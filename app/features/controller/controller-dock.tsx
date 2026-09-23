@@ -9,8 +9,9 @@ import {
 import { z } from "zod";
 import type { ControllerDockView } from "./controller-dock-query.server";
 import type { loader as projectLoader } from "~/routes/project";
-import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
+import type { DockStatus } from "~/routes/resources.controller-unseen";
 import {
+  DOCK_STATUS_URL,
   dockContextFromMatches,
   dockScopeKey,
   dockViewUrl,
@@ -23,7 +24,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
-import { sseScopes } from "~/features/live-updates/event-types";
+import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/event-types";
 
 /**
  * The controller DOCK (ruling 121): one floating Controller button on every
@@ -38,10 +39,13 @@ import { sseScopes } from "~/features/live-updates/event-types";
  * open/closed state for the life of the tab, and shows one line naming what
  * the controller knows here.
  *
- * Live: the view is a root-owned `fetcher.load`, which React Router re-runs on
- * every revalidation — so every surface that already streams the `user` scope
- * refreshes the dock for free; while open, the dock also holds its own stream
- * for the surfaces that have none, and polls while a turn is working.
+ * Live (ruling 454): the dock's two resources, the open panel's view and the
+ * status every page's button reads (unseen replies, turns working), ride no
+ * page revalidation. The dock loads them on the moments that change them: its
+ * own opening, selection and sends, a `controller.updated` that the page's
+ * `user` stream hands it (`CONTROLLER_UPDATED_EVENT`), and, while a turn
+ * works, a 5 s poll of the small status. While open, the dock also holds its
+ * own stream for the surfaces that have none.
  *
  * Ruling 454 (FL-1): this module is the CLOSED dock - the button, the panel's
  * frame and header, and all of the dock's state - and root puts it in every
@@ -134,9 +138,6 @@ function localScopeLabel(context: DockContext): string {
   return "Instance";
 }
 
-/** O39-d: the viewer's unseen controller replies, for the button. */
-const UNSEEN_URL = "/resources/controller-unseen";
-
 export function ControllerDock() {
   const matches = useMatches();
   const location = useLocation();
@@ -206,8 +207,8 @@ function DockShell({ context }: { context: DockContext }) {
   }, [selected]);
 
   const selectedId = selected[context.key] ?? null;
-  // O39-d: `seen` only while the panel is open. The working poll below loads
-  // this view with the panel closed too, and that load reads nothing.
+  // O39-d: `seen` only while the panel is open: the view is loaded only then
+  // (ruling 454), and every such load reads the transcript it shows.
   const url = dockViewUrl(context, selectedId, open);
   const load = view.load;
   // Load whenever the panel is open and the target changes: a new scope
@@ -238,36 +239,87 @@ function DockShell({ context }: { context: DockContext }) {
     });
   }, [stale, context.key]);
 
+  // O39-d: replies the viewer has not seen, whatever scope they were asked
+  // in. A turn runs one to five minutes, and a person who moved to another
+  // page learned nothing when its answer landed. Ruling 454: the same small
+  // status also names the viewer's turns working right now, which is what the
+  // button's working dot and the open panel's step line read.
+  //
+  // Loaded when the dock mounts (the first page, and every return from a page
+  // it stays off, where the controller page may have marked a reply read),
+  // when the panel opens or closes and after it shows a transcript (which
+  // marks it seen), on every `controller.updated` the page's stream hands the
+  // dock, and by the working poll. Not on navigation or on a page's own
+  // revalidation: neither changes it (RF-8).
+  const status = useFetcher<DockStatus>({ key: "controller-unseen" });
+  const loadStatus = status.load;
+  const shownId = current?.conversation?.id ?? null;
+  const shownCount = current?.messages.length ?? 0;
+  useEffect(() => {
+    loadStatus(DOCK_STATUS_URL);
+  }, [loadStatus, open, shownId, shownCount]);
+  // The transcript the open panel shows is being read.
+  const unseen = (status.data?.unseen ?? []).filter((u) => !(open && u.id === shownId));
+  const liveTurns = status.data?.working ?? [];
+  // The button's dot: a turn of the viewer's is working in THIS scope.
+  const working = liveTurns.some((t) => dockScopeKey(t) === context.key);
+  // The open panel's working row: the view says whether the shown thread's
+  // turn works; the status moves its step (ruling 250) between view loads.
+  const liveShown = liveTurns.find((t) => t.id === shownId) ?? null;
+  const shownTurn = current
+    ? liveShown && current.turn.working
+      ? { ...current.turn, phase: liveShown.phase, step: liveShown.step }
+      : current.turn
+    : null;
+
+  // Ruling 454 (CTL-4): a conversation changed somewhere (the page's stream
+  // says so). Refresh the button, and the transcript when it is on screen.
+  const viewUrl = useRef(url);
+  useEffect(() => {
+    viewUrl.current = url;
+  });
+  useEffect(() => {
+    const onUpdated = () => {
+      loadStatus(DOCK_STATUS_URL);
+      if (open) load(viewUrl.current);
+    };
+    window.addEventListener(CONTROLLER_UPDATED_EVENT, onUpdated);
+    return () => window.removeEventListener(CONTROLLER_UPDATED_EVENT, onUpdated);
+  }, [open, load, loadStatus]);
+
   // Poll while a turn is working — open or not, so the working dot on the
-  // button stays honest after the panel is closed.
-  const working = current?.turn.working ?? false;
+  // button stays honest after the panel is closed, and the settle a paused
+  // stream missed still lands. Ruling 454 (CTL-2): the poll reads the small
+  // status, not the whole transcript: the step line moves from it, and the
+  // view is reloaded only when the status and the view disagree about whether
+  // the shown turn works (it started elsewhere, or it settled).
+  const polling = working || (open && (current?.turn.working ?? false));
+  const statusState = useRef(status.state);
+  useEffect(() => {
+    statusState.current = status.state;
+  });
+  useEffect(() => {
+    if (!polling) return;
+    const timer = setInterval(() => {
+      if (statusState.current === "idle") loadStatus(DOCK_STATUS_URL);
+    }, WORKING_POLL_MS);
+    return () => clearInterval(timer);
+  }, [polling, loadStatus]);
+  const shownLive = liveShown !== null;
+  const viewSaysWorking = current?.turn.working ?? false;
+  const lastLive = useRef<{ id: string | null; live: boolean } | null>(null);
   const viewState = useRef(view.state);
   useEffect(() => {
     viewState.current = view.state;
   });
   useEffect(() => {
-    if (!working) return;
-    const timer = setInterval(() => {
-      if (viewState.current === "idle") load(url);
-    }, WORKING_POLL_MS);
-    return () => clearInterval(timer);
-  }, [working, url, load]);
-
-  // O39-d: replies the viewer has not seen, whatever scope they were asked
-  // in. A turn runs one to five minutes, and a person who moved to another
-  // page learned nothing when its answer landed. Loaded on every navigation
-  // and after the panel shows a transcript (which marks it seen); React
-  // Router also revalidates it on the page's own live stream.
-  const unseenFetch = useFetcher<{ unseen: UnseenReplyView[] }>({ key: "controller-unseen" });
-  const loadUnseen = unseenFetch.load;
-  const { pathname } = useLocation();
-  const shownId = current?.conversation?.id ?? null;
-  const shownCount = current?.messages.length ?? 0;
-  useEffect(() => {
-    loadUnseen(UNSEEN_URL);
-  }, [loadUnseen, pathname, open, shownId, shownCount]);
-  // The transcript the open panel shows is being read.
-  const unseen = (unseenFetch.data?.unseen ?? []).filter((u) => !(open && u.id === shownId));
+    const was = lastLive.current;
+    lastLive.current = { id: shownId, live: shownLive };
+    if (!open || !was || was.id !== shownId || was.live === shownLive) return;
+    // A view already on its way was asked for by the same news (a
+    // `controller.updated` loads both); only the poll's flip needs its own.
+    if (viewSaysWorking !== shownLive && viewState.current === "idle") load(viewUrl.current);
+  }, [open, shownId, shownLive, viewSaysWorking, load]);
 
   // A send's result: an error is a toast (the transport failed; refusals are
   // in the transcript); a success selects the thread it landed in and reloads.
@@ -288,15 +340,20 @@ function DockShell({ context }: { context: DockContext }) {
     setText((cur) => (cur === pending.current ? "" : cur));
     pending.current = null;
     const key = sentUnder.current;
-    setSelected((s) =>
-      s[key] === result.conversationId ? s : { ...s, [key]: result.conversationId },
-    );
-    // Only reload while the dock still stands where the send was made. The
-    // context here is the CURRENT one, so after a navigation this would ask for
-    // a task thread under the board's scope - a request the route cannot answer
-    // (review finding 2, path (a)). Recording the selection is enough: the load
+    // A thread the selection does not name yet (a new one, or the scope's
+    // newest with nothing selected) is selected, and the load effect above
+    // fetches it. Ruling 454 (CTL-4): that is the ONE load, so the thread
+    // already selected is reloaded here only when nothing else will. Only
+    // while the panel is open and still stands where the send was made: the
+    // context is the CURRENT one, so after a navigation this would ask for a
+    // task thread under the board's scope - a request the route cannot answer
+    // (review finding 2, path (a)); the selection is enough, and the load
     // effect fires when the person comes back to that scope.
-    if (key === context.key) load(dockViewUrl(context, result.conversationId, open));
+    if (selected[key] !== result.conversationId) {
+      setSelected((s) => ({ ...s, [key]: result.conversationId }));
+    } else if (open && key === context.key) {
+      load(url);
+    }
   });
 
   // Close: a pointer close plays the exit transition and unmounts on
@@ -455,7 +512,14 @@ function DockShell({ context }: { context: DockContext }) {
     // Four of the five longest messages on the live board are 1,800 to 2,200
     // characters, typed into a two-row textarea.
     pending.current = value;
-    send.submit(body, { method: "post", action: "/resources/controller" });
+    // Ruling 454 (CTL-4): a send changes the conversation and nothing the page
+    // under the dock renders, so it does not re-run the page's loaders; what
+    // the turn then does to a board or a task arrives on that page's stream.
+    send.submit(body, {
+      method: "post",
+      action: "/resources/controller",
+      defaultShouldRevalidate: false,
+    });
   };
 
   const pick = (id: string) => {
@@ -550,6 +614,7 @@ function DockShell({ context }: { context: DockContext }) {
           <Suspense fallback={<DockPanelBodyFallback />}>
             <DockPanelBody
               current={current}
+              turn={shownTurn}
               unseen={unseen}
               threadsOpen={threadsOpen}
               busy={busy}

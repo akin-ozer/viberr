@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { TurnStep, WorkingSentence } from "./turn-step";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import type { ControllerDockView } from "./controller-dock-query.server";
+import type { ConversationTurnState } from "~/server/controller/controller-run.server";
 import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
 import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
 import { controllerExamples } from "./controller-examples";
@@ -48,6 +49,9 @@ function emptyCopy(view: ControllerDockView): string {
 export interface DockPanelBodyProps {
   /** The view for the CURRENT scope, or null while it loads. */
   current: ControllerDockView | null;
+  /** The shown thread's turn: the view's, with the step the dock's status
+   *  polled since (ruling 454, CTL-2). */
+  turn: ConversationTurnState | null;
   /** Replies waiting in other threads (the one on screen is left out). */
   unseen: readonly UnseenReplyView[];
   threadsOpen: boolean;
@@ -69,6 +73,7 @@ export interface DockPanelBodyProps {
 
 export function DockPanelBody({
   current,
+  turn,
   unseen,
   threadsOpen,
   busy,
@@ -86,7 +91,7 @@ export function DockPanelBody({
   const sendHint = useModifierHint("↵");
   const threads = current?.threads ?? [];
   const unavailable = current?.unavailable ?? false;
-  const working = current?.turn.working ?? false;
+  const working = turn?.working ?? false;
 
   useEffect(() => {
     onMount();
@@ -229,14 +234,14 @@ export function DockPanelBody({
                   </div>
                 </article>
               ))}
-              {current.turn.working && (
+              {turn?.working && (
                 <div className="ctl-working" role="status">
                   <span className="live-dot" />
                   <WorkingSentence name={current.controllerName} />
                   {/* Ruling 250: the dock follows a person onto every page
                       and has no live-run panel at all, so this row is the
                       ONLY place the turn's own step can reach them here. */}
-                  <TurnStep turn={current.turn} />
+                  <TurnStep turn={turn} />
                 </div>
               )}
             </div>

@@ -36,6 +36,23 @@ export const SSE_STREAM_EVENTS: readonly SseEventName[] = ["controller.log-appen
  */
 export const SSE_RUN_LINE_EVENTS: readonly SseEventName[] = ["run.log-appended"];
 
+/**
+ * Conversation events (ruling 454, CTL-4): a controller conversation changed —
+ * a message landed, a turn started or settled. Only the two controller pages
+ * render a conversation, so only they revalidate on it (`useLiveUpdates`'s
+ * `conversations` option). Everywhere else the one thing that shows a
+ * conversation is the dock, which reloads its own two resources when the
+ * stream hands it {@link CONTROLLER_UPDATED_EVENT}. One dock send publishes five
+ * of these, and each used to re-run every loader of every page the asker had
+ * open, none of which render a word of it.
+ */
+export const SSE_CONVERSATION_EVENTS: readonly SseEventName[] = ["controller.updated"];
+
+/** The window event a live stream dispatches, debounced, for a conversation
+ *  event (and for a reconnect or resync, which may have missed one) on a
+ *  surface that does not render conversations: the dock's cue to reload. */
+export const CONTROLLER_UPDATED_EVENT = "viberr:controller-updated";
+
 export const SSE_ENDPOINT = "/resources/events";
 
 /** Scope strings as the endpoint expects them (`scope=` query params). */

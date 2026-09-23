@@ -49,7 +49,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/resources/search` | `resources.search.ts` | user | ⌘K palette query (`q`) over visible projects | |
 | `/resources/model-catalog` | `resources.model-catalog.ts` | user | models and efforts per backend (Claude enhanced with the VIEWER's own account) | |
 | `/resources/controller` | `resources.controller.ts` | user; a project or task scope the viewer cannot reach answers an empty `unavailable` view (GET) or `{ ok:false }` (POST), never a thrown response, because it feeds a root-owned fetcher | the controller dock's view for the scope the person is standing in (ruling 121); `?seen=1` marks the shown transcript read (ruling 448) | `send` (`text`, `conversationId`, `project`, `task`, `surface`, `timeZone`) |
-| `/resources/controller-unseen` | `resources.controller-unseen.ts` | user | the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448) | |
+| `/resources/controller-unseen` | `resources.controller-unseen.ts` | user | the dock's status: the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448); and the viewer's turns working right now, with scope, phase and step (ruling 454). Like `/resources/controller`, it answers `shouldRevalidate` false: the dock loads it itself | |
 | `/resources/backend-login` | `resources.backend-login.ts` | user | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts; an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
 | `/resources/session-export` | `resources.session-export.ts` | member / conversation owner | `?run=<id>`: resume-script download | |
 
@@ -115,11 +115,14 @@ Intents behind `project.task.tsx` are explained in
   bottom-right button named `Controller · <scope>` opening a non-modal panel bound to
   the current instance, board or task (a bottom sheet at ≤ 720 px). Its composer is
   disabled, with the same sentence the full page uses, when the VIEWER has not connected
-  Claude (ruling 127). The button carries a pulsing dot while a turn works and a still
-  blue dot when a reply its owner has not seen waits in any scope
-  (`/resources/controller-unseen`, ruling 448); the open panel links to replies
-  elsewhere. On `/insights`, which has no stream of its own, the open panel opens one
-  (`DOCK_SELF_STREAM_ROUTE_IDS`). Details in
+  Claude (ruling 127). The button carries a pulsing dot while a turn works in its scope
+  and a still blue dot when a reply its owner has not seen waits in any scope
+  (`/resources/controller-unseen`, rulings 448 and 454); the open panel links to replies
+  elsewhere. Root ships only the button, the panel's frame and header; the panel's body
+  loads on the first open, preloaded on hover or focus (ruling 454). The dock's data
+  rides no page revalidation: the page's `user` stream hands it `controller.updated`
+  instead (ruling 454). On `/insights`, which has no stream of its own, the open panel
+  opens one (`DOCK_SELF_STREAM_ROUTE_IDS`). Details in
   [../domain/controller-and-goals.md §2.1](../domain/controller-and-goals.md#21-the-dock-ruling-121).
 - **Theme**: light / dark / system, per user plus the `viberr_theme` cookie for
   first paint. Motion follows the OS `prefers-reduced-motion` setting only. After first

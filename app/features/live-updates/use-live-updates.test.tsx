@@ -9,6 +9,7 @@ import {
   SSE_REOPEN_BACKOFF_MS,
   useLiveUpdates,
 } from "./use-live-updates";
+import { CONTROLLER_UPDATED_EVENT } from "./event-types";
 
 /**
  * The hook runs under a REAL data router, so `useRevalidator` is React Router's
@@ -110,6 +111,13 @@ let lastPaused = false;
 function Probe({ scopes }: { scopes: string[] }) {
   const { paused } = useLiveUpdates(scopes);
   lastPaused = paused;
+  return null;
+}
+
+/** A surface that renders a controller conversation (the controller pages). */
+const CONVERSATION_SCOPES = ["user"];
+function ConversationProbe() {
+  useLiveUpdates(CONVERSATION_SCOPES, { conversations: true });
   return null;
 }
 
@@ -275,12 +283,42 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
     expect(loaderRuns).toBe(0);
-    // The conversation reference beside it still revalidates, as before.
-    act(() => {
-      FakeEventSource.last().emit("controller.updated", "11");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
-    });
-    expect(loaderRuns).toBe(1);
+  });
+
+  /**
+   * Ruling 454 (CTL-4): a conversation event changes only what shows a
+   * conversation. Measured before: one dock send published five of them, and
+   * each re-ran every loader of every page the asker had open (Home, a board,
+   * a 1.4 MB task page) for a transcript none of them render. The dock is the
+   * one thing on those pages that shows it, so it gets the event instead,
+   * debounced like a revalidation; the controller pages still revalidate.
+   */
+  it("hands a conversation event to the dock, unless the surface renders conversations", () => {
+    const notices: Event[] = [];
+    const listen = (e: Event) => notices.push(e);
+    window.addEventListener(CONTROLLER_UPDATED_EVENT, listen);
+    try {
+      render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
+      act(() => {
+        // One send's burst.
+        for (let i = 0; i < 5; i += 1) FakeEventSource.last().emit("controller.updated", String(i));
+        vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      });
+      // CANARY: route `controller.updated` to `scheduleRevalidate` again.
+      expect(loaderRuns).toBe(0);
+      expect(notices).toHaveLength(1);
+      cleanup();
+
+      render(<ConversationProbe />, { wrapper: DataRouter });
+      act(() => {
+        FakeEventSource.last().emit("controller.updated", "11");
+        vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      });
+      expect(loaderRuns).toBe(1);
+      expect(notices).toHaveLength(1);
+    } finally {
+      window.removeEventListener(CONTROLLER_UPDATED_EVENT, listen);
+    }
   });
 
   /**

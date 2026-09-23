@@ -71,6 +71,16 @@ describe("/resources/controller-unseen (O39-d)", () => {
     expect(ids).not.toContain(stranded.id);
   });
 
+  it("rides no page revalidation, and neither does the dock's view (ruling 454)", async () => {
+    // CTL-3 / RF-8. CANARY: drop `shouldRevalidate` from either route and
+    // React Router reloads it on every navigation, action and revalidation of
+    // every page; the view with the last `seen=1` it was loaded with.
+    const status = await import("~/routes/resources.controller-unseen");
+    const view = await import("~/routes/resources.controller");
+    expect(status.shouldRevalidate()).toBe(false);
+    expect(view.shouldRevalidate()).toBe(false);
+  });
+
   it("is refused without a session", async () => {
     const { loader } = await import("~/routes/resources.controller-unseen");
     const request = app.request("/resources/controller-unseen");

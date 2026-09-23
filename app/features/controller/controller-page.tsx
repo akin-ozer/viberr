@@ -131,6 +131,9 @@ export function ControllerPage({
           : [sseScopes.user()],
       [projectSlug],
     ),
+    // Ruling 454: this page renders the conversation, so `controller.updated`
+    // revalidates it; every other surface hands that event to the dock.
+    { conversations: true },
   );
 
   // Fallback poll while a turn is working: the settle SSE can be missed by a

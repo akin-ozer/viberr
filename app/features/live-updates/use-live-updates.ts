@@ -3,7 +3,9 @@ import { useRevalidator } from "react-router";
 import { z } from "zod";
 import {
   buildEventsUrl,
+  CONTROLLER_UPDATED_EVENT,
   SSE_CONTROL_EVENTS,
+  SSE_CONVERSATION_EVENTS,
   SSE_RUN_LINE_EVENTS,
   SSE_STREAM_EVENTS,
   SSE_EVENT_NAMES,
@@ -21,6 +23,9 @@ import {
  * coalesce into one loader round-trip. Run LINES are the exception: they
  * revalidate only the surface showing that task, at most once per
  * `RUN_LINE_REVALIDATE_MS`, and never push a pending revalidation out.
+ * Conversation events are the other (ruling 454): only a surface that renders
+ * a conversation revalidates on them; elsewhere they go, debounced the same
+ * way, to the controller dock as `CONTROLLER_UPDATED_EVENT`.
  *
  * Loop safety: revalidation only re-runs loaders (GETs). The one loader-side
  * write — R19-15's task-view read-marking — is MONOTONIC (`read_at IS NULL`
@@ -140,11 +145,29 @@ export interface LiveUpdatesState {
   reconnect: () => void;
 }
 
+export interface LiveUpdatesOptions {
+  /**
+   * This surface renders a controller conversation (the two controller
+   * pages), so a conversation event revalidates it. Everywhere else the
+   * event goes to the dock as `CONTROLLER_UPDATED_EVENT` and the page's own
+   * loaders stay put (ruling 454, CTL-4).
+   */
+  conversations?: boolean;
+}
+
+/** Hands the dock its cue (see `CONTROLLER_UPDATED_EVENT`). */
+function notifyDock(): void {
+  window.dispatchEvent(new Event(CONTROLLER_UPDATED_EVENT));
+}
+
 /**
  * @param scopes scope strings (see `sseScopes` in event-types.ts), e.g.
  *   `["project:viberr-core", "user"]`. Changing the set reconnects.
  */
-export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
+export function useLiveUpdates(
+  scopes: readonly string[],
+  { conversations = false }: LiveUpdatesOptions = {},
+): LiveUpdatesState {
   const revalidator = useRevalidator();
   const [paused, setPaused] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -206,6 +229,7 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
     if (signedOut) return;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let dockTimer: ReturnType<typeof setTimeout> | null = null;
     let reopen: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
     let lastRevalidateAt = Number.NEGATIVE_INFINITY;
@@ -217,6 +241,23 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
     const scheduleRevalidate = () => {
       if (timer !== null) clearTimeout(timer);
       timer = setTimeout(revalidateNow, REVALIDATE_DEBOUNCE_MS);
+    };
+    // Ruling 454 (CTL-4): a conversation event on a surface that renders no
+    // conversation is the dock's, debounced the same way (a send publishes
+    // five). Where the surface does render one, it revalidates like any other.
+    const scheduleDockNotice = () => {
+      if (dockTimer !== null) clearTimeout(dockTimer);
+      dockTimer = setTimeout(() => {
+        dockTimer = null;
+        notifyDock();
+      }, REVALIDATE_DEBOUNCE_MS);
+    };
+    const scheduleConversationEvent = conversations ? scheduleRevalidate : scheduleDockNotice;
+    // A reconnect or a resync may have lost a conversation event too, and the
+    // dock's resources do not ride the revalidation that catches the page up.
+    const scheduleCatchUp = () => {
+      scheduleRevalidate();
+      if (!conversations) scheduleDockNotice();
     };
     // A run line JOINS a pending revalidation instead of pushing it out: under a
     // steady stream of lines a trailing debounce would never fire, and each one
@@ -239,6 +280,14 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
       // to handle; revalidating every surface of the person on each would turn
       // one controller turn into a loader storm.
       if (SSE_CONTROL_EVENTS.includes(name) || SSE_STREAM_EVENTS.includes(name)) continue;
+      if (SSE_CONVERSATION_EVENTS.includes(name)) {
+        source.addEventListener(name, scheduleConversationEvent);
+        continue;
+      }
+      if (name === "stream.resync") {
+        source.addEventListener(name, scheduleCatchUp);
+        continue;
+      }
       if (SSE_RUN_LINE_EVENTS.includes(name)) {
         // Only the surface showing THAT task has anything a line changes. The
         // `project:` scope delivers every run of the project here as well — to
@@ -266,7 +315,7 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
       // stream, leaving the bell badge stale until the next interaction).
       // Only the very first stream of the surface's life stays excluded: its
       // loaders just ran, so a pull would be a redundant round-trip.
-      if (attempt > 0 || everOpenedRef.current) scheduleRevalidate();
+      if (attempt > 0 || everOpenedRef.current) scheduleCatchUp();
       everOpenedRef.current = true;
     };
     source.onerror = () => {
@@ -305,6 +354,7 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
     return () => {
       closed = true;
       if (timer !== null) clearTimeout(timer);
+      if (dockTimer !== null) clearTimeout(dockTimer);
       if (reopen !== null) clearTimeout(reopen);
       source.close();
     };
@@ -316,8 +366,8 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
     // `hidden` is ruling 301's trigger, on both edges: going hidden re-runs the
     // effect so the cleanup closes the connection, coming back opens a fresh
     // one, and `onopen` treats that as the REconnect it is and pulls the
-    // loaders once.
-  }, [scopeKey, attempt, signedOut, hidden]);
+    // loaders once. `conversations` is fixed per surface.
+  }, [scopeKey, attempt, signedOut, hidden, conversations]);
 
   return { paused, reconnect };
 }
