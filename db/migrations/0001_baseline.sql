@@ -200,7 +200,8 @@ CREATE TABLE task_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_slug TEXT NOT NULL,
   task_key TEXT NOT NULL,
-  -- 0 = newest (file order, newest-first). Replaced wholesale per task.
+  -- 0 = newest (file order, newest-first). A re-project keeps the rows of
+  -- unchanged events (their id survives, position shifts; ruling 454).
   position INTEGER NOT NULL,
   occurred_at TEXT NOT NULL,
   type TEXT NOT NULL,

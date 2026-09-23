@@ -137,6 +137,36 @@ describe("listActivityStream", () => {
     expect(stream).toEqual(["newer", "older"]);
   });
 
+  it("F28-D1 + ruling 454: a newer event appended later still wins the tie", () => {
+    // Ruling 454 keeps the ids of rows that did not change, so the event
+    // appended SECOND carries the larger id — the old `id ASC` tie-break would
+    // have listed it after the older one. The task page orders by position.
+    const store = setupTestStore(ctx);
+    const at = "2026-08-26T12:00:00.000Z";
+    const ev = (text: string) => ({
+      occurredAt: at,
+      type: "policy" as const,
+      actor: { kind: "system" as const, systemId: "policy-engine" },
+      title: null,
+      text,
+      toAgent: false,
+      evidence: null,
+    });
+    const frontmatter = baseTaskFrontmatter("VIB-9", { stage: "review" });
+    writeTask(store.dataRoot, store.slug, { frontmatter, timeline: [ev("older")] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter,
+      timeline: [ev("newer"), ev("older")],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const stream = listActivityStream(store.db, store.slug)
+      .filter((r) => r.taskKey === "VIB-9")
+      .map((r) => r.text);
+    expect(stream).toEqual(["newer", "older"]);
+  });
+
   it("is empty for a project with no events", () => {
     const store = setupTestStore(ctx);
     rebuildAll(store.db, { dataRoot: store.dataRoot });

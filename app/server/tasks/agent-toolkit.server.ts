@@ -214,6 +214,7 @@ export async function postAgentComment(
   // `from` chip is the agent's own name, not its runtime label.
   // Ruling 382: and the event records who it reached, so compaction keeps it.
   await stampNotifiedRecipients(
+    db,
     taskRef(ctx, input.projectSlug, input.taskKey),
     occurredAt,
     notifyMentionedUsers(db, {

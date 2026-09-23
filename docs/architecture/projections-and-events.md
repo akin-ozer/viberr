@@ -116,8 +116,13 @@ an unparseable goal file counts as one.
   resolved to stage and agent names, ruling 178), rewrites `project_members`, replaces
   the file's `diagnostics`, records provenance, writes the content hash **last**, emits
   `project.updated`, and forces every task of the project to re-project when the
-  project row is new or changed. A vanished `project.md` deletes its diagnostics first
-  and the `projects` row last (members cascade), and emits `project.removed`.
+  project row is new or a field tasks derive from changed: the repo, stages, workflow,
+  resolved required reviewers or member ids (`projectContextForTasks`, the one reader
+  both sides share; ruling 454). A write that only moves `nextTaskNumber` (every task
+  creation), a file lease or the description costs the project row and one
+  `project.updated`. The rescans read the same answer (`taskFacingChanged`) before they
+  force a project's tasks and goals. A vanished `project.md` deletes its diagnostics
+  first and the `projects` row last (members cascade), and emits `project.removed`.
 - `rebuildTaskFile` computes the derived `readiness` (`deriveReadiness`: the
   diagnostics floor and the dependency floor, while `stored_readiness` keeps the file's
   value), stores `blocked_by_json` verbatim, `validation` (`deriveValidation`, never the
@@ -131,10 +136,14 @@ an unparseable goal file counts as one.
   ruling 225; a stored `schedule` projects as `human`), `repo` always the project's,
   counts and `recommendation_kinds`, `schedules_json`, `goal_id` / `goal_link_index`,
   `work_revision_sha` (the active work revision; a discarded one projects as null,
-  ruling 161), `board_rank`; rewrites `task_events` wholesale (position 0 = newest, actor
+  ruling 161), `board_rank`; writes `task_events` (position 0 = newest, actor
   snapshot denormalized into `actor_json` so events survive member removal, agent
-  `actor_ref` keyed `agent/<profileId>`); stores `""` as the hash until events and
-  diagnostics landed; emits `task.updated`. A vanished `task.md` deletes events and
+  `actor_ref` keyed `agent/<profileId>`) keeping the rows of unchanged events: stored
+  and fresh rows are aligned from the oldest end while time, type and actor match, kept
+  rows shift position in one UPDATE and take changed content in place, and the rest are
+  deleted and inserted, so a row's `id` survives an append and the timeline keyed on it
+  does not remount (ruling 454); stores `""` as the hash until events and diagnostics
+  landed; emits `task.updated`. A vanished `task.md` deletes events and
   diagnostics first and the projection row last, and emits `task.removed`.
 - `rebuildGoalFile` reconciles link statuses against live task rows (a terminal-stage
   task makes its link `done`, an archived one `failed` unless already `done`, `skipped`
@@ -148,6 +157,10 @@ an unparseable goal file counts as one.
   state once created, else its own status, `skipped` counting as done). The board
   query resolves every row through ONE resolver; the task query resolves on read;
   nothing caches a resolved state. `listHeldTasks` feeds the release engine.
+- Each file's re-projection (project, task, goal) runs as ONE transaction, its
+  projection events held until COMMIT; a caller already inside a transaction (the full
+  rebuild, a project's cascade) runs it inline (ruling 454). A rebuild that throws rolls
+  back and announces nothing.
 - `rebuildPath` routes a path to the right rebuilder with a content-hash
   short-circuit unless forced. It swallows every throw: the log line `projection rebuild
   failed`, a per-file projection fault (`store-health.server.ts`, rulings 217 and 218),
@@ -183,8 +196,9 @@ the work runs and a throttled call answers `{ status: "throttled", retryAfterMs 
 `project.updated`, `project.removed`, `projection.rebuilt {scope, changed}`,
 `notification.created {userId}`, `notification.read {userId}`, `violation.updated
 {projectSlug, taskKey}`, `goal.updated {projectSlug, goalId}`. Inside
-`collectProjectionEvents` (the rebuild's transaction) they are buffered and re-emitted
-only after commit; a throw discards them. The publisher (`event-publisher.server.ts`)
+`collectProjectionEvents` (the rebuild's transaction, and each single file's
+re-projection, ruling 454) they are buffered and re-emitted only after commit; a throw
+discards them. The publisher (`event-publisher.server.ts`)
 translates each into the wire shape `{ type, entityId, occurredAt, data }`, reading back
 the task's stage and readiness for `task.updated`, and zod-parses every event against
 `sseEventSchema` before publishing.

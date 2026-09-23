@@ -4,7 +4,7 @@ import { requireUser } from "~/server/auth/require-user.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import {
-  getRunLog,
+  runLogPage,
   type RunLogQuery,
 } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
@@ -102,12 +102,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   } else {
     query = { since };
   }
-  const log = getRunLog(db, runId, query);
-  if (!log) {
-    return Response.json(
-      { error: { code: "not_found", message: `Run ${runId} not found.` } },
-      { status: 404 },
-    );
-  }
-  return Response.json({ data: log });
+  // The row read above, not a second read: the live tail calls this once per
+  // streamed line per viewer (ruling 454).
+  return Response.json({ data: runLogPage(db, run, query) });
 }
