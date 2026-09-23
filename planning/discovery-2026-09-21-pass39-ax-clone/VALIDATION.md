@@ -1426,3 +1426,24 @@ not lost work.
   compacted: true" at 04:32:11. Before U39-30 the reply would have appeared at 04:32:16, 24 seconds
   later. The transcript holds the reply once. The rule itself is in `environment-and-gates.md` §2,
   and the controller listed the three things it added beyond my words so I could check them.
+
+## 51. The flake fixed through the board, and U39-32 live (04:30 to 04:58 UTC)
+
+- **AX-36, from report to merge in 27 minutes.** The Surface Developer proved the cause before
+  changing anything: no watch handler was still active, but an accepted connection in `StateNew`
+  sat blocked in `net/http`'s `readRequest` at the shutdown deadline. It fixed the fixture by
+  closing its own client before `Server.Shutdown()`, keeping the 1-second bound and the error
+  check. The reviewer approved `61efc29`. Inside the container, 30 of 30 runs of the formerly
+  flaky test passed on the branch (0.33 s in all, where each failure used to take the full
+  second).
+- **U39-32 on a real acceptance.** The branch contained main (`b758f5f`, checked by fetching
+  both), and the dialog said so: "ax-36 carried main at the last GitHub check, so the reviewed
+  head merges as it is. If main moves before you confirm, the merge that brings it in is pushed
+  to the branch first." PR #28 merged.
+- **Owner decisions taken on the way.** AX-21's landing order went to AX-5 first (AX-5 in review on
+  a clean PR, AX-21's gates not green), written as a wait through the ordinary dependency writer.
+  AX-35's CLI and server half went to the Surface Developer on the same branch, as on AX-28.
+- **Main after PR #28, in the container:** every package passes, and the whole `internal/cli`
+  package passed twenty times in a row (`-count=20`, 63.8 s). The flake that the AX-31 reviewer
+  hit is gone from main, and the gates-document rule the controller wrote at 04:32 is what the
+  three operators were working to in the meantime.
