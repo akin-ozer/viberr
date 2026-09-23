@@ -263,6 +263,15 @@ what they strand, and record an optional reason.
   technical record. **Fixed (default, owner may revisit):** the strip reads the step through the
   same `readableStep` (moved to `app/features/runtime/readable-step.ts`), with the stored text
   on hover. Test: `runs-panels.test.tsx` "U39-26".
+- **U39-27 (LOW-MED) — the goal chains' controls were too small for a finger.** Measured on the
+  controller page at 375px with a coarse pointer: 12 "waits on …" summaries and 6 "Show all N
+  entries" buttons at 15px tall, 68 wait-entry keys and 21 link task keys at 16px, and "Show
+  everyone's (org admin)" at 15px. WCAG 2.5.8 asks for 24px, and these sit in lists, not
+  sentences. **Fixed:** on a coarse pointer each gets `padding-block: .3rem`, so the hit area
+  grows and the text stays put (measured with the rule injected: 24.1 to 25.1px, no horizontal
+  scroll, no two targets overlapping in an open list). A first overlap count of 81 was an
+  artifact: Chrome lays out the contents of a closed `<details>`, so its hidden entries
+  measured on top of each other. Test: `app.css.test.ts` "U39-27".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
@@ -410,6 +419,20 @@ what they strand, and record an optional reason.
 - ~~**A full 40-character sha scrolls a task page sideways on a phone.**~~ **Fixed, ruling 419(i)**
   (2026-09-23): re-measured on AX-19 the page no longer scrolled, but inline code (the sha, long
   file paths) still ran past the column and was clipped; inline code now breaks where it must.
+- **O39-c (owner's call) — two green pull requests merged a minute apart left main red, and
+  nothing in Viberr can notice.** AX-22 (PR #18, 01:53:45) made a Task's Model wait on Gateway
+  routes. AX-26 (PR #20, 01:54:26) and AX-20 before it ship runtime tests that create a Model with
+  no Gateway. Each branch passed its own gates and review. On main (`8f449da`) `go test
+  ./internal/runtime` fails: Tasks stay Pending on "waiting for dependencies: no Gateway routes to
+  Model \"model\" yet" (four tests). Every task's `make gate` now fails there, and AX-21's
+  reviewer requested changes partly for it. Viberr was honest: the acceptance dialog says the
+  checks are unreadable ("merging does not wait for it") and that the base is merged in first,
+  and I accepted both. But nothing runs the head that actually merges, and nothing watches main
+  afterwards. Two designs, for the owner: (1) when an acceptance brings base commits in and no
+  check result can be read, the dialog recommends a verification run at the refreshed head
+  before merging (ruling 238 already re-reviews at a refreshed head, only earlier); (2) after a
+  merge, Viberr runs the project's gate on the default branch and raises one board-level
+  decision if it fails. I asked the controller for an urgent core task to fix the fixtures.
 - **A resumed controller session keeps the model identity it started with until it compacts.**
   After the switch to Opus 5.5 the controller found "Opus 5 ... claude-opus-5[1m]" in its own
   context: ruling 373 records its prompt on the session's first request and replays it. It trusted

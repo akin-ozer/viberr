@@ -6319,6 +6319,15 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* Ruling 419(d): a touch screen has no key to name. */
 @media (pointer: coarse) {
   .kbd-hint { display: none; }
+  /* U39-27: a finger needs a target at least 24px tall (WCAG 2.5.8). On a
+     phone the goal chains' own controls were 15 to 16px: every "waits on"
+     summary, each entry's key, each link's task key and "Show all N entries".
+     Padding, not a new look: the hit area grows and the text stays put. */
+  .ctl-link-waits > summary,
+  .ctl-link-waits li > a.mono,
+  .ctl-links .ctl-link-task,
+  .ctl-goal-more .linkish,
+  .ctl-all-toggle .linkish { padding-block: .3rem; }
 }
 
 /* The org-settings Controller tab (admin config of the controller itself).

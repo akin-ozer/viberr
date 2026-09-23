@@ -3527,4 +3527,19 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(coarse, "a coarse-pointer block must exist").toBeTruthy();
     expect(coarse![1]).toMatch(/\.kbd-hint\s*\{\s*display:\s*none;\s*\}/);
   });
+
+  it("U39-27: on a touch screen the goal chains' controls are tall enough for a finger", () => {
+    // Measured at 375px: 15-16px tall. CANARY: drop the padding rule.
+    const coarse = CODE.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/)![1];
+    for (const selector of [
+      ".ctl-link-waits > summary",
+      ".ctl-link-waits li > a.mono",
+      ".ctl-links .ctl-link-task",
+      ".ctl-goal-more .linkish",
+      ".ctl-all-toggle .linkish",
+    ]) {
+      expect(coarse, selector).toContain(selector);
+    }
+    expect(coarse).toMatch(/\.ctl-all-toggle \.linkish\s*\{\s*padding-block:\s*\.3rem;\s*\}/);
+  });
 });
