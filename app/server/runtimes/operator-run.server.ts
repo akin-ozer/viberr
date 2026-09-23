@@ -2871,7 +2871,26 @@ async function executeCodexPlan(
   const skippedMalformed = (toolName: string, missing: string) => {
     refused.push({ tool: toolName, message: `plan step omitted ${missing}`, kind: "state" });
   };
+  // Ruling 430 (F39-52): a plan is written whole, before any step runs, so it
+  // cannot see a decision one of its own steps puts in front of a person. Live
+  // on AX-21 (01:18): `update_branch_from_base` met a conflict and opened the
+  // blocking conflict packet, and the next step still dispatched the Surface
+  // Developer with "The operator has updated the branch from the changed
+  // base; start from that branch", about a branch the refresh had left
+  // exactly as it was. Once the task holds a packet it did not hold when the
+  // plan began, the steps that ACT are not carried out; a comment still posts.
+  const packetKeyOf = (): string | null => {
+    const packet = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.packet;
+    return packet ? (packet.id ?? packet.title) : null;
+  };
+  const packetAtStart = packetKeyOf();
+  let pausedBy: { tool: string; title: string } | null = null;
+  const pausedSteps: string[] = [];
   for (const a of plan.actions) {
+    if (pausedBy && a.tool !== "post_comment") {
+      pausedSteps.push(a.tool);
+      continue;
+    }
     try {
       switch (a.tool) {
         case "post_comment":
@@ -3102,6 +3121,16 @@ async function executeCodexPlan(
       }
       break;
     }
+    if (!pausedBy) {
+      const now = packetKeyOf();
+      if (now !== null && now !== packetAtStart) {
+        const packet = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.packet;
+        pausedBy = { tool: a.tool, title: packet?.title ?? "a decision" };
+      }
+    }
+  }
+  if (pausedBy && pausedSteps.length > 0) {
+    await narratePausedPlan(db, ctx, input, pausedBy, pausedSteps);
   }
   await narrateRefusedActions(db, ctx, input, refused, plan.reasoning);
   // Ruling 228 (F37-47): stamp the case where the drive did NOTHING because
@@ -3123,6 +3152,44 @@ async function executeCodexPlan(
       tool: r.tool,
       message: r.message,
     }));
+  }
+}
+
+/**
+ * Ruling 430: say which steps a new decision packet stopped, and why.
+ *
+ * Written directly, like `narrateRefusedActions`: the report must not depend on
+ * the gates of the operator it reports on. Never throws; the plan already ran.
+ */
+async function narratePausedPlan(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: RunOperatorInput,
+  pausedBy: { tool: string; title: string },
+  steps: string[],
+): Promise<void> {
+  const list = steps.map((s) => `\`${s}\``).join(", ");
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "operator" },
+        title: "Coordination paused",
+        text:
+          `**Coordination paused:** the \`${pausedBy.tool}\` step left a decision for a person ` +
+          `(“${pausedBy.title}”), so the rest of this plan was not carried out: ${list}. ` +
+          "It was written before that decision existed. The operator picks the task up again once it is answered.",
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.error("codex operator plan-pause narration failed", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
   }
 }
 
@@ -4804,7 +4871,14 @@ export function humanDecisionsInstruction(snapshot: OperatorTaskSnapshot): strin
  */
 export function collisionsInstruction(snapshot: OperatorTaskSnapshot): string {
   const collisions = snapshot.collisions;
-  if (!collisions || collisions.length === 0) return "";
+  // Ruling 431: the leases that bind now, said wherever leases might be quoted.
+  const leases =
+    snapshot.fileLeases && snapshot.fileLeases.length > 0
+      ? "`fileLeases` is the project's lease list as it binds now. A timeline note that a task " +
+        "leased or holds a file is history: quote only what `fileLeases` lists, and never tell an " +
+        "agent a path is held when the list does not hold it.\n\n"
+      : "";
+  if (!collisions || collisions.length === 0) return leases;
   return (
     "`collisions` names the OTHER open review PRs whose diff touches a file this task's PR does, with the shared paths. " +
     "A merge on either side puts the other into conflict, so before you deliver, refresh a branch or dispatch work into " +
@@ -4816,7 +4890,8 @@ export function collisionsInstruction(snapshot: OperatorTaskSnapshot): string {
     // Ruling 426: the lease that parked ax-clone's critical path.
     "When other work waits on the task whose PR you would park, the lease is refused: which of the two " +
     "lands first is then a person's call, so open a decision packet that names both tasks and what waits " +
-    "on each, rather than making this task wait or keeping its work off the file without saying so.\n\n"
+    "on each, rather than making this task wait or keeping its work off the file without saying so.\n\n" +
+    leases
   );
 }
 

@@ -78,6 +78,8 @@ per item and each one was applied to the source and observed failing.
 | 65 | The base refresh honours file leases (F39-50) | — | **done**, ruling 428 |
 | 66 | Small end-user UI fixes found in the unattended run (U39-12 to U39-16) | owner: "UI improvements for end users" | **done** (UI, no rulings) |
 | 67 | The acceptance-stage refresh refusal applies to approved work only; a refused move says where the re-verdict is given (F39-51) | design call, marked | **done**, ruling 429 |
+| 68 | A plan stops acting at the first decision it causes (F39-52) | — | **done**, ruling 430 |
+| 69 | The operator reads the file leases that bind now (F39-53) | — | **done**, ruling 431 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

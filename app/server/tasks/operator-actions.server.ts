@@ -99,7 +99,7 @@ import {
   resolveProjectFilePath,
   updateProjectFile,
 } from "~/server/files/project-writer.server";
-import { leaseHeldAgainst } from "~/server/tasks/file-leases.server";
+import { activeFileLeases, leaseHeldAgainst } from "~/server/tasks/file-leases.server";
 import { matchesGlob } from "~/shared/file-leases";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -2602,6 +2602,19 @@ export interface OperatorTaskSnapshot {
    */
   collisions?: { taskKey: string; prNumber: number; paths: string[]; partial: boolean }[];
   /**
+   * Ruling 431 (pass 39, F39-53): the project's file leases as they bind NOW
+   * (ruling 245(b): a finished holder's lease is gone), every holder included.
+   *
+   * The operator only had the timeline's "Files leased by another task" note,
+   * which is history. Live on ax-clone AX-21 (01:18) the owner had removed
+   * AX-22's lease on `internal/server/server.go` twenty minutes before, and the
+   * operator still told the Surface Developer "AX-22 currently holds
+   * `internal/server/server.go` … do not change those paths", about one of the
+   * three files its conflict needed resolved, while the developer's own prompt
+   * listed no such lease. Absent when nothing is leased.
+   */
+  fileLeases?: { taskKey: string; paths: string[]; reason: string }[];
+  /**
    * Ruling 415 (F39-41): every decision a PERSON made on this task, newest
    * first, read from the WHOLE timeline, with their own words when they gave
    * any.
@@ -3374,6 +3387,12 @@ export function operatorSnapshot(
         sides,
       );
       return found.length > 0 ? { collisions: found } : {};
+    })(),
+    ...((): Pick<OperatorTaskSnapshot, "fileLeases"> => {
+      const leases = activeFileLeases(projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {});
+      return leases.length > 0
+        ? { fileLeases: leases.map((l) => ({ taskKey: l.taskKey, paths: [...l.paths], reason: l.reason })) }
+        : {};
     })(),
     // [1] What this coordinator already proposed, and what a human already
     // refused — the two facts it needed to stop re-proposing a declined move.

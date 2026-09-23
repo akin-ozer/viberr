@@ -254,6 +254,18 @@ what they strand, and record an optional reason.
   Review, where it already stood. Every door was shut, and the refusal lied about why.
   **Fixed: ruling 429** (default, owner may revisit): the acceptance-stage refusal applies only to
   approved work, and the refused move now says where the re-verdict is given.
+- **F39-52 (HIGH) — a plan keeps acting after its own step opened a blocking decision, and tells
+  the agent something false.** AX-21 01:18, right after AX-20 merged: the operator's plan was
+  [`update_branch_from_base`, `run_agent` Surface Developer]. The refresh conflicted (cli.go,
+  client.go, server_test.go), aborted, and opened the blocking packet "`ax-21` conflicts with
+  `main`". The dispatch still ran, with "The operator has updated the branch from the changed base;
+  start from that branch". A run was spent on a stale branch while the task waited on a person.
+  **Fixed: ruling 430.**
+- **F39-53 (MED) — the operator quotes a lease that no longer exists.** Same directive: "AX-22
+  currently holds `internal/server/server.go` and `internal/server/server_test.go`; do not change
+  those paths while the lease is active". I had removed that lease at 00:52, the developer's prompt
+  listed none, and `server_test.go` was one of the conflicting files. The operator's snapshot had no
+  lease list, only the 23:47 timeline note. **Fixed: ruling 431.**
 
 ---
 

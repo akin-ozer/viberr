@@ -447,6 +447,48 @@ describe("Codex structured operator completion", () => {
     expect(task().frontmatter.stage).toBe("impl");
   });
 
+  /**
+   * Ruling 430 (F39-52), live on AX-21 at 01:18: the plan's refresh met a
+   * conflict and opened the blocking conflict packet, and its next step still
+   * dispatched the Surface Developer with "The operator has updated the branch
+   * from the changed base". A plan is written before any step runs; once one
+   * of its steps leaves a decision in front of a person, the rest does not act.
+   */
+  it("ruling 430: once a step leaves a new decision packet, the plan's remaining acting steps are not carried out", async () => {
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Escalate the scope question, then advance.",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Which of the two scopes should the task take?",
+            reason: "A person owns the scope.",
+            packetOptions: null,
+          },
+          transitionAction(),
+        ],
+      }),
+      "finished",
+    );
+    // CANARY: drop the `pausedBy` guard and the transition is recommended on
+    // top of the open question.
+    await eventually(() => {
+      const paused = task().timeline.find((e) => e.type === "note" && e.title === "Coordination paused");
+      expect(paused).toBeDefined();
+      expect(paused!.text).toContain("the `open_packet` step left a decision for a person");
+      expect(paused!.text).toContain("`transition_stage`");
+    });
+    expect(task().packet).not.toBeNull();
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations ?? []).toEqual([]);
+  });
+
   it("F28-O1: a mid-plan abort is narrated even when append-typed-events is WITHHELD", async () => {
     // The operator can dispatch agents but CANNOT append typed events. Its
     // plan's run_agent throws mid-plan (a single-flight 409: the profile
@@ -1580,6 +1622,15 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(onVerdict).toContain("At the SECOND consecutive objection from the same reviewer");
     const later = buildCodexOperatorPrompt(snapshot({}), "manual");
     expect(later).toContain("`propose_ruling` the convention in the rulings document it belongs to");
+  });
+
+  it("ruling 431: the live lease list is explained on every turn it is present, collisions or not", () => {
+    // CANARY: drop the `leases` sentence from `collisionsInstruction`.
+    const fileLeases = [{ taskKey: "AX-20", paths: ["internal/controller/task.go"], reason: "lands first" }];
+    expect(buildCodexOperatorPrompt(snapshot({ fileLeases }), "manual")).toContain(
+      "A timeline note that a task leased or holds a file is history",
+    );
+    expect(buildCodexOperatorPrompt(snapshot({}), "manual")).not.toContain("is the project's lease list as it binds now");
   });
 
   it("ruling 413 reaches a Codex operator: collisions are explained in the shared instruction", () => {

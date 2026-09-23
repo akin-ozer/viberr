@@ -6206,6 +6206,39 @@ describe("ruling 424: the operator snapshot carries the branch-refresh refusal",
 });
 
 /**
+ * Ruling 431 (pass 39): the operator reads the leases that bind now. Live on
+ * AX-21 it quoted a lease the owner had removed twenty minutes earlier, from a
+ * timeline note, to the agent that needed the leased file.
+ */
+describe("ruling 431: the operator snapshot carries the live file leases", () => {
+  function snapOf(): ReturnType<typeof operatorSnapshot> {
+    return operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+  }
+
+  it("lists every binding lease with its holder and reason, drops a finished holder's, and says nothing when none binds", () => {
+    // CANARY: drop the `fileLeases` spread from `operatorSnapshot`.
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-3", { stage: "done" }) });
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      fileLeases: [
+        { paths: ["internal/controller/task.go"], taskKey: "VIB-2", reason: "lands first" },
+        { paths: ["internal/server/server.go"], taskKey: "VIB-3", reason: "merged already" },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapOf().fileLeases).toEqual([
+      { taskKey: "VIB-2", paths: ["internal/controller/task.go"], reason: "lands first" },
+    ]);
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, fileLeases: [] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapOf()).not.toHaveProperty("fileLeases");
+  });
+});
+
+/**
  * Ruling 193 (F37-14, live): a required reviewer chartered to bring a Docker
  * stack up ran on a host with no `make` and no Docker. It said so in its own
  * words — "an environment/repository-baseline blocker, not a discovered
