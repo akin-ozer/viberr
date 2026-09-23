@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ConversationTurnState } from "~/server/controller/controller-run.server";
 
 /**
@@ -50,6 +51,11 @@ export function readableStep(detail: string): string {
     .replace(/\{[^{}]*\}/g, (json) => flatValues(json) ?? json);
 }
 
+/** A tool input as the step stores it: one object of named arguments. */
+const StepInput = z.record(z.string(), z.unknown());
+/** The arguments a person can read inline; nested ones are left out. */
+const StepScalar = z.union([z.string(), z.number(), z.boolean()]);
+
 function flatValues(json: string): string | null {
   let parsed: unknown;
   try {
@@ -57,10 +63,13 @@ function flatValues(json: string): string | null {
   } catch {
     return null;
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const values = Object.values(parsed)
-    .filter((v) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
-    .map(String)
-    .filter((v) => v.trim() !== "");
+  const input = StepInput.safeParse(parsed);
+  if (!input.success) return null;
+  const values = Object.values(input.data).flatMap((v) => {
+    const scalar = StepScalar.safeParse(v);
+    if (!scalar.success) return [];
+    const text = String(scalar.data);
+    return text.trim() === "" ? [] : [text];
+  });
   return values.length > 0 ? values.join(", ") : null;
 }
