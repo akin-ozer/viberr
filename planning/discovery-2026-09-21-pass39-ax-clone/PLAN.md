@@ -88,6 +88,7 @@ per item and each one was applied to the source and observed failing.
 | 75 | A torn Codex rollout starts a fresh session and says why (F39-56) | — | **done**, ruling 434 |
 | 76 | Every reader takes mergeability at the head it was measured on (F39-57) | — | **done**, ruling 435 |
 | 77 | A default-branch read comes in pages the CLI will carry (F39-58) | — | **done**, ruling 436 |
+| 78 | The Live run strip reads a tool step as words (U39-26) | owner: "especially the controller page" | **done** (no ruling; default, owner may revisit) |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

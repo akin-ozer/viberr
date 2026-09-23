@@ -62,6 +62,7 @@ import {
   type RunView,
 } from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
+import { readableStep } from "./readable-step";
 
 /**
  * Ruling 366(e): the counts that climb while a run waits roll their digits
@@ -349,7 +350,13 @@ export function LiveRunPanel({
                 the row's state rather than rendering an empty bold line, and
                 the step row is omitted entirely when there is no step. */}
             <div className="ph">{run.phase ?? "Working"}</div>
-            {run.step ? <div className="step mono">{run.step}</div> : null}
+            {/* U39-26: read as words, as the conversation's working row
+                reads it; the stored step stays on hover. */}
+            {run.step ? (
+              <div className="step mono" title={run.step}>
+                {readableStep(run.step)}
+              </div>
+            ) : null}
           </span>
         </div>
         <div className="run-stats">

@@ -254,6 +254,15 @@ what they strand, and record an optional reason.
   headline takes the run's kind ("controller turn", "operator drive"; specialists unchanged) and
   drops the anchor bit where no anchor is ever given. A controller turn records every server it
   mounted. Tests: `run-inputs.server.test.ts` and `controller-run.server.test.ts` "ruling 344".
+- **U39-26 (LOW-MED) — the Live run strip above the conversation printed raw tool ids.** 02:19,
+  controller page: "composing · mcp__viberr_controller__read_knowledge_base_doc · id:
+  kb_HZpcYS3sovrJ · path: architecture.md answered". U39-9 made the conversation's own working
+  row readable and left the strip raw on purpose ("right for the run panel"). That was my call,
+  and it was wrong for the people this page is for: the strip sits directly above the
+  conversation, on every task page too, and the Agent logs console below it is already the
+  technical record. **Fixed (default, owner may revisit):** the strip reads the step through the
+  same `readableStep` (moved to `app/features/runtime/readable-step.ts`), with the stored text
+  on hover. Test: `runs-panels.test.tsx` "U39-26".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47

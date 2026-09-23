@@ -119,6 +119,26 @@ describe("LiveRunPanel", () => {
     );
   });
 
+  it("U39-26: reads a tool step as words, keeping the stored step on hover", () => {
+    // Live on the controller page, above the conversation: "composing ·
+    // mcp__viberr_controller__read_knowledge_base_doc · id: kb_HZpcYS3sovrJ ·
+    // path: architecture.md answered". CANARY: render `run.step` raw again.
+    const stored =
+      "composing · mcp__viberr_controller__read_knowledge_base_doc · path: architecture.md answered";
+    const { container } = render(
+      <LiveRunPanel
+        runtime={[mkRun({ phase: "Working", step: stored })]}
+        onViewLogs={() => {}}
+        onInterrupt={() => {}}
+        canInterrupt
+        interrupting={false}
+      />,
+    );
+    const step = container.querySelector(".run-phase .step")!;
+    expect(step.textContent).toBe("composing · read knowledge base doc · path: architecture.md answered");
+    expect(step.getAttribute("title")).toBe(stored);
+  });
+
   it("never renders an empty heading — a phase-less running row still says something", () => {
     const { container } = render(
       <LiveRunPanel

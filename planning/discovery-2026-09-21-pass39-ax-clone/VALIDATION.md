@@ -1277,3 +1277,42 @@ person involved:
 The rulings behind that: AX-21's and AX-5's holds released (131(e)). goal-3 link 4 ("Suspend and
 resume", AX-26) and goal-4 link 7 ("ax describe", AX-27) started once their waits cleared (398).
 Each new task's operator advanced its auto boundaries on its own.
+
+## 46. The 02:17 deploy (build `9b5bef86`, rulings 429-436 and U39-9 to U39-25)
+
+The board never went quiet (six live tasks, four with an agent running), so I deployed into it
+and watched the restart path instead. Every in-flight task's working tree survives a restart
+(`reclaimTerminalTaskWorkspaces` touches Done tasks only), so the cost was four interrupted runs,
+not lost work.
+
+- **Served build.** `npm run deploy` read back "serving 0.19.0 @ 9b5bef860853 (env) built
+  2026-09-23T02:17:12.419Z".
+- **Boot recovery (ruling 177).** AX-21 and AX-28 got "Interrupted by a restart" notes naming
+  the runs (`run_WkHvyu4Oz_En` reviewer, `run_OI-7E7uwlbCp`), and all four operators were
+  re-invoked at 02:17:25.
+- **Ruling 433's plan schema is accepted by the provider.** The re-invoked Codex operators'
+  plans executed within twenty seconds: AX-30 at 02:17:41 ("Implement the Core half of AX-30 …
+  stop before changing `cmd/ax` or `internal/cli`") and AX-29 at 02:17:45. A strict-schema
+  violation would have failed every Codex operator run with `invalid_json_schema`.
+- **U39-24, the reader's zone.** The controller's first post-deploy answer quoted "PR #13 at
+  04:16" and "PR #20 (AX-26) … at 04:54", which are 01:16 and 01:54 UTC in Istanbul, the zone
+  the page prints. Before the deploy the same conversation had quoted bare UTC clocks.
+- **U39-25, the inputs headline.** The same conversation's two turns, before and after:
+  "Run inputs — supporting engagement · NO canonical anchor · … · 0 MCP servers" (05:06:26) and
+  "Run inputs — controller turn · persona 39488 chars · prompt 9718 chars · 1 skill · 2
+  knowledge bases · 2 MCP servers" (05:23:39).
+- **Ruling 436, paged reads.** Asked to check §9 of the rulings against `executor.go` (57,835
+  characters) and `local.go` (55,216), which it could not open before, the controller "read both
+  files to the end", corrected three places where §9 contradicted the code (where the execution
+  record lives, what a workload that finished during a restart reports, and where the signal
+  result comes from), and found a real gap: a signal that hits only the command, SIGXCPU from
+  the CPU-time limit among them, is reported as `ExitNonZero` 152 rather than
+  `SignalTerminated`. I asked it to open the follow-up task.
+- **Ruling 434 was not exercised, and its text was wrong.** "Send back for another attempt" on
+  AX-5's stall packet went through the operator, whose dispatch always starts a fresh, anchored
+  run (`01a0cc0e…`, a 3,127-character anchor), and the Developer confirmed its commit at
+  02:19:36. Only an @mention or an answered question resumes a session. The ruling and F39-56
+  now say so; the fix stands for those two paths and for the honest class.
+- **Not yet seen live:** 430 (a plan stopping at a decision), 431 (a lease quoted from the live
+  list), 432 (a stall withdrawn while a conflict stays), 435 (a stale conflict hidden from the
+  snapshot). Each needs its situation to recur.
