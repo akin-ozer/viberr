@@ -154,9 +154,10 @@ export function getControllerDock(
     conversationId: string | null;
     /**
      * O39-d: the panel is OPEN and shows this transcript, so its owner has
-     * seen it. The dock also loads this view while it is closed (the working
-     * poll keeps the button's dot honest), and a load nobody looked at must
-     * not mark the reply it fetched as read.
+     * seen it. A load without it reads nothing: a load nobody looked at must
+     * not mark the reply it fetched as read. (Since ruling 454 the dock loads
+     * this view only while the panel is open; the closed button reads the
+     * dock's status instead.)
      */
     markSeen?: boolean;
     dataRoot?: string;

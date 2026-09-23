@@ -102,6 +102,26 @@ export function dockScopeKey(scope: {
   return `${scope.projectSlug ?? ""}|${scope.taskKey ?? ""}`;
 }
 
+/**
+ * Ruling 454 (CTL-3, RF-8): the `shouldRevalidate` of the dock's two resource
+ * routes. Their fetchers are root-owned, so React Router re-ran both on every
+ * navigation, action and revalidation of every page: a request per page event
+ * for the unseen list, and once the dock had been opened, a reload of the last
+ * transcript with its `seen=1`, which marked a reply read while the panel was
+ * closed (ruling 448 lets only the OPEN dock do that). The dock loads them
+ * itself, on the moments that change them: its own opening, selection and
+ * sends, a `controller.updated` the page's stream hands it, and its working
+ * poll.
+ */
+export function dockResourceShouldRevalidate(): boolean {
+  return false;
+}
+
+/** The dock's status on every page (`resources.controller-unseen.ts`): O39-d's
+ *  unseen replies and, since ruling 454, the viewer's turns working right now.
+ *  What the button reads, and all its working poll loads. */
+export const DOCK_STATUS_URL = "/resources/controller-unseen";
+
 /** The dock's data URL for a scope and a selection (`null` = the newest
  *  thread here, `"new"` = start empty, an id = that thread). */
 export function dockViewUrl(

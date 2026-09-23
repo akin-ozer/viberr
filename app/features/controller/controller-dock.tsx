@@ -1,6 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TurnStep, WorkingSentence } from "./turn-step";
-import { useFreshMessageIds } from "./use-fresh-messages";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
   useFetcher,
@@ -10,27 +8,23 @@ import {
 } from "react-router";
 import { z } from "zod";
 import type { ControllerDockView } from "./controller-dock-query.server";
-import { CONNECT_TO_SEND, NotConnectedNote } from "./controller-page";
-import { controllerExamples } from "./controller-examples";
 import type { loader as projectLoader } from "~/routes/project";
-import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
+import type { DockStatus } from "~/routes/resources.controller-unseen";
 import {
+  DOCK_STATUS_URL,
   dockContextFromMatches,
   dockScopeKey,
   dockViewUrl,
   type DockContext,
 } from "./controller-dock-context";
 import { Icon } from "~/ui/icon";
-import { Markdown } from "~/ui/markdown";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useCsrfToken } from "~/ui/csrf-input";
-import { LocalDayDotTime } from "~/ui/local-time";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
-import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
-import { sseScopes } from "~/features/live-updates/event-types";
+import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/event-types";
 
 /**
  * The controller DOCK (ruling 121): one floating Controller button on every
@@ -45,10 +39,20 @@ import { sseScopes } from "~/features/live-updates/event-types";
  * open/closed state for the life of the tab, and shows one line naming what
  * the controller knows here.
  *
- * Live: the view is a root-owned `fetcher.load`, which React Router re-runs on
- * every revalidation — so every surface that already streams the `user` scope
- * refreshes the dock for free; while open, the dock also holds its own stream
- * for the surfaces that have none, and polls while a turn is working.
+ * Live (ruling 454): the dock's two resources, the open panel's view and the
+ * status every page's button reads (unseen replies, turns working), ride no
+ * page revalidation. The dock loads them on the moments that change them: its
+ * own opening, selection and sends, a `controller.updated` that the page's
+ * `user` stream hands it (`CONTROLLER_UPDATED_EVENT`), and, while a turn
+ * works, a 5 s poll of the small status. While open, the dock also holds its
+ * own stream for the surfaces that have none.
+ *
+ * Ruling 454 (FL-1): this module is the CLOSED dock - the button, the panel's
+ * frame and header, and all of the dock's state - and root puts it in every
+ * route's first download. What the open panel draws (the transcript through
+ * the markdown pipeline, the thread list, the composer) is
+ * `controller-dock-panel.tsx`, loaded on the first open and preloaded when a
+ * pointer or focus reaches the button.
  */
 
 const OPEN_KEY = "viberr.dock.open";
@@ -57,6 +61,31 @@ const WORKING_POLL_MS = 5_000;
 /** The dock's `c` value that means "start with no conversation". */
 const NEW_THREAD = "new";
 const USER_SCOPES = [sseScopes.user()];
+
+/** The open panel's body, on demand (ruling 454, FL-1). */
+const loadPanelBody = () => import("./controller-dock-panel");
+const DockPanelBody = lazy(() =>
+  loadPanelBody().then((m) => ({ default: m.DockPanelBody })),
+);
+function preloadPanelBody(): void {
+  void loadPanelBody();
+}
+
+/**
+ * What the open panel's body shows while its module loads: the same two lines
+ * the body itself shows before its view has landed, so the frame reads the
+ * same either way.
+ */
+function DockPanelBodyFallback() {
+  return (
+    <>
+      <p className="dock-context fine xs dim">Reading where you are…</p>
+      <section className="dock-body dock-transcript" aria-label="Conversation transcript">
+        <p className="empty sm">Loading…</p>
+      </section>
+    </>
+  );
+}
 
 interface DockPayload {
   view: ControllerDockView;
@@ -109,31 +138,6 @@ function localScopeLabel(context: DockContext): string {
   return "Instance";
 }
 
-/** Ruling 314's examples for the scope the dock is open on (shared with the
- *  page, ruling 419(g)). */
-function emptyExamples(view: ControllerDockView): string[] {
-  return controllerExamples(
-    view.scope.kind === "task" && view.scope.taskKey
-      ? { kind: "task", taskKey: view.scope.taskKey }
-      : view.scope.kind === "board"
-        ? { kind: "board" }
-        : { kind: "instance" },
-  );
-}
-
-function emptyCopy(view: ControllerDockView): string {
-  if (view.scope.kind === "task") {
-    return `Ask about ${view.scope.taskKey} or say what to do with it. The controller already has its task file.`;
-  }
-  if (view.scope.kind === "board") {
-    return `Ask about the ${view.scope.projectName} board or say what to do on it: tasks, agents, goal chains.`;
-  }
-  return "Ask about this instance or say what to do: projects, users, resources, agents, goal chains.";
-}
-
-/** O39-d: the viewer's unseen controller replies, for the button. */
-const UNSEEN_URL = "/resources/controller-unseen";
-
 export function ControllerDock() {
   const matches = useMatches();
   const location = useLocation();
@@ -168,9 +172,6 @@ function DockShell({ context }: { context: DockContext }) {
   const [threadsOpen, setThreadsOpen] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [text, setText] = useState("");
-  // Ruling 419(d): the send handler takes ⌘ OR Ctrl, so the hint names the key
-  // this keyboard has (UI-55; the page's composer shares the rule).
-  const sendHint = useModifierHint("↵");
   const restored = useRef(false);
   const panelRef = useRef<HTMLElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
@@ -206,8 +207,8 @@ function DockShell({ context }: { context: DockContext }) {
   }, [selected]);
 
   const selectedId = selected[context.key] ?? null;
-  // O39-d: `seen` only while the panel is open. The working poll below loads
-  // this view with the panel closed too, and that load reads nothing.
+  // O39-d: `seen` only while the panel is open: the view is loaded only then
+  // (ruling 454), and every such load reads the transcript it shows.
   const url = dockViewUrl(context, selectedId, open);
   const load = view.load;
   // Load whenever the panel is open and the target changes: a new scope
@@ -238,36 +239,87 @@ function DockShell({ context }: { context: DockContext }) {
     });
   }, [stale, context.key]);
 
+  // O39-d: replies the viewer has not seen, whatever scope they were asked
+  // in. A turn runs one to five minutes, and a person who moved to another
+  // page learned nothing when its answer landed. Ruling 454: the same small
+  // status also names the viewer's turns working right now, which is what the
+  // button's working dot and the open panel's step line read.
+  //
+  // Loaded when the dock mounts (the first page, and every return from a page
+  // it stays off, where the controller page may have marked a reply read),
+  // when the panel opens or closes and after it shows a transcript (which
+  // marks it seen), on every `controller.updated` the page's stream hands the
+  // dock, and by the working poll. Not on navigation or on a page's own
+  // revalidation: neither changes it (RF-8).
+  const status = useFetcher<DockStatus>({ key: "controller-unseen" });
+  const loadStatus = status.load;
+  const shownId = current?.conversation?.id ?? null;
+  const shownCount = current?.messages.length ?? 0;
+  useEffect(() => {
+    loadStatus(DOCK_STATUS_URL);
+  }, [loadStatus, open, shownId, shownCount]);
+  // The transcript the open panel shows is being read.
+  const unseen = (status.data?.unseen ?? []).filter((u) => !(open && u.id === shownId));
+  const liveTurns = status.data?.working ?? [];
+  // The button's dot: a turn of the viewer's is working in THIS scope.
+  const working = liveTurns.some((t) => dockScopeKey(t) === context.key);
+  // The open panel's working row: the view says whether the shown thread's
+  // turn works; the status moves its step (ruling 250) between view loads.
+  const liveShown = liveTurns.find((t) => t.id === shownId) ?? null;
+  const shownTurn = current
+    ? liveShown && current.turn.working
+      ? { ...current.turn, phase: liveShown.phase, step: liveShown.step }
+      : current.turn
+    : null;
+
+  // Ruling 454 (CTL-4): a conversation changed somewhere (the page's stream
+  // says so). Refresh the button, and the transcript when it is on screen.
+  const viewUrl = useRef(url);
+  useEffect(() => {
+    viewUrl.current = url;
+  });
+  useEffect(() => {
+    const onUpdated = () => {
+      loadStatus(DOCK_STATUS_URL);
+      if (open) load(viewUrl.current);
+    };
+    window.addEventListener(CONTROLLER_UPDATED_EVENT, onUpdated);
+    return () => window.removeEventListener(CONTROLLER_UPDATED_EVENT, onUpdated);
+  }, [open, load, loadStatus]);
+
   // Poll while a turn is working — open or not, so the working dot on the
-  // button stays honest after the panel is closed.
-  const working = current?.turn.working ?? false;
+  // button stays honest after the panel is closed, and the settle a paused
+  // stream missed still lands. Ruling 454 (CTL-2): the poll reads the small
+  // status, not the whole transcript: the step line moves from it, and the
+  // view is reloaded only when the status and the view disagree about whether
+  // the shown turn works (it started elsewhere, or it settled).
+  const polling = working || (open && (current?.turn.working ?? false));
+  const statusState = useRef(status.state);
+  useEffect(() => {
+    statusState.current = status.state;
+  });
+  useEffect(() => {
+    if (!polling) return;
+    const timer = setInterval(() => {
+      if (statusState.current === "idle") loadStatus(DOCK_STATUS_URL);
+    }, WORKING_POLL_MS);
+    return () => clearInterval(timer);
+  }, [polling, loadStatus]);
+  const shownLive = liveShown !== null;
+  const viewSaysWorking = current?.turn.working ?? false;
+  const lastLive = useRef<{ id: string | null; live: boolean } | null>(null);
   const viewState = useRef(view.state);
   useEffect(() => {
     viewState.current = view.state;
   });
   useEffect(() => {
-    if (!working) return;
-    const timer = setInterval(() => {
-      if (viewState.current === "idle") load(url);
-    }, WORKING_POLL_MS);
-    return () => clearInterval(timer);
-  }, [working, url, load]);
-
-  // O39-d: replies the viewer has not seen, whatever scope they were asked
-  // in. A turn runs one to five minutes, and a person who moved to another
-  // page learned nothing when its answer landed. Loaded on every navigation
-  // and after the panel shows a transcript (which marks it seen); React
-  // Router also revalidates it on the page's own live stream.
-  const unseenFetch = useFetcher<{ unseen: UnseenReplyView[] }>({ key: "controller-unseen" });
-  const loadUnseen = unseenFetch.load;
-  const { pathname } = useLocation();
-  const shownId = current?.conversation?.id ?? null;
-  const shownCount = current?.messages.length ?? 0;
-  useEffect(() => {
-    loadUnseen(UNSEEN_URL);
-  }, [loadUnseen, pathname, open, shownId, shownCount]);
-  // The transcript the open panel shows is being read.
-  const unseen = (unseenFetch.data?.unseen ?? []).filter((u) => !(open && u.id === shownId));
+    const was = lastLive.current;
+    lastLive.current = { id: shownId, live: shownLive };
+    if (!open || !was || was.id !== shownId || was.live === shownLive) return;
+    // A view already on its way was asked for by the same news (a
+    // `controller.updated` loads both); only the poll's flip needs its own.
+    if (viewSaysWorking !== shownLive && viewState.current === "idle") load(viewUrl.current);
+  }, [open, shownId, shownLive, viewSaysWorking, load]);
 
   // A send's result: an error is a toast (the transport failed; refusals are
   // in the transcript); a success selects the thread it landed in and reloads.
@@ -288,15 +340,20 @@ function DockShell({ context }: { context: DockContext }) {
     setText((cur) => (cur === pending.current ? "" : cur));
     pending.current = null;
     const key = sentUnder.current;
-    setSelected((s) =>
-      s[key] === result.conversationId ? s : { ...s, [key]: result.conversationId },
-    );
-    // Only reload while the dock still stands where the send was made. The
-    // context here is the CURRENT one, so after a navigation this would ask for
-    // a task thread under the board's scope - a request the route cannot answer
-    // (review finding 2, path (a)). Recording the selection is enough: the load
+    // A thread the selection does not name yet (a new one, or the scope's
+    // newest with nothing selected) is selected, and the load effect above
+    // fetches it. Ruling 454 (CTL-4): that is the ONE load, so the thread
+    // already selected is reloaded here only when nothing else will. Only
+    // while the panel is open and still stands where the send was made: the
+    // context is the CURRENT one, so after a navigation this would ask for a
+    // task thread under the board's scope - a request the route cannot answer
+    // (review finding 2, path (a)); the selection is enough, and the load
     // effect fires when the person comes back to that scope.
-    if (key === context.key) load(dockViewUrl(context, result.conversationId, open));
+    if (selected[key] !== result.conversationId) {
+      setSelected((s) => ({ ...s, [key]: result.conversationId }));
+    } else if (open && key === context.key) {
+      load(url);
+    }
   });
 
   // Close: a pointer close plays the exit transition and unmounts on
@@ -316,6 +373,7 @@ function DockShell({ context }: { context: DockContext }) {
     },
     [],
   );
+  const leaveDock = useCallback(() => closeDock(true), [closeDock]);
   useEffect(() => {
     if (!closing) return;
     const panel = panelRef.current;
@@ -387,23 +445,13 @@ function DockShell({ context }: { context: DockContext }) {
     }
     wasOpen.current = open;
   }, [open, focusInside]);
-
-  // Message entry motion: only a message that arrives while THIS conversation
-  // is already on screen animates (the page shares the rule, ruling 451(d)).
-  const conversationId = current?.conversation?.id ?? null;
-  const messages = current?.messages ?? [];
-  const fresh = useFreshMessageIds(messages, conversationId);
-
-  // Keep the newest message in view without scrolling the page underneath.
-  // `open` is in the deps because closing unmounts the scroll container and
-  // reopening mounts a fresh one at scrollTop 0 - with the same thread and the
-  // same message count nothing else here changes, so the transcript came back
-  // scrolled to its oldest message (review finding 16).
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [open, messages.length, working, threadsOpen, conversationId]);
+  // Ruling 454 (FL-1): the body can land after the open that asked for it (its
+  // module loads on demand), and the open above could then only focus the
+  // panel itself. Move in once it is there, only while focus still rests on
+  // the panel - the same rule the re-aim below keeps.
+  const bodyMounted = useCallback(() => {
+    if (openedByUser.current && document.activeElement === panelRef.current) focusInside();
+  }, [focusInside]);
 
   const busy = send.state !== "idle";
   // The scope itself is not this person's to talk in here (an unknown or
@@ -464,7 +512,14 @@ function DockShell({ context }: { context: DockContext }) {
     // Four of the five longest messages on the live board are 1,800 to 2,200
     // characters, typed into a two-row textarea.
     pending.current = value;
-    send.submit(body, { method: "post", action: "/resources/controller" });
+    // Ruling 454 (CTL-4): a send changes the conversation and nothing the page
+    // under the dock renders, so it does not re-run the page's loaders; what
+    // the turn then does to a board or a task arrives on that page's stream.
+    send.submit(body, {
+      method: "post",
+      action: "/resources/controller",
+      defaultShouldRevalidate: false,
+    });
   };
 
   const pick = (id: string) => {
@@ -542,7 +597,7 @@ function DockShell({ context }: { context: DockContext }) {
                 className="icon-btn"
                 to={pageHref}
                 aria-label="Open the full controller page"
-                onClick={() => closeDock(true)}
+                onClick={leaveDock}
               >
                 <Icon name="ext" />
               </Link>
@@ -556,184 +611,23 @@ function DockShell({ context }: { context: DockContext }) {
               </button>
             </div>
           </header>
-          <p className="dock-context fine xs dim">
-            {current?.scope.contextLine ?? "Reading where you are…"}
-          </p>
-          {unseen.length > 0 && (
-            <p className="dock-unseen fine xs">
-              <span className="unseen-dot" aria-hidden="true" />
-              <span>
-                New {unseen.length === 1 ? "reply" : "replies"} in{" "}
-                {unseen.slice(0, 3).map((u, i) => (
-                  <Fragment key={u.id}>
-                    {i > 0 && ", "}
-                    {threads.some((t) => t.id === u.id) ? (
-                      // A thread of this scope opens right here.
-                      <button type="button" className="linkish" onClick={() => pick(u.id)}>
-                        {u.title}
-                      </button>
-                    ) : (
-                      <Link className="linkish" to={u.href} onClick={() => closeDock(true)}>
-                        {u.taskKey ? `${u.taskKey} · ${u.title}` : u.title}
-                      </Link>
-                    )}
-                  </Fragment>
-                ))}
-                {unseen.length > 3 && ` and ${unseen.length - 3} more`}
-              </span>
-            </p>
-          )}
-          {unavailable ? (
-            <section className="dock-body" aria-label="Controller unavailable here">
-              <p className="empty sm">
-                The controller has nothing to work with here: this project or
-                task is not open to you, or it no longer exists. Everything else
-                on the page still works.
-              </p>
-            </section>
-          ) : threadsOpen ? (
-            <section className="dock-body dock-threads" aria-label="Threads here">
-              {threads.length === 0 ? (
-                <p className="empty sm">No threads here yet.</p>
-              ) : (
-                <ul className="ctl-conv-list">
-                  {threads.map((t) => (
-                    <li key={t.id}>
-                      <button
-                        type="button"
-                        className={`ctl-conv${t.id === conversationId ? " on" : ""}${t.unread ? " unread" : ""}`}
-                        aria-current={t.id === conversationId ? "true" : undefined}
-                        onClick={() => pick(t.id)}
-                      >
-                        <span className="ctl-conv-title">
-                          {t.unread && <span className="unseen-dot" aria-hidden="true" />}
-                          {t.title}
-                          {t.unread && <span className="vh">, new reply</span>}
-                        </span>
-                        <span className="fine xs dim">
-                          {t.lastMessageAt ? <LocalDayDotTime iso={t.lastMessageAt} /> : "empty"}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          ) : (
-            <section
-              className="dock-body dock-transcript"
-              ref={scrollRef}
-              aria-label="Conversation transcript"
-            >
-              {!current ? (
-                <p className="empty sm">Loading…</p>
-              ) : !current.conversation ? (
-                <div className="ctl-empty">
-                  <p className="empty sm">{emptyCopy(current)}</p>
-                  {/* Ruling 314: clicking one SENDS it. An example that only
-                      fills the box would teach the same lesson and then ask the
-                      person to find the button, which is the thing they were
-                      already unsure about. */}
-                  <ul className="ctl-examples">
-                    {emptyExamples(current).map((example) => (
-                      <li key={example}>
-                        <button
-                          type="button"
-                          className="ctl-example"
-                          onClick={() => submit(example)}
-                          disabled={busy || disabled}
-                        >
-                          {example}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <div className="ctl-msgs dock-msgs">
-                  {messages.map((m) => (
-                    <article
-                      key={m.id}
-                      className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
-                      data-fresh={fresh.has(m.id) ? "true" : undefined}
-                    >
-                      <header>
-                        <span className="ctl-msg-who">
-                          {m.author === "user" ? (
-                            "You"
-                          ) : (
-                            <>
-                              <Icon name="cpu" /> {current.controllerName}
-                            </>
-                          )}
-                        </span>
-                        <LocalDayDotTime iso={m.createdAt} />
-                      </header>
-                      <div className="md-body">
-                        <Markdown text={m.text} taskLinks={current.taskLinks} />
-                      </div>
-                    </article>
-                  ))}
-                  {current.turn.working && (
-                    <div className="ctl-working" role="status">
-                      <span className="live-dot" />
-                      <WorkingSentence name={current.controllerName} />
-                      {/* Ruling 250: the dock follows a person onto every page
-                          and has no live-run panel at all, so this row is the
-                          ONLY place the turn's own step can reach them here. */}
-                      <TurnStep turn={current.turn} />
-                    </div>
-                  )}
-                </div>
-              )}
-            </section>
-          )}
-          <div className="dock-composer">
-            <div className="ctl-composer">
-              {current && !current.available && <NotConnectedNote />}
-              <textarea
-                ref={composerRef}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                    e.preventDefault();
-                    submit();
-                  }
-                }}
-                rows={2}
-                placeholder={
-                  !current
-                    ? "Loading…"
-                    : disabled
-                      ? current.available
-                        ? "Read-only: only the thread's owner can talk in it."
-                        : // Ruling 127: the dock bills the person reading it,
-                          // and says so in the note above the box (U39-10).
-                          CONNECT_TO_SEND
-                      : "Ask the controller, or tell it what to do here…"
-                }
-                disabled={disabled}
-                aria-label="Message to the controller"
-              />
-              <div className="ctl-composer-foot">
-                <span className="fine xs dim">
-                  Acts with your permissions
-                  <span className="kbd-hint" suppressHydrationWarning>
-                    {` · ${sendHint} sends`}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  className="btn primary sm"
-                  onClick={() => submit()}
-                  disabled={busy || disabled || !text.trim()}
-                >
-                  {busy ? "Sending…" : "Send"}
-                </button>
-              </div>
-            </div>
-          </div>
+          <Suspense fallback={<DockPanelBodyFallback />}>
+            <DockPanelBody
+              current={current}
+              turn={shownTurn}
+              unseen={unseen}
+              threadsOpen={threadsOpen}
+              busy={busy}
+              disabled={disabled}
+              text={text}
+              onText={setText}
+              onSubmit={submit}
+              onPick={pick}
+              onLeave={leaveDock}
+              composerRef={composerRef}
+              onMount={bodyMounted}
+            />
+          </Suspense>
         </section>
       )}
       <button
@@ -749,6 +643,11 @@ function DockShell({ context }: { context: DockContext }) {
         // decided this in command-palette.tsx and create-profile-modal.tsx):
         // the panel only exists while open.
         aria-controls={open ? "controller-dock-panel" : undefined}
+        // Ruling 454 (FL-1): the open panel's body loads on demand; a pointer
+        // or focus on the button is the moment to fetch it, so a click finds
+        // it there.
+        onPointerEnter={preloadPanelBody}
+        onFocus={preloadPanelBody}
         onClick={() => {
           if (open) {
             closeDock(false);

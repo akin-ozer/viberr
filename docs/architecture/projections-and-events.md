@@ -266,7 +266,12 @@ when a task is open; the controller page: `user`, plus `project:<slug>` on a pro
 the controller dock, Instance settings and notifications: `user`), revalidates the active
 React Router loaders on any data event or `stream.resync` (debounced 300 ms; a run line
 only on its own task's page, floored at 2 s, joining a pending revalidation rather than
-pushing it out), and revalidates once on any connect that follows a previous stream. A
+pushing it out; `controller.updated`, a **conversation event**
+(`SSE_CONVERSATION_EVENTS`), only on the two controller pages, which render the
+conversation and pass `{ conversations: true }`: every other surface hands it, debounced
+the same way, to the controller dock as the window event `CONTROLLER_UPDATED_EVENT`, and
+the dock reloads its own resources, ruling 454), and revalidates once on any connect that
+follows a previous stream (handing the dock the same catch-up). A
 hidden tab holds no stream: the hook closes on `visibilitychange` and reopens on return
 (ruling 301). A failed stream flips `paused` (the topbar's "live updates paused" chip),
 reopens on a 2 / 5 / 15 / 30 s backoff, probes the session after two consecutive
