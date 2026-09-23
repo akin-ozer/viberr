@@ -19,7 +19,7 @@ import type {
  *
  * Highlighting is decoration. The text is on screen before any of this runs,
  * and every failure here (a grammar that will not load, an engine the browser
- * cannot build, a file that takes too long) resolves to `null`, which leaves
+ * cannot build, a pattern the engine rejects) resolves to `null`, which leaves
  * the plain lines exactly as they were.
  */
 
@@ -116,8 +116,22 @@ export const LANGUAGE_LOADERS: ReadonlyMap<string, GrammarLoader> = new Map<
 const THEME = "css-variables";
 
 /** A line longer than this is one plain token — a minified bundle is not
- *  something a regex grammar should be asked to parse character by character. */
+ *  something a regex grammar should be asked to parse character by character.
+ *  This cap, not a clock, is what bounds the work on one line. */
 const MAX_TOKENIZED_LINE = 1_000;
+
+/**
+ * Shiki's per-line clock (500 ms by default) is switched off. The JavaScript
+ * engine compiles a rule's patterns the first time the tokenizer enters it,
+ * inside that clock: the root scanner of a cold grammar alone measured
+ * 300–700 ms on one short line. When the clock runs out the tokenizer stops
+ * mid-line and Shiki stretches the last token to the line's end, so the first
+ * line of the first file in a language painted wrong (a whole
+ * `const answer = 42; // why` coloured as a keyword, the comment never a
+ * comment). The clock is checked only between matches, so it never stopped a
+ * runaway regex either.
+ */
+const NO_TIME_LIMIT = 0;
 
 let corePromise: Promise<HighlighterCore> | null = null;
 
@@ -167,6 +181,7 @@ export async function highlightCode(
       lang: language,
       theme: THEME,
       tokenizeMaxLineLength: MAX_TOKENIZED_LINE,
+      tokenizeTimeLimit: NO_TIME_LIMIT,
       includeExplanation: false,
     });
     return lines.map((line) => line.map(toToken));

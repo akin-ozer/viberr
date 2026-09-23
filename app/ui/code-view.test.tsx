@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import { toToken } from "./code-highlight";
+import { highlightCode, toToken } from "./code-highlight";
 import { CodeView } from "./code-view";
 
 afterEach(cleanup);
@@ -52,6 +52,27 @@ describe("CodeView (ruling 363)", () => {
       />,
     );
     expect(container.querySelector("pre")!.getAttribute("data-digits")).toBe("4");
+  });
+
+  it("a slow tokenizer still colours the whole line: no clock cuts a line short", async () => {
+    // Load the core and the grammar first, so only tokenizing runs under the clock.
+    expect(await highlightCode("0", "javascript")).not.toBeNull();
+    // Every clock read jumps a second: the cost of a cold grammar compiling its
+    // patterns mid-line. Under Shiki's default 500 ms per-line limit the line
+    // stops at the first read and the rest of it takes the last token's colour.
+    let now = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => (now += 1_000));
+    let lines: Awaited<ReturnType<typeof highlightCode>>;
+    try {
+      lines = await highlightCode("const answer = 42; // why", "javascript");
+    } finally {
+      clock.mockRestore();
+    }
+    expect(lines).not.toBeNull();
+    const [line] = lines!;
+    expect(line!.map((token) => token.text).join("")).toBe("const answer = 42; // why");
+    expect(line).toContainEqual({ text: "const", className: "tk-keyword" });
+    expect(line).toContainEqual({ text: "// why", className: "tk-comment" });
   });
 
   it("toToken: the foreground is a bare text node; scope families and font styles become classes", () => {
