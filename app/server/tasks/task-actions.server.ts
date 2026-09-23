@@ -1167,6 +1167,64 @@ export async function setTaskMetadata(
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
 }
 
+/** A literal, for use inside a RegExp. */
+function literalPattern(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Ruling 447 (O39-a): the actor other than the asker that a person's answer to
+ * an agent's question names, if any: another deployed agent (by name or
+ * @handle) or the operator. Such an answer is routing, which is the
+ * operator's job: the asking agent, resumed with it, can only report that it
+ * cannot act on it.
+ *
+ * Live on ax-clone, three of three: AX-22 "Hand off to Surface Developer",
+ * after which the developer did the Surface Developer's edits itself; AX-20
+ * "Operator: move AX-20 back to Verify ...", which the developer spent a run
+ * finding it had no tool for; AX-27 "Offer me a create_task option for the
+ * Developer", which the Surface Developer wrote out and could not do. The
+ * asker's own name is taken out first, so "Surface Developer" never reads as
+ * naming "Developer".
+ */
+export function answerNamesAnotherActor(
+  text: string,
+  askerId: string,
+  /** The deployed agents, each with the @handle a person would type. */
+  agents: readonly { id: string; name: string; handle: string }[],
+): string | null {
+  // Never a profile id: ids are slugs.
+  const OPERATOR = "(operator)";
+  const candidates: { id: string; label: string; pattern: string }[] = [
+    { id: OPERATOR, label: "the operator", pattern: "operator" },
+  ];
+  for (const agent of agents) {
+    const label = agent.name.trim() || agent.id;
+    if (agent.name.trim()) candidates.push({ id: agent.id, label, pattern: agent.name.trim() });
+    if (agent.handle) candidates.push({ id: agent.id, label, pattern: agent.handle });
+  }
+  // Longest first, so "Surface Developer" claims its words before
+  // "Developer" can: the asker's name and another agent's can share a word.
+  candidates.sort((a, b) => b.pattern.length - a.pattern.length);
+  const claimed: { start: number; end: number }[] = [];
+  const hits: { at: number; id: string; label: string }[] = [];
+  for (const candidate of candidates) {
+    const re = new RegExp(
+      `(^|[^\\p{L}\\p{N}_-])(@?${literalPattern(candidate.pattern)})(?=$|[^\\p{L}\\p{N}_-])`,
+      "giu",
+    );
+    for (const match of text.matchAll(re)) {
+      const start = (match.index ?? 0) + (match[1] ?? "").length;
+      const end = start + (match[2] ?? "").length;
+      if (claimed.some((span) => start < span.end && span.start < end)) continue;
+      claimed.push({ start, end });
+      hits.push({ at: start, id: candidate.id, label: candidate.label });
+    }
+  }
+  const other = hits.filter((hit) => hit.id !== askerId).sort((a, b) => a.at - b.at)[0];
+  return other?.label ?? null;
+}
+
 /**
  * R15-14 — hand a resolved decision back to the AGENT that asked for it, by
  * resuming that agent's own provider session.
@@ -10884,15 +10942,48 @@ export async function resolvePacket(
           ? (packet.askedBy?.trim() ?? "")
           : "";
       if (askedBy) {
-        const answer: Parameters<typeof answerAskingAgent>[2] = {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          profileId: askedBy,
-          question: packet.title,
-          decision: option.t,
-        };
-        if (decisionNote) answer.note = decisionNote;
-        answeredAsker = await answerAskingAgent(db, ctx, answer, actor);
+        // Ruling 447 (O39-a): an answer that names another actor goes to the
+        // operator, which routes it; only an answer for the asker goes back.
+        const { listDeployedSpecialists } = await import("./specialist-run.server");
+        const { agentMentionHandle } = await import("./agent-reply.server");
+        const deployed = listDeployedSpecialists(
+          input.projectSlug,
+          ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {},
+        ).map((a: { id: string; name: string }) => ({
+          id: a.id,
+          name: a.name,
+          handle: agentMentionHandle({ profileId: a.id, name: a.name }),
+        }));
+        const routedTo = answerNamesAnotherActor(
+          [option.t, option.d, decisionNote ?? ""].join("\n"),
+          askedBy,
+          deployed,
+        );
+        if (routedTo) {
+          const askerName = deployed.find((a) => a.id === askedBy)?.name ?? askedBy;
+          await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), {
+            occurredAt: new Date().toISOString(),
+            type: "note",
+            actor: { kind: "system", systemId: "policy-engine" },
+            title: null,
+            text:
+              `The answer names ${routedTo}, so it went to the operator to route, ` +
+              `not back to ${askerName}, who asked.`,
+            toAgent: false,
+            evidence: null,
+          });
+          reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        } else {
+          const answer: Parameters<typeof answerAskingAgent>[2] = {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            profileId: askedBy,
+            question: packet.title,
+            decision: option.t,
+          };
+          if (decisionNote) answer.note = decisionNote;
+          answeredAsker = await answerAskingAgent(db, ctx, answer, actor);
+        }
       }
     }
     // No asker (an operator/policy packet), or its session is gone / the profile

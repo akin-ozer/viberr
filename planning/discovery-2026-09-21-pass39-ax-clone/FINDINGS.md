@@ -616,7 +616,10 @@ what they strand, and record an optional reason.
   **Fixed, ruling 443** (2026-09-23): a step whose outcome is the packet it opened is not a refusal.
   `outcome` stays `noop`, so the LV-03 split and its tests stand.
 
-- **O39-a (owner's call) — an answer that routes work to ANOTHER agent summons the asking one.**
+- ~~**O39-a (owner's call) — an answer that routes work to ANOTHER agent summons the asking one.**~~
+  **Fixed, ruling 447** (2026-09-23; default, owner may revisit): an answer whose option or note names
+  another deployed agent or the operator goes to the operator, with a note saying why; an answer
+  for the asker still resumes it. Test: `agent-reply.server.test.ts` "ruling 447".
   AX-22 23:38: the developer asked "Route the Gateway CLI and documentation follow-up?" and
   offered "Hand off to Surface Developer (Recommended)". I picked it. `resolvePacket` summoned the
   ASKING agent ("@developer … This is the decision you were blocked on. Continue from where you
