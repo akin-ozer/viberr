@@ -93,6 +93,9 @@ per item and each one was applied to the source and observed failing.
 | 80 | The workspace contract says fetching is the server's (F39-59) | — | **done** (no ruling) |
 | 81 | The operator is told whose the open packet is (F39-60) | — | **done**, ruling 437 |
 | 82 | The one merge an agent makes is the conflict a person routed to it (F39-61) | — | **done**, ruling 438 |
+| 83 | A base refresh keeps the revision and moves the review subject, with or without a PR (F39-62) | — | **done**, ruling 439 |
+| 84 | A new wait on a task that is already done is refused with its own sentence (F39-63) | — | **done** (no ruling) |
+| 85 | The run loading its tools reads as words (U39-28) | — | **done** (no ruling) |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

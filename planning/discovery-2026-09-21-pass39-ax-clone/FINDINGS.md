@@ -273,6 +273,15 @@ what they strand, and record an optional reason.
   artifact: Chrome lays out the contents of a closed `<details>`, so its hidden entries
   measured on top of each other. Test: `app.css.test.ts` "U39-27".
 
+- **U39-28 (LOW) — the run loading its tools read as SDK jargon.** 03:28, the controller page's
+  working row and Live run strip on a fresh turn: "composing · ToolSearch · query:
+  select:mcp__viberr_controller__get_task,mcp__viberr_controller__list_decisions… answered". Nearly every
+  controller turn opens this way (its MCP tools are deferred behind the SDK's `ToolSearch`), so
+  the first thing a person reads about the work is the loader's query syntax. **Fixed:**
+  `readableStep` reads it as "loading tools · get task, list decisions", and a keyword search as
+  "looking up tools · …". The stored text stays on the `title`. Test:
+  `controller-page.test.tsx` "U39-28".
+
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
   (following a decision that said "resolve the overlap before delivery"), although AX-20's open
@@ -407,6 +416,42 @@ what they strand, and record an optional reason.
   133(b), 163). On AX-21 at 01:40 the same answer had gone through. The fix was live the moment
   the persona file changed, since the operator reads it per run. **Fixed: ruling 438.**
 
+- **F39-62 (HIGH) — a base refresh cost a passing approval, and pinned the reviewer to the code
+  the refresh replaced.** AX-29, 02:43–03:16 UTC. The owner's directive was "wait on AX-32, then
+  bring the branch up to date with main, rerun make gate and make race, and deliver", and the
+  operator did exactly that. At 02:44:06 `update_branch_from_base` merged `main` onto the
+  delivered revision `4e6c47d` as `278c1ed` and pushed it. At 02:45:47 the reviewer was dispatched
+  to run the gates "after the AX-32 base refresh", but no PR existed yet, so ruling 238's re-pin
+  (which reads a drift the reconciler measured at the PR head) had nothing to read, and the
+  reviewer was detached at `4e6c47d`. Its gates failed on exactly the four runtime tests AX-32 had
+  fixed. It approved only because it noticed on its own that `ax-29` had moved ("my initial runs
+  were on the detached pinned commit `4e6c47d`, before I noticed the branch-ref mismatch") and
+  reran on `278c1ed`. Sixty-five seconds later `deliver_for_review`'s post-push reconcile saw a
+  workspace head whose tree differed from the revision's, because a base merge always changes the
+  tree, and minted `278c1ed` as a new revision. The approval went stale, validation went back to
+  `changed`, and the task sat at Review "Waiting on a human" with "Not acceptable yet. Waiting on 1
+  required reviewer approval of the current revision". No reviewer was running. The operator's
+  next two drives re-applied the finished directive: a wait on the already-merged AX-32 (held
+  37 seconds, then "released" with "the base branch has changed since the hold") and a refresh
+  that was already current. Ruling 238 rejected "minting a revision for every base refresh"
+  because "it would stale passing approvals too, so a refresh on a task that was ready to accept
+  would cost a full re-review round". That is what the delivery reconcile did, one step later.
+  I got the task moving as the owner by pressing Run operator. **Fixed: ruling 439.**
+
+- **F39-63 (LOW-MED) — a wait on a task that was already done was written, then released with
+  a false sentence.** AX-29 02:59:49: the operator re-applied the finished directive's first
+  step and added AX-32, merged sixteen minutes earlier. Viberr wrote "Waits on AX-32 … Held
+  until every entry is done", released it 37 seconds later, and the release note said "the base
+  branch has changed since the hold, so the work re-reads it before continuing". Nothing had
+  merged. The operator drive that release paid for planned a refresh of a current branch ("AX-32
+  landed after the hold") instead of the review it owed. **Fixed:** `setTaskDependencies`
+  refuses an ADDED task entry that is already done ("AX-32 is already done, so waiting on it
+  holds nothing. Leave it off the list."). The operator gets that sentence as the step's answer.
+  An entry that finished while already on the list is still the engine's to release, and a
+  settled goal link stays a valid wait (ruling 398(b)). Test: `dependencies.server.test.ts`
+  "F39-63". Two existing tests had added a done task to set up a later state. They now add it
+  while it is open and finish it afterwards, which is the order the product allows.
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
@@ -486,6 +531,11 @@ what they strand, and record an optional reason.
   practice, since `off` and `false` mean the same thing to a reader; recorded so the next pass
   does not re-derive it, and because quoting the enum in the serializer would cost nothing.
   (Found by misreading it myself.)
+- **The accept dialog hedges a fact it has.** AX-28 03:31: "ax-28 is brought up to date with
+  main first. If the base has moved, that merge commit is pushed to the branch and becomes the
+  merge head." The branch already contained main (`7022aa5`), which the PR's `mergeable: clean`
+  at the reviewed head also says, so the merge head WAS the reviewed head. The sentence is
+  accurate, and naming which case applies would spare the reader a look at GitHub.
 - ~~**Insights "By task" lists controller conversations as `/cnv_…`.**~~ **Fixed, U39-22**
   (2026-09-23): controller turns are one row, "controller conversations". Test:
   `insights-query.server.test.ts` "U39-22".
