@@ -1,5 +1,14 @@
 # better-auth (sole auth system)
 
+> **Status, 2026-09-23: history, partly never built.** better-auth is the sole auth system,
+> but it runs with **no plugins**: the `organization` plugin and its `organization`,
+> `member` and `invitation` tables described below were never shipped. The org role is
+> `users.role` (`admin | member`), project membership lives in `project.md`, and the
+> better-auth tables are `user`, `session`, `account` and `verification`
+> (`db/migrations/0001_baseline.sql`; the migrations were later collapsed into that one
+> baseline, so the `0014` named below no longer exists). The current description is
+> [`docs/domain/auth-and-rbac.md`](../docs/domain/auth-and-rbac.md).
+
 Viberr's authentication runs entirely on **better-auth 1.6.x**. better-auth owns
 password + sessions + cookies + GitHub/Google OAuth + rate-limit, and its
 `organization` plugin holds org/tenant membership. Project-scoped RBAC stays

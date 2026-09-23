@@ -280,7 +280,7 @@ describe("humanApprovalRefusalNote — fail closed, but never silently", () => {
     // Ruling 154: the way out is a door that exists on every deployment. The
     // old sentence sent people to a profile card that, without GitHub OAuth,
     // said there was nothing to connect.
-    expect(note).toContain("Users & access");
+    expect(note).toContain("Instance settings, Users & access");
     expect(note).not.toContain("Link it on their profile");
   });
 

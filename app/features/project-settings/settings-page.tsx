@@ -48,6 +48,7 @@ import {
   type RbacAction,
 } from "~/shared/rbac";
 import { countLabel } from "~/shared/text/plural";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * Project settings: project identity and workflow-stages editor
@@ -288,6 +289,8 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
   // Counted, not boolean: each refusal re-inserts the alert, because readers
   // announce an insertion, not a role flip on unchanged text.
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   const errId = "stg-add-err";
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -365,7 +368,8 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
           key={`stg-refused-${refused}`}
           id={errId}
           role="alert"
-          className="stg-err"
+          className={"stg-err" + (refusalShake.shake ? " refused" : "")}
+          onAnimationEnd={refusalShake.onAnimationEnd}
         >
           Give the stage a name.
         </span>
@@ -1517,6 +1521,8 @@ function InviteMemberModal({
   const [flagged, setFlagged] = useState<InviteField | null>(null);
   /** The already-a-member refusal, counted so each one re-inserts the alert. */
   const [dupe, setDupe] = useState<{ n: number; email: string } | null>(null);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const dupeShake = useRefusalShake(dupe?.n ?? null);
   const refs = {
     name: useRef<HTMLInputElement>(null),
     email: useRef<HTMLInputElement>(null),
@@ -1605,7 +1611,8 @@ function InviteMemberModal({
         <div
           key={"dupe-" + dupe.n}
           id="pm-invite-dupe"
-          className="form-err"
+          className={"form-err" + (dupeShake.shake ? " refused" : "")}
+          onAnimationEnd={dupeShake.onAnimationEnd}
           role="alert"
         >
           <Icon name="alert" />
@@ -1832,6 +1839,8 @@ function RepairRepoDialog({
   // missing, marks it and moves focus there. Counted so each refusal
   // re-inserts the alert.
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   const missing: "repo" | "ack" | null =
     repo.trim().length <= 2 ? "repo" : footprintTasks > 0 && !ack ? "ack" : null;
   const error = sent && !busy && result && !result.ok ? result.error : null;
@@ -1910,7 +1919,8 @@ function RepairRepoDialog({
       {/* The client-side refusal has no toast, so this one IS the announcer. */}
       {flagged && (
         <div
-          className="form-err spaced"
+          className={"form-err spaced" + (refusalShake.shake ? " refused" : "")}
+          onAnimationEnd={refusalShake.onAnimationEnd}
           role="alert"
           id="repair-unmet"
           key={"refused-" + refused}

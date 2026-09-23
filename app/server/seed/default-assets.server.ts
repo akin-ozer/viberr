@@ -114,7 +114,8 @@ has its own operator agent that coordinates specialists through the workflow.
   deployed agents and a GitHub repository. The move into the final stage is
   always a human decision.
 - Knowledge bases, skills and MCP connections are org resources granted to
-  agent profiles. Deleting and renaming them is done by admins in Org settings.
+  agent profiles. Deleting and renaming them is done by admins in Instance
+  settings → Agent resources.
 - Goals decompose one outcome into links, each of which becomes a task. The
   server starts every link whose declared wait (\`blockedBy\`) is satisfied, so
   position in the list holds nothing back; a sequence is a chain of waits.
@@ -195,12 +196,17 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // each next one when the previous link completes, and that a waiting
     // link's task is born held; every link whose wait is satisfied starts.
     "d7387a588a1c5425648c030293a893e6dee648bac2576231ab9386e083da1fb0",
+    // The same text after PR #321 renamed "Org settings" to "Instance
+    // settings", which shipped without recording its outgoing hash.
+    "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
     // Seeded-prompt sweep (2026-09-23): before the goal section learned
     // ruling 398 (same sentences as the definition), and before the gate line
     // stopped saying GitHub reads need maintainer (they need membership).
     "6bb9b30dcae4b9c6f6504899ab476c63c00f76b417535c113f355a1165d5195a",
+    // The same text after PR #321's "Instance settings" rename.
+    "7ef616ce31f8f0821caa59e8a0532813bb24b4782e4ae103a1cacfd9dc3bd63f",
     // Pass 38 F38-5: before the dispatch sentence stopped telling the controller to
     // "push a task forward" with an @operator comment, a route ruling 252 made
     // start nothing (four controller comments on the shopify board followed it).
@@ -343,6 +349,8 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   // `reviewer.definition.md` ("typed quality flags") and the Reviewer's `desc`.
   [path.join("kb", "controller-handbook", "handbook.md")]: [
     "a3072990165c8cd4a67d3227d032825bdcb9f33ab82ab7752edf0d6afee9d08b",
+    // PR #321's "Instance settings → Agent resources" version.
+    "3237777fc90a1082f0e01b72f843ec6b68d70639628a55403ed7d2b5f61baa27",
   ],
   [path.join("agents", "profiles", "developer.md")]: [
     "bf84fe28d0f2d21172f415f4c49ceb2aaf10bc824d14bc01d82e391d90bbde19",

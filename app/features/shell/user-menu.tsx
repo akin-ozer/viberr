@@ -17,7 +17,7 @@ import { useToast } from "~/ui/toast";
  *
  * Deliberate mock behavior kept: the Theme item does NOT close the menu
  * (rapid cycling UX). Additions (sanctioned): Escape closes; admins get an
- * "Org settings" quick link to the instance admin surface.
+ * "Instance settings" quick link to the instance admin surface.
  *
  * Ruling 166 (2026-09-08): this is a real ARIA menu again. UI-45 had DROPPED
  * `role="menu"`/`role="menuitem"` because they were declared with no arrow-key

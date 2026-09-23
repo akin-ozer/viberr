@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFetcher, useRevalidator } from "react-router";
 import type { FetcherWithComponents } from "react-router";
+import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalCalendarDate, LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
@@ -14,6 +15,7 @@ import type { ProfileBackend,
 import type { ProfileActionData } from "./profile-page";
 import type { LoginState } from "~/server/runtimes/backend-login.server";
 import type { LoginMethod } from "~/server/runtimes/backend-credentials.server";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * Profile → Agent accounts (ruling 127).
@@ -139,6 +141,8 @@ function PasteForm({
 }) {
   const [secret, setSecret] = useState("");
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   const field = useRef<HTMLInputElement | null>(null);
   const noun = kind === "access_token" ? "workspace access token" : "API key";
   // The refusal says what `validatePastedSecret` says, and the server calls a
@@ -195,7 +199,8 @@ function PasteForm({
         <div
           key={`refused-${refused}`}
           id={errId}
-          className="login-err"
+          className={"login-err" + (refusalShake.shake ? " refused" : "")}
+          onAnimationEnd={refusalShake.onAnimationEnd}
           role="alert"
         >
           <Icon name="alert" />
@@ -294,6 +299,8 @@ function SignInSteps({
   const errId = `${codeId}-err`;
   const [code, setCode] = useState("");
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   // Ruling 294: WHICH button just copied, not merely that one did. Step 1 now
   // has a copy-link button and step 2 (on codex) still has the copy-code one,
   // inside the same component — one boolean made both read "Copied" at once,
@@ -384,8 +391,8 @@ function SignInSteps({
                     aria-label={`Copy the ${VENDOR[backend]} sign-in link`}
                     onClick={() => void copyValue("link", url)}
                   >
-                    <Icon name={copied === "link" ? "check" : "copy"} />
-                    {copied === "link" ? "Copied" : "Copy link"}
+                    <CopyGlyph copied={copied === "link"} />
+                    {copied === "link" ? <span className="copy-done">Copied</span> : "Copy link"}
                   </button>
                 </>
               ) : (
@@ -414,8 +421,8 @@ function SignInSteps({
                       aria-label={`Copy the sign-in code ${login.userCode}`}
                       onClick={() => void copyValue("code", login.userCode ?? "")}
                     >
-                      <Icon name={copied === "code" ? "check" : "copy"} />
-                      {copied === "code" ? "Copied" : "Copy"}
+                      <CopyGlyph copied={copied === "code"} />
+                      {copied === "code" ? <span className="copy-done">Copied</span> : "Copy"}
                     </button>
                   </>
                 ) : (
@@ -458,7 +465,8 @@ function SignInSteps({
                 <div
                   key={`refused-${refused}`}
                   id={errId}
-                  className="login-err"
+                  className={"login-err" + (refusalShake.shake ? " refused" : "")}
+          onAnimationEnd={refusalShake.onAnimationEnd}
                   role="alert"
                 >
                   <Icon name="alert" />

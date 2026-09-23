@@ -556,25 +556,38 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const { PRIOR_SHIPPED_HASHES, seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
       "./default-assets.server"
     );
-    const outgoing: Record<string, string> = {
-      [path.join("agents", "definitions", "controller.md")]:
+    // Two versions where PR #321 ("Instance settings") shipped in between.
+    const outgoing: Record<string, readonly string[]> = {
+      [path.join("agents", "definitions", "controller.md")]: [
         "d7387a588a1c5425648c030293a893e6dee648bac2576231ab9386e083da1fb0",
-      [path.join("skills", "controller-guide", "SKILL.md")]:
+        "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
+      ],
+      [path.join("skills", "controller-guide", "SKILL.md")]: [
         "6bb9b30dcae4b9c6f6504899ab476c63c00f76b417535c113f355a1165d5195a",
-      [path.join("agents", "definitions", "operator.md")]:
+        "7ef616ce31f8f0821caa59e8a0532813bb24b4782e4ae103a1cacfd9dc3bd63f",
+      ],
+      [path.join("agents", "definitions", "operator.md")]: [
         "96d88b2c779416d83501463cf8c3023f77d05504938bd3d578eb680edea2c778",
-      [path.join("skills", "viberr-app-expertise", "SKILL.md")]:
+      ],
+      [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
         "2eaebf8040fe4a8047dc7f78f39482549b15cafeeb2ad18d127264a15113ecc8",
-      [path.join("skills", "developer-expertise", "SKILL.md")]:
+      ],
+      [path.join("skills", "developer-expertise", "SKILL.md")]: [
         "d22b14d8171f832b7f67e79b4899f1e84c97e6d093ed022efd970ed9b0c30cb0",
-      [path.join("skills", "reviewer-expertise", "SKILL.md")]:
+      ],
+      [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
         "eb2e5ebd17f890a65377d8ce016ddc6e105d92a260d7ee4f9d1ef0262be18774",
-      [path.join("kb", "controller-handbook", "handbook.md")]:
+      ],
+      [path.join("kb", "controller-handbook", "handbook.md")]: [
         "a3072990165c8cd4a67d3227d032825bdcb9f33ab82ab7752edf0d6afee9d08b",
-      [path.join("agents", "profiles", "developer.md")]:
+        "3237777fc90a1082f0e01b72f843ec6b68d70639628a55403ed7d2b5f61baa27",
+      ],
+      [path.join("agents", "profiles", "developer.md")]: [
         "bf84fe28d0f2d21172f415f4c49ceb2aaf10bc824d14bc01d82e391d90bbde19",
-      [path.join("agents", "profiles", "reviewer.md")]:
+      ],
+      [path.join("agents", "profiles", "reviewer.md")]: [
         "cbb114a5d3e41103ddf201f40f7e549739de05c659f40ed9b87b3c35372f3055",
+      ],
     };
     const dataRoot = seededStore();
     seedDefaultAgentAssets(dataRoot);
@@ -583,10 +596,12 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const shipped = manifestSchema.parse(
       JSON.parse(readFileSync(path.join(dataRoot, "state", "shipped-assets.json"), "utf8")),
     );
-    for (const [rel, hash] of Object.entries(outgoing)) {
-      expect(shippedCopyIsUnedited(rel, hash, {}), rel).toBe(true);
+    for (const [rel, hashes] of Object.entries(outgoing)) {
       expect(shipped[rel], rel).toBeDefined();
-      expect(shipped[rel], `${rel} still ships its outgoing version`).not.toBe(hash);
+      for (const hash of hashes) {
+        expect(shippedCopyIsUnedited(rel, hash, {}), rel).toBe(true);
+        expect(shipped[rel], `${rel} still ships its outgoing version`).not.toBe(hash);
+      }
       expect(PRIOR_SHIPPED_HASHES[rel], rel).not.toContain(shipped[rel]);
     }
   });

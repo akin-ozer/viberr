@@ -24,6 +24,14 @@ completedAt: '2026-04-01T18:52:57+0300'
 
 # Architecture Decision Document
 
+> **Status, 2026-09-23: design intent from April 2026, kept as history.** It is not
+> maintained as a description of the built system. The code-verified description is
+> [`docs/architecture/`](../../docs/architecture/overview.md) and the binding rulings are
+> [`docs/architecture/decisions.md`](../../docs/architecture/decisions.md); the claims here
+> that the code contradicts are listed in
+> [`docs/validation/2026-09-01-doc-validation.md`](../../docs/validation/2026-09-01-doc-validation.md)
+> §10.2. Cite this document by section name, never by line number.
+
 _This document builds collaboratively through step-by-step discovery. Sections are appended as we work through each architectural decision together._
 
 ## Project Context Analysis

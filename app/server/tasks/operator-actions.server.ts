@@ -2134,7 +2134,7 @@ export async function operatorProposeRuling(
       outcome: "noop",
       message:
         `${input.projectSlug} names no rulings knowledge base, so there is no settled document to amend. ` +
-        "Say what you found on the timeline instead, and an org admin can set one (Org settings, or ask the controller).",
+        "Say what you found on the timeline instead, and a project admin can name one by asking the controller.",
     };
   }
   const seedCtx = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};

@@ -1069,7 +1069,7 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     });
     const note = texts.find((t) => t.startsWith("I could not finish this turn"))!;
     expect(note).toBe(
-      "I could not finish this turn: the instance's spending cap of $0.50 stopped it after spending $0.52. Say it again to continue, or ask an org admin to raise the cap in Org settings (Max spend per Claude run).",
+      "I could not finish this turn: the instance's spending cap of $0.50 stopped it after spending $0.52. Say it again to continue, or ask an org admin to raise the cap in Instance settings (Max spend per Claude run).",
     );
   });
 });

@@ -31,6 +31,7 @@ import {
   type ResCatalogGroup,
   type ResourceSelection,
 } from "./capability-catalog";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * CreateProfileModal (agents.jsx §4.5) — create AND edit form (edit when
@@ -1250,12 +1251,16 @@ function ModalFooter({
    *  an insertion, not a role flip on unchanged text). */
   attempts: number;
 }) {
+  // Ruling 451(g): the box shakes once per refusal, not on each mount; a
+  // server error, never keyed per refusal, does not shake.
+  const refusalShake = useRefusalShake(attempts);
   return (
     <div className="modal-foot">
       <span
         key={showError ? "alert-" + attempts : "hint"}
         id={hintId}
-        className={"foot-hint" + (showError ? " err" : "")}
+        className={"foot-hint" + (showError ? " err" : "") + (showError && refusalShake.shake ? " refused" : "")}
+        onAnimationEnd={showError ? refusalShake.onAnimationEnd : undefined}
         role={showError ? "alert" : undefined}
       >
         {hint}
