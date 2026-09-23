@@ -11,6 +11,7 @@ import {
 } from "../../../test-support/test-store";
 import {
   fakeGithubFetch,
+  unreadableResponse,
   type FakeResponder,
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -62,25 +63,6 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 const REPO_PATH = "/repos/akin-ozer/viberr";
-
-/**
- * FAULT INJECTION: a 200 whose HEADERS throw on read. Every header read in the
- * GitHub client sits outside its try/catch, so this reaches the code paths that
- * must survive an unexpected throw from inside a pass.
- *
- * It used to be a truncated BODY, which no longer qualifies: F21-9 wraps the
- * body read, so a stream that dies mid-read is now a typed `network` failure —
- * a degraded mode the callers handle, not a throw that escapes them.
- */
-function unreadableResponse(): Response {
-  const response = new Response("{}", { status: 200 });
-  Object.defineProperty(response, "headers", {
-    get(): never {
-      throw new TypeError("terminated");
-    },
-  });
-  return response;
-}
 
 function setup() {
   const store = setupTestStore(ctx);
