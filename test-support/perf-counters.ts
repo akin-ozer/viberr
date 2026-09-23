@@ -146,3 +146,61 @@ export function countFileReads(root: string): FileReadProbe {
     },
   };
 }
+
+export interface FileWrites {
+  /** `mkdirSync` targets under the root, relative to it. */
+  mkdirs: string[];
+  /** `appendFileSync` targets under the root, relative to it. */
+  appends: string[];
+}
+
+export interface FileWriteProbe {
+  readonly writes: FileWrites;
+  /** Restores both functions and returns the calls. */
+  stop(): FileWrites;
+}
+
+/** Counts `fs.mkdirSync` and `fs.appendFileSync` calls under `root`, the same
+ *  way `countFileReads` counts reads. */
+export function countFileWrites(root: string): FileWriteProbe {
+  const writes: FileWrites = { mkdirs: [], appends: [] };
+  const resolvedRoot = path.resolve(root);
+  const under = (target: string): string | null => {
+    const abs = path.resolve(target);
+    return abs.startsWith(resolvedRoot + path.sep) ? path.relative(resolvedRoot, abs) : null;
+  };
+  const originalMkdir = fs.mkdirSync;
+  const originalAppend = fs.appendFileSync;
+  Object.defineProperty(fs, "mkdirSync", {
+    configurable: true,
+    writable: true,
+    value: function mkdirSync(...args: Parameters<typeof fs.mkdirSync>) {
+      const rel = under(String(args[0]));
+      if (rel !== null) writes.mkdirs.push(rel);
+      return originalMkdir.apply(fs, args);
+    },
+  });
+  Object.defineProperty(fs, "appendFileSync", {
+    configurable: true,
+    writable: true,
+    value: function appendFileSync(...args: Parameters<typeof fs.appendFileSync>) {
+      const rel = under(String(args[0]));
+      if (rel !== null) writes.appends.push(rel);
+      return originalAppend.apply(fs, args);
+    },
+  });
+  syncBuiltinESMExports();
+  let stopped = false;
+  return {
+    writes,
+    stop() {
+      if (!stopped) {
+        stopped = true;
+        fs.mkdirSync = originalMkdir;
+        fs.appendFileSync = originalAppend;
+        syncBuiltinESMExports();
+      }
+      return writes;
+    },
+  };
+}

@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import { z } from "zod";
 import type {
   LogLine,
   RunBackend,
@@ -639,7 +640,17 @@ export function rawLogPath(
   return path.join(getDataRoot(dataRoot), "runtimes", backend, `${runId}.jsonl`);
 }
 
-/** Append one raw envelope line to the run's canonical .jsonl (creates dirs). */
+/** The error an append into a directory that does not exist yet throws. */
+const missingPath = z.object({ code: z.literal("ENOENT") });
+
+/**
+ * Append one raw envelope line to the run's canonical .jsonl (creates dirs).
+ *
+ * Ruling 454 (LIVE-10): the directory is created only when the append finds it
+ * missing. It exists for every line after a run's first, and a recursive
+ * mkdir on every streamed line was a syscall chain per line on the shared
+ * event loop (on the Docker bind mount, a host round trip).
+ */
 export function appendRawLine(
   backend: RunBackend,
   runId: string,
@@ -647,8 +658,44 @@ export function appendRawLine(
   dataRoot?: string,
 ): void {
   const file = rawLogPath(backend, runId, dataRoot);
-  mkdirSync(path.dirname(file), { recursive: true });
-  appendFileSync(file, raw.replace(/\n+$/, "") + "\n", "utf8");
+  const text = raw.replace(/\n+$/, "") + "\n";
+  try {
+    appendFileSync(file, text, "utf8");
+  } catch (error) {
+    if (!missingPath.safeParse(error).success) throw error;
+    mkdirSync(path.dirname(file), { recursive: true });
+    appendFileSync(file, text, "utf8");
+  }
+}
+
+/**
+ * Insert one projected log line as the run's next line and return its seq —
+ * `nextSeq`'s numbering (max + 1, or 0), taken inside the INSERT itself so a
+ * streamed line costs one statement instead of two (ruling 454, LIVE-10).
+ */
+export function appendRunLine(
+  db: DatabaseSync,
+  input: { runId: string; occurredAt: string; raw: string; display: LogLine },
+): number {
+  // SAFETY: `RETURNING seq` over the INTEGER `seq` column; the INSERT … SELECT
+  // over an aggregate always yields exactly one row to insert, so exactly one
+  // row comes back.
+  const row = db
+    .prepare(
+      `INSERT INTO run_log_lines (run_id, seq, occurred_at, raw_json, display_json, created_at)
+       SELECT ?, COALESCE(MAX(seq), -1) + 1, ?, ?, ?, ?
+         FROM run_log_lines WHERE run_id = ?
+       RETURNING seq`,
+    )
+    .get(
+      input.runId,
+      input.occurredAt,
+      input.raw,
+      JSON.stringify(input.display),
+      new Date().toISOString(),
+      input.runId,
+    ) as { seq: number };
+  return row.seq;
 }
 
 /** Insert one projected log line row (raw + display). Returns the seq used. */

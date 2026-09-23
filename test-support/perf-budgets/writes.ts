@@ -105,4 +105,36 @@ export const WRITES_BUDGETS: PerfBudgetTable = {
     fixture:
       "setupAppTest + runDemoSeed; a running run on VIB-142 with 11 lines; /resources/run-log?since=9 loader as arda; statements on agent_runs or run_log_lines (auth not included)",
   },
+  // LIVE-10/SRV-8: each console line with no facts ran SELECT MAX(seq), the
+  // INSERT and an UPDATE of ~20 unchanged agent_runs columns (30 before);
+  // now the seq is taken inside the INSERT and the fold is skipped.
+  "writes:run-line-10.sql": {
+    ceiling: 10,
+    unit: "count",
+    journey: "live-run",
+    fixture:
+      "setupAppTest + runDemoSeed; createRunSink on a running VIB-142 run after one line with a session fact; 10 display lines with no facts; SQL statement executions",
+  },
+  // LIVE-10/SRV-8: the same 10 lines' WAL commits (20 before: two per line).
+  "writes:run-line-10.commits": {
+    ceiling: 10,
+    unit: "count",
+    journey: "live-run",
+    fixture: "same sink and 10 lines; writes outside a transaction plus COMMITs",
+  },
+  // LIVE-10: a recursive mkdirSync of runtimes/<backend>/ ran before every
+  // line's append (10 before).
+  "writes:run-line-10.mkdirs": {
+    ceiling: 0,
+    unit: "count",
+    journey: "live-run",
+    fixture: "same sink and 10 lines; fs.mkdirSync calls under the data root",
+  },
+  // SRV-8: a line WITH a fact commits its row and its fold together (2 before).
+  "writes:run-line-facts.commits": {
+    ceiling: 1,
+    unit: "count",
+    journey: "live-run",
+    fixture: "same sink; one more display line carrying a usage fact; WAL commits",
+  },
 };

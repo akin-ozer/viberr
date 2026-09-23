@@ -662,8 +662,12 @@ Adapter callbacks → `createRunSink` per line: fold facts → record rate limit
 (`createLineRedactor`: the value, 12 chars or longer, of every server env var whose NAME
 matches `CREDENTIAL_ENV_RE`, the run's own credential (`secrets`, ruling 127), plus
 `TOKEN_PATTERN_SOURCE`) → record quota exhaustion (a `·quota` line) or a credential
-refusal (a `·auth` line) → append raw NDJSON → insert `run_log_lines` (display only) →
-patch run facts → publish `run.log-appended {runId, seq}` (reference only). The sink also
+refusal (a `·auth` line) → append raw NDJSON (the directory is created only when the
+append finds it missing) → insert `run_log_lines` (display only; the next `seq` is taken
+inside the INSERT) → patch run facts, only when a folded value moved since the last patch,
+in the same transaction as the line → publish `run.log-appended {runId, seq}` (reference
+only). A line with no facts is therefore one statement and one commit, and
+`agent_runs.updated_at` moves with the facts, not with every line (ruling 454). The sink also
 writes the compaction audit and timeline note (ruling 369(d), `task.agent.compaction`, a
 "Context compacted" note by `system:runtime-continuity`). The `wire-format` projector maps
 provider envelopes to display lines with `ev ∈ init | text | tool | out | err | result |
