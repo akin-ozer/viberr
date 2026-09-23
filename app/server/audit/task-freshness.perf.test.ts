@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
-import { tallyServerReads } from "../../../test-support/server-read-probe";
+import { tallyServerReads } from "../../../test-support/perf-counters";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { latestTaskReconcileCheckAt } from "./audit-query.server";
 import {

@@ -4,7 +4,7 @@ import {
   statementsMatching,
   tallyServerReads,
   type ServerReadTally,
-} from "../../../test-support/server-read-probe";
+} from "../../../test-support/perf-counters";
 import { setupAppTest } from "../../../test-support/test-app";
 import { authenticate, requireAuth, roleSatisfies } from "./require-user.server";
 import { insertUser } from "./user-store.server";

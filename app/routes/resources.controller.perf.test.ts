@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
-import { tallyServerReads } from "../../test-support/server-read-probe";
+import { tallyServerReads } from "../../test-support/perf-counters";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**

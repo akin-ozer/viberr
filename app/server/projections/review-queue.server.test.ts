@@ -11,7 +11,7 @@ import {
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { isArchived } from "~/features/board/board-filters";
-import { statementsMatching, tallyServerReads } from "../../../test-support/server-read-probe";
+import { statementsMatching, tallyServerReads } from "../../../test-support/perf-counters";
 import { getBoardWithTasks } from "./board-query.server";
 import { rebuildAll } from "./rebuilder.server";
 import { getReviewQueue } from "./review-queue.server";

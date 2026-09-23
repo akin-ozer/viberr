@@ -4,7 +4,8 @@ import path from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 
 /**
- * Ruling 454: deterministic counters for the write-path perf tests. They wrap
+ * Ruling 454: deterministic counters for the perf tests (the one home for
+ * counting SQL, store-file reads and writes). They wrap
  * the process-wide `node:sqlite` prototypes and `fs.readFileSync` for the span
  * between `start` and `stop`, so every module (including ones that prepared
  * their statements before the probe started) is counted. A test holds one
@@ -20,6 +21,10 @@ export interface SqlTally {
   commits: number;
   /** The SQL text of each execution, in order (for filters and messages). */
   sql: string[];
+  /** Rows each execution returned, index-aligned with `sql` (0 for run/exec). */
+  rows: number[];
+  /** `db.prepare` calls (statement compiles). */
+  prepares: number;
 }
 
 const WRITE_RE = /^\s*(insert|update|delete|replace)\b/i;
@@ -30,17 +35,23 @@ export interface SqlProbe {
   stop(): SqlTally;
 }
 
-/** Counts SQL executed on `db` (and any other open handle) until `stop()`. */
-export function countSql(db: DatabaseSync): SqlProbe {
-  const tally: SqlTally = { statements: 0, writes: 0, commits: 0, sql: [] };
-  const record = (sql: string) => {
+/**
+ * Counts SQL executed on every open handle until `stop()`. Pass the database
+ * under test to count WAL commits (a write outside a transaction commits);
+ * without it `commits` counts only explicit COMMITs.
+ */
+export function countSql(db?: DatabaseSync): SqlProbe {
+  const tally: SqlTally = { statements: 0, writes: 0, commits: 0, sql: [], rows: [], prepares: 0 };
+  const record = (sql: string): number => {
     tally.statements += 1;
     tally.sql.push(sql);
+    tally.rows.push(0);
     if (/^\s*commit\b/i.test(sql)) tally.commits += 1;
     if (WRITE_RE.test(sql)) {
       tally.writes += 1;
-      if (!db.isTransaction) tally.commits += 1;
+      if (db && !db.isTransaction) tally.commits += 1;
     }
+    return tally.rows.length - 1;
   };
   const proto = StatementSync.prototype;
   const originals = {
@@ -49,6 +60,7 @@ export function countSql(db: DatabaseSync): SqlProbe {
     all: proto.all,
     iterate: proto.iterate,
     exec: DatabaseSync.prototype.exec,
+    prepare: DatabaseSync.prototype.prepare,
   };
   // Recorded BEFORE the call, so a write's autocommit is judged by the
   // transaction state it ran in. Installed with defineProperty: the methods are
@@ -65,16 +77,20 @@ export function countSql(db: DatabaseSync): SqlProbe {
     configurable: true,
     writable: true,
     value: function get(this: StatementSync, ...args: Parameters<StatementSync["get"]>) {
-      record(this.sourceSQL);
-      return originals.get.apply(this, args);
+      const at = record(this.sourceSQL);
+      const row = originals.get.apply(this, args);
+      tally.rows[at] = row === undefined ? 0 : 1;
+      return row;
     },
   });
   Object.defineProperty(proto, "all", {
     configurable: true,
     writable: true,
     value: function all(this: StatementSync, ...args: Parameters<StatementSync["all"]>) {
-      record(this.sourceSQL);
-      return originals.all.apply(this, args);
+      const at = record(this.sourceSQL);
+      const rows = originals.all.apply(this, args);
+      tally.rows[at] = rows.length;
+      return rows;
     },
   });
   Object.defineProperty(proto, "iterate", {
@@ -89,6 +105,13 @@ export function countSql(db: DatabaseSync): SqlProbe {
     record(sql);
     return originals.exec.call(this, sql);
   };
+  DatabaseSync.prototype.prepare = function prepare(
+    this: DatabaseSync,
+    ...args: Parameters<DatabaseSync["prepare"]>
+  ) {
+    tally.prepares += 1;
+    return originals.prepare.apply(this, args);
+  };
   let stopped = false;
   return {
     tally,
@@ -100,6 +123,7 @@ export function countSql(db: DatabaseSync): SqlProbe {
         proto.all = originals.all;
         proto.iterate = originals.iterate;
         DatabaseSync.prototype.exec = originals.exec;
+        DatabaseSync.prototype.prepare = originals.prepare;
       }
       return tally;
     },
@@ -202,5 +226,58 @@ export function countFileWrites(root: string): FileWriteProbe {
       }
       return writes;
     },
+  };
+}
+
+export interface StatementRecord {
+  sql: string;
+  rows: number;
+}
+
+export interface ServerReadTally {
+  /** `db.prepare` calls (statement compiles). */
+  prepares: number;
+  /** Every execution, with the rows it returned. */
+  statements: StatementRecord[];
+  /** `readFileSync` calls on files under the data root, as relative paths. */
+  storeReads: string[];
+}
+
+/** The executions whose SQL matches `pattern`. */
+export function statementsMatching(tally: ServerReadTally, pattern: RegExp): StatementRecord[] {
+  return tally.statements.filter((s) => pattern.test(s.sql));
+}
+
+/** Rows returned by the executions whose SQL matches `pattern`. */
+export function rowsMatching(tally: ServerReadTally, pattern: RegExp): number {
+  return statementsMatching(tally, pattern).reduce((sum, s) => sum + s.rows, 0);
+}
+
+/**
+ * The read work one call does: SQL compiles, executions with their rows, and
+ * store-file reads under `dataRoot`. Measure a WARM call (run the journey once
+ * first): the figures are then the steady state every revalidation pays, not
+ * the one-off cost of a cold cache.
+ */
+export async function tallyServerReads<T>(
+  dataRoot: string,
+  fn: () => Promise<T> | T,
+): Promise<{ result: T; tally: ServerReadTally }> {
+  const sql = countSql();
+  const files = countFileReads(dataRoot);
+  try {
+    const result = await fn();
+    return { result, tally: toServerReadTally(sql.tally, files.reads) };
+  } finally {
+    sql.stop();
+    files.stop();
+  }
+}
+
+function toServerReadTally(sql: SqlTally, storeReads: string[]): ServerReadTally {
+  return {
+    prepares: sql.prepares,
+    statements: sql.sql.map((text, i) => ({ sql: text, rows: sql.rows[i] ?? 0 })),
+    storeReads: [...storeReads],
   };
 }

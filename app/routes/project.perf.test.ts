@@ -5,7 +5,7 @@ import {
   rowsMatching,
   statementsMatching,
   tallyServerReads,
-} from "../../test-support/server-read-probe";
+} from "../../test-support/perf-counters";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**

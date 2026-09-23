@@ -175,7 +175,10 @@ describe("ruling 127: the backend handles name whose account they would bill", (
       },
     });
     await setText(editor, "@c");
-    await waitFor(() => expect(listbox()).toBeTruthy());
+    // Wait for the rows this test reads, not just the listbox: the list can
+    // mount a render before its "@c" options do (the lazy editor, ruling 454,
+    // moves that render later under a loaded suite).
+    await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).toContain(
       "Codex not connected for Ada Lovelace",
     );
@@ -187,7 +190,10 @@ describe("ruling 127: the backend handles name whose account they would bill", (
   it("an UNOWNED task marks both handles: there is nobody to bill", async () => {
     const { editor } = await renderComposer({ runPrincipal: null });
     await setText(editor, "@c");
-    await waitFor(() => expect(listbox()).toBeTruthy());
+    // Wait for the rows this test reads, not just the listbox: the list can
+    // mount a render before its "@c" options do (the lazy editor, ruling 454,
+    // moves that render later under a loaded suite).
+    await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).toContain("no task owner");
     expect(rowFor("claude")!.textContent).toContain("no task owner");
   });
@@ -195,7 +201,10 @@ describe("ruling 127: the backend handles name whose account they would bill", (
   it("claims nothing when no principal is supplied (a surface with no task)", async () => {
     const { editor } = await renderComposer();
     await setText(editor, "@c");
-    await waitFor(() => expect(listbox()).toBeTruthy());
+    // Wait for the rows this test reads, not just the listbox: the list can
+    // mount a render before its "@c" options do (the lazy editor, ruling 454,
+    // moves that render later under a loaded suite).
+    await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).not.toContain("not connected");
     expect(rowFor("codex")!.textContent).not.toContain("no task owner");
   });
