@@ -52,7 +52,7 @@ import {
 import { listDeployedSpecialists } from "./specialist-run.server";
 import {
   readDefaultBranchFile,
-  DEFAULT_BRANCH_READ_MAX_BYTES,
+  defaultBranchPageNote,
 } from "./operator-repo-read.server";
 
 /**
@@ -451,14 +451,24 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .describe(
               "Repository-relative file path, e.g. 'docs/guide.md' (no leading slash).",
             ),
+          fromLine: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe(
+              "Ruling 436: the 1-based line to start at (default 1). A file longer than one read comes in pages of whole lines; each page names its lines and the fromLine that continues it.",
+            ),
         },
         async (args) => {
-          const read = await readDefaultBranchFile(db, {
+          const request: Parameters<typeof readDefaultBranchFile>[1] = {
             projectSlug,
             dir: workspace.dir,
             defaultBranch: workspace.defaultBranch,
             path: args.path,
-          });
+          };
+          if (args.fromLine !== undefined) request.fromLine = args.fromLine;
+          const read = await readDefaultBranchFile(db, request);
           if (read.kind === "absent") {
             return textResult(
               `[absent] \`${args.path}\` does NOT exist on \`${workspace.defaultBranch}\`.`,
@@ -473,11 +483,10 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           const freshness = read.refreshed
             ? `\`origin/${workspace.defaultBranch}\`, just refreshed from GitHub`
             : `\`origin/${workspace.defaultBranch}\` as of this task's checkout (the refresh from GitHub did not run — treat it as slightly stale)`;
-          const cut = read.truncated
-            ? `\n\n[truncated at ${DEFAULT_BRANCH_READ_MAX_BYTES} characters]`
-            : "";
+          // Ruling 436: a page names its lines and the one that continues it.
+          const page = defaultBranchPageNote(read);
           return textResult(
-            `[found] \`${args.path}\` on ${freshness}:\n\n${read.text}${cut}`,
+            `[found] \`${args.path}\` on ${freshness}${page.range}:\n\n${read.text}${page.note}`,
           );
         },
       ),

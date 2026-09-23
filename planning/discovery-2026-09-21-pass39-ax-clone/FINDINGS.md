@@ -346,6 +346,18 @@ what they strand, and record an optional reason.
   boundary (my own ruling 429) and the review queue's row read the raw field too. `clean` arrived
   at 02:01. **Fixed: ruling 435.**
 
+- **F39-58 (HIGH) — the controller could not read the files its rules are about.** 02:08, during
+  the rulings upkeep I asked for: `read_default_branch_file` on `internal/runtime/executor.go`
+  came back from the Claude CLI as "result (57,835 characters across 1,930 lines) exceeds
+  maximum allowed tokens. Output has been saved to …". Viberr's per-read cap was 60,000
+  characters. The CLI's MCP limit is 25,000 tokens, and the controller has no `Read` tool for
+  the saved file. Anything over the cap was clipped to 60,000, which the CLI refused just the
+  same, and anything over 240 KB overflowed git's buffer and read as "unavailable". The
+  controller said it plainly: §9 of the rulings "rests on reviews, not my own reading of the
+  code", because it could not open `executor.go` or `local.go`. **Fixed: ruling 436** (pages of
+  whole lines under the CLI's limit, `fromLine` on both the controller's and the operator's tool,
+  each page naming the next).
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

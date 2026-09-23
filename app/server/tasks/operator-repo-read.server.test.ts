@@ -6,9 +6,66 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  DEFAULT_BRANCH_READ_PAGE_CHARS,
+  defaultBranchPageNote,
+  pageOfText,
   readDefaultBranchFile,
   readProjectDefaultBranchFile,
 } from "./operator-repo-read.server";
+
+/** A Go-shaped file of `lines` lines, each about 30 characters. */
+function goLines(lines: number): string {
+  return Array.from({ length: lines }, (_, i) => `\tresult${i} := step(ctx, ${i})`).join("\n") + "\n";
+}
+
+describe("ruling 436: a default-branch read comes in pages the CLI will carry", () => {
+  /**
+   * Live on ax-clone at 02:08: the controller asked for
+   * `internal/runtime/executor.go` (57,835 characters) and got "result (57,835
+   * characters across 1,930 lines) exceeds maximum allowed tokens. Output has
+   * been saved to …". Viberr's cap was 60,000, the CLI's MCP limit is 25,000
+   * tokens, and the controller has no Read tool for the saved file.
+   */
+  it("takes whole lines up to the page, and the pages rebuild the file", () => {
+    // CANARY: take every line from fromLine on, uncapped.
+    const text = goLines(1_930);
+    const pages: string[] = [];
+    let from = 1;
+    for (;;) {
+      const page = pageOfText(text, from);
+      if (!page.ok) throw new Error("walked past the end");
+      expect(page.text.length).toBeLessThanOrEqual(DEFAULT_BRANCH_READ_PAGE_CHARS);
+      pages.push(page.text.replace(/\n$/, ""));
+      if (!page.more) break;
+      from = page.toLine + 1;
+    }
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.join("\n") + "\n").toBe(text);
+  });
+
+  it("gives a small file back verbatim, cuts an overlong line, and refuses past the end", () => {
+    expect(pageOfText("the guide\n")).toEqual({
+      ok: true, text: "the guide\n", fromLine: 1, toLine: 1, totalLines: 1, more: false, lineCut: false,
+    });
+    const long = pageOfText(`${"x".repeat(DEFAULT_BRANCH_READ_PAGE_CHARS + 5)}\nnext\n`);
+    expect(long.ok && long.lineCut && long.more && long.text.length).toBe(DEFAULT_BRANCH_READ_PAGE_CHARS);
+    expect(pageOfText("a\nb\n", 3)).toEqual({ ok: false, totalLines: 2 });
+    expect(pageOfText("", 1)).toMatchObject({ ok: true, totalLines: 0, more: false });
+  });
+
+  it("a page names its lines and the fromLine that continues it", () => {
+    // CANARY: drop the "read on with fromLine" sentence.
+    const page = pageOfText(goLines(1_930));
+    if (!page.ok) throw new Error("unreachable");
+    const note = defaultBranchPageNote({ kind: "found", refreshed: true, ...page });
+    expect(note.range).toBe(`, lines 1–${page.toLine} of 1930`);
+    expect(note.note).toBe(`\n\n[The file continues: read on with fromLine: ${page.toLine + 1}.]`);
+    // A file that fits says nothing about pages.
+    const whole = pageOfText("the guide\n");
+    if (!whole.ok) throw new Error("unreachable");
+    expect(defaultBranchPageNote({ kind: "found", refreshed: true, ...whole })).toEqual({ range: "", note: "" });
+  });
+});
 import { cloneWorkspaceRepo, projectRepoMirrorDir } from "./repo-mirror.server";
 
 /**
@@ -256,6 +313,10 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
     const seed = path.join(origins, "seed");
     mkdirSync(path.join(seed, "services"), { recursive: true });
     writeFileSync(path.join(seed, "services", "catalog.ts"), "nine routes live here\n");
+    // Ruling 436: past the old 240,000-byte buffer, which made git's overflow
+    // read as "unavailable".
+    mkdirSync(path.join(seed, "internal", "runtime"), { recursive: true });
+    writeFileSync(path.join(seed, "internal", "runtime", "executor.go"), goLines(10_000));
     await exec("git", ["init", "-q", "-b", "main", seed]);
     await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
     await exec("git", ["-C", seed, "config", "user.name", "T"]);
@@ -319,6 +380,31 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
     const read = await readIt("services/catalog.ts");
     expect(read.kind).toBe("found");
     expect(read.kind === "found" && read.text).toContain("nine routes live here");
+  });
+
+  it("ruling 436: a file far past one page is read to its end, page by page", async () => {
+    // CANARY: put the buffer back at four pages, and the first read is "unavailable".
+    const whole = goLines(10_000);
+    const seen: string[] = [];
+    let fromLine: number | undefined;
+    for (let guard = 0; guard < 50; guard += 1) {
+      const request: Parameters<typeof readProjectDefaultBranchFile>[1] = {
+        projectSlug: SLUG,
+        repo: REPO,
+        defaultBranch: "main",
+        path: "internal/runtime/executor.go",
+        dataRoot,
+      };
+      if (fromLine) request.fromLine = fromLine;
+      const read = await withOrigin(() => readProjectDefaultBranchFile(db, request));
+      if (read.kind !== "found") throw new Error(`read ${read.kind}`);
+      expect(read.totalLines).toBe(10_000);
+      seen.push(read.text.replace(/\n$/, ""));
+      if (!read.more) break;
+      fromLine = read.toLine + 1;
+    }
+    expect(seen.length).toBeGreaterThan(5);
+    expect(seen.join("\n") + "\n").toBe(whole);
   });
 
   it("a path that is not on the branch is ABSENT, which is an answer", async () => {

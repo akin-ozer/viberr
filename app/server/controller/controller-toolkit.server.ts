@@ -56,7 +56,7 @@ import {
 import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import { tasksReleasedBy } from "~/server/projections/dependencies.server";
 import {
-  DEFAULT_BRANCH_READ_MAX_BYTES,
+  defaultBranchPageNote,
   readProjectDefaultBranchFile,
 } from "~/server/tasks/operator-repo-read.server";
 import { GOAL_ON_FAILURE_VALUES } from "~/schemas/goal-file.schema";
@@ -1879,8 +1879,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         path: z
           .string()
           .describe("Repository-relative file path, e.g. 'docs/guide.md' (no leading slash)."),
+        fromLine: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            "Ruling 436: the 1-based line to start at (default 1). A file longer than one read comes in pages of whole lines; each page names its lines and the fromLine that continues it, so read on until it says nothing more.",
+          ),
       },
-      runWith(async (args: { projectSlug?: string; path: string }) => {
+      runWith(async (args: { projectSlug?: string; path: string; fromLine?: number }) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "read this project's repository");
         const project = getProject(db, slug);
@@ -1900,6 +1908,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           defaultBranch: project.defaultBranch,
           path: args.path,
         };
+        if (args.fromLine !== undefined) request.fromLine = args.fromLine;
         if (dataRoot) request.dataRoot = dataRoot;
         const read = await readProjectDefaultBranchFile(db, request);
         recordAudit(db, {
@@ -1927,12 +1936,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           ? `\`${project.defaultBranch}\`, just refreshed from GitHub`
           : `\`${project.defaultBranch}\` as the project's mirror last had it (the refresh from ` +
             "GitHub did not run, so treat it as slightly stale)";
-        // Ruling 285: a cut says it cut, and says where the rest is.
-        const cut = read.truncated
-          ? `\n\n[clipped at ${DEFAULT_BRANCH_READ_MAX_BYTES} characters. This file is longer ` +
-            "than one read; ask for a narrower question about it, or read it on GitHub.]"
-          : "";
-        return `[found] \`${args.path}\` on ${freshness}:\n\n${read.text}${cut}`;
+        // Ruling 285: a cut says it cut, and says where the rest is. Ruling
+        // 436: the rest is the next page, named by the line it starts at.
+        const page = defaultBranchPageNote(read);
+        return `[found] \`${args.path}\` on ${freshness}${page.range}:\n\n${read.text}${page.note}`;
       }),
     ),
     "read_default_branch_file",
