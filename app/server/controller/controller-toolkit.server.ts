@@ -2464,13 +2464,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             }
             return `[done] Operator run started on ${key}.`;
           }
-          const { startAgentRun } = await import(
+          const { isDispatchHeld, listDeployedSpecialists, startAgentRun } = await import(
             "~/server/tasks/specialist-run.server"
           );
+          const profileId = args.agent.trim();
           const runInput: StartAgentRunInput = {
             projectSlug: slug,
             taskKey: key,
-            profileId: args.agent.trim(),
+            profileId,
             triggeredByName: display,
             triggeredByUserId: user.id,
           };
@@ -2478,30 +2479,59 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             runInput.directive = prose(args.prompt);
             runInput.directiveFrom = display;
           }
-          const started = await startAgentRun(db, runInput, actor, { dataRoot });
           // Ruling 263 (F37-93), second half: R21-9's law applied to the
-          // dispatch prompt, on the one door that skipped it. The task page
-          // writes `@<agent> <prompt>` as the dispatcher's own comment after
-          // the start, and the operator's `run_agent` writes one before it —
-          // so a directive that reaches an agent is on the record and
-          // supervision can read it. Through the controller the same words
-          // went into the prompt and NOWHERE else: the timeline showed a run
-          // appearing for no stated reason, and the person who asked for it
-          // could not see what they had asked for. After the start, like the
-          // task page, so a dispatch that throws leaves no orphan hand-off.
+          // dispatch prompt, on the one door that skipped it. Through the
+          // controller the words went into the prompt and NOWHERE else: the
+          // timeline showed a run appearing for no stated reason, and the
+          // person who asked for it could not see what they had asked for. So
+          // `@<agent> <prompt>` is written as that person's own comment,
+          // addressed to the agent, as the task page and the operator's
+          // `run_agent` write it. BEFORE the start (ruling 375): ruling 203's
+          // redelivery window is "a human comment addressed to this agent,
+          // posted after this run started", and this comment used to be
+          // written after the start, so every prompted dispatch through the
+          // controller ran twice — the run, then the same words redelivered
+          // the moment it finished. Recorded first, it predates the run it is
+          // the directive of. A start that throws leaves the words on the
+          // record with the person's note of why nothing ran beside them.
+          const handle =
+            listDeployedSpecialists(slug, { dataRoot }).find((s) => s.id === profileId)
+              ?.name ?? profileId;
+          const { appendComment } = await import("~/server/tasks/task-actions.server");
           if (args.prompt) {
-            const { appendComment } = await import("~/server/tasks/task-actions.server");
             await appendComment(
               db,
               {
                 projectSlug: slug,
                 taskKey: key,
-                text: `@${started.name} ${prose(args.prompt)}`,
+                text: `@${handle} ${prose(args.prompt)}`,
                 forceToAgent: true,
               },
               actor,
               { dataRoot },
             );
+          }
+          let started: Awaited<ReturnType<typeof startAgentRun>>;
+          try {
+            started = await startAgentRun(db, runInput, actor, { dataRoot });
+          } catch (error) {
+            // Ruling 152(c): a hold is not a refusal. The retry is already
+            // scheduled with the directive on it, and the recorded comment
+            // predates that later run too.
+            if (args.prompt && !isDispatchHeld(error)) {
+              const message = error instanceof Error ? error.message : String(error);
+              await appendComment(
+                db,
+                {
+                  projectSlug: slug,
+                  taskKey: key,
+                  text: `No run started for ${handle}: ${message}`,
+                },
+                actor,
+                { dataRoot },
+              );
+            }
+            throw error;
           }
           // Ruling 263, first half: this tool's own description promises it
           // "reports honestly whether a run started". A refused run is a row

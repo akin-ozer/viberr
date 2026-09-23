@@ -8,6 +8,7 @@ import {
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 import {
@@ -1469,10 +1470,10 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
 
   /**
    * Ruling 263's second half: R21-9's law on the one dispatch door that skipped
-   * it. The task page writes `@<agent> <prompt>` after the start and the
-   * operator's `run_agent` writes one before it; through the controller the
-   * directive went into the agent's prompt and nowhere else, so the timeline
-   * showed a run appearing for no stated reason.
+   * it. The task page and the operator's `run_agent` both write
+   * `@<agent> <prompt>` before the start (ruling 375 for the page); through
+   * the controller the directive went into the agent's prompt and nowhere
+   * else, so the timeline showed a run appearing for no stated reason.
    */
   it("run_agent_on_task: the directive is recorded on the timeline (ruling 263)", async () => {
     await call(ids.maintainer, "run_agent_on_task", {
@@ -1711,6 +1712,128 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
       op: "resume",
     });
     expect(resumed).toContain("[done]");
+  });
+});
+
+/**
+ * Ruling 375 on the controller door. The task page's Run-an-agent control ran a
+ * prompted dispatch twice: it recorded the prompt as the person's own
+ * `@<agent>` comment AFTER the start, which put the comment inside ruling 203's
+ * window ("a human comment addressed to this agent, posted after this run
+ * started"), so `deliverDeferredMention` handed the same words back to the agent
+ * the moment its run finished. The route was fixed; `run_agent_on_task` wrote
+ * the same comment in the same place and was not.
+ */
+describe("ruling 375: a prompted run_agent_on_task runs once", () => {
+  // Nothing above dispatches on VIB-151. It is Selin's task and a run bills the
+  // OWNER's accounts (ruling 127), so connecting hers leaves VIB-142 (Arda's)
+  // refused exactly as the ruling 263 cases above need it.
+  const TASK = "VIB-151";
+
+  beforeAll(async () => {
+    await connectFakeBackend(app.db, ids.contributor, "codex");
+    await connectFakeBackend(app.db, ids.contributor, "claude");
+  });
+
+  async function developerRuns() {
+    const { listRunsForTaskRows } = await import("~/server/runtimes/run-store.server");
+    return listRunsForTaskRows(app.db, SLUG, TASK).filter(
+      (row) => row.agent_profile_id === "developer",
+    );
+  }
+
+  /** The fake runtime finishes on a microtask; its completion hook (ruling
+   *  203's window included) and the operator it re-invokes run after. Wait
+   *  until nothing on the task is live, so no write lands after the case. */
+  async function settled(): Promise<void> {
+    const { listRunsForTaskRows } = await import("~/server/runtimes/run-store.server");
+    for (let i = 0; i < 40; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const live = listRunsForTaskRows(app.db, SLUG, TASK).filter(
+        (row) => row.state === "queued" || row.state === "running",
+      );
+      if (live.length === 0) return;
+    }
+  }
+
+  async function humanComments() {
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    return readTaskFile({ projectSlug: SLUG, taskKey: TASK, dataRoot: app.dataRoot })!
+      .parsed.timeline.filter((e) => e.type === "comment" && e.actor.kind === "human");
+  }
+
+  it("records the directive before the run starts, so ruling 203's window never redelivers it", async () => {
+    const prompt = "Controller check-in: reply with one sentence and stop.";
+    const before = (await developerRuns()).length;
+    const reply = await call(ids.maintainer, "run_agent_on_task", {
+      taskKey: TASK,
+      agent: "developer",
+      prompt,
+    });
+    expect(reply).toContain(`[done] Developer run started on ${TASK}`);
+    await settled();
+
+    const run = (await developerRuns())[before]!;
+    expect(run.started_at, "the dispatch started a run").toBeTruthy();
+    const directive = (await humanComments()).find((e) => e.text === `@Developer ${prompt}`);
+    expect(directive, "the prompt is on the record as the person's own comment").toBeDefined();
+    expect(directive!.toAgent).toBe(true);
+    // CANARY: move the `appendComment` back below `startAgentRun` and the
+    // record postdates the run it is the directive of.
+    expect(
+      directive!.occurredAt <= run.started_at!,
+      `directive at ${directive!.occurredAt}, run started at ${run.started_at}`,
+    ).toBe(true);
+
+    // Ruling 203's completion hook, asked directly with this run's window:
+    // nothing to redeliver, nothing started.
+    const { deliverDeferredMention } = await import("~/server/tasks/task-actions.server");
+    const delivered = await deliverDeferredMention(
+      app.db,
+      { dataRoot: app.dataRoot },
+      { projectSlug: SLUG, taskKey: TASK, profileId: "developer", runStartedAt: run.started_at! },
+    );
+    expect(delivered).toEqual({ started: false, pending: 0 });
+    await settled();
+    expect((await developerRuns()).length, "one prompt, one run").toBe(before + 1);
+  });
+
+  it("a start that throws leaves the directive and, beside it, the person's note of why nothing ran", async () => {
+    // Ruling 186: a task waiting on other work is held, and the dispatch
+    // chokepoint refuses it by throwing, before any run row exists.
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const hold = async (blockedBy: string[]) => {
+      await updateTaskFile({ projectSlug: SLUG, taskKey: TASK, dataRoot: app.dataRoot }, (p) => {
+        p.frontmatter.blockedBy = blockedBy;
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    };
+    await hold(["VIB-148"]);
+    try {
+      const prompt = "Pick this up once VIB-148 lands.";
+      const before = (await developerRuns()).length;
+      const reply = await call(ids.maintainer, "run_agent_on_task", {
+        taskKey: TASK,
+        agent: "developer",
+        prompt,
+      });
+      expect(reply).toMatch(/^\[error\] /);
+      const reason = reply.slice("[error] ".length);
+      expect(reason).toContain("VIB-148");
+      // Newest first. CANARY: drop the catch's `appendComment` and the
+      // directive stands alone, reading as a hand-off something answered.
+      const [note, directive] = await humanComments();
+      expect(directive?.text).toBe(`@Developer ${prompt}`);
+      expect(note?.text).toBe(`No run started for Developer: ${reason}`);
+      // The note is the PERSON's, like the directive, and addressed to nobody:
+      // routed to the agent it would be one more thing to deliver.
+      expect(note?.actor).toMatchObject({ kind: "human", userId: ids.maintainer });
+      expect(note?.toAgent).toBe(false);
+      expect((await developerRuns()).length).toBe(before);
+    } finally {
+      await hold([]);
+    }
   });
 });
 
