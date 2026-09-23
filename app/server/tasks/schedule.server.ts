@@ -16,7 +16,7 @@ import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server"
 import { getProject } from "~/server/projections/board-query.server";
 import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { cloneTimeoutMs } from "~/server/tasks/git-clone-auth.server";
-import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import type { TaskMutationContext } from "./task-actions.server";
 import { reprojectTask, taskRef } from "./task-mutation.server";
@@ -332,7 +332,7 @@ export async function fireDueSchedules(
   const terminalNameFor = (slug: string): string => {
     const id = terminalFor(slug);
     const stages = getProject(db, slug)?.stages ?? [];
-    return id === null ? "Done" : (stages.find((s) => s.id === id)?.name ?? id);
+    return id === null ? "Done" : stageName(stages, id);
   };
   // Hunt 2026-08-29: the fire path runs under `operatorAuthorized`, which
   // skips the route-layer requireRunAgents and with it the F17/R6-3

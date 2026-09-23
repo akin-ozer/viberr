@@ -14,6 +14,7 @@ import {
   countLiveAdmins,
   removedAccountLabel,
 } from "~/features/project-settings/membership.server";
+import { stageName } from "~/shared/workflow/stage-roles";
 import { defaultTransitionBy } from "~/shared/workflow/transitions";
 import { ROLE_LABEL, BOUNDARIES } from "./policy-data";
 
@@ -225,8 +226,8 @@ export async function setTransitionBoundary(
     if (rule.locked || (input.to === lastStageId && boundary !== "human")) {
       throw AppError.forbidden(LOCKED_BOUNDARY_MESSAGE);
     }
-    fromName = stages.find((s) => s.id === input.from)?.name ?? input.from;
-    toName = stages.find((s) => s.id === input.to)?.name ?? input.to;
+    fromName = stageName(stages, input.from);
+    toName = stageName(stages, input.to);
     if (rule.boundary === boundary) return; // no-op
     rule.boundary = boundary;
     // F20-26: the human-readable `by` prose describes the boundary. Mutating

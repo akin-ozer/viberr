@@ -3219,13 +3219,12 @@ export function operatorSnapshot(
   const orgCtx: { dataRoot?: string } = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
   const stages = project.parsed.frontmatter.stages;
   const workflow = project.parsed.frontmatter.workflow;
-  const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   const roles = resolveStageRoles(stages, workflow);
   const doneStageId = roles.terminalId;
 
   const nextStages = workflow.flatMap((w) =>
     w.from === fm.stage
-      ? [{ id: w.to, name: stageName(w.to), boundary: w.boundary }]
+      ? [{ id: w.to, name: stageName(stages, w.to), boundary: w.boundary }]
       : [],
   );
   // R7-4: the rework license, listed rather than left to be inferred. Same
@@ -3267,9 +3266,9 @@ export function operatorSnapshot(
     dueDate: fm.dueDate,
     blockedBy: resolveDependencies(db, projectSlug, fm.blockedBy),
     stage: fm.stage,
-    stageName: stageName(fm.stage),
+    stageName: stageName(stages, fm.stage),
     previousStage: fm.previousStageId
-      ? { id: fm.previousStageId, name: stageName(fm.previousStageId) }
+      ? { id: fm.previousStageId, name: stageName(stages, fm.previousStageId) }
       : null,
     readiness: fm.readiness,
     waiting: fm.waiting,

@@ -40,6 +40,7 @@ import {
   stageColorAt,
   TERMINAL_STAGE_COLOR,
 } from "~/shared/workflow/stage-colors";
+import { stageName } from "~/shared/workflow/stage-roles";
 
 export type PolicyPreset = "strict" | "balanced" | "auto";
 
@@ -667,9 +668,8 @@ function applyBoundaryOverrides(
   for (const o of overrides) {
     const edge = out.find((w) => w.from === o.fromId && w.to === o.toId);
     if (!edge) {
-      const name = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
       throw AppError.validation(
-        `There is no workflow edge from "${name(o.fromId)}" to "${name(o.toId)}": boundaries exist between adjacent stages only.`,
+        `There is no workflow edge from "${stageName(stages, o.fromId)}" to "${stageName(stages, o.toId)}": boundaries exist between adjacent stages only.`,
       );
     }
     if (edge.locked) continue; // terminal edge: human, locked, non-negotiable

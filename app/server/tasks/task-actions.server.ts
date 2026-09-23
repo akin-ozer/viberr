@@ -6072,8 +6072,9 @@ export async function liftStageHoldForPerson(
     const held = existing?.parsed.frontmatter.heldAtStage ?? null;
     if (!held) return false;
     const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
-    const stageName =
-      project?.parsed.frontmatter.stages.find((st) => st.id === held)?.name ?? held;
+    const stageName = project
+      ? resolveStageName(project.parsed.frontmatter.stages, held)
+      : held;
     let lifted = false;
     await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       // Re-checked under the lock: a transition since the read above already
@@ -9318,8 +9319,7 @@ export async function reorderTask(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
-  const toName =
-    project.stages.find((s) => s.id === input.toStageId)?.name ?? input.toStageId;
+  const toName = stageName(project, input.toStageId);
   // Dragging INTO the terminal stage runs the full acceptance contract (merge
   // attempt + completion event) via the H4 redirect — surface that honestly so
   // the toast isn't a bare "Moved" for what is actually an acceptance + merge.
