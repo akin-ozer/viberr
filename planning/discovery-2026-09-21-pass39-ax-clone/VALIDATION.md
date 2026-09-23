@@ -1260,3 +1260,20 @@ owner's move at 00:57:02. The operator refreshed at 00:57:32 ("29 commits merged
 `b0ad2f0`"), and the developer was dispatched at 00:59:46. With 429 the operator does that itself at
 Review, and the refusal says where the re-verdict is given. (429 is verified by tests; it was not
 yet deployed at this point.)
+
+## 45. AX-20 merged, and the chain released everything it held (01:15 to 01:17 UTC)
+
+The reviewer approved `e166b1b` at 01:15:11, the WorkspaceController-backed regression included.
+The operator recommended acceptance at 01:15:28. I accepted at 01:16. The ceremony merged PR #13
+at 01:16:13 and deleted `ax-20`. Within 70 seconds the board went from 3 live tasks to 5, with no
+person involved:
+
+```
+[04:15:51] [3 live] AX-20:review/human AX-21:verify/none AX-22:review/agent
+[04:16:21] [4 live] AX-5:triage/agent AX-21:verify/agent AX-22:review/agent AX-26:triage/agent
+[04:17:21] [5 live] AX-5:design/agent AX-21:verify/agent AX-22:review/agent AX-26:design/agent AX-27:triage/agent
+```
+
+The rulings behind that: AX-21's and AX-5's holds released (131(e)). goal-3 link 4 ("Suspend and
+resume", AX-26) and goal-4 link 7 ("ax describe", AX-27) started once their waits cleared (398).
+Each new task's operator advanced its auto boundaries on its own.
