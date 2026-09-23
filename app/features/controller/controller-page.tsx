@@ -25,6 +25,7 @@ import { Markdown } from "~/ui/markdown";
 import { RichText } from "~/ui/rich-text";
 import { Pill, type PillKind } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
@@ -54,6 +55,19 @@ interface ActionResult {
   error?: string;
   toast?: string;
   conversationId?: string;
+}
+
+/**
+ * Toasts an interrupt or goal-op result once: the server's `toast` (tinted by
+ * `ok`), else a failure's `error`. The run strip and every goal card answer
+ * through it.
+ */
+function useOpResultToast(fetcher: ReturnType<typeof useFetcher<ActionResult>>) {
+  const push = useToast();
+  useFetcherResult(fetcher, (d) => {
+    if (d.toast) push(d.toast, d.ok ? "success" : "error");
+    else if (!d.ok && d.error) push(d.error, "error");
+  });
 }
 
 /**
@@ -191,23 +205,18 @@ export function ControllerPage({
 
   const send = useFetcher<ActionResult>();
   const push = useToast();
-  const answeredRef = useRef<ActionResult | null>(null);
-  useEffect(() => {
-    if (send.state !== "idle" || !send.data || answeredRef.current === send.data) {
-      return;
-    }
-    answeredRef.current = send.data;
-    if (!send.data.ok && send.data.error) {
-      push(send.data.error, "error");
+  useFetcherResult(send, (data) => {
+    if (!data.ok && data.error) {
+      push(data.error, "error");
       return;
     }
     // A send that started a NEW conversation selects it.
-    if (send.data.conversationId && params.get("c") !== send.data.conversationId) {
+    if (data.conversationId && params.get("c") !== data.conversationId) {
       const next = new URLSearchParams(params);
-      next.set("c", send.data.conversationId);
+      next.set("c", data.conversationId);
       setParams(next, { preventScrollReset: true });
     }
-  }, [send.state, send.data, params, setParams, push]);
+  });
 
   return (
     // The instance controller (/controller) mounts with no shell around it,
@@ -351,14 +360,7 @@ function ConversationRuntime({
   const [sel, setSel] = useState<string | null>(null);
   const [confirmInterrupt, setConfirmInterrupt] = useState<string | null>(null);
   const stop = useFetcher<ActionResult>();
-  const push = useToast();
-  const answeredRef = useRef<ActionResult | null>(null);
-  useEffect(() => {
-    if (stop.state !== "idle" || !stop.data || answeredRef.current === stop.data) return;
-    answeredRef.current = stop.data;
-    if (stop.data.toast) push(stop.data.toast, stop.data.ok ? "success" : "error");
-    else if (!stop.data.ok && stop.data.error) push(stop.data.error, "error");
-  }, [stop.state, stop.data, push]);
+  useOpResultToast(stop);
 
   const { linesByThread, streamError, olderByThread, loadOlder } = useRunLogStream({
     source: { kind: "controller", conversationId },
@@ -696,17 +698,14 @@ function Composer({
   // is not open, or any transport failure destroyed what the person wrote, and
   // the only account of it was a toast that unmounts itself after 2.6 seconds.
   const pending = useRef<string | null>(null);
-  const settled = useRef<ActionResult | null>(null);
-  useEffect(() => {
-    if (send.state !== "idle" || !send.data || settled.current === send.data) return;
-    settled.current = send.data;
+  useFetcherResult(send, (data) => {
     // Cleared only on success, and only if the box still holds exactly what
     // went out — somebody who started typing the next message while this one
     // was in flight keeps it. On a failure the text and the Send button both
     // stay, so the person can retry or copy it out.
-    if (send.data.ok) setText((cur) => (cur === pending.current ? "" : cur));
+    if (data.ok) setText((cur) => (cur === pending.current ? "" : cur));
     pending.current = null;
-  }, [send.state, send.data]);
+  });
   const disabled =
     !view.available || (view.conversation !== null && !view.viewerOwnsActive);
   const submit = () => {
@@ -1042,14 +1041,7 @@ function GoalCard({
   canRedirect: boolean;
 }) {
   const op = useFetcher<ActionResult>();
-  const push = useToast();
-  const answeredRef = useRef<ActionResult | null>(null);
-  useEffect(() => {
-    if (op.state !== "idle" || !op.data || answeredRef.current === op.data) return;
-    answeredRef.current = op.data;
-    if (op.data.toast) push(op.data.toast, op.data.ok ? "success" : "error");
-    else if (!op.data.ok && op.data.error) push(op.data.error, "error");
-  }, [op.state, op.data, push]);
+  useOpResultToast(op);
   const [confirm, setConfirm] = useState<GoalConfirm | null>(null);
   const [reason, setReason] = useState("");
   const [showAllHistory, setShowAllHistory] = useState(false);

@@ -63,6 +63,7 @@ import {
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
   boardEmptyCopy,
   countArchived,
@@ -1989,7 +1990,6 @@ export function BoardPage({
     beforeKey: string;
   } | null>(null);
   const finalStageId = columns[columns.length - 1]?.stage.id;
-  const moveDone = useRef<unknown>(null);
   /**
    * D9 (WCAG 2.2 / UX spec §Accessibility Strategy) — the board's polite
    * announcement region. Board drag is pointer-only and keyboard users move via
@@ -2172,11 +2172,7 @@ export function BoardPage({
   };
 
   // Toast on completion (and drop the pulse if the move was rejected).
-  useEffect(() => {
-    if (transitionFetcher.state !== "idle" || !transitionFetcher.data) return;
-    if (moveDone.current === transitionFetcher.data) return;
-    moveDone.current = transitionFetcher.data;
-    const d = transitionFetcher.data;
+  useFetcherResult(transitionFetcher, (d) => {
     // The answer is in and the loader has revalidated: the real card stands
     // where the landing preview stood (and pulses), or is back in its lane.
     setInFlight(null);
@@ -2193,7 +2189,7 @@ export function BoardPage({
       // consequential state change a screen-reader user must hear, not only see.
       setAnnounce(`Move refused: ${d.error}`);
     }
-  }, [transitionFetcher.state, transitionFetcher.data, push, inFlight]);
+  });
 
   // Retire the arrival pulse after it plays.
   useEffect(() => {

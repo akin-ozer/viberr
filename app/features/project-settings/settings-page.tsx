@@ -27,6 +27,7 @@ import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useActionToast } from "~/ui/use-action-toast";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
   CredentialCard,
   CredentialManageActions,
@@ -2360,15 +2361,11 @@ export function SettingsPage({
   // Stage rename edit-mode lives here so a fresh add-stage response can
   // drop the new row straight into edit mode (mock behavior).
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
-  const autoEdited = useRef<unknown>(null);
-  useEffect(() => {
-    if (stageFetcher.state !== "idle" || !stageFetcher.data) return;
-    if (autoEdited.current === stageFetcher.data) return;
-    autoEdited.current = stageFetcher.data;
-    if (stageFetcher.data.ok && stageFetcher.data.stageId) {
-      setEditingStageId(stageFetcher.data.stageId);
+  useFetcherResult(stageFetcher, (d) => {
+    if (d.ok && d.stageId) {
+      setEditingStageId(d.stageId);
     }
-  }, [stageFetcher.state, stageFetcher.data]);
+  });
 
   const onNavPolicy = () => navigate(`/projects/${slug}/policy`);
   const onOpenTask = (taskKey: string) =>

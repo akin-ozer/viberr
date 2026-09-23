@@ -1,5 +1,5 @@
 import { holdEntriesSentence } from "~/shared/dependencies";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { unpushedRevisionOf } from "~/schemas/task-file.schema";
 import { useFetcher } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
@@ -17,6 +17,7 @@ import { Pill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { checksPill, checksUnreadPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
@@ -552,13 +553,9 @@ export function TaskDetailsPanel({
   useActionFeedback(depFetcher);
   const [depOpen, setDepOpen] = useState(false);
   const [depText, setDepText] = useState(task.blockedBy.map((e) => e.ref).join(", "));
-  const depHandled = useRef<unknown>(null);
-  useEffect(() => {
-    if (depFetcher.state !== "idle" || !depFetcher.data?.ok) return;
-    if (depHandled.current === depFetcher.data) return;
-    depHandled.current = depFetcher.data;
-    setDepOpen(false);
-  }, [depFetcher.state, depFetcher.data]);
+  useFetcherResult(depFetcher, (d) => {
+    if (d.ok) setDepOpen(false);
+  });
   const startDepEdit = () => {
     setDepText(task.blockedBy.map((e) => e.ref).join(", "));
     setDepOpen(true);
@@ -566,13 +563,9 @@ export function TaskDetailsPanel({
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [labels, setLabels] = useState<string[]>(task.labels);
   const [due, setDue] = useState(task.dueDate ?? "");
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data?.ok) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    setOpen(false);
-  }, [fetcher.state, fetcher.data]);
+  useFetcherResult(fetcher, (d) => {
+    if (d.ok) setOpen(false);
+  });
 
   const startEdit = () => {
     setPriority(task.priority);

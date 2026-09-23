@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFetcher, useNavigate, useSearchParams } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { capabilityById, isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
@@ -19,6 +19,7 @@ import { AgentGlyph } from "~/ui/identity";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
   deploymentDot,
   deploymentStatusKind,
@@ -1596,12 +1597,7 @@ export function AgentsPage({
 
   // One handled-result effect (phase-5/7 pattern): toast, close on success,
   // keep the modal open with the server error otherwise.
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    const d = fetcher.data;
+  useFetcherResult(fetcher, (d) => {
     if (d.ok) {
       push(d.toast);
       for (const notice of d.notices ?? []) {
@@ -1625,7 +1621,7 @@ export function AgentsPage({
       // rendered under a green tick.
       push(d.error, "error");
     }
-  }, [fetcher.state, fetcher.data, push, creating, editing]);
+  });
 
   const submitProfile = (payload: ProfileFormPayload) => {
     setFormError(null);

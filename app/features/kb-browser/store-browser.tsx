@@ -12,6 +12,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useRelativeTime } from "~/ui/use-relative-time";
 import { FolderIco, FolderUpIco, UploadIco } from "./icons";
 import {
@@ -602,12 +603,7 @@ function useStoreOps(
   const uploadBusy = uploading > 0 && opsFetcher.state !== "idle";
 
   // ---- action feedback (toasts ride the server response).
-  const handledOps = useRef<unknown>(null);
-  useEffect(() => {
-    if (opsFetcher.state !== "idle" || !opsFetcher.data) return;
-    if (handledOps.current === opsFetcher.data) return;
-    handledOps.current = opsFetcher.data;
-    const d = opsFetcher.data;
+  useFetcherResult(opsFetcher, (d) => {
     setUploading(0);
     if (d.ok) {
       if (d.toast) push(d.toast);
@@ -617,7 +613,7 @@ function useStoreOps(
       // rendered under a green tick.
       push(d.error, "error");
     }
-  }, [opsFetcher.state, opsFetcher.data, push]);
+  });
 
   // ---- mutations (real fs writes via the org-settings action).
   const submitFields = (fields: Record<string, string>) => {
@@ -785,12 +781,7 @@ function useDocEditor(
   const loading = readFetcher.state !== "idle";
   const saving = saveFetcher.state !== "idle";
 
-  const handledRead = useRef<unknown>(null);
-  useEffect(() => {
-    if (readFetcher.state !== "idle" || !readFetcher.data) return;
-    if (handledRead.current === readFetcher.data) return;
-    handledRead.current = readFetcher.data;
-    const d = readFetcher.data;
+  useFetcherResult(readFetcher, (d) => {
     setDoc((prev) =>
       prev
         ? d.ok
@@ -798,14 +789,9 @@ function useDocEditor(
           : { ...prev, err: d.error ?? "That document could not be read." }
         : prev,
     );
-  }, [readFetcher.state, readFetcher.data]);
+  });
 
-  const handledSave = useRef<unknown>(null);
-  useEffect(() => {
-    if (saveFetcher.state !== "idle" || !saveFetcher.data) return;
-    if (handledSave.current === saveFetcher.data) return;
-    handledSave.current = saveFetcher.data;
-    const d = saveFetcher.data;
+  useFetcherResult(saveFetcher, (d) => {
     if (d.ok) {
       setConfirmReplace(false);
       setDoc(null);
@@ -817,7 +803,7 @@ function useDocEditor(
     setDoc((prev) =>
       prev ? { ...prev, err: d.error ?? "The document was not saved." } : prev,
     );
-  }, [saveFetcher.state, saveFetcher.data, onSaved]);
+  });
 
   const openNew = (dir: string[]) =>
     setDoc({ dir, name: "", body: "", existing: false, truncated: false, err: null });
@@ -978,13 +964,8 @@ export function StoreBrowser({
 
   // ---- GitHub-import feedback: lives here (not in the hook) because a
   // successful import expands the tree state this component owns.
-  const handledGh = useRef<unknown>(null);
   const { ghFetcher, dispatchGh } = ops;
-  useEffect(() => {
-    if (ghFetcher.state !== "idle" || !ghFetcher.data) return;
-    if (handledGh.current === ghFetcher.data) return;
-    handledGh.current = ghFetcher.data;
-    const d = ghFetcher.data;
+  useFetcherResult(ghFetcher, (d) => {
     if (d.ok) {
       if (d.toast) push(d.toast);
       if (d.folder) {
@@ -1003,7 +984,7 @@ export function StoreBrowser({
     } else if (d.error) {
       dispatchGh({ type: "err", err: d.error });
     }
-  }, [ghFetcher.state, ghFetcher.data, push, dispatchGh]);
+  });
 
   // ---- layered close on the native <dialog>: the nested DeleteConfirm is
   // topmost while open, so its own `cancel` handles that layer; here an
