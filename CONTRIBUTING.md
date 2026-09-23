@@ -27,13 +27,22 @@ npm run dev        # http://localhost:5173
 ```
 
 `npm run seed` is a clean sheet: the built-in agent catalog, knowledge bases and skills,
-plus a bootstrap admin when the users table is empty. It ships no demo board data. If you
-want the mock dataset the route-level and e2e specs are written against, run
-`npm run seed:demo` instead.
+plus a bootstrap admin (`admin@viberr.dev` / `viberr-dev-2828` unless
+`VIBERR_SEED_ADMIN_EMAIL` / `VIBERR_SEED_ADMIN_PASSWORD` are set) when the users table is
+empty. It ships no demo board data. If you want the mock dataset the route-level and e2e
+specs are written against, run `npm run seed:demo` instead (sign in as
+`arda@viberr.dev` with `VIBERR_SEED_ADMIN_PASSWORD`, or `viberr-dev-2828` when it is
+unset).
+
+`.env.example` points `VIBERR_DATA_ROOT` at `./docker-data`, the directory the Docker
+setup mounts, so the dev server and the container share one store. Only one process may
+hold it: a second one (or a seed against a running app) is refused by the data-root
+writer lock.
 
 See the [README](README.md) for the full quickstart, the bootstrap-admin credentials,
-Docker setup, and the architecture overview, and [`docs/README.md`](docs/README.md) for the
-code-verified documentation set (agents: read [`AGENTS.md`](AGENTS.md) first).
+Docker setup, and pointers into the architecture docs, and
+[`docs/README.md`](docs/README.md) for the code-verified documentation set (agents: read
+[`AGENTS.md`](AGENTS.md) first).
 
 ## Branch / PR workflow
 
