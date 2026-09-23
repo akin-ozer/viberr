@@ -126,6 +126,7 @@ import {
   sliceTimeline,
 } from "~/features/task-detail/timeline-slice";
 import { roleCan } from "~/shared/rbac";
+import { stageName } from "~/shared/workflow/stage-roles";
 import { Icon } from "~/ui/icon";
 
 /**
@@ -387,8 +388,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         packetCreateTaskEchoes[i] = echoes.map((e) => ({
           key: e.key,
           title: e.title,
-          stage:
-            project?.stages.find((st) => st.id === e.stageId)?.name ?? e.stageId,
+          stage: stageName(project?.stages ?? [], e.stageId),
         }));
       }
     } catch (error) {
@@ -761,11 +761,10 @@ export async function action({ request, params }: Route.ActionArgs) {
               ? completionToast("forced", taskKey, terminalStageNameFor(getProject(db, projectSlug)))
               : option.kind === "move_stage"
                 ? resolvedTask.stage === option.toStage
-                  ? `Decision recorded · ${taskKey} moved to ${
-                      getProject(db, projectSlug)?.stages.find(
-                        (s) => s.id === resolvedTask.stage,
-                      )?.name ?? resolvedTask.stage
-                    }`
+                  ? `Decision recorded · ${taskKey} moved to ${stageName(
+                      getProject(db, projectSlug)?.stages ?? [],
+                      resolvedTask.stage,
+                    )}`
                   : // Toast honesty: the move runs after the decision and can
                     // refuse (the task moved underneath it, the project froze).
                     // Its reason is the timeline note the resolution wrote.
@@ -865,8 +864,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           },
           actor,
         );
-        const toName =
-          proj?.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+        const toName = stageName(proj?.stages ?? [], task.stage);
         return {
           ok: true as const,
           intent,
@@ -1042,8 +1040,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         const stageBefore = getTaskSummary(db, projectSlug, taskKey)?.stage;
         const task = await transitionStage(db, move, actor);
         const proj = getProject(db, projectSlug);
-        const toName =
-          proj?.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+        const toName = stageName(proj?.stages ?? [], task.stage);
         return {
           ok: true as const,
           intent,

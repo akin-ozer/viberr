@@ -41,7 +41,7 @@ import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
 import type { FileLeaseView, SettingsViewData } from "./settings-query.server";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
-import { isTerminalStage, stageLockReason } from "~/shared/workflow/stage-roles";
+import { isTerminalStage, stageLockReason, stageName } from "~/shared/workflow/stage-roles";
 import {
   PROJECT_ROLES,
   roleCan,
@@ -1119,7 +1119,6 @@ export function RequiredReviewersPanel({
   const update = (i: number, patch: Partial<RequiredReviewerDraft>) =>
     setDraft((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
   const remove = (i: number) => setDraft((rows) => rows.filter((_, j) => j !== i));
-  const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   const agentName = (id: string) => candidates.find((c) => c.id === id)?.name ?? id;
   return (
     <div className="panel">
@@ -1190,7 +1189,7 @@ export function RequiredReviewersPanel({
               <button
                 type="button"
                 className="btn ghost sm"
-                aria-label={`Remove rule ${i + 1}: ${agentName(row.profileId)} at ${stageName(row.stageId)}`}
+                aria-label={`Remove rule ${i + 1}: ${agentName(row.profileId)} at ${stageName(stages, row.stageId)}`}
                 disabled={busy}
                 onClick={() => remove(i)}
               >

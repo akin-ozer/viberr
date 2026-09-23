@@ -60,6 +60,7 @@ import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
+import { stageName } from "~/shared/workflow/stage-roles";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -2645,10 +2646,7 @@ export function BoardPage({
         <AcceptOnBoardConfirm
           task={pendingAcceptTask}
           stages={stages}
-          fromStageName={
-            stages.find((s) => s.id === pendingAcceptTask.stage)?.name ??
-            pendingAcceptTask.stage
-          }
+          fromStageName={stageName(stages, pendingAcceptTask.stage)}
           defaultBranch={defaultBranch}
           busy={transitionFetcher.state !== "idle"}
           onCancel={() => setPendingAccept(null)}
