@@ -3077,7 +3077,7 @@ describe("directiveRequestsDelivery (F10-31)", () => {
 /* ----------------------- KB + MCP in the persona (P13-KM-04 / KM-10) */
 
 describe("buildSpecialistPersona — attached resources", () => {
-  const tempRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-persona-"));
+  const tempRoot = () => ctx.makeTempDir();
 
   it("injects a granted KB's docs and marks attached resources trusted", () => {
     const dataRoot = tempRoot();
@@ -3294,7 +3294,7 @@ describe("buildSpecialistPersona — attached resources", () => {
    */
   it("a symlinked SKILL.md never becomes trusted persona material", () => {
     const dataRoot = tempRoot();
-    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    const outside = ctx.makeTempDir();
     writeFileSync(
       path.join(outside, "SKILL.md"),
       "# Evil\n\nSENTINEL-LINKED-SKILL",
@@ -3532,7 +3532,7 @@ describe("buildSpecialistPersona — attached resources", () => {
  * said which source wins.
  */
 describe("R19-2 — the repository wins; a knowledge base is context", () => {
-  const tempRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-precedence-"));
+  const tempRoot = () => ctx.makeTempDir();
 
   function personaWithKb(): string {
     const dataRoot = tempRoot();

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { resolveGithubHandle } from "~/server/github/pr-human-approval.server";
@@ -37,9 +36,6 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 const ACTOR = { userId: "u_admin", label: "admin@test" };
-
-/** `audit_events.details_json` is NOT NULL TEXT (0001_baseline). */
-const auditDetailSchema = z.object({ details_json: z.string() });
 
 function makeDb() {
   const db = ctx.makeDb();
@@ -284,15 +280,10 @@ describe("edit / role / reset / remove", () => {
     expect(existsSync(credentialFile)).toBe(false);
     expect(getBackendCredential(db, user.id, "claude")).toBeNull();
     // The revocation is auditable, not silent.
-    const removal = auditDetailSchema.parse(
-      db
-        .prepare(
-          `SELECT details_json FROM audit_events
-            WHERE action = 'org.user.removed' AND subject_id = ?`,
-        )
-        .get(user.id),
+    const removal = listAuditEvents(db, { action: "org.user.removed" }).find(
+      (e) => e.subjectId === user.id,
     );
-    expect(JSON.parse(removal.details_json)).toMatchObject({
+    expect(removal!.details).toMatchObject({
       backendsRetired: ["claude"],
     });
   });
@@ -365,21 +356,8 @@ describe("edit / role / reset / remove", () => {
     // …and the operator is told, by name, including that it was the default.
     expect(result.toast).toContain("acme");
     expect(result.toast).toContain("DEFAULT");
-    const row = auditDetailSchema.parse(
-      db
-        .prepare(
-          `SELECT details_json FROM audit_events
-            WHERE action = 'org.user.removed' ORDER BY id DESC LIMIT 1`,
-        )
-        .get(),
-    );
-    // SAFETY: the three keys are written unconditionally by deleteOrgUser's
-    // own audit call a few lines above the delete, on every removal.
-    const details = JSON.parse(row.details_json) as {
-      connectionsLost: string[];
-      defaultConnectionLost: string | null;
-      projectsUnbound: string[];
-    };
+    const [row] = listAuditEvents(db, { action: "org.user.removed" });
+    const details = row!.details!;
     expect(details.connectionsLost).toEqual(["acme"]);
     expect(details.defaultConnectionLost).toBe("acme");
     expect(details.projectsUnbound).toEqual(["viberr-core"]);
