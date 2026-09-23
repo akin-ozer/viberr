@@ -6424,9 +6424,11 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 .dock-head-icon .ico { width: 15px; height: 15px; }
 .dock-title {
   font-family: var(--font-display); font-weight: 800; font-size: 1rem;
-  /* Shrinks rather than pushing Threads/New/Close out of the panel's
-     `overflow: hidden` box when the controller has a long name (finding 27). */
-  flex: 0 1 auto; min-width: 0;
+  /* Capped rather than pushing Threads/New/Close out of the panel's
+     `overflow: hidden` box when the controller has a long name (finding 27).
+     U39-12: a cap, not a shrink weight. Any weight left the title losing a
+     pixel to the pill it shares the row with ("Contro…" at 79 of 80px). */
+  flex: 0 0 auto; max-width: 45%; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* U39-12: on a phone the title and the scope pill split one 167px gap, and

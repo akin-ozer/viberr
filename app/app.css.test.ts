@@ -3504,6 +3504,10 @@ describe("app.css controller layout (ruling 419)", () => {
     // Measured at 375px: "Contro…" beside "AX-21 · ax-cl…". CANARY: drop the
     // pill's shrink weight and the two shrink alike again.
     expect(ruleBody(CODE, ".dock-head .pill")).toMatch(/flex:\s*0 100 auto/);
+    // Measured in the preview with only the pill's weight: the title still
+    // lost a pixel (79 of 80). It does not shrink at all now; a long name is
+    // capped instead.
+    expect(ruleBody(CODE, ".dock-title")).toMatch(/flex:\s*0 0 auto;\s*max-width:\s*45%/);
   });
 
   it("ruling 419(i): inline code in markdown may break a long token rather than overflow", () => {

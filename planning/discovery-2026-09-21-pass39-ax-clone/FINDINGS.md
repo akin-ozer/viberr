@@ -164,8 +164,10 @@ what they strand, and record an optional reason.
 - **U39-12 (LOW) — the dock's header cuts the controller's own name on a phone.** At 375px the
   title and the scope pill share about 167px beside four icon buttons, and both were cut:
   "Contro…" next to "AX-21 · ax-cl…". **Fixed:** the pill shrinks first (`flex: 0 100 auto`),
-  because the context line under the header names the scope in full. Measured live with the rule
-  injected: title 80/80px, pill 85 of 101px. Test: `app.css.test.ts` "U39-12".
+  because the context line under the header names the scope in full. The title does not shrink at
+  all: it is capped at 45% instead. A shrink weight alone still cost it a pixel in the production
+  preview (79 of 80px, "Control…"). Measured after: title 80/80px, pill 85 of 103px, buttons
+  inside the header. Test: `app.css.test.ts` "U39-12".
 - **U39-13 (LOW) — a wrapped review-queue row scatters its chips.** Under 1100px the row wraps,
   and the chips kept the one-line row's right-justified 52% box. The first line hung indented, the
   rest fell back to the left edge, and "agent working" jumped to the far right. **Fixed:** once
