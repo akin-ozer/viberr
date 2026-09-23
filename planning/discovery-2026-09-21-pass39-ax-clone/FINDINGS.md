@@ -609,6 +609,14 @@ what they strand, and record an optional reason.
   so a board conversation finishes with no signal anywhere. One option is a `controller`
   notification per reply, marked read when the conversation is opened on the page. Not built,
   because it reverses a documented design and adds a bell item to every turn.
+- **A refresh that meets a conflict is also narrated as a step that "did not apply".** AX-5,
+  03:59:35: the correct "Blocked: `ax-5` conflicts with `main`" event and the packet, and beside
+  them "The operator's plan was not carried out in full. This step did not apply to the task's
+  current state: `update_branch_from_base` — `ax-5` CONFLICTS with `main` …". The step ran; its
+  outcome is the packet. `operatorUpdateBranchFromBase` returns `noop` for a conflict, which the
+  plan narration files as a refusal (ruling 229 fixed the same framing for an already-current
+  branch). Left as is because ruling 408's refusal carry reads the same outcome, and changing it
+  this late would change what the next drive is told.
 - **The "not on the PR" line can name a superseded revision for one reconcile pass.** AX-5,
   04:14:40: the review queue said "PR #24 does not carry the delivered revision 509c0d1" eleven
   seconds after the delivery reconcile minted `b82bb93`. The workspace reconcile re-measures
