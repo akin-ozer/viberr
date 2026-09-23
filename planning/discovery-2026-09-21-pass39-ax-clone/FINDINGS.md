@@ -234,7 +234,13 @@ what they strand, and record an optional reason.
   The work landed in the right PR, so nothing was lost, but the option said one thing and the
   routing did another. Two defensible designs: the summons goes to the operator whenever the chosen
   option names a different profile, or agent-authored options may not name another profile. Left
-  for the owner.
+  for the owner. **Second instance, with a cost (AX-20, 00:43):** the developer asked "Synchronize
+  AX-20 with current main?". My directive was addressed to the operator ("Operator: move AX-20
+  back to Verify … update_branch_from_base"), and the developer was summoned with "Continue from
+  where you stopped and act on it". It spent a run finding it has neither tool and asked me to
+  have the operator do it (00:45:39). Meanwhile the operator's run from the developer's previous
+  report posted "Recommend holding review until you resolve the existing packet's sync choice"
+  (00:44:14), 23 seconds after I had resolved it, reading a snapshot taken before the answer.
 - **O39-b (owner's call) — a deadlock streak writes the same canned decision into the contract
   every round.** AX-22's goal now carries four identical "Let the rework continue — Each round has
   found something real and the work is converging on it" blocks, each followed by the same
