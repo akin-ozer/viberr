@@ -11,12 +11,21 @@ const DOCK =
 
 export const SERVER_READ_BUDGETS: PerfBudgetTable = {
   // TASK-2 / SRV-1: project.md, agent profiles and task.md re-parsed by every
-  // helper that needs one field of them.
+  // helper that needs one field of them. 35 before the content-keyed parse
+  // memo (parse-memo.server.ts); unchanged files now parse zero times.
   "server-read:task-revalidation.yaml-parses": {
-    ceiling: 35,
+    ceiling: 0,
     unit: "count",
     journey: "task-open",
     fixture: TASK_REVALIDATION,
+  },
+  // TASK-2 / SRV-1: the same revalidation with an EMPTY memo (a first open):
+  // each distinct file parses once — project.md, task.md, three profiles.
+  "server-read:task-revalidation.yaml-parses-cold": {
+    ceiling: 5,
+    unit: "count",
+    journey: "task-open",
+    fixture: `${TASK_REVALIDATION}, parse memo emptied first`,
   },
   // TASK-2 / SRV-1: store-file reads (each an existsSync + readFileSync pair).
   "server-read:task-revalidation.store-reads": {
@@ -47,9 +56,9 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     fixture: TASK_REVALIDATION,
   },
   // SRV-1 / FL-3 / BOARD-5: project.md + three profiles parsed twice (board,
-  // then the review queue's second task list).
+  // then the review queue's second task list). 8 before the parse memo.
   "server-read:board-revalidation.yaml-parses": {
-    ceiling: 8,
+    ceiling: 0,
     unit: "count",
     journey: "board-live",
     fixture: BOARD_REVALIDATION,

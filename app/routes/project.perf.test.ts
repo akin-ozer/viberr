@@ -47,12 +47,11 @@ describe("board revalidation (ruling 454)", () => {
   it("stays within its server-read budgets", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const [, cold] = await revalidateBoard(cookie);
-    const { storeFileParseCounts, resetParseMemoForTests } = await import(
-      "~/server/files/parse-memo.server"
-    );
-    resetParseMemoForTests();
+    const { storeFileParseCounts } = await import("~/server/files/parse-memo.server");
+    const totalParses = () => Object.values(storeFileParseCounts()).reduce((a, b) => a + b, 0);
+    const parsesBefore = totalParses();
     const { result, tally } = await tallyServerReads(app.dataRoot, () => revalidateBoard(cookie));
-    const parses = storeFileParseCounts();
+    const parses = totalParses() - parsesBefore;
 
     // Correctness first: the rail counts and the board read the same as before.
     const layout = result[1];
@@ -62,7 +61,7 @@ describe("board revalidation (ruling 454)", () => {
 
     expectWithinBudget(
       "server-read:board-revalidation.yaml-parses",
-      parses["project-file"] + parses["task-file"] + parses["agent-profile"],
+      parses,
     );
     expectWithinBudget("server-read:board-revalidation.store-reads", tally.storeReads.length);
     expectWithinBudget("server-read:board-revalidation.sql", tally.statements.length);

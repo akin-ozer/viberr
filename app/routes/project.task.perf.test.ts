@@ -74,14 +74,13 @@ describe("task-page revalidation (ruling 454)", () => {
   it("stays within its server-read budgets", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     await revalidateTaskPage(cookie);
-    const { storeFileParseCounts, resetParseMemoForTests } = await import(
-      "~/server/files/parse-memo.server"
-    );
-    resetParseMemoForTests();
+    const { storeFileParseCounts } = await import("~/server/files/parse-memo.server");
+    const totalParses = () => Object.values(storeFileParseCounts()).reduce((a, b) => a + b, 0);
+    const parsesBefore = totalParses();
     const { result, tally } = await tallyServerReads(app.dataRoot, () =>
       revalidateTaskPage(cookie),
     );
-    const parses = storeFileParseCounts();
+    const parses = totalParses() - parsesBefore;
 
     // Correctness first: the same slice and counts the page always showed.
     const task = result[2];
@@ -92,9 +91,15 @@ describe("task-page revalidation (ruling 454)", () => {
 
     expectWithinBudget(
       "server-read:task-revalidation.yaml-parses",
-      parses["project-file"] + parses["task-file"] + parses["agent-profile"],
+      parses,
     );
     expectWithinBudget("server-read:task-revalidation.store-reads", tally.storeReads.length);
+
+    // A first open: every distinct file parses once, however many helpers ask.
+    const { resetParseMemoForTests } = await import("~/server/files/parse-memo.server");
+    resetParseMemoForTests();
+    await revalidateTaskPage(cookie);
+    expectWithinBudget("server-read:task-revalidation.yaml-parses-cold", totalParses());
     expectWithinBudget("server-read:task-revalidation.sql", tally.statements.length);
     expectWithinBudget(
       "server-read:task-revalidation.session-lookups",
