@@ -3053,35 +3053,50 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
     expect(CODE).toMatch(/\.activity-cols\s*\{[^}]*align-items:\s*start/);
   });
 
-  it("(c) the OS preference stills every `pulse-a` 'agent working' dot", () => {
+  it("(c) the OS preference stills every infinite loop but a spinner", () => {
     // With the in-app kill switch gone, `prefers-reduced-motion` is the one
-    // signal, and the stilling rule named three of the five dots on this loop.
-    // `.chip .working` (the status-chip dot on EVERY board card with an agent
-    // at work) and `.rdot.running` kept pulsing forever under the preference.
-    // The loop's users are read from the sheet, so a sixth dot is in scope the
-    // moment it is written; the two named ones keep the scan from going vacuous.
-    // Spinners (`runSpin`, `spin`) are a different loop: they convey loading
-    // and stay essential motion.
+    // signal, and each loop needs its own answer. They were found one at a
+    // time: `.chip .working` (the status-chip dot on EVERY board card with an
+    // agent at work) and `.rdot.running` kept pulsing under the preference
+    // while three dots on the same `pulse-a` loop held still, and the log's
+    // `.lcaret` kept blinking. The loops are read from the sheet, so the next
+    // one is in scope the moment it is written; the three named ones keep the
+    // scan from going vacuous. A loop is answered by a LATER reduce rule on the
+    // same selector (same specificity, so source order decides) that sets
+    // `animation: none`, or `display: none` for a decoration that has nothing
+    // to show once it stops moving (the controller's highlight band).
     //
-    // Canary: drop either selector from the reduced-motion list and this goes red.
+    // Canary: drop any selector from its reduce rule and this goes red, naming it.
+    const SPINNERS = {
+      ".run-spin": "the live run's loading ring: essential motion",
+      ".ico.spin": "the shared loading icon: essential motion",
+      ".store-strip .spin": "the store strip's loading icon: essential motion",
+    } satisfies Record<string, string>;
     const parts = (rule: CssRule) => rule.selector.split(",").map((s) => s.trim());
     const reduced = (rule: CssRule) =>
       rule.at.some((q) => /prefers-reduced-motion:\s*reduce/.test(q));
-    const pulsing = RULES.flatMap((rule, index) =>
-      !reduced(rule) && /^pulse-a\b[^;]*\binfinite\b/.test(rule.decls.get("animation") ?? "")
+    const looping = RULES.flatMap((rule, index) =>
+      !reduced(rule) &&
+      /\binfinite\b/.test(
+        `${rule.decls.get("animation") ?? ""} ${rule.decls.get("animation-iteration-count") ?? ""}`,
+      )
         ? parts(rule).map((selector) => ({ selector, index }))
         : [],
     );
-    expect(pulsing.map((p) => p.selector)).toEqual(
-      expect.arrayContaining([".chip .working", ".rdot.running"]),
+    const selectors = looping.map((l) => l.selector);
+    expect(selectors).toEqual(
+      expect.arrayContaining([".chip .working", ".rdot.running", ".lcaret"]),
     );
-    for (const { selector, index } of pulsing) {
-      // Same selector, same specificity: the stilling rule has to come later.
+    for (const spinner of Object.keys(SPINNERS)) {
+      expect(selectors, `${spinner} is exempt as a spinner but no longer loops`).toContain(spinner);
+    }
+    for (const { selector, index } of looping) {
+      if (selector in SPINNERS) continue;
       const stilled = RULES.some(
         (rule, at) =>
           at > index &&
           reduced(rule) &&
-          rule.decls.get("animation") === "none" &&
+          (rule.decls.get("animation") === "none" || rule.decls.get("display") === "none") &&
           parts(rule).includes(selector),
       );
       expect(stilled, `${selector} must hold still under prefers-reduced-motion`).toBe(true);

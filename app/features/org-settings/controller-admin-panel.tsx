@@ -209,6 +209,34 @@ export interface ControllerGrantRequestView {
 /** The lock note's element id — locked grant groups point at it (D04-U9). */
 const LOCK_NOTE_ID = "controller-lock-note";
 
+/** One open request, with its Decline. Its own fetcher, so declining one row
+ *  neither blocks the Save button nor shows another row as busy. */
+function GrantRequestRow({ request: r }: { request: ControllerGrantRequestView }) {
+  const decline = useOrgAction();
+  return (
+    <li>
+      <code className="mono">{r.name}</code> ({CONTROLLER_SECTION_LABEL[r.kind]}):{" "}
+      {r.reason || "no reason given"}
+      <br />
+      <span className="sub">
+        Asked {r.askedAt} by {r.askedByLabel || "someone"}. {r.remedy}
+      </span>{" "}
+      <button
+        type="button"
+        className="btn sm ghost"
+        aria-label={`Decline the controller's request for ${r.name}`}
+        onClick={() =>
+          decline.submit({ intent: "controller-request-decline", requestId: r.id })
+        }
+        disabled={decline.busy}
+        aria-busy={decline.busy}
+      >
+        {decline.busy ? "Declining…" : "Decline"}
+      </button>
+    </li>
+  );
+}
+
 export function ControllerAdminPanel({
   config,
   locks,
@@ -361,10 +389,12 @@ export function ControllerAdminPanel({
         /**
          * Ruling 390 (F39-17): grants the controller asked for and cannot make.
          *
-         * It is a DISCLOSURE, not a control, and deliberately so: ruling 108
-         * put these grants outside the app, so a Grant button here would be
-         * promising something no code on this page can do. Each row prints the
-         * variable, the value and the restart, which is the real answer.
+         * There is no Grant button, deliberately: ruling 108 put these grants
+         * outside the app, so one here would promise something no code on this
+         * page can do. Each row prints the variable, the value and the restart,
+         * which is the real answer, and the save below that leaves the resource
+         * granted closes the request (amended 2026-09-23). The one control is
+         * Decline, which this page CAN honour.
          */
         <div className="pol-note" data-testid="controller-grant-requests">
           <Icon name="inbox" />
@@ -375,17 +405,9 @@ export function ControllerAdminPanel({
                 : `The controller has asked for ${requests.length} grants it cannot make`}
               :
             </strong>
-            <ul className="tight">
+            <ul className="pol-rules">
               {requests.map((r) => (
-                <li key={r.id}>
-                  <code className="mono">{r.name}</code> (
-                  {CONTROLLER_SECTION_LABEL[r.kind]}): {r.reason || "no reason given"}
-                  <br />
-                  <span className="sub">
-                    Asked {r.askedAt} by {r.askedByLabel || "someone"}.{" "}
-                    {r.remedy}
-                  </span>
-                </li>
+                <GrantRequestRow key={r.id} request={r} />
               ))}
             </ul>
           </span>

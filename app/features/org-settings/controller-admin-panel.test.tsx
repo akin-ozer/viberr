@@ -139,7 +139,7 @@ describe("ruling 390: grants the controller asked for and cannot make", () => {
       "knowledge base grants are deployment-locked (ruling 108): set VIBERR_UNLOCK_CONTROLLER_KB=enabled and restart, then add it on the Controller tab. There is no in-app grant while the section is locked.",
   };
 
-  it("names the resource, the reason and the deployment change, and offers no button", () => {
+  it("names the resource, the reason and the deployment change, and offers no Grant button", () => {
     const { container, getByText } = renderPanel({}, ["qa-echo"], LOCKED, [REQUEST]);
     const note = container.querySelector('[data-testid="controller-grant-requests"]')!;
     expect(note).toBeTruthy();
@@ -147,9 +147,33 @@ describe("ruling 390: grants the controller asked for and cannot make", () => {
     expect(note.textContent).toContain("It carries the model rule Arda set");
     expect(note.textContent).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");
     expect(getByText(/asked for 1 grant it cannot make/i)).toBeTruthy();
-    // Ruling 108 put the grant outside the app, so this is a DISCLOSURE. A
-    // control here would promise what no code on this page can do.
-    expect(note.querySelector("button")).toBeNull();
+    // Ruling 108 put the grant outside the app, so a Grant control here would
+    // promise what no code on this page can do. Decline is the one control,
+    // because declining is an answer this page can record.
+    const buttons = [...note.querySelectorAll("button")].map((b) => b.textContent);
+    expect(buttons).toEqual(["Decline"]);
+  });
+
+  it("Decline posts the request's id and nothing about the grants", async () => {
+    const { getByRole } = renderPanel({}, ["qa-echo"], LOCKED, [
+      REQUEST,
+      { ...REQUEST, id: "rq_2", kind: "skills", name: "standing-rules" },
+    ]);
+    // Each row's button names its own request, so a screen reader can tell
+    // two Declines apart.
+    fireEvent.click(
+      getByRole("button", {
+        name: "Decline the controller's request for instance-standing-rules",
+      }),
+    );
+    await waitFor(() => expect(lastForm).not.toBeNull());
+    expect(lastForm).toMatchObject({
+      intent: "controller-request-decline",
+      requestId: "rq_1",
+    });
+    // It declines the ask. It posts no grant list, so no lock applies to it.
+    expect(lastForm).not.toHaveProperty("kb");
+    expect(lastForm).not.toHaveProperty("skills");
   });
 
   it("says nothing at all when there is nothing outstanding", () => {

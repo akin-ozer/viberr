@@ -3773,6 +3773,11 @@ dialog[data-closing]::backdrop {
 }
 .lcaret { color: #b79dff; animation: caretBlink 1.1s steps(2) infinite; }
 @keyframes caretBlink { 50% { opacity: 0; } }
+/* 148(c): under the OS preference the caret holds solid; it still marks where
+   a running log's output arrives, and the blink added nothing to that. */
+@media (prefers-reduced-motion: reduce) {
+  .lcaret { animation: none; }
+}
 
 .logs-foot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .5rem; font-size: .75rem; color: var(--faint); }
 .logs-foot .mono { font-size: .69rem; color: var(--placeholder); }
