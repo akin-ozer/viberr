@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -131,4 +131,13 @@ export async function withLocalGithub<T>(root: string, work: () => Promise<T>): 
 export async function gitOut(cwd: string, args: string[]): Promise<string> {
   const out = await exec("git", ["-C", cwd, ...args]);
   return out.stdout.trim();
+}
+
+/**
+ * `gitOut`'s synchronous twin, for building a real workspace repo inline. It
+ * spawns git IN `cwd` (no `-C`) and pipes stderr, so a failing command throws
+ * without echoing into the test output.
+ */
+export function gitOutSync(cwd: string, args: string[]): string {
+  return execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
 }

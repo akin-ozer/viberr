@@ -5,7 +5,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { toolLoading } from "../../../test-support/mcp-tool-meta";
+import { callToolText, toolLoading } from "../../../test-support/mcp-tool-meta";
 import { runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
@@ -186,14 +186,7 @@ async function call(
     ctx: { dataRoot: app.dataRoot },
     user: { id: user.id, email: user.email, name: user.name },
   });
-  const tool = ops.tools.find((t) => t.name === toolName);
-  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
-  // SAFETY: every ops handler is wrapped by the shared `run`, which always
-  // returns the text shape: { content: [{ type: "text", text }] }.
-  const result = (await tool!.handler(args, {})) as {
-    content: { text: string }[];
-  };
-  return result.content[0]!.text;
+  return callToolText(ops.tools, toolName, args);
 }
 
 /**

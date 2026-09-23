@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +11,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { gitOutSync } from "../../../test-support/git-origin";
 import type {
   Engagement,
   TaskFrontmatter,
@@ -411,9 +411,6 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
 
-    const git = (cwd: string, args: string[]): string =>
-      execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
-
     // The workspace clone the delivery pushes from. `akin-ozer/viberr` → viberr.
     const repoDir = path.join(
       taskDir(store.slug, "VIB-1", store.dataRoot),
@@ -422,35 +419,35 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     );
     rmSync(repoDir, { recursive: true, force: true });
     mkdirSync(repoDir, { recursive: true });
-    git(repoDir, ["init", "-q", "-b", "main"]);
-    git(repoDir, ["config", "user.email", "t@viberr.local"]);
-    git(repoDir, ["config", "user.name", "Test"]);
+    gitOutSync(repoDir, ["init", "-q", "-b", "main"]);
+    gitOutSync(repoDir, ["config", "user.email", "t@viberr.local"]);
+    gitOutSync(repoDir, ["config", "user.name", "Test"]);
     writeFileSync(path.join(repoDir, "README.md"), "# repo\n");
-    git(repoDir, ["add", "-A"]);
-    git(repoDir, ["commit", "-q", "-m", "init"]);
+    gitOutSync(repoDir, ["add", "-A"]);
+    gitOutSync(repoDir, ["commit", "-q", "-m", "init"]);
 
     const remoteDir = path.join(store.dataRoot, "bare-origin.git");
     mkdirSync(remoteDir, { recursive: true });
-    git(remoteDir, ["init", "-q", "--bare"]);
-    git(repoDir, ["remote", "add", "origin", remoteDir]);
-    git(repoDir, ["push", "-q", "origin", "main"]);
-    git(repoDir, ["fetch", "-q", "origin"]);
+    gitOutSync(remoteDir, ["init", "-q", "--bare"]);
+    gitOutSync(repoDir, ["remote", "add", "origin", remoteDir]);
+    gitOutSync(repoDir, ["push", "-q", "origin", "main"]);
+    gitOutSync(repoDir, ["fetch", "-q", "origin"]);
 
     // A STRANGER's `vib-1` on the remote: a commit this task never made.
-    git(repoDir, ["checkout", "-q", "-b", "stranger", "main"]);
+    gitOutSync(repoDir, ["checkout", "-q", "-b", "stranger", "main"]);
     writeFileSync(path.join(repoDir, "stranger.txt"), "from a wiped instance\n");
-    git(repoDir, ["add", "-A"]);
-    git(repoDir, ["commit", "-q", "-m", "foreign work"]);
-    git(repoDir, ["push", "-q", "origin", "stranger:refs/heads/vib-1"]);
-    git(repoDir, ["checkout", "-q", "main"]);
-    git(repoDir, ["branch", "-q", "-D", "stranger"]);
+    gitOutSync(repoDir, ["add", "-A"]);
+    gitOutSync(repoDir, ["commit", "-q", "-m", "foreign work"]);
+    gitOutSync(repoDir, ["push", "-q", "origin", "stranger:refs/heads/vib-1"]);
+    gitOutSync(repoDir, ["checkout", "-q", "main"]);
+    gitOutSync(repoDir, ["branch", "-q", "-D", "stranger"]);
 
     // This task's OWN delivery: a local `vib-1` branched from main, so its
     // history and the remote's share only the root commit.
-    git(repoDir, ["checkout", "-q", "-b", "vib-1", "main"]);
+    gitOutSync(repoDir, ["checkout", "-q", "-b", "vib-1", "main"]);
     writeFileSync(path.join(repoDir, "work.txt"), "this task's work\n");
-    git(repoDir, ["add", "-A"]);
-    git(repoDir, ["commit", "-q", "-m", "[VIB-1] deliver"]);
+    gitOutSync(repoDir, ["add", "-A"]);
+    gitOutSync(repoDir, ["commit", "-q", "-m", "[VIB-1] deliver"]);
 
     const outcome = await performDelivery(
       store.db,
@@ -476,7 +473,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(event!.text).toContain("No review PR was opened");
     // And the remote branch still holds ONLY the stranger's commit — a refused
     // delivery never force-writes over it (R18-4).
-    const remoteTip = git(remoteDir, ["log", "-1", "--format=%s", "refs/heads/vib-1"]);
+    const remoteTip = gitOutSync(remoteDir, ["log", "-1", "--format=%s", "refs/heads/vib-1"]);
     expect(remoteTip).toBe("foreign work");
   });
 

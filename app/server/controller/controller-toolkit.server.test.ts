@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { publishedSchemas } from "../../../test-support/mcp-tool-meta";
+import { callToolText, publishedSchemas } from "../../../test-support/mcp-tool-meta";
 import {
   setupAppTest,
   type AppTestContext,
@@ -107,14 +107,7 @@ async function call(
     user: { id: user.id, email: user.email, name: user.name },
     projectSlug,
   });
-  const tool = toolkit.tools.find((t) => t.name === toolName);
-  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
-  // SAFETY: every toolkit handler is wrapped by `run`, which always returns
-  // the `textResult` shape: { content: [{ type: "text", text }] }.
-  const result = (await tool!.handler(args, {})) as {
-    content: { text: string }[];
-  };
-  return result.content[0]!.text;
+  return callToolText(toolkit.tools, toolName, args);
 }
 
 // ------------------------------------------------------------ tool surface
@@ -1934,14 +1927,7 @@ async function callAnchored(
     projectSlug: SLUG,
     taskKey,
   });
-  const tool = toolkit.tools.find((t) => t.name === toolName);
-  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
-  // SAFETY: every toolkit handler is wrapped by `run`, which always returns
-  // the `textResult` shape: { content: [{ type: "text", text }] }.
-  const result = (await tool!.handler(args, {})) as {
-    content: { text: string }[];
-  };
-  return result.content[0]!.text;
+  return callToolText(toolkit.tools, toolName, args);
 }
 
 describe("task anchoring (ruling 121)", () => {

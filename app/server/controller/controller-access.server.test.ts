@@ -5,6 +5,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { callToolText } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
 /**
@@ -518,14 +519,7 @@ async function callTool(
     user: { id: user.id, email: user.email, name: user.name },
     projectSlug: SLUG,
   });
-  const tool = toolkit.tools.find((t) => t.name === toolName);
-  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
-  // SAFETY: every toolkit handler is wrapped by `run`/`runWith`, which always
-  // answers the `textResult` shape: { content: [{ type: "text", text }] }.
-  const result = (await tool!.handler(args, {})) as {
-    content: { text: string }[];
-  };
-  return result.content[0]!.text;
+  return callToolText(toolkit.tools, toolName, args);
 }
 
 /** The shape `get_github_state` answers a permitted read with. */

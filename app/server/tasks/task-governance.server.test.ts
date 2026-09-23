@@ -1,10 +1,10 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { gitOutSync } from "../../../test-support/git-origin";
 import { taskDir } from "~/server/files/file-store-root.server";
 import {
   actorOf,
@@ -2415,10 +2415,6 @@ describe("resolvePacket kind matrix", () => {
     ],
   };
 
-  function gitc(cwd: string, args: string[]): string {
-    return execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
-  }
-
   /** A REAL workspace clone with a local task branch `vib-1-work`, at the dir
    *  findWorkspaceRepoDir resolves to for this project (repo `.../viberr`). */
   function initTaskWorkspace(store: TestStore, opts: { onRemote?: boolean } = {}): string {
@@ -2429,23 +2425,23 @@ describe("resolvePacket kind matrix", () => {
     );
     rmSync(repoDir, { recursive: true, force: true });
     mkdirSync(repoDir, { recursive: true });
-    gitc(repoDir, ["init", "-q", "-b", "main"]);
-    gitc(repoDir, ["config", "user.email", "t@viberr.local"]);
-    gitc(repoDir, ["config", "user.name", "Test"]);
+    gitOutSync(repoDir, ["init", "-q", "-b", "main"]);
+    gitOutSync(repoDir, ["config", "user.email", "t@viberr.local"]);
+    gitOutSync(repoDir, ["config", "user.name", "Test"]);
     writeFileSync(path.join(repoDir, "README.md"), "# repo\n");
-    gitc(repoDir, ["add", "-A"]);
-    gitc(repoDir, ["commit", "-q", "-m", "init"]);
-    gitc(repoDir, ["checkout", "-q", "-b", "vib-1-work"]);
+    gitOutSync(repoDir, ["add", "-A"]);
+    gitOutSync(repoDir, ["commit", "-q", "-m", "init"]);
+    gitOutSync(repoDir, ["checkout", "-q", "-b", "vib-1-work"]);
     writeFileSync(path.join(repoDir, "w.txt"), "w\n");
-    gitc(repoDir, ["add", "-A"]);
-    gitc(repoDir, ["commit", "-q", "-m", "work"]);
-    gitc(repoDir, ["checkout", "-q", "main"]);
+    gitOutSync(repoDir, ["add", "-A"]);
+    gitOutSync(repoDir, ["commit", "-q", "-m", "work"]);
+    gitOutSync(repoDir, ["checkout", "-q", "main"]);
     if (opts.onRemote) {
       const remoteDir = path.join(store.dataRoot, "bare-origin.git");
       mkdirSync(remoteDir, { recursive: true });
-      gitc(remoteDir, ["init", "-q", "--bare"]);
-      gitc(repoDir, ["remote", "add", "origin", remoteDir]);
-      gitc(repoDir, ["push", "-q", "origin", "vib-1-work"]);
+      gitOutSync(remoteDir, ["init", "-q", "--bare"]);
+      gitOutSync(repoDir, ["remote", "add", "origin", remoteDir]);
+      gitOutSync(repoDir, ["push", "-q", "origin", "vib-1-work"]);
     }
     return repoDir;
   }
@@ -2660,7 +2656,7 @@ describe("resolvePacket kind matrix", () => {
     // local-discard block and fm.branch stays "vib-1-work".
     expect(fm.branch).toBeNull();
     expect(() =>
-      gitc(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
+      gitOutSync(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
     ).toThrow();
     const discarded = listAuditEvents(store.db, { action: "task.branch.discarded" });
     expect(
@@ -2709,7 +2705,7 @@ describe("resolvePacket kind matrix", () => {
       RECOVERY_PACKET,
     );
     const repoDir = initTaskWorkspace(store);
-    const localSha = gitc(repoDir, ["rev-parse", "refs/heads/vib-1-work"]);
+    const localSha = gitOutSync(repoDir, ["rev-parse", "refs/heads/vib-1-work"]);
     expect(localSha).not.toBe(remoteSha);
 
     await resolvePacket(

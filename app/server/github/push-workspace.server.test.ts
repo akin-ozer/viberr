@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +9,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import { gitOutSync } from "../../../test-support/git-origin";
 import { createPat, recordPatValidation, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { PatValidation } from "~/schemas/github-pat.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
@@ -830,28 +830,24 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
   const REPO = () =>
     path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "viberr");
 
-  function git(cwd: string, args: string[]): string {
-    return execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
-  }
-
   /** A REAL git workspace at the repo dir findWorkspaceRepoDir resolves to. */
   function initWorkspaceRepo(withTaskBranch: boolean): string {
     const repoDir = REPO();
     // beforeEach left a fake empty `.git`; start from a clean real repo.
     rmSync(repoDir, { recursive: true, force: true });
     mkdirSync(repoDir, { recursive: true });
-    git(repoDir, ["init", "-q", "-b", "main"]);
-    git(repoDir, ["config", "user.email", "t@viberr.local"]);
-    git(repoDir, ["config", "user.name", "Test"]);
+    gitOutSync(repoDir, ["init", "-q", "-b", "main"]);
+    gitOutSync(repoDir, ["config", "user.email", "t@viberr.local"]);
+    gitOutSync(repoDir, ["config", "user.name", "Test"]);
     writeFileSync(path.join(repoDir, "README.md"), "# repo\n");
-    git(repoDir, ["add", "-A"]);
-    git(repoDir, ["commit", "-q", "-m", "init"]);
+    gitOutSync(repoDir, ["add", "-A"]);
+    gitOutSync(repoDir, ["commit", "-q", "-m", "init"]);
     if (withTaskBranch) {
-      git(repoDir, ["checkout", "-q", "-b", "vib-1-work"]);
+      gitOutSync(repoDir, ["checkout", "-q", "-b", "vib-1-work"]);
       writeFileSync(path.join(repoDir, "work.txt"), "work\n");
-      git(repoDir, ["add", "-A"]);
-      git(repoDir, ["commit", "-q", "-m", "work"]);
-      git(repoDir, ["checkout", "-q", "main"]);
+      gitOutSync(repoDir, ["add", "-A"]);
+      gitOutSync(repoDir, ["commit", "-q", "-m", "work"]);
+      gitOutSync(repoDir, ["checkout", "-q", "main"]);
     }
     return repoDir;
   }
@@ -872,7 +868,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     }
     // The branch is really gone.
     expect(() =>
-      git(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
+      gitOutSync(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
     ).toThrow();
   });
 
@@ -886,7 +882,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     const repoDir = initWorkspaceRepo(true);
     // A real origin the check cannot reach: the question EXISTS and goes
     // unanswered, which is the case that must refuse.
-    git(repoDir, ["remote", "add", "origin", "https://example.invalid/acme/app.git"]);
+    gitOutSync(repoDir, ["remote", "add", "origin", "https://example.invalid/acme/app.git"]);
 
     const out = await discardLocalTaskBranch({
       projectSlug: store.slug,
@@ -906,7 +902,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
           };
         }
         try {
-          return { ok: true, stdout: git(repoDir, args.slice(2)), stderr: "" };
+          return { ok: true, stdout: gitOutSync(repoDir, args.slice(2)), stderr: "" };
         } catch (error) {
           return { ok: false, stdout: "", stderr: String(error) };
         }
@@ -921,13 +917,13 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     // The commits are still there — nothing was destroyed on an unanswered
     // safety question.
     expect(() =>
-      git(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
+      gitOutSync(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
     ).not.toThrow();
   });
 
   it("steps off the branch when HEAD is on it, then deletes", async () => {
     const repoDir = initWorkspaceRepo(true);
-    git(repoDir, ["checkout", "-q", "vib-1-work"]); // HEAD now ON the branch
+    gitOutSync(repoDir, ["checkout", "-q", "vib-1-work"]); // HEAD now ON the branch
     const out = await discardLocalTaskBranch({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -936,7 +932,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
       dataRoot: store.dataRoot,
     });
     expect(out.status).toBe("deleted");
-    expect(git(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
+    expect(gitOutSync(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
   });
 
   it("reports not_found when the branch is not in the workspace", async () => {
@@ -955,9 +951,9 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     const repoDir = initWorkspaceRepo(true);
     const remoteDir = path.join(store.dataRoot, "bare-origin.git");
     mkdirSync(remoteDir, { recursive: true });
-    git(remoteDir, ["init", "-q", "--bare"]);
-    git(repoDir, ["remote", "add", "origin", remoteDir]);
-    git(repoDir, ["push", "-q", "origin", "vib-1-work"]);
+    gitOutSync(remoteDir, ["init", "-q", "--bare"]);
+    gitOutSync(repoDir, ["remote", "add", "origin", remoteDir]);
+    gitOutSync(repoDir, ["push", "-q", "origin", "vib-1-work"]);
     const out = await discardLocalTaskBranch({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -968,7 +964,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     expect(out.status).toBe("on_remote");
     // A refused discard leaves the local branch intact.
     expect(() =>
-      git(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
+      gitOutSync(repoDir, ["rev-parse", "--verify", "refs/heads/vib-1-work"]),
     ).not.toThrow();
   });
 
