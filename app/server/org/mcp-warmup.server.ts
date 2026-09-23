@@ -46,11 +46,6 @@ type WarmupArgs = Parameters<typeof startMcpWarmup>;
  *  manual retest able to recover it. */
 const pending = new Map<string, { input: WarmupArgs[1]; options: WarmupArgs[2] }>();
 
-/** True while this server has a background install running here. */
-export function isWarming(id: string): boolean {
-  return inFlight.has(id);
-}
-
 /** Test seam — the suite must never leave a real warm-up armed. */
 export function resetWarmupsForTest(): void {
   inFlight.clear();

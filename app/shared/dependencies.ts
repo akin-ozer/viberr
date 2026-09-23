@@ -109,26 +109,6 @@ export function canonicalDependencyRef(text: string): string | null {
   return ref ? formatDependencyRef(ref) : null;
 }
 
-/** Parse a whole `blockedBy` list, dropping duplicates (after canonicalizing)
- *  and returning the first unparseable spelling so a writer can refuse it by
- *  name. */
-export interface ParsedDependencyList {
-  /** The canonical spellings, in order, deduplicated. */
-  refs: string[];
-  /** The first spelling that did not parse, or null when every one did. */
-  invalid: string | null;
-}
-
-export function parseDependencyList(entries: readonly string[]): ParsedDependencyList {
-  const refs: string[] = [];
-  for (const entry of entries) {
-    const canonical = canonicalDependencyRef(entry);
-    if (!canonical) return { refs, invalid: entry };
-    if (!refs.includes(canonical)) refs.push(canonical);
-  }
-  return { refs, invalid: null };
-}
-
 /** Split the free-text form the Details editor submits (one entry per line or
  *  comma) into raw entries. */
 export function splitDependencyText(text: string): string[] {

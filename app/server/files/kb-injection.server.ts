@@ -240,7 +240,7 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       // (a grant stored under the display name) and KM-07 (a rename that
       // orphaned every reference). Live-proven: after renaming a KB, a fresh
       // run reported "there is no p13-facts knowledge base reaching this run"
-      // while every UI still showed it attached. Mirrors readSkillBody.
+      // while every UI still showed it attached. Mirrors readSkillBodyDetailed.
       logger.warn(
         "declared knowledge base not found in the store — run proceeds WITHOUT it",
         { kb: name },

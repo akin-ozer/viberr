@@ -55,17 +55,6 @@ function encodeSegment(segment: string): string {
   );
 }
 
-/** The canonical (encoded) URI path for an object key, keeping "/" separators. */
-export function canonicalKeyPath(key: string): string {
-  return (
-    "/" +
-    key
-      .split("/")
-      .map((seg) => encodeSegment(seg))
-      .join("/")
-  );
-}
-
 /**
  * F26-7: the canonical URI for a request, folding in any BASE PATH the endpoint
  * carries.

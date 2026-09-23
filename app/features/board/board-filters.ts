@@ -200,11 +200,6 @@ export function isBoardFilterId(value: string | null): value is BoardFilterId {
   );
 }
 
-/** Branch chip truncation — exact mock rule (>16 chars → 15 + "…"). */
-export function shortBranch(branch: string): string {
-  return branch.length > 16 ? branch.slice(0, 15) + "…" : branch;
-}
-
 /**
  * P13-D-34 (UX-4): every column printed the bare string "No tasks" for a
  * filter+search result, so a board hiding 12 tasks behind an active filter

@@ -149,14 +149,3 @@ export function DueDatePill({
     </Pill>
   );
 }
-
-/** True when a task carries any non-default metadata worth a dedicated row. */
-export function hasVisibleMeta(task: {
-  priority: TaskPriority;
-  labels: readonly string[];
-  dueDate: string | null;
-}): boolean {
-  return (
-    task.priority !== "normal" || task.labels.length > 0 || task.dueDate != null
-  );
-}

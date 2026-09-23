@@ -16,7 +16,7 @@ import { logger } from "~/server/logging/logger.server";
  *
  * BUDGET (P14-KM-03, then C2/pass-16). Knowledge bases have been budgeted since
  * F9; skills first got a cap in P14-KM-03 — but a PER-SKILL one, applied fresh
- * on every `readSkillBody` call inside the caller's loop. N skills × 24 k is
+ * on every per-skill read inside the caller's loop. N skills × 24 k is
  * unbounded, which is precisely the failure the KB budget exists to prevent, so
  * {@link readSkillBodies} spends ONE shared budget across the whole declared
  * list exactly as the KB leg does — including the "omitted entirely" marker for
@@ -201,16 +201,6 @@ export function readSkillBodyDetailed(
   return {
     body: `${trimmed.slice(0, budgetChars)}\n\n_(skill truncated — SKILL.md is ${trimmed.length} chars and exceeds the ${budgetChars}-char injection budget)_`,
   };
-}
-
-/** Read one skill's body, or "" when absent/unreadable/uncontained. Thin
- *  wrapper over {@link readSkillBodyDetailed} for callers that only inject. */
-export function readSkillBody(
-  name: string,
-  dataRoot?: string,
-  budgetChars: number = SKILL_INJECTION_BUDGET,
-): string {
-  return readSkillBodyDetailed(name, dataRoot, budgetChars).body;
 }
 
 export interface SkillInjectionSet {

@@ -520,6 +520,12 @@ export function nativeSkillNames(skills?: readonly string[]): string[] {
   return [...new Set(skills)].filter(isSdkSkillName);
 }
 
+/** What the start could enable natively, and what it had to drop. */
+export interface NativeSkillsOutcome {
+  native: string[];
+  dropped: string[];
+}
+
 /**
  * The skills THIS run enables natively — the names above, gated on the one
  * precondition the native channel cannot run without: the run's plugin
@@ -546,12 +552,6 @@ export function nativeSkillNames(skills?: readonly string[]): string[] {
  * (`droppedSkillsNotice`). The agent then treats them as unavailable instead
  * of invoking a name that never loads.
  */
-/** What the start could enable natively, and what it had to drop. */
-export interface NativeSkillsOutcome {
-  native: string[];
-  dropped: string[];
-}
-
 export function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
   const granted = nativeSkillNames(spec.skills);
   if (granted.length === 0) return { native: [], dropped: [] };
@@ -561,10 +561,6 @@ export function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
     { runId: spec.runId, plugin: spec.skillPlugin?.path ?? null, skills: granted },
   );
   return { native: [], dropped: granted };
-}
-
-export function nativeSkillsForRun(spec: RunSpec): string[] {
-  return nativeSkillsOutcome(spec).native;
 }
 
 /** The system-prompt correction for skills the persona announced as attached

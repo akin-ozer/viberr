@@ -7,7 +7,6 @@ import {
   matchesBoardFilter,
   matchesLabelFilter,
   matchesSearch,
-  shortBranch,
   type FilterableTask,
   type SearchableTask,
 } from "./board-filters";
@@ -257,14 +256,6 @@ describe("matchesSearch", () => {
   it("misses unrelated text", () => {
     expect(matchesSearch(task, "billing")).toBe(false);
     expect(matchesSearch(task, "junior-reviewer")).toBe(false);
-  });
-});
-
-describe("shortBranch", () => {
-  it("keeps ≤16 chars, truncates to 15 + ellipsis beyond", () => {
-    expect(shortBranch("main")).toBe("main");
-    expect(shortBranch("1234567890123456")).toBe("1234567890123456");
-    expect(shortBranch("vib-142-attach-workspace")).toBe("vib-142-attach-…");
   });
 });
 

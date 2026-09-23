@@ -56,10 +56,6 @@ import { extractMentions, findMentionSpans } from "~/ui/mention-spans";
  * makes the handle ambiguous (guessing stays worse than a visible non-delivery).
  */
 
-/** Single-token mention grammar. Kept exported for callers that only need the
- *  raw token shape; routing itself goes through `extractMentions`. */
-export const MENTION_RE = /@([A-Za-z][\w-]*)/g;
-
 /** Handles that route to agents, never to a person named e.g. "Claude". */
 // "controller" (ruling 99): the instance controller's handle never maps to a human.
 export const RESERVED_HANDLES = new Set(["agent", "operator", "codex", "claude", "controller"]);
@@ -324,24 +320,6 @@ function resolveIn(
   const members = projectMemberIds(db, projectSlug);
   if (members === null) return resolveMentionTargets(users, text);
   return resolveMentionTargets(users, text, members);
-}
-
-/**
- * The @handles in `text` that route to nobody, resolved against the same user
- * set the fan-out uses. Callers that must disclose the non-delivery need the
- * handles BEFORE anything is written, so the disclosure and the comment land in
- * one write.
- *
- * `projectSlug` is optional only because the call sites predate F33-9; pass it
- * whenever the comment belongs to a project, or a non-member tag is dropped
- * without the author being told (see {@link mentionNonDeliveryNote}).
- */
-export function ambiguousMentionHandles(
-  db: DatabaseSync,
-  text: string,
-  projectSlug?: string,
-): string[] {
-  return resolveIn(db, text, projectSlug).ambiguous;
 }
 
 /**

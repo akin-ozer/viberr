@@ -79,11 +79,6 @@ export type PrHumanApproval = z.infer<typeof prHumanApprovalSchema>;
 /** The `pr` key this record lives under. */
 export const PR_HUMAN_APPROVAL_KEY = "humanApproval";
 
-/** A project member, as the reconciler can cheaply supply it. */
-export interface ProjectMemberIds {
-  userId: string;
-}
-
 type UserHandleRow = {
   id: string;
   name: string | null;

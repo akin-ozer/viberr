@@ -9,9 +9,9 @@ import { BACKEND_LABEL } from "~/shared/text/backend-label";
  * Mentionable directory for the task-comment composer's @-autocomplete.
  *
  * The composer suggests three groups, mirroring exactly how the server
- * resolves an @mention when a comment is posted (see task-actions.server.ts
- * `MENTION_RE`/`RESERVED_HANDLES` + agent-reply.server.ts
- * `resolveMentionedAgent`):
+ * resolves an @mention when a comment is posted (see mention-notify.server.ts
+ * `resolveMentionTargets` — ~/ui/mention-spans `extractMentions` minus
+ * `RESERVED_HANDLES` — + agent-reply.server.ts `resolveMentionedAgent`):
  *
  *   - agents   : the task/project's deployed specialists. The composer's
  *                handle is the specialist's `id` (space-free and stable); the

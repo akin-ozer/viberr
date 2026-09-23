@@ -443,9 +443,9 @@ describe("mentions stay inside the project (F33-9)", () => {
   });
 
   it("the human comment path writes the non-delivery next to the comment", async () => {
-    // The seam, not the note: `appendComment` used to call
-    // `ambiguousMentionHandles(db, text)` with no project, so the F33-9 half of
-    // the report never reached the author — proven live before this test existed
+    // The seam, not the note: `appendComment` used to ask only for the ambiguous
+    // handles, with no project, so the F33-9 half of the report never reached
+    // the author — proven live before this test existed
     // (the comment landed, the notification was correctly withheld, and nothing
     // on the page said the tag had gone nowhere).
     const store = setupTestStore(ctx);

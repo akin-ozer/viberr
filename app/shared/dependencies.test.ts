@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalDependencyRef,
   formatDependencyRef,
-  parseDependencyList,
   parseDependencyRef,
   splitDependencyText,
 } from "./dependencies";
@@ -53,17 +52,6 @@ describe("dependency references — the two spellings and nothing else", () => {
     }
     expect(canonicalDependencyRef("jc-6")).toBe("JC-6");
     expect(canonicalDependencyRef("nope")).toBeNull();
-  });
-
-  it("parses a whole list: dedupes after canonicalizing and names the first bad entry", () => {
-    expect(parseDependencyList(["jc-6", "JC-6", "goal-1 link 3"])).toEqual({
-      refs: ["JC-6", "goal-1 link 3"],
-      invalid: null,
-    });
-    expect(parseDependencyList(["JC-6", "goal-1 link", "JC-7"])).toEqual({
-      refs: ["JC-6"],
-      invalid: "goal-1 link",
-    });
   });
 
   it("splits the editor's free text on newlines and commas", () => {

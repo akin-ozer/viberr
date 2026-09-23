@@ -3791,9 +3791,10 @@ function readOperatorDefinition(dataRoot?: string): string {
   return FALLBACK_OPERATOR_DEFINITION;
 }
 
-// P11-36: readSkillBody now lives in ~/server/files/skill-body.server (shared
-// with the specialist runtime) so the operator and specialists resolve declared
-// skills identically — one code path, one missing-skill warning.
+// P11-36: the skill reader (`readSkillBodies`) lives in
+// ~/server/files/skill-body.server (shared with the specialist runtime) so the
+// operator and specialists resolve declared skills identically — one code path,
+// one missing-skill warning.
 
 // readKbBody now lives in ~/server/files/kb-injection.server (shared with the
 // specialist runtime): recursive tree walk + all text-doc extensions, so

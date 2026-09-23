@@ -36,7 +36,6 @@ export const GOAL_STATUS_VALUES = [
   "completed",
   "cancelled",
 ] as const;
-export type GoalStatus = (typeof GOAL_STATUS_VALUES)[number];
 
 export const GOAL_LINK_STATUS_VALUES = [
   "pending",
@@ -45,10 +44,8 @@ export const GOAL_LINK_STATUS_VALUES = [
   "failed",
   "skipped",
 ] as const;
-export type GoalLinkStatus = (typeof GOAL_LINK_STATUS_VALUES)[number];
 
 export const GOAL_ON_FAILURE_VALUES = ["pause", "continue"] as const;
-export type GoalOnFailure = (typeof GOAL_ON_FAILURE_VALUES)[number];
 
 export const goalLinkSchema = z.object({
   /** 1-based position in the chain. */
