@@ -4,6 +4,10 @@ import type { PerfBudgetTable } from "../perf-verdict";
 const BOARD_40 =
   "jsdom: BoardPage with 40 cards over five lanes (agent working, PRs, branches, owners, agent seats, problem chips) for a viewer who can move tasks; a revalidation is structuredClone of the board";
 
+/** The local-time.perf.test.tsx fixture. */
+const LOCAL_STAMPS =
+  "jsdom: thirty LocalDayDotTime stamps mounted by a client render (no hydration) in Pacific/Auckland, inside a Profiler";
+
 /** Ruling 454 ratchet ceilings: client render work and CSS (board cards, icons, hydration). */
 export const RENDER_BUDGETS: PerfBudgetTable = {
   // TASK-8 / LIVE-6 / BOARD-4 / CTL-5: 12 before the per-glyph {__html} cache
@@ -66,5 +70,19 @@ export const RENDER_BUDGETS: PerfBudgetTable = {
     journey: "board-live",
     fixture:
       "jsdom: StageBoard in a DragDropProvider, 40 cards over five lanes, a card dragged over the review lane; its landing slot moves",
+  },
+  // CSS-3: 2 while useHydrated started false on every mount.
+  "render:local-time.commits-per-client-mount": {
+    ceiling: 1,
+    unit: "count",
+    journey: "task-open",
+    fixture: LOCAL_STAMPS,
+  },
+  // CSS-3: 30 before (every stamp swapped from its UTC form after mounting).
+  "render:local-time.text-rewrites-per-client-mount": {
+    ceiling: 0,
+    unit: "count",
+    journey: "task-open",
+    fixture: `${LOCAL_STAMPS}; characterData MutationObserver records`,
   },
 };
