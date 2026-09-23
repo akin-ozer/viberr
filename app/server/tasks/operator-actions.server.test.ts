@@ -15,9 +15,12 @@ import {
   deliveringEngagement,
   supportingEngagements,
   type Recommendation,
+  type TaskPacket,
   type WorkRevision,
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
@@ -42,6 +45,7 @@ import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
+  AGENT_REPORT_CAP_TOOLLESS,
   AUTONOMY_CLAMPED_AUDIT_ACTION,
   clampAutonomy,
   deliverGate,
@@ -52,9 +56,14 @@ import {
   operatorDispatchAgent,
   operatorOpenPacket,
   operatorPostComment,
+  operatorProposeRuling,
+  operatorLeaseFiles,
   operatorSetGoal,
+  PROPOSED_RULINGS_HEADING,
+  RULING_PROPOSAL_TITLE,
   operatorResolvePacket,
   operatorSnapshot,
+  OPERATOR_TIMELINE_DEFAULT,
   operatorTransitionStage,
   operatorAutonomyFor,
   operatorBackendFor,
@@ -146,6 +155,40 @@ function seedTask(stage: string): void {
       ownerUserId: store.users.arda.id,
       operator: { assignedAtStageId: "triage" },
       title: "Operator drive",
+    }),
+    goal: "Prove the operator drives the task.",
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
+/** Ruling 384: a delivered, reviewed, approved task with a live review PR —
+ *  the shape an acceptance card's merge clause is true for. */
+function seedAcceptable(stage: string): void {
+  const sha = "a".repeat(40);
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter("VIB-1", {
+      stage,
+      ownerUserId: store.users.arda.id,
+      operator: { assignedAtStageId: "triage" },
+      title: "Operator drive",
+      branch: "vib-1-work",
+      workRevision: {
+        id: "rev_1",
+        headSha: sha,
+        treeSha: "t".repeat(40),
+        branch: "vib-1-work",
+        createdAt: "2026-07-25T09:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+      engagements: [
+        { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+        { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+      ],
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: sha, result: "approve", reason: "looks right", at: "2026-07-25T09:30:00.000Z", rounds: 1 },
+      ],
+      validation: "healthy",
+      pr: { number: 7, state: "review", title: "[VIB-1] work", headSha: sha, mergeable: "clean" },
     }),
     goal: "Prove the operator drives the task.",
   });
@@ -1085,6 +1128,108 @@ describe("dispatchGate — absent means the catalog default (hunt 2026-08-29)", 
   });
 });
 
+/**
+ * Ruling 421 (F39-43). Ruling 410 has the operator ask a reviewer that keeps
+ * objecting for everything it would still block on, and on ax-clone every
+ * operator folded that question into the review of a fresh rework. Nothing
+ * recorded that it had, so three deadlock packets in 25 minutes (AX-20, AX-22,
+ * AX-24) recommended asking again the question their own verdict had answered.
+ * The dispatch that puts the question now stamps the engagement with its run.
+ */
+describe("ruling 421: a dispatch that puts the completeness question says so", () => {
+  it("stamps the reviewer's engagement with THIS run's id; a plain dispatch stamps nothing", async () => {
+    // CANARY: drop the stamp in `dispatchAgentRun` (or stop threading
+    // `completeness` through `operatorDispatchAgent`) and `question` stays empty.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const plain = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", prompt: "Review the revision." },
+      authority("supervised"),
+    );
+    expect(plain.outcome).toBe("done");
+    const engaged = () => task().frontmatter.engagements.find((e) => e.profileId === "reviewer");
+    expect(engaged()?.question ?? null).toBeNull();
+    await interruptRunningRuns("VIB-1");
+
+    const asked = await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        profileId: "reviewer",
+        prompt: "Review the rework, and name everything you would still block on.",
+        completeness: true,
+      },
+      authority("supervised"),
+    );
+    expect(asked.outcome).toBe("done");
+    const newest = listRunsForTask(store.db, store.slug, "VIB-1")
+      .filter((r) => r.kind === "reviewer")
+      .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""))
+      .at(-1)!;
+    expect(engaged()?.question).toMatchObject({ kind: "completeness", runId: newest.serverRunId });
+    await interruptRunningRuns("VIB-1");
+  });
+
+  it("the Claude operator's run_agent tool threads `completeness` to the stamp", async () => {
+    // CANARY: drop `if (args.completeness) input.completeness = true` from the
+    // toolkit's run_agent handler and the engagement carries no question.
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const { buildOperatorToolkit } = await import("./operator-toolkit.server");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority("supervised"),
+    });
+    const runAgent = toolkit.tools.find((t) => t.name === "run_agent")!;
+    // SAFETY: the handler validates its own arguments; this is the shape the
+    // tool's schema declares.
+    await runAgent.handler(
+      { profileId: "reviewer", prompt: "Name everything you would still block on.", completeness: true } as never,
+      {} as never,
+    );
+    const run = listRunsForTask(store.db, store.slug, "VIB-1").find((r) => r.kind === "reviewer")!;
+    expect(
+      task().frontmatter.engagements.find((e) => e.profileId === "reviewer")?.question,
+    ).toMatchObject({ kind: "completeness", runId: run.serverRunId });
+    await interruptRunningRuns("VIB-1");
+  });
+
+  it("a recommended completeness run carries the flag on its card, and Apply stamps it", async () => {
+    // CANARY: drop `rec.completeness` from the recommend arm or from Apply.
+    deployRoster([
+      { capabilityId: "dispatch-agents", mode: "recommend" },
+      { capabilityId: "append-typed-events", mode: "direct" },
+    ]);
+    seedTask("review");
+    await operatorDispatchAgent(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "reviewer", prompt: "Name everything you would block on.", completeness: true },
+      authority("supervised"),
+    );
+    const card = task().frontmatter.recommendations[0]!;
+    expect(card).toMatchObject({ kind: "run_agent", profileId: "reviewer", completeness: true });
+    await applyRecommendation(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", recId: card.id },
+      { userId: store.users.arda.id, label: "Arda" },
+      { dataRoot: store.dataRoot },
+    );
+    const run = listRunsForTask(store.db, store.slug, "VIB-1").find((r) => r.kind === "reviewer")!;
+    expect(
+      task().frontmatter.engagements.find((e) => e.profileId === "reviewer")?.question,
+    ).toMatchObject({ kind: "completeness", runId: run.serverRunId });
+    await interruptRunningRuns("VIB-1");
+  });
+});
+
 describe("operatorDispatchAgent — supporting posture (delivers derivation)", () => {
   it("a verdict-capable, non-repo-write profile auto-engages as SUPPORTING and runs as a reviewer", async () => {
     // resolveDeliversIntent: no explicit hint, unengaged, and no repo-write
@@ -1855,7 +2000,11 @@ describe("operatorTransitionStage", () => {
    */
   it("F19-26: a supervised transition to the TERMINAL stage produces an ACCEPTANCE card, not a disguised move", async () => {
     deployRoster(DEFAULT_POLICY);
-    seedTask("review");
+    // Ruling 384: a task that HAS a reviewed pull request, so the merge clause
+    // the case is about is a true one. The no-PR and no-verdict shapes are
+    // their own cases below — this fixture used to be neither, and the card
+    // promised a merge for a task with nothing to merge (R19-8, regressed).
+    seedAcceptable("review");
     const r = await operatorTransitionStage(
       store.db,
       { dataRoot: store.dataRoot },
@@ -1873,6 +2022,8 @@ describe("operatorTransitionStage", () => {
     expect(recs[0]!.label).toContain("Done");
     expect(recs[0]!.detail).toMatch(/Accepting completion moves/i);
     expect(recs[0]!.detail).toMatch(/merges the review PR/i);
+    // Ruling 384: and it OPENS by naming the approval it rests on.
+    expect(recs[0]!.detail).toMatch(/approved `[0-9a-f]{7}`/);
     // The pre-fix harm, gone from every string the human reads: a bland move
     // that never says "accept" or "merge" over an irreversible merge.
     const rendered = [r.message, recs[0]!.label, recs[0]!.detail].join("\n");
@@ -1882,6 +2033,35 @@ describe("operatorTransitionStage", () => {
     expect(
       listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
     ).toHaveLength(1);
+  });
+
+  /**
+   * Ruling 384 (F39-12), live on ax-clone AX-12. The deliverer wrote a report,
+   * committed nothing and opened no PR. The operator moved the task Design →
+   * Build → Verify → Review in three minutes, its own plan reasoning saying
+   * "advance to Review **for the required reviewer verdict**" — and then, on
+   * the next turn, filed a one-click acceptance card reading "The review is
+   * clean and the work meets the goal. … merges the review PR when GitHub is
+   * reachable." `verdicts` was `[]`, `validation` was `none`, no reviewer was
+   * ever engaged, and there was no pull request to merge. Both halves of the
+   * sentence were fixed prose over state the file already held.
+   */
+  it("ruling 384: the card does not claim a review nobody gave, or a merge with no PR", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("review");
+    const r = await operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done" },
+      authority("supervised"),
+    );
+    expect(r.outcome).toBe("recommended");
+    const detail = task().frontmatter.recommendations[0]!.detail;
+    // CANARY: restore either fixed sentence and one of these fails.
+    expect(detail).not.toMatch(/review is clean/i);
+    expect(detail).not.toMatch(/merges the review PR/i);
+    expect(detail).toContain("No review verdict is recorded on this task");
+    expect(detail).toContain("no pull request on this task, so nothing is merged");
   });
 
   /**
@@ -3264,7 +3444,9 @@ describe("applyRecommendation / dismissRecommendation", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(snapshot().blockedBy).toEqual([]);
     const { setTaskDependencies } = await import("./dependencies.server");
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-77", { stage: "done", waiting: "none" }) });
+    // F39-63: a wait is added while its entry is open; the snapshot then
+    // resolves the entry as it stands.
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-77", { stage: "impl", waiting: "none" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     await setTaskDependencies(
       store.db,
@@ -3278,6 +3460,11 @@ describe("applyRecommendation / dismissRecommendation", () => {
       { userId: "operator", label: "operator" },
       { dataRoot: store.dataRoot, operatorAuthorized: true },
     );
+    expect(snapshot().blockedBy).toEqual([
+      { ref: "VIB-77", label: "VIB-77", state: "open", taskKey: "VIB-77", goalId: null },
+    ]);
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-77", { stage: "done", waiting: "none" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     expect(snapshot().blockedBy).toEqual([
       { ref: "VIB-77", label: "VIB-77", state: "done", taskKey: "VIB-77", goalId: null },
     ]);
@@ -3439,6 +3626,384 @@ describe("auto-invoke on task creation", () => {
     const t = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
     expect(deliveringEngagement(t.frontmatter)).toBeNull();
     expect(listRunsForTask(store.db, store.slug, created.key)).toHaveLength(0);
+  });
+});
+
+/**
+ * Ruling 417 (owner, 2026-09-23): the operator leases files to its OWN task,
+ * first come first served. On ax-clone AX-20 and AX-21 collided on
+ * `internal/sandbox/local.go`, which cost an agent run, a decision packet and
+ * the owner's answer: the operator saw the collision (ruling 413) and had no
+ * move to make about it.
+ */
+describe("operatorLeaseFiles (ruling 417)", () => {
+  const prAt = (number: number, changed: string[]) => ({
+    number,
+    state: "review" as const,
+    title: `PR ${number}`,
+    paths: { headSha: "a".repeat(40), changed, truncated: false },
+  });
+  function seedBoard(): void {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "impl",
+        branch: "vib-2",
+        pr: prAt(13, ["internal/sandbox/local.go", "internal/runtime/executor.go"]),
+        ownerUserId: store.users.arda.id,
+      }),
+      goal: "collides on the sandbox file",
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", {
+        stage: "impl",
+        branch: "vib-3",
+        pr: prAt(14, ["docs/manifests.md"]),
+      }),
+      goal: "touches nothing leased",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+  const leases = () =>
+    readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.fileLeases;
+  const lease = (taskKey: string, paths: string[], reason = "rewriting the sandbox lifetime") =>
+    operatorLeaseFiles(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey, paths, reason },
+      authority("full"),
+    );
+  const timelineOf = (taskKey: string) =>
+    readTaskFile({ projectSlug: store.slug, taskKey, dataRoot: store.dataRoot })!.parsed.timeline;
+
+  it("leases to its own task, records it, and tells the task whose open PR it now blocks", async () => {
+    seedBoard();
+    // CANARY: drop the write and the project holds no lease; drop the
+    // affected-task loop and VIB-2 learns at its next refused push.
+    const r = await lease("VIB-1", ["internal/sandbox/**"]);
+    expect(r.outcome).toBe("done");
+    expect(leases()).toEqual([
+      { paths: ["internal/sandbox/**"], taskKey: "VIB-1", reason: "rewriting the sandbox lifetime" },
+    ]);
+    expect(r.message).toContain("VIB-2 (PR #13)");
+    expect(timelineOf("VIB-1")[0]).toMatchObject({ type: "note", title: "Files leased" });
+    const told = timelineOf("VIB-2")[0]!;
+    expect(told.type).toBe("policy");
+    expect(told.text).toContain("`internal/sandbox/local.go`");
+    expect(told.text).toContain("next delivery is refused");
+    // VIB-3's PR touches nothing leased and is told nothing.
+    expect(timelineOf("VIB-3").some((e) => e.title === "Files leased by another task")).toBe(false);
+    expect(
+      listNotifications(store.db, store.users.arda.id).some((n) => n.title === "Files leased by another task"),
+    ).toBe(true);
+    expect(
+      listAuditEvents(store.db).some(
+        (e) => e.action === "project.file_leases.updated" && e.taskKey === "VIB-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("first come, first served: an overlapping path another active task holds is refused by name", async () => {
+    seedBoard();
+    await lease("VIB-1", ["internal/sandbox/**"]);
+    // CANARY: drop `leaseHeldAgainst` and VIB-2 gets a lease on a file VIB-1
+    // holds, and each task's delivery is then refused by the other's.
+    const r = await lease("VIB-2", ["internal/sandbox/local.go"], "mine too");
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("`internal/sandbox/**` is already held by VIB-1");
+    expect(r.message).toContain("First come, first served");
+    expect(leases()).toHaveLength(1);
+  });
+
+  /**
+   * Ruling 426 (pass 39): live on ax-clone AX-22's operator leased
+   * `internal/controller/task.go`, which AX-20's open PR already changed, and
+   * AX-21, AX-5 and goal-6 waited on AX-20. AX-20's operator then made AX-20
+   * wait on AX-22, and the critical path sat behind AX-22's ninth review round.
+   */
+  it("ruling 426: refuses a lease that would hold work other tasks wait on, and names who waits", async () => {
+    seedBoard();
+    // VIB-4 and VIB-5 wait on VIB-2, whose open PR #13 changes the sandbox file.
+    for (const key of ["VIB-4", "VIB-5"]) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "triage", blockedBy: ["VIB-2"] }),
+        goal: "waits on VIB-2",
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // CANARY: drop the `stalled` check and VIB-1 takes the lease, and VIB-2
+    // (and everything behind it) waits on VIB-1.
+    const r = await lease("VIB-1", ["internal/sandbox/**"]);
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toBe(
+      "`internal/sandbox/local.go` is changed by VIB-2's open PR #13, and VIB-4 and VIB-5 wait on VIB-2: " +
+        "leasing it to VIB-1 would hold all of them behind VIB-1. Which of the two lands first is a person's " +
+        "call (ruling 426). Open a decision packet that names both tasks and what waits on each, keep VIB-1's " +
+        "work off those paths, or wait for VIB-2 to merge (set_dependencies). Nothing was leased.",
+    );
+    expect(leases() ?? []).toEqual([]);
+    expect(timelineOf("VIB-2").some((e) => e.title === "Files leased by another task")).toBe(false);
+    // A path no waited-on PR changes is still the operator's to lease.
+    const docs = await lease("VIB-1", ["docs/manifests.md"], "the manifest reference");
+    expect(docs.outcome).toBe("done");
+  });
+
+  it("ruling 426: refuses a lease that would make the leaser and the other task wait on each other", async () => {
+    seedBoard();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", branch: "vib-1", blockedBy: ["VIB-2"] }),
+      goal: "the leaser itself waits on VIB-2",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // CANARY: drop the cycle arm and this reads as a stall with nobody named.
+    const r = await lease("VIB-1", ["internal/sandbox/**"]);
+    expect(r.outcome).toBe("noop");
+    expect(r.message).toContain("VIB-1 itself waits on VIB-2");
+    expect(r.message).toContain("would make each wait for the other to merge");
+    expect(leases() ?? []).toEqual([]);
+  });
+
+  it("is idempotent for what the task already holds, and refused without delivery authority", async () => {
+    seedBoard();
+    await lease("VIB-1", ["internal/sandbox/**"]);
+    const again = await lease("VIB-1", ["internal/sandbox/**"]);
+    expect(again.outcome).toBe("noop");
+    expect(again.message).toContain("already holds");
+    expect(leases()).toHaveLength(1);
+
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "deliver-review-pr", mode: "off" }]);
+    const denied = await lease("VIB-1", ["docs/**"]);
+    expect(denied.outcome).toBe("denied");
+    expect(leases()).toHaveLength(1);
+  });
+});
+
+describe("operatorProposeRuling", () => {
+  /**
+   * F39-1/F39-7 (pass 39, owner ruling): the operator can write a CORRECTION
+   * into the project's settled rulings, as a proposal, and nothing more.
+   *
+   * Before this the delivery loop had no writer for the rulings KB at all — the
+   * operator's toolkit had none, specialists have none, and the controller only
+   * runs when a human talks to it. Live, the rulings demanded
+   * `go test -race ./...`, the host had CGO off and no C compiler, the developer
+   * proved it, the reviewer re-proved it independently, and the false rule kept
+   * being injected into every run as binding truth while the operator could only
+   * say so in a comment.
+   */
+  async function seedRulingsKb(docBody: string): Promise<string> {
+    const { saveKnowledgeBase } = await import("~/server/org/resources.server");
+    const { resolveStoreTarget } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const actor = { kind: "user" as const, userId: store.users.arda.id, label: "arda" };
+    const { kb } = await saveKnowledgeBase(
+      store.db,
+      { name: "ax-rulings", refresh: "on change" },
+      actor,
+      { dataRoot: store.dataRoot },
+    );
+    const target = resolveStoreTarget(store.db, "kb", kb.id, {
+      dataRoot: store.dataRoot,
+    })!;
+    writeStoreDoc(store.db, target, [], "environment-and-gates.md", docBody, actor);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      rulingsKb: kb.dir,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    return target.rootAbs;
+  }
+
+  it("appends a non-binding proposal into the named rulings document, with the event, audit and notification", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const root = await seedRulingsKb(
+      "# Environment and gates\n\n- Every test must pass under `go test -race ./...`.\n",
+    );
+    const r = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        doc: "environment-and-gates.md",
+        text: "Strike the -race requirement: this host cannot run it.",
+        // A model answering a field called `evidence` writes the label too;
+        // the writer strips one rather than doubling it.
+        evidence: "Evidence: `CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.",
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    expect(r.message).toContain("NOT binding");
+
+    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
+    // The settled line is untouched — a proposal never edits or removes one.
+    expect(body).toContain("- Every test must pass under `go test -race ./...`.");
+    // CANARY: drop the heading from `operatorProposeRuling` and this goes red;
+    // the proposal would then read as settled text.
+    expect(body).toContain(PROPOSED_RULINGS_HEADING);
+    expect(body).toContain("Nothing here is binding.");
+    expect(body).toContain("**[VIB-1,");
+    expect(body).toContain("Strike the -race requirement");
+    expect(body).toContain("exited 127");
+    // CANARY: drop the label strip and this reads "Evidence: Evidence: …" in
+    // the rulings document and again on the timeline, which is what the first
+    // live proposal wrote.
+    expect(body).not.toMatch(/Evidence:\s*Evidence:/i);
+    // Filed AFTER the settled text, so a reader meets the rule first.
+    expect(body.indexOf("- Every test must pass")).toBeLessThan(
+      body.indexOf(PROPOSED_RULINGS_HEADING),
+    );
+
+    const top = task().timeline[0]!;
+    expect(top.type).toBe("quality");
+    expect(top.title).toBe(RULING_PROPOSAL_TITLE);
+    expect(top.text).toContain("Proposed, not binding");
+    expect(top.text).toContain("environment-and-gates.md");
+
+    expect(
+      listAuditEvents(store.db).some(
+        (e) => e.action === "task.operator.ruling_proposed" && e.taskKey === "VIB-1",
+      ),
+    ).toBe(true);
+    // A settled ruling is a human's to change, so the proposal must reach one.
+    expect(
+      listNotifications(store.db, store.users.arda.id).some(
+        (n) => n.title === RULING_PROPOSAL_TITLE,
+      ),
+    ).toBe(true);
+  });
+
+  it("a second proposal stacks under the same heading instead of duplicating it", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const root = await seedRulingsKb("# Gates\n\n- Run every gate.\n");
+    const base = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      doc: "environment-and-gates.md",
+    };
+    for (const [text, evidence] of [
+      ["First correction.", "run A"],
+      ["Second correction.", "run B"],
+    ]) {
+      const r = await operatorProposeRuling(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { ...base, text: text!, evidence: evidence! },
+        authority("full"),
+      );
+      expect(r.outcome).toBe("done");
+    }
+    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
+    expect(body.split(PROPOSED_RULINGS_HEADING)).toHaveLength(2);
+    expect(body).toContain("First correction.");
+    expect(body).toContain("Second correction.");
+  });
+
+  /**
+   * The entry goes in with `String.replace`, and a replacement STRING expands
+   * `$&`, `$'`, `` $` `` and `$$`. Operator evidence is shell and Makefile
+   * text, where `$$` is ordinary.
+   */
+  it("files a proposal's `$` characters exactly as written", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const root = await seedRulingsKb("# Gates\n\n- Run every gate.\n");
+    const base = { projectSlug: store.slug, taskKey: "VIB-1", doc: "environment-and-gates.md" };
+    await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { ...base, text: "First correction.", evidence: "run A" },
+      authority("full"),
+    );
+    // The heading now exists, so this one is spliced in after it.
+    await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        ...base,
+        text: "The race gate needs cgo: keep `$&` and `$'` literal.",
+        evidence: "`for p in $$(go list ./...); do go test -race $$p; done` exited 2",
+      },
+      authority("full"),
+    );
+    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
+    // CANARY: pass the replacement as a string again and `$$` collapses to `$`,
+    // `$&` becomes the heading and `$'` splices the rest of the document in.
+    expect(body).toContain("for p in $$(go list ./...); do go test -race $$p; done");
+    expect(body).toContain("keep `$&` and `$'` literal");
+    expect(body.split(PROPOSED_RULINGS_HEADING)).toHaveLength(2);
+  });
+
+  it("refuses by name when the project names no rulings KB, and when the document is not in it", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const noKb = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        doc: "whatever.md",
+        text: "x",
+        evidence: "y",
+      },
+      authority("full"),
+    );
+    expect(noKb.outcome).toBe("noop");
+    expect(noKb.message).toContain("names no rulings knowledge base");
+
+    await seedRulingsKb("# Gates\n\n- Run every gate.\n");
+    const wrongDoc = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        // CANARY: skip the existence check and this CREATES a settled-looking
+        // document nobody asked for, named by a typo.
+        doc: "enviroment-and-gates.md",
+        text: "x",
+        evidence: "y",
+      },
+      authority("full"),
+    );
+    expect(wrongDoc.outcome).toBe("noop");
+    expect(wrongDoc.message).toContain("is not a document in the rulings knowledge base");
+    expect(wrongDoc.message).toContain("environment-and-gates.md");
+  });
+
+  it("needs all three fields, and is denied without append-typed-events", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await seedRulingsKb("# Gates\n\n- Run every gate.\n");
+    const thin = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", doc: "environment-and-gates.md", text: "x", evidence: "  " },
+      authority("full"),
+    );
+    expect(thin.outcome).toBe("noop");
+    expect(thin.message).toContain("evidence that proves it");
+
+    deployRoster([{ capabilityId: "append-typed-events", mode: "off" }]);
+    const denied = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        doc: "environment-and-gates.md",
+        text: "x",
+        evidence: "y",
+      },
+      authority("full"),
+    );
+    expect(denied.outcome).toBe("denied");
   });
 });
 
@@ -3885,7 +4450,9 @@ describe("B2 — the operator may only withdraw ITS OWN packet", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", reason: "I have decided already" },
       authority("full"),
     );
-    expect(res.outcome).toBe("denied");
+    // F39-10: `noop`. `generate-packets` is granted `direct` here — what rules
+    // the withdrawal out is WHO raised the open packet, which is task state.
+    expect(res.outcome).toBe("noop");
     expect(res.message).toContain("not by you");
     // The question — and the profile the answer resumes — survives.
     expect(task().packet!.title).toBe("Which database should I migrate?");
@@ -5433,7 +6000,10 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
       { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review" },
       authority("full"),
     );
-    expect(r.outcome).toBe("denied");
+    // F39-10: `noop`. `stage-transitions` is granted `direct` here — the PR's
+    // mergeability is task state, and a `denied` would file this on the
+    // timeline as a policy refusal against a grant that is wide open.
+    expect(r.outcome).toBe("noop");
     expect(r.message).toContain("VIB-1's review PR #7 conflicts with the base branch");
     expect(r.message).toContain("VIB-1 stays at In Progress");
     expect(r.message).toContain("Open the conflict packet (update_branch_from_base)");
@@ -5612,6 +6182,179 @@ describe("F37-11: the operator snapshot carries the base compare", () => {
 });
 
 /**
+ * Ruling 424 (pass 39): the operator planned `update_branch_from_base` at the
+ * acceptance stage fifteen times across seven ax-clone tasks, each refused and
+ * each a "plan was not carried out in full" note. The doctrine said never; the
+ * snapshot said `baseBehindBy: 7`. The refusal itself is now a snapshot fact,
+ * read from the function the tool refuses with.
+ */
+describe("ruling 424: the operator snapshot carries the branch-refresh refusal", () => {
+  function snapOf(): ReturnType<typeof operatorSnapshot> {
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+  }
+
+  function seedAt(stage: string, mergeable: "clean" | "conflicting"): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage,
+        branch: "vib-1",
+        pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("names the refusal at the acceptance stage", () => {
+    // CANARY: drop `notRefreshableReason` from `operatorSnapshot`.
+    seedAt("review", "clean");
+    expect(snapOf().notRefreshableReason).toBe(
+      "VIB-1 is at Review, the acceptance boundary: the branch is brought up to date once, at acceptance time, and merged in the same ceremony. Do not refresh it here; recommend or accept the completion instead.",
+    );
+  });
+
+  it("is null before the acceptance stage, where the refresh runs", () => {
+    seedAt("impl", "clean");
+    expect(snapOf().notRefreshableReason).toBeNull();
+  });
+
+  it("is null for a pull request GitHub reports conflicting: the refresh is how the conflict packet opens", () => {
+    seedAt("review", "conflicting");
+    expect(snapOf().notRefreshableReason).toBeNull();
+  });
+
+  it("ruling 429: is null while the work is still in its review loop, and set once it is approved", () => {
+    // CANARY: drop the `failing`/`changed` arm from `acceptanceBoundaryRefusal`.
+    for (const [validation, refused] of [
+      ["failing", false],
+      ["changed", false],
+      ["healthy", true],
+    ] as const) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "review",
+          branch: "vib-1",
+          validation,
+          pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable: "clean" },
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      expect(snapOf().notRefreshableReason !== null, validation).toBe(refused);
+    }
+  });
+
+  it("ruling 435: a conflict measured on an older head is neither shown to the operator nor lifts the boundary", () => {
+    /**
+     * Live on AX-21: the refresh pushed `5241ef1` at 01:57:47 with the base
+     * merged in cleanly. GitHub was still computing, so the file kept the
+     * `conflicting` measured on the previous head, and at 01:58:49 the
+     * operator told the reviewer to "note whether the PR's current conflicting
+     * mergeability status prevents acceptance". The gate had already read the
+     * pin (ruling 405); the snapshot read the raw field.
+     *
+     * CANARY: read `fm.pr.mergeable` raw in either place.
+     */
+    const seed = (mergeableAt: string) => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "review",
+          branch: "vib-1",
+          validation: "healthy",
+          pr: {
+            number: 7,
+            state: "review",
+            title: "[VIB-1] t",
+            mergeable: "conflicting",
+            mergeableAt,
+            headSha: "5241ef1ecb39682151e01884e00fe715b246d8be",
+          },
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    };
+    seed("d20be152db4ba8b622ab3c99dd993a1375304998");
+    expect(snapOf().pr?.mergeable).toBeNull();
+    expect(snapOf().notRefreshableReason).not.toBeNull();
+    // Measured on the head that stands: it is the fact, and the boundary lifts.
+    seed("5241ef1ecb39682151e01884e00fe715b246d8be");
+    expect(snapOf().pr?.mergeable).toBe("conflicting");
+    expect(snapOf().notRefreshableReason).toBeNull();
+  });
+});
+
+/**
+ * Ruling 437 (pass 39, F39-60): the snapshot says who raised the open packet,
+ * with the refusal's own predicate, so the operator can tell a packet it may
+ * withdraw from one only a person answers.
+ */
+describe("ruling 437: the operator snapshot names who raised the open packet", () => {
+  it("an operator's packet is yours, an agent's question and the policy engine's are not", () => {
+    // CANARY: answer `yours: true` for every packet.
+    const seed = (packet: TaskPacket) => {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+        packet,
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      return operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full")).packet;
+    };
+    const base: TaskPacket = {
+      id: "pkt_1",
+      type: "input",
+      kind: "Decision required",
+      from: "operator",
+      title: "t",
+      body: "",
+      observations: [],
+      options: [],
+    };
+    expect(seed({ ...base, from: "operator" })).toMatchObject({ raisedBy: "operator", yours: true });
+    expect(
+      seed({ ...base, kind: "Agent question", from: "agent:codex/developer (Implementation)", askedBy: "developer" }),
+    ).toMatchObject({ raisedBy: "agent:codex/developer (Implementation)", yours: false });
+    expect(seed({ ...base, from: "policy-engine" })).toMatchObject({ raisedBy: "policy-engine", yours: false });
+  });
+});
+
+/**
+ * Ruling 431 (pass 39): the operator reads the leases that bind now. Live on
+ * AX-21 it quoted a lease the owner had removed twenty minutes earlier, from a
+ * timeline note, to the agent that needed the leased file.
+ */
+describe("ruling 431: the operator snapshot carries the live file leases", () => {
+  function snapOf(): ReturnType<typeof operatorSnapshot> {
+    return operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
+  }
+
+  it("lists every binding lease with its holder and reason, drops a finished holder's, and says nothing when none binds", () => {
+    // CANARY: drop the `fileLeases` spread from `operatorSnapshot`.
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review" }) });
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-3", { stage: "done" }) });
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      fileLeases: [
+        { paths: ["internal/controller/task.go"], taskKey: "VIB-2", reason: "lands first" },
+        { paths: ["internal/server/server.go"], taskKey: "VIB-3", reason: "merged already" },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapOf().fileLeases).toEqual([
+      { taskKey: "VIB-2", paths: ["internal/controller/task.go"], reason: "lands first" },
+    ]);
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, fileLeases: [] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(snapOf()).not.toHaveProperty("fileLeases");
+  });
+});
+
+/**
  * Ruling 193 (F37-14, live): a required reviewer chartered to bring a Docker
  * stack up ran on a host with no `make` and no Docker. It said so in its own
  * words — "an environment/repository-baseline blocker, not a discovered
@@ -5747,3 +6490,549 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
     expect(reviewerRow()?.consecutiveRequestChanges).toBe(0);
   });
 });
+
+/**
+ * Ruling 397 (F39-24): a report a failed run left standing.
+ *
+ * Live on ax-clone AX-2, 24 milliseconds apart:
+ *   08:33:08.181  comment  agent  "Done on branch `ax-2`, commit `3e0396ab` …
+ *                                  `make gate` and `go test -race ./...` pass."
+ *   08:33:08.205  blocked  agent  "The Implementation agent run did not complete …
+ *                                  Nothing was delivered to a pull request."
+ * 1,531 committed lines sat in the workspace and the recommended recovery was
+ * to build them again. Ruling 394 stops the common cause; this is what the
+ * operator is told when it happens anyway.
+ */
+describe("ruling 397: the snapshot names a report a failed run left standing", () => {
+  const AGENT = { kind: "agent" as const, backend: "codex" as const, profileId: "dev", roleHint: "Implementation" };
+  const REPORT = {
+    occurredAt: "2026-09-22T08:33:08.181Z",
+    type: "comment" as const,
+    actor: AGENT,
+    title: null,
+    text: "Done on branch `ax-2`, commit `3e0396ab`. make gate and go test -race both pass.",
+    toAgent: false,
+    evidence: null,
+  };
+  const FAILURE = {
+    occurredAt: "2026-09-22T08:33:08.205Z",
+    type: "blocked" as const,
+    actor: AGENT,
+    title: null,
+    text: "The Implementation agent run did not complete. Codex could not be reached from this deployment. Nothing was delivered to a pull request.",
+    toAgent: false,
+    evidence: null,
+  };
+  const dispatched = (at: string) => ({
+    occurredAt: at,
+    type: "agent" as const,
+    actor: { kind: "operator" as const },
+    title: null,
+    text: "Started a Codex run for the Implementation agent.",
+    toAgent: false,
+    evidence: null,
+  });
+
+  function snapWith(timeline: unknown[]) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "g",
+      // SAFETY: every entry is built from the literals above, each of which is
+      // a complete task-file event; `writeTask` serializes them unchanged.
+      timeline: timeline as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    );
+  }
+
+  it("finds the pair and carries both stamps", () => {
+    // CANARY: drop `findUnfinishedReport` from the snapshot and this is
+    // undefined, which is the state that let the operator re-dispatch AX-2.
+    expect(snapWith([FAILURE, REPORT]).unfinishedReport).toEqual({
+      actor: "Implementation",
+      failedAt: FAILURE.occurredAt,
+      reportedAt: REPORT.occurredAt,
+    });
+  });
+
+  it("says nothing once something has been dispatched since", () => {
+    // The decision this fact exists to inform has been made; repeating it every
+    // turn is noise.
+    expect(
+      snapWith([dispatched("2026-09-22T08:40:00.000Z"), FAILURE, REPORT]).unfinishedReport,
+    ).toBeUndefined();
+  });
+
+  it("says nothing when the failed run posted no report", () => {
+    const note = {
+      occurredAt: "2026-09-22T08:33:00.000Z",
+      type: "note" as const,
+      actor: AGENT,
+      title: null,
+      text: "Context compacted.",
+      toAgent: false,
+      evidence: null,
+    };
+    expect(snapWith([FAILURE, note]).unfinishedReport).toBeUndefined();
+  });
+
+  /**
+   * Every agent is `kind: "agent"`, and the walk used to compare kinds: a run
+   * that failed with no report was paired with any agent's older comment, and
+   * a Codex operator was handed the reviewer's last verdict as the failed
+   * developer's report.
+   */
+  it("pairs a failure only with the SAME agent's report from the SAME run", () => {
+    const reviewerVerdict = {
+      ...REPORT,
+      occurredAt: "2026-09-22T08:20:00.000Z",
+      actor: { kind: "agent" as const, backend: "codex" as const, profileId: "reviewer", roleHint: "Review" },
+      text: "Verdict: request_changes. The race test is missing.",
+    };
+    // CANARY: compare actor kinds again and this pairs with the reviewer.
+    expect(snapWith([FAILURE, reviewerVerdict]).unfinishedReport).toBeUndefined();
+    // The same agent's comment from an EARLIER run, behind this run's start.
+    const earlier = { ...REPORT, occurredAt: "2026-09-22T08:10:00.000Z", text: "Round one done." };
+    // CANARY: drop the stop at the run's `agent` start event and this pairs
+    // with round one's report.
+    expect(
+      snapWith([FAILURE, dispatched("2026-09-22T08:30:00.000Z"), earlier]).unfinishedReport,
+    ).toBeUndefined();
+  });
+
+  it("ignores a blocked event that is not a run failure", () => {
+    const asked = { ...FAILURE, text: "I cannot reach the repository and have stopped." };
+    expect(snapWith([asked, REPORT]).unfinishedReport).toBeUndefined();
+  });
+
+  it("finds a pair that falls outside the timeline window the prompt renders", () => {
+    // The window caps how many rows the prompt shows; the pair can sit below
+    // it, and the fact is about the task rather than about the window.
+    const filler = Array.from({ length: 12 }, (_, i) => ({
+      ...REPORT,
+      occurredAt: `2026-09-22T09:${String(10 + i).padStart(2, "0")}:00.000Z`,
+      type: "note" as const,
+      actor: { kind: "system" as const, systemId: "policy-engine" },
+      text: `filler ${i}`,
+    }));
+    expect(snapWith([...filler, FAILURE, REPORT]).unfinishedReport).toEqual({
+      actor: "Implementation",
+      failedAt: FAILURE.occurredAt,
+      reportedAt: REPORT.occurredAt,
+    });
+  });
+
+  /**
+   * Ruling 408 (F39-35), live on ax-clone AX-18.
+   *
+   * The operator planned `[deliver_for_review, transition_stage]`. The delivery
+   * RAN -- it pushed `d44e874` to PR #16 -- and the transition was refused, so
+   * `refused.length !== plan.actions.length` and ruling 400's carry (which
+   * records only a WHOLLY refused plan) stored nothing. Fourteen seconds later
+   * the next drive planned `transition_stage` again and was refused with a
+   * byte-identical message, and the two of them tripped the two-in-a-row hold.
+   */
+  const REFUSAL = {
+    occurredAt: "2026-09-22T17:07:51.797Z",
+    type: "note" as const,
+    actor: { kind: "operator" as const },
+    title: null,
+    text:
+      "**The operator's plan was not carried out in full.** This step did not apply to the task's current state:\n\n" +
+      "- `transition_stage` — AX-18's review PR #16 conflicts with the base branch.",
+    toAgent: false,
+    evidence: null,
+  };
+  const moved = (at: string) => ({
+    occurredAt: at,
+    type: "transition" as const,
+    actor: { kind: "operator" as const },
+    title: null,
+    text: "**Transition:** moved AX-18 from Verify to Review.",
+    toAgent: false,
+    evidence: null,
+  });
+
+  it("ruling 408: a PARTIALLY refused plan is carried, not just a wholly refused one", () => {
+    // CANARY: drop `findUnansweredRefusal` from the snapshot and this is
+    // undefined — the state in which AX-18's next drive re-planned the step
+    // Viberr had just refused.
+    expect(snapWith([REFUSAL]).unansweredRefusal).toEqual({
+      at: REFUSAL.occurredAt,
+      text: REFUSAL.text,
+    });
+  });
+
+  it("ruling 408: says nothing once the operator has moved the task since", () => {
+    expect(snapWith([moved("2026-09-22T17:17:02.144Z"), REFUSAL]).unansweredRefusal).toBeUndefined();
+  });
+
+  /**
+   * Ruling 413 (improvement point, pass 39): the operator sees the collision
+   * viberr already computes.
+   *
+   * Ruling 236 has intersected the open review PRs' diffs since pass 37 and
+   * rendered the answer on ONE surface, the human's review queue. The operator
+   * decides what to dispatch, when to deliver and whether to refresh a branch,
+   * and `get_task` was single-task -- which the ax-clone controller named as
+   * its third weakness: "every cross-task correlation on this board is
+   * currently done by you". Live, all five open PRs carried an overlap while
+   * AX-20 and AX-21 spent a run, a packet and a human answer on a collision in
+   * `internal/sandbox/local.go`.
+   */
+  it("ruling 413: the snapshot names the other open PRs this task's diff collides with", () => {
+    const prAt = (number: number, changed: string[]) => ({
+      number,
+      state: "review" as const,
+      title: `PR ${number}`,
+      paths: { headSha: "a".repeat(40), changed, truncated: false },
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        branch: "vib-1",
+        pr: prAt(11, ["internal/sandbox/local.go", "internal/cli/render.go"]),
+      }),
+      goal: "mine",
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        stage: "impl",
+        branch: "vib-2",
+        pr: prAt(13, ["internal/sandbox/local.go", "internal/runtime/executor.go"]),
+      }),
+      goal: "collides on the sandbox file",
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", {
+        stage: "impl",
+        branch: "vib-3",
+        pr: prAt(14, ["docs/manifests.md"]),
+      }),
+      goal: "touches nothing of mine",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    // CANARY: drop the `collisions` block and this is undefined, which is what
+    // every operator on the ax-clone board was given.
+    const collisions = operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+    ).collisions;
+    expect(collisions).toEqual([
+      {
+        taskKey: "VIB-2",
+        prNumber: 13,
+        paths: ["internal/sandbox/local.go"],
+        partial: false,
+      },
+    ]);
+  });
+
+  it("ruling 408: says nothing once something has been dispatched since", () => {
+    expect(
+      snapWith([dispatched("2026-09-22T17:09:00.000Z"), REFUSAL]).unansweredRefusal,
+    ).toBeUndefined();
+  });
+});
+
+/**
+ * Ruling 415 (F39-41), live on ax-clone AX-19.
+ *
+ * The owner answered round five in their own words: "I am changing what may
+ * block rather than asking again". Ruling 284 keeps typed words out of the
+ * goal, so the words reached the operator once, as the note on the turn they
+ * summoned. That turn dispatched the rework, the provider refused it for quota,
+ * and the next turn (a scheduled resume, forty minutes on) read a six-entry
+ * window that started after the decision. It asked the reviewer again. And it
+ * is a Codex plan, which "cannot call tools", so the window's own advice to
+ * widen it with `get_task` pointed somewhere it could not go.
+ */
+describe("ruling 415: a person's decisions never fall out of the operator's view", () => {
+  const PERSON = { kind: "human" as const, userId: "u_arda", nameHint: "Arda" };
+  const decided = (at: string, text: string) => ({
+    occurredAt: at,
+    type: "transition" as const,
+    actor: PERSON,
+    title: null,
+    text,
+    toAgent: false,
+    evidence: null,
+  });
+  const ROUND_FIVE = decided(
+    "2026-09-22T19:27:09.023Z",
+    "**Decision:** answered with a custom directive. Operator re-engages with it.\n\n" +
+      "> Round five. So I am changing what may block rather than asking again.\n" +
+      ">\n" +
+      "> The work: dispatch the Developer on the current finding.",
+  );
+  const WAIT = decided(
+    "2026-09-22T19:34:20.283Z",
+    "**Decision:** wait for the Codex window to reopen. An operator run is scheduled.\n\n" +
+      "> Wait for the window. Not retrying on Claude.",
+  );
+  const filler = (i: number) => ({
+    occurredAt: `2026-09-22T20:${String(10 + i).padStart(2, "0")}:00.000Z`,
+    type: "note" as const,
+    actor: { kind: "system" as const, systemId: "schedule-runner" },
+    title: null,
+    text: `filler ${i}`,
+    toAgent: false,
+    evidence: null,
+  });
+  function snap(timeline: unknown[], opts: { toolless?: boolean } = {}) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      goal: "g",
+      // SAFETY: every entry is built from the literals above, each of which is
+      // a complete task-file event; `writeTask` serializes them unchanged.
+      timeline: timeline as never,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    return operatorSnapshot(
+      store.db,
+      { dataRoot: store.dataRoot },
+      store.slug,
+      "VIB-1",
+      authority("full"),
+      OPERATOR_TIMELINE_DEFAULT,
+      opts,
+    );
+  }
+  // Newest first, as a task file holds its timeline.
+  const history = () => [...Array.from({ length: 8 }, (_, i) => filler(7 - i)), WAIT, ROUND_FIVE];
+
+  it("carries every decision, newest first, from past the window, with the person's words", () => {
+    const s = snap(history(), { toolless: true });
+    // The window alone holds neither decision: this is AX-19's 20:13 turn.
+    expect(s.recentTimeline.some((e) => e.text.includes("Decision"))).toBe(false);
+    // CANARY: drop the `humanDecisions` block and this is undefined.
+    expect(s.humanDecisions).toEqual([
+      {
+        at: WAIT.occurredAt,
+        by: "Arda",
+        decision: "wait for the Codex window to reopen. An operator run is scheduled.",
+        words: "Wait for the window. Not retrying on Claude.",
+      },
+      {
+        at: ROUND_FIVE.occurredAt,
+        by: "Arda",
+        decision: "answered with a custom directive. Operator re-engages with it.",
+        words:
+          "Round five. So I am changing what may block rather than asking again.\n\n" +
+          "The work: dispatch the Developer on the current finding.",
+      },
+    ]);
+  });
+
+  it("cuts an OLDER decision's words only for an operator that can fetch the rest", () => {
+    const long = decided("2026-09-22T19:00:00.000Z", `**Decision:** answered.\n\n> ${"x".repeat(2000)}`);
+    const withTools = snap([WAIT, long]).humanDecisions![1]!;
+    expect(withTools.words!.length).toBe(1500);
+    expect(withTools.clipped).toContain("read_timeline_entry");
+    // Ruling 440: one that cannot is handed the words whole.
+    // CANARY: cut a tool-less operator's older decisions at 1,500 again and
+    // the rest of the person's words is out of its reach.
+    const toolless = snap([WAIT, long], { toolless: true }).humanDecisions![1]!;
+    expect(toolless.words).toBe("x".repeat(2000));
+    expect(toolless.clipped).toBeUndefined();
+    // The newest is the one that governs, so it is carried whole.
+    expect(snap([long]).humanDecisions![0]!.clipped).toBeUndefined();
+  });
+
+  it("never sends a tool-less operator to a tool: the window note says where the binding parts went", () => {
+    const toolless = snap(history(), { toolless: true }).timelineOlder!;
+    // CANARY: drop the `toolless` arm and this names get_task again.
+    expect(toolless).not.toMatch(/get_task|read_timeline_entry/);
+    expect(toolless).toContain("cannot fetch them");
+    expect(toolless).toContain("`humanDecisions`");
+    // An operator WITH tools keeps the address, which works for it.
+    expect(snap(history()).timelineOlder).toContain("Call get_task");
+  });
+
+  it("hands a tool-less operator the unfinished report itself", () => {
+    const AGENT = { kind: "agent" as const, backend: "codex" as const, profileId: "dev", roleHint: "Implementation" };
+    const report = {
+      occurredAt: "2026-09-22T08:33:08.181Z",
+      type: "comment" as const,
+      actor: AGENT,
+      title: null,
+      text: "Done on branch `ax-2`, commit `3e0396ab`. make gate passes.",
+      toAgent: false,
+      evidence: null,
+    };
+    const failure = {
+      ...report,
+      occurredAt: "2026-09-22T08:33:08.205Z",
+      type: "blocked" as const,
+      text: "The Implementation agent run did not complete. Nothing was delivered to a pull request.",
+    };
+    // CANARY: drop the `toolless` report copy and the instruction can only
+    // point at read_timeline_entry, which a Codex plan cannot call.
+    expect(snap([failure, report], { toolless: true }).unfinishedReport?.text).toBe(report.text);
+    expect(snap([failure, report]).unfinishedReport?.text).toBeUndefined();
+  });
+
+  /**
+   * Ruling 440 (F39-67). Live on ax-clone AX-5 a deploy restarted the server
+   * while a Codex operator was reacting to the reviewer's second report.
+   * Recovery re-invoked it with no report in hand (`trigger: "manual"`), so
+   * the report reached it only as a window entry, cut at 1,500 characters,
+   * partway into finding 3 of 4. The owner got a packet asking to "confirm
+   * the full report", and its follow-up task left out finding 4.
+   */
+  describe("ruling 440: a tool-less operator is handed what it cannot fetch", () => {
+    const REVIEWER = { kind: "agent" as const, backend: "codex" as const, profileId: "reviewer", role: "Review & validation" };
+    const finding = (n: number, head: string) =>
+      `${n}. **${head}.** ${"The evidence for this finding, with file and line. ".repeat(9).trim()}`;
+    const REPORT_TEXT = [
+      "Verdict: request-changes",
+      "**Blocking findings — complete set for this revision:**",
+      finding(1, "The served runtime cannot start Tasks through the executor used for SSH"),
+      finding(2, "The remote PTY has no controlling terminal or foreground process group"),
+      finding(3, "SSH commands bypass Task resource limits"),
+      finding(4, "Bare command names resolve using the control-plane PATH"),
+    ].join("\n\n");
+    const report = {
+      occurredAt: "2026-09-23T04:55:32.998Z",
+      type: "comment" as const,
+      actor: REVIEWER,
+      title: "Review verdict",
+      text: REPORT_TEXT,
+      toAgent: false,
+      evidence: null,
+    };
+    const restart = {
+      occurredAt: "2026-09-23T04:59:48.317Z",
+      type: "note" as const,
+      actor: { kind: "system" as const, systemId: "policy-engine" },
+      title: "Interrupted by a restart",
+      text: "**Restart:** the run was still running when the server stopped.",
+      toAgent: false,
+      evidence: null,
+    };
+    const rowOf = (s: ReturnType<typeof snap>) =>
+      s.recentTimeline.find((e) => e.occurredAt === report.occurredAt)!;
+
+    it("carries AX-5's report whole in the window, finding 4 included", () => {
+      // The shape that bit: finding 4 starts past the 1,500 cut.
+      expect(REPORT_TEXT.indexOf("4. **Bare command names")).toBeGreaterThan(1500);
+      // CANARY: cut a tool-less operator's window at 1,500 again and finding
+      // 4 is gone, with "this turn cannot fetch the rest" beside it.
+      const row = rowOf(snap([restart, report], { toolless: true }));
+      expect(row.text).toBe(REPORT_TEXT);
+      expect(row.clipped).toBeUndefined();
+      // An operator with tools keeps ruling 285's cut and the address.
+      const withTools = rowOf(snap([restart, report]));
+      expect(withTools.text).not.toContain("Bare command names");
+      expect(withTools.text.length).toBe(1498);
+      expect(withTools.clipped).toBe(
+        "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole",
+      );
+    });
+
+    it("says so when even the tool-less cut lands, and names no tool", () => {
+      const huge = { ...report, text: "y".repeat(AGENT_REPORT_CAP_TOOLLESS + 10) };
+      const row = rowOf(snap([restart, huge], { toolless: true }));
+      expect(row.text.length).toBe(AGENT_REPORT_CAP_TOOLLESS - 2);
+      expect(row.clipped).toBe("cut at 16,000 chars; this turn cannot fetch the rest");
+      expect(row.clipped).not.toMatch(/get_task|read_timeline_entry/);
+    });
+
+    it("hands over an unfinished report past 4,000 characters whole, and says when it is cut", () => {
+      const failure = {
+        ...report,
+        occurredAt: "2026-09-23T04:55:33.100Z",
+        type: "blocked" as const,
+        title: null,
+        text: "The Review & validation agent run did not complete.",
+      };
+      const long = { ...report, text: "z".repeat(5000) };
+      // CANARY: bound it by the packet note's 4,000 again and the last 1,000
+      // characters never reach the operator.
+      const found = snap([failure, long], { toolless: true }).unfinishedReport!;
+      expect(found.text).toBe(long.text);
+      expect(found.clipped).toBeUndefined();
+      const huge = { ...report, text: "z".repeat(AGENT_REPORT_CAP_TOOLLESS + 1) };
+      const cut = snap([failure, huge], { toolless: true }).unfinishedReport!;
+      expect(cut.text!.length).toBe(AGENT_REPORT_CAP_TOOLLESS);
+      expect(cut.clipped).toBe("cut at 16,000 chars; this turn cannot fetch the rest");
+    });
+  });
+});
+
+/**
+ * Ruling 402 (F39-29): the operator can see the chain it is one link of.
+ *
+ * Live on ax-clone AX-4 the operator planned a decision packet offering to
+ * create a follow-on task for the missing `/logs` baseline. `ax logs` is
+ * goal-4 link 5, waiting on AX-4 itself — the very task it was coordinating.
+ * It could not have known: its goal text opens "Part of goal goal-4 … link 1"
+ * and names no other link (ruling 404 removed the frozen total that used to
+ * say "of 5", because it went stale the moment the chain grew), and the one
+ * read `read_board`'s own description names for that question ("work you are
+ * about to ask for may already have an owner") lists TASKS, and a pending
+ * link has none.
+ */
+describe("ruling 402: the snapshot carries this task's goal chain", () => {
+  const ctx = () => ({ dataRoot: store.dataRoot });
+
+  function snapFor(taskKey: string) {
+    return operatorSnapshot(store.db, ctx(), store.slug, taskKey, authority("full"));
+  }
+
+  it("names every link, including the ones that are still only a plan", async () => {
+    const { createGoal } = await import("./goal-actions.server");
+    deployRoster(DEFAULT_POLICY);
+    const created = await createGoal(
+      store.db,
+      {
+        projectSlug: store.slug,
+        title: "Cycle 4 — CLI",
+        links: [
+          { title: "ax CLI skeleton", goal: "Skeleton. Done when merged." },
+          { title: "ax logs: the route and the command", goal: "Logs. Done when merged.", blockedBy: ["link 1"] },
+        ],
+      },
+      { userId: store.users.arda.id, label: "arda@viberr.dev" },
+      ctx(),
+    );
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const chain = snapFor(created.activeTaskKey!).goalChain!;
+    // CANARY: drop `goalChain` and the operator sees "link 1" in its goal text
+    // with no way to learn that any other link exists — which is how AX-4 came
+    // to offer a task its own goal already planned.
+    expect(chain.goalId).toBe(created.goalId);
+    expect(chain.title).toBe("Cycle 4 — CLI");
+    expect(chain.linkIndex).toBe(1);
+    expect(chain.links).toEqual([
+      { index: 1, title: "ax CLI skeleton", status: "active", taskKey: created.activeTaskKey, blockedBy: [] },
+      {
+        index: 2,
+        title: "ax logs: the route and the command",
+        status: "pending",
+        // The whole point: planned, owned by the chain, and carrying NO task —
+        // exactly what `read_board` cannot show.
+        taskKey: null,
+        blockedBy: [`${created.goalId} link 1`],
+      },
+    ]);
+  });
+
+  it("says nothing for a task that belongs to no goal", () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    expect(snapFor("VIB-1").goalChain).toBeUndefined();
+  });
+});
+

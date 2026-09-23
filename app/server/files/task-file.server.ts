@@ -37,6 +37,8 @@ import {
  *                    ### <UTC ISO> · <type> · <actor-ref>
  *                    title: …          (optional metadata, completion only)
  *                    to: agent         (optional metadata, comments only)
+ *                    notified: <id, id> (optional — who this event's own
+ *                                       notification reached; ruling 382)
  *                    <blank line>
  *                    <text — RichText micro-format>
  *                    evidence:            (optional, outcome events — P13-D-26:
@@ -52,7 +54,7 @@ import {
  *
  * Event-body escaping: free text inside a timeline event may legitimately
  * contain lines that would otherwise read as file STRUCTURE (`## ` section
- * headings, `### ` event headings, `title:`/`to:` metadata lines, the
+ * headings, `### ` event headings, `title:`/`to:`/`notified:` metadata lines, the
  * `evidence:` / `attachments:` markers). The serializer prefixes such lines with a single
  * backslash (`\## Notes`); the parser strips exactly one backslash from any
  * line that is one-or-more backslashes followed by a structural pattern —
@@ -71,7 +73,7 @@ const KNOWN_EVENT_TYPES = new Set<string>(TIMELINE_EVENT_TYPES);
 
 /** Line patterns the parser treats as structure inside an event block
  * (mirrors SECTION_RE / EVENT_HEADING_PREFIX / metadata / evidence rules). */
-const STRUCTURAL_LINE_SRC = String.raw`## |### |title:\s|to:\s|\s*evidence:\s*$|\s*attachments:\s*$`;
+const STRUCTURAL_LINE_SRC = String.raw`## |### |title:\s|to:\s|notified:\s|\s*evidence:\s*$|\s*attachments:\s*$`;
 /** Serialize side: line needs a(nother) escape backslash. */
 const NEEDS_ESCAPE_RE = new RegExp(String.raw`^\\*(?:${STRUCTURAL_LINE_SRC})`);
 /** Parse side: line carries at least one escape backslash — strip one. */
@@ -203,6 +205,7 @@ function parseEventBlock(
   // Metadata lines: consecutive `title:` / `to:` lines directly after heading.
   let title: string | null = null;
   let toAgent = false;
+  let notified: string[] = [];
   let i = 0;
   while (i < bodyLines.length) {
     const line = bodyLines[i]!;
@@ -211,6 +214,16 @@ function parseEventBlock(
       i += 1;
     } else if (/^to:\s/.test(line)) {
       toAgent = line.slice("to:".length).trim() === "agent";
+      i += 1;
+    } else if (/^notified:\s/.test(line)) {
+      // Ruling 382: the recipients this event's fan-out reached. One line,
+      // comma separated, ids only — compaction reads it and folds nothing that
+      // notified somebody.
+      notified = line
+        .slice("notified:".length)
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
       i += 1;
     } else {
       break;
@@ -279,6 +292,7 @@ function parseEventBlock(
     evidence,
   };
   if (attachments && attachments.length > 0) event.attachments = attachments;
+  if (notified.length > 0) event.notified = notified;
   return event;
 }
 
@@ -330,6 +344,11 @@ function serializeEvent(event: TaskFileEvent): string {
   // byte-stable (a parsed title has no newline to fold) and closes it.
   if (event.title) lines.push(`title: ${event.title.replace(/\s*\n\s*/g, " ")}`);
   if (event.toAgent) lines.push(`to: agent`);
+  // Ruling 382: one metadata line, same shape as `title:`/`to:` — a comma
+  // separated id list the parser reads back whole.
+  if (event.notified && event.notified.length > 0) {
+    lines.push(`notified: ${event.notified.join(", ")}`);
+  }
   lines.push("");
   lines.push(escapeEventText(event.text));
   if (event.evidence && event.evidence.length > 0) {

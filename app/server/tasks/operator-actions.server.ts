@@ -8,7 +8,9 @@ import {
   type RevisionDrift,
 } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
-import { resolveDependencies } from "~/server/projections/dependencies.server";
+import { resolveDependencies, tasksWaitingOn } from "~/server/projections/dependencies.server";
+import { listProjectTasks } from "~/server/projections/board-query.server";
+import { prPathOverlaps } from "~/server/projections/review-queue.server";
 import {
   misdirectedOptionPromise,
   misdirectedPromiseRefusal,
@@ -24,7 +26,7 @@ import {
   type OfferWithdrawalSlot,
   type OfferWithdrawalCause,
 } from "./task-mutation.server";
-import type { DependencyRender } from "~/shared/dependencies";
+import { joinDependencyEntries, type DependencyRender } from "~/shared/dependencies";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
@@ -51,9 +53,13 @@ import {
   unpushedRevisionOf,
   type UnpushedRevision,
 } from "~/schemas/task-file.schema";
+import { PLAN_NOT_CARRIED_OUT_RE, RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
+import { readGoalFile } from "~/server/files/goal-writer.server";
+import { acceptanceBoundaryRefusal } from "~/server/github/acceptance-boundary.server";
 import {
   activeWorkRevision,
   consecutiveRequestChanges,
+  PACKET_NOTE_MAX,
   PACKET_OPTION_KINDS,
   revisionLeftWorkspace,
   type ForeignBranchHead,
@@ -88,7 +94,15 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { backendDispatchHold } from "~/server/runtimes/backend-quota.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import {
+  readProjectFile,
+  resolveProjectFilePath,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
+import { activeFileLeases, leaseHeldAgainst } from "~/server/tasks/file-leases.server";
+import { matchesGlob } from "~/shared/file-leases";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import {
   readTaskFile,
   resolveTaskFilePath,
@@ -105,6 +119,7 @@ import { storeRelativePath } from "~/server/files/file-store-root.server";
 import {
   notifyMentionedUsers,
   withAmbiguityDisclosure,
+  stampNotifiedRecipients,
 } from "./mention-notify.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
@@ -131,6 +146,7 @@ import {
 import {
   acceptanceNoChangeCheck,
   noChangeApplies,
+  noChangeCandidate,
   noChangeCompletionEvent,
 } from "./no-change-completion.server";
 import {
@@ -143,10 +159,13 @@ import {
   type DispatchHeldError,
 } from "./specialist-run.server";
 import {
+  acceptanceOfferBasis,
+  readRequiredReviewers,
   resolveRequiredReviewers,
   type RequiredReviewerView,
 } from "./required-reviewers.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
+import { liveMergeable } from "~/features/github/github-pills";
 import {
   listKnowledgeBaseNames,
   listMcpServerNames,
@@ -234,6 +253,14 @@ export interface OperatorActionResult {
    */
   outcome: "done" | "recommended" | "denied" | "noop";
   message: string;
+  /**
+   * Ruling 443: the step's outcome IS a decision packet it opened, as when a
+   * base refresh meets a conflict. It tried what it could and left the choice
+   * to a person, which is not a refusal: `outcome` stays `noop` (the state
+   * split above), and a plan's narration does not file it as a step that "did
+   * not apply". Ruling 430 already pauses the acting steps after it.
+   */
+  openedPacket?: true;
   /** Users the action's own watcher notification actually REACHED (routing
    *  prefs applied per recipient). Set by the packet writer so a caller that
    *  owes a fallback notice about the same event (T13) can dedupe per
@@ -837,13 +864,18 @@ async function writeOperatorComment(
   // B-FD8b: scan the caller's ORIGINAL text, not the stored post-trim form — a
   // handle inside a fenced block that evidence-separation cut away must still
   // notify (the record lost the line; the ping must not be lost with it).
-  notifyMentionedUsers(db, {
-    text,
-    projectSlug,
-    taskKey,
-    from: { kind: "agent", name: "Operator" },
-    occurredAt: event.occurredAt,
-  });
+  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  await stampNotifiedRecipients(
+    taskRef(ctx, projectSlug, taskKey),
+    event.occurredAt,
+    notifyMentionedUsers(db, {
+      text,
+      projectSlug,
+      taskKey,
+      from: { kind: "agent", name: "Operator" },
+      occurredAt: event.occurredAt,
+    }),
+  );
   if (variant === "recommend") {
     recordAudit(db, {
       action: "task.operator.recommended",
@@ -907,6 +939,8 @@ interface RecommendationInput {
   label: string;
   /** accept_completion — ruling 137: the work revision the offer binds to. */
   forHeadSha?: string;
+  /** run_agent — ruling 421: the run puts the completeness question. */
+  completeness?: boolean;
 }
 
 async function addRecommendation(
@@ -928,6 +962,7 @@ async function addRecommendation(
   if (rec.profileId) recommendation.profileId = rec.profileId;
   if (rec.prompt) recommendation.prompt = rec.prompt;
   if (rec.delivers !== undefined) recommendation.delivers = rec.delivers;
+  if (rec.completeness) recommendation.completeness = true;
   if (rec.toStageId) recommendation.toStageId = rec.toStageId;
   if (rec.forHeadSha) recommendation.forHeadSha = rec.forHeadSha;
   // Same disclosure the narration path carries (S5-G3): the reasoning is
@@ -937,6 +972,7 @@ async function addRecommendation(
     `**Recommendation:** ${rec.label}. ${reasoning}`,
   );
   let wasNew = false;
+  const reasoningAt = new Date().toISOString();
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     const existing = parsed.frontmatter.recommendations.find(
       (r) =>
@@ -950,6 +986,7 @@ async function addRecommendation(
     } else if (
       existing.prompt !== recommendation.prompt ||
       existing.delivers !== recommendation.delivers ||
+      existing.completeness !== recommendation.completeness ||
       existing.label !== recommendation.label ||
       existing.forHeadSha !== recommendation.forHeadSha
     ) {
@@ -969,6 +1006,8 @@ async function addRecommendation(
       } else {
         delete existing.delivers;
       }
+      if (recommendation.completeness) existing.completeness = true;
+      else delete existing.completeness;
       // Ruling 137: a re-recommended acceptance re-binds to the revision it
       // was authored against, or the card keeps a stale binding.
       if (recommendation.forHeadSha !== undefined) {
@@ -980,7 +1019,7 @@ async function addRecommendation(
     }
     parsed.frontmatter.waiting = "human";
     parsed.timeline.unshift({
-      occurredAt: new Date().toISOString(),
+      occurredAt: reasoningAt,
       type: "comment",
       actor: { kind: "operator" },
       title: null,
@@ -1000,12 +1039,18 @@ async function addRecommendation(
     details: { kind: rec.kind },
   });
   // NEW-4: recommendation reasoning that tags a person pings them too.
-  notifyMentionedUsers(db, {
-    text: commentText,
-    projectSlug,
-    taskKey,
-    from: { kind: "agent", name: "Operator" },
-  });
+  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  await stampNotifiedRecipients(
+    taskRef(ctx, projectSlug, taskKey),
+    reasoningAt,
+    notifyMentionedUsers(db, {
+      text: commentText,
+      projectSlug,
+      taskKey,
+      occurredAt: reasoningAt,
+      from: { kind: "agent", name: "Operator" },
+    }),
+  );
   // Ping the supervisors: a supervised operator recommendation is a decision
   // waiting on a human. Without this, the recommendation card only appears if
   // someone happens to open the task — the bell and "Waiting on you" inbox stay
@@ -1029,6 +1074,22 @@ async function addRecommendation(
     );
   }
 }
+
+/**
+ * F39-68: what a `create_task` option can and cannot reach. A task it creates
+ * starts from the base branch. Live on ax-clone AX-5 the operator recommended
+ * a core follow-up for review findings in `pty_linux.go`, a file that existed
+ * only on `ax-5`, and made AX-5 wait on it. The new task could not have
+ * reached that code, and AX-5 would have been held (ruling 186) until a
+ * person found the cycle. Its guidance said to use the kind for "another
+ * owner's package" and never said where a created task starts. Both operator
+ * surfaces say it from here, so the two never disagree.
+ */
+export const CREATE_TASK_BASE_NOTE =
+  "A created task starts from the base branch, so it cannot reach code that exists only on this " +
+  "task's unmerged branch. Rework on files this task's own commits added stays on this task, even " +
+  "when another owner's package holds them: hand delivery to that owner here instead. Never make " +
+  "this task wait on a task that needs this task's code.";
 
 /** One option the operator offers on a decision/blocking packet. */
 /** Ruling 138: the longest `goalDraft` an option may carry into task.md. */
@@ -1089,6 +1150,10 @@ export interface OperatorOpenPacketInput {
   /** Ruling 315: the account-level cause that raised this, when the cause is
    *  bigger than the task. Packets sharing it are resolved together. */
   cause?: string;
+  /** Ruling 432: a stall escalation (`openStuckLoopPacket`), the one family a
+   *  later successful run may withdraw. Set by the server only; the operator's
+   *  own packet tools build their input field by field and never carry it. */
+  stalled?: true;
 }
 
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
@@ -1148,10 +1213,23 @@ function retryOtherBackendDefaults(
     backend: failed === "codex" ? "claude" : "codex",
   };
   // Stamped so the retry re-runs the agent that failed rather than falling
-  // back to the delivering one, and so `withdrawSupersededStuckPacket` joins
-  // the packet to the right agent's success.
+  // back to the delivering one, and so a stall packet's withdrawal
+  // (`withdrawSupersededStuckPacket`, ruling 432) joins it to the right
+  // agent's success.
   if (profileId) defaults.profileId = profileId;
   return defaults;
+}
+
+/**
+ * B2 as ruling 437 exposes it: a packet the operator may withdraw is one it
+ * raised. `from` is stamped by each writer ("operator" for the operator's own,
+ * the agent's actor ref for a question, the policy engine for its escalations),
+ * and a question an agent asked through the operator still names the agent in
+ * `askedBy`. One predicate for the refusal and for the snapshot that warns
+ * about it, so the two cannot disagree.
+ */
+export function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">): boolean {
+  return packet.from === "operator" && !packet.askedBy;
 }
 
 /** Open a typed human-decision packet and notify the task's supervisors. */
@@ -1748,6 +1826,8 @@ export async function operatorOpenPacket(
   // Ruling 315: an account-level cause travels onto the packet, so a sibling
   // raised by the same failure can be found when this one is answered.
   if (input.cause) packet.cause = input.cause;
+  // Ruling 432: what lets a later successful run withdraw it, and nothing else.
+  if (input.stalled) packet.stalled = true;
 
   let opened = false;
   // Ruling 137: a packet pauses coordination, so the standing acceptance
@@ -1872,9 +1952,12 @@ export async function operatorResolvePacket(
   // now has no surface, and the R15-14 `askedBy` resume (which fires from the
   // human's resolution) never runs. `from` is stamped by the writer:
   // "operator" here, the agent's actor ref in `buildAgentQuestionPacket`.
-  if (packet.from !== "operator" || packet.askedBy) {
+  if (!packetIsOperators(packet)) {
+    // F39-10: `noop` — WHO raised the open packet is task state, the same kind
+    // of fact as "no open decision packet to resolve" one branch above, which
+    // has always been a noop. `generate-packets` is granted either way.
     return {
-      outcome: "denied",
+      outcome: "noop",
       message:
         `The open packet "${packet.title}" was raised by ${packet.from}, not by you. ` +
         "Only a human can resolve an agent's question. Answer it in a comment or leave it standing.",
@@ -1890,7 +1973,7 @@ export async function operatorResolvePacket(
     // (never an agent question that landed in the window), and it must be the
     // same packet this decision was made about (F10-09 ids).
     const current = parsed.packet;
-    if (!current || current.from !== "operator" || current.askedBy) return;
+    if (!current || !packetIsOperators(current)) return;
     if (packet.id && current.id !== packet.id) return;
     parsed.packet = null;
     withdrawn = true;
@@ -1969,6 +2052,392 @@ export function contextConflictEvent(
       `\`${conflict.kbSource}\` says otherwise. ${conflict.detail}`,
     toAgent: false,
     evidence: null,
+  };
+}
+
+// -------------------------------------------------- propose a ruling change
+
+export const RULING_PROPOSAL_TITLE = "Ruling contradicted by evidence";
+
+/** The heading every proposal is filed under, in the settled document itself.
+ *  One constant so the writer and the reader cannot disagree about it. */
+export const PROPOSED_RULINGS_HEADING = "## Proposed (not binding)";
+
+export interface RulingProposal {
+  /** Document path inside the project's rulings knowledge base. */
+  doc: string;
+  /** What should change, in the operator's own words. */
+  text: string;
+  /** What proves it: the command and its output, a run id, a verdict. */
+  evidence: string;
+}
+
+/**
+ * F39-1/F39-7 (pass 39, owner ruling): the operator may PROPOSE a change to the
+ * project's settled rulings, in the rulings document itself, and nothing more.
+ *
+ * Before this, nothing inside the delivery loop could write the rulings KB. The
+ * operator's toolkit had no KB write, specialists have none, and the controller
+ * only runs when a human talks to it — so a ruling that turned out to be FALSE
+ * kept being injected into every run as binding truth. Live in pass 39 the
+ * rulings demanded `go test -race ./...`; the host has `CGO_ENABLED=0` and no C
+ * compiler; the delivering agent proved it, the reviewer re-proved it
+ * independently, the operator wrote "the ruling is contradicted by evidence,
+ * remedy: update the ruling" — as a COMMENT, because that was the only surface
+ * it had — and the false requirement went on propagating into every goal the
+ * operator drafted afterwards.
+ *
+ * The proposal is appended under {@link PROPOSED_RULINGS_HEADING} in the named
+ * document. It never edits a settled line and never removes one: promotion is a
+ * human or controller edit, exactly as before. What changes is that the fact now
+ * lands where the rule lives, next to the rule it contradicts, and every run
+ * reads it with the rule.
+ */
+export async function operatorProposeRuling(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string } & RulingProposal,
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const doc = input.doc.trim();
+  const text = input.text.trim();
+  // Both surfaces label the field themselves ("Evidence: …"), and a model that
+  // writes the label into the VALUE is not wrong — it is answering a field
+  // called `evidence`. Strip one leading label rather than printing
+  // "Evidence: Evidence:" into the rulings document and the timeline, which is
+  // what the first live proposal did.
+  const evidence = input.evidence.trim().replace(/^evidence\s*:\s*/i, "").trim();
+  if (!doc || !text || !evidence) {
+    return {
+      outcome: "noop",
+      message:
+        "A proposal needs all three: the rulings document to amend, what should change, and the evidence that proves it. Nothing was written.",
+    };
+  }
+  if (gate(authority, "append-typed-events") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot post events in this project.",
+    };
+  }
+  const { listKnowledgeBases, resolveStoreTarget } = await import(
+    "~/server/org/resources.server"
+  );
+  const { writeStoreDoc } = await import("~/server/org/store-files.server");
+  const project = readProjectFile({
+    projectSlug: input.projectSlug,
+    dataRoot: ctx.dataRoot,
+  });
+  const rulingsDir = project?.parsed.frontmatter.rulingsKb ?? null;
+  if (!rulingsDir) {
+    return {
+      outcome: "noop",
+      message:
+        `${input.projectSlug} names no rulings knowledge base, so there is no settled document to amend. ` +
+        "Say what you found on the timeline instead, and an org admin can set one (Org settings, or ask the controller).",
+    };
+  }
+  const seedCtx = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
+  const kb =
+    listKnowledgeBases(db, seedCtx).find((row) => row.dir === rulingsDir) ?? null;
+  const target = kb ? resolveStoreTarget(db, "kb", kb.id, seedCtx) : null;
+  if (!target) {
+    return {
+      outcome: "noop",
+      message: `The rulings knowledge base "${rulingsDir}" is named by ${input.projectSlug} but no longer resolves in the store. Nothing was written.`,
+    };
+  }
+  // The document has to be one the KB really holds: a typo would otherwise
+  // CREATE a settled-looking document nobody asked for.
+  const name = doc.replace(/^\/+/, "").split("/").pop() ?? doc;
+  const abs = path.join(target.rootAbs, name);
+  let existing: string;
+  try {
+    existing = readFileSync(abs, "utf8");
+  } catch {
+    const held = readdirSync(target.rootAbs)
+      .filter((f) => !f.startsWith("."))
+      .sort();
+    return {
+      outcome: "noop",
+      message:
+        `"${name}" is not a document in the rulings knowledge base ${rulingsDir}. Nothing was written. ` +
+        (held.length > 0
+          ? `It holds: ${held.join(", ")}.`
+          : "It holds no documents."),
+    };
+  }
+  const entry =
+    `- **[${input.taskKey}, ${new Date().toISOString().slice(0, 10)}]** ${text}\n` +
+    `  Evidence: ${evidence}\n`;
+  const body = existing.includes(PROPOSED_RULINGS_HEADING)
+    ? // A replacer FUNCTION: a replacement string expands `$&`, `$'`, `` $` ``
+      // and `$$`, and the operator's own text is shell and Makefile evidence
+      // (`for p in $$(go list ./...)` would be filed as `$(go list ./...)`).
+      existing.replace(
+        PROPOSED_RULINGS_HEADING,
+        () => `${PROPOSED_RULINGS_HEADING}\n\n${entry.trimEnd()}`,
+      )
+    : `${existing.trimEnd()}\n\n${PROPOSED_RULINGS_HEADING}\n\n` +
+      "Raised by an operator from evidence on a task. **Nothing here is binding.** " +
+      "A human or the controller promotes an entry into the settled text above, or deletes it.\n\n" +
+      entry;
+  writeStoreDoc(db, target, [], name, body, OPERATOR_AUDIT_ACTOR, {
+    overwrite: true,
+  });
+  const event: TaskFileEvent = {
+    occurredAt: new Date().toISOString(),
+    type: "quality",
+    actor: { kind: "operator" },
+    title: RULING_PROPOSAL_TITLE,
+    text:
+      `**Proposed, not binding:** ${text} ` +
+      `Filed under "${PROPOSED_RULINGS_HEADING.replace(/^#+ /, "")}" in \`${rulingsDir}/${name}\`, ` +
+      `which every run on this project reads. Evidence: ${evidence}`,
+    toAgent: false,
+    evidence: null,
+  };
+  await updateTaskFile(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    (parsed) => {
+      parsed.timeline.unshift(event);
+    },
+  );
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.operator.ruling_proposed",
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { rulingsKb: rulingsDir, doc: name, bytes: entry.length },
+  });
+  // A settled ruling is a human's to change; the proposal is worth nothing if
+  // it only exists in a document nobody re-reads.
+  notifyTaskWatchers(
+    db,
+    {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      kind: "quality",
+      title: RULING_PROPOSAL_TITLE,
+      text: event.text,
+      occurredAt: event.occurredAt,
+      from: OPERATOR_NOTIFY_FROM,
+    },
+    ctx,
+  );
+  return {
+    outcome: "done",
+    message: `Proposed against \`${rulingsDir}/${name}\`. It is NOT binding: a human promotes or deletes it.`,
+  };
+}
+
+/** Ruling 417: the audit action shared with the settings page's lease writer. */
+const FILE_LEASES_AUDIT_ACTION = "project.file_leases.updated";
+
+/**
+ * Ruling 417 (owner, 2026-09-23): the operator leases files to ITS OWN task.
+ *
+ * Ruling 245 gave the project leases ("this task owns these paths until it
+ * merges") and ruling 396 a human surface, but only a person on the settings
+ * page, or the controller when a person asked it, could declare one. The
+ * operator is the first to SEE two open PRs sharing a file (ruling 413) and
+ * could do nothing about it: on ax-clone AX-20 and AX-21 collided on
+ * `internal/sandbox/local.go` and it cost an agent run, a decision packet and
+ * the owner's answer. The owner chose the direct door over a proposal a person
+ * adopts: first come, first served, and a person clears one on the settings
+ * page.
+ *
+ * Gated on DELIVERY authority, not a new grant: a lease orders deliveries, and
+ * an operator that cannot deliver has nothing to land first. Refused by name
+ * when another active task already holds an overlapping path. Every other task
+ * whose open PR changes a newly leased path is told on its own timeline, since
+ * its next delivery is now refused.
+ */
+export async function operatorLeaseFiles(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; paths: string[]; reason: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const paths = [...new Set(input.paths.map((p) => p.trim()).filter(Boolean))];
+  const reason = input.reason.trim();
+  if (paths.length === 0 || !reason) {
+    return {
+      outcome: "noop",
+      message:
+        "A lease needs at least one path and the reason it is held: the reason is what every task it refuses is shown. Nothing was leased.",
+    };
+  }
+  if (deliverGate(authority) === "deny") {
+    return {
+      outcome: "denied",
+      message:
+        "This operator may not deliver on this project, so it has nothing to land first and nothing to lease files for.",
+    };
+  }
+  const project = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
+  const task = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!project || !task) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  if (taskClosure(task.parsed.frontmatter, project.parsed.frontmatter.stages).closed) {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} is closed, and a lease held by a finished task binds nobody (ruling 245(b)). Nothing was leased.`,
+    };
+  }
+  const leaseCtx = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
+  // Ruling 426: a lease that would park work other tasks wait on is a person's
+  // call. Live on ax-clone AX-22's operator leased `internal/controller/task.go`
+  // at 23:47, which AX-20's open PR #13 already changed; AX-20's operator then
+  // made AX-20 wait on AX-22, and AX-21, AX-5 and goal-6 waited on AX-20. The
+  // critical path sat behind AX-22's ninth review round, and AX-20's finished
+  // rework could not even be reviewed. Neither operator could see the whole
+  // chain; this check can.
+  const stalled = listProjectTasks(db, input.projectSlug, { dataRoot: ctx.dataRoot }).flatMap((t) => {
+    if (t.key === input.taskKey || !t.pr || t.pr.state !== "review") return [];
+    const hit = (t.pr.paths?.changed ?? []).find((path) => paths.some((glob) => matchesGlob(path, glob)));
+    if (!hit) return [];
+    const waiting = tasksWaitingOn(db, input.projectSlug, t.key);
+    return waiting.length > 0 ? [{ key: t.key, pr: t.pr.number, path: hit, waiting }] : [];
+  });
+  const first = stalled[0];
+  if (first) {
+    const others = first.waiting.filter((k) => k !== input.taskKey);
+    // The leaser waiting on the task it would park is a cycle: each would
+    // wait for the other to merge, and neither ever could.
+    if (others.length < first.waiting.length) {
+      return {
+        outcome: "noop",
+        message:
+          `\`${first.path}\` is changed by ${first.key}'s open PR #${first.pr}, and ${input.taskKey} ` +
+          `itself waits on ${first.key}: leasing it to ${input.taskKey} would make each wait for the ` +
+          `other to merge. Keep ${input.taskKey}'s work off those paths, or drop the wait if it is ` +
+          `wrong (ruling 426). Nothing was leased.`,
+      };
+    }
+    return {
+      outcome: "noop",
+      message:
+        `\`${first.path}\` is changed by ${first.key}'s open PR #${first.pr}, and ` +
+        `${joinDependencyEntries(others)} ${others.length === 1 ? "waits" : "wait"} on ${first.key}: ` +
+        `leasing it to ${input.taskKey} would hold all of them behind ${input.taskKey}. ` +
+        `Which of the two lands first is a person's call (ruling 426). Open a decision packet ` +
+        `that names both tasks and what waits on each, keep ${input.taskKey}'s work off those ` +
+        `paths, or wait for ${first.key} to merge (set_dependencies). Nothing was leased.`,
+    };
+  }
+  let refusal: string | null = null;
+  let fresh: string[] = [];
+  // Checked INSIDE the project file's lock, so two operators leasing at once
+  // cannot both win the same path.
+  await updateProjectFile(
+    { projectSlug: input.projectSlug, dataRoot: ctx.dataRoot },
+    (parsed) => {
+      const leases = parsed.frontmatter.fileLeases ?? [];
+      const mine = new Set(
+        leases.filter((l) => l.taskKey === input.taskKey).flatMap((l) => l.paths),
+      );
+      fresh = paths.filter((p) => !mine.has(p));
+      if (fresh.length === 0) return;
+      const held = leaseHeldAgainst(input.projectSlug, leases, input.taskKey, fresh, leaseCtx);
+      if (held) {
+        refusal =
+          `\`${held.glob}\` is already held by ${held.taskKey} (${held.reason || "no reason given"}), ` +
+          `and it overlaps what ${input.taskKey} asked for. First come, first served: the lease stays with ` +
+          `${held.taskKey}. Keep ${input.taskKey}'s work off those paths, wait for ${held.taskKey} to merge ` +
+          "(set_dependencies), or open a decision packet if a person should move the lease.";
+        return;
+      }
+      parsed.frontmatter.fileLeases = [...leases, { paths: fresh, taskKey: input.taskKey, reason }];
+    },
+  );
+  if (refusal) return { outcome: "noop", message: refusal };
+  if (fresh.length === 0) {
+    return {
+      outcome: "noop",
+      message: `${input.taskKey} already holds ${paths.map((p) => `\`${p}\``).join(", ")}. Nothing changed.`,
+    };
+  }
+  rebuildPath(
+    db,
+    resolveProjectFilePath({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot }),
+    { dataRoot: ctx.dataRoot },
+  );
+  const list = fresh.map((p) => `\`${p}\``).join(", ");
+  const at = new Date().toISOString();
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: at,
+      type: "note",
+      actor: { kind: "operator" },
+      title: "Files leased",
+      text:
+        `**The operator leased ${list} to ${input.taskKey} until it merges:** ${reason} ` +
+        "Any other task whose delivery changes these paths is refused before it reaches GitHub. " +
+        "A person can clear the lease on the project's settings page.",
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reproject(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: FILE_LEASES_AUDIT_ACTION,
+    actor: OPERATOR_AUDIT_ACTOR,
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { leased: fresh.join(", "), holder: input.taskKey, by: "operator" },
+  });
+  // Every other task whose OPEN PR changes a newly leased path: its next
+  // delivery is refused from now on, and it hears that now rather than at the
+  // refused push.
+  const affected = listProjectTasks(db, input.projectSlug, { dataRoot: ctx.dataRoot }).flatMap((t) => {
+    if (t.key === input.taskKey || !t.pr || t.pr.state !== "review") return [];
+    const hit = (t.pr.paths?.changed ?? []).find((path) => fresh.some((glob) => matchesGlob(path, glob)));
+    return hit ? [{ key: t.key, pr: t.pr.number, path: hit }] : [];
+  });
+  for (const other of affected) {
+    const text =
+      `**${input.taskKey} now holds ${list}** (leased by its operator: ${reason}). ` +
+      `PR #${other.pr} changes \`${other.path}\`, so ${other.key}'s next delivery is refused until ` +
+      `${input.taskKey} merges. Drop that change, wait for ${input.taskKey}, or ask a person to clear ` +
+      "the lease on the project's settings page.";
+    await updateTaskFile(taskRef(ctx, input.projectSlug, other.key), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: at,
+        type: "policy",
+        actor: { kind: "operator" },
+        title: "Files leased by another task",
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reproject(db, ctx, input.projectSlug, other.key);
+    notifyTaskWatchers(
+      db,
+      {
+        projectSlug: input.projectSlug,
+        taskKey: other.key,
+        kind: "policy",
+        title: "Files leased by another task",
+        text,
+        occurredAt: at,
+        from: OPERATOR_NOTIFY_FROM,
+      },
+      ctx,
+    );
+  }
+  return {
+    outcome: "done",
+    message:
+      `Leased ${list} to ${input.taskKey} until it merges.` +
+      (affected.length > 0
+        ? ` ${affected.map((a) => `${a.key} (PR #${a.pr})`).join(", ")} changes one of them and was told its next delivery is refused.`
+        : ""),
   };
 }
 
@@ -2081,8 +2550,157 @@ export interface OperatorTaskSnapshot {
     /** Ruling 138: `goal_edit` once an edit_goal option was confirmed — the
      *  packet is decided and waits for the edited goal, so do not re-ask. */
     awaiting: "goal_edit" | null;
+    /** Ruling 437: who raised it, as the packet records it ("operator", an
+     *  agent's ref, "policy-engine"). */
+    raisedBy: string;
+    /** Ruling 437: whether `resolve_packet` may withdraw it, read with the
+     *  refusal's own condition: only a packet the operator raised, never an
+     *  agent's question. */
+    yours: boolean;
   } | null;
+  /**
+   * Ruling 402 (F39-29): the CHAIN this task is one link of.
+   *
+   * The task's own goal text opens "Part of goal goal-4 (Cycle 4 — CLI: apply,
+   * get, watch, logs), link 1" — it names the chain and this task's place in
+   * it, and nothing else. `read_board` lists TASKS, and a pending link has no
+   * task yet, so the one read its own description names for the question
+   * ("work you are about to ask for may already have an owner") could not
+   * answer it. This is now the ONLY live view of the chain an actor gets:
+   * ruling 404 removed the "of 5" that header used to carry, because a frozen
+   * total went stale the moment the chain grew (AX-21 told its own agent it
+   * was the last link while three more followed).
+   *
+   * Live on ax-clone AX-4 the operator planned a decision packet offering to
+   * create a follow-on task for the missing `/logs` baseline. `ax logs` is
+   * goal-4 link 5, waiting on AX-4 itself — the very task it was coordinating.
+   * Absent for a task that belongs to no goal.
+   */
+  goalChain?: {
+    goalId: string;
+    title: string;
+    /** This task's own link index within the chain. */
+    linkIndex: number;
+    links: {
+      index: number;
+      title: string;
+      status: string;
+      /** The task carrying it, or null while the link is still only a plan —
+       *  which is exactly the case `read_board` cannot see. */
+      taskKey: string | null;
+      blockedBy: string[];
+    }[];
+  };
   recentTimeline: OperatorTimelineRow[];
+  /**
+   * Ruling 397 (F39-24): a run Viberr recorded as FAILED that had already
+   * posted its report moments earlier, with nothing dispatched since.
+   *
+   * Ruling 394 stops the common cause of this, but a genuinely cut run can
+   * still leave a partial report, and the failure event's own sentence
+   * ("Nothing was delivered to a pull request") is about the PR while a reader
+   * takes it to be about the work. Live on ax-clone AX-2 the report said "Done
+   * on branch ax-2, commit 3e0396ab, make gate and go test -race both pass",
+   * and the sentence two lines below it said the run did not complete; a human
+   * had to read the workspace to find out which was true.
+   *
+   * Absent once anything has been dispatched since: the decision this carries
+   * has been made by then, and repeating it every turn is noise.
+   */
+  unfinishedReport?: {
+    /** The agent whose run failed, by its role (its profile id when the
+     *  event carries none). */
+    actor: string;
+    /** The failure event's stamp. */
+    failedAt: string;
+    /** The report's stamp, which `read_timeline_entry` takes. */
+    reportedAt: string;
+    /** Ruling 415: the report itself, for an operator that cannot call
+     *  `read_timeline_entry` (a Codex plan). Absent for one that can. */
+    text?: string;
+    /** Ruling 440: present only when `text` was cut. */
+    clipped?: string;
+  };
+  /**
+   * Ruling 408 (F39-35): a refusal this task has not answered yet.
+   *
+   * Ruling 400 made the plan-refused retry CARRY its refusals instead of
+   * saying "read them on the timeline" -- but it records them only when the
+   * plan was WHOLLY refused (`refused.length === plan.actions.length`), which
+   * is the rarer half. Live on ax-clone AX-18 the operator planned
+   * `[deliver_for_review, transition_stage]`; the delivery RAN, the transition
+   * was refused, so nothing was recorded -- and fourteen seconds later the
+   * next drive planned `transition_stage` again and was refused with a
+   * byte-identical message. That second wasted drive is what tripped the
+   * two-in-a-row hold (ruling 406).
+   *
+   * Partial or whole, a refusal the operator has not acted on is the most
+   * important thing about the task. Absent once it has moved the task or
+   * dispatched an agent since.
+   */
+  unansweredRefusal?: { at: string; text: string };
+  /**
+   * Ruling 413: the OTHER open review PRs whose diff shares a file with this
+   * task's, by shared path.
+   *
+   * Viberr has computed this since ruling 236 and rendered it on exactly one
+   * surface, the human's review queue, described there as "read-only and quiet
+   * by design". The operator is the actor that decides what to dispatch, when
+   * to deliver and whether to refresh a branch, and it had no cross-task view
+   * at all: asked where it was weakest, the ax-clone controller answered that
+   * `get_task` is single-task, "so every cross-task correlation on this board
+   * is currently done by you". Ruling 402 gave it the goal chain for the same
+   * reason; this is the other fact viberr already holds.
+   *
+   * Read live on ax-clone: all five open PRs carried one, and AX-20 and AX-21
+   * had already spent a run, a decision packet and a human answer on a
+   * collision in `internal/sandbox/local.go`. Absent when this task has no
+   * open review PR, or when nothing overlaps.
+   */
+  collisions?: { taskKey: string; prNumber: number; paths: string[]; partial: boolean }[];
+  /**
+   * Ruling 431 (pass 39, F39-53): the project's file leases as they bind NOW
+   * (ruling 245(b): a finished holder's lease is gone), every holder included.
+   *
+   * The operator only had the timeline's "Files leased by another task" note,
+   * which is history. Live on ax-clone AX-21 (01:18) the owner had removed
+   * AX-22's lease on `internal/server/server.go` twenty minutes before, and the
+   * operator still told the Surface Developer "AX-22 currently holds
+   * `internal/server/server.go` … do not change those paths", about one of the
+   * three files its conflict needed resolved, while the developer's own prompt
+   * listed no such lease. Absent when nothing is leased.
+   */
+  fileLeases?: { taskKey: string; paths: string[]; reason: string }[];
+  /**
+   * Ruling 415 (F39-41): every decision a PERSON made on this task, newest
+   * first, read from the WHOLE timeline, with their own words when they gave
+   * any.
+   *
+   * Ruling 284 keeps typed words out of the goal and said nothing was lost by
+   * it, because the words "reach the operator in their own `note` field on the
+   * re-queue". They reach exactly ONE turn. Live on ax-clone AX-19 the owner
+   * answered round five in their own words ("I am changing what may block
+   * rather than asking again"); the turn that note summoned dispatched the
+   * rework, the provider refused that run for quota three minutes later, and
+   * the next turn, forty minutes on, was a scheduled resume whose six-entry
+   * window started after the decision. It did the one thing the decision
+   * ruled out: it asked the reviewer again.
+   *
+   * The newest entry's words are whole; older ones are cut, and say so.
+   * Absent when no person has decided anything here.
+   */
+  humanDecisions?: {
+    /** The decision event's stamp. */
+    at: string;
+    /** Who decided, as the timeline names them. */
+    by: string;
+    /** What was chosen: the decision sentence, without its label. */
+    decision: string;
+    /** The person's own words (a directive, or the note under an option). */
+    words?: string;
+    /** Present when `words` was cut, saying where the rest is. */
+    clipped?: string;
+  }[];
   /** Ruling 302: how many entries this task's timeline HAS, against the
    *  `recentTimeline.length` shown. Present always, so a coordinator never has
    *  to infer from a full-looking window that it saw everything. */
@@ -2200,6 +2818,16 @@ export interface OperatorTaskSnapshot {
    *  compared this task yet. Informational: a stale or absent reading must
    *  never stop an update, it only stops the step being planned blind. */
   baseBehindBy?: number | null;
+  /** Ruling 424 (pass 39): the sentence `update_branch_from_base` refuses
+   *  with from where the task stands, or null when a refresh would run. At
+   *  the acceptance stage the ceremony refreshes the branch once and merges,
+   *  so a positive `baseBehindBy` there is the ceremony's to settle; the
+   *  operator read the doctrine and the count and planned the refresh anyway,
+   *  fifteen times across seven ax-clone tasks, each one a "plan was not
+   *  carried out in full" note on the task's timeline. Read from the same
+   *  function the tool refuses with, so the two cannot disagree. Optional only
+   *  so hand-built fixtures need not restate it; `operatorSnapshot` sets it. */
+  notRefreshableReason?: string | null;
   /** R19-1: the project's repository ("owner/name"), or null when none is
    *  attached. The coordinator used to be blind to it — it could not even NAME
    *  the repository it operates on, which is part of how it came to call its own
@@ -2431,6 +3059,146 @@ export interface OperatorTimelineRow {
   clipped?: string;
 }
 
+/**
+ * Ruling 397: find a report a failed run left standing, if one is still the
+ * open question on this task.
+ *
+ * The scan walks the timeline newest-first and stops at the first `agent`
+ * event, which is Viberr recording that a run STARTED: once something has been
+ * dispatched, the decision this fact exists to inform has already been made.
+ * The pair is written milliseconds apart by one code path — the reply first,
+ * the failure second — so they are adjacent among that agent's own events.
+ */
+function findUnfinishedReport(
+  timeline: readonly TaskFileEvent[],
+): OperatorTaskSnapshot["unfinishedReport"] {
+  // WHO wrote an event, as one key. Every agent is `kind: "agent"`, so the
+  // kind alone paired a failed run with any agent's comment: the reviewer's
+  // verdict from the round before was handed over as the developer's report.
+  const whoOf = (e: TaskFileEvent): string =>
+    e.actor.kind === "agent"
+      ? `agent:${e.actor.profileId}`
+      : e.actor.kind === "human"
+        ? `human:${e.actor.userId}`
+        : e.actor.kind;
+  for (let i = 0; i < timeline.length; i++) {
+    const event = timeline[i]!;
+    // Something was dispatched after the failure: the question is settled.
+    if (event.type === "agent") return undefined;
+    if (event.type !== "blocked") continue;
+    if (!RUN_DID_NOT_COMPLETE_RE.test(event.text)) continue;
+    if (event.actor.kind !== "agent") return undefined;
+    const who = whoOf(event);
+    const actor = event.actor.roleHint ?? event.actor.profileId;
+    for (let j = i + 1; j < timeline.length; j++) {
+      const older = timeline[j]!;
+      // The run's own start: everything older belongs to an earlier run, so
+      // this one posted no report.
+      if (older.type === "agent") return undefined;
+      if (whoOf(older) !== who) continue;
+      // The same agent's own previous event. A comment is its report; anything
+      // else means this run posted none and there is nothing to weigh.
+      if (older.type !== "comment") return undefined;
+      return { actor, failedAt: event.occurredAt, reportedAt: older.occurredAt };
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Ruling 408: the newest refusal note with nothing done since.
+ *
+ * Same walk as {@link findUnfinishedReport} and the same stop rule: a
+ * `transition` or an `agent` event means the operator got somewhere after the
+ * refusal, so it has been answered and carrying it would be noise.
+ */
+function findUnansweredRefusal(
+  timeline: readonly TaskFileEvent[],
+): OperatorTaskSnapshot["unansweredRefusal"] {
+  for (const event of timeline) {
+    if (event.type === "transition" || event.type === "agent") return undefined;
+    if (event.actor.kind !== "operator") continue;
+    if (!PLAN_NOT_CARRIED_OUT_RE.test(event.text)) continue;
+    return { at: event.occurredAt, text: event.text };
+  }
+  return undefined;
+}
+
+/** Ruling 415: how many of a task's human decisions the snapshot carries. */
+export const HUMAN_DECISIONS_MAX = 5;
+/** Ruling 285: the window cuts an entry here for an operator that can read
+ *  the rest with `read_timeline_entry`. */
+const TIMELINE_ENTRY_CAP = 1500;
+/** Ruling 415: an OLDER decision's words are cut here, at the timeline
+ *  window's own per-entry cap; the newest is whole. */
+const OLDER_DECISION_WORDS_CAP = TIMELINE_ENTRY_CAP;
+/**
+ * Ruling 440 (F39-67): the one cut for everything an operator that cannot
+ * call tools (a Codex plan) is handed in place of an address. That covers a
+ * window entry, a decision's words, an unfinished report, and the report that
+ * woke it (`agentReportBlock`). Ruling 415 raised only the last of those to
+ * this. So the same reviewer report read whole on the turn it woke, and cut
+ * at 1,500 characters on any other turn, which "cannot fetch the rest".
+ */
+export const AGENT_REPORT_CAP_TOOLLESS = 16000;
+/** Every packet resolution a person makes is written with this label. */
+const DECISION_LEAD = "**Decision:**";
+
+/**
+ * Ruling 415 (F39-41): the decisions a person made on this task, newest
+ * first, over the WHOLE timeline rather than the snapshot's window.
+ *
+ * A decision is the `transition` event `resolvePacket` writes under a human
+ * actor, led by "**Decision:**"; the person's own words ride it as a
+ * blockquote, the one shape both the custom directive and the note under a
+ * listed option are written in.
+ */
+function findHumanDecisions(
+  timeline: readonly TaskFileEvent[],
+  toolless: boolean,
+): OperatorTaskSnapshot["humanDecisions"] {
+  const found: NonNullable<OperatorTaskSnapshot["humanDecisions"]> = [];
+  for (const event of timeline) {
+    if (found.length >= HUMAN_DECISIONS_MAX) break;
+    if (event.type !== "transition" || event.actor.kind !== "human") continue;
+    if (!event.text.startsWith(DECISION_LEAD)) continue;
+    const [lead = "", ...rest] = event.text.split(/\n\n/);
+    const quoted = rest
+      .join("\n\n")
+      .split("\n")
+      .filter((line) => line.startsWith(">"))
+      .map((line) => line.replace(/^> ?/, ""))
+      .join("\n")
+      .trim();
+    const entry: NonNullable<OperatorTaskSnapshot["humanDecisions"]>[number] = {
+      at: event.occurredAt,
+      by: event.actor.nameHint ?? "a person",
+      decision: lead.slice(DECISION_LEAD.length).trim(),
+    };
+    if (quoted) {
+      // The newest decision governs, so it is carried whole (it is bounded by
+      // the directive field's own limit); older ones are context. Ruling 440:
+      // context an operator cannot fetch is carried whole too.
+      const cap = toolless
+        ? AGENT_REPORT_CAP_TOOLLESS
+        : found.length === 0
+          ? PACKET_NOTE_MAX
+          : OLDER_DECISION_WORDS_CAP;
+      if (quoted.length > cap) {
+        entry.words = `${quoted.slice(0, cap - 1)}…`;
+        entry.clipped = toolless
+          ? `cut at ${cap.toLocaleString("en-US")} chars; this turn cannot fetch the rest`
+          : `cut at ${cap.toLocaleString("en-US")} chars; read_timeline_entry with this \`at\` returns it whole`;
+      } else {
+        entry.words = quoted;
+      }
+    }
+    found.push(entry);
+  }
+  return found.length > 0 ? found : undefined;
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -2438,7 +3206,15 @@ export function operatorSnapshot(
   taskKey: string,
   authority: OperatorAuthority,
   events: number = OPERATOR_TIMELINE_DEFAULT,
+  /**
+   * Ruling 415: `toolless` is a Codex operator, which returns a plan and "cannot
+   * call tools". Every note that names a tool (`get_task`, `read_timeline_entry`)
+   * sent it somewhere it cannot go, so for it the snapshot carries the content
+   * instead of the address, and says plainly when content is out of reach.
+   */
+  opts: { toolless?: boolean } = {},
 ): OperatorTaskSnapshot {
+  const toolless = opts.toolless === true;
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file) throw AppError.notFound(`Task ${taskKey} not found.`);
   const project = readProjectFile({
@@ -2586,6 +3362,8 @@ export function operatorSnapshot(
           body: file.parsed.packet.body,
           options: file.parsed.packet.options.map((o) => o.t),
           awaiting: file.parsed.packet.awaiting ?? null,
+          raisedBy: file.parsed.packet.from,
+          yours: packetIsOperators(file.parsed.packet),
         }
       : null,
     timelineTotal: file.parsed.timeline.length,
@@ -2598,7 +3376,15 @@ export function operatorSnapshot(
       // is clipped — an entry that ends mid-sentence with a "…" and no way to
       // ask for the rest is how a coordinator states half a report as the whole
       // of it, which it did, live, on SHOP-42.
-      const clipped = e.text.length > 1500;
+      //
+      // Ruling 440 (F39-67): an operator that cannot go to the address is
+      // handed the content. Live on ax-clone AX-5 a restart re-invoked a Codex
+      // operator without the reviewer report that had woken the interrupted
+      // turn. It read that report here, cut partway into finding 3 of 4. It
+      // opened a packet asking the owner to "confirm the full report", and
+      // proposed a follow-up task that left out finding 4.
+      const cap = toolless ? AGENT_REPORT_CAP_TOOLLESS : TIMELINE_ENTRY_CAP;
+      const clipped = e.text.length > cap;
       const row: OperatorTimelineRow = {
         occurredAt: e.occurredAt,
         type: e.type,
@@ -2606,14 +3392,109 @@ export function operatorSnapshot(
           e.actor.kind === "human"
             ? (e.actor.nameHint ?? "human")
             : e.actor.kind,
-        text: clipped ? e.text.slice(0, 1497) + "…" : e.text,
+        text: clipped ? e.text.slice(0, cap - 3) + "…" : e.text,
       };
       if (clipped) {
-        row.clipped =
-          "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole";
+        const at = `cut at ${cap.toLocaleString("en-US")} chars`;
+        row.clipped = toolless
+          ? `${at}; this turn cannot fetch the rest`
+          : `${at} — read_timeline_entry with this occurredAt returns it whole`;
       }
       return row;
     }),
+    // Ruling 402: the chain, when this task is a link of one.
+    ...((): Pick<OperatorTaskSnapshot, "goalChain"> => {
+      const ref = fm.goalRef;
+      if (!ref) return {};
+      const goal = readGoalFile({
+        projectSlug,
+        goalId: ref.goalId,
+        dataRoot: ctx.dataRoot,
+      });
+      if (!goal) return {};
+      const g = goal.parsed.frontmatter;
+      return {
+        goalChain: {
+          goalId: g.id,
+          title: g.title,
+          linkIndex: ref.linkIndex,
+          links: g.links.map((l) => ({
+            index: l.index,
+            title: l.title,
+            status: l.status,
+            taskKey: l.taskKey,
+            blockedBy: l.blockedBy,
+          })),
+        },
+      };
+    })(),
+    // Ruling 397: scanned over the WHOLE timeline, not the window above — the
+    // pair is adjacent, but the window can end between them.
+    ...((): Pick<OperatorTaskSnapshot, "unfinishedReport"> => {
+      const found = findUnfinishedReport(file.parsed.timeline);
+      if (!found) return {};
+      // Ruling 415: an operator that cannot call read_timeline_entry gets the
+      // report itself. Ruling 440: bounded by the one cut such an operator
+      // gets everywhere, and saying so when that cut lands.
+      if (toolless) {
+        const report = file.parsed.timeline.find((e) => e.occurredAt === found.reportedAt);
+        if (report) {
+          const cut = report.text.length > AGENT_REPORT_CAP_TOOLLESS;
+          found.text = cut
+            ? `${report.text.slice(0, AGENT_REPORT_CAP_TOOLLESS - 1)}…`
+            : report.text;
+          if (cut) {
+            found.clipped = `cut at ${AGENT_REPORT_CAP_TOOLLESS.toLocaleString("en-US")} chars; this turn cannot fetch the rest`;
+          }
+        }
+      }
+      return { unfinishedReport: found };
+    })(),
+    // Ruling 415: whole timeline, for ruling 408's reason — a person's decision
+    // falls out of the window while it is still the one that governs.
+    ...((): Pick<OperatorTaskSnapshot, "humanDecisions"> => {
+      const found = findHumanDecisions(file.parsed.timeline, toolless);
+      return found ? { humanDecisions: found } : {};
+    })(),
+    // Ruling 408: whole timeline for the same reason — the refusal can fall
+    // out of the window while still being the open question.
+    ...((): Pick<OperatorTaskSnapshot, "unansweredRefusal"> => {
+      const found = findUnansweredRefusal(file.parsed.timeline);
+      return found ? { unansweredRefusal: found } : {};
+    })(),
+    // Ruling 413: ruling 236's intersection, reused rather than re-derived.
+    ...((): Pick<OperatorTaskSnapshot, "collisions"> => {
+      const mine = fm.pr;
+      if (!mine || mine.state !== "review" || !mine.paths?.changed.length) return {};
+      const sides = listProjectTasks(db, projectSlug, { dataRoot: ctx.dataRoot }).flatMap((t) =>
+        t.pr && t.pr.state === "review" && t.pr.paths?.changed.length
+          ? [
+              {
+                taskKey: t.key,
+                prNumber: t.pr.number,
+                changed: t.pr.paths.changed,
+                truncated: t.pr.paths.truncated,
+              },
+            ]
+          : [],
+      );
+      const found = prPathOverlaps(
+        {
+          taskKey,
+          prNumber: mine.number,
+          changed: mine.paths.changed,
+          truncated: mine.paths.truncated,
+        },
+        sides,
+      );
+      return found.length > 0 ? { collisions: found } : {};
+    })(),
+    ...((): Pick<OperatorTaskSnapshot, "fileLeases"> => {
+      const leases = activeFileLeases(projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {});
+      return leases.length > 0
+        ? { fileLeases: leases.map((l) => ({ taskKey: l.taskKey, paths: [...l.paths], reason: l.reason })) }
+        : {};
+    })(),
     // [1] What this coordinator already proposed, and what a human already
     // refused — the two facts it needed to stop re-proposing a declined move.
     recommendations: {
@@ -2654,11 +3535,14 @@ export function operatorSnapshot(
               activeWorkRevision(fm.workRevision)?.headSha ?? null,
               taskKey,
             ) ?? "",
-          // Ruling 162: the fact the acceptance gate refuses on, exposed as the
-          // reconciler recorded it (settled PRs carry none).
+          // Ruling 162: the fact the acceptance gate refuses on (settled PRs
+          // carry none). Ruling 435: read as the gate reads it, pinned to the
+          // head it was measured on (ruling 405). Raw, it said `conflicting`
+          // for three minutes after the push that resolved AX-21's conflict,
+          // and the operator told the reviewer to weigh it.
           mergeable:
             fm.pr.state === "review" || fm.pr.state === "accepted"
-              ? (fm.pr.mergeable ?? null)
+              ? liveMergeable(fm.pr)
               : null,
         }
       : null,
@@ -2689,6 +3573,7 @@ export function operatorSnapshot(
         ctx.dataRoot,
       ),
     ),
+    notRefreshableReason: acceptanceBoundaryRefusal(fm, taskKey, project.parsed.frontmatter),
     // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
     // R19-8: the "nothing to deliver" shape, stated outright.
@@ -2730,10 +3615,18 @@ export function operatorSnapshot(
     // A window that does not say it is a window is how a coordinator states
     // part of a history as the whole of it.
     const older = snapshot.timelineTotal - snapshot.recentTimeline.length;
-    snapshot.timelineOlder =
-      `${older} older ${older === 1 ? "entry is" : "entries are"} not shown, newest first. ` +
-      `Call get_task with events up to ${OPERATOR_TIMELINE_MAX} to widen this window, ` +
-      "and read_timeline_entry with an occurredAt for one in full.";
+    const notShown = `${older} older ${older === 1 ? "entry is" : "entries are"} not shown, newest first. `;
+    // Ruling 415: the address is only worth giving to an operator that can go
+    // there. For one that cannot, say where the parts of that history that
+    // still bind were carried instead.
+    snapshot.timelineOlder = toolless
+      ? notShown +
+        "This turn cannot fetch them. What in them still binds you is carried in this snapshot: " +
+        "`humanDecisions` (every decision a person made here, in their own words), `unansweredRefusal`, " +
+        "`unfinishedReport` and `goalChain`."
+      : notShown +
+        `Call get_task with events up to ${OPERATOR_TIMELINE_MAX} to widen this window, ` +
+        "and read_timeline_entry with an occurredAt for one in full.";
   }
   return snapshot;
 }
@@ -3198,6 +4091,9 @@ export async function operatorDispatchAgent(
     delivers?: boolean;
     /** The operator's stated reason, when it gave one. */
     reason?: string;
+    /** Ruling 421: this run puts ruling 410's completeness question, so the
+     *  verdict it returns is recorded as the reviewer's complete set. */
+    completeness?: boolean;
   },
   authority: OperatorAuthority,
 ): Promise<OperatorActionResult> {
@@ -3270,6 +4166,7 @@ export async function operatorDispatchAgent(
     // Persist the EXPLICIT hint so Apply dispatches what this arm announced —
     // the card used to drop it and Apply re-derived, sometimes the opposite.
     if (input.delivers !== undefined) rec.delivers = input.delivers;
+    if (input.completeness) rec.completeness = true;
     await addRecommendation(
       db,
       ctx,
@@ -3345,6 +4242,7 @@ export async function operatorDispatchAgent(
     // the same rule as the trace above, and an explicit `true` is what asks
     // assignSpecialist for a delivery hand-off.
     if (input.delivers !== undefined) promptInput.delivers = input.delivers;
+    if (input.completeness) promptInput.completeness = true;
     let prompted: Awaited<ReturnType<typeof operatorPromptAgent>>;
     try {
       prompted = await operatorPromptAgent(db, promptInput, ctx);
@@ -3383,6 +4281,7 @@ export async function operatorDispatchAgent(
     profileId: input.profileId,
   };
   if (input.delivers !== undefined) dispatch.delivers = input.delivers;
+  if (input.completeness) dispatch.completeness = true;
   let result: Awaited<ReturnType<typeof startAgentRun>>;
   try {
     result = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx(ctx));
@@ -3664,7 +4563,9 @@ export async function operatorTransitionStage(
   // `mergeable: conflicting` was already on the file.
   {
     const mergeEntry = mergeStageEntryRefusal(ctx, input.projectSlug, input.taskKey, input.toStageId);
-    if (mergeEntry) return { outcome: "denied", message: mergeEntry };
+    // F39-10: `noop` — the PR's mergeability and its delivered revision are
+    // task STATE, not a capability the project withheld.
+    if (mergeEntry) return { outcome: "noop", message: mergeEntry };
   }
   // Ruling 151 (owner, Q35-1): the boundary the project author declared is the
   // contract every human reads on the Policy page and in project.md, and a
@@ -4119,6 +5020,7 @@ export async function operatorAcceptCompletion(
     // wording keys on the DURABLE claim (unchanged by F28-L1, which only reorders
     // the acceptance GATE so a verified-empty completion is not refused).
     const isNoChange = noChangeApplies(file.parsed.frontmatter);
+    const requiredHere = readRequiredReviewers(input.projectSlug, ctx);
     // Ruling 137: the offer binds to the revision it describes, so a later
     // delivery can withdraw it by name and the card can say which one.
     const offer: RecommendationInput = {
@@ -4137,9 +5039,21 @@ export async function operatorAcceptCompletion(
       input.projectSlug,
       input.taskKey,
       offer,
-      isNoChange
-        ? `The review is clean and there is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
-        : `The review is clean and the work meets the goal. Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`,
+      // Ruling 384 (F39-12): the first clause is DERIVED, never asserted. The
+      // card used to open "The review is clean and the work meets the goal" on
+      // every acceptance offer — live on AX-12 that sentence sat on a task with
+      // `verdicts: []`, `validation: none` and no reviewer ever engaged. The
+      // second clause keys on whether a PR EXISTS (`noChangeCandidate`), not on
+      // the agent's `noChanges` flag, which is the R20-2 lesson: an envelope
+      // that forgets the flag must not make the card promise a merge for a task
+      // that has no pull request and never will (R19-8, regressed through the
+      // flag).
+      `${acceptanceOfferBasis(file.parsed.frontmatter, requiredHere)} ` +
+        (isNoChange
+          ? `There is nothing to deliver: no branch carries work for ${input.taskKey}. Accepting moves it to ${doneName} as **completed with no changes**; nothing is merged, and the branch state is re-checked when you confirm.`
+          : noChangeCandidate(file.parsed.frontmatter)
+            ? `Accepting completion moves ${input.taskKey} to ${doneName}. There is no pull request on this task, so nothing is merged.`
+            : `Accepting completion moves ${input.taskKey} to ${doneName} and merges the review PR when GitHub is reachable; otherwise it records the PR as accepted (merge pending).`),
     );
     recordAudit(db, {
       action: "task.operator.recommended_completion",

@@ -5,6 +5,7 @@ import { createRoutesStub, Outlet } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { ControllerDock } from "./controller-dock";
 import type { ControllerDockView } from "./controller-dock-query.server";
+import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
 
 /**
  * Ruling 121 — the controller dock, driven through a routed stub: the trigger
@@ -49,6 +50,7 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     },
     conversation: null,
     messages: [],
+    taskLinks: {},
     turn: { working: false, runId: null, phase: null, step: null },
     threads: [],
     viewerOwnsActive: false,
@@ -59,6 +61,8 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
 interface MountOptions {
   path: string;
   view: (request: Request) => ControllerDockView;
+  /** O39-d: the viewer's unseen replies (none by default). */
+  unseen?: () => UnseenReplyView[];
   action?: (form: FormData) => { ok: true; conversationId: string } | { ok: false; error: string };
 }
 
@@ -86,6 +90,11 @@ function mount(opts: MountOptions) {
             { id: "routes/project.task", path: "tasks/:key", Component: () => <div>task page</div> },
             { id: "routes/project.controller", path: "controller", Component: () => <div>controller page</div> },
           ],
+        },
+        {
+          id: "routes/resources.controller-unseen",
+          path: "resources/controller-unseen",
+          loader: () => ({ unseen: opts.unseen ? opts.unseen() : [] }),
         },
         {
           id: "routes/resources.controller",
@@ -121,6 +130,70 @@ async function restored(expected: "0" | "1" = "0") {
     expect(window.sessionStorage.getItem("viberr.dock.open")).toBe(expected),
   );
 }
+
+/**
+ * O39-d. A controller turn runs one to five minutes. Its answer reached the
+ * surfaces still open on it, and a person who moved to another page had no
+ * signal anywhere that it had landed.
+ */
+describe("the dock tells a person a reply is waiting (O39-d)", () => {
+  const BOARD_REPLY: UnseenReplyView = {
+    id: "cnv_board",
+    title: "Plan the release",
+    projectSlug: "viberr",
+    taskKey: null,
+    href: "/projects/viberr/controller?c=cnv_board",
+  };
+
+  it("marks the button, says so to a screen reader, and links to the reply from the panel", async () => {
+    mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView(), unseen: () => [BOARD_REPLY] });
+    // CANARY: drop the unseen dot from the button and nothing on this page
+    // says the board conversation has answered.
+    const fab = await screen.findByRole("button", { name: /a new reply/ });
+    await waitFor(() => expect(fab.querySelector(".unseen-dot")).not.toBeNull());
+    expect(screen.getByRole("status").textContent).toBe("Controller replied in “Plan the release”");
+    fireEvent.click(fab);
+    const link = await screen.findByRole("link", { name: "Plan the release" });
+    expect(link.getAttribute("href")).toBe("/projects/viberr/controller?c=cnv_board");
+  });
+
+  it("does not count the thread the open panel is showing", async () => {
+    const shown = { ...BOARD_REPLY, id: "cnv_a", title: "First", taskKey: "VIB-1", href: "/projects/viberr/controller?c=cnv_a" };
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          conversation: conversationFixture(),
+          threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
+        }),
+      unseen: () => [shown],
+    });
+    const fab = await screen.findByRole("button", { name: /a new reply/ });
+    fireEvent.click(fab);
+    // CANARY: drop the `open && u.id === shownId` filter and the person is told
+    // about the reply they are reading.
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Controller · VIB-1 · Viberr$/ })).toBeTruthy());
+    expect(screen.queryByText(/New reply in/)).toBeNull();
+  });
+
+  it("marks an unread thread in the panel's own list", async () => {
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          threads: [
+            { id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false },
+            { id: "cnv_b", title: "Second", lastMessageAt: "2026-09-01T11:00:00.000Z", unread: true },
+          ],
+        }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /^Controller · / }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Threads here/ }));
+    // CANARY: drop the unread mark from the dock's thread list.
+    expect(await screen.findByRole("button", { name: /^Second, new reply/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^First/ }).textContent).not.toContain("new reply");
+  });
+});
 
 describe("the controller dock (ruling 121)", () => {
   it("names the scope on the trigger, opens on the current place, and focuses the composer", async () => {
@@ -269,12 +342,12 @@ describe("the controller dock (ruling 121)", () => {
     // Ruling 127: the dock's refusal is the person's own, and names the one
     // place they fix it — the same sentence the page's composer and the
     // refused turn's transcript line carry.
-    expect(composer.getAttribute("placeholder")).toMatch(
-      /your own Claude account/,
-    );
-    expect(composer.getAttribute("placeholder")).toMatch(
-      /Profile → Agent accounts/,
-    );
+    // U39-10: as a visible note with the place linked, not a placeholder cut
+    // after the dock's two rows. CANARY: drop <NotConnectedNote /> from the dock.
+    const note = panel.querySelector(".ctl-composer [data-not-connected]");
+    expect(note?.textContent).toMatch(/your own Claude account/);
+    expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
+    expect(composer.getAttribute("placeholder")).toBe("Connect Claude to send a message.");
   });
 
   it("Escape inside the panel closes instantly and hands focus back to the trigger", async () => {
@@ -389,7 +462,7 @@ describe("the controller dock (ruling 121)", () => {
   it("the Threads toggle keeps one name and lets aria-pressed carry the state (finding 25)", async () => {
     mount({
       path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView({ threads: [{ id: "cnv_a", title: "First", lastMessageAt: null }] }),
+      view: () => taskView({ threads: [{ id: "cnv_a", title: "First", lastMessageAt: null, unread: false }] }),
     });
     fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
     // The count only settles once the view lands; the NAME must not change
@@ -465,6 +538,42 @@ describe("the controller dock (ruling 121)", () => {
     }
   });
 
+  /**
+   * O39-d: the working poll runs with the panel closed too, and a load nobody
+   * is reading must not mark the reply it fetches as seen. Only the open
+   * panel's loads say `seen`.
+   */
+  it("O39-d: only an OPEN panel's load marks its transcript seen", async () => {
+    const { loads } = mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView({ turn: { working: true, runId: "run_1", phase: null, step: null } }),
+    });
+    const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
+    await restored();
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(trigger);
+      });
+      expect(loads.at(-1)!.searchParams.get("seen")).toBe("1");
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /^Controller · VIB-1/ }));
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull();
+      const closedAt = loads.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      // CANARY: build the dock URL with `seen` always set and this poll marks
+      // the reply read while nobody is looking.
+      expect(loads.length).toBeGreaterThan(closedAt);
+      expect(loads.at(-1)!.searchParams.get("seen")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("animates only a reply that arrives while the panel is open (finding 32)", async () => {
     const first: ControllerDockView["messages"][number] = {
       id: "m1",
@@ -520,6 +629,25 @@ describe("the controller dock (ruling 121)", () => {
     }
   });
 
+  it("U39-29: a task the reply names opens from the dock too", async () => {
+    // CANARY: drop `taskLinks={current.taskLinks}` from the dock's Markdown.
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          conversation: conversationFixture(),
+          messages: [
+            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "VIB-2 waits on VIB-1.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+          ],
+          taskLinks: { "VIB-2": "/projects/viberr/tasks/VIB-2", "VIB-1": "/projects/viberr/tasks/VIB-1" },
+          viewerOwnsActive: true,
+        }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    const link = await screen.findByRole("link", { name: "VIB-2" });
+    expect(link.getAttribute("href")).toBe("/projects/viberr/tasks/VIB-2");
+  });
+
   it("returns focus to the trigger on close from a REMEMBERED-open panel too", async () => {
     // The e2e caught this: the dock restored open across a navigation, Escape
     // inside the panel closed it, and focus was left on nothing because the
@@ -549,8 +677,8 @@ describe("the controller dock (ruling 121)", () => {
       view: () =>
         taskView({
           threads: [
-            { id: "cnv_a", title: "First thread", lastMessageAt: "2026-09-01T10:00:00.000Z" },
-            { id: "cnv_b", title: "Second thread", lastMessageAt: "2026-09-01T11:00:00.000Z" },
+            { id: "cnv_a", title: "First thread", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false },
+            { id: "cnv_b", title: "Second thread", lastMessageAt: "2026-09-01T11:00:00.000Z", unread: false },
           ],
         }),
     });
@@ -583,6 +711,8 @@ describe("the controller dock (ruling 121)", () => {
     expect(form.get("project")).toBe("viberr");
     expect(form.get("task")).toBe("VIB-1");
     expect(form.get("surface")).toBe("/projects/viberr/tasks/VIB-1");
+    // U39-24. CANARY: drop the zone from the dock's send.
+    expect(form.get("timeZone")).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
     expect(form.get("_csrf")).toBe("tok");
     expect(form.get("conversationId")).toBe("");
     await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("cnv_new"));
@@ -639,7 +769,7 @@ describe("the controller dock (ruling 121)", () => {
             { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
           turn: { working: true, runId: "run_2", phase: null, step: null },
-          threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z" }],
+          threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
           viewerOwnsActive: true,
         }),
     });

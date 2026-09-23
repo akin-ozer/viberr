@@ -24,6 +24,27 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
     expect(listScopeViolations(db, "viberr-core", { status: "open" })).toHaveLength(0);
   });
 
+  /**
+   * Ruling 386 (F39-13): live on ax-clone the Settings rail carried a bold red
+   * `4` and every one of the four rows was `checks:read` — the scope ruling 360
+   * settled as NOT required and ruling 380(b) taught the timeline and the
+   * credential card to call an advisory. The row is kept on purpose (360); what
+   * was wrong was counting it as something a person must go and fix.
+   */
+  it("ruling 386: an ADVISORY scope is recorded, and does not light the rail badge", () => {
+    const db = ctx.makeDb();
+    openScopeViolation(db, { projectSlug: "ax-clone", taskKey: "AX-9", scope: "checks:read" });
+    openScopeViolation(db, { projectSlug: "ax-clone", taskKey: "AX-11", scope: "checks:read" });
+    // The record stays — ruling 360 settled that it is worth having.
+    expect(listScopeViolations(db, "ax-clone", { status: "open" })).toHaveLength(2);
+    // CANARY: drop the `scopeIsAdvisory` filter and this is 2.
+    expect(countOpenPolicyViolations(db, "ax-clone")).toBe(0);
+
+    // A scope the project really does require still counts, beside them.
+    openScopeViolation(db, { projectSlug: "ax-clone", taskKey: "AX-9", scope: "workflow" });
+    expect(countOpenPolicyViolations(db, "ax-clone")).toBe(1);
+  });
+
   it("the demo seed re-adds the mock VIB-142 violation (rail badge = 1)", async () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();

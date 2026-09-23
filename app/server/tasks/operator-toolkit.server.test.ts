@@ -14,8 +14,8 @@ import {
   buildOperatorToolkit,
   OPERATOR_TOOLKIT_INSTRUCTIONS,
 } from "./operator-toolkit.server";
-import type { OperatorAuthority } from "./operator-actions.server";
-import { operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
+import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
+import { operatorPlanSchemaFor, operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -604,6 +604,29 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(declared).toContain("Refused on any other kind");
   });
 
+  it("ruling 421: run_agent publishes `completeness`, and get_task names it with the round-two question", async () => {
+    // CANARY: drop the `completeness` field from run_agent's schema, and the
+    // Claude operator has no way to say the question was put.
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("dispatch-agents", "direct");
+        return auth;
+      })(),
+    });
+    const declared = JSON.stringify(
+      (await publishedSchemas(toolkit.mcpServers.viberr)).get("run_agent"),
+    );
+    expect(declared).toContain('"completeness"');
+    expect(declared).toContain("records the verdict that run returns as the reviewer's complete set");
+    const getTask = toolkit.tools.find((t) => t.name === "get_task")!;
+    expect(getTask.description).toContain("Pass `completeness: true` on that `run_agent` (ruling 421)");
+  });
+
   /**
    * Ruling 164 (pass 35, F35-14): the tool that AUTHORS options says the title
    * is a promise, names the two kinds that keep it, and declares `toStage`.
@@ -631,6 +654,27 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     const declared = JSON.stringify(published.get("open_decision_packet"));
     expect(declared).toContain('"toStage"');
     expect(declared).toContain("move_stage only");
+  });
+
+  it("F39-68: the option kinds say a created task starts from the base branch", async () => {
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: (() => {
+        const auth = authority([]);
+        auth.policy.set("generate-packets", "direct");
+        return auth;
+      })(),
+    });
+    const published = await publishedSchemas(toolkit.mcpServers.viberr);
+    // CANARY: drop the sentence and Claude's operator is told only to use
+    // `create_task` for "another service", the guidance AX-5's operator
+    // followed into a follow-up that could not reach the code.
+    expect(JSON.stringify(published.get("open_decision_packet"))).toContain(
+      JSON.stringify(CREATE_TASK_BASE_NOTE).slice(1, -1),
+    );
   });
 
   /**
@@ -916,6 +960,37 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     // Ruling 269's payload rides the same door, and was written with it.
     expect(declared).toContain('"newTask"');
     expect(declared).toContain("create_task only");
+  });
+
+  /**
+   * Ruling 433 (F39-55): ruling 270 opened this door on the Claude tool and
+   * left the Codex plan's closed. The same three kinds stayed named, refused
+   * and impossible to satisfy for every Codex operator, and on ax-clone, where
+   * every operator is Codex, that was AX-4 twice and AX-27 once. A new option
+   * field is added to both doors or the suite goes red.
+   */
+  it("ruling 433: the Codex plan's option carries every field the Claude tool's option does", async () => {
+    // CANARY: drop any option field from the Codex plan schema.
+    const auth = authority([]);
+    auth.policy.set("generate-packets", "direct");
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: auth,
+    });
+    const published = await publishedSchemas(toolkit.mcpServers.viberr);
+    const claudeOption = z
+      .object({
+        properties: z.object({
+          options: z.object({ items: z.object({ properties: z.record(z.string(), z.unknown()) }) }),
+        }),
+      })
+      .parse(published.get("open_decision_packet")).properties.options.items.properties;
+    const codexOption =
+      operatorPlanSchemaFor(auth).properties.actions.items.properties.packetOptions.items.properties;
+    expect(Object.keys(codexOption).sort()).toEqual(Object.keys(claudeOption).sort());
   });
 
   /**

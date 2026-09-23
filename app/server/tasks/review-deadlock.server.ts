@@ -55,12 +55,24 @@ import {
 /**
  * Consecutive `request_changes` rounds from ONE reviewer that raise the packet.
  *
- * Two, on the owner's call. One is ordinary review. Two means the objection
- * outlived either a rework or the deliverer's answer that it had nothing in
- * scope to change, and every loop measured on this board (SHOP-5, SHOP-6,
- * SHOP-10) was already unmistakable by then.
+ * THREE, on the owner's call of 2026-09-22 (ruling 410). It was two, on the
+ * owner's earlier call, and that was right about where a rework stops being
+ * the obvious move -- but wrong about whose move it is. Measured on ax-clone:
+ * the "ask the reviewer for its complete blocking set instead of reworking
+ * again" call was made five times in one afternoon (AX-4, AX-19, AX-20, AX-18,
+ * AX-22) and every one of them was made by the OWNER, because Viberr raised
+ * the packet on the second verdict and the operator's turn found `waiting:
+ * human` with the decision already taken out of its hands. Its own response to
+ * a second request-changes, every time, was the same mechanical loop: move
+ * Review to Verify, post a rework directive, start the deliverer.
+ *
+ * So round two is now the OPERATOR's: it puts the completeness question to the
+ * reviewer itself, one run with no rework behind it. Viberr escalates to a
+ * person at three, which means the loop survived that question -- which is the
+ * decision a person should actually be given, instead of the one the operator
+ * could have taken.
  */
-export const REVIEW_DEADLOCK_ROUNDS = 2;
+export const REVIEW_DEADLOCK_ROUNDS = 3;
 
 /**
  * The question the `question_reviewer` resolution puts to the reviewer.
@@ -114,6 +126,19 @@ export interface ReviewDeadlock {
   rounds: number;
   /** The latest objection's own reason text, as the verdict stored it. */
   latestReason: string;
+  /**
+   * Ruling 416(b): the revision, newest first within this streak, on which the
+   * reviewer read unchanged work again and still objected (more `reviews` than
+   * `rounds`): its verdict-shaped answer to the completeness question. Null
+   * when no such answer is on record. Live on ax-clone AX-24 the operator put
+   * the question at round two, the reviewer answered on `78e764c`, one rework
+   * followed, and the round-three packet recommended asking again.
+   */
+  answeredOn: string | null;
+  /** How the answer on `answeredOn` was given: the reviewer re-read unchanged
+   *  work (`reread`, ruling 416(b)), or the run that returned it put the
+   *  question (`asked`, ruling 421). Null with no answer on record. */
+  answeredHow: "reread" | "asked" | null;
 }
 
 /**
@@ -131,7 +156,19 @@ export function reviewDeadlockOf(
   const mine = fm.verdicts.filter((v) => v.profileId === profileId);
   const latest = mine[mine.length - 1];
   if (!latest || latest.result !== "request_changes") return null;
-  return { profileId, rounds, latestReason: latest.reason };
+  let answeredOn: string | null = null;
+  let answeredHow: ReviewDeadlock["answeredHow"] = null;
+  for (let i = mine.length - 1; i >= 0; i -= 1) {
+    const v = mine[i]!;
+    if (v.result !== "request_changes") break;
+    const asked = v.answers === "completeness";
+    if (asked || (v.reviews ?? v.rounds) > v.rounds) {
+      answeredOn = v.headSha ? v.headSha.slice(0, 7) : v.revisionId;
+      answeredHow = asked ? "asked" : "reread";
+      break;
+    }
+  }
+  return { profileId, rounds, latestReason: latest.reason, answeredOn, answeredHow };
 }
 
 /**
@@ -161,6 +198,26 @@ export interface ReviewDeadlockPacketInput {
    * — the option's own description has to say what will really happen.
    */
   heldBy: readonly string[];
+  /**
+   * Ruling 416 (F39-42): the objection has NO rework behind it. The reviewer
+   * read the same revision again with no delivered round in between, so this
+   * verdict is its answer on work that has not moved: exactly what round two's
+   * completeness question asks for. Live on ax-clone AX-19 the operator put
+   * that question, the reviewer answered with three concrete blockers on the
+   * untouched revision, and the packet recommended asking it again. Absent in
+   * callers that predate it, which reads as false.
+   */
+  noReworkBehind?: boolean;
+  /** The short sha the objection was made on, for the sentence that names it. */
+  revisionLabel?: string | null;
+  /**
+   * Ruling 421 (F39-43): the run that returned THIS objection put ruling 410's
+   * completeness question, so the list in it is the reviewer's complete set.
+   * Live on ax-clone AX-20, AX-22 and AX-24 the operator folded the question
+   * into the review of a fresh rework three times in 25 minutes, and each
+   * packet recommended asking it again. Absent reads as false.
+   */
+  askedWithThisReview?: boolean;
 }
 
 /**
@@ -171,6 +228,15 @@ export interface ReviewDeadlockPacketInput {
 export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): TaskPacket {
   const handle = `@${input.reviewerName}`;
   const held = input.heldBy.length > 0 ? input.heldBy.join(", ") : "";
+  // Two ways the objection itself is the answer: the reviewer re-read work
+  // that had not moved (ruling 416), or the run that returned it put the
+  // question (ruling 421).
+  const rereadNow = input.noReworkBehind === true;
+  const askedNow = !rereadNow && input.askedWithThisReview === true;
+  const answered = rereadNow || askedNow;
+  const answeredEarlier = !answered && input.deadlock.answeredOn !== null;
+  const questionSpent = answered || answeredEarlier;
+  const revision = input.revisionLabel ? `\`${input.revisionLabel}\`` : "the same revision";
   const observations: TaskPacket["observations"] = [
     { k: "Reviewer", v: handle, code: false },
     {
@@ -200,9 +266,39 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
       `${input.taskKey}, with no approve in between` +
       (input.delivererName ? `, and @${input.delivererName} has reworked against each one` : "") +
       ". " +
-      "Two rounds is where another rework stops being the obvious move: either the reviewer is " +
-      "paying out its findings one at a time, or it is asking for something this deliverable " +
-      "cannot give it. Nothing was dispatched on this objection: the task is on you.\n\n" +
+      "Three rounds is past where another rework stops being the obvious move: either the " +
+      "reviewer is paying out its findings one at a time, or it is asking for something this " +
+      "deliverable cannot give it. Nothing was dispatched on this objection: the task is on " +
+      "you.\n\n" +
+      // Ruling 410: the operator owns round two, so this packet means one of
+      // two things and the timeline says which. Stated rather than implied,
+      // because the option below is the same one the operator was told to use
+      // and a person should know whether it has already been spent.
+      (rereadNow
+        ? // Ruling 416: Viberr knows which, so it says which.
+          `This objection has no rework behind it: ${handle} read ${revision} again with nothing ` +
+          "delivered since its last verdict, so what it returned is its answer on work that has " +
+          "not moved. That is what the completeness question asks for, and asking again would get " +
+          "the same list. The move it leaves is one rework against exactly this verdict.\n\n"
+        : askedNow
+          ? // Ruling 421: the question was put with this very review.
+            `This objection is ${handle}'s answer to the completeness question: the run that returned ` +
+            `it was asked for everything ${handle} would still block on, on ${revision}, and this is ` +
+            "the list. Asking again would get the same list. The move it leaves is one rework against " +
+            "exactly this verdict.\n\n"
+          : answeredEarlier
+            ? // Ruling 416(b) and 421: the same fact, one step removed.
+              `The completeness question has been answered in this streak: ${handle} ` +
+              (input.deadlock.answeredHow === "asked"
+                ? `was asked for everything it would block on with its review of \`${input.deadlock.answeredOn}\` and returned the list, `
+                : `read \`${input.deadlock.answeredOn}\` again with nothing reworked behind it and returned the list it would block on, `) +
+              "and this objection has outlived that answer and the rework against it. " +
+              "Asking again would repeat it. What is left is whether this objection is real work the " +
+              "deliverable owes, or one it cannot give.\n\n"
+          : "Round two was the operator's: it was told to put the completeness question to this " +
+            "reviewer itself, one run with no rework behind it. So either it did and the objection " +
+            "outlived the answer, or it did not and this is the first time the question has been " +
+            "asked. The reviewer's own verdicts on the timeline say which.\n\n") +
       // Ruling 329: this ask lives in the BODY, which is read on the card and
       // nowhere else. It used to sit on an option's `d`, which `resolvePacket`
       // appends to the GOAL verbatim — so a sentence about a textarea became
@@ -222,19 +318,27 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
         d:
           `${held ? "Queues" : "Starts"} ${input.reviewerName} with one question and no rework ` +
           "behind it: name everything you would still block on across your own surface, on the " +
-          "revision as it stands. A verdict is supposed to be the complete set, so the answer " +
-          "either ends the loop or shows it cannot be ended by reworking." +
+          "revision as it stands. " +
+          // Ruling 416: never recommended on top of the answer it would ask for.
+          (rereadNow
+            ? `It has just read ${revision} again, unchanged, and answered; asking again repeats that.`
+            : askedNow
+              ? `It was asked this with its review of ${revision} and answered; asking again repeats that.`
+              : answeredEarlier
+              ? `It answered this on \`${input.deadlock.answeredOn}\` in this streak; asking again repeats that.`
+              : "A verdict is supposed to be the complete set, so the answer either ends the loop or " +
+                "shows it cannot be ended by reworking.") +
           // Ruling 241: said BEFORE the choice, not discovered after it.
           (held
             ? ` ${input.taskKey} waits on ${held}, and Viberr refuses every agent run while it ` +
               "does, so the question is held with the task and put the moment the wait clears."
             : ""),
-        rec: true,
+        rec: !questionSpent,
         profileId: input.deadlock.profileId,
       },
       {
         kind: "custom",
-        t: "Let the rework continue",
+        t: answered ? "Rework once against this verdict" : "Let the rework continue",
         /**
          * Ruling 329: an option's `d` BECOMES the contract.
          *
@@ -261,10 +365,17 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
          * is a promise the product never kept and a decision record that
          * describes a dialog.
          */
-        d:
-          "Each round has found something real and the work is converging on it. Hands the task " +
-          "back to the operator to carry on.",
-        rec: false,
+        d: rereadNow
+          ? `Rework once against ${handle}'s latest verdict: it read ${revision} again with ` +
+            "nothing delivered in between, so that verdict is its complete set, and the next " +
+            "review is judged against it. Hands the task back to the operator to carry on."
+          : askedNow
+            ? `Rework once against ${handle}'s latest verdict: it was asked for everything it would ` +
+              "block on and this is its list, so the next review is judged against it. Hands the " +
+              "task back to the operator to carry on."
+            : "Each round has found something real and the work is converging on it. Hands the task " +
+            "back to the operator to carry on.",
+        rec: questionSpent,
       },
       {
         kind: "force_accept",

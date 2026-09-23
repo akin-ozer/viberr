@@ -107,11 +107,14 @@ export function dockScopeKey(scope: {
 export function dockViewUrl(
   scope: { projectSlug: string | null; taskKey: string | null },
   conversationId: string | null,
+  /** O39-d: the panel is open, so the transcript this loads is read. */
+  seen = false,
 ): string {
   const params = new URLSearchParams();
   if (scope.projectSlug) params.set("project", scope.projectSlug);
   if (scope.projectSlug && scope.taskKey) params.set("task", scope.taskKey);
   if (conversationId) params.set("c", conversationId);
+  if (seen) params.set("seen", "1");
   const qs = params.toString();
   return qs ? `/resources/controller?${qs}` : "/resources/controller";
 }

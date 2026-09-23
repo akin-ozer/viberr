@@ -163,6 +163,27 @@ describe("GET /resources/controller", () => {
     expect(boardView.view.threads.map((t) => t.id)).toContain(board.id);
     expect(boardView.view.threads.map((t) => t.id)).not.toContain(newer.id);
   });
+
+  /** O39-d: `seen=1` is the open panel reading; a closed dock's poll is not. */
+  it("marks the transcript seen only when the open panel asks with seen=1", async () => {
+    const { appendMessage, createConversation, listUnseenReplies } = await import(
+      "~/server/controller/controller-conversations.server"
+    );
+    const c = createConversation(app.db, {
+      userId: arda,
+      userLabel: "arda@viberr.dev",
+      projectSlug: SLUG,
+      taskKey: "VIB-141",
+    });
+    appendMessage(app.db, { conversationId: c.id, author: "controller", text: "Done." });
+    const unseen = () => listUnseenReplies(app.db, arda).map((r) => r.id);
+    await get(arda, `?project=${SLUG}&task=VIB-141&c=${c.id}`);
+    // CANARY: drop the `seen` param from the loader's `markSeen` and either
+    // this stays unseen below or is marked here.
+    expect(unseen()).toContain(c.id);
+    await get(arda, `?project=${SLUG}&task=VIB-141&c=${c.id}&seen=1`);
+    expect(unseen()).not.toContain(c.id);
+  });
 });
 
 describe("POST /resources/controller", () => {

@@ -9,6 +9,7 @@ import {
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type {
+  TaskFileEvent,
   Engagement,
   ReviewVerdict,
   TaskFrontmatter,
@@ -17,6 +18,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import type { AgentDeployment } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import type { RequiredReviewerView } from "./required-reviewers.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
@@ -151,12 +153,37 @@ function reviewedByOther(patch: Partial<TaskFrontmatter> = {}): Partial<TaskFron
   };
 }
 
-function seed(store: TestStore, patch: Partial<TaskFrontmatter>, packet: TaskPacket | null = null): void {
+function seed(
+  store: TestStore,
+  patch: Partial<TaskFrontmatter>,
+  packet: TaskPacket | null = null,
+  /** Ruling 385: what a run saved into `attachments/`, on the event that saved it. */
+  timeline: TaskFileEvent[] = [],
+): void {
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", patch),
     packet,
+    timeline,
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
+}
+
+/** Ruling 388: when the deliverer saved the report — the task's non-commit
+ *  delivery, and the identity its review binds to. */
+const REPORT_AT = "2026-09-22T06:23:28.646Z";
+
+/** An agent reply that saved a report into the task's `attachments/` dir. */
+function reportEvent(): TaskFileEvent {
+  return {
+    occurredAt: REPORT_AT,
+    type: "comment",
+    actor: { kind: "agent", backend: "codex", profileId: "developer", roleHint: "Implementation" },
+    title: null,
+    text: "The upstream fidelity report is complete and attached.",
+    toAgent: false,
+    evidence: null,
+    attachments: ["AX-12-upstream-fidelity-report.md"],
+  };
 }
 
 function actor(user: { id: string; email: string }) {
@@ -228,6 +255,143 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     ).toBeNull();
   });
 
+  /**
+   * Ruling 385 (owner, 2026-09-22; F39-12(c)), live on ax-clone AX-12. The task
+   * was a standalone upstream-fidelity check: the deliverer wrote a 27KB
+   * report, attached it, committed nothing and opened no PR. The gate held on
+   * git alone, so the project's own rule — "Reviewer reviews at Review" — owed
+   * nothing, and the task reached an enabled one-click Accept with
+   * `verdicts: []`. Any task whose deliverable is not a commit walked through.
+   */
+  it("ruling 385: holds a report-only task — delivered work, no commit", () => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(
+      store,
+      { stage: "review", waiting: "human", deliveredAt: REPORT_AT },
+      null,
+      [reportEvent()],
+    );
+    // CANARY: restore `if (!rev && !fm.pr) return []` and this is null.
+    const reason = resolveAcceptanceAffordance(
+      { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+      { dataRoot: store.dataRoot },
+    ).blockedReason;
+    expect(reason).toContain("Required reviewer Code Reviewer");
+    // No sha to name, so it names what there IS to review.
+    expect(reason).toContain("the work delivered on this task");
+  });
+
+  it("ruling 385: the review queue agrees, so the two surfaces cannot drift", () => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(
+      store,
+      { stage: "review", waiting: "human", deliveredAt: REPORT_AT },
+      null,
+      [reportEvent()],
+    );
+    const rows = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(rows.ready.map((t) => t.key)).not.toContain("VIB-1");
+    expect(rows.working.find((t) => t.key === "VIB-1")?.blockReason).toContain(
+      "Required reviewer Code Reviewer",
+    );
+  });
+
+  /**
+   * Ruling 388 (F39-15). Ruling 385 held the task; nothing could satisfy the
+   * hold. `requiredReviewerApproved` keyed on `workRevision`, so with no commit
+   * it returned false whatever the reviewer did — and the verdict writer would
+   * not have stored an approval to read anyway. Live on AX-12 that was a dead
+   * end with force-accept as the only door.
+   */
+  it("ruling 388: an approval bound to the DELIVERY satisfies the hold", () => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        deliveredAt: REPORT_AT,
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: `files:${REPORT_AT}`,
+            result: "approve",
+            reason: "The report covers every command and names its sources.",
+            at: "2026-09-22T07:24:15.357Z",
+            rounds: 1,
+          },
+        ],
+      },
+      null,
+      [reportEvent()],
+    );
+    // CANARY: key `requiredReviewerApproved` on `workRevision` again and this
+    // is the refusal sentence forever.
+    expect(
+      resolveAcceptanceAffordance(
+        { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+        { dataRoot: store.dataRoot },
+      ).blockedReason,
+    ).toBeNull();
+  });
+
+  it("ruling 388: a LATER delivery stales the approval, like a new revision", () => {
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(
+      store,
+      {
+        stage: "review",
+        waiting: "human",
+        // The deliverer saved again after the verdict, so the subject moved.
+        deliveredAt: "2026-09-22T09:00:00.000Z",
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: `files:${REPORT_AT}`,
+            result: "approve",
+            reason: "Approved the earlier draft.",
+            at: "2026-09-22T07:24:15.357Z",
+            rounds: 1,
+          },
+        ],
+      },
+      null,
+      [reportEvent()],
+    );
+    expect(
+      resolveAcceptanceAffordance(
+        { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+        { dataRoot: store.dataRoot },
+      ).blockedReason,
+    ).toContain("Required reviewer Code Reviewer");
+  });
+
+  it("ruling 385: a person's own upload is an INPUT and holds nothing", () => {
+    // Ruling 379's human attachment writes a plain `note` with no list — an
+    // uploaded fixture is something the work reads, not something it produced.
+    const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    seed(store, { stage: "review", waiting: "human", noChanges: true }, null, [
+      {
+        occurredAt: "2026-09-22T05:05:20.040Z",
+        type: "note",
+        actor: { kind: "human", userId: store.users.arda.id, nameHint: "Arda" },
+        title: "Attachment added",
+        text: "Attached `live-fixture.yaml` (1 KB).",
+        toAgent: false,
+        evidence: null,
+      },
+    ]);
+    expect(
+      resolveAcceptanceAffordance(
+        { projectSlug: store.slug, taskKey: "VIB-1", viewerUserId: store.users.arda.id },
+        { dataRoot: store.dataRoot },
+      ).blockedReason,
+    ).toBeNull();
+  });
+
   it("force-accept bypasses the rule and the audit row names it", async () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(store, reviewedByOther());
@@ -259,5 +423,74 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
       viewerUserId: store.users.arda.id,
     });
     expect(ready.ready.map((t) => t.key)).toEqual(["VIB-1"]);
+  });
+});
+
+/**
+ * Ruling 384's clause reads the review SUBJECT (ruling 388). A task whose
+ * deliverable is a saved file has no commit revision, and keyed on the
+ * revision alone its acceptance card said "No review verdict is recorded"
+ * over the approval its reviewer had just given.
+ */
+describe("ruling 384: the acceptance card's basis reads the review subject", () => {
+  const RULES: RequiredReviewerView[] = [
+    { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Reviewer" },
+  ];
+
+  it("names the approval of a FILES delivery", async () => {
+    const { acceptanceOfferBasis } = await import("./required-reviewers.server");
+    const deliveredAt = "2026-09-22T10:00:00.000Z";
+    const basis = acceptanceOfferBasis(
+      {
+        workRevision: null,
+        deliveredAt,
+        pr: null,
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: `files:${deliveredAt}`,
+            result: "approve",
+            reason: "The report covers every package.",
+            at: "2026-09-22T10:05:00.000Z",
+            rounds: 1,
+          },
+        ],
+      },
+      RULES,
+    );
+    // CANARY: key the approvals on the commit revision alone again and this
+    // reads "No review verdict is recorded on this task…".
+    expect(basis).toBe("Reviewer approved the files delivered on this task.");
+  });
+
+  it("still names the commit it approved, and says so when nobody approved", async () => {
+    const { acceptanceOfferBasis } = await import("./required-reviewers.server");
+    const sha = "b".repeat(40);
+    const fm = {
+      workRevision: {
+        id: "rev_1",
+        headSha: sha,
+        treeSha: null,
+        branch: "vib-1",
+        createdAt: "2026-09-22T10:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+      pr: null,
+      verdicts: [
+        {
+          profileId: "reviewer",
+          revisionId: "rev_1",
+          headSha: sha,
+          result: "approve" as const,
+          reason: "",
+          at: "2026-09-22T10:05:00.000Z",
+          rounds: 1,
+        },
+      ],
+    };
+    expect(acceptanceOfferBasis(fm, RULES)).toBe("Reviewer approved `bbbbbbb`.");
+    expect(acceptanceOfferBasis({ ...fm, verdicts: [] }, RULES)).toContain(
+      "No review verdict is recorded on this task",
+    );
   });
 });

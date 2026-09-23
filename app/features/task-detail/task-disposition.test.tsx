@@ -116,6 +116,7 @@ const ACCEPTANCE: AcceptanceAffordance = {
   hasAuthority: true,
   atBoundary: true,
   blockedReason: null,
+  blockedGates: [],
   blockedReasonViaPacket: null,
   canAccept: true,
   terminallyBlocked: false,
@@ -137,6 +138,8 @@ function renderPage(props: {
   /** Ruling 368: hold every action until the test answers it, so the
    *  in-flight state can be read. */
   held?: { reply: Promise<unknown> };
+  /** U39-32 / ruling 449: base commits the branch lacked at the last compare. */
+  baseBehindBy?: number | null;
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -170,6 +173,7 @@ function renderPage(props: {
             githubHost="https://github.com"
             workRevisionSha={props.workRevisionSha ?? null}
             canDeliver={props.canDeliver ?? false}
+            baseBehindBy={props.baseBehindBy ?? null}
           />
         </ToastProvider>
       ),
@@ -236,6 +240,21 @@ describe("P14-LV-06: the acceptance affordance", () => {
     expect(getByText("Accept this completion?")).toBeTruthy();
     // The confirm button is explicit that accepting merges.
     expect(findButton(container, "Accept → Done & merge")).toBeDefined();
+  });
+
+  it("ruling 449: the Accept dialog's re-review first submits refresh-and-review, and accepts nothing", async () => {
+    const { container, submitted } = renderPage({
+      task: { pr: { number: 117, state: "review", title: "[VIB-151] x" } },
+      workRevisionSha: "abcdef1234567890",
+      baseBehindBy: 2,
+    });
+    fireEvent.click(findButton(container, "Accept completion → Done")!);
+    // CANARY: stop passing `onRefreshFirst` from the page and the dialog has
+    // no safe path to offer.
+    fireEvent.click(findButton(container, "Update the branch and re-review first")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("refresh-and-review");
+    expect(submitted.some((row) => row.intent === "accept-completion")).toBe(false);
   });
 
   it("the confirm does not promise a merge on a task with no pull request", () => {
@@ -890,16 +909,41 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(submitted[0]!.to).toBe("done");
   });
 
-  it("F19-37: a move to any OTHER stage still goes in one click — only the last stage is an acceptance", async () => {
+  it("F19-37: a FORWARD move to another stage still goes in one click — only the last stage is an acceptance", async () => {
     const { submitted, getByLabelText, getByRole, queryByText } = renderPage({
       myRole: "admin",
+      task: { stage: "triage" },
     });
+    fireEvent.click(getByLabelText("Change stage (currently Triage)"));
+    fireEvent.click(getByRole("menuitemradio", { name: "Review" }));
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("transition");
+    expect(submitted[0]!.to).toBe("review");
+    expect(submitted[0]!.reason).toBeUndefined();
+    expect(queryByText(/accepts this completion/)).toBeNull();
+  });
+
+  it("ruling 381: a BACKWARD move asks why first, and sends the answer with the move", async () => {
+    // The seventh writer on this menu. A send-back is the strongest instruction
+    // a human posts on a board and it used to be mute; the operator then
+    // inferred the work from an older decision. Canary: submit straight from
+    // `onTransition` and `submitted` fills on the menu click, with no reason.
+    const { container, submitted, getByLabelText, getByRole, getByText } =
+      renderPage({ myRole: "admin" });
     fireEvent.click(getByLabelText("Change stage (currently Review)"));
     fireEvent.click(getByRole("menuitemradio", { name: "Triage" }));
+    expect(submitted).toHaveLength(0);
+    expect(getByText("Move back to Triage?")).toBeTruthy();
+    // It does not move until the reason exists.
+    const confirm = findButton(container, "Move back")!;
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    const why = container.ownerDocument.querySelector("dialog textarea")!;
+    fireEvent.change(why, { target: { value: "  the retry path is unhandled  " } });
+    fireEvent.click(findButton(container, "Move back")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("transition");
     expect(submitted[0]!.to).toBe("triage");
-    expect(queryByText(/accepts this completion/)).toBeNull();
+    expect(submitted[0]!.reason).toBe("the retry path is unhandled");
   });
 });
 

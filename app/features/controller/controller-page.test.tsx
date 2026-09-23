@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createRoutesStub, type ActionFunction } from "react-router";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createRoutesStub, useLocation, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import { ControllerPage, surfaceLabel } from "./controller-page";
+import { ControllerPage, linksStrandedByCancel, surfaceLabel } from "./controller-page";
+import { readableStep } from "./turn-step";
 import type { ControllerSurfaceView } from "./controller-query.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "~/features/runtime/runtime-types";
@@ -36,11 +37,12 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     projectName: "Viberr Core",
     viewerId: "u_arda",
     conversations: [
-      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null },
-      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142" },
+      { id: "cnv_b", title: "Board thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T10:00:00.000Z", projectSlug: "viberr-core", taskKey: null, unread: false },
+      { id: "cnv_t", title: "Task thread", ownerLabel: "arda@viberr.dev", own: true, lastMessageAt: "2026-09-01T11:00:00.000Z", projectSlug: "viberr-core", taskKey: "VIB-142", unread: false },
     ],
     conversation: null,
     messages: [],
+    taskLinks: {},
     turn: { working: false, runId: null, phase: null, step: null },
     runtime: [],
     canInterruptTurn: false,
@@ -51,6 +53,27 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     ...over,
   };
 }
+
+/**
+ * O39-d: the rail and the phone's picker mark a thread holding a controller
+ * reply the viewer has not opened.
+ */
+describe("the page marks a reply the viewer has not seen (O39-d)", () => {
+  it("marks the unread thread on the rail and in the picker, and no other", async () => {
+    const v = view();
+    v.conversations = v.conversations.map((c) => (c.id === "cnv_t" ? { ...c, unread: true } : c));
+    renderPage(v);
+    // CANARY: drop the rail's unread mark and the thread that answered looks
+    // like every other.
+    const unread = await screen.findByRole("link", { name: /Task thread, new reply/ });
+    expect(unread.className).toContain("unread");
+    expect(screen.getByRole("link", { name: /^Board thread/ }).className).not.toContain("unread");
+    const options = Array.from(screen.getByRole("combobox", { name: "Conversation" }).querySelectorAll("option"));
+    expect(options.map((o) => o.textContent)).toEqual(
+      expect.arrayContaining(["New reply · VIB-142 · Task thread", "Board thread"]),
+    );
+  });
+});
 
 describe("ruling 131(c): the Goals panel names what a link waits on", () => {
   it("renders 'waits on …' under a link with a declared wait, and nothing under one without", async () => {
@@ -111,8 +134,142 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
       history: [],
     };
     const { container } = renderPage(view({ goals: [goal] }));
-    await screen.findByText("waits on goal-1 link 2 (JC-4) (JC-6 is done)");
+    // Ruling 425(b): the states now read as a count and a list, never as a
+    // flat list of addresses in which JC-6 looks as waited-on as JC-4.
+    await screen.findByText("waits on 1 · 1 done");
+    const rows = [...container.querySelectorAll("[data-link-wait] li")].map((li) => [
+      li.getAttribute("data-state"),
+      li.querySelector(".ctl-wait-state")?.textContent,
+      li.querySelector(".mono")?.textContent,
+    ]);
+    expect(rows).toEqual([
+      ["open", "open", "JC-4"],
+      ["done", "done", "JC-6"],
+    ]);
     expect(container.textContent).not.toContain("waits on goal-1 link 2, JC-6");
+  });
+
+  /**
+   * Ruling 425 (pass 39, the controller page for end users). Live on ax-clone:
+   * goal-6 link 1 read "active" over AX-6, which sat in Triage held by ten
+   * other links; goal-6 link 5 printed thirteen entries as one sentence of
+   * addresses ("goal-4 link 6, goal-4 link 7, goal-5 link 1 (AX-5) …"); and
+   * goal-4 link 5 read "waits on AX-20 AX-21", AX-21 being its own task.
+   */
+  describe("ruling 425: a chain link says what holds it in words a person can follow", () => {
+    function chains(): NonNullable<ControllerSurfaceView["goals"]> {
+      const base = {
+        status: "active" as const,
+        createdBy: "u_arda",
+        createdByLabel: "Arda",
+        onFailure: "pause" as const,
+        description: "",
+        createdAt: null,
+        updatedAt: null,
+        history: [],
+      };
+      return [
+        {
+          ...base,
+          id: "goal-4",
+          title: "Cycle 4",
+          currentIndex: 5,
+          links: [
+            { index: 5, title: "ax logs: the server route and the command", goal: "L.", taskKey: "AX-21", status: "active", note: null, redeclared: false, blockedBy: ["AX-20"], waits: [{ ref: "AX-20", label: "AX-20", state: "open", taskKey: "AX-20", goalId: null }] },
+            { index: 6, title: "ax delete, and the deletion cascade rule", goal: "D.", taskKey: null, status: "pending", note: null, redeclared: false, blockedBy: [] },
+          ],
+        },
+        {
+          ...base,
+          id: "goal-6",
+          title: "Cycle 6",
+          currentIndex: 1,
+          links: [
+            {
+              index: 1,
+              title: "End-to-end test harness",
+              goal: "E.",
+              taskKey: "AX-6",
+              status: "active",
+              note: null,
+              redeclared: false,
+              blockedBy: ["goal-4 link 5", "goal-4 link 6", "AX-24", "goal-9 link 1"],
+              waits: [
+                { ref: "goal-4 link 5", label: "goal-4 link 5 (AX-21)", state: "open", taskKey: "AX-21", goalId: "goal-4" },
+                { ref: "goal-4 link 6", label: "goal-4 link 6", state: "open", taskKey: null, goalId: "goal-4" },
+                { ref: "AX-24", label: "AX-24", state: "done", taskKey: "AX-24", goalId: null },
+                { ref: "goal-9 link 1", label: "goal-9 link 1", state: "cancelled", taskKey: null, goalId: "goal-9" },
+              ],
+            },
+            {
+              index: 2,
+              title: "Released once its waits are done",
+              goal: "R.",
+              taskKey: "AX-7",
+              status: "active",
+              note: null,
+              redeclared: false,
+              blockedBy: ["AX-24"],
+              waits: [{ ref: "AX-24", label: "AX-24", state: "done", taskKey: "AX-24", goalId: null }],
+            },
+          ],
+        },
+      ];
+    }
+
+    it("(a) a link whose task is still held reads blocked, as its board card does, and one whose waits are all done reads active", async () => {
+      // CANARY: drop `held` and use LINK_PILL[l.status] alone.
+      const { container } = renderPage(view({ goals: chains() }));
+      await screen.findByText("End-to-end test harness");
+      const pillOf = (title: string) =>
+        [...container.querySelectorAll(".ctl-links li")]
+          .find((li) => li.querySelector(".ctl-link-title")?.textContent === title)
+          ?.querySelector(".pill")?.textContent;
+      // The board's word for the same task (card-status `blocked`).
+      expect(pillOf("End-to-end test harness")).toBe("blocked");
+      expect(pillOf("ax logs: the server route and the command")).toBe("blocked");
+      expect(pillOf("Released once its waits are done")).toBe("active");
+      expect(pillOf("ax delete, and the deletion cascade rule")).toBe("pending");
+    });
+
+    it("(b) the wait list is a count that opens to each entry's state, link and title", async () => {
+      // CANARY: render the old one-sentence `holdEntriesSentence` instead of `LinkWaits`.
+      const { container } = renderPage(view({ goals: chains() }));
+      await screen.findByText("End-to-end test harness");
+      const waits = [...container.querySelectorAll("details[data-link-wait]")];
+      const harness = waits.find((d) => d.closest("li")?.querySelector(".ctl-link-title")?.textContent === "End-to-end test harness")!;
+      expect(harness.querySelector("summary")?.textContent).toBe("waits on 3 · 1 done · 1 can never finish");
+      const rows = [...harness.querySelectorAll("li")].map((li) => ({
+        state: li.querySelector(".ctl-wait-state")?.textContent,
+        ref: li.querySelector(".mono")?.textContent,
+        href: li.querySelector("a.mono")?.getAttribute("href") ?? null,
+        title: li.querySelector(".ctl-wait-title")?.textContent || null,
+      }));
+      expect(rows).toEqual([
+        // A goal link with a task names the task, and the link's title.
+        { state: "open", ref: "AX-21", href: "/projects/viberr-core/tasks/AX-21", title: "ax logs: the server route and the command" },
+        // A goal link the chain has not started names the link, and opens that chain.
+        { state: "not started", ref: "goal-4 link 6", href: "/projects/viberr-core/controller#goal-4", title: "ax delete, and the deletion cascade rule" },
+        // A wait on a cancelled chain's link is marked, and nothing on the page names it.
+        { state: "cancelled", ref: "goal-9 link 1", href: "/projects/viberr-core/controller#goal-9", title: null },
+        // Done entries come last.
+        { state: "done", ref: "AX-24", href: "/projects/viberr-core/tasks/AX-24", title: null },
+      ]);
+      const released = waits.find((d) => d.closest("li")?.querySelector(".ctl-link-title")?.textContent === "Released once its waits are done")!;
+      expect(released.querySelector("summary")?.textContent).toBe("waited on one entry, all done");
+    });
+
+    it("(c) a link's own task sits before its title, never after what it waits on", async () => {
+      // CANARY: move the `ctl-link-task` link back after the waits.
+      const { container } = renderPage(view({ goals: chains() }));
+      await screen.findByText("End-to-end test harness");
+      const li = [...container.querySelectorAll(".ctl-links > li")].find(
+        (n) => n.querySelector(".ctl-link-title")?.textContent === "ax logs: the server route and the command",
+      )!;
+      const order = [...li.children].map((c) => c.className.split(" ").find((k) => k.startsWith("ctl-") || k === "pill") ?? c.tagName);
+      expect(order.indexOf("ctl-link-task")).toBeLessThan(order.indexOf("ctl-link-title"));
+      expect(order.indexOf("ctl-link-title")).toBeLessThan(order.indexOf("ctl-link-waits"));
+    });
   });
 
   /**
@@ -218,7 +375,9 @@ describe("the project controller page (ruling 121)", () => {
     await screen.findByText("Managing the Viberr Core board with your own permissions.");
     const chip = screen.getByText("VIB-142", { selector: ".ctl-conv-task" });
     expect(chip.closest("a")?.textContent).toContain("Task thread");
-    expect(screen.getByText("Board thread").closest("a")?.querySelector(".ctl-conv-task")).toBeNull();
+    expect(
+      screen.getByText("Board thread", { selector: ".ctl-conv-title" }).closest("a")?.querySelector(".ctl-conv-task"),
+    ).toBeNull();
   });
 
   it("says which task an open thread is anchored to, and where a message came from", async () => {
@@ -260,7 +419,8 @@ describe("the project controller page (ruling 121)", () => {
 describe("the conversation rail (U33-8)", () => {
   it("asks for a blank composer by name, so a bare URL can mean the newest thread", async () => {
     renderPage(view());
-    const link = await screen.findByRole("link", { name: "New" });
+    // Ruling 419(a): New lives in the page head now, one control for the page.
+    const link = await screen.findByRole("link", { name: "New conversation" });
     expect(link.getAttribute("href")).toBe(
       "/projects/viberr-core/controller?c=new",
     );
@@ -283,7 +443,7 @@ describe("the conversation rail (U33-8)", () => {
         viewerOwnsActive: true,
       }),
     );
-    await screen.findByText("Board thread");
+    await screen.findByText("Board thread", { selector: ".ctl-conv-title" });
     const marked = [...container.querySelectorAll("a.ctl-conv.on")];
     expect(marked.map((a) => a.textContent)).toEqual([
       expect.stringContaining("Board thread"),
@@ -311,13 +471,21 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     await screen.findByText("Managing this instance with your own permissions.");
     const box = composer(container);
     expect(box.disabled).toBe(true);
-    expect(box.placeholder).toContain("your own Claude account");
-    expect(box.placeholder).toContain("Profile → Agent accounts");
+    // U39-10: the sentence is a visible note beside the box, with the place it
+    // names linked; the disabled box itself says only what it cannot do.
+    // CANARY: drop <NotConnectedNote /> from the composer.
+    const note = container.querySelector(".ctl-composer [data-not-connected]");
+    expect(note?.textContent).toContain("your own Claude account");
+    expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
+    expect(box.placeholder).toBe("Connect Claude to send a message.");
     // The pill states the same fact in the header, and neither of them blames
     // the deployment: since ruling 127 it holds no credential to blame.
     expect(container.textContent).toContain("Claude not connected");
     expect(container.textContent).not.toContain("backend unavailable");
-    expect(container.textContent).not.toContain("on this instance");
+    // The blame, not the words: ruling 419(g) puts ruling 314's instance
+    // examples on this page, and one of them asks about the agent profiles
+    // "on this instance", which blames nothing.
+    expect(container.textContent).not.toMatch(/unavailable[^.]*on this instance/i);
   });
 
   it("says nothing of the sort to a viewer who HAS connected Claude", async () => {
@@ -329,6 +497,7 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     expect(box.disabled).toBe(false);
     expect(box.placeholder).toContain("Ask the controller");
     expect(container.textContent).not.toContain("Claude not connected");
+    expect(container.querySelector("[data-not-connected]")).toBeNull();
   });
 
   it("keeps the read-only refusal distinct from the not-connected one", async () => {
@@ -395,9 +564,14 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
   });
 
   it("ruling 259: a successful send clears it", async () => {
+    const posted: Record<string, string>[] = [];
     const { container } = renderInstancePage(
       view({ available: true, projectName: null, conversations: [], goals: null }),
-      () => ({ ok: true, conversationId: "cv_new" }),
+      async ({ request }) => {
+        const form = await request.formData();
+        posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+        return { ok: true, conversationId: "cv_new" };
+      },
     );
     await screen.findByText("Managing this instance with your own permissions.");
     const box = composer(container);
@@ -407,6 +581,9 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     });
     // CANARY: clear on neither path and the box keeps every message ever sent.
     expect(box.value).toBe("");
+    // U39-24: the zone this page prints times in goes with the message, so
+    // the controller quotes times in it. CANARY: drop it from `sendForm`.
+    expect(posted[0]?.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
   });
 });
 
@@ -497,7 +674,74 @@ describe("the open conversation's execution", () => {
     // the run panel below keeps showing it — the live shape.
     const row = await screen.findByRole("status");
     expect(row.textContent).toContain("is working");
-    expect(row.textContent).toContain('get_task · {"taskKey":"SHOP-31"}');
+    // U39-9: in words, with the stored text kept on the title.
+    expect(row.textContent).toContain("get task · SHOP-31");
+    expect(row.querySelector(".ctl-working-step")?.getAttribute("title")).toBe(
+      'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
+    );
+  });
+
+  it("U39-9: a step reads as words: no server prefix, no underscores, a flat input as its values", () => {
+    // CANARY: render `detail` instead of `readableStep(detail)`.
+    expect(readableStep("composing · mcp__viberr_controller__read_default_branch_file · internal/client/client.go answered")).toBe(
+      "composing · read default branch file · internal/client/client.go answered",
+    );
+    expect(readableStep('mcp__viberr_ops__read_run_log · {"runId":"run_x","tail":40}')).toBe("read run log · run_x, 40");
+    // A payload the 120-character cap cut short is not JSON, so it stays as stored.
+    expect(readableStep('mcp__viberr_controller__update_goal · {"goalId":"goal-6","links…')).toBe(
+      'update goal · {"goalId":"goal-6","links…',
+    );
+    // Built-in tools and their inputs are already words.
+    expect(readableStep("Bash · npm test")).toBe("Bash · npm test");
+  });
+
+  it("U39-28: the run loading its tools says so, with their names", () => {
+    // Live on ax-clone, the first step of a controller turn. CANARY: drop the
+    // two ToolSearch replacements.
+    expect(
+      readableStep(
+        "composing · ToolSearch · query: select:mcp__viberr_controller__get_task,mcp__viberr_controller__list_decisions… answered",
+      ),
+    ).toBe("composing · loading tools · get task, list decisions… answered");
+    expect(readableStep("ToolSearch · query: slack send")).toBe("looking up tools · slack send");
+    // Live after the deploy: the cap cut the second id before its tool name.
+    // CANARY: drop the truncated-id replacement.
+    expect(
+      readableStep(
+        "composing · ToolSearch · query: select:mcp__viberr_controller__read_knowledge_base_doc,mcp__viberr_controller_… answered",
+      ),
+    ).toBe("composing · loading tools · read knowledge base doc, … answered");
+  });
+
+  it("U39-29: the tasks a reply names open from the transcript", async () => {
+    // Live on ax-clone, "I created two urgent core tasks … AX-33 and AX-34"
+    // named five tasks as plain text. CANARY: drop `taskLinks={view.taskLinks}`
+    // from the transcript's Markdown.
+    renderPage(
+      view({
+        conversation: {
+          id: "cnv_b",
+          userId: "u1",
+          userLabel: "arda@viberr.dev",
+          projectSlug: "viberr-core",
+          taskKey: null,
+          title: "Board thread",
+          createdAt: "2026-09-01T10:00:00.000Z",
+          updatedAt: "2026-09-01T10:00:00.000Z",
+          lastMessageAt: "2026-09-01T10:00:05.000Z",
+        },
+        messages: [
+          { id: "m2", conversationId: "cnv_b", seq: 2, author: "controller", userId: null, text: "I created VIB-142. VIB-7 is not on this board.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+        ],
+        taskLinks: { "VIB-142": "/projects/viberr-core/tasks/VIB-142" },
+        viewerOwnsActive: true,
+      }),
+      "?c=cnv_b",
+    );
+    const link = await screen.findByRole("link", { name: "VIB-142" });
+    expect(link.getAttribute("href")).toBe("/projects/viberr-core/tasks/VIB-142");
+    expect(link.hasAttribute("target")).toBe(false);
+    expect(screen.queryByRole("link", { name: "VIB-7" })).toBeNull();
   });
 
   it("ruling 250: a phase that only repeats the sentence is not printed twice", async () => {
@@ -556,23 +800,43 @@ describe("the open conversation's execution", () => {
     const cells = [...container.querySelectorAll(".run-cell")].map(plain);
     expect(cells[0]).toMatch(/^Elapsed01:0[56]$/);
     expect(cells.slice(1)).toEqual(["Turns3", "Tokens1.2k", "Runtimeclaude-opus-4-8"]);
-    expect(screen.getByRole("button", { name: "View logs" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Interrupt" })).toBeTruthy();
+
+    // F39 (owner decision): while the turn streams, its console is DISCLOSED
+    // on this card — open by default, because it was always on the page
+    // before, just a full viewport below with the conversation in between.
+    const trigger = screen.getByRole("button", { name: "Hide console" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     // The console, with the turn's line and the transcript-shaped footer.
     expect(screen.getByText("Agent logs")).toBeTruthy();
     expect(screen.getByText("Reading the board.")).toBeTruthy();
     expect(container.textContent).toContain("never in the transcript");
-    // The strip sits above the transcript; the console below the composer.
+    // CANARY: restore the scroll-to-anchor `onViewLogs` and the console goes
+    // back below the composer — this query null, and the order four items.
+    expect(
+      container.querySelector(".runbar .runbar-console")?.textContent,
+    ).toContain("Agent logs");
     const main = container.querySelector(".ctl-main")!;
-    const order = [...main.children].map((el) => el.className.split(" ")[0]);
-    expect(order).toEqual(["runbar", "panel", "ctl-composer", "panel"]);
+    expect([...main.children].map((el) => el.className.split(" ")[0])).toEqual([
+      "runbar",
+      "panel",
+      "ctl-composer",
+    ]);
+
+    // And it collapses, which is the whole point of a disclosure.
+    fireEvent.click(trigger);
+    expect(screen.queryByText("Agent logs")).toBeNull();
+    const closed = screen.getByRole("button", { name: "Show console" });
+    expect(closed.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(closed);
+    expect(screen.getByText("Agent logs")).toBeTruthy();
   });
 
   it("hides Interrupt from a viewer who may not stop the turn", async () => {
     renderPage(working({ canInterruptTurn: false, viewerOwnsActive: false }), "?c=cnv_b");
     await screen.findByText("Live run");
     expect(screen.queryByRole("button", { name: "Interrupt" })).toBeNull();
-    expect(screen.getByRole("button", { name: "View logs" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hide console" })).toBeTruthy();
   });
 
   it("Interrupt confirms first, then posts the conversation and the run", async () => {
@@ -610,8 +874,422 @@ describe("the open conversation's execution", () => {
       view({ conversation, viewerOwnsActive: true, runtime: [], canInterruptTurn: true }),
       "?c=cnv_b",
     );
-    await screen.findByText("Board thread");
+    await screen.findByText("Board thread", { selector: ".ctl-conv-title" });
     expect(container.querySelector(".runbar")).toBeNull();
     expect(screen.queryByText("Agent logs")).toBeNull();
+  });
+});
+
+type Goal = NonNullable<ControllerSurfaceView["goals"]>[number];
+type GoalLink = Goal["links"][number];
+
+function goalOf(over: Partial<Goal> & Pick<Goal, "id" | "links">): Goal {
+  return {
+    title: `Chain ${over.id}`,
+    status: "active",
+    createdBy: "u_arda",
+    createdByLabel: "Arda",
+    onFailure: "pause",
+    description: "",
+    currentIndex: null,
+    createdAt: null,
+    updatedAt: null,
+    history: [],
+    ...over,
+  };
+}
+
+function linkOf(over: Partial<GoalLink> & Pick<GoalLink, "index">): GoalLink {
+  return {
+    title: `Link ${over.index}`,
+    goal: "Do it.",
+    taskKey: null,
+    status: "pending",
+    note: null,
+    redeclared: false,
+    blockedBy: [],
+    ...over,
+  };
+}
+
+/**
+ * Ruling 419: the controller page for the person using it.
+ *
+ * Measured live on ax-clone (six goal chains, three conversations): the list of
+ * conversations and its New button began 4,419px down the page on a desktop
+ * and 5,576px down on a phone, under every chain; the main column went blank
+ * for ~3,000px beside a rail that scrolled with the page; a phone landed at the
+ * bottom of a 12,625px transcript; one unconfirmed click cancelled a whole
+ * chain for good; and a completed chain took 479px to say it was done.
+ */
+describe("ruling 419(a): the page's navigation is at its top", () => {
+  it("puts the conversations first in the rail, ahead of the goal chains", async () => {
+    // CANARY: render <GoalsPanel> before <ConversationList> in the aside.
+    const { container } = renderPage(
+      view({ goals: [goalOf({ id: "goal-1", links: [linkOf({ index: 1 })] })] }),
+    );
+    await screen.findByText("Chain goal-1");
+    const rail = container.querySelector("aside.ctl-side")!;
+    expect([...rail.children].map((c) => c.className)).toEqual([
+      "panel ctl-convs",
+      "panel ctl-goals",
+    ]);
+  });
+
+  it("offers New conversation in the page head, and nowhere else", async () => {
+    // CANARY: put a `New` link back in the Conversations panel's head.
+    const { container } = renderPage(view());
+    const link = await screen.findByRole("link", { name: "New conversation" });
+    expect(link.closest("header.ctl-head")).not.toBeNull();
+    expect(within(container.querySelector<HTMLElement>(".ctl-convs")!).queryAllByRole("link", { name: /^New/ })).toEqual([]);
+  });
+
+  it("a phone's thread switcher names the open thread and opens the one picked", async () => {
+    // CANARY: drop the picker's `navigate(...)`, and the URL never moves.
+    let search = "";
+    function Probe() {
+      search = useLocation().search;
+      return null;
+    }
+    const open = {
+      id: "cnv_b",
+      userId: "u1",
+      userLabel: "arda@viberr.dev",
+      projectSlug: "viberr-core",
+      taskKey: null,
+      title: "Board thread",
+      createdAt: "2026-09-01T10:00:00.000Z",
+      updatedAt: "2026-09-01T10:00:00.000Z",
+      lastMessageAt: "2026-09-01T10:00:00.000Z",
+    };
+    const Stub = createRoutesStub([
+      {
+        id: "root",
+        path: "/",
+        loader: () => ({ csrf: "tok", theme: "system" }),
+        children: [
+          {
+            path: "projects/:slug/controller",
+            Component: () => (
+              <ToastProvider>
+                <ControllerPage
+                  view={view({ conversation: open, viewerOwnsActive: true })}
+                  projectSlug="viberr-core"
+                  canRedirectGoals={false}
+                />
+                <Probe />
+              </ToastProvider>
+            ),
+          },
+        ],
+      },
+    ]);
+    render(<Stub initialEntries={["/projects/viberr-core/controller?c=cnv_b"]} />);
+    const picker = await screen.findByRole("combobox", { name: "Conversation" });
+    if (!(picker instanceof HTMLSelectElement)) throw new Error("the switcher must be a native select");
+    expect(picker.value).toBe("cnv_b");
+    expect([...picker.options].map((o) => o.textContent)).toEqual([
+      "Board thread",
+      "VIB-142 · Task thread",
+    ]);
+    fireEvent.change(picker, { target: { value: "cnv_t" } });
+    await waitFor(() => expect(search).toBe("?c=cnv_t"));
+  });
+
+  it("on the blank composer the switcher says so instead of naming a thread", async () => {
+    renderPage(view({ conversation: null }), "?c=new");
+    const picker = await screen.findByRole("combobox", { name: "Conversation" });
+    if (!(picker instanceof HTMLSelectElement)) throw new Error("the switcher must be a native select");
+    expect(picker.value).toBe("");
+    expect(picker.options[0]!.textContent).toBe("New conversation");
+  });
+});
+
+describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
+  it("moves only the transcript's own box to the newest message", async () => {
+    // CANARY: restore `endRef.current?.scrollIntoView?.({ block: "end" })`.
+    const intoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    const height = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("ctl-transcript") ? 4321 : 0;
+      });
+    try {
+      const { container } = renderPage(
+        view({
+          conversation: {
+            id: "cnv_b",
+            userId: "u1",
+            userLabel: "arda@viberr.dev",
+            projectSlug: "viberr-core",
+            taskKey: null,
+            title: "Board thread",
+            createdAt: "2026-09-01T10:00:00.000Z",
+            updatedAt: "2026-09-01T10:00:00.000Z",
+            lastMessageAt: "2026-09-01T10:00:00.000Z",
+          },
+          messages: [
+            { id: "m1", conversationId: "cnv_b", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: null, createdAt: "2026-09-01T10:00:00.000Z" },
+          ],
+          viewerOwnsActive: true,
+        }),
+        "?c=cnv_b",
+      );
+      await screen.findByText("Status?");
+      const box = container.querySelector<HTMLElement>("section.ctl-transcript")!;
+      await waitFor(() => expect(box.scrollTop).toBe(4321));
+      expect(intoView).not.toHaveBeenCalled();
+    } finally {
+      intoView.mockRestore();
+      height.mockRestore();
+    }
+  });
+});
+
+describe("ruling 419(c): cancelling a chain is confirmed, and says what it strands", () => {
+  const target = goalOf({
+    id: "goal-4",
+    title: "CLI",
+    links: [
+      linkOf({ index: 1, taskKey: "AX-4", status: "done" }),
+      linkOf({ index: 2, taskKey: "AX-24", status: "active" }),
+      linkOf({ index: 6 }),
+      linkOf({ index: 7 }),
+    ],
+  });
+  const other = goalOf({
+    id: "goal-6",
+    title: "Release",
+    links: [
+      // Waits on an unstarted link of goal-4: stranded by the cancel.
+      linkOf({ index: 1, blockedBy: ["goal-4 link 6", "goal-5 link 1"] }),
+      // Waits only on a link that already has its task: not stranded.
+      linkOf({ index: 2, blockedBy: ["goal-4 link 2"] }),
+      // Waits on goal-4 link 7 but is already done: nothing left to strand.
+      linkOf({ index: 3, status: "done", taskKey: "AX-30", blockedBy: ["goal-4 link 7"] }),
+    ],
+  });
+  const settledChain = goalOf({
+    id: "goal-9",
+    status: "completed",
+    links: [linkOf({ index: 1, status: "done", taskKey: "AX-1", blockedBy: ["goal-4 link 7"] })],
+  });
+
+  it("linksStrandedByCancel names only live links waiting on a link that can never start", () => {
+    // CANARY: drop the `!l.taskKey` filter and goal-6 link 2 is named too.
+    expect(linksStrandedByCancel(target, [target, other, settledChain])).toEqual(["goal-6 link 1"]);
+    expect(linksStrandedByCancel(other, [target, other, settledChain])).toEqual([]);
+  });
+
+  it("Cancel goal posts nothing until confirmed, then posts the reason typed", async () => {
+    // CANARY: make the button call `act({ op: "cancel" })` directly.
+    const posted: Record<string, string>[] = [];
+    renderPage(view({ goals: [target, other] }), "", async ({ request }) => {
+      const form = await request.formData();
+      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+      return { ok: true, toast: "Goal goal-4 cancelled. Its record stays readable." };
+    });
+    await screen.findByText("CLI");
+    const card = document.querySelector<HTMLElement>('[data-goal="goal-4"]')!;
+    const trigger = within(card).getByRole("button", { name: "Cancel goal" });
+    // Ruling 149's destructive face on the trigger.
+    expect(trigger.className).toBe("btn ghost sm danger");
+    fireEvent.click(trigger);
+    expect(posted).toEqual([]);
+    const dialog = await screen.findByRole("alertdialog", { name: "Cancel goal-4?" });
+    expect(dialog.getAttribute("data-screen-label")).toBe("Cancel goal dialog");
+    expect(dialog.textContent).toContain("A cancelled chain cannot be resumed, and none of its 2 unstarted links will ever start.");
+    expect(dialog.textContent).toContain(
+      "goal-6 link 1 waits on those unstarted links and would wait forever unless its wait is changed.",
+    );
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Scope moved to goal-7" } });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel goal" }));
+    });
+    await screen.findByText("Goal goal-4 cancelled. Its record stays readable.");
+    expect(posted).toEqual([
+      { _csrf: "tok", intent: "goal-op", goalId: "goal-4", op: "cancel", reason: "Scope moved to goal-7" },
+    ]);
+  });
+
+  it("Keep it running closes the dialog and posts nothing", async () => {
+    const posted: string[] = [];
+    renderPage(view({ goals: [target] }), "", async () => {
+      posted.push("x");
+      return { ok: true };
+    });
+    await screen.findByText("CLI");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel goal" }));
+    await screen.findByRole("alertdialog", { name: "Cancel goal-4?" });
+    fireEvent.click(screen.getByRole("button", { name: "Keep it running" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(posted).toEqual([]);
+  });
+
+  it("Skip on a failed link confirms first and says the skip releases its waiters", async () => {
+    // CANARY: make Skip call `act({ op: "skip_link", ... })` directly.
+    const failing = goalOf({
+      id: "goal-5",
+      title: "Ops",
+      links: [linkOf({ index: 3, title: "Gateway data path", taskKey: "AX-22", status: "failed" })],
+    });
+    const posted: Record<string, string>[] = [];
+    renderPage(view({ goals: [failing] }), "", async ({ request }) => {
+      const form = await request.formData();
+      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+      return { ok: true, toast: "Link 3 skipped." };
+    });
+    await screen.findByText("Ops");
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    expect(posted).toEqual([]);
+    const dialog = await screen.findByRole("alertdialog", { name: "Skip link 3?" });
+    expect(dialog.textContent).toContain('"Gateway data path" will never run, and a skipped link cannot be retried.');
+    expect(dialog.textContent).toContain("released as if it were done");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Skip link" }));
+    });
+    await screen.findByText("Link 3 skipped.");
+    expect(posted).toEqual([{ _csrf: "tok", intent: "goal-op", goalId: "goal-5", op: "skip_link", index: "3" }]);
+  });
+});
+
+describe("ruling 419(d): a chain states its progress, and a settled one folds", () => {
+  it("opens running chains, folds settled ones, and counts what is done", async () => {
+    // CANARY: render `<details open>` for every chain.
+    const running = goalOf({
+      id: "goal-2",
+      title: "Control plane",
+      links: [
+        linkOf({ index: 1, status: "done", taskKey: "AX-2" }),
+        linkOf({ index: 2, status: "skipped" }),
+        linkOf({ index: 3, status: "active", taskKey: "AX-3" }),
+        linkOf({ index: 4 }),
+      ],
+    });
+    const completed = goalOf({
+      id: "goal-1",
+      title: "Foundation",
+      status: "completed",
+      links: [linkOf({ index: 1, status: "done", taskKey: "AX-1" }), linkOf({ index: 2, status: "done", taskKey: "AX-7" })],
+    });
+    const { container } = renderPage(view({ goals: [running, completed] }));
+    await screen.findByText("Control plane");
+    const card = (id: string) => container.querySelector<HTMLDetailsElement>(`details[data-goal="${id}"]`)!;
+    expect(card("goal-2").open).toBe(true);
+    expect(card("goal-1").open).toBe(false);
+    expect(card("goal-2").querySelector("[data-goal-progress]")!.textContent).toBe("1 of 4 done · 1 skipped");
+    expect(card("goal-1").querySelector("[data-goal-progress]")!.textContent).toBe("2 of 2 done");
+    // The folded chain still names itself in its summary line.
+    expect(card("goal-1").querySelector("summary")!.textContent).toContain("Foundation");
+    expect(container.querySelector(".ctl-goals-count")!.textContent).toBe("1 running · 1 settled");
+  });
+});
+
+describe("ruling 419(d): the send hint names the key this keyboard has", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("says Ctrl on a keyboard with no ⌘, and prints no ⌘ anywhere in the footer", async () => {
+    // CANARY: restore the literal "⌘↵ sends".
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" });
+    const { container } = renderPage(view());
+    await screen.findByText(/Acts with your permissions/);
+    const foot = container.querySelector(".ctl-composer-foot")!;
+    await waitFor(() => expect(foot.textContent).toContain("Ctrl ↵ sends"));
+    expect(foot.textContent).not.toContain("⌘");
+    // The hint is its own element, which a touch screen drops (app.css).
+    expect(foot.querySelector(".kbd-hint")!.textContent).toBe(" · Ctrl ↵ sends");
+  });
+});
+
+describe("ruling 419(g): the page's blank transcript offers ruling 314's examples", () => {
+  it("lists the board examples and SENDS the one clicked, as the dock does", async () => {
+    // CANARY: drop the `ctl-examples` list from the blank transcript.
+    const posted: Record<string, string>[] = [];
+    renderPage(view({ conversation: null }), "?c=new", async ({ request }) => {
+      const form = await request.formData();
+      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+      return { ok: true, conversationId: "cnv_new" };
+    });
+    const example = await screen.findByRole("button", {
+      name: "What is waiting on me right now, and what is waiting on an agent?",
+    });
+    expect(screen.getAllByRole("button").filter((b) => b.className === "ctl-example")).toHaveLength(3);
+    await act(async () => {
+      fireEvent.click(example);
+    });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({
+      _csrf: "tok",
+      intent: "send",
+      text: "What is waiting on me right now, and what is waiting on an agent?",
+    });
+    expect(posted[0]!.conversationId).toBeUndefined();
+  });
+
+  it("holds the examples while the viewer's Claude is not connected", async () => {
+    renderPage(view({ conversation: null, available: false }), "?c=new");
+    const example = await screen.findByRole("button", { name: "Which tasks have been open longest, and why?" });
+    expect(example).toHaveProperty("disabled", true);
+  });
+});
+
+describe("U39-21 on the rail: a chain's history renders its inline code", () => {
+  it("renders `code` in a history entry instead of printing the backticks", async () => {
+    // CANARY: render `entry.text` as plain text again.
+    const goal = goalOf({
+      id: "goal-4",
+      title: "CLI",
+      description: "",
+      history: [{ occurredAt: "2026-09-22T20:00:00.000Z", text: "Link 2 renamed to `ax apply -f` by Arda Kaya." }],
+      links: [linkOf({ index: 1 })],
+    });
+    const { container } = renderPage(view({ goals: [goal] }));
+    await screen.findByText("CLI");
+    const entry = container.querySelector(".ctl-goal-history li")!;
+    expect(entry.querySelector("code.mono")?.textContent).toBe("ax apply -f");
+    expect(entry.textContent).not.toContain("`");
+  });
+});
+
+describe("ruling 419(h): a chain says what it is for and what has happened to it", () => {
+  const history = Array.from({ length: 8 }, (_, i) => ({
+    occurredAt: `2026-09-22T2${i}:00:00.000Z`,
+    text: `Entry ${8 - i}`,
+  }));
+
+  it("folds the description and the newest history under 'About this chain', six at a time", async () => {
+    // CANARY: drop the `ctl-goal-more` disclosure.
+    const goal = goalOf({
+      id: "goal-4",
+      title: "CLI",
+      description: "Give the runtime a face.",
+      history,
+      links: [linkOf({ index: 1 })],
+    });
+    const { container } = renderPage(view({ goals: [goal] }));
+    await screen.findByText("CLI");
+    const more = container.querySelector<HTMLDetailsElement>('details[data-goal="goal-4"] details.ctl-goal-more')!;
+    expect(more.querySelector("summary")!.textContent).toBe("About this chain");
+    expect(more.textContent).toContain("Give the runtime a face.");
+    const shown = () => [...more.querySelectorAll(".ctl-goal-history li")].map((li) => li.textContent);
+    expect(shown()).toHaveLength(6);
+    expect(shown()[0]).toContain("Entry 8");
+    fireEvent.click(within(more).getByRole("button", { name: "Show all 8 entries" }));
+    expect(shown()).toHaveLength(8);
+  });
+
+  it("opens the chain a link pointed at, even a settled one", async () => {
+    // CANARY: drop `useTargetedGoal()` from the Goals panel.
+    const done = goalOf({
+      id: "goal-1",
+      title: "Foundation",
+      status: "completed",
+      links: [linkOf({ index: 1, status: "done", taskKey: "AX-1" })],
+    });
+    const { container } = renderPage(view({ goals: [done] }), "#goal-1");
+    await screen.findByText("Foundation");
+    await waitFor(() =>
+      expect(container.querySelector<HTMLDetailsElement>("details#goal-1")!.open).toBe(true),
+    );
   });
 });

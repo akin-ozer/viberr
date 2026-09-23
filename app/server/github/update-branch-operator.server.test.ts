@@ -25,7 +25,7 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeProject } from "../../../test-support/test-store";
-import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
+import { operatorSnapshot, type OperatorAuthority } from "~/server/tasks/operator-actions.server";
 import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
@@ -106,6 +106,8 @@ function fakeGit(
     pushRefused?: boolean;
     /** Ruling 159(b): the store-layout paths HEAD's tree carries. */
     storeLayoutFiles?: string[];
+    /** Ruling 428: the files the branch changes since it forked. */
+    branchFiles?: string[];
   } = {},
 ) {
   const calls: string[][] = [];
@@ -130,6 +132,12 @@ function fakeGit(
     }
     if (args.includes("--verify")) {
       return { ok: true, stdout: remote === "current" ? PRE_SHA : REMOTE_SHA, stderr: "" };
+    }
+    if (opts.branchFiles && args.includes("merge-base") && !args.includes("--is-ancestor")) {
+      return { ok: true, stdout: "f".repeat(40), stderr: "" };
+    }
+    if (opts.branchFiles && args.includes("--name-only") && args.includes("--no-merges")) {
+      return { ok: true, stdout: `${opts.branchFiles.join("\n")}\n`, stderr: "" };
     }
     if (args.includes("merge-base")) {
       return remote === "behind"
@@ -216,6 +224,27 @@ const act = (
   );
 
 describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
+  it("F39-69: a carried-out refresh is recorded on the drive, a conflict is not", async () => {
+    const drive = () => ({ backend: "codex" as const, autonomy: "supervised" as const, reactDepth: 0 });
+    const run = async (git: ReturnType<typeof fakeGit>) => {
+      const operatorRun: ReturnType<typeof drive> & { refreshed?: boolean } = drive();
+      await operatorUpdateBranchFromBase(
+        store.db,
+        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch({}).fetchImpl, operatorRun },
+        { projectSlug: store.slug, taskKey: "VIB-1", exec: git.exec },
+        authority(),
+      );
+      return operatorRun.refreshed;
+    };
+    // CANARY: drop `stampRefreshed` from either `done` arm and its case reads
+    // undefined, so the settle cannot tell a drive that stopped halfway.
+    expect(await run(fakeGit({ behind: 2 }))).toBe(true);
+    expect(await run(fakeGit({ behind: 0 }))).toBe(true);
+    // Ruling 134(c)'s arm: the workspace is current and origin lags it.
+    expect(await run(fakeGit({ behind: 0, remote: "behind" }))).toBe(true);
+    expect(await run(fakeGit({ conflict: true }))).toBeUndefined();
+  });
+
   it("updates the branch and puts it on the TIMELINE, not just in the tool result", async () => {
     const git = fakeGit({ behind: 2 });
     const res = await act(git.exec);
@@ -247,6 +276,9 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(res.outcome).toBe("noop");
     expect(res.message).toContain("CONFLICTS");
     expect(res.message).toContain("decision packet");
+    // Ruling 443: the packet is the step's outcome. CANARY: drop the mark and
+    // a Codex plan narrates this step as one that "did not apply".
+    expect(res.openedPacket).toBe(true);
     const file = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -282,6 +314,21 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(file.parsed.frontmatter.waiting).toBe("human");
     // The branch itself was left alone.
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+
+  it("ruling 443: a conflict whose packet could not open carries no packet mark", async () => {
+    // An operator that may not open packets: the conflict has no decision to
+    // point at, so it stays a state refusal the plan narrates.
+    const noPackets = authority({
+      policy: new Map([
+        ["generate-packets", "off"],
+        ["append-typed-events", "direct"],
+      ]),
+    });
+    const res = await act(fakeGit({ conflict: true }).exec, noPackets);
+    expect(res.outcome).toBe("noop");
+    expect(res.message).toContain("could NOT be opened");
+    expect(res.openedPacket).toBeUndefined();
   });
 
   it("ruling 133(b): with NO delivering agent the packet offers only what can execute and says why", async () => {
@@ -347,6 +394,27 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(res.message).toContain("Remove those paths");
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
     expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(false);
+  });
+
+  it("ruling 428: a branch that changes a leased path is not refreshed, and the operator is told to wait for the holder", async () => {
+    // CANARY: drop the `lease_held` arm from `outcomeSentence` and the message
+    // falls to the generic "The branch was not updated" with no next step.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review", branch: "vib-2" }),
+    });
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      fileLeases: [{ paths: ["internal/controller/task.go"], taskKey: "VIB-2", reason: "lands first" }],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const git = fakeGit({ behind: 2, branchFiles: ["internal/controller/task.go"] });
+    const res = await act(git.exec);
+    expect(res.outcome).toBe("noop");
+    expect(res.message).toContain("was NOT updated, and nothing was merged or pushed");
+    expect(res.message).toContain("which VIB-2 holds (lands first)");
+    expect(res.message).toContain("Do not retry the refresh until VIB-2 has merged.");
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
   });
 
   it("ruling 229: an already-current branch is never narrated as a refused plan step", async () => {
@@ -446,7 +514,24 @@ describe("the operator persona teaches the branch update", () => {
   it("names the tool and when to use it", () => {
     expect(seed).toContain("`update_branch_from_base`");
     expect(seed).toMatch(/before you deliver/i);
-    expect(seed).toMatch(/never ask an agent to rebase, merge, or force-push/i);
+    expect(seed).toMatch(/never ask an agent to rebase or force-push, never ask it to bring the branch up to date/i);
+  });
+
+  it("ruling 438: names the one merge an agent makes, the conflict a person routed to it", () => {
+    /**
+     * Live on AX-28 at 02:45: I answered the branch-conflict packet by sending
+     * the conflict to the Developer, which is what the packet's own recommended
+     * redirect does ("it merges and resolves the conflicting files"). The
+     * operator refused, "the operator rules prohibit agent-side merges", and
+     * opened "AX-28 base conflict has no supported resolution path". The
+     * doctrine forbade every agent merge; on AX-21 at 01:40 the same answer
+     * had been relayed.
+     *
+     * CANARY: restore "never ask an agent to rebase, merge, or force-push".
+     */
+    expect(seed).not.toMatch(/never ask an agent to rebase, merge/i);
+    expect(seed).toMatch(/that is the one merge an agent makes \(ruling 438\)/);
+    expect(seed).toMatch(/direct it to merge `origin\/<base>` into the task branch in its own workspace/);
   });
 
   it("ruling 134(c): says the tool reports origin's copy and that the push is `deliver_for_review`'s job", () => {
@@ -566,9 +651,15 @@ describe("ruling 134(c): the remote report", () => {
     const res = await act(fakeGit({ behind: 2 }).exec, authority(), gh.fetchImpl);
     expect(res.outcome).toBe("done");
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    // Ruling 439: and the head it merged onto, which is what lets the reviewed
+    // revision be followed through the refresh. Canary: drop `onto` from the
+    // push in recordBranchRefresh.
     expect(fm.frontmatter.baseRefreshes).toEqual([
-      { mergeSha: MERGE_SHA, baseSha: BASE_SHA, base: "main", commits: 2, at: expect.any(String) },
+      { mergeSha: MERGE_SHA, baseSha: BASE_SHA, base: "main", commits: 2, at: expect.any(String), onto: PRE_SHA },
     ]);
+    // The push published the revision the merge was made onto. Canary: drop
+    // the stamp in recordBranchRefresh.
+    expect(fm.frontmatter.workRevision?.pushedAt).toEqual(expect.any(String));
     expect(fm.frontmatter.pr?.revisionDrift).toBeTruthy();
     const sentence = describeRevisionDrift(fm.frontmatter.pr?.revisionDrift).sentence;
     expect(sentence).not.toBe("");
@@ -577,6 +668,58 @@ describe("ruling 134(c): the remote report", () => {
     const event = fm.timeline.find((e) => e.type === "github" && e.text.includes("Brought `vib-1` up to date"))!;
     expect(event.text).toBe(res.message);
     expect(listAuditEvents(store.db, { action: "github.branch_update.operator" })[0]!.details).toMatchObject({ mergeSha: MERGE_SHA, remote: "current" });
+  });
+
+  /**
+   * F39-64: GitHub shows a pushed head on the PR some seconds after the push.
+   * Live on ax-clone AX-29 the acceptance ceremony's reconcile read the PR at
+   * the reviewed head, measured no drift, and the timeline said "The review
+   * PR's head now equals the reviewed revision" one line after the merge commit
+   * it had pushed; the completion record then left the refresh out.
+   */
+  describe("F39-64: the reconcile reads the PR before GitHub shows the pushed head", () => {
+    function lagging(reviewedHead: string) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          branch: "vib-1",
+          workRevision: { id: "rev_1", headSha: reviewedHead, treeSha: null, branch: "vib-1", createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+          pr: { number: 5, state: "review", title: "[VIB-1] t", headSha: PRE_SHA },
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      // GitHub still answers the pre-push head.
+      return fakeGithubFetch({
+        [`GET ${REPO_PATH}/compare/main...vib-1`]: { body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] } },
+        [`GET ${REPO_PATH}/pulls`]: { body: [{ number: 5, title: "[VIB-1] t", state: "open", draft: false, merged_at: null, head: { sha: PRE_SHA } }] },
+        [`GET ${REPO_PATH}/pulls/5`]: { body: { number: 5, title: "[VIB-1] t", state: "open", merged: false, merged_at: null, head: { sha: PRE_SHA }, additions: 1, deletions: 0, changed_files: 1 } },
+        [`GET ${REPO_PATH}/commits/${PRE_SHA}/check-runs`]: { body: { total_count: 0, check_runs: [] } },
+      });
+    }
+
+    it("reads the drift from the refresh record, never claims the heads are equal", async () => {
+      // CANARY: drop the `lagging` arm and the sentence is the AX-29 one.
+      const gh = lagging(PRE_SHA);
+      const res = await act(fakeGit({ behind: 2 }).exec, authority(), gh.fetchImpl);
+      expect(res.outcome).toBe("done");
+      expect(res.message).not.toContain("now equals the reviewed revision");
+      expect(res.message).toContain(
+        "Drift, from Viberr's own refresh record (GitHub had not shown the new head on the pull request): base refreshed · 1 merge commit · 2 base commits · 0 authored commits since review.",
+      );
+      const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+      // What the completion record and the accept dialog read.
+      expect(fm.pr?.revisionDrift).toEqual({ headSha: MERGE_SHA, authored: 0, baseRefresh: { merges: 1, commits: 2 } });
+    });
+
+    it("says it did not re-measure when the record cannot reach the pushed head", async () => {
+      // The refresh was made onto a head that is not the reviewed revision's.
+      const gh = lagging("f".repeat(40));
+      const res = await act(fakeGit({ behind: 2 }).exec, authority(), gh.fetchImpl);
+      expect(res.message).not.toContain("now equals the reviewed revision");
+      expect(res.message).toContain(
+        "GitHub has not shown the new head on the pull request yet, so the drift was not re-measured; the next GitHub pass will.",
+      );
+    });
   });
 
   it("ruling 132: when the reconcile cannot run, the row still lands and the message says the drift was not re-measured", async () => {
@@ -641,12 +784,34 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     seedAt("review", { pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable: "clean" } });
     const git = fakeGit({ behind: 2 });
     const res = await act(git.exec);
-    expect(res.outcome).toBe("denied");
+    // F39-10: `noop`, not `denied`. What rules the step out is the task's
+    // STAGE; the operator's `update-task-branch` grant is untouched, and
+    // `narrateRefusedActions` files a `denied` under "refused by its capability
+    // policy" as a `policy` event — blaming a grant that is not the cause.
+    expect(res.outcome).toBe("noop");
     expect(res.message).toBe(
       "VIB-1 is at Review, the acceptance boundary: the branch is brought up to date once, at acceptance time, and merged in the same ceremony. Do not refresh it here; recommend or accept the completion instead.",
     );
     expect(git.calls).toHaveLength(0);
     expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")).toBeUndefined();
+    // Ruling 424: the operator reads this refusal before it plans. The snapshot
+    // and the tool share one function, so they say the same thing.
+    const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority());
+    expect(snap.notRefreshableReason).toBe(res.message);
+  });
+
+  it("ruling 429: while the work is still in its review loop the refresh runs at the acceptance stage", async () => {
+    // Live on AX-20: validation `changed` at Review, and the deliverer needed
+    // AX-19's merged work to build its integration test. CANARY: drop the
+    // `failing`/`changed` arm from `acceptanceBoundaryRefusal`.
+    seedAt("review", {
+      validation: "failing",
+      pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable: "clean" },
+    });
+    const git = fakeGit({ behind: 2 });
+    const res = await act(git.exec);
+    expect(res.message).not.toContain("the acceptance boundary");
+    expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(true);
   });
 
   it("G35-5 (d): a PR GitHub already reports conflicting is the exception: the tool records the conflict and opens the packet", async () => {

@@ -78,6 +78,10 @@ import {
   setOAuthProviderEnabled,
 } from "~/server/auth/oauth-providers.server";
 import {
+  openResourceRequests,
+  resourceRequestRemedy,
+} from "~/server/controller/controller-requests.server";
+import {
   deleteKnowledgeBase,
   deleteMcpServer,
   deleteSkill,
@@ -143,6 +147,18 @@ export async function loader({ request }: Route.LoaderArgs) {
     controllerConfig: resolveControllerConfig(),
     // Ruling 108: which of its sections this DEPLOYMENT allows editing.
     controllerLocks: controllerSectionLocks(),
+    // Ruling 390: grants the controller asked for and cannot make itself. The
+    // remedy sentence is computed HERE so the panel and the controller's own
+    // turn context print the identical words.
+    controllerRequests: openResourceRequests().map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      name: r.name,
+      reason: r.reason,
+      askedAt: r.askedAt,
+      askedByLabel: r.askedByLabel,
+      remedy: resourceRequestRemedy(r.kind),
+    })),
   };
 }
 
@@ -796,6 +812,7 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
       callbackOrigin={loaderData.callbackOrigin}
       runConcurrency={loaderData.runConcurrency}
       runSpendCapUsd={loaderData.runSpendCapUsd}
+      controllerRequests={loaderData.controllerRequests}
       s3Audit={loaderData.s3Audit}
       auditEvents={loaderData.auditEvents}
       auditEventsOrgScoped={loaderData.auditEventsOrgScoped}

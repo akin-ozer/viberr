@@ -392,3 +392,24 @@ describe("the operator doctrine upgrade in place (ruling 134)", () => {
     expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(assetHash(definition));
   });
 });
+
+/**
+ * Ruling 437 (F39-60): the operator's app skill told it to resolve any packet
+ * that had become moot. `resolve_packet` refuses every packet the operator did
+ * not raise, and operators planned it on agents' questions twice in half an
+ * hour. The skill now draws the same line as the snapshot and the refusal.
+ *
+ * CANARY: restore "If a packet becomes moot because its input arrived another
+ * way, resolve it." with no qualification.
+ */
+describe("ruling 437: the app skill says whose packets the operator may resolve", () => {
+  const skill = readFileSync(
+    path.join(import.meta.dirname, "assets/viberr-app-expertise.skill.md"),
+    "utf8",
+  );
+  it("scopes the moot-packet rule to the operator's own packets and names `packet.yours`", () => {
+    expect(skill).toContain("If a packet you raised becomes moot");
+    expect(skill).toContain("`packet.yours: false` in `get_task`");
+    expect(skill).not.toMatch(/If a packet becomes moot because/);
+  });
+});

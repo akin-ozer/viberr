@@ -237,23 +237,28 @@ export function useLogSelection(runtime: RunView[]) {
     if (pendingLogReady) setPendingLogSel(null);
     setLogSel(id);
   };
+  // F39 (owner decision): while a run is LIVE its console is disclosed inside
+  // the run card, so the strip's own control is a toggle rather than a jump to
+  // a panel a viewport below with the timeline in between.
+  // Open by default — the console was always on the page before, just far
+  // from the strip that describes it.
+  const [consoleOpen, setConsoleOpen] = useState(true);
   const onViewLogs = (id: string) => {
     selectLog(id);
-    // Scroll the logs panel into view (spec §5.2 addition).
-    requestAnimationFrame(() => {
-      document
-        .querySelector('[data-comment-anchor="agent-logs"]')
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    setConsoleOpen((open) => !open);
   };
   const onAgentLog = (threadId: string) => {
     setPendingLogSel(threadId);
     setLogSel(threadId);
+    // From the TIMELINE the console is genuinely elsewhere, so this one still
+    // travels — it just has to open the disclosure first, or there would be
+    // nothing at the anchor to travel to.
+    setConsoleOpen(true);
     requestAnimationFrame(() => {
       document
         .querySelector('[data-comment-anchor="agent-logs"]')
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
-  return { shownLogSel, selectLog, onViewLogs, onAgentLog };
+  return { shownLogSel, selectLog, onViewLogs, onAgentLog, consoleOpen };
 }

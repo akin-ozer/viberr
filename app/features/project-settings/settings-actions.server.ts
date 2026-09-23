@@ -47,6 +47,7 @@ import {
   type GithubContextOptions,
 } from "~/server/github/github-context.server";
 import { releaseProjectConversations } from "~/server/controller/controller-conversations.server";
+import { overlappingLeases } from "~/server/tasks/file-leases.server";
 import { invalidateRepoAccess } from "~/features/github/github-query.server";
 import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -346,6 +347,38 @@ export function parseRequiredReviewerRulesField(raw: string): RequiredReviewerRu
 }
 
 /**
+ * Ruling 396: the lease table, posted whole as one JSON field.
+ *
+ * The shape only — every fact about the board (the holder exists, no two
+ * leases cover one glob, a lease has at least one path) is checked by
+ * `setProjectFileLeases`, so the form and the controller's `set_file_leases`
+ * are refused for the same reasons in the same words.
+ */
+const fileLeasesFieldSchema = z.array(
+  z.object({
+    paths: z.array(z.string()),
+    taskKey: z.string(),
+    reason: z.string().default(""),
+  }),
+);
+
+export function parseFileLeasesField(
+  raw: string,
+): { paths: string[]; taskKey: string; reason: string }[] {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw || "[]");
+  } catch {
+    throw AppError.validation("The lease list could not be read. Reload the page and try again.");
+  }
+  const parsed = fileLeasesFieldSchema.safeParse(decoded);
+  if (!parsed.success) {
+    throw AppError.validation("The lease list could not be read. Reload the page and try again.");
+  }
+  return parsed.data;
+}
+
+/**
  * Ruling 178 (pass 36, G36-3): check a submitted rule list against the
  * project — every stage id must be a non-terminal stage, every profile id a
  * deployed specialist that can report a validation verdict — and refuse by
@@ -394,7 +427,10 @@ export function validateRequiredReviewerRules(
         `${specialist.name} (${specialist.id}) cannot report a validation verdict, so it cannot be a required reviewer. Nothing was written. ${capableList}`,
       );
     }
-    const key = `${stageId} ${profileId}`;
+    // The separator is a NUL escape, never a literal NUL byte: one raw NUL in
+    // this file made grep read the whole 1,400 lines as "binary" and answer
+    // nothing, silently, for every search anyone ran against it.
+    const key = `${stageId}\u0000${profileId}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ stageId, profileId });
@@ -552,7 +588,6 @@ export async function setProjectFileLeases(
 ): Promise<{ toast: string; leases: FileLeaseRow[]; changed: boolean }> {
   requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project policy");
   const cleaned: FileLeaseRow[] = [];
-  const claimed = new Map<string, string>();
   for (const raw of input.leases) {
     const paths = [...new Set(raw.paths.map((p) => p.trim()).filter(Boolean))];
     if (paths.length === 0) {
@@ -571,17 +606,23 @@ export async function setProjectFileLeases(
           "can open is a refusal nobody can act on.",
       );
     }
-    for (const glob of paths) {
-      const already = claimed.get(glob);
-      if (already && already !== taskKey) {
-        throw AppError.validation(
-          `Two leases both cover \`${glob}\` (${already} and ${taskKey}). ` +
-            "Which one owns it would depend on list order, and that is the one question a lease answers.",
-        );
-      }
-      claimed.set(glob, taskKey);
-    }
     cleaned.push({ paths, taskKey, reason: raw.reason.trim() });
+  }
+  // Ruling 417: two ACTIVE holders may not lease globs that can match one
+  // file, identical or not. Each would refuse the other's delivery, and the
+  // exact-match check this replaces let `internal/**` stand beside
+  // `internal/sandbox/local.go`.
+  const clash = overlappingLeases(input.projectSlug, cleaned, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {});
+  if (clash) {
+    const [a, b] = clash;
+    throw AppError.validation(
+      a.glob === b.glob
+        ? `Two leases both cover \`${a.glob}\` (${a.taskKey} and ${b.taskKey}). ` +
+            "Which one owns it would depend on list order, and that is the one question a lease answers."
+        : `Two leases overlap: \`${a.glob}\` (${a.taskKey}) and \`${b.glob}\` (${b.taskKey}) can both match ` +
+            "one file, so a task changing it would be refused by the lease it does not hold and neither " +
+            "could ever land. Narrow one of them, or give both paths to one task.",
+    );
   }
   let changed = false;
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {

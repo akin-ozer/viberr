@@ -1,4 +1,20 @@
-import { readFileSync, readdirSync, statSync, unlinkSync, type Dirent } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+  type Dirent,
+} from "node:fs";
+import { AppError } from "~/server/errors/app-error.server";
+import {
+  INLINE_TYPES,
+  MAX_UPLOAD_BYTES,
+  READABLE_TEXT_EXTENSIONS,
+  UPLOADABLE_EXTENSIONS,
+} from "~/shared/attachment-kinds";
 import path from "node:path";
 import {
   resolveStoreSegment,
@@ -8,13 +24,20 @@ import {
 /**
  * R19-19 — the task attachments store (read side).
  *
- * Files land here through two writers: the browser MCP server's `--output-dir`
- * (screenshots, PDFs the agent saves) and, since PR #179, the agent evidence
- * drop — any run granted `attach-evidence-references` may copy files in
- * directly ("post a file on the task thread"). The read side is
- * deliberately dumb — the DIRECTORY is the truth, no projection table, no
- * upload path, no retention machinery: attachments live inside the task dir so
- * archive/delete flows move them with the task.
+ * Files land here through three writers: the browser MCP server's
+ * `--output-dir` (screenshots, PDFs the agent saves), the agent evidence drop
+ * since PR #179 — any run granted `attach-evidence-references` may copy files
+ * in directly ("post a file on the task thread") — and, since F39-6 (pass 39),
+ * a PERSON, through {@link writeTaskAttachment}. The read side is deliberately
+ * dumb — the DIRECTORY is the truth, no projection table, no retention
+ * machinery: attachments live inside the task dir so archive/delete flows move
+ * them with the task.
+ *
+ * F39-6: the human writer was missing, and it cost a real answer. Viberr's own
+ * controller, asked where a human-supplied artifact would genuinely help,
+ * named the task and the file — "a human-supplied fixture stops the decoder
+ * from being tested against a fixture it wrote for itself" — and there was no
+ * way to supply it. The only route was writing into the data volume by hand.
  *
  * Serving rules (the route consumes these):
  *  - names resolve through `resolveStoreSegment` — traversal throws, and the
@@ -268,26 +291,9 @@ export function resolveTaskAttachment(
   return resolveStoreSegment(taskAttachmentsDir(slug, key, dataRoot), name);
 }
 
-/** Extension → inline content type. Anything absent here is served as a
- *  download (`application/octet-stream`), never rendered on the app origin. */
-const INLINE_TYPES = new Map<string, string>([
-  [".png", "image/png"],
-  [".jpg", "image/jpeg"],
-  [".jpeg", "image/jpeg"],
-  [".webp", "image/webp"],
-  [".gif", "image/gif"],
-  [".pdf", "application/pdf"],
-  [".txt", "text/plain; charset=utf-8"],
-  [".log", "text/plain; charset=utf-8"],
-  [".md", "text/plain; charset=utf-8"],
-  [".json", "application/json"],
-  // Ruling 105: yaml/csv join the inert-text set so the in-app read-only
-  // viewer can fetch them. Plain text on purpose — never a renderable type.
-  [".yml", "text/plain; charset=utf-8"],
-  [".yaml", "text/plain; charset=utf-8"],
-  [".csv", "text/plain; charset=utf-8"],
-]);
-
+/** Extension → inline content type (`INLINE_TYPES`). Anything absent there is
+ *  served as a download (`application/octet-stream`), never rendered on the
+ *  app origin. */
 export function attachmentContentType(name: string): {
   type: string;
   inline: boolean;
@@ -297,6 +303,72 @@ export function attachmentContentType(name: string): {
   return type
     ? { type, inline: true }
     : { type: "application/octet-stream", inline: false };
+}
+
+// ------------------------------------------------------- the human writer
+
+export {
+  MAX_UPLOAD_BYTES,
+  READABLE_TEXT_EXTENSIONS,
+  UPLOADABLE_EXTENSIONS,
+} from "~/shared/attachment-kinds";
+
+export interface WrittenAttachment {
+  name: string;
+  bytes: number;
+  /** True when a file of that name was already there. */
+  replaced: boolean;
+}
+
+/**
+ * Write one human-supplied attachment onto a task. Refuses — by throwing
+ * {@link AppError.validation} with a sentence naming the reason — a traversing
+ * or separator-bearing name, a dot-prefixed name the store scanner would then
+ * hide, an extension outside {@link UPLOADABLE_EXTENSIONS}, and anything over
+ * {@link MAX_UPLOAD_BYTES}. The caller does the authorization and the audit.
+ */
+export function writeTaskAttachment(
+  slug: string,
+  key: string,
+  name: string,
+  data: Uint8Array,
+  dataRoot?: string,
+  /** The sentence that refuses overwriting a file already there, or null to
+   *  allow it. The caller knows whose file it is; the store does not. */
+  refuseReplace: string | null = null,
+): WrittenAttachment {
+  const cleaned = name.trim();
+  if (!cleaned) {
+    throw AppError.validation("Give the file a name.");
+  }
+  if (cleaned.startsWith(".")) {
+    // Same rule as every other write into the store: the scanner skips
+    // dot-files, so this one would be written, reported as saved, and then be
+    // invisible to the panel and to every agent run.
+    throw AppError.validation(
+      `A file name cannot start with a dot — “${cleaned}” would be hidden from this task and from every agent run.`,
+    );
+  }
+  const ext = path.extname(cleaned).toLowerCase();
+  if (!UPLOADABLE_EXTENSIONS.has(ext)) {
+    throw AppError.validation(
+      `Viberr does not store “${ext || cleaned}” attachments. It takes the files it can show or read back: ${[...UPLOADABLE_EXTENSIONS].sort().join(", ")}.`,
+    );
+  }
+  if (data.byteLength > MAX_UPLOAD_BYTES) {
+    throw AppError.validation(
+      `“${cleaned}” is ${Math.round(data.byteLength / 1024 / 1024)} MB; an attachment may be up to ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`,
+    );
+  }
+  const dir = taskAttachmentsDir(slug, key, dataRoot);
+  // The SAME traversal-refusing resolver the serving route uses, so a name
+  // this accepts is a name that route can serve and vice versa.
+  const abs = resolveStoreSegment(dir, cleaned);
+  const replaced = existsSync(abs);
+  if (replaced && refuseReplace) throw AppError.validation(refuseReplace);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(abs, data);
+  return { name: cleaned, bytes: data.byteLength, replaced };
 }
 
 /**
@@ -322,20 +394,6 @@ export function attachmentContentType(name: string): {
  * describe as if it had looked.
  */
 export const ATTACHMENT_READ_CHARS = 40_000;
-
-/** Extensions this returns as text. The inline set above is about what a
- *  BROWSER may render on the app origin, which is a different question. */
-const READABLE_TEXT = new Set([
-  ".txt",
-  ".log",
-  ".md",
-  ".json",
-  ".yml",
-  ".yaml",
-  ".csv",
-  ".diff",
-  ".patch",
-]);
 
 export interface TaskAttachmentRead {
   name: string;
@@ -375,11 +433,11 @@ export function readTaskAttachmentText(
   }
   if (!st.isFile()) return null;
   const ext = path.extname(wanted).toLowerCase();
-  if (!READABLE_TEXT.has(ext)) {
+  if (!READABLE_TEXT_EXTENSIONS.has(ext)) {
     return {
       unreadable:
         `\`${wanted}\` is a ${ext || "typeless"} file (${st.size.toLocaleString("en-US")} bytes). ` +
-        `This reads TEXT attachments only (${[...READABLE_TEXT].join(", ")}). ` +
+        `This reads TEXT attachments only (${[...READABLE_TEXT_EXTENSIONS].join(", ")}). ` +
         `Open it on the task page rather than describing it from its name.`,
     };
   }

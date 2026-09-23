@@ -111,6 +111,9 @@ export async function action({ request, params }: Route.ActionArgs) {
           // Absent fields ⇒ `null` ⇒ a drop on Done that skipped the dialog is
           // refused.
           ack: acceptanceAck(formData),
+          // Ruling 381: why the card went BACK. The server requires it for a
+          // backward manual move, whichever door the move came through.
+          reason: String(formData.get("reason") ?? ""),
         },
         actor,
       );

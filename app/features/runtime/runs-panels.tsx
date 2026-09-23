@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import NumberFlow, { NumberFlowGroup } from "@number-flow/react";
 import { ThinkingOrb } from "thinking-orbs";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
@@ -55,6 +62,7 @@ import {
   type RunView,
 } from "./runtime-types";
 import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
+import { readableStep } from "./readable-step";
 
 /**
  * Ruling 366(e): the counts that climb while a run waits roll their digits
@@ -213,7 +221,7 @@ function AgentPicker({
         <RunGlyph run={cur} />
         <span className="rsel-nm">
           {cur.who.name}
-          <span className="rsel-role"> · {roleShort(cur)}</span>
+          {roleShort(cur) && <span className="rsel-role"> · {roleShort(cur)}</span>}
         </span>
         <span className={"rdot " + cur.state} />
         <Icon name="chevron" className="caret" />
@@ -278,12 +286,23 @@ export function LiveRunPanel({
   onInterrupt,
   canInterrupt,
   interrupting,
+  console: consoleSlot = null,
+  consoleOpen = false,
 }: {
   runtime: RunView[];
   onViewLogs: (id: string) => void;
   onInterrupt: (runId: string) => void;
   canInterrupt: boolean;
   interrupting: boolean;
+  /** F39 (owner decision): the streaming console for THIS run, rendered inside
+   *  the card. A live run's output belongs with the strip that describes it —
+   *  measured on the controller page, the panel it used to live in sat 886px
+   *  (a full viewport) below, with the conversation in between, so the control
+   *  that reached it read as navigation, jumped out of the conversation and
+   *  offered no way back. A caller that passes nothing keeps the old layout. */
+  console?: ReactNode;
+  /** Whether {@link console} is showing, so the trigger can name what it does. */
+  consoleOpen?: boolean;
 }) {
   const running = runtime.filter((r) => r.state === "running");
   const [selId, setSelId] = useState<string | null>(running.length ? running[0]!.id : null);
@@ -331,7 +350,13 @@ export function LiveRunPanel({
                 the row's state rather than rendering an empty bold line, and
                 the step row is omitted entirely when there is no step. */}
             <div className="ph">{run.phase ?? "Working"}</div>
-            {run.step ? <div className="step mono">{run.step}</div> : null}
+            {/* U39-26: read as words, as the conversation's working row
+                reads it; the stored step stays on hover. */}
+            {run.step ? (
+              <div className="step mono" title={run.step}>
+                {readableStep(run.step)}
+              </div>
+            ) : null}
           </span>
         </div>
         <div className="run-stats">
@@ -377,9 +402,20 @@ export function LiveRunPanel({
           </div>
         </div>
         <div className="run-actions">
-          <button type="button" className="btn ghost sm" onClick={() => onViewLogs(run.id)}>
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => onViewLogs(run.id)}
+            aria-expanded={consoleSlot !== null ? consoleOpen : undefined}
+          >
             <Icon name="term" />
-            View logs
+            {consoleSlot === null
+              ? // No inline slot: the caller still keeps its console elsewhere,
+                // and the old jump-to-anchor wording is the honest one there.
+                "View logs"
+              : consoleOpen
+                ? "Hide console"
+                : "Show console"}
           </button>
           {canInterrupt && (
             /* Ruling 150: a stop discards the work in flight, so the trigger
@@ -398,6 +434,9 @@ export function LiveRunPanel({
             </button>
           )}
         </div>
+        {consoleOpen && consoleSlot !== null && (
+          <div className="runbar-console">{consoleSlot}</div>
+        )}
       </div>
     </div>
   );
@@ -1078,11 +1117,17 @@ export function AgentLogsPanel({
               // broken template rather than as the fact. Same treatment as
               // `SessionIdChip` above, and worse here because the glyph landed
               // inside a sentence instead of in a value slot.
-              cur!.finished
-              ? "run finished at " +
-                finishedClock(cur!.finished, hydrated) +
-                "; thread can be re-engaged"
-              : "run finished; thread can be re-engaged"
+              // Ruling 419(d): a controller conversation is not re-engaged,
+              // it is continued, and the way to do that is the composer.
+              cur!.kind === "controller"
+              ? (cur!.finished
+                  ? "turn finished at " + finishedClock(cur!.finished, hydrated)
+                  : "turn finished") + "; send a message to continue the conversation"
+              : cur!.finished
+                ? "run finished at " +
+                  finishedClock(cur!.finished, hydrated) +
+                  "; thread can be re-engaged"
+                : "run finished; thread can be re-engaged"
             : cur!.state === "error"
               ? // Ruling 130(a): the SENTENCE follows the classified failure
                 // for every run kind; the retry clause follows the OFFER.

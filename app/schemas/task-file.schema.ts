@@ -7,7 +7,7 @@ import {
   type FileDiagnostic,
 } from "./file-diagnostics";
 import { canonicalDependencyRef } from "~/shared/dependencies";
-import type { RevisionDrift } from "~/shared/revision-drift";
+import { headCarriesRevision, type RefreshLink, type RevisionDrift } from "~/shared/revision-drift";
 
 /**
  * Zod schemas + tolerant parser for the `task.md` frontmatter and packet
@@ -299,6 +299,26 @@ export const engagementSchema = z
      *  live profile" rule intact, so an ADMIN's profile-backend change still takes
      *  effect on the next run — the retry pin and a profile edit stay distinct. */
     pinnedBackend: z.enum(["codex", "claude"]).nullable().optional(),
+    /**
+     * Ruling 421 (F39-43): the run this engagement is answering the
+     * completeness question in. Ruling 410 has the operator ask a reviewer
+     * that keeps objecting for EVERYTHING it would still block on, and every
+     * operator on ax-clone folded that question into the review that follows
+     * a rework. Nothing recorded that it had, so three deadlock packets in 25
+     * minutes recommended asking again the question the very verdict they
+     * escalated had answered. The dispatch that puts the question stamps it
+     * here with its run id; the verdict THAT run returns is recorded as the
+     * answer (`ReviewVerdict.answers`) and consumes it. Keyed by run, so a
+     * stamp a later run did not carry can never attach to that run's verdict.
+     */
+    question: z
+      .object({
+        kind: z.literal("completeness"),
+        runId: z.string().min(1),
+        at: z.string().min(1),
+      })
+      .nullable()
+      .optional(),
   })
   .loose();
 export type Engagement = z.infer<typeof engagementSchema>;
@@ -398,6 +418,9 @@ export const recommendationSchema = z
      *  re-derived the posture and could install the opposite one). Absent =
      *  no hint (Apply derives, exactly like a hint-less dispatch). */
     delivers: z.boolean().optional(),
+    /** run_agent — ruling 421: the recommended run puts the completeness
+     *  question, so Apply stamps it exactly as a direct dispatch would. */
+    completeness: z.boolean().optional(),
     /** transition — the target stage id. */
     toStageId: z.string().optional(),
     /** Button label, e.g. "Run Developer". */
@@ -616,6 +639,17 @@ export const prRefSchema = z
     // P14-LV-07: same optional-key convention as `checks`/`review` — an absent
     // key is "never read", which is NOT the same as "merges cleanly".
     mergeable: z.enum(PR_MERGEABLE_VALUES).nullish().catch(null),
+    // Ruling 405 (F39-32): the head `mergeable` was MEASURED on. GitHub
+    // recomputes mergeability asynchronously, so the read right after a push
+    // answers "unknown" and the reconciler keeps the last-known verdict for
+    // the same PR -- a rule written for an unread value, applied to a PR whose
+    // head has moved underneath it. Live on ax-clone AX-18: the operator
+    // resolved the conflict, pushed `d44e874`, and was refused the transition
+    // twice on a `conflicting` measured at `5ae0752`, the commit it had just
+    // superseded. `paths` has carried this pin since ruling 236 ("a list read
+    // for a DIFFERENT head than the one now live is dropped rather than shown
+    // stale"); the verdict that BLOCKS had none. Absent = never measured.
+    mergeableAt: z.string().min(1).nullish().catch(null),
     // Ruling 236 (owner, 2026-09-14): the repository paths this PR changes, so
     // the review queue can say which OTHER open PRs a merge would put into
     // conflict before a person finds out by pressing Accept. Pinned to the head
@@ -1036,6 +1070,19 @@ export const taskPacketSchema = z
      * for the same reason agree on it without anything coordinating them.
      */
     cause: z.string().optional(),
+    /**
+     * Ruling 432: the packet is a STALL escalation. The server raised it
+     * because an agent's run failed or the coordination loop stopped making
+     * progress (`openStuckLoopPacket`, "Work stalled: pick a recovery path").
+     *
+     * It is the one family a later successful run can prove wrong, so it is the
+     * only one that run may withdraw (`withdrawSupersededStuckPacket`, owner
+     * ruling 2026-07-18). A branch conflict, a lease order, an agent's question
+     * and the operator's own decisions carry no marker: a run finishing says
+     * nothing about any of them, and withdrawing one called a standing conflict
+     * "moot". Written only by the server; neither operator backend can set it.
+     */
+    stalled: z.literal(true).optional(),
     /** R15-14: profileId of the AGENT that raised this question, when one did.
      *  Resolving such a packet resumes that agent's own session with the answer
      *  rather than handing it to the operator to re-engage a cold run. Absent on
@@ -1126,11 +1173,15 @@ export const REVIEW_VERDICT_RESULTS = ["approve", "request_changes"] as const;
 export const reviewVerdictSchema = z
   .object({
     profileId: z.string().min(1),
-    /** The workRevision.id this verdict judged — a verdict on an OLD revision is
-     *  automatically stale once a new revision is minted. */
+    /** What this verdict judged: the `workRevision.id`, or — ruling 388, when
+     *  the deliverable is not a commit — `files:<deliveredAt>`. Either way a
+     *  verdict on an OLD subject is automatically stale once a new one appears.
+     *  `reviewSubjectId` is the one place that decides which. */
     revisionId: z.string().min(1),
-    /** Denormalized head SHA for display/traceability. */
-    headSha: z.string().min(1),
+    /** Denormalized head SHA for display/traceability. Ruling 388: absent when
+     *  the subject is not a commit, and every reader of it already had to cope
+     *  with having no sha to name. */
+    headSha: z.string().min(1).optional(),
     result: z.enum(REVIEW_VERDICT_RESULTS),
     reason: z.string().default(""),
     at: z.string().min(1),
@@ -1141,6 +1192,20 @@ export const reviewVerdictSchema = z
      *  reviewer re-blocking an UNCHANGED revision is the strongest evidence
      *  there is that the deliverer cannot satisfy it. Absent reads 1. */
     rounds: z.number().int().min(1).default(1),
+    /** Ruling 416(b): how many times this reviewer returned this result on
+     *  this revision, fought round or not. More reviews than rounds means the
+     *  reviewer read the revision again with nothing reworked behind it: a
+     *  verdict-shaped answer to the completeness question, which the deadlock
+     *  packet must not recommend asking again. Absent reads as `rounds` (no
+     *  such re-read on record). */
+    reviews: z.number().int().min(1).optional(),
+    /** Ruling 421: the reviewer answered the completeness question on this
+     *  revision in the current same-result streak: a run that put it
+     *  (`Engagement.question`) returned this result here. Kept across the
+     *  per-revision overwrite, as `reviews` is, so a later round on the same
+     *  revision does not erase it. The deadlock packet reads it as the
+     *  question spent. */
+    answers: z.literal("completeness").optional(),
   })
   .loose();
 export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;
@@ -1161,6 +1226,11 @@ export const baseRefreshSchema = z
     commits: z.number().int().min(0),
     /** UTC ISO instant the refresh was pushed. */
     at: z.string().min(1),
+    /** Ruling 439: the branch head the merge was made on (its first parent,
+     *  full sha). It is what lets a revision be followed through Viberr's own
+     *  refreshes (`refreshChainFrom`). A refresh recorded without it links
+     *  nothing, so a head past it is judged by its tree, as before. */
+    onto: z.string().min(1).optional(),
   })
   .loose();
 export type BaseRefresh = z.infer<typeof baseRefreshSchema>;
@@ -1238,6 +1308,21 @@ const taskFrontmatterFields = {
   validation: z.enum(VALIDATION_VALUES),
   /** F10-15: the immutable work revision currently under review (or null). */
   workRevision: workRevisionSchema.nullable(),
+  /**
+   * Ruling 388 (F39-15): when a RUN last delivered work that is not a commit.
+   *
+   * A research task, a design note, an audit: the deliverable is the files the
+   * run saved into `attachments/`, and there is no revision to bind a review
+   * to. Everything downstream of review was keyed on `workRevision`, so such a
+   * task could not hold a verdict, could not derive a validation from one, and
+   * after ruling 385 could not be accepted either. This is the identity the
+   * review binds to instead, and a later run that saves files moves it, which
+   * is what makes the old verdict stale — the same rule a new revision follows.
+   *
+   * A person's own upload never sets it: an uploaded fixture is an input to the
+   * work, not the work (ruling 379).
+   */
+  deliveredAt: z.string().nullable().default(null),
   /** F10-15: per-engagement verdicts, each bound to the revision it judged. */
   verdicts: z.array(reviewVerdictSchema),
   /** Ruling 132 (pass 34, F34-14): every base refresh the operator's
@@ -1335,6 +1420,10 @@ export type TaskFrontmatter = z.infer<typeof taskFrontmatterSchema>;
 type ReviewState = {
   engagements: Engagement[];
   workRevision: WorkRevision | null;
+  /** Ruling 388: the non-commit delivery this task's review binds to. Optional
+   *  so the existing call sites (which all pass whole frontmatter) need no
+   *  change. */
+  deliveredAt?: string | null;
   verdicts: ReviewVerdict[];
   /** R19-8: this task was verified to have nothing to deliver. Optional so the
    *  existing call sites (which all pass whole frontmatter) need no change. */
@@ -1350,14 +1439,34 @@ export function requiredReviewers(fm: { engagements: Engagement[] }): Engagement
   return fm.engagements.filter((e) => !e.delivers && e.verdictCapable);
 }
 
-/** Verdicts bound to the CURRENT work revision — older ones are stale (F10-32). */
+/**
+ * Ruling 388: what a review on this task binds to right now.
+ *
+ * The active work revision, or — when the deliverable is not a commit — the
+ * moment a run last saved files. ONE place decides it, so the verdict writer,
+ * the staleness rule, the derived validation and the required-reviewer gate can
+ * never disagree about what was reviewed. Null when the task has delivered
+ * nothing at all, which is ruling 161's case: nobody owes a verdict.
+ */
+export function reviewSubjectId(fm: {
+  workRevision: WorkRevision | null;
+  deliveredAt?: string | null;
+}): string | null {
+  const rev = activeWorkRevision(fm.workRevision);
+  if (rev) return rev.id;
+  return fm.deliveredAt ? `files:${fm.deliveredAt}` : null;
+}
+
+/** Verdicts bound to the CURRENT subject — older ones are stale (F10-32,
+ *  ruling 388). */
 export function currentVerdicts(fm: {
   workRevision: WorkRevision | null;
+  deliveredAt?: string | null;
   verdicts: ReviewVerdict[];
 }): ReviewVerdict[] {
-  const rev = activeWorkRevision(fm.workRevision);
-  if (!rev) return [];
-  return fm.verdicts.filter((v) => v.revisionId === rev.id);
+  const subject = reviewSubjectId(fm);
+  if (!subject) return [];
+  return fm.verdicts.filter((v) => v.revisionId === subject);
 }
 
 /** The DERIVED review-state cache written into `validation` (F10-15): failing if
@@ -1367,8 +1476,14 @@ export function currentVerdicts(fm: {
 export function deriveValidation(
   fm: ReviewState,
 ): (typeof VALIDATION_VALUES)[number] {
-  // Ruling 161: a discarded revision owes nobody a verdict.
-  if (!activeWorkRevision(fm.workRevision)) return "none";
+  // Ruling 161: a discarded revision owes nobody a verdict. Ruling 388: neither
+  // does a task that has delivered nothing at all — but a task whose deliverable
+  // is a saved FILE has delivered, and used to be forced to `none` here however
+  // its reviewer had ruled. Live on ax-clone AX-12 that printed "**Validation:**
+  // none. Review & validation requested changes." in one sentence, and left the
+  // operator with no rework route, because ruling 163's backward move needs a
+  // `failing` or `changed` validation to license it.
+  if (!reviewSubjectId(fm)) return "none";
   const required = requiredReviewers(fm);
   const cur = currentVerdicts(fm);
   const verdictOf = (profileId: string) =>
@@ -1509,6 +1624,11 @@ export function conflictingPrBlockedReason(
   const pr = fm.pr;
   if (!pr || pr.mergeable !== "conflicting") return null;
   if (pr.state === "merged" || pr.state === "closed") return null;
+  // Ruling 405: a conflict belongs to the head it was measured on. Once the
+  // head moves past it the verdict says nothing about what is there now, and
+  // this gate falls back to the rule the doc comment above already states:
+  // unknown never blocks, because the merge attempt is the authority.
+  if (pr.mergeableAt && pr.headSha && pr.mergeableAt !== pr.headSha) return null;
   // Ruling 291 (F37-126): this never names the rewrite. Viberr's own remedy is a
   // MERGE — `update_branch_from_base` "merge[s] the base into the branch and
   // push[es] it", and that same tool's text tells the operator to "never ask an
@@ -1566,8 +1686,10 @@ export interface NextWorkRevision {
 /** Compute the next work revision for a freshly delivered head. A head with the
  *  SAME tree (or same head when the tree is unavailable) as the current revision
  *  is the SAME review subject — no new revision, so prior verdicts are NOT
- *  invalidated (F10-32). Otherwise a NEW revision id is minted, which makes
- *  every prior verdict stale automatically (F10-15 new-commit invalidation). */
+ *  invalidated (F10-32). So is a head the revision reaches through Viberr's own
+ *  base refreshes alone (ruling 439). Otherwise a NEW revision id is minted,
+ *  which makes every prior verdict stale automatically (F10-15 new-commit
+ *  invalidation). */
 export function nextWorkRevision(
   current: WorkRevision | null,
   input: {
@@ -1578,6 +1700,8 @@ export function nextWorkRevision(
     sourceProfileId: string | null;
     createdAt: string;
   },
+  /** Ruling 439: the base refreshes recorded on the task. */
+  refreshes: readonly RefreshLink[],
 ): NextWorkRevision {
   // Ruling 161: a discarded revision is never the same subject, whatever its
   // tree: the branch it named is gone, and a re-created head is new work.
@@ -1587,7 +1711,16 @@ export function nextWorkRevision(
     (input.treeSha != null && active.treeSha != null
       ? active.treeSha === input.treeSha
       : active.headSha === input.headSha);
-  if (sameSubject) return { revision: active, changed: false };
+  // Ruling 439 (pass 39, F39-62): a base merge changes the tree by definition,
+  // so the tree test above minted a new revision at the first delivery after
+  // every refresh and staled every verdict on the old one — the cost ruling
+  // 238 rejected when it decided a refresh mints nothing. Live on ax-clone
+  // AX-29 a reviewer approved the refreshed head and the delivery 65 seconds
+  // later threw the approval away. A head the revision reaches through
+  // Viberr's own recorded refreshes is the same deliverable on a newer base.
+  const refreshedOnly =
+    active != null && headCarriesRevision(active.headSha, input.headSha, refreshes);
+  if (active && (sameSubject || refreshedOnly)) return { revision: active, changed: false };
   return {
     revision: {
       id: input.id,
@@ -1629,6 +1762,7 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "archived",
   "validation",
   "workRevision",
+  "deliveredAt",
   "verdicts",
   // Ruling 132: same reason as `blockedBy`.
   "baseRefreshes",
@@ -2074,6 +2208,15 @@ export function parseTaskFrontmatter(
       taskFrontmatterFields.workRevision,
       null,
     ),
+    // Ruling 388: absent on every file written before it existed, which reads
+    // as "this task has delivered no files" — the truth for all of them.
+    deliveredAt: tolerant(
+      diagnostics,
+      data,
+      "deliveredAt",
+      taskFrontmatterFields.deliveredAt,
+      null,
+    ),
     // Per-ROW (F18): one malformed verdict drops only itself, never the whole
     // list — a whole-array wipe of recorded reviewer approvals would persist on
     // the next write and silently revert review state.
@@ -2373,22 +2516,16 @@ export interface TaskFileEvent {
    *  serializes to nothing. Names only — the directory stays the truth. */
   attachments?: string[];
   /**
-   * Ruling 317: this comment is the FULL text a stored verdict's `reason` is a
-   * clip of, and whose marker names this timeline as the complete copy.
+   * Ruling 382 (F39-9): the people this event's own notification fan-out
+   * REACHED, routing preferences applied. Written by whichever writer fanned
+   * the event out, and read by compaction, which never folds an event that
+   * notified somebody: viberr told a person "this is here", and the pointer has
+   * to still lead somewhere.
    *
-   * Ruling 292 clips a justification at 2,000 characters and appends "Its full
-   * report is on this task's timeline, whole." Compaction then folded exactly
-   * this comment away, because the two fields that protect a comment from
-   * folding — `evidence` and `attachments` — are moved OFF it by
-   * `prepareAgentReplyEvent` precisely when there IS a verdict (P13-D-26 puts
-   * them on the `quality` event instead). So the protection was inverted: a
-   * deliverer's report was immune and the record a stored pointer depends on
-   * was first to go.
-   *
-   * Optional and absent almost everywhere; an absent field serializes to
-   * nothing, so no existing task file changes.
+   * Absent on almost every event (most notify nobody) and an absent field
+   * serializes to nothing, so no existing task file changes.
    */
-  verdictReport?: boolean;
+  notified?: string[];
 }
 
 /** Full parsed task file (see app/server/files/task-file.server.ts). */

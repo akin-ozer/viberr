@@ -2040,3 +2040,63 @@ describe("claude adapter compact() (ruling 376)", () => {
   });
 });
 
+
+/**
+ * Ruling 394 (F39-21) — the Claude half of "a completed turn is a completed
+ * turn".
+ *
+ * The defect was demonstrated live on Codex (see that adapter's suite), but the
+ * gate here had the same shape: a terminal non-error `result` followed by a
+ * thrown stream error fell straight through to `settleError`, and the run that
+ * the SDK had just told us succeeded was reported as a failure. `sawResult` is
+ * the stronger evidence of the two — Claude emits exactly one result, at the
+ * end of the whole query, so nothing can be in flight behind it.
+ */
+describe("ruling 394: the stream threw after the query's own result", () => {
+  const MESSAGES = [
+    { type: "system", subtype: "init", session_id: "sess-1", model: "claude-sonnet-4-5", tools: ["Bash"], mcp_servers: [] },
+    { type: "assistant", message: { content: [{ type: "text", text: "@operator Done on branch `ax-2`." }] } },
+    { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: { input_tokens: 10, output_tokens: 3 }, total_cost_usd: 0.05 },
+    { type: "system", subtype: "never-reached" },
+  ];
+
+  async function run(messages: unknown[], throwAfter: number) {
+    const { q } = fakeQuery(messages, { throwAfter });
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    createClaudeAdapter({ queryFn: () => q }).start(SPEC, {
+      onLine: (l) => lines.push(l),
+      onExit: (e) => (exit = e),
+    });
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+    return { lines, exit };
+  }
+
+  it("finishes, and records the drop as transport rather than a cause", async () => {
+    // CANARY: delete the `sawResult && !resultIsError` branch from the catch
+    // and this settles `error` — a successful run reported as a failed one.
+    const { lines, exit } = await run(MESSAGES, 3);
+    expect(exit).toMatchObject({ outcome: "finished" });
+    const note = lines.at(-1)!;
+    expect(note.display?.tag).toBe("run·transport·after-turn");
+    expect(note.display?.ev).toBe("meta");
+    expect(note.display?.text).toContain("the run's own result stands");
+    expect(lines.some((l) => l.display?.ev === "err")).toBe(false);
+  });
+
+  it("still FAILS when the stream throws before any result", async () => {
+    const { exit } = await run(MESSAGES, 2);
+    expect(exit).toMatchObject({ outcome: "error" });
+  });
+
+  it("still FAILS when the result itself was an error", async () => {
+    const errored = [
+      MESSAGES[0],
+      MESSAGES[1],
+      { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 2, usage: { input_tokens: 10, output_tokens: 3 }, result: "boom" },
+      MESSAGES[3],
+    ];
+    const { exit } = await run(errored, 3);
+    expect(exit).toMatchObject({ outcome: "error" });
+  });
+});

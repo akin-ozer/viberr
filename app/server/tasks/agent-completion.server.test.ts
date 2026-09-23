@@ -1133,6 +1133,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const withheld = packet!.observations.find((o) => o.k === "Tailored options withheld");
     expect(withheld, "the packet hides that a better option set was refused").toBeTruthy();
     expect(withheld!.v).toContain("refused its own packet");
+    // Ruling 432: the fallback is still a stall, so a later clean run may
+    // still withdraw it.
+    expect(packet!.stalled).toBe(true);
   });
 
   it("ruling 325: an escalation that was REFUSED says what refused it, and that there is nothing to resolve", async () => {
@@ -1430,9 +1433,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    */
   it("rulings 204 + 242: a second request_changes on the SAME revision counts a round only when the DELIVERER ran", async () => {
     writeReviewTask();
-    /** Ruling 242: the deliverer took a turn. A run row is the whole signal —
-     *  its state is irrelevant, because a rework that was dispatched and
-     *  crashed still means a round was fought. */
+    /** Ruling 242: the deliverer took a turn. A run row is the whole signal,
+     *  whatever its state, because a rework that was dispatched and crashed
+     *  still means a round was fought. Ruling 416 carves out one state: a run
+     *  the PROVIDER refused fought nothing (see the deadlock block below). */
     let delivererRuns = 0;
     const delivererRan = (): void => {
       delivererRuns += 1;
@@ -1577,7 +1581,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * The owner's remedy was to escalate rather than gate: the operator keeps
    * every move, and the second objection reaches a person by itself.
    */
-  describe("ruling 237: the second consecutive objection escalates to a person", () => {
+  describe("ruling 237 as amended by 410: the THIRD consecutive objection escalates to a person", () => {
     const reviewerInput = (profileId: string) => ({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -1631,6 +1635,219 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const blocks = (n: number) =>
       `Verdict: request_changes\n\n@operator objection number ${n}.`;
 
+    /**
+     * Ruling 416: a deliverer run that ENDED in error, classified as `kind`.
+     * `quota` is the provider refusing it; `idle_timeout` is the run hanging
+     * mid-work, which is the crash ruling 242 still counts.
+     */
+    const erroredRework = (kind: "quota" | "idle_timeout"): void => {
+      delivererRuns += 1;
+      const id = `run_rework_${delivererRuns}`;
+      upsertRun(store.db, {
+        id,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId: `rework-${delivererRuns}`,
+        role: "Developer",
+        kind: "primary",
+        backend: "codex",
+        model: "gpt-5.6-luna",
+        sdk: "codex",
+        agentName: "dev",
+        agentProfileId: "dev",
+        state: "error",
+      });
+      insertRunLine(store.db, {
+        runId: id,
+        seq: 0,
+        occurredAt: new Date().toISOString(),
+        raw: "",
+        display: {
+          t: "00:00:01",
+          ev: "err",
+          tag: `run·error·${kind}`,
+          text:
+            kind === "quota"
+              ? "Codex refused the agent run: the account is over its usage limit."
+              : "The run produced nothing for the whole idle window.",
+          failure: emptyRunFailureFacts(kind),
+        },
+      });
+    };
+    /** A verdict with NO rework dispatched before it (`review` always reworks). */
+    const reviewOnly = async (reply: string) => {
+      const runId = await finishedRunWith(reply);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput("reviewer"),
+        { id: runId, state: "finished" },
+      );
+    };
+    const roundsOnTheRevision = () => taskFile().parsed.frontmatter.verdicts[0]?.rounds;
+
+    it("ruling 416: a rework the PROVIDER refused fought no round, a crash still did, and a repeat keeps the rounds fought", async () => {
+      // Live on ax-clone AX-19: the rework was refused for quota three minutes
+      // in, with nothing committed, and the reviewer's next verdict on the
+      // untouched revision counted as a sixth round.
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      expect(roundsOnTheRevision()).toBe(2);
+
+      // CANARY (a): count every errored run again and this reads 3.
+      // CANARY (b): let a repeat with no round behind it fall back to 1, as it
+      // did, and this reads 1: an answer took a fought round OFF the count.
+      erroredRework("quota");
+      await reviewOnly(blocks(3));
+      expect(roundsOnTheRevision()).toBe(2);
+      expect(taskFile().parsed.packet, "two rounds, however many verdicts, is not a deadlock").toBeNull();
+
+      // A rework that hung mid-work is still a round fought (ruling 242 stands).
+      erroredRework("idle_timeout");
+      await reviewOnly(blocks(4));
+      expect(roundsOnTheRevision()).toBe(3);
+      expect(taskFile().parsed.packet?.title).toContain("requested changes 3 times running");
+    });
+
+    it("ruling 416: the packet on an objection with no rework behind it recommends one rework against it, never asking again", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      await review(blocks(3));
+      const first = taskFile().parsed.packet!;
+      // A fought third round: the question is still the recommended move.
+      expect(first.options.find((o) => o.rec)?.kind).toBe("question_reviewer");
+
+      // A person answers it (cleared here), the rework is refused for quota,
+      // and the reviewer reads the untouched revision again: its answer.
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          f.packet = null;
+        },
+      );
+      erroredRework("quota");
+      await reviewOnly(blocks(4));
+
+      const raised = taskFile().parsed.packet!;
+      // CANARY: pass `noReworkBehind: false` from the verdict writer and the
+      // recommended option is the question the reviewer has just answered.
+      const recommended = raised.options.filter((o) => o.rec);
+      expect(recommended.map((o) => o.t)).toEqual(["Rework once against this verdict"]);
+      expect(recommended[0]!.kind).toBe("custom");
+      const question = raised.options.find((o) => o.kind === "question_reviewer")!;
+      expect(question.rec).toBe(false);
+      expect(question.d).toContain("asking again repeats that");
+      expect(raised.body).toContain("no rework behind it");
+      expect(raised.body).not.toContain("So either it did");
+    });
+
+    it("ruling 416(b): an answer given EARLIER in the streak is not recommended again either", async () => {
+      // Live on ax-clone AX-24: round two at 20:35, the operator put the
+      // completeness question, the reviewer answered on the untouched revision
+      // at 20:45, one rework followed, and the round-three packet at 21:08
+      // recommended "Ask Reviewer what else it would block on".
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      await reviewOnly(blocks(3)); // the answer: nothing reworked behind it
+      expect(taskFile().parsed.frontmatter.verdicts[0]).toMatchObject({ rounds: 2, reviews: 3 });
+      await review(blocks(4)); // one rework against it, still objecting
+
+      const raised = taskFile().parsed.packet!;
+      expect(raised.title).toContain("requested changes 3 times running");
+      // CANARY: drop `answeredOn` from `reviewDeadlockOf` (or stop recording
+      // `reviews`) and the question is recommended on top of its own answer.
+      expect(raised.options.filter((o) => o.rec).map((o) => o.t)).toEqual(["Let the rework continue"]);
+      const question = raised.options.find((o) => o.kind === "question_reviewer")!;
+      expect(question.rec).toBe(false);
+      expect(question.d).toContain("in this streak; asking again repeats that");
+      expect(raised.body).toContain("has been answered in this streak");
+      expect(raised.body).not.toContain("So either it did");
+    });
+
+    /**
+     * Ruling 421 (F39-43). The shape measured three times on ax-clone in 25
+     * minutes: after a rework, the operator dispatched the review WITH ruling
+     * 410's question folded in ("provide one complete verdict with every
+     * remaining blocker"), the reviewer answered, and the packet that answer
+     * raised recommended asking the question again, because nothing on record
+     * said it had been asked.
+     */
+    const reviewAsked = async (reply: string, stampRun: "this" | "another" = "this") => {
+      rework();
+      const runId = await finishedRunWith(reply);
+      const { updateTaskFile } = await import("~/server/files/task-writer.server");
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          const own = f.frontmatter.engagements.find((e) => e.profileId === "reviewer");
+          own!.question = {
+            kind: "completeness",
+            runId: stampRun === "this" ? runId : "run_some_other_dispatch",
+            at: new Date().toISOString(),
+          };
+        },
+      );
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        reviewerInput("reviewer"),
+        { id: runId, state: "finished" },
+      );
+    };
+
+    it("ruling 421: the verdict of a run that put the question IS the answer, and the packet it raises recommends one rework", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      await reviewAsked(blocks(3));
+
+      const verdict = taskFile().parsed.frontmatter.verdicts[0]!;
+      // CANARY: drop the `answersQuestion` stamp in the verdict writer.
+      expect(verdict.answers).toBe("completeness");
+      // Consumed: the stamp answers exactly one verdict.
+      expect(
+        taskFile().parsed.frontmatter.engagements.find((e) => e.profileId === "reviewer")?.question ?? null,
+      ).toBeNull();
+
+      const raised = taskFile().parsed.packet!;
+      expect(raised.title).toContain("requested changes 3 times running");
+      // CANARY: stop passing `askedWithThisReview` to the packet builder and
+      // the question is recommended on top of the answer it just received.
+      expect(raised.options.filter((o) => o.rec).map((o) => o.t)).toEqual(["Rework once against this verdict"]);
+      const question = raised.options.find((o) => o.kind === "question_reviewer")!;
+      expect(question.rec).toBe(false);
+      expect(question.d).toContain("It was asked this with its review of");
+      expect(raised.body).toContain("answer to the completeness question");
+      expect(raised.body).not.toContain("So either it did");
+    });
+
+    it("ruling 421: a stamp from another run never makes this verdict an answer", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      await reviewAsked(blocks(3), "another");
+      // CANARY: match the stamp by kind alone, not by run id, and this verdict
+      // is taken for an answer nobody asked for.
+      expect(taskFile().parsed.frontmatter.verdicts[0]!.answers).toBeUndefined();
+      const raised = taskFile().parsed.packet!;
+      expect(raised.options.find((o) => o.rec)?.kind).toBe("question_reviewer");
+    });
+
+    it("ruling 421: an answer given with an EARLIER review in the streak is not asked for again either", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await reviewAsked(blocks(2)); // round two, the question folded in: answered
+      await review(blocks(3)); // one rework against it, still objecting
+      const raised = taskFile().parsed.packet!;
+      expect(raised.options.filter((o) => o.rec).map((o) => o.t)).toEqual(["Let the rework continue"]);
+      expect(raised.body).toContain("was asked for everything it would block on with its review of");
+      expect(raised.body).not.toContain("read `");
+    });
+
     it("ruling 328: an escalation skipped because another packet was open is raised when that one clears", async () => {
       /**
        * Ruling 237 raises the "N times running" packet from inside the locked
@@ -1654,9 +1871,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
        */
       writeReviewTask();
       await review(blocks(1));
+      // Ruling 410: round two is the operator's and raises nothing, so the
+      // round that ESCALATES is the third -- which is the one the unrelated
+      // packet has to be standing in front of.
+      await review(blocks(2));
 
       // An unrelated decision — a backend failure, the live shape — is open
-      // when the second objection lands.
+      // when the escalating objection lands.
       const { updateTaskFile } = await import("~/server/files/task-writer.server");
       await updateTaskFile(
         { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
@@ -1671,11 +1892,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
             options: [
               { kind: "request_edit", t: "Send the agent back to continue", d: "", rec: true },
             ],
+            // Ruling 432: what `openStuckLoopPacket` writes on every stall,
+            // and what lets the run's success withdraw it below.
+            stalled: true,
           };
         },
       );
 
-      await review(blocks(2));
+      await review(blocks(3));
 
       // The automatic clear site: no person is involved at all. The verdict was
       // written while the stalled packet stood, so ruling 237 skipped the
@@ -1686,7 +1910,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // covered because it is the same defect, not because it has bitten.
       const raised = taskFile().parsed.packet;
       expect(raised, "the escalation was dropped for good").not.toBeNull();
-      expect(raised!.title).toContain("requested changes 2 times running");
+      expect(raised!.title).toContain("requested changes 3 times running");
       // ...and it says why it is arriving late, rather than appearing from
       // nowhere on a task whose last visible event was a packet withdrawal.
       const note = taskFile().parsed.timeline.find((e) =>
@@ -1699,7 +1923,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     it("ruling 328: the same retry runs when a PERSON clears the packet that blocked it", async () => {
       // THE PATH THE TWO LIVE MISSES TOOK. An `input` packet is never
       // auto-withdrawn (`withdrawSupersededStuckPacket` returns on anything but
-      // `blocked`), so it survives the run and a person answers it — which is
+      // a stall, ruling 432), so it survives the run and a person answers it — which is
       // what happened on SHOP-18 at 04:38:38 and on SHOP-10 — and the
       // escalation ruling 237 skipped is owed just the same.
       // CANARY: delete the `retryReviewDeadlockEscalation` call in resolvePacket.
@@ -1721,6 +1945,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         },
       );
       await review(blocks(2));
+      await review(blocks(3));
       expect(taskFile().parsed.packet?.title).toBe("Which of the two contracts wins?");
 
       const { resolvePacket } = await import("./task-actions.server");
@@ -1738,7 +1963,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
       const raised = taskFile().parsed.packet;
       expect(raised, "the escalation was dropped when the person answered").not.toBeNull();
-      expect(raised!.title).toContain("requested changes 2 times running");
+      expect(raised!.title).toContain("requested changes 3 times running");
 
       // A packet that arrives with nobody told is not an escalation. The first
       // draft of this retry wrote the packet and stopped there — no inbox row,
@@ -1747,7 +1972,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // retryReviewDeadlockEscalation.
       const { listNotifications } = await import("~/server/projections/notifications.server");
       const inbox = listNotifications(store.db, store.users.arda.id, { limit: 50 });
-      const told = inbox.find((n) => (n.title ?? "").includes("requested changes 2 times running"));
+      const told = inbox.find((n) => (n.title ?? "").includes("requested changes 3 times running"));
       expect(told, "the escalation reached nobody's inbox").toBeTruthy();
       // Ruling 237's own rule: the policy engine raised this, not the operator.
       expect(told!.from?.name ?? "").toBe("Policy engine");
@@ -1756,7 +1981,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(audited.at(-1)!.details).toMatchObject({ retried: true });
     });
 
-    it("opens the packet on the second, not the first", async () => {
+    it("opens the packet on the third, not the second: round two is the operator's (ruling 410)", async () => {
       writeReviewTask();
 
       await review(blocks(1));
@@ -1766,12 +1991,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(taskFile().parsed.packet).toBeNull();
 
       await review(blocks(2));
+      await review(blocks(3));
       const packet = taskFile().parsed.packet;
       // CANARY: delete the `openReviewDeadlockPacket` call in
       // `recordAgentCompletion` and this is null — the exact state SHOP-5 sat
       // in for four rounds.
       expect(packet).not.toBeNull();
-      expect(packet?.title).toContain("requested changes 2 times running");
+      expect(packet?.title).toContain("requested changes 3 times running");
       expect(packet?.body).toContain("@reviewer");
       // The deliverer is named, so the person reading the card knows who has
       // been reworking against it.
@@ -1837,6 +2063,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const packet = taskFile().parsed.packet!;
       expect(packet.options[0]?.kind).toBe("question_reviewer");
 
@@ -2060,6 +2287,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const { resolvePacket } = await import("./task-actions.server");
       // Longer than the old silent cap, shorter than the refusal — the exact
       // band SHOP-76's decision fell into.
@@ -2085,6 +2313,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const { resolvePacket } = await import("./task-actions.server");
       const { PACKET_NOTE_MAX } = await import("~/schemas/task-file.schema");
       const before = taskFile().parsed.timeline.length;
@@ -2120,6 +2349,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask({ blockedBy: ["VIB-9"] });
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const packet = taskFile().parsed.packet!;
       expect(packet.options[0]?.kind).toBe("question_reviewer");
       // Said BEFORE the choice. CANARY: drop `heldBy` from the packet build and
@@ -2186,9 +2416,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         ).n;
       writeReviewTask();
       await review(blocks(1));
+      // Ruling 410: round two goes BACK to the operator on purpose -- that is
+      // the round it now owns. The claim under test is about the round that
+      // ESCALATES, so the baseline is taken after it.
+      await review(blocks(2), "reviewer", { dispatchedByName: "operator" });
       const before = operatorRuns();
 
-      await review(blocks(2), "reviewer", { dispatchedByName: "operator" });
+      await review(blocks(3), "reviewer", { dispatchedByName: "operator" });
       expect(taskFile().parsed.packet).not.toBeNull();
       expect(operatorRuns()).toBe(before);
       // The task is on a person, which is what the card claims.
@@ -2207,6 +2441,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
 
       const timeline = taskFile().parsed.timeline;
       const noteAt = timeline.findIndex((e) => e.text.startsWith("**Decision packet:**"));
@@ -2227,6 +2462,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       const packet = taskFile().parsed.packet!;
       const opt = (kind: string) => packet.options.find((o) => o.kind === kind)!;
 
@@ -2289,6 +2525,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       // SAFETY: `actor_json` is TEXT on `notifications`; the packet rows were
       // just written by the escalation above.
       const rows = store.db
@@ -2324,10 +2561,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       );
 
       await review(blocks(2));
+      await review(blocks(3));
       expect(taskFile().parsed.packet).toBeNull();
       // The verdict itself still lands: closing the task does not erase what a
       // reviewer found.
-      expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(2);
+      expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(3);
     });
 
     it("ruling 137: no acceptance offer survives beside the packet", async () => {
@@ -2353,6 +2591,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
       await review(blocks(1));
       await review(blocks(2));
+      await review(blocks(3));
       expect(taskFile().parsed.packet).not.toBeNull();
       expect(
         taskFile().parsed.frontmatter.recommendations.map((r) => r.id),
@@ -3423,12 +3662,17 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   }
 
   /** Write a `type: "blocked"` work-stalled packet straight into the task file
-   *  (the schema shape operatorOpenPacket produces). */
-  async function openBlockedPacket(options: PacketOption[]): Promise<void> {
+   *  (the schema shape operatorOpenPacket produces). `stalled` is the ruling 432
+   *  marker `openStuckLoopPacket` writes; `false` writes the same blocked shape
+   *  without it, which is what every other blocked packet looks like. */
+  async function openBlockedPacket(
+    options: PacketOption[],
+    { stalled = true }: { stalled?: boolean } = {},
+  ): Promise<void> {
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
-        parsed.packet = {
+        const packet: NonNullable<typeof parsed.packet> = {
           type: "blocked",
           kind: "Blocked decision",
           from: "operator",
@@ -3437,9 +3681,27 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
           observations: [],
           options,
         };
+        if (stalled) packet.stalled = true;
+        parsed.packet = packet;
         parsed.frontmatter.readiness = "blocked";
       },
     );
+  }
+
+  /**
+   * Ruling 432: open a packet through the REAL writers rather than a hand-built
+   * fixture of what they are believed to write. The operator is deployed only
+   * for the write, since both writers open packets on its authority, and is
+   * removed again so the completion's react stays out of the way, exactly as
+   * in the tests that write the packet directly.
+   */
+  async function withOperatorDeployed(write: () => Promise<void>): Promise<void> {
+    const before = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    deployOperator();
+    await write();
+    writeProject(store.dataRoot, before);
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   const redirect: PacketOption = {
@@ -3510,10 +3772,11 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   });
 
   it("an accept_completion packet is never auto-withdrawn (completion stays human)", async () => {
-    await openBlockedPacket([
-      { kind: "accept_completion", t: "Accept & move to Done", d: "", rec: true },
-      redirect,
-    ]);
+    // Ruling 432: no acceptance packet is a stall, so none carries the marker.
+    await openBlockedPacket(
+      [{ kind: "accept_completion", t: "Accept & move to Done", d: "", rec: true }, redirect],
+      { stalled: false },
+    );
     const runId = await finishedRunWith("More work landed.");
     await runEffects(runId, { delivers: true });
     expect(taskFile().parsed.packet).not.toBeNull();
@@ -3548,10 +3811,120 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
     expect(taskFile().parsed.packet).toBeNull();
   });
 
-  it("an agent-agnostic packet (no retry option) withdraws on any successful run", async () => {
+  it("an agent-agnostic stall packet (no retry option) withdraws on any successful run", async () => {
     await openBlockedPacket([redirect]);
     const runId = await finishedRunWith("Unblocked and finished.");
     await runEffects(runId, { delivers: true });
     expect(taskFile().parsed.packet).toBeNull();
+  });
+
+  it("ruling 432: a branch-conflict packet outlives a clean run that changed nothing (AX-21)", async () => {
+    /**
+     * Live on AX-21 at 01:24. `update_branch_from_base` met a conflict and
+     * opened "`ax-21` conflicts with `main`". The same plan dispatched the
+     * Surface Developer, which found the conflict, changed nothing and ended
+     * cleanly: "Blocked on the unresolved AX-21/main conflict; no lasting
+     * changes were made". Its success then withdrew the conflict as "moot",
+     * and the question it asked about the conflict was held behind a decision
+     * that no longer existed. A run finishing disproves a stall and nothing
+     * else.
+     *
+     * CANARY: in `withdrawSupersededStuckPacket`, take any blocked packet again
+     * instead of `packet.stalled`.
+     */
+    const { operatorOpenPacket, resolveOperatorAuthority } = await import(
+      "./operator-actions.server"
+    );
+    await withOperatorDeployed(async () => {
+      const authorized = { dataRoot: store.dataRoot, operatorAuthorized: true };
+      const opened = await operatorOpenPacket(
+        store.db,
+        authorized,
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          packetType: "blocked",
+          title: "`vib-1-work` conflicts with `main`",
+          body:
+            "The task branch cannot be brought up to date automatically. The merge was " +
+            "aborted and the branch is exactly as it was. A person decides how this is resolved.",
+          observations: [{ k: "Conflicting files", v: "internal/cli/cli.go", code: true }],
+          options: [
+            {
+              kind: "redirect",
+              title: "Have Developer resolve the conflict",
+              detail: "Its workspace already has `origin/main` fetched: it merges and resolves the conflicting files.",
+              recommended: true,
+            },
+            {
+              kind: "custom",
+              title: "Resolve `vib-1-work` yourself",
+              detail: "Merge `main` into the branch by hand and push it.",
+            },
+            {
+              kind: "archive_task",
+              title: "Archive the task: the work is superseded",
+              detail: "Keeps the record and the branch; the task leaves the board.",
+            },
+          ],
+        },
+        resolveOperatorAuthority(authorized, store.slug, {}),
+      );
+      expect(opened.outcome, opened.message).toBe("done");
+    });
+    const conflict = taskFile().parsed.packet;
+    expect(conflict?.title).toBe("`vib-1-work` conflicts with `main`");
+    expect(conflict?.stalled, "only a stall escalation carries the marker").toBeUndefined();
+
+    const runId = await finishedRunWith(
+      "Blocked on the unresolved VIB-1/main conflict; no lasting changes were made.",
+    );
+    await runEffects(runId, { delivers: true });
+
+    const parsed = taskFile().parsed;
+    expect(parsed.packet?.id, "a clean run withdrew a standing conflict").toBe(conflict!.id);
+    expect(parsed.frontmatter.readiness).toBe("blocked");
+    expect(
+      parsed.timeline.some((e) => (e.text ?? "").includes("**Packet withdrawn:**")),
+      "the timeline called the conflict moot",
+    ).toBe(false);
+    expect(
+      listAuditEvents(store.db).some((e) => e.action === "task.packet.withdrawn_superseded"),
+    ).toBe(false);
+  });
+
+  it("ruling 432: the stall packet the server raises carries the marker, and a clean run withdraws it", async () => {
+    /**
+     * The producer half: the marker is only worth anything if the one writer
+     * of stall packets puts it there, so this drives that writer instead of
+     * writing the packet by hand.
+     *
+     * CANARY: drop `stalled: true` from `openStuckLoopPacket`'s packet.
+     */
+    await withOperatorDeployed(async () => {
+      const { openStuckLoopPacketForTest } = await import("./task-actions.server");
+      await openStuckLoopPacketForTest(
+        store.db,
+        { dataRoot: store.dataRoot, operatorAuthorized: true },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          agentHandle: "dev",
+          reason: "The agent repeated its previous report verbatim, with no forward progress.",
+        },
+      );
+    });
+    const stall = taskFile().parsed.packet;
+    expect(stall?.title).toBe("Work stalled: pick a recovery path");
+    expect(stall?.stalled).toBe(true);
+
+    const runId = await finishedRunWith("Recovered: the work is delivered.");
+    await runEffects(runId, { delivers: true });
+
+    const parsed = taskFile().parsed;
+    expect(parsed.packet).toBeNull();
+    expect(parsed.frontmatter.readiness).toBe("ready");
+    const note = parsed.timeline.find((e) => (e.text ?? "").includes("**Packet withdrawn:**"));
+    expect(note?.text).toContain("Work stalled: pick a recovery path");
   });
 });

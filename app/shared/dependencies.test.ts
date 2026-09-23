@@ -86,7 +86,9 @@ const entry = (label: string, state: DependencyRender["state"]): DependencyRende
   ref: label,
   label,
   state,
-  taskKey: label.startsWith("goal-") ? null : label,
+  // The resolver's shape: a goal link that has a task carries that task's key
+  // (and prints it in its label); a bare task ref is its own key.
+  taskKey: label.startsWith("goal-") ? (/\(([^)]+)\)$/.exec(label)?.[1] ?? null) : label,
   goalId: label.startsWith("goal-") ? label.split(" ")[0]! : null,
 });
 
@@ -149,10 +151,29 @@ describe("ruling 356: the hold sentence names a done entry as done, not as waite
         entry("goal-2 link 4", "open"),
         entry("BNB-11", "done"),
       ]),
-    ).toBe("goal-2 link 4 (goal-2 link 1 (BNB-2) and BNB-11 are done)");
+    ).toBe("goal-2 link 4, goal-2 link 1 (BNB-2, done) and BNB-11 (done)");
     expect(holdEntriesSentence([entry("goal-1 link 2", "open"), entry("JC-3", "done")])).toBe(
-      "goal-1 link 2 (JC-3 is done)",
+      "goal-1 link 2 and JC-3 (done)",
     );
+  });
+
+  it("F39-44: a done entry's tag never reads as the pending entry before it", () => {
+    // Live on ax-clone's Goals rail: the trailing `(… is done)` group sat where a
+    // goal link prints its task, so "goal-1 link 2 (JC-3 is done)" said the
+    // PENDING link was done, and "goal-4 link 7 (AX-4, …" named AX-4 as its task.
+    // CANARY: restore the trailing group, `${pending} (${done} are done)`.
+    const s = holdEntriesSentence([
+      entry("goal-4 link 7", "open"),
+      entry("AX-4", "done"),
+      entry("goal-2 link 3 (AX-16)", "done"),
+    ]);
+    expect(s).toBe("goal-4 link 7, AX-4 (done) and goal-2 link 3 (AX-16, done)");
+    // No parenthesis opens straight after a pending entry that has no task.
+    expect(s).not.toMatch(/goal-4 link 7 \(/);
+    // Every entry that is done says so inside its own parenthesis.
+    for (const label of ["AX-4", "goal-2 link 3"]) {
+      expect(s).toMatch(new RegExp(`${label} \\([^)]*done\\)`));
+    }
   });
 
   it("lists an all-done hold plainly: the release sweep is on its way", () => {
@@ -162,15 +183,16 @@ describe("ruling 356: the hold sentence names a done entry as done, not as waite
   it("the refusal reads the same split and keeps its release promise", () => {
     const s = holdRefusal("BNB-3", [entry("goal-2 link 4", "open"), entry("BNB-11", "done")], "running an agent on it");
     expect(s).toContain(
-      "BNB-3 waits on goal-2 link 4 (BNB-11 is done) and Viberr is holding it, so running an agent on it is refused.",
+      "BNB-3 waits on goal-2 link 4 and BNB-11 (done) and Viberr is holding it, so running an agent on it is refused.",
     );
-    expect(s).not.toContain("waits on goal-2 link 4 and BNB-11");
+    // The done entry is never listed as something still waited on.
+    expect(s).not.toMatch(/BNB-11(?! \(done\))/);
     expect(s).toContain("Viberr releases it when every entry is done");
   });
 
   it("a dead entry still decides the tail", () => {
     const s = holdRefusal("BNB-3", [entry("goal-2 link 4", "cancelled"), entry("BNB-11", "done")], "running an agent on it");
-    expect(s).toContain("waits on goal-2 link 4 (BNB-11 is done)");
+    expect(s).toContain("waits on goal-2 link 4 and BNB-11 (done)");
     expect(s).toContain("goal-2 link 4 can never complete");
   });
 });

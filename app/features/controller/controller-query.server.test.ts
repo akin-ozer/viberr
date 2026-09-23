@@ -161,3 +161,152 @@ describe("getControllerSurface — the open conversation's runtime", () => {
     expect(() => open(store.users.selin)).toThrow();
   });
 });
+
+/**
+ * Ruling 419(f): a person is named on the controller page the way the rest of
+ * the app names them. A conversation stores its owner's email when it is
+ * created, and the transcript and the rail printed "arda@viberr.dev" beside
+ * every message the task timeline attributes to "Arda".
+ */
+describe("getControllerSurface — people are named by display name (ruling 419(f))", () => {
+  it("names the open thread's owner and every listed thread's owner, not their address", async () => {
+    // CANARY: return `c.userLabel` / the stored conversation unchanged.
+    const { createConversation } = await import("~/server/controller/controller-conversations.server");
+    const own = createConversation(store.db, {
+      userId: store.users.arda.id,
+      userLabel: store.users.arda.email,
+      projectSlug: null,
+    });
+    createConversation(store.db, {
+      userId: store.users.murat.id,
+      userLabel: store.users.murat.email,
+      projectSlug: null,
+    });
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: null,
+      conversationId: own.id,
+      all: true,
+      dataRoot: store.dataRoot,
+    });
+    expect(view.conversation?.userLabel).toBe(store.users.arda.name);
+    expect(view.conversations.map((c) => c.ownerLabel).sort()).toEqual(
+      [store.users.arda.name, store.users.murat.name].sort(),
+    );
+    expect(JSON.stringify(view.conversations)).not.toContain("@");
+  });
+
+  it("keeps the stored label for an owner who no longer has a row", async () => {
+    const { createConversation } = await import("~/server/controller/controller-conversations.server");
+    createConversation(store.db, { userId: "u_gone", userLabel: "gone@viberr.dev", projectSlug: null });
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: null,
+      conversationId: null,
+      all: true,
+      dataRoot: store.dataRoot,
+    });
+    expect(view.conversations.find((c) => c.ownerLabel === "gone@viberr.dev")).toBeDefined();
+  });
+});
+
+/**
+ * O39-d: the page is one of the two places a transcript is read, so opening a
+ * thread there makes its replies seen, and the rail marks the viewer's other
+ * threads that hold a reply they have not opened.
+ */
+describe("getControllerSurface — replies the viewer has not seen (O39-d)", () => {
+  it("opening a thread sees it, the rail flags the others, and an admin reading someone's thread sees nothing for them", async () => {
+    const { createConversation, appendMessage, listUnseenReplies } = await import(
+      "~/server/controller/controller-conversations.server"
+    );
+    const replied = (userId: string, text: string) => {
+      const c = createConversation(store.db, { userId, userLabel: "x", projectSlug: null });
+      appendMessage(store.db, { conversationId: c.id, author: "user", userId, text });
+      appendMessage(store.db, { conversationId: c.id, author: "controller", text: `Answer to ${text}` });
+      return c;
+    };
+    const read = replied(store.users.arda.id, "first");
+    const waiting = replied(store.users.arda.id, "second");
+    const murats = replied(store.users.murat.id, "his");
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: null,
+      conversationId: read.id,
+      all: true,
+      dataRoot: store.dataRoot,
+    });
+    // CANARY: drop `markConversationSeen` from the surface and the open
+    // thread stays flagged while the person reads it.
+    const flags = Object.fromEntries(view.conversations.map((c) => [c.id, c.unread]));
+    expect(flags).toEqual({ [read.id]: false, [waiting.id]: true, [murats.id]: false });
+    expect(listUnseenReplies(store.db, store.users.arda.id).map((r) => r.id)).toEqual([waiting.id]);
+    // An org admin opening Murat's thread reads it for nobody.
+    getControllerSurface(store.db, store.users.arda, {
+      projectSlug: null,
+      conversationId: murats.id,
+      all: true,
+      dataRoot: store.dataRoot,
+    });
+    expect(listUnseenReplies(store.db, store.users.murat.id).map((r) => r.id)).toEqual([murats.id]);
+  });
+});
+
+describe("getControllerSurface — the tasks a transcript names (U39-29)", () => {
+  it("resolves the keys the open conversation names on this board", async () => {
+    // CANARY: return `taskLinks: {}` from getControllerSurface.
+    const [{ createConversation, appendMessage }, { writeTask, baseTaskFrontmatter }, { rebuildAll }] = await Promise.all([
+      import("~/server/controller/controller-conversations.server"),
+      import("../../../test-support/test-store"),
+      import("~/server/projections/rebuilder.server"),
+    ]);
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-100") });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const conversation = createConversation(store.db, {
+      userId: store.users.arda.id,
+      userLabel: store.users.arda.email,
+      projectSlug: store.slug,
+    });
+    appendMessage(store.db, { conversationId: conversation.id, author: "controller", text: "I created VIB-100; VIB-5 is gone." });
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: store.slug,
+      conversationId: conversation.id,
+      all: false,
+      dataRoot: store.dataRoot,
+    });
+    expect(view.taskLinks).toEqual({ "VIB-100": "/projects/viberr-core/tasks/VIB-100" });
+  });
+});
+
+/**
+ * Ruling 419(h): the page the task's chain chip sends a person to carries each
+ * chain's history, which the projection never held (`listGoals` returns it
+ * empty). A pause, a skip, a cancel and its reason are recorded there and
+ * nowhere a person could read them.
+ */
+describe("getControllerSurface — a chain carries its history (ruling 419(h))", () => {
+  it("reads each chain's history from its file, newest first", async () => {
+    // CANARY: return `listGoals` unchanged and `history` is empty.
+    const { createGoal, updateGoal } = await import("~/server/tasks/goal-actions.server");
+    const actor = { userId: store.users.arda.id, label: store.users.arda.email };
+    const ctxFiles = { dataRoot: store.dataRoot };
+    const made = await createGoal(
+      store.db,
+      { projectSlug: store.slug, title: "Chain with a past", links: [{ title: "Only link", goal: "Do it." }] },
+      actor,
+      ctxFiles,
+    );
+    await updateGoal(
+      store.db,
+      { projectSlug: store.slug, goalId: made.goalId, action: { op: "pause" } },
+      actor,
+      ctxFiles,
+    );
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: store.slug,
+      conversationId: null,
+      all: false,
+      dataRoot: store.dataRoot,
+    });
+    const chain = view.goals?.find((g) => g.id === made.goalId);
+    expect(chain?.history.length).toBeGreaterThan(0);
+    expect(chain?.history[0]!.text).toContain("Paused by");
+  });
+});

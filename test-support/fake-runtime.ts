@@ -22,6 +22,9 @@ export interface FakeRun {
   sessionId?: string;
   keepRunning?: boolean;
   outcome?: "finished" | "error";
+  /** Hold the run's lines (and its exit) until this settles, so a test can
+   *  attach callbacks to the run id first. Absent: the run plays at once. */
+  gate?: Promise<void>;
 }
 
 /** The runs a test queued, per backend, consumed oldest-first by the adapters. */
@@ -110,8 +113,12 @@ function createFakeAdapter(backend: RealBackend): RuntimeAdapter {
       };
       cb.onPhase?.("Compacting context", "at the end of the run");
       const occurredAt = new Date().toISOString();
-      if (outcome.compacted) {
-        // What the Claude adapter emits: the boundary as this run's fact.
+      // What the Claude adapter emits: the boundary as this run's fact. The
+      // Codex adapter emits NOTHING on success, because the app-server's reply
+      // carries no sizes and the run service reads the compaction off the
+      // rollout instead; a fake that emitted here would note it a second time
+      // (ruling 414).
+      if (outcome.compacted && backend === "claude") {
         cb.onLine({
           raw: JSON.stringify({ type: "test", backend, compaction: outcome }),
           display: {
@@ -149,7 +156,7 @@ function playFakeRun(
   const lines = queuedRun?.lines ?? defaultLines(spec.backend, spec.prompt);
   let stopped = false;
 
-  queueMicrotask(() => {
+  const play = () => {
     if (stopped) return;
     for (const [index, line] of lines.entries()) {
       if (stopped) return;
@@ -164,6 +171,11 @@ function playFakeRun(
         sessionId,
       });
     }
+  };
+  const gate = queuedRun?.gate;
+  queueMicrotask(() => {
+    if (gate) void gate.then(play);
+    else play();
   });
 
   return {

@@ -31,6 +31,8 @@ function insertRun(
     /** Ruling 308: the two columns the task and profile breakdowns group on. */
     taskKey?: string;
     agentProfileId?: string;
+    /** Ruling 395: what the provider said it wrote into the cache. */
+    cacheWrite?: number;
   },
 ) {
   seq += 1;
@@ -39,9 +41,9 @@ function insertRun(
        (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
         started_at, finished_at, turns, input_tokens, cached_input_tokens,
         output_tokens, usage_final, total_cost_usd, created_at, updated_at, agent_profile_id,
-        interrupted_reason)
+        interrupted_reason, cache_write_tokens)
      VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?)`,
+             '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', ?, ?, ?)`,
   ).run(
     `run_${seq}`,
     r.taskKey ?? `VIB-${seq}`,
@@ -61,10 +63,25 @@ function insertRun(
     r.cost ?? null,
     r.agentProfileId ?? "developer",
     r.interruptedReason ?? null,
+    r.cacheWrite ?? 0,
   );
 }
 
 const NOW = "2026-08-23T12:00:00.000Z";
+
+describe("U39-22: the task breakdown", () => {
+  it("counts controller turns as one row named for what they are, never as a task called /cnv_…", () => {
+    // CANARY: group on `project_slug || '/' || task_key` alone again.
+    const db = ctx.makeDb();
+    insertRun(db, { kind: "controller", project: "", taskKey: "cnv_a", cost: 1 });
+    insertRun(db, { kind: "controller", project: "", taskKey: "cnv_b", cost: 2 });
+    insertRun(db, { taskKey: "VIB-7", cost: 0.5 });
+    const labels = getInsightsSummary(db, NOW).byTask.rows.map((r) => [r.label, r.runs]);
+    expect(labels).toContainEqual(["controller conversations", 2]);
+    expect(labels).toContainEqual(["viberr-core/VIB-7", 1]);
+    expect(labels.some(([l]) => String(l).includes("cnv_"))).toBe(false);
+  });
+});
 
 describe("getInsightsSummary", () => {
   it("sums totals and counts outcomes with a success rate", () => {
@@ -467,6 +484,7 @@ function insertTask(
     branch?: string | null;
     prJson?: string | null;
     revisionSha?: string | null;
+    githubJson?: string | null;
     packetJson?: string | null;
     eventCount?: number;
     createdAt?: string | null;
@@ -476,9 +494,9 @@ function insertTask(
     `INSERT INTO task_projections
        (project_slug, task_key, title, stage, readiness, waiting, urgent,
         archived, validation, owner_user_id, branch, pr_json,
-        work_revision_sha, packet_json, event_count, created_at,
+        work_revision_sha, github_json, packet_json, event_count, created_at,
         source_path, content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, 'ready', ?, 0, ?, 'none', ?, ?, ?, ?, ?, ?, ?,
+     VALUES (?, ?, ?, ?, 'ready', ?, 0, ?, 'none', ?, ?, ?, ?, ?, ?, ?, ?,
              ?, 'hash', '2026-08-01T00:00:00.000Z')`,
   ).run(
     t.project ?? "gp",
@@ -491,6 +509,7 @@ function insertTask(
     t.branch ?? null,
     t.prJson ?? null,
     t.revisionSha ?? null,
+    t.githubJson ?? null,
     t.packetJson ?? null,
     t.eventCount ?? 0,
     t.createdAt ?? "2026-08-20T00:00:00.000Z",
@@ -792,6 +811,60 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
   });
 
   /**
+   * Ruling 407 (F39-34), live on ax-clone AX-12.
+   *
+   * AX-12's deliverable was an upstream-fidelity REPORT, delivered as 20
+   * attachments: `noChanges: true`, zero commits, force-accepted, Done. It
+   * carries a `workRevision`, so Insights counted it as a delivery, found no
+   * PR, and published "18 of 19 delivered tasks carry branch + PR" with AX-12
+   * named as the one that does not -- a shortfall that can never be closed,
+   * because nothing about a finished task moves again.
+   *
+   * Ruling 391 settled that a report is delivered work; ruling 401 dropped the
+   * same task's "behind main" pill for the same reason, on the same predicate.
+   * This is that predicate, in the surface that still demanded a PR.
+   */
+  it("ruling 407: a delivery that was never commit-shaped is not an untraced one", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    insertTask(db, { key: "VIB-1", branch: "vib-1", prJson: '{"number":9}', revisionSha: "a".repeat(40) });
+    // AX-12's shape: done, a revision on the record, no PR, no commits.
+    insertTask(db, {
+      key: "VIB-2",
+      stage: "done",
+      branch: "vib-2",
+      revisionSha: "b".repeat(40),
+      githubJson: JSON.stringify({ commits: [] }),
+    });
+
+    const g = getInsightsSummary(db, NOW).oversight;
+    // CANARY: drop `&& !commitless(t)` and this reads 1 of 2, 50%, naming
+    // gp/VIB-2 -- which is AX-12's row on the live page, verbatim.
+    expect(g.traceability.deliveredTasks).toBe(1);
+    expect(g.traceability.tracedTasks).toBe(1);
+    expect(g.traceability.pct).toBe(1);
+    expect(g.traceability.untraced).toEqual([]);
+  });
+
+  it("ruling 407: a task that DID commit and never opened a PR is still untraced", () => {
+    const db = ctx.makeDb();
+    insertProject(db, "gp");
+    // Same terminal stage, same missing PR -- but it committed, so the demand
+    // for a pull request is one somebody could have met.
+    insertTask(db, {
+      key: "VIB-2",
+      stage: "done",
+      branch: "vib-2",
+      revisionSha: "b".repeat(40),
+      githubJson: JSON.stringify({ commits: [{ sha: "c".repeat(7) }] }),
+    });
+
+    const g = getInsightsSummary(db, NOW).oversight;
+    expect(g.traceability.deliveredTasks).toBe(1);
+    expect(g.traceability.untraced).toEqual(["gp/VIB-2"]);
+  });
+
+  /**
    * Ruling 290 (pass 37, F37-125). Three cards on /insights counted EXCEPTIONS
    * — untraceable work, work with no next actor, records past the readability
    * guardrail — and named none of them. Live this pass the page read "41 of 42
@@ -971,5 +1044,69 @@ describe("backend quota readings (pass 29)", () => {
     expect(claude.reading?.utilization).toBeCloseTo(0.92, 5);
     expect(claude.reading?.observedAt).toBe("2026-08-23T11:30:00.000Z");
     expect(after.find((q) => q.backend === "codex")!.reading).toBeNull();
+  });
+});
+
+/**
+ * Ruling 395 (F39-22) — a figure the provider never reports, printed as a
+ * measured zero, on the page built to judge the prompt-cache work.
+ *
+ * Live on the ax-clone instance the Prompt cache table read, for 21 Codex
+ * specialist runs: `WRITTEN 0 · READ 45.0M · WRITE/READ 0.000`. Codex declares
+ * `cache_write_input_tokens` in the SDK's own types and returned exactly 0 for
+ * it in 101 of 101 usage envelopes, against 67.2M tokens reported read. A
+ * reader checking whether rulings 369-376 do anything on Codex would take
+ * `0.000` for an answer.
+ *
+ * Every neighbouring column on that page already refuses to do this: the cost
+ * breakdowns print "not reported" rather than $0.00, the quota panel prints
+ * "no reading yet", the lifetime column prints "not reported", and the panel's
+ * own docstring says "a rate with no first call behind it prints n/a, never
+ * 0%".
+ */
+describe("ruling 395: a backend that reports no cache write reports no cache write", () => {
+  it("prints nothing rather than zero for an all-Codex group, and keeps the ratio out", () => {
+    const db = ctx.makeDb();
+    // 21 Codex runs, millions read, and the provider's flat zero written.
+    for (let i = 0; i < 3; i++) {
+      insertRun(db, {
+        kind: "primary",
+        backend: "codex",
+        model: "gpt-5.6-luna",
+        inTok: 2_000_000,
+        cachedTok: 1_800_000,
+        cacheWrite: 0,
+      });
+    }
+    const s = getInsightsSummary(db, NOW);
+    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
+    expect(primary.readTokens).toBe(5_400_000);
+    // CANARY: fall back to `r.write_tokens ?? 0` and this is 0 with a 0.000
+    // ratio beside 5.4M read, which is the live defect verbatim.
+    expect(primary.writeTokens).toBeNull();
+    expect(primary.writeReadRatio).toBeNull();
+    expect(primary.writeReportingRuns).toBe(0);
+  });
+
+  it("reports the figure when a Claude run is in the group, and says how many report it", () => {
+    const db = ctx.makeDb();
+    insertRun(db, { kind: "primary", backend: "codex", cachedTok: 1_000_000, cacheWrite: 0 });
+    insertRun(db, { kind: "primary", backend: "claude", cachedTok: 1_000_000, cacheWrite: 400_000 });
+    const s = getInsightsSummary(db, NOW);
+    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
+    expect(primary.writeTokens).toBe(400_000);
+    expect(primary.writeReportingRuns).toBe(1);
+    expect(primary.writeReadRatio).toBeCloseTo(0.2, 5);
+  });
+
+  it("keeps a genuine zero from a reporting backend as a zero", () => {
+    // Claude answers the question and the answer is none: that IS a
+    // measurement, and this ruling must not swallow it.
+    const db = ctx.makeDb();
+    insertRun(db, { kind: "primary", backend: "claude", cachedTok: 1_000_000, cacheWrite: 0 });
+    const s = getInsightsSummary(db, NOW);
+    const primary = s.cache.byKind.find((r) => r.label === "primary")!;
+    expect(primary.writeTokens).toBe(0);
+    expect(primary.writeReadRatio).toBe(0);
   });
 });

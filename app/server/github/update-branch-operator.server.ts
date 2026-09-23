@@ -6,7 +6,7 @@ import {
   resolveTaskFilePath,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
-import { describeRevisionDrift } from "~/shared/revision-drift";
+import { describeRevisionDrift, headCarriesRevision, refreshOnlyDrift } from "~/shared/revision-drift";
 import { reconcileTask, type GithubActionContext } from "./github-reconciler.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
@@ -28,6 +28,7 @@ import {
 import type { Exec } from "./push-workspace.server";
 import {
   DIVERGED_BRANCH_REMEDY,
+  activeWorkRevision,
   deliveringEngagement,
   type Engagement,
   type FileActorRef,
@@ -35,7 +36,8 @@ import {
 } from "~/schemas/task-file.schema";
 import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
+import { stageName } from "~/shared/workflow/stage-roles";
+import { acceptanceBoundaryRefusal } from "./acceptance-boundary.server";
 import { verdictStageFor } from "~/shared/workflow/verdict-stage";
 
 /**
@@ -73,6 +75,9 @@ type BranchUpdateAuditDetails = {
   /** Ruling 133(b): conflict packets only — who the packet offered as the
    *  resolver: the deployed, repo-write delivering agent, or nobody. */
   resolver?: "deliverer" | "none";
+  /** Ruling 428: the leased path that refused the update, and its holder. */
+  path?: string;
+  holder?: string;
 };
 
 /** Ruling 133(b): who can resolve a conflict in product. A deliverer only
@@ -290,6 +295,12 @@ function outcomeSentence(r: UpdateBranchResult, lead = "Brought"): string {
       // Ruling 159(b): the same refusal the delivery push reports, through the
       // door that pushes the workspace head. Naming the paths is the remedy.
       return `\`${r.branch}\` was NOT updated: ${r.reason}. Remove those paths from the branch, then update it again.`;
+    case "lease_held":
+      // Ruling 428: the delivery push's lease refusal, through this door.
+      return (
+        `\`${r.branch}\` was NOT updated, and nothing was merged or pushed: ${r.reason} ` +
+        `Do not retry the refresh until ${r.holder} has merged.`
+      );
     case "update_failed":
       return `The branch was not updated: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`;
     default:
@@ -335,19 +346,55 @@ export async function recordBranchRefresh(
       base: result.base,
       commits: result.commits,
       at: new Date().toISOString(),
+      onto: result.onto,
     });
+    // Ruling 439: the push that published the merge published the revision it
+    // was made onto, the same fact a delivery push stamps (ruling 161).
+    const rev = activeWorkRevision(parsed.frontmatter.workRevision);
+    if (
+      rev &&
+      !rev.pushedAt &&
+      headCarriesRevision(rev.headSha, result.mergeSha, parsed.frontmatter.baseRefreshes)
+    ) {
+      rev.pushedAt = new Date().toISOString();
+    }
   });
   const reconcile = await reconcileTask(db, ref, by.reconcileActor, ctx);
+  // F39-64 (pass 39): GitHub shows a pushed head on the pull request some
+  // seconds after the push, and the reconcile above can read the PR first.
+  // It then measured no drift at the head it was shown, the reviewed one, and
+  // this wrote "The review PR's head now equals the reviewed revision" one line
+  // after the merge commit it had just pushed. Live on ax-clone AX-29 the
+  // acceptance ceremony did that and merged, so the permanent completion
+  // record left out the refresh the acceptance itself shipped. The pushed head
+  // is in hand, and Viberr recorded every commit between it and the reviewed
+  // revision, so the drift is read from that record (ruling 439) until GitHub
+  // catches up. The same record answers when GitHub could not be read at all.
+  let lagging = false;
+  let fromRecord: ReturnType<typeof refreshOnlyDrift> = null;
+  await updateTaskFile(fileRef, (parsed) => {
+    const pr = parsed.frontmatter.pr;
+    const rev = activeWorkRevision(parsed.frontmatter.workRevision);
+    if (!pr || pr.headSha === result.mergeSha) return;
+    lagging = true;
+    fromRecord = rev
+      ? refreshOnlyDrift(rev.headSha, result.mergeSha, parsed.frontmatter.baseRefreshes)
+      : null;
+    if (fromRecord) pr.revisionDrift = fromRecord;
+  });
   const after = readTaskFile(fileRef)?.parsed.frontmatter ?? null;
   const drift = describeRevisionDrift(after?.pr?.revisionDrift);
-  const measured =
-    reconcile.status === "reconciled"
-      ? after?.pr
-        ? drift.kind === "none"
-          ? `The review PR's head now equals the reviewed revision.`
-          : `Drift re-measured: ${drift.sentence}.`
-        : ""
-      : `Drift could not be re-measured now (${reconcile.status}); the next GitHub pass will.`;
+  const measured = fromRecord
+    ? `Drift, from Viberr's own refresh record (GitHub had not shown the new head on the pull request): ${drift.sentence}.`
+    : reconcile.status !== "reconciled"
+      ? `Drift could not be re-measured now (${reconcile.status}); the next GitHub pass will.`
+      : !after?.pr
+        ? ""
+        : lagging
+          ? `GitHub has not shown the new head on the pull request yet, so the drift was not re-measured; the next GitHub pass will.`
+          : drift.kind === "none"
+            ? `The review PR's head now equals the reviewed revision.`
+            : `Drift re-measured: ${drift.sentence}.`;
   const sentence = `${outcomeSentence(result, by.lead)}${measured ? ` ${measured}` : ""}`;
   // A branch that moved must SAY it moved. The tool result is text the model
   // reads; the timeline is the record the humans read, and a base merge
@@ -365,35 +412,10 @@ export async function recordBranchRefresh(
   return sentence;
 }
 
-/**
- * Ruling 162 / G35-5(d) (pass 35): why the operator may not refresh the
- * branch from where the task stands, or null. At the acceptance boundary (the
- * stage with the edge into the terminal one, and anything past it) the base
- * refresh belongs to the acceptance ceremony, which brings the branch up to
- * date once, re-runs the gate and merges in the same step; an operator
- * refresh there pushed merge commits that conflicted again minutes later. The
- * one exception is a PR GitHub already reports conflicting: acceptance would
- * only refuse, so the tool's job is to attempt the merge, record the
- * conflict list and open the conflict packet.
- */
-function acceptanceBoundaryRefusal(
-  fm: TaskFrontmatter,
-  taskKey: string,
-  project: { stages: { id: string; name: string }[]; workflow: { from: string; to: string }[] },
-): string | null {
-  const roles = resolveStageRoles(project.stages, project.workflow);
-  if (roles.reviewId === null || roles.terminalId === null) return null;
-  const stageIndex = project.stages.findIndex((s) => s.id === fm.stage);
-  const reviewIndex = project.stages.findIndex((s) => s.id === roles.reviewId);
-  if (stageIndex < 0 || reviewIndex < 0) return null;
-  if (stageIndex < reviewIndex || fm.stage === roles.terminalId) return null;
-  if (fm.pr?.mergeable === "conflicting") return null;
-  const here = stageName(project.stages, fm.stage);
-  return (
-    `${taskKey} is at ${here}, the acceptance boundary: the branch is brought up to date ` +
-    `once, at acceptance time, and merged in the same ceremony. Do not refresh it here; ` +
-    `recommend or accept the completion instead.`
-  );
+/** F39-69: tell the drive it refreshed, so its settle can see a drive that
+ *  stopped right after preparing the branch. */
+function stampRefreshed(ctx: TaskActionContext): void {
+  if (ctx.operatorRun) ctx.operatorRun.refreshed = true;
 }
 
 /**
@@ -445,7 +467,15 @@ export async function operatorUpdateBranchFromBase(
         projectFile.parsed.frontmatter,
       )
     : null;
-  if (boundaryRefusal) return { outcome: "denied", message: boundaryRefusal };
+  // F39-10: `noop`, not `denied`. The operator's `update-task-branch` grant is
+  // whatever the project set it to — on the live ax-clone board it is `direct`,
+  // and this refusal fired twice anyway, because what rules the step out is the
+  // task's STAGE. Returned as `denied`, `narrateRefusedActions` files it under
+  // "refused by its capability policy" as a `policy` event, so the record sends
+  // a reader to the Agents page to loosen a grant that was never the cause.
+  // That is the misblame class LV-03 exists to prevent, and this type's own
+  // contract already says which field decides it.
+  if (boundaryRefusal) return { outcome: "noop", message: boundaryRefusal };
   // Ruling 163: a task at or past the review stage returns to it when the
   // conflict's redirect is resolved, so the resolved revision gets its verdict
   // where the reviewers are eligible. Decided here so the option's own text
@@ -484,6 +514,10 @@ export async function operatorUpdateBranchFromBase(
   if (result.status === "conflict" || result.status === "store_layout") {
     details.files = result.files;
   }
+  if (result.status === "lease_held") {
+    details.path = result.path;
+    details.holder = result.holder;
+  }
   // Ruling 133(b): who the conflict packet will offer as the resolver, decided
   // once here so the audit row and the packet cannot disagree.
   const resolver: ConflictResolver | null =
@@ -515,6 +549,7 @@ export async function operatorUpdateBranchFromBase(
         lead: "Brought",
       },
     );
+    stampRefreshed(ctx);
     return { outcome: "done", message: sentence };
   }
 
@@ -548,6 +583,7 @@ export async function operatorUpdateBranchFromBase(
     // event three lines up — the event ruling 134(c) deliberately suppresses
     // when it would duplicate, re-added by the refusal narration with no
     // suppression and a worse headline.
+    stampRefreshed(ctx);
     return { outcome: "done", message: sentence };
   }
 
@@ -592,7 +628,7 @@ export async function operatorUpdateBranchFromBase(
       },
       authority,
     );
-    return {
+    const conflicted: OperatorActionResult = {
       outcome: "noop",
       message:
         `${outcomeSentence(result)} ` +
@@ -600,11 +636,15 @@ export async function operatorUpdateBranchFromBase(
           ? "Opened a blocking decision packet for a human to resolve — do not retry this yourself."
           : `A decision packet could NOT be opened (${packet.message}) — say so and ask a human to resolve the branch.`),
     };
+    // Ruling 443: the packet is this step's outcome, not a refusal of it.
+    if (packet.outcome === "done") conflicted.openedPacket = true;
+    return conflicted;
   }
 
   // Ruling 229: the other already-current shape — the remote is level too, so
   // there is nothing even to note. Same reasoning: the tool did its job.
   if (result.status === "already_current") {
+    stampRefreshed(ctx);
     return { outcome: "done", message: outcomeSentence(result) };
   }
 

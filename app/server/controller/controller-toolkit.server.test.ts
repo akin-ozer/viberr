@@ -10,6 +10,10 @@ import path from "node:path";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { toolLoading } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
+import {
+  ADVISORY_CAPABILITY_NOTE,
+  capabilityIsAdvisory,
+} from "~/shared/capabilities";
 
 /**
  * Ruling 99 — the controller's permission matrix, driven arm by arm.
@@ -156,6 +160,56 @@ describe("the tool surface itself encodes the invariants", () => {
     const loading = toolLoading(toolkit.mcpServers.viberr_controller);
     expect(loading.loaded).toEqual([]);
     expect(loading.deferred).toHaveLength(toolkit.tools.length);
+  });
+
+  /**
+   * Ruling 411 (F39-38), live on ax-clone.
+   *
+   * `edit_link` was the one op that can make a link STARTABLE and the one that
+   * did not advance the chain afterwards -- `resume`, `skip_link` and
+   * `add_link` all do. So clearing a wait left the link for the periodic tick,
+   * and `update_goal` returned with `activeTaskKey` still naming the link
+   * before it. The controller cleared goal-4 link 2's wait, read the goal back
+   * TWICE, saw a startable link with no task both times, and created AX-25 to
+   * carry it -- while the tick had already minted AX-24 four seconds earlier.
+   * `adopt_task` correctly refused the second ("Link 2 already has a task"),
+   * leaving AX-25 an orphan with an agent dispatched on it, building
+   * `ax apply -f` a second time on a second branch.
+   *
+   * The guard held. The op that should have closed the window did not exist,
+   * so the instruction is only half the fix: `edit_link` now advances.
+   */
+  it("ruling 411: update_goal says a link you unblock starts AT ONCE, so do not pre-make its task", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    const updateGoal = toolkit.tools.find((t) => t.name === "update_goal");
+    expect(updateGoal, "update_goal must exist for this to mean anything").toBeTruthy();
+    // The instruction text lives on each zod field's `.describe()`, which is
+    // what the model is shown. Read the shape, not a stringify of the schema:
+    // Zod 4 keeps descriptions off the serialized `def`.
+    const described = updateGoal!.description;
+    // CANARY: drop either sentence and the controller is told what it was told
+    // when it made AX-25.
+    expect(described).toContain("STARTS that link in the same call");
+    expect(described).toContain("never create a task for a link you are about to unblock");
+    expect(described).toContain("RULING 411");
+    // The reply names the started task in its message. `activeTaskKey` is the
+    // chain's current link (goal-actions' own ruling 411 test pins that it is
+    // NOT the started one), so the text must never send the reader there.
+    // CANARY: restore "names it in activeTaskKey" to either text and this fails.
+    // `strictTool` hands the SDK a whole `z.strictObject` as the tool's input
+    // schema (strict-tool.server.ts); parsed as one rather than asserted.
+    const schema = z.instanceof(z.ZodType).parse(updateGoal!.inputSchema);
+    const fields = JSON.stringify(z.toJSONSchema(schema));
+    for (const text of [described, fields]) {
+      expect(text).toContain("Link N started as KEY");
+      expect(text).not.toMatch(/activeTaskKey names|names it in activeTaskKey/);
+    }
   });
 });
 
@@ -496,6 +550,141 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
+   * F39-1 (pass 39): a long rulings document is BUILT, not sent whole.
+   *
+   * Live, the controller's second KB document — 7,356 bytes of markdown with Go
+   * snippets and tables — came back `InputValidationError: … could not be
+   * parsed as JSON`. It recovered by re-emitting a shorter version, which cost
+   * it the whole document over again. Rulings 257 and 305 (the collision guard
+   * and the version check) exist to stop a whole-document REPLACE deleting text
+   * the writer never read; an append deletes nothing, so it needs neither.
+   */
+  it("F39-1: doc.append builds a document in bounded calls and destroys nothing", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "append-probe",
+      doc: { path: "gates.md", content: "# Gates\n\n- Run every gate." },
+    });
+    // `newId` is base64url, so the id can carry `-` and `_`: `\w+` would stop
+    // at a hyphen and hand the next call a truncated id ~1 run in 6.
+    const kbId = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kbId, created).toBeTruthy();
+    // SAFETY: the expectation above fails the test when the reply carried no
+    // id, so every use below is on the matched group.
+    const kb = kbId!;
+
+    const appended = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb,
+      name: "append-probe",
+      doc: {
+        path: "gates.md",
+        content: "## Proposed\n\n- Strike the race gate.",
+        append: true,
+      },
+    });
+    expect(appended).toContain("Appended");
+    expect(appended).toContain("Nothing was replaced");
+
+    // SAFETY: `read_knowledge_base_doc` answers the JSON it built; `text` is
+    // its own field.
+    const read = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", {
+        id: kb,
+        path: "gates.md",
+      }),
+    ) as { text: string };
+    // CANARY: route append through the replace arm and the first section is
+    // gone — which is exactly the failure rulings 257/305 guard against.
+    expect(read.text).toContain("- Run every gate.");
+    expect(read.text).toContain("- Strike the race gate.");
+    expect(read.text.indexOf("Run every gate")).toBeLessThan(
+      read.text.indexOf("Strike the race gate"),
+    );
+
+    // An append to a name that does not exist CREATES it — building a document
+    // must not need a separate first call.
+    const fresh = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb,
+      name: "append-probe",
+      doc: { path: "new-doc.md", content: "first section", append: true },
+    });
+    expect(fresh).toContain("(created)");
+
+    // The two modes are never resolved for the caller: a call that asks for
+    // both does not know which it meant.
+    const mixed = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb,
+      name: "append-probe",
+      doc: { path: "gates.md", content: "x", append: true, replace: true },
+    });
+    expect(mixed).toContain("Nothing was written");
+    expect(mixed).toContain("cannot be combined");
+    // SAFETY: as above — the refused call must have written nothing.
+    const after = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", {
+        id: kb,
+        path: "gates.md",
+      }),
+    ) as { text: string };
+    expect(after.text).toContain("- Run every gate.");
+  });
+
+  /**
+   * F39-4 (pass 39): `get_project` never shapes ADVISORY persona guidance like
+   * an authority.
+   *
+   * `UNIFIED_CAP_CATALOG` holds matrix-only rows (`group: null`): stored in
+   * `project.md`, shown in the persona matrix, enforced by nothing, and refused
+   * by `update_agent_deployment`. The editor and `list_capabilities` both drop
+   * them; this read could not (they are really on the deployment) and used to
+   * emit them as `{capabilityId, mode, label}` — byte-identical to an enforced
+   * grant. Live, the controller read `move-task-to-review: direct` here, never
+   * attempted to change it, and told its owner that the Developer "can advance
+   * a task to Review on its own even though I routed delivery through the
+   * operator". Every clause false, all three drawn from this row.
+   */
+  it("F39-4: get_project marks advisory grants and leaves enforced ones unmarked", async () => {
+    interface Grant {
+      capabilityId: string;
+      mode: string;
+      label: string;
+      advisory?: string;
+    }
+    // SAFETY: the tool answers the JSON it built; the fields asserted are its own.
+    const view = JSON.parse(await call(ids.projectAdmin, "get_project")) as {
+      agents: { profileId: string; capabilities: Grant[] }[];
+    };
+    const developer = view.agents.find((a) => a.profileId === "developer");
+    expect(developer, "the demo board deploys a developer").toBeTruthy();
+    const byId = new Map(developer!.capabilities.map((c) => [c.capabilityId, c]));
+
+    // The row that produced the false claim, and two more of the same kind.
+    for (const id of ["move-task-to-review", "run-unit-integration-validation"]) {
+      const row = byId.get(id);
+      expect(row, `${id} is deployed on the developer`).toBeTruthy();
+      // CANARY: drop the marking in `get_project` and this is `undefined` —
+      // the row goes back to reading as a granted authority at a mode.
+      expect(row!.advisory).toBe(ADVISORY_CAPABILITY_NOTE);
+      expect(row!.advisory).toContain("no toggle");
+    }
+
+    // An ENFORCED grant carries no such key: the marking must not become noise
+    // on the rows that are real.
+    const enforced = byId.get("execute-code-or-write-repo");
+    expect(enforced, "repo write is deployed on the developer").toBeTruthy();
+    expect(enforced!.advisory).toBeUndefined();
+    expect(enforced!.mode).toBe("direct");
+
+    // And the marking agrees with the write surface: exactly the ids
+    // `update_agent_deployment` refuses are the ones marked.
+    for (const row of developer!.capabilities) {
+      expect(
+        row.advisory !== undefined,
+        `${row.capabilityId} marking matches capabilityIsAdvisory`,
+      ).toBe(capabilityIsAdvisory(row.capabilityId));
+    }
+  });
+
+  /**
    * Ruling 256 (F37-85): `get_project` reads leases the way the GATES read them.
    *
    * Ruling 247 made a lease whose holder has finished bind nobody, and wired it
@@ -829,6 +1018,59 @@ describe("instance scope: org-role gate on every management tool", () => {
     expect(agents).toContain("[done]");
   });
 
+  /**
+   * Ruling 390 (F39-17). The controller cannot attach a resource to itself —
+   * ruling 108 makes that a deployment decision with no in-app override for
+   * anyone — and live in pass 39 that left an owner's standing rule in a
+   * knowledge base nobody had told the controller to read, with the ask
+   * existing only as prose in a conversation about to end.
+   */
+  it("request_resource_grant records an ask it cannot answer, and refuses one naming nothing real", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "instance-standing-rules",
+      doc: { path: "standing-rules.md", content: "# Rule 1\n\nEvery agent runs at max." },
+    });
+    expect(created).toContain("[done]");
+
+    const asked = await call(ids.orgAdmin, "request_resource_grant", {
+      kind: "kb",
+      name: "instance-standing-rules",
+      reason: "It carries the model rule Arda set, as its heading.",
+    });
+    expect(asked).toContain("[done]");
+    // The remedy is the deployment change, never a button this page could own.
+    expect(asked).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");
+    expect(asked).toContain("do not say you have the resource until it is");
+
+    // Idempotent: asking again is the same ask, not a second one on a person.
+    const again = await call(ids.orgAdmin, "request_resource_grant", {
+      kind: "kb",
+      name: "instance-standing-rules",
+      reason: "Asked once more.",
+    });
+    expect(again).toContain("Already open");
+
+    // CANARY: drop the existence check and this records an ask whose remedy
+    // would not work, sitting on an admin's screen forever.
+    const bogus = await call(ids.orgAdmin, "request_resource_grant", {
+      kind: "skills",
+      name: "no-such-skill",
+      reason: "Nothing here.",
+    });
+    expect(bogus).toContain("[denied]");
+    expect(bogus).toContain("Create it first");
+  });
+
+  it("request_resource_grant is org-admin only, like every other instance-scope write", async () => {
+    const denied = await call(ids.contributor, "request_resource_grant", {
+      kind: "kb",
+      name: "instance-standing-rules",
+      reason: "A member should not reach this.",
+    });
+    expect(denied).toContain("[denied]");
+    expect(denied).toContain("org admin");
+  });
+
   it("create_project is open to a plain org member (FR5 parity): the gate passed and only the GitHub-connection validation refused", async () => {
     const reply = await call(ids.contributor, "create_project", {
       name: "Member Made",
@@ -933,12 +1175,21 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
       toStageId: "impl",
     });
     expect(denied).toContain("[denied]");
-    const moved = await call(ids.maintainer, "move_task", {
+    // Ruling 381: backward, so the controller is held to the same sentence the
+    // board's dialog collects — and the refusal comes AFTER the tier gate, so
+    // the contributor above is still told about their role, not about a field.
+    const mute = await call(ids.maintainer, "move_task", {
       taskKey: "VIB-142",
       toStageId: "impl",
     });
+    expect(mute).toContain("needs a reason");
+    const moved = await call(ids.maintainer, "move_task", {
+      taskKey: "VIB-142",
+      toStageId: "impl",
+      reason: "the retry path is still unhandled",
+    });
     expect(moved).toContain("[done]");
-    // Restore for later arms.
+    // Restore for later arms. Forward, so it asks nothing.
     const restored = await call(ids.maintainer, "move_task", {
       taskKey: "VIB-142",
       toStageId: "review",
@@ -1720,7 +1971,11 @@ describe("task anchoring (ruling 121)", () => {
         { title: "Second", goal: "Do the second thing. Done when merged.", blockedBy: ["VIB-142"] },
       ],
     });
-    expect(created).toMatch(/^\[done\] Goal goal-\d+ created with 2 links; link 1 is VIB-\d+\.$/);
+    // Ruling 398: the message names every link that started, because more than
+    // one can. Link 2 waits on VIB-142, so only link 1 starts here.
+    expect(created).toMatch(
+      /^\[done\] Goal goal-\d+ created with 2 links; 1 started now \(link 1 is VIB-\d+\)\.$/,
+    );
     const goalId = /goal-\d+/.exec(created)![0];
     // SAFETY: `get_goal` answers `json(goalView)`, whose `links` are the
     // schema-parsed GoalLink[] (index and blockedBy always present).

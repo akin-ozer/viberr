@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeRevisionDrift } from "~/shared/revision-drift";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AcceptConfirm, type AcceptConfirmTask } from "./accept-confirm";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 
@@ -102,6 +102,68 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
     const force = withPacket("Which environment should the smoke suite target?", true);
     expect(force).toContain("Withdraws");
     expect(force).toContain("Bypassing");
+  });
+
+  /**
+   * Ruling 393 (F39-20), live on ax-clone AX-12. U35-3 made the audit row and
+   * the forced completion event name EVERY bypassed gate so an override could
+   * not be under-reported, and said in its own docstring that "the timeline,
+   * the audit log and the confirm dialog list the same bypasses". The dialog
+   * was the one that never received the list: a human confirmed "Bypassing:
+   * Waiting on 1 required reviewer approval of the current revision." and the
+   * audit row recorded that gate AND the project's required-reviewer rule.
+   */
+  it("ruling 393: force lists EVERY gate it bypasses, not just the first", () => {
+    const gates = [
+      "Waiting on 1 required reviewer approval of the current revision.",
+      "Required reviewer Reviewer (project rule at Review) has not approved revision 76dabee.",
+    ];
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({})}
+        workRevisionSha={null}
+        noChanges={false}
+        defaultBranch="main"
+        ceremony={{ mode: "force" }}
+        blockedReason={gates[0]!}
+        blockedGates={gates}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const text =
+      container.ownerDocument.querySelector(
+        'dialog[data-screen-label="Accept completion dialog"]',
+      )?.textContent ?? "";
+    // CANARY: drop `blockedGates` from the Bypassing row and the second gate
+    // is invisible to the person authorizing the override, while the audit row
+    // records it.
+    expect(text).toContain("Bypassing");
+    for (const gate of gates) expect(text).toContain(gate);
+  });
+
+  it("ruling 393: a single gate still reads as one sentence, not a list", () => {
+    const only = "Waiting on 1 required reviewer approval of the current revision.";
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({})}
+        workRevisionSha={null}
+        noChanges={false}
+        defaultBranch="main"
+        ceremony={{ mode: "force" }}
+        blockedReason={only}
+        blockedGates={[only]}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const dialog = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    expect(dialog.textContent).toContain(only);
+    expect(dialog.querySelector("ul.tight")).toBeNull();
   });
 
   it("shows NO Withdraws row when there is no open decision", () => {
@@ -413,6 +475,7 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
     pr: AcceptConfirmTask["pr"];
     branch?: string | null;
     mode?: "accept" | "complete-merge";
+    baseBehindBy?: number | null;
   }): string {
     const { container } = render(
       <AcceptConfirm
@@ -421,6 +484,7 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
           branch: props.branch === undefined ? "vib-151" : props.branch,
         })}
         workRevisionSha={"a".repeat(40)}
+        baseBehindBy={props.baseBehindBy ?? null}
         defaultBranch="main"
         ceremony={{ mode: props.mode ?? "accept" }}
         blockedReason={null}
@@ -445,6 +509,19 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
     );
   });
 
+  it("U39-32: says which case this click is when the last compare knows", () => {
+    // Live on ax-clone the conditional sentence sat over AX-28 (carried main)
+    // and AX-29 (four commits behind). CANARY: render the conditional sentence
+    // whatever `baseBehindBy` says.
+    expect(dialogText({ pr: OPEN_PR, baseBehindBy: 0 })).toContain(
+      "vib-151 carried main at the last GitHub check, so the reviewed head merges as it is.",
+    );
+    expect(dialogText({ pr: OPEN_PR, baseBehindBy: 4 })).toContain(
+      "vib-151 is 4 commits behind main at the last GitHub check. Accepting merges them into the branch first and pushes that merge commit, which becomes the merge head. No review has run on that combination.",
+    );
+    expect(dialogText({ pr: OPEN_PR, baseBehindBy: 1 })).toContain("is 1 commit behind main");
+  });
+
   it("says nothing about a refresh on the paths that perform none", () => {
     // `complete-merge` runs `completeTaskMerge`, which merges the PR without
     // the ceremony; a task with no pull request has no branch to refresh.
@@ -455,6 +532,62 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
     expect(dialogText({ pr: OPEN_PR, branch: null })).not.toContain(
       "is brought up to date with",
     );
+  });
+});
+
+/**
+ * Ruling 449 (O39-c): when the reviewed head is behind its base, the merge
+ * head would be one no review ran on. Live on ax-clone two green pull
+ * requests merged a minute apart and left main red. The dialog offers the
+ * owner's own method as one click: bring it up to date and re-review first.
+ */
+describe("ruling 449: update the branch and re-review first", () => {
+  const OPEN_PR = { number: 16, state: "review" as const, title: "[VIB-151] t" };
+  function dialog(props: { baseBehindBy: number | null; onRefreshFirst?: () => void; onConfirm?: () => void; mode?: "accept" | "force" }) {
+    return render(
+      <AcceptConfirm
+        task={detail({ pr: OPEN_PR, branch: "vib-151" })}
+        workRevisionSha={"a".repeat(40)}
+        baseBehindBy={props.baseBehindBy}
+        defaultBranch="main"
+        ceremony={{ mode: props.mode ?? "accept" }}
+        blockedReason={null}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={props.onConfirm ?? (() => {})}
+        {...(props.onRefreshFirst ? { onRefreshFirst: props.onRefreshFirst } : {})}
+      />,
+    );
+  }
+  const offer = () => screen.queryByRole("button", { name: /Update the branch and re-review first/ });
+
+  it("offers it while the branch is behind, runs it instead of accepting, and says what it does", () => {
+    const onRefreshFirst = vi.fn();
+    const onConfirm = vi.fn();
+    const { container } = dialog({ baseBehindBy: 3, onRefreshFirst, onConfirm });
+    // CANARY: drop the button and the one safe path is a separate trip.
+    fireEvent.click(offer()!);
+    expect(onRefreshFirst).toHaveBeenCalledOnce();
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(container.textContent?.replace(/\s+/g, " ")).toContain(
+      "No review has run on that combination. Update the branch and re-review first runs the review on it before anything merges.",
+    );
+  });
+
+  it("is not offered when the branch carries its base, when nothing measured it, or on force", () => {
+    const onRefreshFirst = vi.fn();
+    dialog({ baseBehindBy: 0, onRefreshFirst });
+    expect(offer()).toBeNull();
+    cleanup();
+    dialog({ baseBehindBy: null, onRefreshFirst });
+    expect(offer()).toBeNull();
+    cleanup();
+    dialog({ baseBehindBy: 3, onRefreshFirst, mode: "force" });
+    expect(offer()).toBeNull();
+    cleanup();
+    // A door that passes no handler (the board, a packet) offers nothing.
+    dialog({ baseBehindBy: 3 });
+    expect(offer()).toBeNull();
   });
 });
 

@@ -97,6 +97,51 @@ export interface TaskMutationContext {
      */
     planWhollyRefused?: boolean;
     /**
+     * Ruling 406 (F39-33): this drive CARRIED OUT at least one planned action
+     * (an `outcome: "done"`), whatever effect it had.
+     *
+     * The settle-time "deliberate hold" verdict used to be reached by
+     * enumerating effects, and the list kept turning out to be short: ruling
+     * 152(a) added a transition that landed elsewhere, ruling 202 added
+     * delivery ("a drive whose single action was `deliver_for_review` was
+     * called a deliberate hold"), ruling 228 added the wholly-refused plan.
+     * Live on ax-clone AX-18 it happened a fourth time, and this time Viberr
+     * was punishing an operator for following Viberr's own instruction: the
+     * transition was refused with "Open the conflict packet
+     * (update_branch_from_base) ... instead of moving the task", the operator
+     * planned exactly that, the refresh succeeded as a no-op because the
+     * branch was already current -- and because a base refresh is not a
+     * transition, a dispatch, a delivery or a packet, Viberr recorded that the
+     * operator "held it twice in a row without advancing, dispatching, or
+     * opening a packet", set `heldAtStage` and paused coordination.
+     *
+     * An operator that ACTED did not hold. That is one fact about the drive
+     * rather than a list of the effects Viberr has thought of so far, so it
+     * does not need a fifth amendment the next time an action has a new shape.
+     */
+    carriedOutAction?: boolean;
+    /**
+     * F39-69: this drive carried out a base refresh (`update_branch_from_base`
+     * answered `done`: merged, or already current). A refresh only prepares
+     * the branch for a step that follows it. Live on ax-clone AX-5 a Codex
+     * operator planned the refresh as step one of a person's three-step
+     * directive and stopped. The task sat at Review, "waiting on a human", with
+     * nothing to answer, because the settle-time backstop resumes a drive only
+     * at an `auto` stage, and Review's way out is a person's.
+     */
+    refreshed?: boolean;
+    /**
+     * Ruling 400 (F39-27): the refusal sentences themselves, so the one
+     * automatic retry can CARRY them instead of telling the operator to go
+     * and read them.
+     *
+     * Ruling 392 settled this shape for agents — an instruction that delegates
+     * reading costs a run — and the plan-refused nudge was committing it a
+     * level up, against a reader whose own timeline window clamps entries and
+     * whose attention is the thing being spent.
+     */
+    refusedPlanSteps?: { tool: string; message: string }[];
+    /**
      * Ruling 357 (pass 38, F38-11): this drive's own delivery opened the review
      * PR or moved its head under full autonomy — the event that used to queue
      * a `delivered` operator turn behind this very drive's lease. The drive

@@ -246,6 +246,48 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  /**
+   * O39-d: `seen_seq` says what a conversation's owner has seen. A root that
+   * predates it has conversations with replies in them already, and a
+   * default of 0 would mark every one a new reply on the first page after
+   * the deploy. The healer backfills each to its newest message.
+   */
+  it("adds seen_seq to an older root with every existing conversation read", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlseen-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE controller_conversations (
+           id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_label TEXT NOT NULL,
+           project_slug TEXT, task_key TEXT, title TEXT NOT NULL DEFAULT '',
+           created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_message_at TEXT);
+         CREATE TABLE controller_messages (
+           id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL,
+           author TEXT NOT NULL, user_id TEXT, text TEXT NOT NULL, run_id TEXT,
+           surface TEXT, created_at TEXT NOT NULL, UNIQUE (conversation_id, seq));
+         INSERT INTO controller_conversations (id, user_id, user_label, title, created_at, updated_at)
+           VALUES ('c1', 'u1', 'a@b.dev', '', '2026-09-22', '2026-09-22'),
+                  ('c2', 'u1', 'a@b.dev', '', '2026-09-22', '2026-09-22');
+         INSERT INTO controller_messages (id, conversation_id, seq, author, user_id, text, created_at)
+           VALUES ('m1', 'c1', 1, 'user', 'u1', 'hi', '2026-09-22'),
+                  ('m2', 'c1', 2, 'controller', NULL, 'hello', '2026-09-22');`,
+      );
+      ensureBaselineColumns(db);
+      // SAFETY: both columns are selected by name; `seen_seq` is NOT NULL.
+      const seen = db
+        .prepare(`SELECT id, seen_seq FROM controller_conversations ORDER BY id`)
+        .all() as { id: string; seen_seq: number }[];
+      // CANARY: drop the backfill and c1's reply reads as new after a deploy.
+      expect(seen).toEqual([
+        { id: "c1", seen_seq: 2 },
+        { id: "c2", seen_seq: 0 },
+      ]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 /**

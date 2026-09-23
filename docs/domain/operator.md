@@ -267,6 +267,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `post_comment` | `operatorPostComment` (guardrails applied; narration stored verbatim, ruling 104) | `append-typed-events` |
 | `set_goal` | `operatorSetGoal` (refuses to overwrite a human goal; drafts for a human to save) | `append-typed-events` |
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 56) | `append-typed-events` |
+| `propose_ruling` | `operatorProposeRuling` (ruling 378: appends one non-binding, dated, task-stamped entry under `## Proposed (not binding)` in a document of the project's rulings KB, with the evidence; edits no settled line; refuses when the project names no rulings KB or the document is not one it holds. The Codex plan verb is `propose_ruling`, carrying the document in `kbSource`, the correction in `text` and the evidence in `repoSource`) | `append-typed-events` |
 | `open_decision_packet` | `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 84) | `generate-packets` |
 | `resolve_decision_packet` | `operatorResolvePacket` (refuses any packet not `from: operator` or carrying `askedBy`) | `generate-packets` |
 | `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`; the Codex plan verb is `set_dependencies` with `blockedBy`) | `generate-packets` (the wait is the hold packet's replacement) |

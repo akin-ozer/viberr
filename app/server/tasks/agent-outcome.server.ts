@@ -114,6 +114,9 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
         body: { type: ["string", "null"] },
         options: {
           type: ["array", "null"],
+          // U39-23: the same convention `ask_human` states to a Claude agent.
+          description:
+            "2-4 concrete answer choices. The first is presented as the suggested one, so put the one you recommend first.",
           items: {
             type: "object",
             additionalProperties: false,
@@ -490,6 +493,9 @@ export function resolveAgentCollab(
  */
 export const AGENT_QUESTION_PACKET_KIND = "Agent question";
 
+/** A trailing "(Recommended)" an agent writes on the option it recommends. */
+const RECOMMENDED_MARK = /\s*\(\s*recommended\s*\)\s*$/i;
+
 /** The agent-question decision packet (ask-human, G3): type `input`, from =
  * the agent's own ref, choices as resolvable `custom` options. Shared by the
  * live Claude toolkit and the completion-time Codex envelope path. */
@@ -500,13 +506,25 @@ export function buildAgentQuestionPacket(
   // Ruling 298: no cut here either. The cap that belongs on an agent's live
   // question is declared on `ask_human`'s own schema, where exceeding it is
   // refused by name and the agent re-asks inside the same run.
-  const choices = question.options ?? [];
+  const choices = (question.options ?? []).map((o) => {
+    const title = o.title.trim();
+    const bare = title.replace(RECOMMENDED_MARK, "").trim();
+    return { title: bare, detail: o.detail, marked: bare !== title };
+  });
+  // U39-23: agents mark their pick in the title ("Coordinate core status work
+  // (Recommended)"), and the card already shows a `recommended` pill, so it
+  // said so twice and carried the mark into the answer, the summon note and
+  // the decision record. The mark says which option the agent recommends, so
+  // it decides the pill; with none, the first is the suggested one, as
+  // `ask_human` tells the agent.
+  const marked = choices.findIndex((c) => c.marked);
+  const recommended = marked === -1 ? 0 : marked;
   const options: PacketOption[] = choices.length
     ? choices.map((o, i) => ({
         kind: "custom" as const,
-        t: o.title.trim() || `Option ${i + 1}`,
+        t: o.title || `Option ${i + 1}`,
         d: (o.detail ?? "").trim(),
-        rec: i === 0,
+        rec: i === recommended,
       }))
     : [
         {

@@ -110,6 +110,8 @@ export async function action({ request }: Route.ActionArgs) {
         // that includes the ones sent from here (review finding 23). The store
         // normalizes it; a form without the field records null, as before.
         surface: String(formData.get("surface") ?? "") || null,
+        // U39-24: the reader's zone; normalized by the engine.
+        timeZone: String(formData.get("timeZone") ?? "") || null,
       });
       if (result.state === "refused") {
         // U35-4 (pass 35): the refusal is recorded IN the conversation (a

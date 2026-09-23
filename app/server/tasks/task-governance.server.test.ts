@@ -20,7 +20,7 @@ import {
   type TaskPacket,
   type WorkRevision,
 } from "~/schemas/task-file.schema";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import {
   createNotification,
   listNotifications,
@@ -753,16 +753,82 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
     expect(detail?.timeline[0]?.text).toContain("moved VIB-1 from Triage to In Progress");
   });
 
-  it("allows a BACKWARD manual move (review→ready) for a maintainer", async () => {
+  /**
+   * Ruling 381 (F39-8): a manual move BACKWARD says why.
+   *
+   * It used to be mute — the event read "moved VIB-1 from Review to Ready" and
+   * nothing else — while the operator's own playbook told it to read the
+   * human's reason and act on it. Live in pass 39 a send-back carried a
+   * specific instruction, there was no field for it, and the operator inferred
+   * the work from an older decision and dispatched the wrong thing.
+   */
+  it("ruling 381: a BACKWARD manual move is refused without a reason, and carries it when given", async () => {
     const store = prepared();
     withTask(store, { stage: "review" });
+    // CANARY: drop the `movingBack` guard and this resolves — the move lands
+    // with nothing on the record saying why, which is the whole defect.
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    // It says what to do about it, not just that it refused.
+    await expect(
+      transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true, reason: "   " },
+        actor(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      userMessage: expect.stringContaining("needs a reason"),
+    });
+    // Nothing moved on a refusal.
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")?.stage).toBe("review");
+
     const task = await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "ready", manual: true },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        toStageId: "ready",
+        manual: true,
+        reason: "make gate does not run the race test the rulings require.\n\nAdd it.",
+      },
       actor(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(task.stage).toBe("ready");
+    const detail = getTaskDetail(store.db, store.slug, "VIB-1");
+    // On the transition entry ITSELF, which is where the operator reads it —
+    // QUOTED, so the person's own sentence does not run on after the move's
+    // full stop ("…to Ready. make gate does not run…"), and their line breaks
+    // survive into the quote.
+    expect(detail?.timeline[0]).toMatchObject({ type: "transition" });
+    expect(detail?.timeline[0]?.text).toContain("moved VIB-1 from Review to Ready.");
+    expect(detail?.timeline[0]?.text).toContain(
+      "\n\n> make gate does not run the race test the rulings require.\n>\n> Add it.",
+    );
+  });
+
+  it("ruling 381: a FORWARD manual move needs no reason", async () => {
+    const store = prepared();
+    withTask(store);
+    const task = await transitionStage(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    expect(task.stage).toBe("impl");
+    // CANARY: require it on every manual move and this fails — ordinary
+    // progress would demand an essay.
+    expect(getTaskDetail(store.db, store.slug, "VIB-1")?.timeline[0]?.text).toContain(
+      "moved VIB-1 from Triage to In Progress",
+    );
   });
 
   it("rejects a manual move to an unknown stage", async () => {
@@ -3424,6 +3490,79 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   });
 
   /**
+   * Ruling 381 made a manual BACKWARD move name its reason, and this door is a
+   * manual move. Without one, every move_stage option that goes back was
+   * refused after the packet had already cleared: the decision stood on the
+   * timeline and the task stayed where it was.
+   */
+  it("move_stage: a BACKWARD option moves the task, with the option as the reason", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      {
+        ...movePacket("impl"),
+        options: [
+          {
+            kind: "move_stage",
+            t: "Send VIB-1 back to Implementation",
+            d: "The race test the rulings require is missing.",
+            rec: true,
+            toStage: "impl",
+          },
+        ],
+      },
+    );
+
+    const res = await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: drop the move's `reason` and the task stays at review, under a
+    // "was **not** moved" note.
+    expect(res.task.stage).toBe("impl");
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(texts.some((t) => t.includes("was **not** moved"))).toBe(false);
+    const move = texts.find((t) => t.startsWith("**Transition:**"))!;
+    expect(move).toContain(
+      "> Send VIB-1 back to Implementation — The race test the rulings require is missing.",
+    );
+  });
+
+  it("move_stage: a person's own note is the reason when they gave one", async () => {
+    const store = prepared();
+    withTask(
+      store,
+      {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+      },
+      movePacket("impl"),
+    );
+
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        note: "Add the retry path first.",
+      },
+      actor(store.users.murat),
+      { dataRoot: store.dataRoot },
+    );
+    const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
+    expect(texts.find((t) => t.startsWith("**Transition:**"))).toContain("> Add the retry path first.");
+  });
+
+  /**
    * Ruling 224 (F37-44). The Codex window went at 23:28 with the provider
    * naming its own reopening, and six tasks stalled at once behind a packet
    * whose every option was wrong right then. The wait is the remedy, and
@@ -3734,6 +3873,74 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     // The clause that settles the contradiction the amendment may create — the
     // reviewer must not read the answer as an agent overstepping.
     expect(goal).toContain("the decision wins");
+  });
+
+  /**
+   * O39-b, live on ax-clone AX-22: a review deadlock asked round after round,
+   * and every "Let the rework continue" answer appended the same block, four
+   * copies in the goal every fresh run re-anchors on.
+   */
+  it("O39-b: the same decision again is written into the contract once", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    const answer = async (optionIndex: number) => {
+      await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+        parsed.packet = QUESTION;
+      });
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    };
+    const copies = (text: string) => goalOf(store).split(text).length - 1;
+    await answer(0);
+    await answer(0);
+    // CANARY: drop the `includes` guard and the goal holds the block twice.
+    expect(copies("Stripe — Hosted Stripe Checkout.")).toBe(1);
+    // A different answer is a new decision, and it is written.
+    await answer(1);
+    expect(copies("Mock-only — Deterministic, non-monetary.")).toBe(1);
+    expect(copies("the decision wins")).toBe(2);
+    // Each answer is still on the timeline.
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.filter((e) => e.text.startsWith("**Decision:**")).length).toBe(3);
+  });
+
+  /**
+   * The answer alone is not the decision: an agent's options are often a bare
+   * "Yes", and a second QUESTION answered "Yes" is a new decision that the
+   * answer-only match dropped from the contract.
+   */
+  it("O39-b: the same answer to a DIFFERENT question is still written", async () => {
+    const store = prepared();
+    const ask = (title: string): TaskPacket => ({
+      ...QUESTION,
+      title,
+      options: [{ kind: "custom", t: "Yes", d: "", rec: true }],
+    });
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, ask("Should I add retries?"));
+    const answer = async (packet: TaskPacket) => {
+      await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+        parsed.packet = packet;
+      });
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    };
+    await answer(ask("Should I add retries?"));
+    await answer(ask("Should I delete the legacy API?"));
+    // CANARY: match on the answer alone and the second question is missing.
+    expect(goalOf(store)).toContain("answered “Should I add retries?”:**\n\nYes");
+    expect(goalOf(store)).toContain("answered “Should I delete the legacy API?”:**\n\nYes");
+    // A question asked again with only its count changed is the same one.
+    await answer(ask("Reviewer has requested changes 3 times running"));
+    await answer(ask("Reviewer has requested changes 4 times running"));
+    expect(goalOf(store).split("requested changes").length - 1).toBe(1);
   });
 
   it("writes a CHOSEN option into the goal too, title and description", async () => {

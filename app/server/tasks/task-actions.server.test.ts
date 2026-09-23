@@ -57,6 +57,8 @@ import {
   revisionDriftNote,
   specialistReplyDirective,
   transitionStage,
+  refreshAndReview,
+  reReviewDirective,
   acceptanceDisclosureOf,
   applyRecommendation,
   commentToAgent,
@@ -338,7 +340,20 @@ describe("createTask", () => {
       { dataRoot: store.dataRoot },
     );
     const mixed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-101", dataRoot: store.dataRoot })!.parsed;
-    expect(mixed.timeline[0]!.text).toContain("Created waiting on VIB-1 (VIB-2 is done)");
+    expect(mixed.timeline[0]!.text).toContain("Created waiting on VIB-1 and VIB-2 (done)");
+    // F39-65: a list that is all done holds nothing, and says so. Live on
+    // AX-35, every chain task's first note claimed a hold over done work.
+    // CANARY: drop the `waitAllDone` branch.
+    await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Waits on done work only", blockedBy: ["VIB-2"] },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const allDone = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-102", dataRoot: store.dataRoot })!.parsed;
+    expect(allDone.timeline.find((e) => e.title === "Waits on other work")?.text).toBe(
+      "Created after the work it waits on was done (VIB-2), so nothing holds it; Viberr releases the list at once.",
+    );
 
     /**
      * Ruling 255 (pass 37, F37-84): one creation is one instant.
@@ -3429,6 +3444,11 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("impl");
+    // Ruling 381: the move is BACKWARD, and Apply never asks the human for a
+    // sentence — the card's own words are the reason, and they land on the
+    // transition entry where the operator reads them.
+    const applied = task(store).timeline.find((e) => e.type === "transition");
+    expect(applied?.text).toContain("Move the task back to In Progress");
   });
 
   it("ruling 327: the packet door dates the Done record when it WRITES it, not when the ceremony began", async () => {
@@ -3671,7 +3691,8 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
 
   it("a drop on any OTHER column stays ack-free", async () => {
     // The board move is only an acceptance when it lands on the final column;
-    // everywhere else it is the plain governed move it always was.
+    // everywhere else it is the plain governed move it always was. (Backward, so
+    // ruling 381 asks for the sentence the drop already collects.)
     const store = prepared();
     seedReviewed(store);
     await reorderTask(
@@ -3682,6 +3703,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
         toStageId: "impl",
         beforeKey: null,
         ack: null,
+        reason: "the retry path is still unhandled",
       },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
@@ -4236,7 +4258,7 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
 
     await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true, reason: "the migration is still missing" },
       actor(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -4245,6 +4267,15 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
     expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
     const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
     expect(note?.text).toContain('"Accept completion and move VIB-1 to Done"');
+    // Ruling 387 (F39-14): the withdrawal is a CONSEQUENCE of the move, and
+    // its timestamp is the later of the two, so it sits ABOVE the transition in
+    // a newest-first timeline — and the file stays strictly newest-first, which
+    // viberr's own `timeline_not_strictly_newest_first` diagnostic checks.
+    // CANARY: unshift the transition after the withdrawal and both fail.
+    expect(parsed.timeline[0]?.title).toBe("Recommendation withdrawn");
+    expect(parsed.timeline[1]?.type).toBe("transition");
+    const stamps = parsed.timeline.map((e) => e.occurredAt);
+    expect([...stamps].sort().reverse()).toEqual(stamps);
     expect(note?.text).toContain('"Move to Done"');
     expect(note?.text).toMatch(/moved to \*\*[^*]+\*\*, away from the acceptance boundary/);
     expect(note?.text).toContain("1 recommendation still stands");
@@ -5267,6 +5298,76 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
   }
 
+  /**
+   * Ruling 412 (F39-39), live on ax-clone AX-18.
+   *
+   * The operator planned Review to Verify to rework against a reviewer's
+   * complete blocker list. `validation` was `changed` rather than `failing`
+   * (the list arrived as a comment, not a verdict), so ruling 163 licensed
+   * exactly one backward move, into the review stage, where the task already
+   * was. It got "No allowed transition from Review to Verify." and nothing
+   * else -- and because the step THROWS rather than being refused, the rest of
+   * its plan was abandoned: "Coordination stopped". The task sat on a human.
+   *
+   * Both the reason and the way out were in that function's own scope.
+   */
+  it("ruling 412: a refused backward move says WHY, and names the way forward", async () => {
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "merge");
+    const opCtx = { dataRoot: store.dataRoot, operatorAuthorized: true };
+    let refused = "";
+    try {
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", rework: true },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      );
+    } catch (thrown) {
+      refused = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    expect(refused, "the move must still be refused").not.toBe("");
+
+    // CANARY: drop the `why`/`wayOut` clauses and this is the bare sentence
+    // AX-18's operator was given before it stopped coordinating.
+    expect(refused).toContain("No allowed transition from Merge to In Progress");
+    expect(refused, "names the fact that licenses the one legal move").toContain(
+      "The revision changed after the last verdict",
+    );
+    expect(refused, "names the ONE backward move that is allowed").toContain("into Review");
+    expect(refused, "names the move that needs no transition at all").toContain(
+      "engaged deliverer runs at every stage",
+    );
+  });
+
+  it("ruling 429(b): an UNFLAGGED backward move off a changed revision is told the truth, not 'neither'", async () => {
+    // Live on AX-20 (00:47): the operator's plan moved Review to Verify without
+    // the rework flag, on a task whose revision had changed after its verdict,
+    // and was told "rework needs a failing verdict or a revision that changed
+    // after one; this task has neither". CANARY: read `changedReworkTarget`
+    // alone again.
+    const store = prepared();
+    withMergeBoard(store);
+    seedChangedAt(store, "review");
+    let refused = "";
+    try {
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
+        OPERATOR_TASK_ACTOR,
+        { dataRoot: store.dataRoot, operatorAuthorized: true },
+      );
+    } catch (thrown) {
+      refused = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    expect(refused).toContain("No allowed transition from Review to In Progress");
+    expect(refused).not.toContain("this task has neither");
+    expect(refused).toContain(
+      "The revision changed after the last verdict, and its re-verdict is given at Review, where the task already stands.",
+    );
+  });
+
   it("ruling 163 (a): the operator's rework move Merge to Review is allowed on `changed`; Merge to In Progress is not", async () => {
     // Canary: require `validation === "failing"` again in transitionStage's
     // `isReworkMove`. Live: KNC-20's operator was refused "No allowed
@@ -5451,6 +5552,112 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(taskFile(store).frontmatter.stage).toBe("review");
   });
 
+  /**
+   * Ruling 449 (O39-c): the accept dialog's "update the branch and re-review
+   * first". Live on ax-clone two green pull requests merged a minute apart
+   * and left main red: the ceremony merged the newer base into the second and
+   * merged a head nobody had run.
+   */
+  describe("ruling 449: refreshAndReview", () => {
+    const approved = (store: TestStore) =>
+      seedChangedAt(store, "review", {
+        workRevision: workRev("rev_1"),
+        verdicts: [
+          { profileId: "reviewer", revisionId: "rev_1", headSha: "a".repeat(40), result: "approve", reason: "ok", at: "2026-08-19T09:30:00.000Z", rounds: 1 },
+        ],
+        validation: "healthy",
+        readiness: "ready",
+        waiting: "human",
+      });
+    const updated = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+      status: "updated",
+      branch: "vib-1-work",
+      base: "main",
+      commits: 3,
+      mergeSha: "m".repeat(40),
+      baseSha: "b".repeat(40),
+      onto: "a".repeat(40),
+      remoteBefore: { kind: "current", headSha: "a".repeat(40) },
+      remote: { kind: "current", headSha: "m".repeat(40) },
+    }));
+
+    it("refreshes as the person, then re-runs the reviewer on the head that will merge", async () => {
+      const store = prepared();
+      approved(store);
+      const startAgentRun = vi.fn<NonNullable<TaskActionDeps["startAgentRun"]>>(async () => ({
+        runId: "run_rr",
+        backend: "codex",
+        role: "Review & validation",
+        name: "Reviewer",
+        outcome: "started",
+        refusal: null,
+      }));
+      // CANARY: drop the reviewer dispatch and the refresh lands with nobody
+      // running the review it was for.
+      const result = await refreshAndReview(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot, deps: { updateBranchFromBase: updated, startAgentRun } },
+      );
+      expect(result.status).toBe("refreshed");
+      expect(startAgentRun).toHaveBeenCalledOnce();
+      const dispatch = startAgentRun.mock.calls[0]![1];
+      expect(dispatch).toMatchObject({ profileId: "reviewer", directiveFrom: actor(store.users.arda).label });
+      expect(dispatch.directive).toBe(reReviewDirective("vib-1-work", "main", "m".repeat(40)));
+      expect(dispatch.directive).toContain("merge commit `mmmmmmm`");
+      const parsed = taskFile(store);
+      // Nothing is accepted: the task waits at Review for the new verdict.
+      expect(parsed.frontmatter.stage).toBe("review");
+      expect(parsed.frontmatter.baseRefreshes.at(-1)).toMatchObject({ mergeSha: "m".repeat(40), base: "main" });
+      expect(parsed.timeline.some((e) => e.text.startsWith("Asked for a re-review before accepting, brought `vib-1-work` up to date with `main`"))).toBe(true);
+      expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.actorLabel).toBe(actor(store.users.arda).label);
+    });
+
+    it("starts nothing when the branch already carries its base, or the refresh met a conflict", async () => {
+      const store = prepared();
+      approved(store);
+      const startAgentRun = vi.fn<NonNullable<TaskActionDeps["startAgentRun"]>>();
+      const current = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+        status: "already_current",
+        branch: "vib-1-work",
+        base: "main",
+        remote: { kind: "current", headSha: "a".repeat(40) },
+      }));
+      const deps = (updateBranchFromBase: NonNullable<TaskActionDeps["updateBranchFromBase"]>) => ({
+        dataRoot: store.dataRoot,
+        deps: { updateBranchFromBase, startAgentRun, runOperator: vi.fn() },
+      });
+      const same = await refreshAndReview(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actor(store.users.arda), deps(current));
+      expect(same.status).toBe("current");
+      const conflicting = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>(async () => ({
+        status: "conflict",
+        branch: "vib-1-work",
+        base: "main",
+        files: ["app/main.ts"],
+      }));
+      const clash = await refreshAndReview(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actor(store.users.arda), deps(conflicting));
+      expect(clash.status).toBe("conflict");
+      expect(taskFile(store).timeline.some((e) => e.text.includes("CONFLICT with `main` in app/main.ts") && e.text.includes("no re-review was started"))).toBe(true);
+      expect(startAgentRun).not.toHaveBeenCalled();
+    });
+
+    it("is the acceptance authority's: a viewer is refused before anything runs", async () => {
+      const store = prepared();
+      approved(store);
+      const refresh = vi.fn<NonNullable<TaskActionDeps["updateBranchFromBase"]>>();
+      await expect(
+        refreshAndReview(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1" },
+          actor(store.users.elif),
+          { dataRoot: store.dataRoot, deps: { updateBranchFromBase: refresh } },
+        ),
+      ).rejects.toThrow();
+      expect(refresh).not.toHaveBeenCalled();
+    });
+  });
+
   it("G35-5 (d): an accept on a behind-base branch performs exactly one refresh, then one merge, in that order", async () => {
     // Canary: drop the `refreshBranchForAcceptance` call in attemptAcceptanceMerge.
     const store = prepared();
@@ -5473,6 +5680,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         commits: 2,
         mergeSha: "m".repeat(40),
         baseSha: "b".repeat(40),
+        onto: "a".repeat(40),
         remoteBefore: { kind: "current", headSha: "a".repeat(40) },
         remote: { kind: "current", headSha: "m".repeat(40) },
       };
@@ -5494,7 +5702,13 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(parsed.frontmatter.baseRefreshes[0]).toMatchObject({ mergeSha: "m".repeat(40), base: "main", commits: 2 });
     expect(parsed.timeline.some((e) => e.text.startsWith("Accepting the completion brought `vib-1-work` up to date with `main`"))).toBe(true);
     expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.details).toMatchObject({ status: "updated", commits: 2 });
-
+    // F39-64: GitHub never showed the merge head here (no transport), and the
+    // permanent record still names the refresh this acceptance shipped, from
+    // Viberr's own record. CANARY: drop `pr.revisionDrift = fromRecord`.
+    const completion = parsed.timeline.find((e) => e.type === "completion");
+    expect(completion?.text).toContain(
+      "carries a base refresh made after the review (1 merge commit, 2 base commits) and no authored commits outside the reviewed revision",
+    );
   });
 
   /**
@@ -5757,6 +5971,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       commits: 2,
       mergeSha: "m".repeat(40),
       baseSha: "b".repeat(40),
+      onto: "a".repeat(40),
       remoteBefore: { kind: "current", headSha: "a".repeat(40) },
       remote: { kind: "current", headSha: "m".repeat(40) },
     }));

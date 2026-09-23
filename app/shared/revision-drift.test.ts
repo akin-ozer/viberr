@@ -3,6 +3,8 @@ import {
   describeRevisionDrift,
   revisionDriftNote,
   classifyRevisionDrift,
+  headCarriesRevision,
+  refreshChainFrom,
   reviewSubjectSha,
 } from "./revision-drift";
 
@@ -188,6 +190,7 @@ describe("reviewSubjectSha (ruling 238)", () => {
       reviewedSha: REVIEWED,
       prHeadSha: REFRESHED,
       drift: baseOnly,
+      refreshes: [],
     });
     expect(subject).toEqual({
       sha: REFRESHED,
@@ -204,7 +207,7 @@ describe("reviewSubjectSha (ruling 238)", () => {
       { ...baseOnly, authored: 3, baseRefresh: { merges: 2, commits: 9 } },
     ]) {
       expect(
-        reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: REFRESHED, drift }),
+        reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: REFRESHED, drift, refreshes: [] }),
       ).toEqual({ sha: REVIEWED, rePinned: null });
     }
   });
@@ -215,19 +218,20 @@ describe("reviewSubjectSha (ruling 238)", () => {
     // stale base-refresh reading re-pins onto commits nobody has read.
     const stale = { ...baseOnly, headSha: "c".repeat(40) };
     expect(
-      reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: REFRESHED, drift: stale }),
+      reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: REFRESHED, drift: stale, refreshes: [] }),
     ).toEqual({ sha: REVIEWED, rePinned: null });
   });
 
   it("keeps the pin with no PR, no drift, an empty refresh, or a head that never moved", () => {
     const stands = { sha: REVIEWED, rePinned: null };
-    expect(reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: null, drift: baseOnly })).toEqual(stands);
-    expect(reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: REFRESHED, drift: null })).toEqual(stands);
+    expect(reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: null, drift: baseOnly, refreshes: [] })).toEqual(stands);
+    expect(reviewSubjectSha({ reviewedSha: REVIEWED, prHeadSha: REFRESHED, drift: null, refreshes: [] })).toEqual(stands);
     expect(
       reviewSubjectSha({
         reviewedSha: REVIEWED,
         prHeadSha: REFRESHED,
         drift: { headSha: REFRESHED, authored: 0, baseRefresh: { merges: 0, commits: 0 } },
+        refreshes: [],
       }),
     ).toEqual(stands);
     expect(
@@ -235,11 +239,98 @@ describe("reviewSubjectSha (ruling 238)", () => {
         reviewedSha: REVIEWED,
         prHeadSha: REVIEWED,
         drift: { ...baseOnly, headSha: REVIEWED },
+        refreshes: [],
       }),
     ).toEqual(stands);
   });
 
   it("has nothing to pin when nothing has been delivered", () => {
-    expect(reviewSubjectSha({ reviewedSha: null, prHeadSha: REFRESHED, drift: baseOnly })).toBeNull();
+    expect(reviewSubjectSha({ reviewedSha: null, prHeadSha: REFRESHED, drift: baseOnly, refreshes: [] })).toBeNull();
+  });
+});
+
+/**
+ * Ruling 439 (pass 39, F39-62). Live on ax-clone AX-29: the delivered revision
+ * was `4e6c47d`; the operator merged `main` onto it (merge `278c1ed`, 2 base
+ * commits) and dispatched the reviewer before any PR existed. The reviewer was
+ * detached at `4e6c47d`, its gates failed on the four tests the merged base had
+ * fixed, and the approval it gave on `278c1ed` was thrown away 65 seconds later
+ * when the delivery minted `278c1ed` as a new revision.
+ */
+describe("the refresh chain (ruling 439)", () => {
+  const DELIVERED = "4e6c47d51283c3f457b040d4d685ccf1edc373d5";
+  const MERGED = "278c1ed382729dd7a3ce7ddf755157a5f72f6d35";
+  const MERGED_AGAIN = "9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7a8b9c0";
+  const AUTHORED = "e".repeat(40);
+  const ax29 = [{ mergeSha: MERGED, onto: DELIVERED, commits: 2 }];
+
+  it("re-pins a review to the refreshed head when no PR exists yet (AX-29)", () => {
+    // CANARY: drop the chain arm from reviewSubjectSha and this is the live
+    // AX-29 dispatch, detached at the pre-refresh commit.
+    expect(
+      reviewSubjectSha({ reviewedSha: DELIVERED, prHeadSha: null, drift: null, refreshes: ax29 }),
+    ).toEqual({
+      sha: MERGED,
+      rePinned: { reviewedSha: DELIVERED, baseRefresh: { merges: 1, commits: 2 } },
+    });
+  });
+
+  it("follows refreshes made one onto the other, and counts them all", () => {
+    const twice = [...ax29, { mergeSha: MERGED_AGAIN, onto: MERGED, commits: 3 }];
+    expect(
+      reviewSubjectSha({ reviewedSha: DELIVERED, prHeadSha: null, drift: null, refreshes: twice }),
+    ).toEqual({
+      sha: MERGED_AGAIN,
+      rePinned: { reviewedSha: DELIVERED, baseRefresh: { merges: 2, commits: 5 } },
+    });
+    // With a PR, the subject stops at the PR head the chain reaches.
+    expect(
+      reviewSubjectSha({ reviewedSha: DELIVERED, prHeadSha: MERGED, drift: null, refreshes: twice }),
+    ).toEqual({
+      sha: MERGED,
+      rePinned: { reviewedSha: DELIVERED, baseRefresh: { merges: 1, commits: 2 } },
+    });
+  });
+
+  it("keeps the pin when the refresh sits on authored work, or names no head", () => {
+    const stands = { sha: DELIVERED, rePinned: null };
+    // Merged onto a commit made after the revision: that commit is unreviewed.
+    const ontoAuthored = [{ mergeSha: MERGED, onto: AUTHORED, commits: 2 }];
+    expect(
+      reviewSubjectSha({ reviewedSha: DELIVERED, prHeadSha: null, drift: null, refreshes: ontoAuthored }),
+    ).toEqual(stands);
+    const unlinked = [{ mergeSha: MERGED, commits: 2 }];
+    expect(
+      reviewSubjectSha({ reviewedSha: DELIVERED, prHeadSha: null, drift: null, refreshes: unlinked }),
+    ).toEqual(stands);
+    // A PR head off the chain is not offered.
+    expect(
+      reviewSubjectSha({ reviewedSha: DELIVERED, prHeadSha: AUTHORED, drift: null, refreshes: ax29 }),
+    ).toEqual(stands);
+  });
+
+  it("lets a drift measured at the PR head outrank the chain", () => {
+    // The reconciler read the head itself; an authored commit it found there
+    // keeps the pin whatever the record says.
+    expect(
+      reviewSubjectSha({
+        reviewedSha: DELIVERED,
+        prHeadSha: MERGED,
+        drift: { headSha: MERGED, authored: 1, baseRefresh: { merges: 1, commits: 2 } },
+        refreshes: ax29,
+      }),
+    ).toEqual({ sha: DELIVERED, rePinned: null });
+  });
+
+  it("says which heads carry the revision, and cannot loop on a malformed record", () => {
+    expect(headCarriesRevision(DELIVERED, DELIVERED, [])).toBe(true);
+    expect(headCarriesRevision(DELIVERED, MERGED, ax29)).toBe(true);
+    expect(headCarriesRevision(DELIVERED, MERGED, [])).toBe(false);
+    expect(headCarriesRevision(DELIVERED, AUTHORED, ax29)).toBe(false);
+    const cycle = [
+      { mergeSha: MERGED, onto: DELIVERED, commits: 1 },
+      { mergeSha: DELIVERED, onto: MERGED, commits: 1 },
+    ];
+    expect(refreshChainFrom(DELIVERED, cycle)?.links.map((l) => l.head)).toEqual([MERGED, DELIVERED]);
   });
 });

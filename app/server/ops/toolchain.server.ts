@@ -250,6 +250,113 @@ export function resetToolchainCacheForTests(): void {
   cached = null;
 }
 
+// ------------------------------------------------- probing an arbitrary tool
+
+/**
+ * F39-1 (pass 39): whether ONE named command exists on this host.
+ *
+ * {@link Toolchain} is a fixed struct, and ruling 191 widened the LIST without
+ * changing that: it still answers only for the ten names it was compiled with,
+ * all of them npm-shaped. A project whose gates are `gofmt`, `go vet`,
+ * `golangci-lint` and `go test` can therefore verify three of its four gates
+ * and not the fourth, and nothing in the product can answer "is
+ * `golangci-lint` on PATH?".
+ *
+ * Live in pass 39 the controller — briefed with those exact four gates, and
+ * behaving correctly given what it could see — wrote "golangci-lint is NOT
+ * preinstalled" into the project's binding rulings, budgeted a whole delivery
+ * task to find out, and told its owner "I have no shell". golangci-lint was
+ * installed. The fact was one `command -v` away and no surface could ask.
+ *
+ * Bounded by construction rather than by trust:
+ *  - the NAME is matched against {@link PROBE_NAME_RE} — letters, digits, dot,
+ *    dash, underscore, plus — so nothing that could be a path, a flag, a shell
+ *    metacharacter or an option ever reaches a child;
+ *  - `command -v` runs through `/bin/sh` with the name as an ARGUMENT (`-c` with
+ *    `"$1"`), never interpolated into the script, so a name that slipped the
+ *    regex still could not become code;
+ *  - one `--version` follows only when the lookup SUCCEEDED, argv, no shell;
+ *  - both children get the credential-free probe env every other probe gets.
+ *
+ * It reports presence and a version, never a path: where a binary lives is
+ * deployment configuration, and this reading is open to any asker.
+ */
+export const PROBE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
+
+/** The most names one call may probe: a bounded question, not an inventory. */
+export const PROBE_LIMIT = 8;
+
+export type ProbedTool =
+  | { name: string; present: true; version: string | null }
+  | { name: string; present: false; reason: string };
+
+export function probeTool(name: string, deps: ToolchainDeps = {}): ProbedTool {
+  const run = deps.run ?? runCommand;
+  const cleaned = name.trim();
+  if (!PROBE_NAME_RE.test(cleaned)) {
+    return {
+      name: cleaned,
+      present: false,
+      reason:
+        "not a command name — probe a bare name like \"golangci-lint\", never a path, a flag or a shell fragment",
+    };
+  }
+  // `command -v` is POSIX and answers for builtins and functions too, which
+  // `which` does not. The name is argv, never part of the script.
+  const found = run("/bin/sh", ["-c", 'command -v -- "$1"', "sh", cleaned], {
+    timeoutMs: VERSION_TIMEOUT_MS,
+  });
+  if (!found.ok || !found.stdout.trim()) {
+    return { name: cleaned, present: false, reason: `${cleaned} is not on PATH` };
+  }
+  const version = run(cleaned, ["--version"], { timeoutMs: VERSION_TIMEOUT_MS });
+  return {
+    name: cleaned,
+    present: true,
+    version: version.ok ? versionOf(version.stdout) : null,
+  };
+}
+
+/**
+ * Probe up to {@link PROBE_LIMIT} names, de-duplicated, in the order asked.
+ * A tool that was FOUND is memoized for the life of the process, like every
+ * other probe here. A miss is asked again: the probe exists so a gate is
+ * checked before it is promised, and the usual answer to "golangci-lint is
+ * not on PATH" is a person installing it, which a cached miss would deny
+ * until the next restart.
+ */
+const probeCache = new Map<string, ProbedTool>();
+
+export function probeTools(
+  names: readonly string[],
+  deps: ToolchainDeps = {},
+): ProbedTool[] {
+  const seen = new Set<string>();
+  const out: ProbedTool[] = [];
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    if (out.length >= PROBE_LIMIT) break;
+    const hit = probeCache.get(name);
+    if (hit) {
+      out.push(hit);
+      continue;
+    }
+    const probed = probeTool(name, deps);
+    // Only a tool that is there. A malformed NAME is not a host fact, and an
+    // absent tool is one a person can fix while the server runs.
+    if (probed.present) probeCache.set(name, probed);
+    out.push(probed);
+  }
+  return out;
+}
+
+/** Test-only: forget probed names (the version cache is separate). */
+export function resetProbeCacheForTests(): void {
+  probeCache.clear();
+}
+
 /**
  * The shell tools a run can invoke, in the order a reader wants them — the
  * runtimes (`codexCli`, `claudeAgentSdk`) are deliberately out: they are what

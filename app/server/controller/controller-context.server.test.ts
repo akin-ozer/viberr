@@ -323,6 +323,36 @@ describe("gatherControllerContext", () => {
     expect(without.text).not.toContain("They are looking at");
   });
 
+  it("U39-24: states the zone the person reads times in, and its clock now, and never otherwise", async () => {
+    /**
+     * Live at 03:57 on the ax-clone controller page: a bubble the page
+     * stamped 03:57 said "The move went through as yours at 00:57:02", to a
+     * person in Istanbul. The page prints local times; the tools answer in UTC.
+     *
+     * CANARY: drop the zone line from the context.
+     */
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const withZone = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: null,
+      user: arda,
+      timeZone: "Europe/Istanbul",
+      now: new Date("2026-09-23T00:57:02Z"),
+      dataRoot: app.dataRoot,
+    });
+    expect(withZone.text).toContain(
+      "They read times in Europe/Istanbul (GMT+03:00), where it is 03:57 now.",
+    );
+    expect(withZone.text).toContain("never as a bare UTC clock");
+    const without = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: null,
+      user: arda,
+      dataRoot: app.dataRoot,
+    });
+    expect(without.text).not.toContain("They read times in");
+  });
+
   it("says so, and does not throw, when the anchored task cannot be read", async () => {
     const { gatherControllerContext } = await import("./controller-context.server");
     const read = gatherControllerContext(app.db, {
@@ -530,6 +560,53 @@ describe("gatherControllerContext", () => {
         dataRoot: app.dataRoot,
       });
     }
+  });
+
+  /**
+   * Ruling 390 (F39-17): the ask the controller raised and nobody has answered
+   * comes back in EVERY scope, because the failure it closes is a standing fact
+   * that lived only in a conversation that ended.
+   */
+  it("ruling 390: an open grant request rides in every scope, and leaves when answered", async () => {
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const { raiseResourceRequest, closeResourceRequest, openResourceRequests } =
+      await import("./controller-requests.server");
+    raiseResourceRequest(
+      {
+        kind: "kb",
+        name: "instance-standing-rules",
+        reason: "It carries the model rule Arda set, as its heading.",
+        askedByUserId: arda.id,
+        askedByLabel: "arda@viberr.dev · via controller",
+      },
+      app.dataRoot,
+    );
+    // CANARY: drop `openRequestsContextLine` from the block and every one of
+    // these loses the ask the moment the conversation that raised it ends.
+    for (const scope of [
+      { projectSlug: null, taskKey: null },
+      { projectSlug: SLUG, taskKey: null },
+      { projectSlug: SLUG, taskKey: "VIB-142" },
+    ]) {
+      const read = gatherControllerContext(app.db, {
+        ...scope,
+        user: arda,
+        dataRoot: app.dataRoot,
+      });
+      expect(read.text, JSON.stringify(scope)).toContain("instance-standing-rules");
+      expect(read.text, JSON.stringify(scope)).toContain(
+        "VIBERR_UNLOCK_CONTROLLER_KB=enabled",
+      );
+    }
+    const [open] = openResourceRequests(app.dataRoot);
+    closeResourceRequest(open!.id, "granted", "arda@viberr.dev", app.dataRoot);
+    const after = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: null,
+      user: arda,
+      dataRoot: app.dataRoot,
+    });
+    expect(after.text).not.toContain("instance-standing-rules");
   });
 
   it("never exceeds the block budget", async () => {

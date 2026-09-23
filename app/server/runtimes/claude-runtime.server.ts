@@ -13,6 +13,7 @@ import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   answeredStep,
+  postTurnTransportLine,
   RUN_PHASE,
   stepUpdateForLine,
   type CompactCallbacks,
@@ -57,7 +58,11 @@ import {
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
- * (`@anthropic-ai/claude-agent-sdk`, verified v0.3.261). `query()` returns a
+ * (`@anthropic-ai/claude-agent-sdk`, verified v0.3.280, bundling Claude Code
+ * 2.1.280: every option below, the `Query` methods called on it, the result
+ * and init fields read and the native-binary resolver `backend-login` mirrors
+ * were re-checked against it; its `opus` alias resolves to `claude-opus-5-5`,
+ * where 2.1.261's resolved to `claude-opus-5`). `query()` returns a
  * `Query` (async generator of `SDKMessage`) whose yielded objects are the
  * SAME envelopes documented in runtime-adapters.md §1.3 (system·init with
  * session_id/model/tools, assistant/user with tool_use/tool_result blocks,
@@ -1717,6 +1722,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
          * (observed live: a completed implementation died at turn 51 running
          * `gh --version`).
          */
+        // Ruling 394: the drop that landed after the query's own result.
+        const emitPostTurnTransport = (detail: string) => {
+          cb.onLine(postTurnTransportLine(detail));
+        };
         const emitCutOff = (): boolean => {
           if (resultSubtype === "error_max_turns") {
             const now = new Date().toISOString();
@@ -1853,6 +1862,23 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           if (emitCutOff()) {
             logger.info("claude run cut off by a cap", { runId: spec.runId, subtype: resultSubtype });
             return settle("error");
+          }
+          // Ruling 394: the SDK's terminal `result` had already landed and it
+          // was not an error, so the query finished and the stream threw on
+          // teardown. The Codex half of this ruling is the one the ax-clone
+          // board demonstrated; this is the same gate on the same reasoning,
+          // and `sawResult` is stronger evidence still — Claude emits exactly
+          // one result, at the end of the whole query, so nothing can be in
+          // flight behind it.
+          if (sawResult && !resultIsError) {
+            logger.info("claude stream threw after its result", {
+              runId: spec.runId,
+              runOutcome: "finished",
+            });
+            emitPostTurnTransport(
+              error instanceof Error ? error.message : String(error),
+            );
+            return settle("finished");
           }
           logger.error("claude query error", {
             runId: spec.runId,

@@ -444,7 +444,18 @@ const BASELINE_COLUMNS: readonly {
   },
   {
     table: "controller_conversations",
-    columns: [{ name: "task_key", ddl: "task_key TEXT" }],
+    columns: [
+      { name: "task_key", ddl: "task_key TEXT" },
+      // O39-d: what the owner has seen. Every conversation that predates the
+      // column counts as read to its newest message, so a deploy does not
+      // mark every old thread as a new reply.
+      {
+        name: "seen_seq",
+        ddl: "seen_seq INTEGER NOT NULL DEFAULT 0",
+        backfill:
+          "UPDATE controller_conversations SET seen_seq = COALESCE((SELECT MAX(seq) FROM controller_messages m WHERE m.conversation_id = controller_conversations.id), 0)",
+      },
+    ],
   },
   // Ruling 176: an org MCP server's marked write tools and its discovered tool
   // names. `listMcpServers` names both on every Settings render and every run

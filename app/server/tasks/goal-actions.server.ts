@@ -1,5 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
-import { parseBlockedByColumn, resolveDependencies } from "~/server/projections/dependencies.server";
+import { actorProseName } from "./user-display-name.server";
+import {
+  deadDependencies,
+  dependenciesSatisfied,
+  parseBlockedByColumn,
+  resolveDependencies,
+} from "~/server/projections/dependencies.server";
 import { z } from "zod";
 import {
   allLinksSettled,
@@ -118,11 +124,18 @@ function linkGoalText(
    *  to. Absent (a first start) leaves the declared text. */
   body?: string,
 ): string {
+  // Ruling 404 (F39-31): this header is FROZEN into the task's goal body at
+  // creation and never rewritten, so it may only state facts that cannot move.
+  // The chain's LENGTH moves -- the controller added links 6-8 to goal-4 on
+  // 2026-09-22 and three already-created tasks went on claiming "of 5", with
+  // AX-21 telling its own agent it was the last link of the chain while three
+  // more followed. A previous link's STATUS moves the same way. Both are gone:
+  // the goal id, the title, this link's own index and which task carried the
+  // previous link are settled the moment the task exists. The live chain is
+  // `goalChain` on the operator's snapshot (ruling 402), which is read fresh.
   const head =
-    `Part of goal ${goal.id} (${goal.title}), link ${link.index} of ${goal.links.length}.` +
-    (previous?.taskKey
-      ? ` The previous link was carried by ${previous.taskKey} (${previous.status}).`
-      : "");
+    `Part of goal ${goal.id} (${goal.title}), link ${link.index}.` +
+    (previous?.taskKey ? ` The previous link was carried by ${previous.taskKey}.` : "");
   return `${head}\n\n${(body ?? "").trim() || link.goal.trim() || link.title}`;
 }
 
@@ -138,11 +151,56 @@ export function stripChainHeader(goal: string): string {
 // ------------------------------------------------------------------ create
 
 /**
+ * Ruling 398: can this link start, must it wait, or is its wait dead?
+ *
+ * A wait on a link of this SAME goal is answered from the frontmatter being
+ * written, never from the projection. The projection is rebuilt after this
+ * pass, so a sibling this very pass marked `done` or `skipped` still reads
+ * `failed` there — which silently stranded the link behind it.
+ */
+function linkWaitState(
+  db: DatabaseSync,
+  projectSlug: string,
+  fm: GoalFrontmatter,
+  link: GoalLink,
+): "ready" | "open" | "dead" {
+  if (link.blockedBy.length === 0) return "ready";
+  const foreign: string[] = [];
+  let open = false;
+  let dead = false;
+  for (const raw of link.blockedBy) {
+    const ref = parseDependencyRef(raw);
+    if (ref?.kind === "goal" && ref.goal === fm.id) {
+      const sibling = fm.links.find((l) => l.index === ref.link);
+      if (!sibling) dead = true;
+      // `skipped` settles a wait exactly as `done` does: onFailure=continue
+      // means the chain moves past that link, and a dependent that stayed held
+      // on it would never move at all.
+      else if (sibling.status === "failed") dead = true;
+      else if (sibling.status !== "done" && sibling.status !== "skipped") open = true;
+      continue;
+    }
+    foreign.push(raw);
+  }
+  if (foreign.length > 0) {
+    const resolved = resolveDependencies(db, projectSlug, foreign);
+    if (deadDependencies(resolved).length > 0) dead = true;
+    else if (!dependenciesSatisfied(resolved)) open = true;
+  }
+  return dead ? "dead" : open ? "open" : "ready";
+}
+
+/** Ruling 398: `link 3` — a wait on a sibling link of the goal being written,
+ *  the only spelling available before the goal has an id. */
+const RELATIVE_LINK_RE = /^link\s+(\d+)$/i;
+
+/**
  * Ruling 131(c): validate one link's declared wait. References to THIS
- * chain's own links are checked here (an existing link, never itself, never
- * a later link of the same chain, which the chain order already forbids);
- * everything else goes through the shared validator, whose cycle walk
- * traverses declared goal-link edges as well as created tasks.
+ * chain's own links are checked here (an existing link, never itself; a
+ * later link is fine since ruling 398(c), and a cycle among them is
+ * `refuseLinkCycles`' question); everything else goes through the shared
+ * validator, whose cycle walk traverses declared goal-link edges as well as
+ * created tasks.
  */
 function validateLinkWait(
   db: DatabaseSync,
@@ -155,7 +213,21 @@ function validateLinkWait(
   const own: string[] = [];
   const foreign: string[] = [];
   for (const raw of entries) {
-    const ref = parseDependencyRef(raw);
+    // Ruling 398: `link 2` means link 2 of THIS goal.
+    //
+    // The id is minted while the goal is being written, so at creation time an
+    // author has no way to name their own chain — and now that a link starts
+    // as soon as its declared wait allows, naming a sibling is how a SEQUENCE
+    // is written down at all. Without this spelling a sequential goal would
+    // take a create plus one `update_goal` per link, after reading back an id
+    // the author never chose.
+    //
+    // Expanded here and stored in the canonical absolute spelling, so the file
+    // keeps exactly the two spellings `app/shared/dependencies.ts` documents.
+    const relative = RELATIVE_LINK_RE.exec(raw.trim());
+    const ref = parseDependencyRef(
+      relative ? `${goalId} link ${Number(relative[1])}` : raw,
+    );
     if (ref?.kind === "goal" && ref.goal === goalId) {
       if (ref.link === linkIndex) {
         throw AppError.validation(`${formatDependencyRef(ref)}: a link cannot wait on itself.`);
@@ -163,11 +235,17 @@ function validateLinkWait(
       if (!links.some((l) => l.index === ref.link)) {
         throw AppError.validation(`${goalId} has no link ${ref.link} (it has ${links.length}).`);
       }
-      if (ref.link > linkIndex) {
-        throw AppError.validation(
-          `${formatDependencyRef(ref)}: a link cannot wait on a LATER link of its own chain (the chain runs in order).`,
-        );
-      }
+      // Ruling 398(c): a forward wait is ordinary now.
+      //
+      // The refusal that stood here — "a link cannot wait on a LATER link of
+      // its own chain (the chain runs in order)" — was right while position
+      // WAS the order: a later link's task did not exist yet, so waiting on it
+      // deadlocked. Ruling 398 took that meaning away and this guard outlived
+      // it, which the ax-clone controller hit the same afternoon: it wanted the
+      // failure-semantics audit held behind the link that ADDS the routes it
+      // audits, four positions later in the same goal, and had no way to say
+      // so. What actually has to be refused is a CYCLE, and `refuseLinkCycles`
+      // below refuses it over the whole graph rather than by position.
       own.push(formatDependencyRef(ref));
       continue;
     }
@@ -181,6 +259,49 @@ function validateLinkWait(
   const out: string[] = [];
   for (const entry of [...own, ...validated]) if (!out.includes(entry)) out.push(entry);
   return out;
+}
+
+/**
+ * Ruling 398(c): refuse a cycle among a goal's own links.
+ *
+ * Position stopped being the order, so "later" is no longer a safe proxy for
+ * "would deadlock". This is the real question, asked over the whole graph: a
+ * link that waits, directly or through its siblings, on itself can never start,
+ * and neither can anything behind it. Cross-goal and cross-task cycles are
+ * `validateDependencyRefs`' job (`cyclePath`); this covers the one graph that
+ * is being written and does not exist in the store yet.
+ */
+function refuseLinkCycles(goalId: string, links: readonly GoalLink[]): void {
+  const edges = new Map<number, number[]>();
+  for (const link of links) {
+    const out: number[] = [];
+    for (const raw of link.blockedBy) {
+      const ref = parseDependencyRef(raw);
+      if (ref?.kind === "goal" && ref.goal === goalId) out.push(ref.link);
+    }
+    edges.set(link.index, out);
+  }
+  const state = new Map<number, "open" | "closed">();
+  const stack: number[] = [];
+  const walk = (index: number): void => {
+    const seen = state.get(index);
+    if (seen === "closed") return;
+    if (seen === "open") {
+      const at = stack.indexOf(index);
+      const loop = [...stack.slice(at), index]
+        .map((i) => `link ${i}`)
+        .join(" waits on ");
+      throw AppError.validation(
+        `${loop}: these links wait on each other, so none of them could ever start.`,
+      );
+    }
+    state.set(index, "open");
+    stack.push(index);
+    for (const next of edges.get(index) ?? []) walk(next);
+    stack.pop();
+    state.set(index, "closed");
+  };
+  for (const link of links) walk(link.index);
 }
 
 export async function createGoal(
@@ -231,7 +352,7 @@ export async function createGoal(
   // project's goals lock across all three, or two concurrent creates mint the
   // SAME id, both create a task, and the loser's `createGoalFile` throws with
   // its task already created and dispatched to an operator.
-  const { goalId, created } = await withGoalsLock(
+  const { goalId } = await withGoalsLock(
     input.projectSlug,
     ctx.dataRoot,
     async () => {
@@ -243,6 +364,7 @@ export async function createGoal(
       for (const link of links) {
         link.blockedBy = validateLinkWait(db, input.projectSlug, id, link.index, links, link.blockedBy);
       }
+      refuseLinkCycles(id, links);
       const now = new Date().toISOString();
       const fm: GoalFrontmatter = {
         id,
@@ -256,30 +378,37 @@ export async function createGoal(
         updatedAt: now,
       };
 
-      // Link 1's task is created FIRST (under the asking user's own authority —
-      // requireAction inside createTask), so a refusal there leaves no orphan
-      // goal file behind.
-      const first = links[0]!;
-      const firstInput: CreateTaskInput = {
-        projectSlug: input.projectSlug,
-        title: first.title,
-        goal: linkGoalText(fm, first, null),
-        goalRef: { goalId: id, linkIndex: 1 },
-      };
-      // Ruling 131(c): link 1's declared wait rides onto its task at birth.
-      if (first.blockedBy.length > 0) firstInput.blockedBy = first.blockedBy;
-      const task = await createTask(db, firstInput, actor, ctx);
-      first.taskKey = task.key;
-      first.status = "active";
-
+      // Ruling 398(c): the FILE is written first, and the tasks follow.
+      //
+      // Link 1's task used to be created before the file, so that a refusal
+      // left no orphan goal behind. That ordering became impossible the moment
+      // a link could wait on a sibling: `createTask` validates the inherited
+      // wait against the store, and `goal-50 link 2` is not in the store until
+      // the goal file exists. The orphan it guarded against is covered anyway —
+      // `requireAction(create-task)` runs at the top of this function, and a
+      // start that fails now parks the goal by name instead of throwing, which
+      // is a record rather than a silent gap.
       await createGoalFile(goalRef(ctx, input.projectSlug, id), {
         frontmatter: fm,
         description: input.description?.trim() ?? "",
       });
-      return { goalId: id, created: task };
+      return { goalId: id };
     },
   );
   rebuildGoalFile(db, input.projectSlug, goalId, { dataRoot: ctx.dataRoot });
+  // Ruling 398: every link that nothing makes wait starts here, link 1
+  // included, through the one selector (`startLinkTask`, under the creator's
+  // re-proved authority), rather than sitting until the goal runner's next
+  // tick: a person who declares three independent links means three tasks
+  // now. A start that fails parks the goal in `attention` by name; the file
+  // is already written, so nothing here is rolled back.
+  await reconcileGoal(db, input.projectSlug, goalId, ctx);
+  const startedList =
+    readGoalFile(goalRef(ctx, input.projectSlug, goalId))?.parsed.frontmatter.links.filter(
+      (l) => l.taskKey,
+    ) ?? [];
+  const startedLinks = startedList.length;
+  const created = startedList[0]?.taskKey ?? null;
 
   recordAudit(db, {
     action: "goal.created",
@@ -287,13 +416,17 @@ export async function createGoal(
     subjectKind: "goal",
     subjectId: goalId,
     projectSlug: input.projectSlug,
-    details: { title, links: links.length, firstTask: created.key },
+    details: { title, links: links.length, firstTask: created ?? "" },
   });
   return {
     goalId,
     status: "active",
-    activeTaskKey: created.key,
-    message: `Goal ${goalId} created with ${links.length} link${links.length === 1 ? "" : "s"}; link 1 is ${created.key}.`,
+    activeTaskKey: created,
+    message:
+      `Goal ${goalId} created with ${links.length} link${links.length === 1 ? "" : "s"}; ` +
+      (startedLinks === 0
+        ? "no link started yet — every one of them waits on something."
+        : `${startedLinks} started now (${startedList.map((l) => `link ${l.index} is ${l.taskKey}`).join(", ")}).`),
   };
 }
 
@@ -435,6 +568,8 @@ export async function updateGoal(
   let message = "";
   let retryLinkIndex: number | null = null;
   let advanceAfter = false;
+  /** Ruling 411: the pending link an `edit_link` unblocked, if any. */
+  let startedIndex: number | null = null;
   // Ruling 155: an active link's wait lives on its task. The goal-file lock
   // below is not re-entrant, and the task writer mirrors the list back onto
   // this very file, so the forward runs AFTER the lock is released.
@@ -445,7 +580,8 @@ export async function updateGoal(
     (goal) => {
       const fm = goal.frontmatter;
       const terminal = fm.status === "completed" || fm.status === "cancelled";
-      const by = actor.label;
+      // U39-18: the chain's history is read by people, so it names them.
+      const by = actorProseName(db, actor);
       switch (op.op) {
         case "rename": {
           // Ruling 267 (pass 37, F37-97): the ONE op a settled chain still
@@ -594,6 +730,15 @@ export async function updateGoal(
                 op.blockedBy,
               ),
             };
+            // Ruling 398(c): the whole graph, after the edit lands on it. This
+            // arm writes the new wait to the TASK, so `fm.links` still holds
+            // the old one: check the graph the edit makes, not the one it
+            // replaces.
+            const wait = forward.wait.blockedBy;
+            refuseLinkCycles(
+              fm.id,
+              fm.links.map((l) => (l.index === link.index ? { ...l, blockedBy: wait } : l)),
+            );
             return;
           }
           if (link.status !== "pending" && link.status !== "failed") {
@@ -614,6 +759,24 @@ export async function updateGoal(
           // at declaration time, this chain's other links included.
           if (op.blockedBy !== undefined) {
             link.blockedBy = validateLinkWait(db, input.projectSlug, fm.id, link.index, fm.links, op.blockedBy);
+            refuseLinkCycles(fm.id, fm.links);
+            // Ruling 411 (F39-38): editing a pending link's wait is the most
+            // direct way there is to make that link STARTABLE, and it was the
+            // one op that did not advance the chain afterwards -- `resume`,
+            // `skip_link` and `add_link` all do. So the link sat until the
+            // periodic tick, `update_goal` returned with `activeTaskKey` still
+            // naming the link before it, and a caller that read the goal back
+            // saw a startable link with no task. Live on ax-clone the
+            // controller cleared goal-4 link 2's wait, read the goal TWICE,
+            // saw link 2 taskless both times, created AX-25 to carry it -- and
+            // the tick had already minted AX-24 four seconds earlier. Two
+            // tasks for one link, one of them an orphan with an agent
+            // dispatched on it. `reconcileGoal` is convergent, so asking it
+            // here costs nothing when the wait still stands.
+            advanceAfter = true;
+            // Ruling 411: remember WHICH link this edit could have started, so
+            // the reply can name its task instead of the chain's current one.
+            if (link.blockedBy.length === 0) startedIndex = link.index;
           }
           const waitClause =
             op.blockedBy !== undefined
@@ -646,6 +809,7 @@ export async function updateGoal(
             redeclared: false,
             blockedBy: validateLinkWait(db, input.projectSlug, fm.id, nextIndex, fm.links, op.blockedBy ?? []),
           });
+          refuseLinkCycles(fm.id, fm.links);
           advanceAfter = true;
           message = `Link ${fm.links.length} added.`;
           return `Link ${fm.links.length} (${title}) added by ${by}.`;
@@ -878,11 +1042,20 @@ export async function updateGoal(
   }
   const after = readGoalFile(goalRef(ctx, input.projectSlug, input.goalId));
   const fm = after?.parsed.frontmatter ?? parsed.frontmatter;
+  // Ruling 411: say which task the edit STARTED. `activeTaskKey` names the
+  // link the chain currently rides on, which since ruling 398's fan-out is
+  // usually a DIFFERENT link -- so a caller that unblocked link 2 and read
+  // this reply was told about link 1 and learned nothing about its own edit.
+  // Live, that caller created a second task for a link Viberr had just filled.
+  const startedKey =
+    startedIndex !== null
+      ? (fm.links.find((l) => l.index === startedIndex)?.taskKey ?? null)
+      : null;
   return {
     goalId: input.goalId,
     status: fm.status,
     activeTaskKey: activeTaskKeyOf(fm.links),
-    message,
+    message: startedKey ? `${message} Link ${startedIndex} started as ${startedKey}.` : message,
   };
 }
 
@@ -1070,7 +1243,7 @@ async function startLinkTaskLocked(
   // Ask the engine once, now that the link carries its task; it is convergent,
   // so an unsatisfied or lagging read leaves the tick to do what it always did.
   if (linkInput.blockedBy) {
-    await releaseTask(db, ctx, projectSlug, created.key).catch((error) => {
+    await releaseTask(db, ctx, projectSlug, created.key, { atBirth: true }).catch((error) => {
       logger.warn("release check after the link's mint failed — the tick will retry", {
         goalId,
         linkIndex,
@@ -1126,7 +1299,17 @@ export async function reconcileGoal(
   let completedNow = false;
   let attentionNow: string | null = null;
   let failedLink: { index: number; title: string; taskKey: string } | null = null;
-  let startIndex: number | null = null;
+  /**
+   * Ruling 398: the links to start on this pass. A LIST, not a single index.
+   *
+   * A chain used to create link N+1's task only when link N settled, so a goal
+   * could put exactly one task on the board however its links were declared:
+   * concurrency equalled the number of active GOALS, and `blockedBy` on a
+   * pending link changed nothing, because the task it would hold did not exist
+   * to be held. Its own docstring ("born held") describes the behaviour this
+   * restores.
+   */
+  const startIndexes: number[] = [];
 
   await updateGoalFile(ref, (goal) => {
     const fm = goal.frontmatter;
@@ -1206,28 +1389,60 @@ export async function reconcileGoal(
       completedNow = true;
       history.push("Every link is settled. Goal completed.");
     } else if (fm.status === "active") {
-      const index = currentLinkIndex(fm.links);
-      const link = index === null ? null : fm.links.find((l) => l.index === index);
-      // `failed` with onFailure=continue: move past it.
-      if (link && link.status === "failed" && fm.onFailure === "continue") {
-        link.status = "skipped";
-        link.note = `${link.note ?? "Failed."} Chain continues past it (onFailure: continue).`;
-        history.push(`Link ${link.index} failed and was skipped (onFailure: continue).`);
-        const nextIndex = currentLinkIndex(fm.links);
-        if (nextIndex === null) {
-          if (fm.links.length > 0) {
-            fm.status = "completed";
-            completedNow = true;
-            history.push("Every link is settled. Goal completed.");
-          }
-        } else {
-          const next = fm.links.find((l) => l.index === nextIndex);
-          if (next && !next.taskKey) startIndex = nextIndex;
+      // `failed` with onFailure=continue: skip past every failed link, so a
+      // pass that fans out is not stopped by one of them.
+      if (fm.onFailure === "continue") {
+        for (const link of fm.links) {
+          if (link.status !== "failed") continue;
+          link.status = "skipped";
+          link.note = `${link.note ?? "Failed."} Chain continues past it (onFailure: continue).`;
+          history.push(`Link ${link.index} failed and was skipped (onFailure: continue).`);
         }
-      } else if (link && !link.taskKey && link.status === "pending") {
-        // The chain is ON this link and no task carries it (fresh advance, or
-        // a crash between goal write and task creation) — start it.
-        startIndex = link.index;
+        if (allLinksSettled(fm.links) && fm.links.length > 0) {
+          fm.status = "completed";
+          completedNow = true;
+          history.push("Every link is settled. Goal completed.");
+        }
+      }
+      if (fm.status === "active") {
+        // Ruling 398: every pending link with no task yet whose DECLARED wait
+        // is already satisfied. A genuine chain still runs in order, because
+        // each of its links waits on the last; independent links start
+        // together. The shape of the work decides the concurrency, rather than
+        // the shape of the scheduler.
+        //
+        // Satisfaction is evaluated HERE rather than by creating every task at
+        // once and letting `blockedBy` hold them. Creating them early would
+        // cost two things that have nothing to do with concurrency: a later
+        // link would stop being editable (`update_goal` edits a PENDING link,
+        // and every link would be active from the first pass), and a wait that
+        // is only valid once the work it names exists would park the chain the
+        // moment the goal was written.
+        for (const link of fm.links) {
+          if (link.status !== "pending" || link.taskKey) continue;
+          const wait = linkWaitState(db, projectSlug, fm, link);
+          if (wait === "dead") {
+            // Ruling 131(e)'s rule, kept: a wait that can NEVER complete parks
+            // the chain for a person instead of leaving the link pending
+            // forever with nothing anywhere saying why. Under the old
+            // one-at-a-time advance this happened by accident — the start was
+            // attempted and `validateDependencyRefs` threw — and fanning out
+            // would have made it silent, because a link whose wait is dead is
+            // simply never selected.
+            if (fm.status === "active") {
+              fm.status = "attention";
+              attentionNow =
+                `Link ${link.index} (${link.title}) waits on work that can never complete. ` +
+                "The chain is paused for your decision: edit the wait, skip the link, or cancel the goal.";
+              history.push(
+                `Chain paused (attention): link ${link.index}'s wait can never complete.`,
+              );
+            }
+            continue;
+          }
+          if (wait === "open") continue;
+          startIndexes.push(link.index);
+        }
       }
     }
 
@@ -1250,7 +1465,13 @@ export async function reconcileGoal(
     });
   }
 
-  if (startIndex !== null) {
+  if (startIndexes.length > 0) {
+    // Ruling 398: the projection before the starts, not only after them.
+    // `createTask` validates the new task's inherited wait THROUGH the
+    // projection, so a sibling this very pass marked `skipped` still read as
+    // archived there and the start was refused in the name of a link the chain
+    // had just decided to move past.
+    rebuildGoalFile(db, projectSlug, goalId, { dataRoot: ctx.dataRoot });
     const fm = readGoalFile(ref)?.parsed.frontmatter;
     if (!fm) return;
     // Unattended creation: re-prove the CREATOR's live authority first.
@@ -1269,38 +1490,45 @@ export async function reconcileGoal(
       rebuildGoalFile(db, projectSlug, goalId, { dataRoot: ctx.dataRoot });
       return;
     }
-    try {
-      await startLinkTask(
-        db,
-        projectSlug,
-        goalId,
-        startIndex,
-        {
-          userId: fm.createdBy,
-          label: `${fm.createdByLabel || fm.createdBy} · goal chain`,
-        },
-        ctx,
-        "advance",
-      );
-    } catch (error) {
-      logger.error("goal link task creation failed", {
-        goalId,
-        linkIndex: startIndex,
-        err: error instanceof Error ? error : new Error(String(error)),
-      });
-      await updateGoalFile(ref, (goal) => {
-        if (goal.frontmatter.status !== "active") return;
-        goal.frontmatter.status = "attention";
-        return `Chain paused (attention): creating the next link's task failed (${error instanceof Error ? error.message : "unknown error"}).`;
-      });
-      const after = readGoalFile(ref)?.parsed.frontmatter;
-      if (after) {
-        notifyCreator(
+    // Ruling 398: one link's failure must not swallow its siblings. Each start
+    // is its own attempt; the FIRST that fails parks the goal and the rest are
+    // left for the next pass, which is the same convergent behaviour a single
+    // start had — a parked goal starts nothing until a human resumes it.
+    for (const linkIndex of startIndexes) {
+      try {
+        await startLinkTask(
           db,
-          after,
           projectSlug,
-          "The chain could not advance: creating the next link's task failed. Resume the goal to retry.",
+          goalId,
+          linkIndex,
+          {
+            userId: fm.createdBy,
+            label: `${fm.createdByLabel || fm.createdBy} · goal chain`,
+          },
+          ctx,
+          "advance",
         );
+      } catch (error) {
+        logger.error("goal link task creation failed", {
+          goalId,
+          linkIndex,
+          err: error instanceof Error ? error : new Error(String(error)),
+        });
+        await updateGoalFile(ref, (goal) => {
+          if (goal.frontmatter.status !== "active") return;
+          goal.frontmatter.status = "attention";
+          return `Chain paused (attention): creating link ${linkIndex}'s task failed (${error instanceof Error ? error.message : "unknown error"}).`;
+        });
+        const after = readGoalFile(ref)?.parsed.frontmatter;
+        if (after) {
+          notifyCreator(
+            db,
+            after,
+            projectSlug,
+            `The chain could not advance: creating link ${linkIndex}'s task failed. Resume the goal to retry.`,
+          );
+        }
+        break;
       }
     }
   }
@@ -1556,6 +1784,21 @@ const goalProjectionRowSchema = z.object({
   created_at: z.string().nullable(),
   updated_at: z.string().nullable(),
 });
+
+/**
+ * Ruling 419(h): a chain's history, newest first, straight from its canonical
+ * file. The projection carries no history (`listGoals` returns it empty), and
+ * the controller page is the surface the task page sends a person to "where the
+ * whole chain is read" — which showed neither why a chain paused nor the reason
+ * a person gave when they cancelled it. Empty when the file is gone.
+ */
+export function readGoalHistory(
+  projectSlug: string,
+  goalId: string,
+  ctx: TaskMutationContext = {},
+): GoalView["history"] {
+  return readGoalFile(goalRef(ctx, projectSlug, goalId))?.parsed.timeline ?? [];
+}
 
 /** List a project's goals from the projection (board panel read model). */
 export function listGoals(db: DatabaseSync, projectSlug: string): GoalView[] {

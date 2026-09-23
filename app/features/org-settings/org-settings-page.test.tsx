@@ -1243,6 +1243,7 @@ describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
           s3Audit={null}
           controllerConfig={CONTROLLER_CONFIG}
           controllerLocks={CONTROLLER_LOCKS}
+          controllerRequests={[]}
           auditEvents={[]}
           auditEventsOrgScoped={[]}
         />,
@@ -1282,6 +1283,7 @@ describe("resources tab badge counts resources, not resources+templates", () => 
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
       />,
@@ -1340,6 +1342,7 @@ describe("C9: instance storage line", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
       />,
@@ -1372,6 +1375,7 @@ describe("C9: instance storage line", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
       />,
@@ -1408,6 +1412,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
       />,
@@ -1432,6 +1437,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
         auditEvents={[]}
         auditEventsOrgScoped={[]}
       />,
@@ -1459,6 +1465,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
         auditEvents={[]}
         auditEventsOrgScoped={[]}
       />,
@@ -1479,6 +1486,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
         auditEvents={[]}
         auditEventsOrgScoped={[]}
       />,
@@ -1497,6 +1505,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
         auditEvents={[]}
         auditEventsOrgScoped={[]}
       />,
@@ -1515,6 +1524,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
       />,
@@ -1539,6 +1549,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
         auditEvents={[]}
         auditEventsOrgScoped={[]}
       />,
@@ -1569,6 +1580,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
       // Ruling 234: the two windows are fetched SEPARATELY, so the unscoped
         // list here deliberately does NOT contain the PAT row. That is the live
         // shape the ruling fixes: on a busy instance the org-scoped events fall
@@ -1626,6 +1638,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
       />,
@@ -1653,6 +1666,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
         auditEvents={[]}
         auditEventsOrgScoped={[]}
       />,
@@ -1699,6 +1713,7 @@ describe("run concurrency control", () => {
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
         auditEvents={[]}
         auditEventsOrgScoped={[]}
       />,
@@ -1748,6 +1763,7 @@ describe("spending cap control (ruling 175)", () => {
       s3Audit={null}
       controllerConfig={CONTROLLER_CONFIG}
       controllerLocks={CONTROLLER_LOCKS}
+      controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
     />
@@ -1840,6 +1856,7 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
       s3Audit={s3Audit}
       controllerConfig={CONTROLLER_CONFIG}
       controllerLocks={CONTROLLER_LOCKS}
+      controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
     />
@@ -1988,6 +2005,7 @@ describe("FR33: the audit card discloses the export-before-purge record", () => 
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
         auditEvents={[]}
         auditEventsOrgScoped={[]}
       />,
@@ -2036,6 +2054,7 @@ describe("R15-13: instance settings name their scope, not a project's name", () 
         s3Audit={null}
         controllerConfig={CONTROLLER_CONFIG}
         controllerLocks={CONTROLLER_LOCKS}
+        controllerRequests={[]}
       auditEvents={[]}
       auditEventsOrgScoped={[]}
       />,

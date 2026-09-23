@@ -757,3 +757,75 @@ describe("set-required-reviewers (ruling 178)", () => {
     expect(cleared.toast).toBe("Required reviewers cleared");
   });
 });
+
+/**
+ * Ruling 396 (F39-23): leases reach a human surface.
+ *
+ * Before this, `set_file_leases` was a controller tool and nothing else: no
+ * route, no form, no panel. A delivery refused by a lease told the person to
+ * "clear the lease once VIB-142 has landed" and there was nowhere to do it.
+ */
+describe("set-file-leases (ruling 396)", () => {
+  it("round-trips a lease through the action into project.md and back out of the loader", async () => {
+    const saved = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "set-file-leases",
+        leases: JSON.stringify([
+          { paths: ["package-lock.json", "make/**"], taskKey: "VIB-142", reason: "owns the lockfile" },
+        ]),
+      }),
+    );
+    expect(saved.ok).toBe(true);
+    expect(projectMd()).toContain("fileLeases:");
+    expect(projectMd()).toContain("package-lock.json");
+
+    const { loader } = await import("~/routes/project.settings");
+    const { cookie } = await app.cookieFor(ids.arda);
+    // SAFETY: as in the cases above — the loader reads `request` and `params`
+    // only; the framework's `context` is never touched.
+    const { view } = await loader({
+      request: app.request("/projects/viberr-core/settings", { cookie }),
+      params: { slug: "viberr-core" },
+      context: {},
+    } as never);
+    // CANARY: drop `fileLeases` from the settings view and the panel has
+    // nothing to render, which is the state this ruling found.
+    expect(view.fileLeases).toEqual([
+      {
+        paths: ["package-lock.json", "make/**"],
+        taskKey: "VIB-142",
+        taskTitle: expect.any(String),
+        reason: "owns the lockfile",
+        spent: false,
+      },
+    ]);
+    expect(view.leaseCandidates.map((c) => c.key)).toContain("VIB-142");
+
+    // Same authority as every other project policy, and the same refusals.
+    const denied = actionOutcome(
+      await postAction(ids.murat, { intent: "set-file-leases", leases: "[]" }),
+    );
+    expect(denied.status).toBe(403);
+
+    const unreadable = actionOutcome(
+      await postAction(ids.arda, { intent: "set-file-leases", leases: "not json" }),
+    );
+    expect(unreadable.status).toBe(400);
+    expect(unreadable.error).toContain("could not be read");
+
+    // The writer's own board check reaches the form, in its own words.
+    const ghost = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "set-file-leases",
+        leases: JSON.stringify([{ paths: ["x"], taskKey: "VIB-99999", reason: "" }]),
+      }),
+    );
+    expect(ghost.status).toBe(400);
+    expect(ghost.error).toContain("is not a task in this project");
+
+    const cleared = actionOutcome(
+      await postAction(ids.arda, { intent: "set-file-leases", leases: "[]" }),
+    );
+    expect(cleared.ok).toBe(true);
+  });
+});

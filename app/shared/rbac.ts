@@ -80,6 +80,14 @@ export const RBAC_DEFINITIONS = [
     covers: "and what a task waits on, which releases it when cleared",
     roles: [A, M, C],
   },
+  // F39-6 (pass 39): attaching a file to a task. Same tier as the metadata a
+  // contributor already grooms, and for the same reason: it adds evidence to a
+  // task and changes no gate. Its own row rather than a rider on
+  // `edit-task-meta`, because a table that gates attachments under a label
+  // reading "priority, labels & due date" answers "who can attach the
+  // fixture?" nowhere — which is the mistake ruling 309(a) corrected for
+  // dependencies.
+  { id: "attach-file", label: "Attach a file to a task", roles: [A, M, C] },
   { id: "approve-transition", label: "Approve stage transitions", roles: [A, M] },
   { id: "resolve-packet", label: "Resolve decision packets", roles: [A, M] },
   { id: "accept-completion", label: "Accept completion → Done", roles: [A, M] },

@@ -471,11 +471,79 @@ describe("the turn carries the context read (ruling 121)", () => {
   });
 
   /**
+   * Ruling 444. The controller's system prompt is recorded when its
+   * conversation starts and replayed until it compacts (ruling 373). It named
+   * the model, so after the switch to Opus 5.5 the controller found "Opus 5
+   * ... claude-opus-5[1m]" in its own context and had to reason its way past it.
+   */
+  it("ruling 444: the model is named in the turn, never in the recorded system prompt", async () => {
+    const { buildTurnPrompt, buildControllerSystemPrompt } = await import("./controller-run.server");
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
+    // CANARY: drop the `runtime` line and the turn never says which model it is.
+    const prompt = buildTurnPrompt(app.db, conversation, "now this", "CONTEXT BLOCK", "opus[1m]");
+    expect(prompt).toContain("You run on model `opus[1m]` this turn.");
+    expect(prompt.indexOf("CONTEXT BLOCK")).toBe(0);
+    expect(prompt.indexOf("You run on model")).toBeLessThan(prompt.indexOf(`${user.email} says:`));
+    // CANARY: name the model in the system prompt again and a resumed
+    // conversation replays the old one after every switch.
+    const system = buildControllerSystemPrompt(app.db, {
+      conversation,
+      user: { ...user, orgRole: "admin" },
+      config: { ...resolveControllerConfig(app.dataRoot), model: "opus[1m]" },
+      toolManifest: "",
+      mountedMcps: [],
+      unresolvedMcps: [],
+      toolkit: [],
+      deniedTools: [],
+      dataRoot: app.dataRoot,
+    }).prompt;
+    expect(system).not.toContain("opus[1m]");
+    expect(system).toContain("Each turn's message names the model you run on");
+  });
+
+  /**
    * Review finding 12: everything above asserts the PIECES. This asserts the
    * assembly — what the runtime was actually started with — through the fake
    * adapter's captured RunSpec, so the context read, the task anchor and the
    * surface hint cannot be unwired with the suite still green.
    */
+  it("ruling 444: a started turn names the model the settings chose", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { lastRunSpec } = await import("../../../test-support/fake-runtime");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { resolveControllerConfig, saveControllerConfig } = await import("./controller-profile.server");
+    const { seedDefaultAgentAssets } = await import("~/server/seed/default-assets.server");
+    // The shipped controller profile, as boot installs it.
+    seedDefaultAgentAssets(app.dataRoot);
+    // Every section locked: empty lists keep what is stored, so only the
+    // model changes, and it is put back below.
+    const locks = { skills: true, kb: true, mcps: true, instructions: true };
+    const actor = { userId: user.id, label: user.email };
+    const kept = { effort: "", definition: "", skills: [], kb: [], mcps: [] };
+    const before = resolveControllerConfig(app.dataRoot).model;
+    saveControllerConfig(app.db, { ...kept, model: "opus[1m]" }, actor, { dataRoot: app.dataRoot, locks });
+    await connectFakeBackend(app.db, user.id, "claude");
+    try {
+      const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "which model are you?",
+        user: { ...user, orgRole: "admin" },
+        dataRoot: app.dataRoot,
+      });
+    } finally {
+      await disconnectFakeBackend(app.db, user.id, "claude");
+      saveControllerConfig(app.db, { ...kept, model: before }, actor, { dataRoot: app.dataRoot, locks });
+    }
+    // CANARY: stop passing the model into the turn prompt.
+    expect(lastRunSpec()!.prompt).toContain("You run on model `opus[1m]` this turn.");
+  });
+
   it("starts the run with the context read, the anchored task and the surface hint", async () => {
     const { connectFakeBackend, disconnectFakeBackend } = await import(
       "../../../test-support/backend-credentials"
@@ -500,6 +568,8 @@ describe("the turn carries the context read (ruling 121)", () => {
         text: "what is this task?",
         user: { ...user, orgRole: "admin" },
         surface: "/projects/viberr-core/tasks/VIB-142?events=50",
+        // U39-24: posted by the composer; the engine normalizes it.
+        timeZone: " europe/istanbul ",
         dataRoot: app.dataRoot,
       });
     } finally {
@@ -507,6 +577,8 @@ describe("the turn carries the context read (ruling 121)", () => {
     }
     const spec = lastRunSpec();
     expect(spec, "a controller run must have started").toBeTruthy();
+    // CANARY: stop passing the zone into the context read.
+    expect(spec!.prompt).toContain("They read times in Europe/Istanbul (GMT+03:00)");
     // The context read is FIRST, and it is the task's own file.
     expect(spec!.prompt.startsWith("Context gathered by the server when this turn started")).toBe(
       true,
@@ -587,6 +659,17 @@ describe("the turn carries the context read (ruling 121)", () => {
         from: user.email,
         chars: "which tasks are waiting on me?".length,
       });
+      // U39-25: the headline names a controller turn, never "supporting
+      // engagement · NO canonical anchor", and counts the servers this turn
+      // really mounted, which its own `system·init` line lists.
+      // CANARY: drop `kind: "controller"`, or the `mounted` override.
+      const headline = listRunLines(app.db, first).find(
+        (l) => l.display.tag === RUN_INPUTS_TAG,
+      )!.display.text;
+      expect(headline.startsWith("Run inputs — controller turn · persona ")).toBe(true);
+      expect(headline).not.toContain("anchor");
+      expect(inputs!.mcp.mounted).toEqual(["viberr_controller", "viberr_ops"]);
+      expect(headline).toContain("2 MCP servers");
 
       // The SECOND turn resumes, and must disclose too. CANARY: move the
       // `recordRunInputs` call inside the `else` (fresh-start) branch and this

@@ -56,18 +56,38 @@ const GIT_SHOW_TIMEOUT_MS = 20_000;
 /** Bound on the `git config` that names the checkout's repository. */
 const GIT_CONFIG_TIMEOUT_MS = 10_000;
 /**
- * Cap on the bytes handed back to the model. A default-branch read exists to
- * settle "is this content on the default branch?", not to stream a 4 MB
- * generated file into an operator turn's context.
+ * Ruling 436: one read hands back at most this many characters, as whole lines.
+ *
+ * It was 60,000, and the Claude CLI refuses an MCP result over its own limit
+ * (`MAX_MCP_OUTPUT_TOKENS`, 25,000 tokens by default), which dense code reaches
+ * near 55,000 characters. The refusal saves the result to a file and points at
+ * it, and the controller has no `Read` tool. So on ax-clone the controller
+ * could not read `internal/runtime/executor.go` (57,835 characters) at all,
+ * and a file over the cap was no better off: its first 60,000 characters were
+ * refused whole, so the clip note never arrived. 40,000 leaves room for the
+ * header and for code that tokenizes densely.
  */
-export const DEFAULT_BRANCH_READ_MAX_BYTES = 60_000;
+export const DEFAULT_BRANCH_READ_PAGE_CHARS = 40_000;
+/**
+ * The largest file a read will load to page through. The mirror is local, so
+ * this bounds memory, not the network. It was the page cap times four
+ * (240,000 bytes), and git's buffer overflow then reported a big file as
+ * "unavailable" instead of its first page.
+ */
+const DEFAULT_BRANCH_READ_MAX_BLOB_BYTES = 32 * 1024 * 1024;
 
 export type DefaultBranchRead =
   | {
       kind: "found";
+      /** Ruling 436: lines `fromLine`..`toLine` (1-based) of the file. */
       text: string;
-      /** True when the content was cut at DEFAULT_BRANCH_READ_MAX_BYTES. */
-      truncated: boolean;
+      fromLine: number;
+      toLine: number;
+      totalLines: number;
+      /** Lines remain after `toLine`: read on from `toLine + 1`. */
+      more: boolean;
+      /** Line `fromLine` alone was longer than a page and was cut. */
+      lineCut: boolean;
       /** Whether the ref was refreshed from the remote for THIS read. */
       refreshed: boolean;
     }
@@ -85,6 +105,119 @@ function pathIsReadable(repoPath: string): boolean {
   if (!p || p.startsWith("/") || p.startsWith("-")) return false;
   if (p.includes(":")) return false;
   return !p.split("/").includes("..");
+}
+
+/** One page of a file, or the line count when `fromLine` is past its end. */
+export type TextPage =
+  | {
+      ok: true;
+      text: string;
+      fromLine: number;
+      toLine: number;
+      totalLines: number;
+      more: boolean;
+      lineCut: boolean;
+    }
+  | { ok: false; totalLines: number };
+
+/**
+ * Ruling 436: the whole lines from `fromLine` (1-based) that fit in
+ * `pageChars`, so any file can be read to its end in pieces. At least one line
+ * is always taken; a single line longer than a page is cut and says so.
+ */
+export function pageOfText(
+  text: string,
+  fromLine = 1,
+  pageChars = DEFAULT_BRANCH_READ_PAGE_CHARS,
+): TextPage {
+  const body = text.endsWith("\n") ? text.slice(0, -1) : text;
+  const lines = body === "" ? [] : body.split("\n");
+  const totalLines = lines.length;
+  const start = Math.max(1, Math.floor(fromLine));
+  if (totalLines === 0) {
+    return start === 1
+      ? { ok: true, text: "", fromLine: 1, toLine: 0, totalLines: 0, more: false, lineCut: false }
+      : { ok: false, totalLines };
+  }
+  if (start > totalLines) return { ok: false, totalLines };
+  const first = lines[start - 1]!;
+  if (first.length > pageChars) {
+    return {
+      ok: true,
+      text: first.slice(0, pageChars),
+      fromLine: start,
+      toLine: start,
+      totalLines,
+      more: start < totalLines,
+      lineCut: true,
+    };
+  }
+  let used = first.length;
+  let end = start;
+  while (end < totalLines && used + 1 + lines[end]!.length <= pageChars) {
+    used += 1 + lines[end]!.length;
+    end += 1;
+  }
+  return {
+    ok: true,
+    // A page that is the whole file is the file, byte for byte.
+    text: start === 1 && end === totalLines ? text : lines.slice(start - 1, end).join("\n"),
+    fromLine: start,
+    toLine: end,
+    totalLines,
+    more: end < totalLines,
+    lineCut: false,
+  };
+}
+
+/**
+ * Ruling 436: what a page says about itself, in the same words on the
+ * controller's tool and the operator's. `range` goes after the source in the
+ * header; `note` closes the result and names the next call.
+ */
+export interface DefaultBranchPageNote {
+  /** After the source in the header: ", lines A–B of N", or "" for a whole file. */
+  range: string;
+  /** Closes the result: the cut line and the next fromLine, or "". */
+  note: string;
+}
+
+export function defaultBranchPageNote(
+  read: Extract<DefaultBranchRead, { kind: "found" }>,
+): DefaultBranchPageNote {
+  const whole = read.fromLine === 1 && !read.more && !read.lineCut;
+  const range = whole ? "" : `, lines ${read.fromLine}–${read.toLine} of ${read.totalLines}`;
+  const notes: string[] = [];
+  if (read.lineCut) {
+    notes.push(
+      `Line ${read.fromLine} is longer than one page, so it was cut at ${DEFAULT_BRANCH_READ_PAGE_CHARS} characters.`,
+    );
+  }
+  if (read.more) {
+    notes.push(`The file continues: read on with fromLine: ${read.toLine + 1}.`);
+  }
+  return { range, note: notes.length ? `\n\n[${notes.join(" ")}]` : "" };
+}
+
+/** A `git show` answer, paged, or the past-the-end refusal. */
+function pagedRead(stdout: string, fromLine: number | undefined, refreshed: boolean): DefaultBranchRead {
+  const page = pageOfText(stdout, fromLine ?? 1);
+  if (!page.ok) {
+    return {
+      kind: "unavailable",
+      reason: `the file has ${page.totalLines} line${page.totalLines === 1 ? "" : "s"}, so fromLine ${fromLine} is past its end`,
+    };
+  }
+  return {
+    kind: "found",
+    text: page.text,
+    fromLine: page.fromLine,
+    toLine: page.toLine,
+    totalLines: page.totalLines,
+    more: page.more,
+    lineCut: page.lineCut,
+    refreshed,
+  };
 }
 
 /** `https://github.com/<owner>/<repo>.git` (or the ssh form) → `owner/repo`. */
@@ -187,6 +320,8 @@ export async function readDefaultBranchFile(
     defaultBranch: string;
     /** Repository-relative path, e.g. `docs/guide.md`. */
     path: string;
+    /** Ruling 436: the 1-based line the page starts at (default 1). */
+    fromLine?: number;
     /** Test seam; production callers resolve the configured store root. */
     dataRoot?: string;
   },
@@ -206,16 +341,10 @@ export async function readDefaultBranchFile(
       ["-C", source.dir, "show", source.ref],
       {
         timeout: GIT_SHOW_TIMEOUT_MS,
-        maxBuffer: DEFAULT_BRANCH_READ_MAX_BYTES * 4,
+        maxBuffer: DEFAULT_BRANCH_READ_MAX_BLOB_BYTES,
       },
     );
-    const truncated = stdout.length > DEFAULT_BRANCH_READ_MAX_BYTES;
-    return {
-      kind: "found",
-      text: truncated ? stdout.slice(0, DEFAULT_BRANCH_READ_MAX_BYTES) : stdout,
-      truncated,
-      refreshed: source.refreshed,
-    };
+    return pagedRead(stdout, input.fromLine, source.refreshed);
   } catch (error) {
     const detail = redactGitOutput(gitErrorText(error));
     // git says `path 'x' does not exist in 'origin/main'` (or `exists on disk,
@@ -259,6 +388,8 @@ export async function readProjectDefaultBranchFile(
     defaultBranch: string;
     /** Repository-relative path, e.g. `docs/guide.md`. */
     path: string;
+    /** Ruling 436: the 1-based line the page starts at (default 1). */
+    fromLine?: number;
     dataRoot?: string;
   },
 ): Promise<DefaultBranchRead> {
@@ -308,15 +439,9 @@ export async function readProjectDefaultBranchFile(
     const { stdout } = await execFileAsync(
       "git",
       ["-C", mirror.dir, "show", `${input.defaultBranch}:${repoPath}`],
-      { timeout: GIT_SHOW_TIMEOUT_MS, maxBuffer: DEFAULT_BRANCH_READ_MAX_BYTES * 4 },
+      { timeout: GIT_SHOW_TIMEOUT_MS, maxBuffer: DEFAULT_BRANCH_READ_MAX_BLOB_BYTES },
     );
-    const truncated = stdout.length > DEFAULT_BRANCH_READ_MAX_BYTES;
-    return {
-      kind: "found",
-      text: truncated ? stdout.slice(0, DEFAULT_BRANCH_READ_MAX_BYTES) : stdout,
-      truncated,
-      refreshed: mirror.refreshed,
-    };
+    return pagedRead(stdout, input.fromLine, mirror.refreshed);
   } catch (error) {
     const detail = redactGitOutput(gitErrorText(error));
     if (/does not exist in|exists on disk, but not in/i.test(detail)) {

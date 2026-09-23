@@ -19,12 +19,28 @@ import {
   effortsFor,
 } from "~/server/runtimes/model-catalog.server";
 import {
+  ADVISORY_CAPABILITY_NOTE,
   ALWAYS_HUMAN_CAPABILITY_IDS,
   UNIFIED_CAP_CATALOG,
   capabilityById,
+  capabilityIsAdvisory,
   type CapabilityKind,
 } from "~/shared/capabilities";
+import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
+
+/**
+ * One capability row as `get_project` answers it (F39-4). `advisory` is present
+ * only on a `group: null` catalogue row: persona guidance nothing enforces and
+ * `update_agent_deployment` refuses. Its ABSENCE is the signal that a grant is
+ * real, so this shape is a contract, not a convenience.
+ */
+interface DeployedGrantView {
+  capabilityId: string;
+  mode: CapabilityMode;
+  label: string;
+  advisory?: string;
+}
 import { capabilityPatchRefusal,
   OPERATOR_CAP_MODES,
   SPECIALIST_CAP_MODES,
@@ -40,7 +56,7 @@ import {
 import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import { tasksReleasedBy } from "~/server/projections/dependencies.server";
 import {
-  DEFAULT_BRANCH_READ_MAX_BYTES,
+  defaultBranchPageNote,
   readProjectDefaultBranchFile,
 } from "~/server/tasks/operator-repo-read.server";
 import { GOAL_ON_FAILURE_VALUES } from "~/schemas/goal-file.schema";
@@ -58,6 +74,13 @@ import {
   updateOrgUser,
 } from "~/server/org/org-users.server";
 import { disableUser, enableUser } from "~/server/auth/user-admin.server";
+import {
+  raiseResourceRequest,
+  REQUESTABLE_KINDS,
+  resourceRequestRemedy,
+  type RequestableKind,
+} from "./controller-requests.server";
+import { CONTROLLER_SECTION_LABEL } from "~/shared/controller-locks";
 import {
   listKnowledgeBases,
   listMcpServers,
@@ -617,6 +640,80 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     );
   }
 
+  /** Ruling 390: the grant keys that exist for one locked section — what a
+   *  request may name, and what the refusal lists when it names nothing real.
+   *  A KB is granted by its store DIRECTORY (F33-8), never by its id. */
+  const knownResourceNames = (kind: RequestableKind): string[] =>
+    kind === "kb"
+      ? listKnowledgeBases(db, { dataRoot }).map((kb) => kb.dir)
+      : kind === "skills"
+        ? listSkills(db, { dataRoot }).map((sk) => sk.name)
+        : listMcpServers(db).map((m) => m.name);
+
+  add(
+    tool(
+      "request_resource_grant",
+      "Ask for a skill, knowledge base or MCP server to be attached to YOUR OWN profile, when you have created or found one your next conversation needs. Org admins only. You cannot grant it yourself (ruling 108 makes controller grants a deployment decision, with no in-app override for anyone), and this is how the ask survives the conversation: it goes on the record, it appears on Org settings for whoever runs this deployment, and it comes back in your own turn context until it is answered. Idempotent per (kind, name) while open, so re-asking never stacks duplicates on a person. Naming a resource that does not exist is refused: create it first.",
+      {
+        kind: z
+          .enum(REQUESTABLE_KINDS)
+          .describe("Which of your locked sections the grant belongs to."),
+        name: z
+          .string()
+          .describe(
+            "The resource's grant key exactly as its list tool prints it (a KB's `grantKey`, a skill's name, an MCP's name).",
+          ),
+        reason: z
+          .string()
+          .describe(
+            "Why your next conversation needs it, in one or two sentences. An admin reads this and nothing else about the ask.",
+          ),
+      },
+      runWith((args: { kind: RequestableKind; name: string; reason: string }) => {
+        requireOrgAdmin("ask for a resource grant");
+        const name = args.name.trim();
+        if (!name) throw AppError.validation("Which resource?");
+        // Ruling 390: refuse an ask nobody can answer. A request naming a
+        // resource the store does not have would sit on an admin's screen
+        // forever, and the remedy it prints would not work.
+        const known = knownResourceNames(args.kind);
+        if (!known.includes(name)) {
+          return (
+            `[denied] No ${CONTROLLER_SECTION_LABEL[args.kind].replace(" grants", "")} named "${name}" exists on this instance. ` +
+            (known.length > 0
+              ? `Create it first. Present: ${known.join(", ")}.`
+              : "Create it first.")
+          );
+        }
+        const { request, created } = raiseResourceRequest(
+          {
+            kind: args.kind,
+            name,
+            reason: args.reason,
+            askedByUserId: actor.userId ?? "",
+            askedByLabel: actor.label,
+          },
+          dataRoot,
+        );
+        if (created) {
+          recordAudit(db, {
+            action: "controller.resource_grant.requested",
+            actor,
+            subjectKind: "agent_profile",
+            subjectId: "controller",
+            details: { kind: request.kind, name: request.name },
+          });
+        }
+        return (
+          `[done] ${created ? "Recorded" : "Already open"}: a grant request for the ${CONTROLLER_SECTION_LABEL[request.kind].replace(" grants", "")} ` +
+          `"${request.name}" (${request.id}). ${resourceRequestRemedy(request.kind)} ` +
+          `It is on Org settings and in your own turn context until it is answered; do not say you have the resource until it is.`
+        );
+      }),
+    ),
+    "request_resource_grant",
+  );
+
   add(
     tool(
       "list_knowledge_bases",
@@ -685,7 +782,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed.",
+      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole).",
       {
         id: z
           .string()
@@ -702,7 +799,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         doc: z
           .strictObject({
             path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
-            content: z.string().describe("The WHOLE file. There is no append; what you omit is gone."),
+            content: z
+              .string()
+              .describe(
+                "The WHOLE file — what you omit is gone — UNLESS `append` is set, when it is the text to add at the end.",
+              ),
+            append: z
+              .boolean()
+              .optional()
+              .describe(
+                "F39-1: add `content` to the END of the document instead of replacing it, creating the file when it is absent. Destroys nothing, so no `replace`/`replaces` is needed (passing either with this is refused). Use it to build a long document in bounded calls rather than one large one.",
+              ),
             replace: z
               .boolean()
               .optional()
@@ -724,7 +831,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           id?: string;
           name: string;
           refresh?: KbRefreshMode;
-          doc?: { path: string; content: string; replace?: boolean; replaces?: string };
+          doc?: {
+            path: string;
+            content: string;
+            append?: boolean;
+            replace?: boolean;
+            replaces?: string;
+          };
         }) => {
           requireOrgAdmin("manage knowledge bases");
           const saved = await saveKnowledgeBase(
@@ -755,6 +868,38 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // rulings KB — injected into EVERY run on the project — is one call
             // away from being erased by a model writing the obvious filename.
             const before = readStoreDoc(target, [args.doc.path]);
+            // F39-1: APPEND. It cannot destroy anything, so rulings 257 and
+            // 305 (the collision guard and the version check) do not apply —
+            // they exist to stop a whole-document replace deleting text the
+            // writer never read. Mixing the two modes would be a caller that
+            // does not know which it meant, so it is refused rather than
+            // resolved.
+            if (args.doc.append === true) {
+              if (args.doc.replace !== undefined || args.doc.replaces !== undefined) {
+                return (
+                  `${head} Nothing was written. append cannot be combined with ` +
+                  "replace or replaces: an append adds to the end and destroys nothing, " +
+                  "a replace overwrites the whole document. Send one or the other."
+                );
+              }
+              const joined = before
+                ? `${before.text.replace(/\s+$/, "")}\n\n${args.doc.content.trim()}\n`
+                : `${args.doc.content.trim()}\n`;
+              const appended = writeStoreDoc(
+                db,
+                target,
+                [],
+                args.doc.path,
+                joined,
+                auditActor,
+                { overwrite: true },
+              );
+              return (
+                `${head} Appended ${args.doc.content.trim().length} bytes to ` +
+                `${appended.path.join("/")}${before ? "" : " (created)"}; it is now ` +
+                `${appended.bytes} bytes. Nothing was replaced.`
+              );
+            }
             // Ruling 305: a whole-document replace names the version it read.
             // `writeStoreDoc`'s own collision guard (ruling 257) asks whether
             // the file EXISTS; this asks whether it is still the one you read.
@@ -1408,7 +1553,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every catalogued capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1493,13 +1638,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               // template it came from (null when it does not).
               resources: row.resources,
               templateDrift: row.templateDrift,
-              capabilities: row.capabilities.map((c) => ({
-                capabilityId: c.capabilityId,
-                mode: c.mode,
-                // A retired id that is no longer in the catalogue keeps its
-                // id as its label; nothing here assumes the lookup succeeds.
-                label: capabilityById(c.capabilityId)?.label ?? c.capabilityId,
-              })),
+              capabilities: row.capabilities.map((c) => {
+                const grant: DeployedGrantView = {
+                  capabilityId: c.capabilityId,
+                  mode: c.mode,
+                  // A retired id that is no longer in the catalogue keeps its
+                  // id as its label; nothing here assumes the lookup succeeds.
+                  label: capabilityById(c.capabilityId)?.label ?? c.capabilityId,
+                };
+                // F39-4: an ADVISORY row says so, in the reply, next to its
+                // mode. Both other renderers of these grants drop advisory
+                // rows entirely; this one cannot (they are really in
+                // `project.md` and really in the persona matrix), so it marks
+                // them instead. No `advisory` key ⇒ a real, enforced,
+                // settable grant.
+                if (capabilityIsAdvisory(c.capabilityId)) {
+                  grant.advisory = ADVISORY_CAPABILITY_NOTE;
+                }
+                return grant;
+              }),
             };
             return row.kind === "operator"
               ? { ...entry, autonomy: row.autonomy ?? "supervised" }
@@ -1722,8 +1879,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         path: z
           .string()
           .describe("Repository-relative file path, e.g. 'docs/guide.md' (no leading slash)."),
+        fromLine: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            "Ruling 436: the 1-based line to start at (default 1). A file longer than one read comes in pages of whole lines; each page names its lines and the fromLine that continues it, so read on until it says nothing more.",
+          ),
       },
-      runWith(async (args: { projectSlug?: string; path: string }) => {
+      runWith(async (args: { projectSlug?: string; path: string; fromLine?: number }) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "read this project's repository");
         const project = getProject(db, slug);
@@ -1743,6 +1908,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           defaultBranch: project.defaultBranch,
           path: args.path,
         };
+        if (args.fromLine !== undefined) request.fromLine = args.fromLine;
         if (dataRoot) request.dataRoot = dataRoot;
         const read = await readProjectDefaultBranchFile(db, request);
         recordAudit(db, {
@@ -1770,12 +1936,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           ? `\`${project.defaultBranch}\`, just refreshed from GitHub`
           : `\`${project.defaultBranch}\` as the project's mirror last had it (the refresh from ` +
             "GitHub did not run, so treat it as slightly stale)";
-        // Ruling 285: a cut says it cut, and says where the rest is.
-        const cut = read.truncated
-          ? `\n\n[clipped at ${DEFAULT_BRANCH_READ_MAX_BYTES} characters. This file is longer ` +
-            "than one read; ask for a narrower question about it, or read it on GitHub.]"
-          : "";
-        return `[found] \`${args.path}\` on ${freshness}:\n\n${read.text}${cut}`;
+        // Ruling 285: a cut says it cut, and says where the rest is. Ruling
+        // 436: the rest is the next page, named by the line it starts at.
+        const page = defaultBranchPageNote(read);
+        return `[found] \`${args.path}\` on ${freshness}${page.range}:\n\n${read.text}${page.note}`;
       }),
     ),
     "read_default_branch_file",
@@ -1889,13 +2053,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "move_task",
-      "Move a task to another stage. Workflow boundaries and your project role decide; a move into the final Done stage is refused here, because acceptance is decided on the task page with its own confirmation.",
+      "Move a task to another stage. Workflow boundaries and your project role decide; a move into the final Done stage is refused here, because acceptance is decided on the task page with its own confirmation. A move to an EARLIER stage requires `reason` (ruling 381).",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
         toStageId: z.string().describe("Target stage id (from get_project)."),
+        reason: z
+          .string()
+          .optional()
+          .describe(
+            "Required for a move BACKWARD (ruling 381): what should change before the task comes back. It lands on the transition entry and the operator acts on it.",
+          ),
       },
-      runWith(async (args: { projectSlug?: string; taskKey?: string; toStageId: string }) => {
+      runWith(async (args: { projectSlug?: string; taskKey?: string; toStageId: string; reason?: string }) => {
         const slug = slugOf(args.projectSlug);
         const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "move tasks");
@@ -1932,6 +2102,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           toStageId: args.toStageId,
           manual: true,
         };
+        // Ruling 381: the same sentence the board's dialog collects. The
+        // controller is a door onto the same act, so it asks the same thing —
+        // and `transitionStage` refuses the move without it rather than
+        // trusting the caller to have read the schema.
+        if (args.reason?.trim()) move.reason = args.reason.trim();
         const moved = await transitionStage(db, move, actor, { dataRoot });
         return `[done] ${key} is now in stage ${moved.stage}.`;
       }),
@@ -2734,7 +2909,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_file_leases",
-      "Ruling 245: declare which TASK owns which shared paths until it merges, or pass an empty list to clear. Project admin (edit-policy). This is the ordering statement `blockedBy` cannot make: `blockedBy` says \"do not START until done\", a lease says \"both may proceed, this one owns `pnpm-lock.yaml` until it lands\". Enforced at DELIVERY — another task whose BRANCH changes a leased path (measured from where it forked off the default branch, so a change pushed before the lease existed still counts) is refused by name, before anything reaches GitHub (ruling 353). The merge itself reads no lease. Globs: `*` matches within one segment, `**` spans segments and covers the directory itself. The whole list is replaced by what you pass. A lease naming a task this project does not have is refused, and two leases may not cover the same glob.",
+      "Ruling 245: declare which TASK owns which shared paths until it merges, or pass an empty list to clear. Project admin (edit-policy). This is the ordering statement `blockedBy` cannot make: `blockedBy` says \"do not START until done\", a lease says \"both may proceed, this one owns `pnpm-lock.yaml` until it lands\". Enforced at DELIVERY — another task whose BRANCH changes a leased path (measured from where it forked off the default branch, so a change pushed before the lease existed still counts) is refused by name, before anything reaches GitHub (ruling 353). The merge itself reads no lease. Globs: `*` matches within one segment, `**` spans segments and covers the directory itself. The whole list is replaced by what you pass, and operators lease files to their own tasks too (ruling 417), so read `fileLeases` from get_project first and pass every lease you mean to keep. A lease naming a task this project does not have is refused, and so are two leases held by different unfinished tasks whose globs can match one file (ruling 417: each would refuse the other's delivery, so neither could land).",
       {
         projectSlug: z.string().optional(),
         leases: z
@@ -3352,7 +3527,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_goal",
-      "Define a chained goal: one outcome decomposed into an ordered chain of tasks. Link 1's task is created now; each later task is created when the previous link completes, and every task's own operator does the work. Contributor or above (a chain is future task creation).",
+      "Define a goal: one outcome decomposed into links, each of which becomes a task with its own operator. Ruling 398: EVERY link whose declared wait is already satisfied gets its task NOW, so a link with no `blockedBy` starts immediately alongside link 1 \u2014 order in the list is not a dependency and does not hold anything back. Say what a link waits for or it starts at once. Within this goal, write `link 2` (the goal has no id until it is written); a wait on another goal is `goal-1 link 3`, and a wait on a task is its key. A link whose wait can never complete parks the goal for a human instead of sitting pending forever. Contributor or above (a goal is future task creation).",
       {
         projectSlug: z.string().optional(),
         title: z.string(),
@@ -3369,7 +3544,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               blockedBy: z
                 .array(z.string())
                 .optional()
-                .describe("Ruling 131(c): what this link's task waits on (task keys, or other goals' links like 'goal-1 link 3'); the task is born held when the chain creates it."),
+                .describe("What this link waits for. EMPTY MEANS NOTHING: the link starts the moment the goal is written, alongside link 1 (ruling 398). A sibling of this same goal is `link 2`; another goal's link is `goal-1 link 3`; a task is its key. The task is born held when the wait names work that is still open."),
             }),
           )
           .min(1)
@@ -3454,7 +3629,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_goal",
-      "Redirect a goal chain: rename it (title and/or description), pause, resume, cancel, skip a link, retry a failed link (a fresh task, rebuilt from that task's own current text), edit a pending or failed link (an active link takes blockedBy only, written on its task), add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable and nothing is deleted; every op is refused on one EXCEPT rename, which corrects what a settled chain is called without changing what it did (ruling 267).",
+      "Redirect a goal chain: rename it (title and/or description), pause, resume, cancel, skip a link, retry a failed link (a fresh task, rebuilt from that task's own current text), edit a pending or failed link (an active link takes blockedBy only, written on its task), add a link, or remove a pending link. The creator or a maintainer+. Completed and cancelled chains stay readable and nothing is deleted; every op is refused on one EXCEPT rename, which corrects what a settled chain is called without changing what it did (ruling 267). RULING 411: clearing a pending link's wait STARTS that link in the same call, and the reply names the task Viberr just created for it (\"Link N started as KEY\"). The reply's closing \"is active on\" key is the chain's CURRENT link, usually a different one, so never read the new task from it. So never create a task for a link you are about to unblock: you will get two, one the chain carries and one orphan with an agent already running on it.",
       {
         projectSlug: z.string().optional(),
         goalId: z.string(),
@@ -3475,7 +3650,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "adopt_task: an EXISTING task in this project for the pending link to carry. Ruling 243 — use this instead of creating a task and deleting the link, which destroys the link's authored text. The task must not already belong to another chain.",
+            "adopt_task: an EXISTING task in this project for the pending link to carry. Ruling 243 — use this instead of creating a task and deleting the link, which destroys the link's authored text. The task must not already belong to another chain, and the LINK must still have none: a link starts the moment nothing makes it wait (ruling 398, in the unblocking call itself since ruling 411), so a link you just unblocked already has its own task and this is refused. Adopt a task that existed BEFORE the link could start, never one you made for it.",
           ),
         title: z.string().optional(),
         goal: z.string().optional(),
@@ -3487,7 +3662,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         blockedBy: z
           .array(z.string())
           .optional()
-          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it). On an active link this is the only editable field: it is written on the link's task, and the link mirrors it."),
+          .describe("edit_link / add_link: what the link's task waits on (the full list; [] clears; omit on edit_link to leave it). On an active link this is the only editable field: it is written on the link's task, and the link mirrors it. RULING 411: clearing a PENDING link's wait STARTS that link, in this same call: Viberr creates its task before the reply returns and names it there (\"Link N started as KEY\"), not in the closing \"is active on\" key, which is the chain's current link. So never create a task for a link you are about to unblock: you will get two, one the chain carries and one orphan with an agent already running on it."),
       },
       runWith(
         async (args: {

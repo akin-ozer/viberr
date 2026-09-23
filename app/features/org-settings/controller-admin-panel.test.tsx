@@ -8,6 +8,7 @@ import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import { ToastProvider } from "~/ui/toast";
 import {
   ControllerAdminPanel,
+  type ControllerGrantRequestView,
   type ControllerConfigView,
   type ControllerSectionLocks,
 } from "./controller-admin-panel";
@@ -86,6 +87,8 @@ function renderPanel(
   overrides: Partial<ControllerConfigView> = {},
   mcps: string[] = ["qa-echo"],
   locks: ControllerSectionLocks = UNLOCKED,
+  /** Ruling 390: open grant requests the controller raised for itself. */
+  requests: ControllerGrantRequestView[] = [],
 ) {
   lastForm = null;
   const config = { ...CONFIG, ...overrides };
@@ -97,6 +100,7 @@ function renderPanel(
           <ControllerAdminPanel
             config={config}
             locks={locks}
+            requests={requests}
             kbs={KBS}
             skills={["controller-guide", "developer-expertise"]}
             mcps={mcps}
@@ -122,6 +126,39 @@ function renderPanel(
   ]);
   return render(<Stub initialEntries={["/org/settings"]} />);
 }
+
+describe("ruling 390: grants the controller asked for and cannot make", () => {
+  const REQUEST = {
+    id: "rq_1",
+    kind: "kb" as const,
+    name: "instance-standing-rules",
+    reason: "It carries the model rule Arda set, as its heading.",
+    askedAt: "2026-09-22T11:00:00.000Z",
+    askedByLabel: "arda@viberr.dev · via controller",
+    remedy:
+      "knowledge base grants are deployment-locked (ruling 108): set VIBERR_UNLOCK_CONTROLLER_KB=enabled and restart, then add it on the Controller tab. There is no in-app grant while the section is locked.",
+  };
+
+  it("names the resource, the reason and the deployment change, and offers no button", () => {
+    const { container, getByText } = renderPanel({}, ["qa-echo"], LOCKED, [REQUEST]);
+    const note = container.querySelector('[data-testid="controller-grant-requests"]')!;
+    expect(note).toBeTruthy();
+    expect(note.textContent).toContain("instance-standing-rules");
+    expect(note.textContent).toContain("It carries the model rule Arda set");
+    expect(note.textContent).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");
+    expect(getByText(/asked for 1 grant it cannot make/i)).toBeTruthy();
+    // Ruling 108 put the grant outside the app, so this is a DISCLOSURE. A
+    // control here would promise what no code on this page can do.
+    expect(note.querySelector("button")).toBeNull();
+  });
+
+  it("says nothing at all when there is nothing outstanding", () => {
+    const { container } = renderPanel({}, ["qa-echo"], LOCKED, []);
+    expect(
+      container.querySelector('[data-testid="controller-grant-requests"]'),
+    ).toBeNull();
+  });
+});
 
 describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
   it("picks the model from the catalog select, not a free-text field", async () => {

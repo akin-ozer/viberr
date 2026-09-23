@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { RealBackend } from "./runtime-registry.server";
@@ -280,8 +280,13 @@ export function transcriptExists(
  * as "session gone" and force a fresh run on every deployment whose provider
  * writes transcripts somewhere this process cannot see — degrading continuity
  * to fix a continuity bug. `unknown` resumes exactly as before.
+ *
+ * Ruling 434: `damaged` — the transcript is there and the CLI will refuse it.
+ * A Codex rollout must open with its `session_meta` line; three on this
+ * instance (Codex CLI 0.156) had a `task_started` line written over the head
+ * of it, and every resume of those sessions failed.
  */
-export type SessionContinuity = "present" | "missing" | "unknown";
+export type SessionContinuity = "present" | "missing" | "damaged" | "unknown";
 
 /**
  * How the two CLIs report a resume against a session they no longer hold —
@@ -293,6 +298,14 @@ export type SessionContinuity = "present" | "missing" | "unknown";
  */
 export const SESSION_MISSING_RE =
   /no conversation found|conversation not found|session not found|no session (?:with|found)|unknown session|no such session|rollout not found|no rollout/i;
+
+/**
+ * Ruling 434: what the Codex CLI says when a rollout's head is torn —
+ * "rollout at <path> does not start with session metadata (code -32603)".
+ * The session cannot be resumed and fresh runs still work, which is
+ * `session_missing`'s outcome; the classifier gives it its own sentence.
+ */
+export const SESSION_DAMAGED_RE = /does not start with session metadata/i;
 
 /**
  * Ruling 221 (F37-41): the same outcome by a different road — the store the
@@ -358,11 +371,55 @@ export function probeSessionContinuity(
   if (!userId) return "unknown";
   if (backend === "codex") {
     if (codexSessionDirs(userId, dataRoot).length === 0) return "unknown";
-    return locateCodex(userId, sessionId, dataRoot) ? "present" : "missing";
+    const rollout = locateCodex(userId, sessionId, dataRoot);
+    if (!rollout) return "missing";
+    // Ruling 434: found is not resumable. Asked here, before the spawn, so a
+    // torn rollout starts a fresh session instead of a run that fails.
+    return codexRolloutOpensWithMeta(rollout) ? "present" : "damaged";
   }
   const projectsDir = claudeProjectsDir(userId, dataRoot);
   if (!projectsDir || !existsSync(projectsDir)) return "unknown";
   return locateClaude(userId, sessionId, dataRoot) ? "present" : "missing";
+}
+
+/** The first line of a Codex rollout, as far as the probe needs it. */
+const rolloutHeadSchema = z.object({ type: z.string() });
+
+/** Longest first line the probe reads. The `session_meta` line carries the
+ *  base instructions, tens of kilobytes; a line past this is not one. */
+const ROLLOUT_HEAD_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Ruling 434: does this rollout open with its `session_meta` line, which the
+ * CLI needs to resume it? Reads only as far as the first newline.
+ *
+ * An unreadable file answers true: the probe's job is to catch a file it can
+ * see is torn, and a read error is not evidence of that, so the resume goes
+ * ahead as before and the CLI says what it says.
+ */
+function codexRolloutOpensWithMeta(rollout: string): boolean {
+  let fd: number | null = null;
+  try {
+    fd = openSync(rollout, "r");
+    const chunk = Buffer.alloc(64 * 1024);
+    const parts: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const n = readSync(fd, chunk, 0, chunk.length, total);
+      if (n === 0) break;
+      const newline = chunk.subarray(0, n).indexOf(0x0a);
+      parts.push(Buffer.from(chunk.subarray(0, newline === -1 ? n : newline)));
+      total += n;
+      if (newline !== -1 || total >= ROLLOUT_HEAD_MAX_BYTES) break;
+    }
+    const head = rolloutHeadSchema.safeParse(JSON.parse(Buffer.concat(parts).toString("utf8")));
+    return head.success && head.data.type === "session_meta";
+  } catch (error) {
+    // A torn head is often not JSON at all; any other failure is the read.
+    return error instanceof SyntaxError ? false : true;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
 }
 
 // ------------------------------------------------- context size readers
@@ -481,15 +538,35 @@ export function sessionContextTokens(
   return null;
 }
 
-/** One compaction as the rollout shows it: the last prompt the CLI sent
- *  before it and the first one after (0 when no later call landed). */
+/**
+ * One compaction as the rollout shows it: the last prompt the CLI sent before
+ * it, and the size of the context it left.
+ *
+ * Ruling 403: `postTokens` is NULL when nothing measured it, never 0. A zero
+ * seeded as "not measured yet" survived all the way to the timeline, where it
+ * told a human that a 100k-213k token conversation had been summarized "to 0k
+ * tokens". Null is the value the whole chain treats as unmeasured
+ * (`compactionNoteText` renders it "a summary").
+ *
+ * Ruling 414 corrected why it was missing. The CLI writes one compaction as
+ * `compacted`, then its own size line (a `token_count` whose prompt is 0 and
+ * whose total is the compacted context), then a `ContextCompaction` item. The
+ * size line used to CLOSE the compaction, so the item opened a second one with
+ * no size, and that phantom was the event every note printed. The size was
+ * measured the whole time.
+ */
 export interface CodexCompactionEvent {
   preTokens: number;
-  postTokens: number;
+  postTokens: number | null;
 }
 
-/** The compaction still waiting for the first prompt after it. */
-interface PendingCompaction {
+/**
+ * The compaction whose other spellings may still arrive. It stays open from
+ * its first marker until the next REAL call (a `token_count` with a prompt): a
+ * context can only need compacting again once a call has grown it, so a marker
+ * before that call is the same compaction written another way.
+ */
+interface OpenCompaction {
   event: CodexCompactionEvent | null;
 }
 
@@ -499,11 +576,12 @@ export interface CodexRolloutRunStats {
   peakPromptTokens: number;
   /** The last call's prompt — the size a resume replays. */
   lastPromptTokens: number;
-  /** Context compactions the CLI recorded in the window. */
+  /** Context compactions the CLI recorded in the window: the length of
+   *  `compactionEvents`, so the run row and the notes count the same thing. */
   compactions: number;
   /** One entry per compaction in the window, in order: the last prompt the
-   *  CLI sent before it and the first one after (0 when the rollout ended
-   *  before another call landed). The sizes the timeline note prints. */
+   *  CLI sent before it and the context it left (its own size line, else the
+   *  first call after it, else null). The sizes the timeline note prints. */
   compactionEvents: CodexCompactionEvent[];
   /** Calls seen in the window; 0 means the rollout said nothing about it. */
   calls: number;
@@ -544,18 +622,16 @@ export function codexRolloutRunStats(
   // top-level `compacted` line carrying the replacement history (0.153, the
   // shape measured live on 2026-09-21), an `event_msg` whose item is a
   // `ContextCompaction` (written beside it), and an older `context_compacted`
-  // event. One compaction can appear under two of them, so the count is the
-  // LARGEST of the three tallies, never their sum; the sizes come from the
-  // prompt figures around the first marker of each compaction.
-  const tallies = { compacted: 0, item: 0, event: 0 };
+  // event. One compaction appears under two of them, with its own size line
+  // BETWEEN the two (ruling 414), so every marker until the next real call is
+  // the same compaction.
   let lastPrompt = 0;
-  // The compaction still waiting for the first prompt after it (a holder, so
-  // the marking below is one statement the flow analysis can follow).
-  const pending: PendingCompaction = { event: null };
+  // A holder, so the marking below is one statement the flow analysis follows.
+  const open: OpenCompaction = { event: null };
   const markCompaction = () => {
-    if (pending.event) return; // the same compaction's second spelling
-    pending.event = { preTokens: lastPrompt, postTokens: 0 };
-    stats.compactionEvents.push(pending.event);
+    if (open.event) return; // the same compaction, spelled again
+    open.event = { preTokens: lastPrompt, postTokens: null };
+    stats.compactionEvents.push(open.event);
   };
   for (const raw of transcriptLines(filePath)) {
     const line = codexRolloutLineSchema.parse(raw);
@@ -564,18 +640,14 @@ export function codexRolloutRunStats(
     // across two runs than to lose the only figure a run has.
     if (Number.isFinite(since) && Number.isFinite(at) && at < since) continue;
     if (line.type === "compacted") {
-      tallies.compacted += 1;
       markCompaction();
       continue;
     }
     if (line.type !== "event_msg" || !line.payload) continue;
-    if (line.payload.type === "context_compacted") {
-      tallies.event += 1;
-      markCompaction();
-      continue;
-    }
-    if (line.payload.type === "item_completed" && line.payload.item?.type === "ContextCompaction") {
-      tallies.item += 1;
+    if (
+      line.payload.type === "context_compacted" ||
+      (line.payload.type === "item_completed" && line.payload.item?.type === "ContextCompaction")
+    ) {
       markCompaction();
       continue;
     }
@@ -584,19 +656,22 @@ export function codexRolloutRunStats(
     const prompt = usage?.input_tokens ?? 0;
     if (prompt <= 0) {
       // The compaction request's own line: no prompt, but `total_tokens` is
-      // the compacted context — the size a resume replays when no later call
-      // followed (ruling 376's completion compaction is the run's last event).
+      // the compacted context, the size a resume replays. It MEASURES the
+      // open compaction and does not end it (ruling 414): the CLI writes the
+      // compaction's second spelling after it.
       const compacted = usage?.total_tokens ?? 0;
-      if (pending.event && compacted > 0) {
-        pending.event.postTokens = compacted;
-        pending.event = null;
+      if (open.event && open.event.postTokens === null && compacted > 0) {
+        open.event.postTokens = compacted;
         stats.lastPromptTokens = compacted;
       }
       continue;
     }
-    if (pending.event) {
-      pending.event.postTokens = prompt;
-      pending.event = null;
+    if (open.event) {
+      // A real call ends the compaction. Its prompt is the post size only
+      // when the compaction's own size line never came: it already carries
+      // the work done since.
+      if (open.event.postTokens === null) open.event.postTokens = prompt;
+      open.event = null;
     }
     lastPrompt = prompt;
     stats.calls += 1;
@@ -610,7 +685,7 @@ export function codexRolloutRunStats(
     stats.lastPromptTokens = prompt;
     if (prompt > stats.peakPromptTokens) stats.peakPromptTokens = prompt;
   }
-  stats.compactions = Math.max(tallies.compacted, tallies.item, tallies.event);
+  stats.compactions = stats.compactionEvents.length;
   return stats;
 }
 

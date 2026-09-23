@@ -602,6 +602,22 @@ describe("U33-2: an unreachable repository has a home on the project card", () =
 
   const noop = () => {};
 
+  it("U39-20: renders the description's inline format instead of printing the marks", () => {
+    // CANARY: render `p.desc` as plain text again.
+    const { container } = renderPiece(
+      <ProjectCard
+        p={card({ desc: "A working Go clone of Google's `ax` (github.com/google/ax): a **declarative** tool." })}
+        starred={false}
+        onStar={noop}
+        showDesc
+      />,
+    );
+    const desc = container.querySelector(".pj-desc")!;
+    expect(desc.querySelector("code.mono")?.textContent).toBe("ax");
+    expect(desc.querySelector("strong")?.textContent).toBe("declarative");
+    expect(desc.textContent).not.toContain("`");
+  });
+
   it("leaves the repo line alone when no caller carries the fact", () => {
     const { container } = renderPiece(
       <ProjectCard p={card()} starred={false} onStar={noop} />,

@@ -158,17 +158,38 @@ export function AcceptConfirm({
    *  packet mode the page passes `blockedReasonViaPacket` here — the refusal a
    *  packet resolution would hit, never the open packet it clears (F19-7). */
   blockedReason,
+  /**
+   * Ruling 393 (F39-20): EVERY gate a force-accept would bypass, in gate order.
+   *
+   * U35-3 made the audit row and the forced completion event name all of them
+   * so the record could not under-report an override; its docstring says "the
+   * timeline, the audit log and the confirm dialog list the same bypasses", and
+   * the dialog was the one that never got the list. Live on ax-clone AX-12 a
+   * human confirmed one bypassed gate and the audit recorded two. Empty (or
+   * absent, for the packet mode, which has its own single refusal) falls back
+   * to `blockedReason` alone.
+   */
+  blockedGates = [],
   blockedReasonAuthoritative = true,
   /** F32-11 (pass 32): the OPEN decision packet this acceptance withdraws
    *  (its title), or null. Accepting a task with an open packet used to clear
    *  it silently — no row here, no timeline note, no audit — so the human
    *  never learned a question died with the acceptance. */
   openPacketTitle = null,
+  baseBehindBy = null,
+  onRefreshFirst,
   busy,
   onCancel,
   onConfirm,
 }: {
   task: AcceptConfirmTask;
+  /** U39-32: how many base commits the branch lacked at the reconciler's last
+   *  compare, or null when that was never measured (the board door). */
+  baseBehindBy?: number | null;
+  /** Ruling 449 (O39-c): bring the branch up to date and re-review it before
+   *  accepting. Offered only where the caller passes it (the task page's
+   *  direct Accept) and only while the branch is behind its base. */
+  onRefreshFirst?: () => void;
   openPacketTitle?: string | null;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
@@ -196,6 +217,8 @@ export function AcceptConfirm({
   /** R19-B: the human GitHub approval carrying the verdict gate, or null. */
   verdictSatisfiedBy?: string | null;
   blockedReason: string | null;
+  /** Ruling 393: every gate a force-accept bypasses, in gate order. */
+  blockedGates?: readonly string[];
   /** Ruling 162's interlock applies to the refusal the SERVER will re-decide
    *  from the same facts (the task page reads the live task file through
    *  `resolveAcceptanceAffordance`), so a dialog quoting it may disable its own
@@ -455,10 +478,42 @@ export function AcceptConfirm({
             <div className="obs">
               <span className="k">Branch</span>
               <span>
-                <span className="mono">{task.branch}</span> is brought up to
-                date with <span className="mono">{defaultBranch}</span> first.
-                If the base has moved, that merge commit is pushed to the
-                branch and becomes the merge head.
+                {/* U39-32: the reconciler's last compare says which case this
+                    click is. Live on ax-clone the same conditional sentence
+                    sat over a branch that already carried main (AX-28) and one
+                    four commits behind it (AX-29), and the person had to go to
+                    GitHub to learn which, and whether the head that would
+                    merge had ever been reviewed. */}
+                {baseBehindBy === 0 ? (
+                  <>
+                    <span className="mono">{task.branch}</span> carried{" "}
+                    <span className="mono">{defaultBranch}</span> at the last
+                    GitHub check, so the reviewed head merges as it is. If{" "}
+                    <span className="mono">{defaultBranch}</span> moves before
+                    you confirm, the merge that brings it in is pushed to the
+                    branch first.
+                  </>
+                ) : baseBehindBy !== null && baseBehindBy > 0 ? (
+                  <>
+                    <span className="mono">{task.branch}</span> is{" "}
+                    {baseBehindBy === 1 ? "1 commit" : `${baseBehindBy} commits`}{" "}
+                    behind <span className="mono">{defaultBranch}</span> at the
+                    last GitHub check. Accepting merges{" "}
+                    {baseBehindBy === 1 ? "it" : "them"} into the branch first
+                    and pushes that merge commit, which becomes the merge head.
+                    No review has run on that combination.
+                    {onRefreshFirst && !force && !mergeOnly
+                      ? " Update the branch and re-review first runs the review on it before anything merges."
+                      : ""}
+                  </>
+                ) : (
+                  <>
+                    <span className="mono">{task.branch}</span> is brought up to
+                    date with <span className="mono">{defaultBranch}</span> first.
+                    If the base has moved, that merge commit is pushed to the
+                    branch and becomes the merge head.
+                  </>
+                )}
               </span>
             </div>
           )}
@@ -535,7 +590,19 @@ export function AcceptConfirm({
                   Ruling 162 (pass 35): that click is not offered either; the
                   confirm below is disabled and described by this row. */}
               <span className="k">{force ? "Bypassing" : "Blocked"}</span>
-              <span>{blockedReason}</span>
+              {/* Ruling 393: on the FORCE path every gate, because that is what
+                  the audit row and the completion event will say it bypassed.
+                  Everywhere else the first one is the refusal, and a list would
+                  be noise about a click the server is going to refuse anyway. */}
+              {force && blockedGates.length > 1 ? (
+                <ul className="tight">
+                  {blockedGates.map((gate) => (
+                    <li key={gate}>{gate}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span>{blockedReason}</span>
+              )}
             </div>
           )}
           {openPacketTitle && (
@@ -579,6 +646,14 @@ export function AcceptConfirm({
           <button type="button" className="btn ghost" onClick={close}>
             Not yet
           </button>
+          {onRefreshFirst && !force && !mergeOnly && baseBehindBy !== null && baseBehindBy > 0 && (
+            // Ruling 449 (O39-c): the head that merges would be one no review
+            // ran on. This runs the review on it first; acceptance comes after.
+            <button type="button" className="btn" disabled={busy} onClick={onRefreshFirst}>
+              <Icon name="refresh" />
+              Update the branch and re-review first
+            </button>
+          )}
           <button
             type="button"
             className={"btn " + (force ? "danger" : "primary")}

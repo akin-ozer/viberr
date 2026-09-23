@@ -2098,6 +2098,48 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
     await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
     expect(fm().frontmatter.workRevision?.pushedAt).toEqual(expect.any(String));
   });
+
+  describe("ruling 439: a pushed head that is Viberr's own base refresh", () => {
+    // Live on ax-clone AX-29 the refresh pushed `278c1ed` (the merge onto the
+    // revision `4e6c47d`), and the delivery found origin `up_to_date` at that
+    // merge.
+    const merged = "278c1ed".padEnd(40, "0");
+    function seedRefreshedOnto(onto: string): void {
+      seed({
+        stage: "review",
+        branch: "vib-1",
+        workRevision: {
+          id: "rev_reported",
+          headSha: HEAD,
+          treeSha: "b".repeat(40),
+          branch: "vib-1",
+          createdAt: "2026-09-06T18:56:57.000Z",
+          sourceProfileId: "developer",
+          kind: "delivered",
+        },
+        baseRefreshes: [
+          { mergeSha: merged, baseSha: "b".repeat(40), base: "main", commits: 2, at: "2026-09-23T02:44:06.000Z", onto },
+        ],
+      });
+      pushMock.mockResolvedValue({ status: "up_to_date", branch: "vib-1", headSha: merged });
+    }
+
+    it("publishes the revision it was merged onto", async () => {
+      // CANARY: compare `rev.headSha === pushedHead` again and the revision
+      // origin carries is still read as a local draft.
+      seedRefreshedOnto(HEAD);
+      await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+      const stamped = fm().frontmatter.workRevision;
+      expect(stamped?.id).toBe("rev_reported");
+      expect(stamped?.pushedAt).toEqual(expect.any(String));
+    });
+
+    it("says nothing about a revision the refresh was not merged onto", async () => {
+      seedRefreshedOnto("9".repeat(40));
+      await performDelivery(store.db, dataCtx(), store.slug, "VIB-1", actor(store.users.arda));
+      expect(fm().frontmatter.workRevision?.pushedAt ?? null).toBeNull();
+    });
+  });
 });
 
 /**

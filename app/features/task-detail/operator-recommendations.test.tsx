@@ -51,6 +51,33 @@ describe("OperatorRecommendations", () => {
 afterEach(cleanup);
 
 /**
+ * U39-7 (pass 39): the operator writes a card's reason with `code` and
+ * **bold**, like every comment it writes, and the card printed the backticks:
+ * "Reviewer approved `9471594`. Accepting completion moves AX-24 to Done".
+ */
+describe("OperatorRecommendations: the operator's reason renders its inline format", () => {
+  it("renders `code` and **bold** in the reason and the directive instead of printing the marks", () => {
+    // CANARY: render `{r.detail}` as plain text again.
+    const html = renderToString(
+      <OperatorRecommendations
+        recommendations={[
+          { id: "r1", kind: "accept_completion", label: "Accept completion and move AX-24 to Done", detail: "Reviewer approved `9471594`. **Clean** review." },
+          { id: "r2", kind: "run_agent", profileId: "dev", label: "Run Developer", detail: "Rework the gate.", prompt: "Fix `apply.go` only." },
+        ]}
+        canApply
+        busy={false}
+        onApply={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+    expect(html).toContain('Reviewer approved <code class="mono">9471594</code>');
+    expect(html).toContain("<strong>Clean</strong>");
+    expect(html).toContain('Fix <code class="mono">apply.go</code> only.');
+    expect(html).not.toContain("`");
+  });
+});
+
+/**
  * Ruling 162 (pass 35, F35-12 (c)): no surface offers an acceptance the gate
  * will refuse. The acceptance card keeps its control (ruling 147's shape) but
  * prints the gate's refusal as a keyed alert, and Apply re-announces it

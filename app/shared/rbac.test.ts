@@ -220,11 +220,12 @@ describe("the matrix is a policy decision, pinned by hand", () => {
     // membership gate (R15-4) — neither ever calls `requireAction`.
     view: "viewer",
     comment: "viewer",
-    // A contributor creates work, holds their own seat, and grooms scheduling
-    // metadata that changes no gate.
+    // A contributor creates work, holds their own seat, grooms scheduling
+    // metadata that changes no gate, and adds evidence to a task.
     "create-task": "contributor",
     "own-task": "contributor",
     "edit-task-meta": "contributor",
+    "attach-file": "contributor",
     // Governance of a task's movement, its acceptance contract, its agents and
     // the project's GitHub binding.
     "approve-transition": "maintainer",

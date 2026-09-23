@@ -19,6 +19,11 @@ import {
   healthSnapshot,
   type HealthSnapshot,
 } from "~/server/ops/health-snapshot.server";
+import {
+  PROBE_LIMIT,
+  probeTools,
+  type ProbedTool,
+} from "~/server/ops/toolchain.server";
 import { getRunLog, runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
 import type { RunLog, RunLogQuery } from "~/server/runtimes/run-service.server";
 import {
@@ -177,7 +182,7 @@ function backendCredential(
 export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp {
   const { db, ctx, user } = deps;
   const dataRoot = ctx.dataRoot;
-  const { actor, orgAdmin, requireOrgAdmin, requireVisible, run, runWith, json } =
+  const { actor, orgAdmin, requireOrgAdmin, requireVisible, runWith, json } =
     controllerToolGuards(db, user, dataRoot);
 
   /**
@@ -296,9 +301,17 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "instance_health",
-      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, how many people have connected each model backend (and whether you have), the run concurrency queue, and the host toolchain (node, npm, git, python3, go versions or null when absent; and the pinned Codex CLI and Claude Agent SDK). Open to anyone: agent backends are connected per person, so nothing here names another person or any deployment configuration.",
-      {},
-      run(() => {
+      "How this Viberr instance is doing right now: overall status and which subsystems are degraded, the store watchers and the single-writer lock, disk space, the maintenance pass, build identity, how many people have connected each model backend (and whether you have), the run concurrency queue, and the host toolchain (node, npm, git, python3, go versions or null when absent; and the pinned Codex CLI and Claude Agent SDK). That fixed list is npm-shaped, so pass `probe` to ask about ANY other command this host might have — up to 8 bare names, e.g. [\"golangci-lint\", \"gofmt\"] — and each answers `present` with a version, or `present: false` with the reason. PROBE BEFORE YOU PROMISE A GATE: a gate command whose binary you never checked is a promise every task on the board inherits and quietly fails. Open to anyone: agent backends are connected per person, and this reports presence and versions only, never a path, so nothing here names another person or any deployment configuration.",
+      {
+        probe: z
+          .array(z.string())
+          .max(PROBE_LIMIT)
+          .optional()
+          .describe(
+            `Up to ${PROBE_LIMIT} command names to check on this host, e.g. ["golangci-lint", "gofmt"]. Bare names only: a path, a flag or a shell fragment is refused by name rather than run.`,
+          ),
+      },
+      runWith((args: { probe?: string[] }) => {
         // The READING is ungated: it is what `/resources/health` already serves
         // UNAUTHENTICATED (aggregate counts, the lock holder's pid and host,
         // free bytes, build identity), plus availability booleans and three
@@ -317,6 +330,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           backendCredentials: BackendCredentialReport[];
           runs: ReturnType<typeof runConcurrencySnapshot>;
           browserDetail?: string;
+          probe?: ProbedTool[];
         } = {
           ...snapshot,
           // The asker-facing half of the health probe's connection counts: an
@@ -331,6 +345,11 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           // usual answer to "why has nothing started".
           runs: runConcurrencySnapshot(db),
         };
+        // F39-1: the answer to a question the fixed `toolchain` struct cannot
+        // hold. Present only when asked, so the common reading stays the size
+        // it was.
+        const probed = probeTools(args.probe ?? []);
+        if (probed.length > 0) body.probe = probed;
         // C05-A: the browser's configured executable PATH is deployment
         // configuration and stays org-admin-only, which is why `admin` is
         // still resolved above even though the per-backend reading beside it

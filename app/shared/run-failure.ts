@@ -128,8 +128,75 @@ export interface RunFailureFacts {
  * authentication. Its TLS sibling matched only by accident, through `\btls\b`
  * inside a `close_notify` message.
  */
+/**
+ * Ruling 389 (F39-16): the additions at the end are Codex's own transport
+ * vocabulary, which this list did not speak.
+ *
+ * Live on ax-clone AX-11 the provider said, verbatim, "Reconnecting... waiting
+ * for network (Connection failed: error sending request)" — reqwest's standard
+ * transport failure, which the Rust CLI surfaces unchanged. The list had
+ * "connection error" but not "connection failed", and nothing for "error
+ * sending request". So the classifier fell through to `unknown`, and a network
+ * blip cost twice: the packet told the owner to "Review its authentication and
+ * runtime configuration" one line above the provider's own words saying the
+ * network dropped, and it came out as a generic stalled-work packet
+ * recommending "Redirect with sharper guidance" instead of the backend-failure
+ * packet that offers waiting and retrying.
+ */
 export const LOCAL_NETWORK_FAILURE_RE =
-  /unable to connect|could not connect|connection (?:refused|reset|closed|timed out|error)|econnrefused|econnreset|enotfound|eai_again|etimedout|ehostunreach|enetunreach|epipe|certificate|self.signed|\btls\b|\bssl\b|handshake|fetch failed|network error|socket hang up|getaddrinfo|dns|failed to lookup address information|name does not resolve|nodename nor servname|temporary failure in name resolution|peer closed connection|close_notify/i;
+  /unable to connect|could not connect|connection (?:refused|reset|closed|timed out|error|failed)|econnrefused|econnreset|enotfound|eai_again|etimedout|ehostunreach|enetunreach|epipe|certificate|self.signed|\btls\b|\bssl\b|handshake|fetch failed|network error|socket hang up|getaddrinfo|dns|failed to lookup address information|name does not resolve|nodename nor servname|temporary failure in name resolution|peer closed connection|close_notify|error sending request|waiting for network|request timed out|\breconnecting\b|stream (?:closed|ended) unexpectedly/i;
+
+/**
+ * Ruling 397 (F39-24): the lead of the sentence a failed run writes onto the
+ * task timeline, and the matcher that finds it again.
+ *
+ * They live together so they cannot drift. The operator has to be able to spot
+ * this event among the several kinds of `blocked` event a task carries, because
+ * it is the one that may be standing directly on top of a finished report: the
+ * reply is written first and the failure a few milliseconds later, and the
+ * failure's own words ("Nothing was delivered to a pull request") are about the
+ * PR while a reader takes them to be about the work.
+ */
+export function runDidNotCompleteLead(role: string, roleLabel: string): string {
+  return `The ${role} ${roleLabel} run did not complete`;
+}
+
+/** Matches what {@link runDidNotCompleteLead} writes, for any role. */
+export const RUN_DID_NOT_COMPLETE_RE = /^The \S[^\n]{0,80}? run did not complete[.:]/;
+
+/**
+ * Ruling 394 (F39-21): the tag on the line a run carries when its transport
+ * died AFTER the agent's turn had already completed.
+ *
+ * Live on the ax-clone board, twice inside ten minutes, a Codex run emitted a
+ * complete outcome envelope, the provider emitted `turn.completed`, and THEN
+ * the connection dropped while Viberr ran its own end-of-run compaction. Both
+ * adapters gated success on "a completed turn and no fatal error" as a flat
+ * conjunction over the whole stream, with no regard for ORDER, so a drop during
+ * teardown reclassified a finished run as a failed one. AX-2 lost 1,531 lines
+ * of committed Go across seven files and AX-3 lost two commits; each task was
+ * parked `waiting: human` under a packet whose RECOMMENDED option was to re-run
+ * the agent whose work was already in the tree.
+ *
+ * A completed turn with nothing in flight behind it is a completed turn. What
+ * happens to the socket afterwards is a fact about the socket, and this line is
+ * where it is recorded.
+ */
+export const POST_TURN_TRANSPORT_TAG = "run·transport·after-turn";
+
+/**
+ * The line a human reads when {@link POST_TURN_TRANSPORT_TAG} is written: the
+ * run's own result stands, and the drop is named rather than hidden.
+ */
+export function postTurnTransportText(detail: string): string {
+  const flat = detail.replace(/\s+/g, " ").trim();
+  const clipped = flat.length > 200 ? `${flat.slice(0, 199)}…` : flat;
+  return (
+    "the connection dropped after the agent's turn had completed, so the run's " +
+    "own result stands and this is recorded as transport only" +
+    (clipped ? ` · ${clipped}` : "")
+  );
+}
 
 /** The machine code such a failure carries, when it names one
  *  (`UNKNOWN_CERTIFICATE_VERIFICATION_ERROR`, `ECONNRESET`, `ERR_TLS_...`),
@@ -167,3 +234,16 @@ export function formatUsd(amount: number): string {
   if (amount >= 1) return `$${amount.toFixed(2)}`;
   return `$${amount.toFixed(4).replace(/0{1,2}$/, "")}`;
 }
+
+/**
+ * Ruling 408: the lead sentence of the note Viberr writes when an operator plan
+ * step did not run, and the matcher that finds it again.
+ *
+ * Paired here for the same reason {@link RUN_DID_NOT_COMPLETE_RE} is: the
+ * writer is in `operator-run.server.ts` and the reader is in
+ * `operator-actions.server.ts`, and a silent drift between them turns the
+ * carry back into the "read them on the timeline" instruction ruling 400
+ * retired.
+ */
+export const PLAN_NOT_CARRIED_OUT_LEAD = "**The operator's plan was not carried out in full.**";
+export const PLAN_NOT_CARRIED_OUT_RE = /^\*\*The operator's plan was not carried out in full\.\*\*/;

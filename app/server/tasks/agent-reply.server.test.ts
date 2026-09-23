@@ -1941,6 +1941,174 @@ describe("commentToAgent", () => {
     if (spec) expect(spec.prompt).toContain("Target the staging config");
   }, 30_000);
 
+  /**
+   * Ruling 447 (O39-a), live on ax-clone three of three: an answer that routed
+   * the work to ANOTHER actor summoned the asking agent, which then did the
+   * other agent's edits itself (AX-22) or spent a run finding it had no tool
+   * for them (AX-20, AX-27).
+   */
+  it("ruling 447: an answer names another actor exactly when it routes the work", async () => {
+    const { answerNamesAnotherActor } = await import("./task-actions.server");
+    const agents = [
+      { id: "developer", name: "Developer", handle: "developer" },
+      { id: "surface-developer", name: "Surface Developer", handle: "surface-developer" },
+      { id: "reviewer", name: "Review & validation", handle: "reviewer" },
+    ];
+    // AX-22: the chosen option hands the work to someone else.
+    expect(answerNamesAnotherActor("Hand off to Surface Developer (Recommended)", "developer", agents)).toBe(
+      "Surface Developer",
+    );
+    // AX-20: the note addresses the operator.
+    expect(
+      answerNamesAnotherActor("Operator: move AX-20 back to Verify, then update_branch_from_base.", "developer", agents),
+    ).toBe("the operator");
+    // AX-27: the note names the Developer, and the asker's own name is not a
+    // mention of it.
+    expect(
+      answerNamesAnotherActor(
+        "Coordinate core status work\nOffer me a create_task option for the Developer (the core owner).",
+        "surface-developer",
+        agents,
+      ),
+    ).toBe("Developer");
+    expect(answerNamesAnotherActor("Surface Developer finishes it on this branch.", "surface-developer", agents)).toBeNull();
+    expect(answerNamesAnotherActor("Ask @reviewer to look again.", "developer", agents)).toBe("Review & validation");
+    // An answer for the asker names nobody else, and a word inside a word is
+    // not a name.
+    expect(answerNamesAnotherActor("Target the staging config\nstaging only", "developer", agents)).toBeNull();
+    expect(answerNamesAnotherActor("Use the cooperator pattern.", "developer", agents)).toBeNull();
+  });
+
+  it("ruling 447: an answer that names the operator goes to the operator, and the asker is not resumed", async () => {
+    const priorSessionId = "sess_r447_dev";
+    upsertRun(store.db, {
+      id: "run_r447_prior",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t_r447",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sessionId: priorSessionId,
+      sdk: "test",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    writeTranscript(priorSessionId);
+    const existing = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    writeTask(store.dataRoot, store.slug, {
+      ...existing.parsed,
+      packet: {
+        id: "pkt_r447",
+        type: "input",
+        kind: "Agent question",
+        from: "agent:claude/dev (developer)",
+        askedBy: "dev",
+        title: "Synchronize VIB-1 with current main?",
+        body: "The branch is behind.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Synchronize now", d: "", rec: true },
+          { kind: "custom", t: "Leave it", d: "", rec: false },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        note: "Operator: bring the branch up to date with main first.",
+      },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: drop the `routedTo` branch and the developer is resumed with an
+    // instruction only the operator can carry out.
+    const resumed = listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
+      (r) => r.session_id === priorSessionId && r.id !== "run_r447_prior",
+    );
+    expect(resumed).toBe(false);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.map((e) => e.text)).toContain(
+      "The answer names the operator, so it went to the operator to route, not back to dev, who asked.",
+    );
+    expect(file.parsed.timeline.some((e) => e.text.includes("has been answered by a human"))).toBe(false);
+  });
+
+  /**
+   * The option's DESCRIPTION is the asker's own text, and it narrates what
+   * happens next as often as it names who acts. A person who picks it names
+   * nobody, so the answer goes back to the agent that asked.
+   */
+  it("ruling 447: an option whose description mentions the operator still answers the asker", async () => {
+    const priorSessionId = "sess_r447_desc";
+    upsertRun(store.db, {
+      id: "run_r447_desc",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t_r447_desc",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sessionId: priorSessionId,
+      sdk: "test",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    writeTranscript(priorSessionId);
+    const existing = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    writeTask(store.dataRoot, store.slug, {
+      ...existing.parsed,
+      packet: {
+        id: "pkt_r447_desc",
+        type: "input",
+        kind: "Agent question",
+        from: "agent:claude/dev (developer)",
+        askedBy: "dev",
+        title: "Keep the retry loop?",
+        body: "It doubles the test time.",
+        observations: [],
+        options: [
+          {
+            kind: "custom",
+            t: "Keep it",
+            d: "I finish the loop here and the operator then moves the task to Verify.",
+            rec: true,
+          },
+          { kind: "custom", t: "Drop it", d: "", rec: false },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: scan `option.d` again and the answer is routed to the operator.
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.some((e) => e.text.startsWith("The answer names"))).toBe(false);
+    expect(
+      await waitFor(
+        () =>
+          listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
+            (r) => r.session_id === priorSessionId && r.id !== "run_r447_desc",
+          ),
+        10_000,
+      ),
+    ).toBe(true);
+  });
+
   // P14-RT-02 / LV-04: the WIRING, not just the prompt builder. `commentToAgent`
   // threaded the human's words into the RESUMED path and the operator-prompt
   // path but neither FRESH branch, so a first-ever @mention started a run that

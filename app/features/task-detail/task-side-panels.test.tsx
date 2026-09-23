@@ -27,6 +27,7 @@ const ACCEPTANCE: AcceptanceAffordance = {
   hasAuthority: false,
   atBoundary: false,
   blockedReason: null,
+  blockedGates: [],
   blockedReasonViaPacket: null,
   canAccept: false,
   terminallyBlocked: false,
@@ -273,7 +274,7 @@ describe("ruling 131: the Current-state Waiting-on row names the other work", ()
     });
     // Ruling 356: JC-3 is done in the fixture, and reads as done (CANARY:
     // print the bare labels again).
-    expect(kv(container, "Waiting on")).toBe("Other work: goal-1 link 2 (JC-3 is done)");
+    expect(kv(container, "Waiting on")).toBe("Other work: goal-1 link 2 and JC-3 (done)");
     const row = [...container.querySelectorAll(".kv-row")].find((r) => r.querySelector(".k")?.textContent === "Waiting on")!;
     expect(row.querySelector(".v span")?.getAttribute("title")).toBe("goal-1 link 2 · open · JC-3 · done");
     // A human still owed something wins over the wait.

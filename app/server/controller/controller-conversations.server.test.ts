@@ -394,6 +394,52 @@ describe("conversation access", () => {
  * records that it was stopped, and the lease is released so the next message
  * starts a fresh turn instead of queueing behind a run that is gone.
  */
+/**
+ * O39-d. A controller turn runs one to five minutes, and its answer reached
+ * only the surfaces still open on it: a person who moved to another page had
+ * no signal anywhere that it had landed.
+ */
+describe("O39-d: a reply its owner has not seen", () => {
+  it("is unseen until its owner looks, and never anybody else's", async () => {
+    const { createConversation, appendMessage, markConversationSeen, listUnseenReplies } = await import(
+      "./controller-conversations.server"
+    );
+    const ids = (userId: string) => listUnseenReplies(app.db, userId).map((r) => r.id);
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: "viberr-core",
+    });
+    appendMessage(app.db, { conversationId: conversation.id, author: "user", userId: ownerId, text: "How many tasks are open?" });
+    // A person's own message is not news to them.
+    expect(ids(ownerId)).not.toContain(conversation.id);
+    appendMessage(app.db, { conversationId: conversation.id, author: "controller", text: "Four." });
+    // CANARY: drop the `m.seq > c.seen_seq` clause and a reply stays unseen
+    // after its owner has read it (or, dropping the author clause, the
+    // person's own message becomes a "reply").
+    expect(listUnseenReplies(app.db, ownerId)).toContainEqual({
+      id: conversation.id,
+      title: expect.any(String),
+      projectSlug: "viberr-core",
+      taskKey: null,
+    });
+    // Somebody else opening it (an org admin) changes nothing for the owner.
+    markConversationSeen(app.db, conversation.id, orgAdminId);
+    expect(ids(ownerId)).toContain(conversation.id);
+    markConversationSeen(app.db, conversation.id, ownerId);
+    expect(ids(ownerId)).not.toContain(conversation.id);
+    // Looking again changes nothing (the loader runs on every revalidation).
+    markConversationSeen(app.db, conversation.id, ownerId);
+    expect(ids(ownerId)).not.toContain(conversation.id);
+    // The next reply is news again.
+    appendMessage(app.db, { conversationId: conversation.id, author: "controller", text: "Five now." });
+    expect(ids(ownerId)).toContain(conversation.id);
+    // It is never another person's news.
+    expect(ids(otherMemberId)).not.toContain(conversation.id);
+    expect(ids(orgAdminId)).not.toContain(conversation.id);
+  });
+});
+
 describe("stopping a turn", () => {
   async function startWorkingTurn() {
     const { createConversation } = await import("./controller-conversations.server");
@@ -1025,5 +1071,158 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     expect(note).toBe(
       "I could not finish this turn: the instance's spending cap of $0.50 stopped it after spending $0.52. Say it again to continue, or ask an org admin to raise the cap in Org settings (Max spend per Claude run).",
     );
+  });
+});
+
+/**
+ * U39-19 (pass 39): a conversation is titled by the person's first sentence,
+ * not by 79 characters cut mid-word. The live rail's titles, before and after.
+ */
+describe("U39-19: deriveTitle", () => {
+  it("titles a thread by its first sentence, and clips a long one at a word", async () => {
+    // CANARY: return the 79-character slice again.
+    const { deriveTitle } = await import("./controller-conversations.server");
+    expect(deriveTitle("Knowledge base check, please. Since the ax-clone knowledge bases were last written, AX-17 merged.")).toBe(
+      "Knowledge base check, please.",
+    );
+    expect(deriveTitle("AX-24 merged a few minutes ago (PR #19). Please bring the rulings knowledge base up to date.")).toBe(
+      "AX-24 merged a few minutes ago (PR #19).",
+    );
+    // A first sentence too short to name anything falls back to the clip.
+    expect(deriveTitle("Good graph. AX-2 and AX-3 are both building, which is what I was after. One correction about the graph.")).toBe(
+      "Good graph. AX-2 and AX-3 are both building, which is what I was after. One…",
+    );
+    // A version number is not a sentence end.
+    expect(deriveTitle("Deployed build 0.19.0 with the new rail. Check the goals.")).toBe(
+      "Deployed build 0.19.0 with the new rail.",
+    );
+    // No sentence end and short: the text itself.
+    expect(deriveTitle("Anyone there?")).toBe("Anyone there?");
+    // A first sentence longer than the rail shows is clipped at a word.
+    const long =
+      "Separate from the build: I need this board's access model exercised for real, not in a test, by the people who will use it.";
+    const title = deriveTitle(long);
+    expect(title.endsWith("…")).toBe(true);
+    expect(title.length).toBeLessThanOrEqual(80);
+    expect(title.slice(0, -1).endsWith(" ")).toBe(false);
+    expect(long.startsWith(title.slice(0, -1))).toBe(true);
+  });
+});
+
+/**
+ * U39-30: a long turn's answer reaches the transcript the moment it is
+ * written, not after the completion compaction (ruling 376) behind it. Live on
+ * ax-clone the page showed "Compacting context" for 27 seconds while the reply
+ * already existed, and ruling 371 measured one compaction at 131.
+ */
+describe("U39-30: the answer does not wait for the compaction", () => {
+  it("is in the transcript while the compaction runs, and only once after it", async () => {
+    // CANARY: drop the `registerRunAnswered` hook and the transcript is empty
+    // of the reply during the compaction; drop the settle's `replyPosted`
+    // check and the reply is posted twice.
+    const { createConversation, listMessages } = await import("./controller-conversations.server");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { queueFakeRun, queueFakeCompaction } = await import("../../../test-support/fake-runtime");
+    const { getRun } = await import("~/server/runtimes/run-store.server");
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    const answer = "Three tasks are open on the board.";
+    queueFakeRun({
+      sessionId: "sess-u39-30",
+      lines: [
+        { t: "1", ev: "init", tag: "system·init", text: "session" },
+        { t: "2", ev: "text", tag: "assistant", text: answer },
+        { t: "3", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 1, in: 150_000, cached: 0, out: 500 } },
+      ],
+      extraFacts: [
+        undefined,
+        {
+          cache: {
+            messageId: "m1",
+            promptTokens: 150_000,
+            cacheWrite: 1_000,
+            cacheRead: 149_000,
+            perCall: true,
+            ttl: { fiveMinute: 0, oneHour: 1_000 },
+            missReason: null,
+          },
+        },
+        undefined,
+      ],
+    });
+    let duringCompaction: string[] | null = null;
+    queueFakeCompaction("claude", { compacted: true, preTokens: 150_000, postTokens: 12_000 }, () => {
+      duringCompaction = listMessages(app.db, conversation.id)
+        .filter((m) => m.author === "controller")
+        .map((m) => m.text);
+    });
+    const result = await runControllerTurn(app.db, {
+      conversationId: conversation.id,
+      text: "How many tasks are open?",
+      user: { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" },
+      dataRoot: app.dataRoot,
+    });
+    if (result.state !== "started") throw new Error(`turn ${result.state}`);
+    for (let i = 0; i < 400; i += 1) {
+      const state = getRun(app.db, result.runId)?.state;
+      const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
+      if (state && state !== "running" && state !== "queued" && replies.length > 0 && duringCompaction) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // Let the settle that follows the compaction run.
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(duringCompaction).toEqual([answer]);
+    const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
+    expect(replies.map((m) => [m.text, m.runId])).toEqual([[answer, result.runId]]);
+
+    // The next turn in the thread takes the resume door. CANARY: drop
+    // `resumeInput.onAnswered = answered`.
+    const second = "Two of them are waiting on review.";
+    queueFakeRun({
+      sessionId: "sess-u39-30-b",
+      lines: [
+        { t: "1", ev: "init", tag: "system·init", text: "session" },
+        { t: "2", ev: "text", tag: "assistant", text: second },
+        { t: "3", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 1, in: 150_000, cached: 0, out: 500 } },
+      ],
+      extraFacts: [
+        undefined,
+        {
+          cache: {
+            messageId: "m2",
+            promptTokens: 150_000,
+            cacheWrite: 1_000,
+            cacheRead: 149_000,
+            perCall: true,
+            ttl: { fiveMinute: 0, oneHour: 1_000 },
+            missReason: null,
+          },
+        },
+        undefined,
+      ],
+    });
+    let duringSecond: string[] | null = null;
+    queueFakeCompaction("claude", { compacted: true, preTokens: 150_000, postTokens: 12_000 }, () => {
+      duringSecond = listMessages(app.db, conversation.id)
+        .filter((m) => m.author === "controller")
+        .map((m) => m.text);
+    });
+    const next = await runControllerTurn(app.db, {
+      conversationId: conversation.id,
+      text: "And which are waiting?",
+      user: { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" },
+      dataRoot: app.dataRoot,
+    });
+    if (next.state !== "started") throw new Error(`turn ${next.state}`);
+    for (let i = 0; i < 400; i += 1) {
+      const state = getRun(app.db, next.runId)?.state;
+      if (state && state !== "running" && state !== "queued" && duringSecond) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(duringSecond).toEqual([answer, second]);
   });
 });

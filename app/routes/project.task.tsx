@@ -22,6 +22,7 @@ import {
 import { AppError } from "~/server/errors/app-error.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
+import { taskKeyLinks } from "~/server/projections/task-key-links.server";
 import { getPref } from "~/server/prefs/user-prefs.server";
 import {
   attachmentProducers,
@@ -41,11 +42,13 @@ import {
   dismissRecommendation,
   forceAcceptCompletion,
   manualDeliverForReview,
+  refreshAndReview,
   releaseOwner,
   requestPacketMaintainerDecision,
   resolveAcceptanceAffordance,
   resolvePacket,
   setOwner,
+  attachTaskFile,
   setTaskArchived,
   setTaskMetadata,
   transitionStage,
@@ -59,6 +62,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countTaskAttachments,
   listTaskAttachments,
+  MAX_UPLOAD_BYTES,
 } from "~/server/files/task-attachments.server";
 import {
   listDeployedSpecialists,
@@ -68,7 +72,10 @@ import {
 } from "~/server/tasks/specialist-run.server";
 import { getMentionables } from "~/server/tasks/mention-suggestions.server";
 import { githubWebHost } from "~/server/github/github-client.server";
-import { latestTaskReconcileAt } from "~/server/provenance/provenance-query.server";
+import {
+  createReconcileBehindByLookup,
+  latestTaskReconcileAt,
+} from "~/server/provenance/provenance-query.server";
 import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
@@ -286,6 +293,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // specialists, registered users, and the reserved backend/role handles —
   // the same targets the server resolves an @mention to when a comment posts.
   const mentionables = getMentionables(db, params.slug, params.key);
+  // U39-31: the other tasks this page's goal and timeline slice name, as the
+  // pages this viewer can open. The task itself is never linked to itself.
+  const taskLinks = taskKeyLinks(
+    db,
+    [detail.goal, ...slice.events.map((e) => e.text)],
+    { projectSlug: params.slug, viewerId: user.id, exclude: params.key },
+  );
 
   // Pending operator recommendations live in the task FILE (not the projection);
   // read them here so the task-detail renders them as actionable cards. The
@@ -469,6 +483,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     /** UI-30: false → the console content above was withheld (non-member). */
     runsVisible,
     mentionables,
+    taskLinks,
     // UI-57: the task's GitHub card (branch / diff / commits / PR) is served
     // from the SAME cached projection the GitHub page labels "Updated 3m ago /
     // Not yet synced" — but here it carried no freshness cue at all, so stale
@@ -478,6 +493,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // architecture.md. It now goes through app/server/provenance/, which owns
     // the table.
     githubReconciledAt: latestTaskReconcileAt(db, params.slug, params.key),
+    // U39-32: how far the branch stood behind the base at the reconciler's
+    // last compare, so the accept dialog can say which of its two cases this
+    // click is. Null: never compared.
+    baseBehindBy: createReconcileBehindByLookup(db)(detail.filePath),
     // F19-22: the line above is the last pass that CHANGED something — DG-3
     // deliberately withholds the provenance row when a poller tick finds
     // nothing new (github-reconciler.server.ts), so it drifts to "1h ago" on a
@@ -543,7 +562,27 @@ function runAgentsAuthority(
   };
 }
 
+/**
+ * F39-6: the largest body this route reads. One attachment at its cap, plus
+ * the multipart envelope and the form's other fields; every other intent
+ * posts a few kilobytes.
+ */
+const MAX_TASK_ACTION_BODY_BYTES = MAX_UPLOAD_BYTES + 64 * 1024;
+
 export async function action({ request, params }: Route.ActionArgs) {
+  // Refused before the body is read: `requireFormAction` parses the whole
+  // multipart form into memory, and the attachment's own size check runs only
+  // after that, so an oversized upload used to be buffered whole first.
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (declared > MAX_TASK_ACTION_BODY_BYTES) {
+    return data(
+      {
+        ok: false as const,
+        error: `That is ${Math.round(declared / 1024 / 1024)} MB; an attachment may be up to ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`,
+      },
+      { status: 413 },
+    );
+  }
   const {
     auth: ctx,
     db,
@@ -832,6 +871,17 @@ export async function action({ request, params }: Route.ActionArgs) {
           toast: completionToast("accepted", taskKey, toName),
         };
       }
+      case "refresh-and-review": {
+        // Ruling 449 (O39-c): the accept dialog's safe answer to a reviewed
+        // head that is behind the base. The person's refresh, then the
+        // re-review of the head that will merge. A refusal of the step
+        // itself (a conflict, nothing to re-run) is the toast.
+        const result = await refreshAndReview(db, { projectSlug, taskKey }, actor);
+        if (result.status !== "refreshed") {
+          return data({ ok: false as const, error: result.message }, { status: 409 });
+        }
+        return { ok: true as const, intent, toast: result.message };
+      }
       case "deliver-review": {
         // R15-2 safety net (b): a human performs delivery (push + review PR)
         // directly. Maintainer+ or the task's own owner — enforced (and
@@ -855,6 +905,34 @@ export async function action({ request, params }: Route.ActionArgs) {
               },
               { status: 409 },
             );
+      }
+      case "attach-file": {
+        // F39-6: the human writer the attachments panel never had. Multipart,
+        // one file per submit; `attachTaskFile` does the authorization
+        // (`attach-file`, contributor+), the name/extension/size refusals, the
+        // timeline note and the audit row.
+        const file = formData.get("file");
+        if (!(file instanceof File) || file.size === 0) {
+          return data(
+            { ok: false as const, error: "Choose a file to attach." },
+            { status: 400 },
+          );
+        }
+        const { attachment } = await attachTaskFile(
+          db,
+          {
+            projectSlug,
+            taskKey,
+            name: file.name,
+            data: new Uint8Array(await file.arrayBuffer()),
+          },
+          actor,
+        );
+        return {
+          ok: true as const,
+          intent,
+          toast: `${attachment.name} attached${attachment.replaced ? " (replaced)" : ""} · agents on this task can read it`,
+        };
       }
       case "archive-task":
       case "restore-task": {
@@ -949,6 +1027,10 @@ export async function action({ request, params }: Route.ActionArgs) {
           toStageId,
           manual: true,
         };
+        // Ruling 381: why the person moved it. Required going BACKWARD, which
+        // the server decides (it is the side that knows the stage order).
+        const moveReason = String(formData.get("reason") ?? "").trim();
+        if (moveReason) move.reason = moveReason;
         if (acceptsCompletion) move.ack = acceptanceAck(formData);
         // F32-10 (pass 32): a no-op move must not be narrated as a move. The
         // server's idempotent short-circuit now pays the same gate as a real
@@ -1376,6 +1458,7 @@ export default function TaskDetailRoute({
       me={{ id: layout.user.id, name: layout.user.name }}
       myRole={layout.myRole}
       mentionables={loaderData.mentionables}
+      taskLinks={loaderData.taskLinks}
       recommendations={loaderData.recommendations}
       schedules={loaderData.schedules}
       // Ruling 320: the loader has read these since ruling 241 and the panel
@@ -1391,6 +1474,7 @@ export default function TaskDetailRoute({
       acceptance={loaderData.acceptance}
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
+      baseBehindBy={loaderData.baseBehindBy}
       githubCheckedAt={loaderData.githubCheckedAt}
       workRevisionSha={loaderData.workRevisionSha}
       noChanges={loaderData.noChanges}

@@ -506,6 +506,9 @@ CREATE TABLE controller_conversations (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   last_message_at TEXT,
+  -- O39-d: the highest message `seq` the owner has seen. A controller reply
+  -- above it is unseen, which the dock's button and the thread lists mark.
+  seen_seq INTEGER NOT NULL DEFAULT 0,
   CHECK (task_key IS NULL OR project_slug IS NOT NULL)
 );
 CREATE INDEX idx_controller_conversations__user

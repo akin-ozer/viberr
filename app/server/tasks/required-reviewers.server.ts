@@ -4,6 +4,7 @@ import type {
 } from "~/schemas/project-file.schema";
 import {
   activeWorkRevision,
+  reviewSubjectId,
   type PrRef,
   type ReviewVerdict,
   type WorkRevision,
@@ -85,6 +86,14 @@ export interface RequiredReviewerTaskState {
   workRevision: WorkRevision | null;
   verdicts: ReviewVerdict[];
   pr: PrRef | null;
+  /**
+   * Ruling 385 (F39-12(c)) / ruling 388: when a DELIVERER last saved files —
+   * this task's non-commit delivery. It started life as a timeline scan the
+   * callers threaded in; it is frontmatter now, because the same fact has to
+   * identify what a verdict was given ON, which no reader can reconstruct from
+   * a boolean.
+   */
+  deliveredAt?: string | null;
 }
 
 /**
@@ -95,23 +104,38 @@ export interface RequiredReviewerTaskState {
  */
 export function requiredReviewerApproved(
   rule: Pick<RequiredReviewerView, "profileId">,
-  fm: Pick<RequiredReviewerTaskState, "workRevision" | "verdicts">,
+  fm: Pick<RequiredReviewerTaskState, "workRevision" | "deliveredAt" | "verdicts">,
 ): boolean {
-  const rev = activeWorkRevision(fm.workRevision);
-  if (!rev) return false;
+  // Ruling 388: the subject, not the revision. Keyed on `workRevision` alone
+  // this returned false forever on a task whose deliverable is a saved file —
+  // an approval could not be stored, so the gate ruling 385 added could never
+  // be satisfied and force-accept was the only way out.
+  const subject = reviewSubjectId(fm);
+  if (!subject) return false;
   return fm.verdicts.some(
     (v) =>
       v.profileId === rule.profileId &&
-      v.revisionId === rev.id &&
+      v.revisionId === subject &&
       v.result === "approve",
   );
 }
 
 /**
  * The gate: one refusal sentence per rule whose reviewer has no current
- * approval, in rule order. A task with no active work revision and no pull
- * request (planning work, or a discarded revision — ruling 161) is not held:
- * there is nothing for the reviewer to judge.
+ * approval, in rule order.
+ *
+ * Ruling 385 (owner, 2026-09-22; F39-12(c)): the gate holds on DELIVERED WORK,
+ * in whatever form the task delivered it — a work revision, a pull request, or
+ * files a run saved. It used to hold on git alone, and ax-clone AX-12 walked
+ * straight through: a standalone research task whose deliverable was a 27KB
+ * report, attached, no commit and no PR, reached an enabled one-click Accept
+ * with `verdicts: []` while the board's own rule said "Reviewer reviews at
+ * Review". Any task whose deliverable is not a commit skipped its project's
+ * required reviewer, silently.
+ *
+ * A task that produced NOTHING is still not held — that is ruling 161's case
+ * (planning work, or a discarded revision), and there really is nothing to
+ * judge.
  */
 export function requiredReviewerRefusals(
   rules: readonly RequiredReviewerView[],
@@ -119,12 +143,15 @@ export function requiredReviewerRefusals(
 ): string[] {
   if (rules.length === 0) return [];
   const rev = activeWorkRevision(fm.workRevision);
-  if (!rev && !fm.pr) return [];
+  if (!rev && !fm.pr && !fm.deliveredAt) return [];
   const subject = rev
     ? `revision ${rev.headSha.slice(0, 7)}`
     : fm.pr?.headSha
       ? `revision ${fm.pr.headSha.slice(0, 7)}`
-      : `pull request #${fm.pr?.number ?? "?"}`;
+      : fm.pr
+        ? `pull request #${fm.pr.number}`
+        : // Ruling 385: no git subject at all — name what there IS to review.
+          "the work delivered on this task";
   return rules
     .filter((rule) => !requiredReviewerApproved(rule, fm))
     .map(
@@ -132,4 +159,50 @@ export function requiredReviewerRefusals(
         `Required reviewer ${rule.agentName} (project rule at ${rule.stageName}) has not approved ${subject}. ` +
         `Run the review at ${rule.stageName}, or an admin can force-accept.`,
     );
+}
+
+/**
+ * Ruling 384 (F39-12): the acceptance card's opening clause, DERIVED.
+ *
+ * The card used to open with a fixed sentence — "The review is clean and the
+ * work meets the goal" — on every acceptance offer the operator filed. Live on
+ * ax-clone AX-12 that sentence sat on a task with `verdicts: []`,
+ * `validation: none` and no reviewer ever engaged: the deliverer wrote a report,
+ * the operator moved the task Design → Build → Verify → Review in three minutes
+ * saying "advance to Review **for the required reviewer verdict**", and then,
+ * on its next turn, offered a one-click acceptance asserting the review was
+ * clean. The state that would have refuted it was on the file the whole time.
+ *
+ * So the clause says what the record holds, and nothing else: who approved the
+ * revision being accepted, or that nobody did.
+ */
+export function acceptanceOfferBasis(
+  fm: RequiredReviewerTaskState,
+  rules: readonly RequiredReviewerView[],
+): string {
+  const rev = activeWorkRevision(fm.workRevision);
+  // Ruling 388: the subject, not the revision, the same one the verdict
+  // writer and the gate read. Keyed on the revision alone, a task whose
+  // deliverable is a saved file was told "No review verdict is recorded" over
+  // the approval its reviewer had just given.
+  const subject = reviewSubjectId(fm);
+  const approvals = subject
+    ? fm.verdicts.filter((v) => v.revisionId === subject && v.result === "approve")
+    : [];
+  if (approvals.length === 0) {
+    // Named, because "no verdict" reads as an oversight and the reader needs to
+    // know whether the project even asked for one.
+    return rules.length > 0
+      ? `No review verdict is recorded on this task, and the project requires ${rules
+          .map((r) => r.agentName)
+          .join(", ")} at ${rules.map((r) => r.stageName).join(", ")}.`
+      : "No review verdict is recorded on this task.";
+  }
+  const names = approvals.map((v) => {
+    const rule = rules.find((r) => r.profileId === v.profileId);
+    return rule?.agentName ?? v.profileId;
+  });
+  return rev
+    ? `${names.join(", ")} approved \`${rev.headSha.slice(0, 7)}\`.`
+    : `${names.join(", ")} approved the files delivered on this task.`;
 }

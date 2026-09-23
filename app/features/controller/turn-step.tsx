@@ -1,4 +1,7 @@
 import type { ConversationTurnState } from "~/server/controller/controller-run.server";
+import { readableStep } from "~/features/runtime/readable-step";
+
+export { readableStep };
 
 /**
  * Ruling 250 (pass 37, F37-79): what the live controller turn is doing, on the
@@ -26,7 +29,7 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
   if (!detail) return null;
   return (
     <span className="ctl-working-step mono" title={detail}>
-      {detail}
+      {readableStep(detail)}
     </span>
   );
 }

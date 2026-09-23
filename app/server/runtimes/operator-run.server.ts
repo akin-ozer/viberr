@@ -74,11 +74,16 @@ import {
   operatorSetDependencies,
   operatorSetGoal,
   operatorFlagContextConflict,
+  operatorProposeRuling,
+  operatorLeaseFiles,
   operatorSnapshot,
   operatorTransitionStage,
   operatorResolvePacket,
   resolveOperatorAuthority,
+  AGENT_REPORT_CAP_TOOLLESS,
+  CREATE_TASK_BASE_NOTE,
   OPERATOR_POLICY_SCOPE_NOTE,
+  OPERATOR_TIMELINE_DEFAULT,
   type OperatorActionResult,
   type OperatorAuthority,
   type OperatorAuthorityOverrides,
@@ -142,6 +147,7 @@ import {
   describeRunFailure,
   type DescribeRunFailureInput,
 } from "~/server/tasks/run-failure-remedy.server";
+import { PLAN_NOT_CARRIED_OUT_LEAD } from "~/shared/run-failure";
 import {
   noteModelAvailabilityFromFailure,
   clearModelMark,
@@ -256,6 +262,12 @@ export interface RunOperatorInput {
    *  was refused in full, not because it left an auto stage idle. The two read
    *  differently to the operator and the turn instruction says which. */
   planRefusedNudge?: boolean;
+  /** F39-69: this nudge exists because the previous drive refreshed the
+   *  branch and stopped there, so its instruction names the refresh. */
+  refreshNudge?: boolean;
+  /** Ruling 400: the refusal sentences the previous drive collected, quoted
+   *  into this retry's instruction so it never has to go and find them. */
+  refusedPlanSteps?: { tool: string; message: string }[];
   /** transition trigger — what just moved (display names) and who moved it.
    *  `transitionByHuman` null = the operator's own move (continue the flow);
    *  a name = a human decided it, and the turn instruction tells the operator
@@ -993,6 +1005,12 @@ export function operatorLeftTaskStranded(
    * wholly refused plan and this backstop could not see it.
    */
   planWhollyRefused = false,
+  /**
+   * F39-69: the drive carried out a base refresh and then stopped, which is
+   * half a step whatever the stage's boundary. The caller passes it only for
+   * a drive that was not itself the nudge, so it re-arms nothing.
+   */
+  refreshedAndStopped = false,
 ): boolean {
   if (task.archived) return false;
   if (task.packet) return false; // a decision IS pending — the human's move
@@ -1002,6 +1020,7 @@ export function operatorLeftTaskStranded(
   if (task.blockedBy.length > 0) return false;
   if (ownMoveLandedHere) return true;
   if (planWhollyRefused) return true;
+  if (refreshedAndStopped) return true;
   return workflow.some((w) => w.from === task.stage && w.boundary === "auto");
 }
 
@@ -1092,6 +1111,14 @@ export async function maybeResumeStrandedOperator(
   const autoStage = project.parsed.frontmatter.workflow.some(
     (w) => w.from === file.parsed.frontmatter.stage && w.boundary === "auto",
   );
+  // F39-69: a drive that refreshed and stopped. Never the nudge itself: the
+  // nudge that refreshes again and stops has had its one automatic resume.
+  // A drive that DELIVERED after its refresh took the step the refresh
+  // prepared, and REFRESH_ENDED_NUDGE would tell it that it had not.
+  const refreshedAndStopped =
+    ref.ownRun?.refreshed === true &&
+    ref.ownRun.delivered !== true &&
+    ref.strandedResume !== true;
   const stranded = operatorLeftTaskStranded(
     {
       archived: file.parsed.frontmatter.archived,
@@ -1107,6 +1134,7 @@ export async function maybeResumeStrandedOperator(
       ref.ownRun.movedToStageId === file.parsed.frontmatter.stage,
     // Ruling 228: or it planned only steps it was not allowed to take.
     ref.ownRun?.planWhollyRefused === true,
+    refreshedAndStopped,
   );
   if (!stranded) return false;
 
@@ -1150,11 +1178,16 @@ export async function maybeResumeStrandedOperator(
   // recorded as having "held the stage without advancing, dispatching, or
   // opening a packet" and coordination was declared paused on a task that was
   // being delivered.
+  // Ruling 406: and ANY action it carried out is progress. The three clauses
+  // above are effects Viberr thought to enumerate; this one is the fact.
   const nudgeMadeProgress =
     (ref.ownRun?.movedToStageId !== undefined &&
       ref.ownRun.movedToStageId !== ref.stageAtStart) ||
-    ref.ownRun?.delivered === true;
+    ref.ownRun?.delivered === true ||
+    ref.ownRun?.carriedOutAction === true;
   if (ref.strandedResume && !nudgeMadeProgress) {
+    // Ruling 399: the same fact the stranded predicate already consulted.
+    const planRefused = ref.ownRun?.planWhollyRefused === true;
     const { updateTaskFile, resolveTaskFilePath } = await import(
       "~/server/files/task-writer.server"
     );
@@ -1168,11 +1201,29 @@ export async function maybeResumeStrandedOperator(
           type: "note",
           actor: { kind: "system", systemId: "policy-engine" },
           title: null,
-          text:
-            (autoStage
-              ? "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet — treating that as a deliberate hold. "
-              : "**Note:** the operator moved the task to this stage and then held it twice in a row without dispatching or opening a packet — treating that as a deliberate hold. ") +
-            "Coordination is paused here: run the operator manually when the hold should end, adjust the goal, or loosen the boundary in Policy → Workflow rules.",
+          text: planRefused
+            ? // Ruling 399 (F39-26): the operator did not choose anything here.
+              // Every action it planned was REFUSED, twice — which Viberr knows
+              // in this exact scope (`planWhollyRefused`, read eleven lines
+              // above to decide the task was stranded at all) and which the
+              // refusal notes say in their own words, directly above this one.
+              // Calling that a deliberate hold is a sentence contradicting a
+              // fact the same function is holding, and the remedy it offered
+              // — run the operator again — is the one move that reproduces it:
+              // the operator was already re-invoked once and told what was
+              // wrong, and planned the refused step again anyway.
+              "**Note:** the operator did not hold this stage — it was stopped. " +
+              "Every action it planned was refused, on its first run and again on " +
+              "the one automatic retry, so nothing it decided was carried out. The " +
+              "refusal notes are directly above and each names what was wrong with " +
+              "the step. Coordination is paused because a fresh operator run plans " +
+              "against the same state and is refused the same way: do the thing a " +
+              "refusal names, change what made the step impossible, or take the " +
+              "action yourself."
+            : (autoStage
+                ? "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet — treating that as a deliberate hold. "
+                : "**Note:** the operator moved the task to this stage and then held it twice in a row without dispatching or opening a packet — treating that as a deliberate hold. ") +
+              "Coordination is paused here: run the operator manually when the hold should end, adjust the goal, or loosen the boundary in Policy → Workflow rules.",
           toAgent: false,
           evidence: null,
         });
@@ -1259,7 +1310,16 @@ export async function maybeResumeStrandedOperator(
     strandedResume: true,
     dataRoot: ref.dataRoot,
   };
-  if (ref.ownRun?.planWhollyRefused === true) nudge.planRefusedNudge = true;
+  if (refreshedAndStopped && ref.ownRun?.planWhollyRefused !== true) {
+    nudge.refreshNudge = true;
+  }
+  if (ref.ownRun?.planWhollyRefused === true) {
+    nudge.planRefusedNudge = true;
+    // Ruling 400: carry the refusals into the retry's own instruction.
+    if (ref.ownRun.refusedPlanSteps?.length) {
+      nudge.refusedPlanSteps = ref.ownRun.refusedPlanSteps;
+    }
+  }
   void runOperator(db, nudge).catch((error) => {
     logger.error("stranded-operator resume failed", {
       taskKey: ref.taskKey,
@@ -2052,6 +2112,16 @@ const OPERATOR_PLAN_TOOLS = [
   // task keys and goal links; `blockedBy: []` clears it) instead of opening a
   // hold packet. The plan mirror of the Claude toolkit's `set_dependencies`.
   "set_dependencies",
+  // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`. Every agent on
+  // the pass-39 instance ran on Codex, so a tool that exists only on the Claude
+  // toolkit would have been unreachable by the operator that actually found the
+  // false ruling. `text` carries the correction, `kbSource` the document to
+  // amend, `repoSource` the evidence.
+  "propose_ruling",
+  // Ruling 417 (owner): lease shared files to THIS task until it merges. The
+  // plan mirror of the Claude toolkit's `lease_files`; `paths` carries the
+  // globs and `text` the reason.
+  "lease_files",
 ] as const;
 
 const OPERATOR_PACKET_TYPES = ["input", "blocked"] as const;
@@ -2083,6 +2153,12 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   // Ruling 131(b): the wait is the hold packet's replacement, so it rides the
   // packet's own grant.
   set_dependencies: ["generate-packets"],
+  // F39-1/F39-7: same gate as `flag_context_conflict` — it writes a typed event
+  // and a proposal, never a binding rule.
+  propose_ruling: ["append-typed-events"],
+  // Ruling 417: a lease orders DELIVERIES, so it rides delivery authority —
+  // resolved via deliverGate below, like `deliver_for_review` itself.
+  lease_files: ["deliver-review-pr"],
 } satisfies Record<OperatorPlanTool, readonly string[]>;
 
 /**
@@ -2095,7 +2171,7 @@ export function operatorPlanToolsFor(
   authority: OperatorAuthority,
 ): OperatorPlanTool[] {
   const permitted = OPERATOR_PLAN_TOOLS.filter((toolName) =>
-    toolName === "deliver_for_review"
+    toolName === "deliver_for_review" || toolName === "lease_files"
       ? deliverGate(authority) !== "deny"
       : toolName === "update_branch_from_base"
         ? updateBranchGate(authority) !== "deny"
@@ -2121,10 +2197,14 @@ export function operatorPlanToolsFor(
   // OUTSIDE Viberr — a pushed branch, an opened PR. `operatorDeliverForReview`
   // refuses either way, so advertising them only buys a billed turn spent
   // planning a push that cannot happen.
+  // Ruling 417: `lease_files` rides the delivery gate, so the fallback that
+  // withholds delivery withholds it too; advertising it would buy a turn
+  // spent planning a lease `operatorLeaseFiles` refuses.
   return permitted.length
     ? [...permitted]
     : OPERATOR_PLAN_TOOLS.filter(
-        (t) => t !== "deliver_for_review" && t !== "update_branch_from_base",
+        (t) =>
+          t !== "deliver_for_review" && t !== "update_branch_from_base" && t !== "lease_files",
       );
 }
 
@@ -2159,14 +2239,23 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           delivers: { type: ["boolean", "null"], description: "run_agent: true = hand delivery to this profile (owns branch/PR, one per task); false = run as supporting (review). Null derives it from the profile's grants and the task's current deliverer." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; else null." },
+          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_ruling: the correction, or the missing convention (ruling 418), in one or two sentences; for lease_files: why this task holds the paths, which every task the lease refuses is shown; else null." },
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
-          kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees; else null." },
-          repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative; else null." },
+          kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For propose_ruling: the rulings document to amend, by file name as the rulings knowledge base lists it. Else null." },
+          repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For propose_ruling: the EVIDENCE that proves the ruling wrong or the convention missing \u2014 the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
           blockedBy: {
             type: ["array", "null"],
             items: { type: "string" },
             description: "For set_dependencies ONLY: the FULL list of what this task waits on, as task keys (`JC-6`) and goal links (`goal-1 link 3`) in this project; an empty array clears the wait. Null for every other tool.",
+          },
+          paths: {
+            type: ["array", "null"],
+            items: { type: "string" },
+            description: "For lease_files ONLY (ruling 417): the path globs to lease to THIS task until it merges, as narrow as the shared files (`*` within one segment, `**` across segments), and put the reason in `text`. First come, first served: a path another active task already holds is refused by name. Null for every other tool.",
+          },
+          completeness: {
+            type: ["boolean", "null"],
+            description: "For run_agent ONLY (ruling 421): true when this run puts ruling 410's completeness question to a reviewer (name EVERYTHING it would still block on, including anything it would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Null for every other run and every other tool.",
           },
           // P11-27: let the Codex operator AUTHOR the packet's option set from its
           // own reasoning (2–4 options), instead of always getting the canned
@@ -2192,10 +2281,17 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   description:
                     "retry_other_backend only: the backend to re-run the failed agent on — it must be the OTHER one. Null lets the server pick the opposite of the backend that failed.",
                 },
+                // Ruling 409 (F39-36): this said "retry_other_backend only" while
+                // ruling 237 REFUSES a `question_reviewer` option that has no
+                // profileId. Live on ax-clone AX-18 the operator reached for
+                // exactly that option, read this description, correctly left
+                // the field null, and was refused twice -- then the task was
+                // stranded and a human had to act. Two kinds need it, so both
+                // are named.
                 profileId: {
                   type: ["string", "null"],
                   description:
-                    "retry_other_backend only: the agent profile to re-run. Null re-runs the agent whose run failed.",
+                    "TWO kinds need this, null on every other. `retry_other_backend`: the agent profile to re-run (null re-runs the agent whose run failed). `question_reviewer`: REQUIRED — the profileId of the reviewer the question is put to, which must be a reviewer this task actually has (`reviewers[].profileId`); an option without it is refused, because the resolution would promise \"ask X\" and have nobody to start.",
                 },
                 deleteBranch: {
                   type: ["boolean", "null"],
@@ -2219,12 +2315,57 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   description:
                     "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Null on every other kind.",
                 },
+                // Ruling 433 (F39-55): ruling 270 gave the Claude tool the
+                // payloads of rulings 224, 230 and 269, and this schema never
+                // got them. A Codex operator could name the three kinds, was
+                // refused for the missing payload, and had no field to send
+                // it in. Live on ax-clone: AX-4 twice, AX-27 once.
+                blockedBy: {
+                  type: ["array", "null"],
+                  items: { type: "string" },
+                  description:
+                    "block_on_dependencies only (ruling 230): what THIS task waits on, as task keys or `goal-N link M`. Required on that kind, since an option that names nothing to wait on resolves into a hold that releases on nothing. Null on every other kind. Not the action-level blockedBy, which is set_dependencies'.",
+                },
+                dueAt: {
+                  type: ["string", "null"],
+                  description:
+                    "wait_for_window only (ruling 224): the instant the provider said its window reopens, as an ISO timestamp. The resolution schedules the re-dispatch just after it. Required on that kind; null on every other. Viberr raises the quota packet itself, so author one only when no packet was raised.",
+                },
+                newTask: {
+                  type: ["object", "null"],
+                  additionalProperties: false,
+                  description:
+                    "create_task only (ruling 269): the task the person's confirm CREATES, under their own authority. Use it for work that belongs outside this task (another owner's package, a contract nobody produces, a gap a report named), instead of an option whose text tells the reader to create a task. " +
+                    CREATE_TASK_BASE_NOTE +
+                    " Required on that kind; null on every other.",
+                  properties: {
+                    title: { type: "string", description: "The new task's title." },
+                    goal: {
+                      type: "string",
+                      description:
+                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria). It is the contract whoever works it is held to.",
+                    },
+                    blockedBy: {
+                      type: ["array", "null"],
+                      items: { type: "string" },
+                      description: "What the NEW task waits on (task keys, or `goal-N link M`), not what this task waits on. Null for nothing.",
+                    },
+                    blocks: {
+                      type: ["array", "null"],
+                      items: { type: "string" },
+                      description:
+                        "Ruling 287: the EXISTING tasks that must wait on the new one, usually the direction that matters, since a task is created to unblock something. Each key gets the new task added to its own blockedBy when the person confirms. This task's own key belongs here whenever it is the work that must wait (ruling 322). Null for none.",
+                    },
+                    labels: { type: ["array", "null"], items: { type: "string" }, description: "Labels for the new task; null for none." },
+                  },
+                  required: ["title", "goal", "blockedBy", "blocks", "labels"],
+                },
               },
-              required: ["kind", "title", "detail", "recommended", "backend", "profileId", "deleteBranch", "toStage", "goalDraft"],
+              required: ["kind", "title", "detail", "recommended", "backend", "profileId", "deleteBranch", "toStage", "goalDraft", "blockedBy", "dueAt", "newTask"],
             },
           },
         },
-        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy"],
+        required: ["tool", "profileId", "delivers", "toStageId", "packetType", "text", "reason", "packetOptions", "kbSource", "repoSource", "blockedBy", "paths", "completeness"],
       },
     },
   },
@@ -2253,6 +2394,12 @@ const operatorPlanActionSchema = z.strictObject({
   // Ruling 131: set_dependencies — the FULL list; `.optional()` so plans
   // persisted before the field existed still replay across a restart-resume.
   blockedBy: z.array(z.string()).nullable().optional(),
+  // Ruling 417: lease_files — `.optional()` so plans persisted before the
+  // field existed still replay across a restart-resume.
+  paths: z.array(z.string()).nullable().optional(),
+  // Ruling 421: run_agent's completeness question — `.optional()` for the same
+  // replay reason.
+  completeness: z.boolean().nullable().optional(),
   packetOptions: z
     .array(
       z.strictObject({
@@ -2267,6 +2414,19 @@ const operatorPlanActionSchema = z.strictObject({
         deleteBranch: z.boolean().nullable().optional(),
         toStage: z.string().nullable().optional(),
         goalDraft: z.string().nullable().optional(),
+        // Ruling 433: `.optional()` for the same replay reason.
+        blockedBy: z.array(z.string()).nullable().optional(),
+        dueAt: z.string().nullable().optional(),
+        newTask: z
+          .strictObject({
+            title: z.string(),
+            goal: z.string(),
+            blockedBy: z.array(z.string()).nullable().optional(),
+            blocks: z.array(z.string()).nullable().optional(),
+            labels: z.array(z.string()).nullable().optional(),
+          })
+          .nullable()
+          .optional(),
       }),
     )
     .nullable(),
@@ -2304,6 +2464,15 @@ export function authoredPacketOptions(
         deleteBranch?: boolean | null;
         toStage?: string | null;
         goalDraft?: string | null;
+        blockedBy?: string[] | null;
+        dueAt?: string | null;
+        newTask?: {
+          title: string;
+          goal: string;
+          blockedBy?: string[] | null;
+          blocks?: string[] | null;
+          labels?: string[] | null;
+        } | null;
       }[]
     | null,
 ): OperatorPacketOptionInput[] | null {
@@ -2338,6 +2507,22 @@ export function authoredPacketOptions(
     // it on any other kind and validates the stage id against the board.
     const toStage = o.toStage?.trim();
     if (toStage) option.toStage = toStage;
+    // Ruling 433: the payloads rulings 230, 224 and 269 require, carried the
+    // way the Claude tool carries them (ruling 270). `operatorOpenPacket`
+    // refuses each off its kind and its kind without it.
+    if (o.blockedBy?.length) option.blockedBy = [...o.blockedBy];
+    const dueAt = o.dueAt?.trim();
+    if (dueAt) option.dueAt = dueAt;
+    if (o.newTask) {
+      const newTask: NonNullable<OperatorPacketOptionInput["newTask"]> = {
+        title: o.newTask.title.trim(),
+        goal: o.newTask.goal.trim(),
+      };
+      if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
+      if (o.newTask.blocks?.length) newTask.blocks = [...o.newTask.blocks];
+      if (o.newTask.labels?.length) newTask.labels = [...o.newTask.labels];
+      option.newTask = newTask;
+    }
     return option;
   });
 }
@@ -2405,7 +2590,17 @@ async function startCodexOperatorRun(
   /** R21-4: the identity (and any reserved row) claimed before the clone. */
   start: OperatorRunStart,
 ): Promise<RunOperatorResult> {
-  const snapshot = operatorSnapshot(db, ctx, input.projectSlug, input.taskKey, authority);
+  // Ruling 415: this operator returns a plan and cannot call tools, so the
+  // snapshot carries content where it would otherwise carry an address.
+  const snapshot = operatorSnapshot(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    authority,
+    OPERATOR_TIMELINE_DEFAULT,
+    { toolless: true },
+  );
   // P14-RT-04 / KM-02: the operator's DECLARED org MCP servers mount on Codex
   // too. P13-KM-03 wired them into the Claude toolkit only, so the same grant
   // was real on one backend and decorative on the other — a Codex operator could
@@ -2449,8 +2644,13 @@ async function startCodexOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
-    input.planRefusedNudge ? "plan-refused" : input.strandedResume,
+    input.planRefusedNudge
+      ? "plan-refused"
+      : input.refreshNudge
+        ? "refresh-ended"
+        : input.strandedResume,
     input.dependencyRelease,
+    input.refusedPlanSteps,
   );
   const orgMcpServers = mcp.servers;
 
@@ -2509,6 +2709,7 @@ async function startCodexOperatorRun(
     taskKey: input.taskKey,
     threadId: start.threadId,
     backend: "codex",
+    kind: "operator",
     dataRoot: input.dataRoot,
     inputs: {
       ...promptBuild.inputs,
@@ -2759,12 +2960,17 @@ async function executeCodexPlan(
   const consultedProfileIds: string[] = [];
   const record = (toolName: string, result: OperatorActionResult | undefined) => {
     if (!result) return;
-    if (result.outcome === "denied" || result.outcome === "noop") {
-      refused.push({
-        tool: toolName,
-        message: result.message,
-        kind: result.outcome === "denied" ? "authority" : "state",
-      });
+    const refusal = planRefusalOf(toolName, result);
+    if (refusal) {
+      refused.push(refusal);
+      return;
+    }
+    // Ruling 406: the drive acted. Stamped HERE, on the one funnel every plan
+    // step already passes through, so a new action shape is covered the day it
+    // is added instead of the day it is mistaken for a deliberate hold.
+    // Ruling 443: a step whose outcome is the packet it opened acted too.
+    if ((result.outcome === "done" || result.openedPacket) && ctx.operatorRun) {
+      ctx.operatorRun.carriedOutAction = true;
     }
   };
   // B-6 (pass 24): OpenAI-strict structured output makes every plan field
@@ -2775,7 +2981,26 @@ async function executeCodexPlan(
   const skippedMalformed = (toolName: string, missing: string) => {
     refused.push({ tool: toolName, message: `plan step omitted ${missing}`, kind: "state" });
   };
+  // Ruling 430 (F39-52): a plan is written whole, before any step runs, so it
+  // cannot see a decision one of its own steps puts in front of a person. Live
+  // on AX-21 (01:18): `update_branch_from_base` met a conflict and opened the
+  // blocking conflict packet, and the next step still dispatched the Surface
+  // Developer with "The operator has updated the branch from the changed
+  // base; start from that branch", about a branch the refresh had left
+  // exactly as it was. Once the task holds a packet it did not hold when the
+  // plan began, the steps that ACT are not carried out; a comment still posts.
+  const packetKeyOf = (): string | null => {
+    const packet = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.packet;
+    return packet ? (packet.id ?? packet.title) : null;
+  };
+  const packetAtStart = packetKeyOf();
+  let pausedBy: { tool: string; title: string } | null = null;
+  const pausedSteps: string[] = [];
   for (const a of plan.actions) {
+    if (pausedBy && a.tool !== "post_comment") {
+      pausedSteps.push(a.tool);
+      continue;
+    }
     try {
       switch (a.tool) {
         case "post_comment":
@@ -2832,9 +3057,13 @@ async function executeCodexPlan(
               ...base,
               profileId: a.profileId,
             };
-            if (a.text) dispatch.prompt = a.text;
+            // Ruling 446 (F39-70): the directive travels with what this plan's earlier steps
+            // were refused, which the narration below only writes after the
+            // agent has started.
+            if (a.text) dispatch.prompt = withEarlierRefusals(a.text, refused);
             if (a.delivers != null) dispatch.delivers = a.delivers;
             if (a.reason) dispatch.reason = a.reason;
+            if (a.completeness) dispatch.completeness = true;
             const dispatched = await operatorDispatchAgent(db, ctx, dispatch, authority);
             // R20-9: only a dispatch that actually LANDED is a consultation — a
             // denied or no-op one consulted nobody (noteConsultedProfile).
@@ -2919,6 +3148,46 @@ async function executeCodexPlan(
             );
           }
           break;
+        case "propose_ruling":
+          // F39-1/F39-7 (pass 39): `kbSource` is the rulings document to amend,
+          // `text` the correction, `repoSource` the evidence that proves it.
+          // Reuses the plan's existing string fields rather than growing the
+          // schema — the two ruling-shaped actions then read alike.
+          if (a.kbSource && a.text && a.repoSource) {
+            record(
+              a.tool,
+              await operatorProposeRuling(
+                db,
+                ctx,
+                {
+                  ...base,
+                  doc: a.kbSource,
+                  text: a.text,
+                  evidence: a.repoSource,
+                },
+                authority,
+              ),
+            );
+          } else {
+            skippedMalformed(
+              a.tool,
+              "the rulings document, the correction, and the evidence",
+            );
+          }
+          break;
+        case "lease_files": {
+          // Ruling 417: `paths` are the globs, `text` (or `reason`) why.
+          const why = a.text || a.reason;
+          if (a.paths && a.paths.length > 0 && why) {
+            record(
+              a.tool,
+              await operatorLeaseFiles(db, ctx, { ...base, paths: a.paths, reason: why }, authority),
+            );
+          } else {
+            skippedMalformed(a.tool, "the paths to lease and the reason they are held");
+          }
+          break;
+        }
       }
     } catch (error) {
       // ABORT the remaining plan on a governed-action failure: executing later
@@ -2965,6 +3234,16 @@ async function executeCodexPlan(
       }
       break;
     }
+    if (!pausedBy) {
+      const now = packetKeyOf();
+      if (now !== null && now !== packetAtStart) {
+        const packet = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.packet;
+        pausedBy = { tool: a.tool, title: packet?.title ?? "a decision" };
+      }
+    }
+  }
+  if (pausedBy && pausedSteps.length > 0) {
+    await narratePausedPlan(db, ctx, input, pausedBy, pausedSteps);
   }
   await narrateRefusedActions(db, ctx, input, refused, plan.reasoning);
   // Ruling 228 (F37-47): stamp the case where the drive did NOTHING because
@@ -2981,16 +3260,103 @@ async function executeCodexPlan(
   // is narrated on its own terms and is not this.
   if (ctx.operatorRun && plan.actions.length > 0 && refused.length === plan.actions.length) {
     ctx.operatorRun.planWhollyRefused = true;
+    // Ruling 400: the sentences, not just the flag. The retry quotes them.
+    ctx.operatorRun.refusedPlanSteps = refused.map((r) => ({
+      tool: r.tool,
+      message: r.message,
+    }));
+  }
+}
+
+/**
+ * Ruling 430: say which steps a new decision packet stopped, and why.
+ *
+ * Written directly, like `narrateRefusedActions`: the report must not depend on
+ * the gates of the operator it reports on. Never throws; the plan already ran.
+ */
+async function narratePausedPlan(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: RunOperatorInput,
+  pausedBy: { tool: string; title: string },
+  steps: string[],
+): Promise<void> {
+  const list = steps.map((s) => `\`${s}\``).join(", ");
+  try {
+    await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: { kind: "operator" },
+        title: "Coordination paused",
+        text:
+          `**Coordination paused:** the \`${pausedBy.tool}\` step left a decision for a person ` +
+          `(“${pausedBy.title}”), so the rest of this plan was not carried out: ${list}. ` +
+          "It was written before that decision existed. The operator picks the task up again once it is answered.",
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  } catch (error) {
+    logger.error("codex operator plan-pause narration failed", {
+      taskKey: input.taskKey,
+      err: error instanceof Error ? error : new Error(String(error)),
+    });
   }
 }
 
 /** A plan step that did not run, and WHY it did not (see OperatorActionResult):
  *  `authority` = the capability policy (or ownership) refused it;
  *  `state` = the task's current state, or the step itself, ruled it out. */
-interface RefusedPlanStep {
+export interface RefusedPlanStep {
   tool: string;
   message: string;
   kind: "authority" | "state";
+}
+
+/**
+ * Ruling 443: what one plan step's result adds to the plan's refusals, if
+ * anything. `denied` is a refusal by authority and `noop` one by state (the
+ * LV-03 split), except a step whose outcome is the decision packet it opened.
+ * Live on ax-clone AX-21, AX-28 and AX-5 a refresh that met a conflict was
+ * narrated "This step did not apply to the task's current state" beside the
+ * packet it had just opened. The step ran, and its outcome was the packet.
+ */
+export function planRefusalOf(
+  toolName: string,
+  result: OperatorActionResult,
+): RefusedPlanStep | null {
+  if (result.outcome !== "denied" && result.outcome !== "noop") return null;
+  if (result.openedPacket) return null;
+  return {
+    tool: toolName,
+    message: result.message,
+    kind: result.outcome === "denied" ? "authority" : "state",
+  };
+}
+
+/**
+ * Ruling 446 (F39-70): a dispatch in a Codex plan carries the refusals the same plan has
+ * already collected. A plan is written before any step runs, so a directive
+ * can only say "if the lease is refused, ...". The note that answers it is
+ * narrated after the plan's last step, when the agent is already running.
+ * Live on ax-clone AX-5 the Developer was told "Do not modify any path the
+ * lease action refuses" and was never told which paths those were: the note
+ * naming them landed 46 ms after its run started.
+ */
+export function withEarlierRefusals(
+  directive: string,
+  refused: readonly { tool: string; message: string }[],
+): string {
+  if (refused.length === 0) return directive;
+  const one = refused.length === 1;
+  return (
+    `${directive}\n\nViberr did not carry out ${one ? "this earlier step" : "these earlier steps"} ` +
+    "of the operator's plan for this turn. Read the directive above against what actually " +
+    `happened (${one ? "it is" : "each is"} Viberr's answer to the operator):\n` +
+    refused.map((r) => `- \`${r.tool}\`: ${r.message}`).join("\n")
+  );
 }
 
 /**
@@ -3037,7 +3403,9 @@ async function narrateRefusedActions(
         ? `${were(byAuthority)} refused by its capability policy:\n\n${list(byAuthority)}`
         : `${did(byState)} not apply to the task's current state:\n\n${list(byState)}`;
   const text =
-    `**The operator's plan was not carried out in full.** ${body}` +
+    // Ruling 408: the lead is a shared constant, because the next turn's carry
+    // finds this note by it.
+    `${PLAN_NOT_CARRIED_OUT_LEAD} ${body}` +
     (reasoning.trim()
       ? `\n\nWhat it intended:\n\n> ${reasoning.trim().replace(/\n/g, "\n> ")}`
       : "");
@@ -3175,8 +3543,13 @@ async function startRealOperatorRun(
     transitionContextOf(input),
     input.scheduleNote,
     input.resolvedOption,
-    input.planRefusedNudge ? "plan-refused" : input.strandedResume,
+    input.planRefusedNudge
+      ? "plan-refused"
+      : input.refreshNudge
+        ? "refresh-ended"
+        : input.strandedResume,
     input.dependencyRelease,
+    input.refusedPlanSteps,
   );
 
   const spec: StartRunInput = {
@@ -3223,6 +3596,7 @@ async function startRealOperatorRun(
     taskKey: input.taskKey,
     threadId: start.threadId,
     backend: "claude",
+    kind: "operator",
     dataRoot: input.dataRoot,
     inputs: {
       ...promptBuild.inputs,
@@ -3972,7 +4346,40 @@ type OperatorTrigger = NonNullable<RunOperatorInput["trigger"]>;
  * would be false twice over — the stage need not be auto-advance, and the run
  * did not end idle by choice. `false` for an ordinary drive.
  */
-type StrandedNudge = boolean | "idle-stage" | "plan-refused";
+type StrandedNudge = boolean | "idle-stage" | "plan-refused" | "refresh-ended";
+
+/**
+ * F39-69: a Codex plan is the whole turn. Nothing re-invokes the operator for
+ * a step of its own, and a plan may safely chain a refresh and the step it
+ * prepares because ruling 430 stops the acting steps after one that opens a
+ * packet. AX-5's operator planned the refresh alone and stopped.
+ *
+ * Ruling 450: and a walk across `auto` stages. Each of the operator's own
+ * moves ends its drive and the next stage starts another, so AX-1 spent five
+ * operator runs walking Design to Review with nothing to do at Build or
+ * Verify. The moves chain in one plan, each checked from the stage it runs at.
+ */
+export const CODEX_PLAN_WHOLE_TURN =
+  "The plan is the whole turn: nothing re-invokes you for a step of your own, so plan every step " +
+  "this turn needs. A refresh goes with the step it prepares. A walk across `auto` stages where " +
+  "nothing needs an agent is one `transition_stage` per stage, in order, in this plan (each is " +
+  "checked against the stage it runs from). If a step opens a decision packet (a refresh that meets " +
+  "a conflict does), Viberr carries out none of the acting steps after it (ruling 430). ";
+
+/**
+ * F39-69: the instruction for a drive resumed because the previous one
+ * refreshed the branch and stopped. It is not the idle-stage nudge's "this
+ * auto-advance stage" (a Review stage is not one), and not an accusation of
+ * holding: the previous drive acted.
+ */
+export const REFRESH_ENDED_NUDGE =
+  "You are re-invoked ONCE because your previous run brought the branch up to date " +
+  "(`update_branch_from_base`) and stopped there: nothing was dispatched, delivered or asked. " +
+  "A refresh only prepares the branch for the step that follows it. Take that step now, in this " +
+  "turn: the newest person's decision in `humanDecisions` and the stage rule below say what it is. " +
+  "If a person must choose first, open a decision packet that says so. This is the only automatic " +
+  "nudge. In a plan, a refresh and the step after it can go together: if the refresh meets a " +
+  "conflict, Viberr opens the packet and does not carry out the steps after it (ruling 430). ";
 
 /** What a transition trigger carries (owner ruling 2026-07-26). */
 export interface TransitionContext {
@@ -3991,27 +4398,45 @@ function transitionContextOf(input: RunOperatorInput): TransitionContext | undef
   };
 }
 
-function agentReportBlock(trigger: OperatorTrigger, agentReply?: string): string {
+/** Ruling 285's cut, for an operator that can fetch the rest. */
+const AGENT_REPORT_CAP = 4000;
+// Ruling 415: the cut for one that cannot (a Codex plan) is far larger: a
+// reviewer's findings past 4,000 characters were unreachable there. Ruling
+// 440 made it the one cut for everything such an operator is handed, so it
+// lives beside the snapshot (`AGENT_REPORT_CAP_TOOLLESS`).
+
+export function agentReportBlock(
+  trigger: OperatorTrigger,
+  agentReply?: string,
+  opts: { toolless?: boolean } = {},
+): string {
   if (trigger !== "agent-reply" || !agentReply?.trim()) return "";
-  const report = agentReply.slice(0, 4000);
+  const cap = opts.toolless ? AGENT_REPORT_CAP_TOOLLESS : AGENT_REPORT_CAP;
+  const report = agentReply.slice(0, cap);
   // Ruling 285 (F37-120): the clip was already honest — it said "first 4,000
   // chars" — and honesty about a dead end is still a dead end. A thorough
   // reviewer's report runs past this routinely, and what is past it is where a
   // reviewer puts the findings it went out of its way to make: live on SHOP-42
   // the clipped half held two unowned defects, and the operator raised a packet
   // to a human saying it had not read them. Name the way out beside the cut.
-  const suffix =
-    agentReply.length > report.length
-      ? " (first 4,000 chars — the rest is NOT below)"
-      : "";
-  const more =
-    agentReply.length > report.length
-      ? "\n\nThis report is CUT. The full text is this task's newest agent comment on " +
+  const cut = agentReply.length > report.length;
+  const suffix = cut
+    ? ` (first ${cap.toLocaleString("en-US")} chars — the rest is NOT below)`
+    : "";
+  // Ruling 415: the way out is only worth naming to an operator that can take
+  // it. One that cannot is told the rest is out of reach, so it neither
+  // summarises the cut report as whole nor sends someone to fetch it.
+  const more = !cut
+    ? ""
+    : opts.toolless
+      ? "\n\nThis report is CUT, and this turn cannot fetch the rest. Say so if you " +
+        "summarise it or raise a packet about it, and never conclude it did not mention " +
+        "something: the rest is on the timeline for a person, not for you."
+      : "\n\nThis report is CUT. The full text is this task's newest agent comment on " +
         "the timeline: `get_task` prints its `occurredAt`, and `read_timeline_entry` " +
         "returns it whole. Read it before you summarise this report for a person, " +
         "before you raise a packet about it, and before you conclude it did not " +
-        "mention something."
-      : "";
+        "mention something.";
   return `\n\n# Agent report${suffix}\n\n\`\`\`text\n${report}\n\`\`\`${more}`;
 }
 
@@ -4142,6 +4567,9 @@ function operatorTurnDoctrine(
   resolvedOption?: ResolvedPacketOption,
   strandedResume?: StrandedNudge,
   dependencyRelease?: DependencyReleasePayload,
+  /** Ruling 400: the refusals a `plan-refused` retry is being re-invoked over,
+   *  quoted into its instruction rather than pointed at. */
+  refusedSteps?: { tool: string; message: string }[],
 ): string {
   if (humanComment?.trim()) {
     const by = humanCommentBy?.trim();
@@ -4193,6 +4621,15 @@ function operatorTurnDoctrine(
       "React to the report above. When the deliverer reports completed, committed work that is plausibly reviewable, deliver it with `deliver_for_review` (push + review PR — YOUR decision, see the stage rules) and move the task toward review; accept a clean review through `accept_completion`. " +
       "Rework on a task whose PR is already open is delivered the same way: `deliver_for_review` pushes the new revision to that PR. " +
       "If review requests changes, move back to the work stage and `run_agent` the delivering profile with the concrete findings as its prompt. " +
+      // Ruling 410: the sentence above is round ONE. Live on ax-clone the skill
+      // carried the round-two duty (AX-24, 20:35) while this said otherwise.
+      "At the SECOND consecutive objection from the same reviewer (`reviewers[].consecutiveRequestChanges` 2), do not rework yet: run that reviewer once with no rework behind it and ask for everything it would still block on, then rework ONCE against the whole answer (ruling 410). " +
+      // Ruling 421 (F39-43): the question has to be RECORDED as asked, or the
+      // deadlock packet recommends asking it again on top of the answer.
+      "Whenever a `run_agent` puts that question to a reviewer, alone or folded into the review of a fresh rework, set `completeness: true` on it: Viberr then records the verdict that run returns as the complete set, and a later deadlock packet recommends one rework against it instead of the question you already asked (ruling 421). " +
+      // Ruling 418 (owner): this is the turn a reviewer's verdict arrives on,
+      // and it returns before the stage rules, so the duty is stated here too.
+      "If the objection is a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it, also `propose_ruling` that convention in the rulings document it belongs to, with the verdict as the evidence: one per class, never one per finding. " +
       "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
     );
   }
@@ -4367,11 +4804,24 @@ function operatorTurnDoctrine(
   // re-judging the stage as abandoned).
   const resumeContext = !strandedResume
     ? ""
-    : strandedResume === "plan-refused"
-      ? // Ruling 228: this drive did not decide to wait — it was stopped. The
-        // refusals are already on the timeline with their remedies in them, so
-        // the one thing to forbid is planning the same refused step again.
-        "You are re-invoked ONCE because EVERY action your previous run planned was refused, so nothing happened at all. The refusals are on the timeline, and each one names what to do instead — read them and follow them. " +
+    : strandedResume === "refresh-ended"
+      ? // F39-69: the previous drive acted, and stopped halfway.
+        REFRESH_ENDED_NUDGE
+      : strandedResume === "plan-refused"
+      ? // Ruling 228: this drive did not decide to wait — it was stopped.
+        // Ruling 400: and the refusals are QUOTED here rather than pointed at.
+        // "They are on the timeline, read them" is the instruction ruling 392
+        // retired for agents, committed a level up: live on ax-clone AX-4 the
+        // operator was told exactly this, planned the same malformed
+        // `create_task` option again, and the board recorded a deliberate hold
+        // on a task nobody had decided to hold.
+        "You are re-invoked ONCE because EVERY action your previous run planned was refused, so nothing happened at all. " +
+        (refusedSteps?.length
+          ? `Here is what was refused, in full:\n${refusedSteps
+              .map((r) => `- \`${r.tool}\` — ${r.message}`)
+              .join("\n")}\nEach one names what was wrong with the step. Fix that, or do something else. ` +
+            "Re-planning any of the steps above unchanged produces the identical refusal. "
+          : "The refusals are on the timeline, and each one names what to do instead — read them and follow them. ") +
         "Do NOT plan the same refused action again; it will be refused again and this is the only automatic nudge. Take an action you are actually permitted to take, or, if there genuinely is none, `open_decision_packet` telling the human what you wanted to do, why you cannot, and what you need from them. Do not end this turn with nothing recorded. "
       : "You are re-invoked ONCE because your previous run ended with this auto-advance stage idle: nothing pending, nothing dispatched, no packet. This is the only automatic nudge — nothing re-invokes you again for the same idle stage. " +
         "Either take the advancing action now (transition, dispatch, or deliver per the stage rule below), or, if the goal or a human directive tells you to HOLD this stage, record the hold so it is a decision instead of a stall: `open_decision_packet` asking the human to confirm the hold (offer options to resume, adjust the goal, or keep holding). Do not end this turn with the stage idle and nothing recorded. ";
@@ -4438,7 +4888,12 @@ function stageRule(snapshot: OperatorTaskSnapshot): string {
     // complete list per revision (specialist-run.server.ts), so a later
     // round that introduces a class it could have named earlier is a defect
     // in the REVIEW, and the operator is the one who can see it.
-    "- SAME reviewer, a DIFFERENT objection each round (`consecutiveRequestChanges` \u2265 2 with the earlier findings actually fixed): its verdict is supposed to be the COMPLETE set it would block on for that revision, so a fresh class appearing now is either something the rework introduced, something that was unreachable until an earlier blocker cleared, or a review that is being paid for one finding at a time. You will usually not have to act on this yourself: the SECOND consecutive objection from one reviewer opens a decision packet for the person who owns the task (ruling 237), and a packet pauses your coordination until they answer, so the case reaches you already decided. When you are reading a task where it has NOT (the packet slot was taken, or the project does not let you open packets), the move is to ask the reviewer and require the answer before the next rework: `run_agent` THE REVIEWER with `delivers: false` and that question as its prompt \u2014 \u201cname everything you would still block on across your owned surface, now\u201d. `post_comment` is narration for the humans and reaches no agent: a question you only comment can never be answered, and the turn ends having done nothing. Do not send the deliverer back into another round until the reviewer has answered.\n" +
+    "- SAME reviewer, a DIFFERENT objection each round (`consecutiveRequestChanges` \u2265 2 with the earlier findings actually fixed): its verdict is supposed to be the COMPLETE set it would block on for that revision, so a fresh class appearing now is either something the rework introduced, something that was unreachable until an earlier blocker cleared, or a review that is being paid for one finding at a time. You will usually not have to act on this yourself: the SECOND consecutive objection from one reviewer opens a decision packet for the person who owns the task (ruling 237), and a packet pauses your coordination until they answer, so the case reaches you already decided. When you are reading a task where it has NOT (the packet slot was taken, or the project does not let you open packets), the move is to ask the reviewer and require the answer before the next rework: `run_agent` THE REVIEWER with `delivers: false`, `completeness: true` (ruling 421: the verdict it returns is then recorded as the answer) and that question as its prompt \u2014 \u201cname everything you would still block on across your owned surface, now\u201d. `post_comment` is narration for the humans and reaches no agent: a question you only comment can never be answered, and the turn ends having done nothing. Do not send the deliverer back into another round until the reviewer has answered.\n" +
+    // Ruling 418 (owner): the rulings KB learns from review. Live on ax-clone
+    // the reviewers blocked on git option injection (AX-19), credentials in
+    // status (AX-22) and lost field presence (AX-24), and none became a
+    // convention the next task on the same surfaces would read.
+    "- A reviewer blocked on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it: alongside your one coordination action, `propose_ruling` the convention in the rulings document it belongs to, with the verdict as the evidence. It binds nobody until a person or the controller promotes it, and every later run reads it at once. One convention per class, never one per finding; a class the rulings already cover needs nothing.\n" +
     "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch, offering `resolve_remote_collision` (clear the stale remote branch and its recorded squatting PR, then re-deliver) or `archive_task`, instead of retrying blindly. Never offer `discard_branch` for a push conflict: it destroys the task's LOCAL commits and its authoring is refused while delivered work stands.\n" +
     "- A directive you sent earlier that never became a run is an UNDELIVERED hand-off — the timeline says so (\"did NOT start a run\"), or `liveRuns` is empty with no report after your prompt. Once the blocker is gone (e.g. the stage moved to one the profile works), re-send the prompt yourself; do not wait for a report that can never come.\n" +
     "Take exactly one such action and stop. NEVER end your turn leaving the task at a pre-work or `auto` stage with nothing done and no packet: either advance the boundary, hand off to a specialist, or `open_decision_packet` when a human must scope or unblock it. A pre-work stage that needs no human input must never be left waiting on a human."
@@ -4510,10 +4965,15 @@ function dependenciesInstruction(
   const entries = release?.entries.length ? release.entries.join(", ") : "everything it waited on";
   const by = release?.clearedBy ? `${release.clearedBy} cleared the wait on ${entries}` : `${entries} is done`;
   return (
-    `The work this task waited on has landed: ${by}. Viberr released the task (the list is empty, the hold is cleared) and re-invoked you. ` +
-    // Ruling 291: the old wording told the OPERATOR to want the one
-    // operation its own `update_branch_from_base` text forbids it to ask for.
-    "The base branch has CHANGED since the hold: any specialist you dispatch must start from a fresh read of it (say so in the prompt), and delivered work from before the hold may need the base merged into its branch — `update_branch_from_base`, never a rebase. " +
+    (release?.atBirth
+      ? // F39-65: a chain link minted by the completion it waits on. It has no
+        // work from before a hold, so the refresh advice has nothing to act on.
+        `Everything this task waits on was done before it was created (${entries}), so nothing held it. Viberr cleared the list and invoked you. ` +
+        "No work was delivered before now, so there is nothing to bring up to date: any specialist you dispatch starts from the current base. "
+      : `The work this task waited on has landed: ${by}. Viberr released the task (the list is empty, the hold is cleared) and re-invoked you. ` +
+        // Ruling 291: the old wording told the OPERATOR to want the one
+        // operation its own `update_branch_from_base` text forbids it to ask for.
+        "The base branch has CHANGED since the hold: any specialist you dispatch must start from a fresh read of it (say so in the prompt), and delivered work from before the hold may need the base merged into its branch — `update_branch_from_base`, never a rebase. ") +
     (snapshot.openPacket
       ? "A decision packet is open on this task. If it is a hold packet you opened about this very wait, it is now MOOT: `resolve_decision_packet` it first and say why. "
       : "") +
@@ -4533,8 +4993,192 @@ function dependenciesInstruction(
  */
 const operatorTurnInstruction = (
   ...args: Parameters<typeof operatorTurnDoctrine>
-): string =>
-  `${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+): string => {
+  // Ruling 397: a report a failed run left standing outranks every trigger's
+  // own doctrine, because it changes what the next action should BE. It goes
+  // first for the same reason the capability-gap remedy goes last: every
+  // early-returning branch below is a turn that can be about to re-dispatch
+  // work that is already done.
+  const standing = unfinishedReportInstruction(args[0]);
+  // Ruling 408: and a refusal nothing has answered, for the same reason — it
+  // changes what the next action can BE. After the report, which is about not
+  // re-dispatching finished work; this one is about not re-planning a step
+  // Viberr has already said no to.
+  const refused = unansweredRefusalInstruction(args[0]);
+  // Ruling 415: what a person decided outranks the stage doctrine too, and it
+  // is the field a window cut used to hide. Ruling 413's collisions ride the
+  // same channel, because this instruction is the one BOTH backends read.
+  const decided = humanDecisionsInstruction(args[0]);
+  const colliding = collisionsInstruction(args[0]);
+  // Ruling 424: where the branch refresh is refused, said on every trigger,
+  // because the turn that planned it was usually a report's, which returns
+  // before the stage rules.
+  const unrefreshable = refreshBoundaryInstruction(args[0]);
+  // Ruling 437: whose the open packet is, for the same reason.
+  const notYours = packetAuthorInstruction(args[0]);
+  return `${standing}${refused}${decided}${colliding}${unrefreshable}${notYours}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+};
+
+/**
+ * Ruling 437 (pass 39, F39-60): the open packet is not the operator's to
+ * withdraw.
+ *
+ * The snapshot carried the packet's content "to judge whether the packet is
+ * now moot", and several turn texts say "if it is genuinely moot,
+ * `resolve_decision_packet` it". It never said who raised it, which is all the
+ * refusal reads. Live on ax-clone the operator planned `resolve_packet` on an
+ * agent's question twice in half an hour (AX-28 02:12, AX-31 02:39), each a
+ * "plan was not carried out in full" note.
+ */
+export function packetAuthorInstruction(snapshot: OperatorTaskSnapshot): string {
+  const packet = snapshot.packet;
+  if (!packet || packet.yours) return "";
+  return (
+    `The open decision packet was raised by ${packet.raisedBy}, not by you (\`packet.yours: false\`). ` +
+    "Only a person resolves it, so `resolve_packet` is refused, however moot it looks. Leave it " +
+    "standing, and put anything you would recommend in a comment.\n\n"
+  );
+}
+
+/**
+ * Ruling 424 (pass 39): the branch refresh is not the operator's at the
+ * acceptance stage once the work is approved (ruling 429), said where both
+ * backends read it.
+ *
+ * The doctrine already said so ("never call it once the task stands at the
+ * acceptance stage"), next to "call it before you hand work to a reviewer".
+ * On a board whose reviews run AT the acceptance stage those two collide on
+ * every rework, and the second one won: fifteen refused refreshes across seven
+ * ax-clone tasks, each a "plan was not carried out in full" note on the task's
+ * timeline, each planned on the turn a report came in with `baseBehindBy`
+ * positive. The snapshot now carries the refusal itself; this says what it
+ * means for the plan.
+ */
+export function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): string {
+  if (!snapshot.notRefreshableReason) return "";
+  return (
+    "This task stands at the acceptance stage, where `update_branch_from_base` refuses (`notRefreshableReason`). " +
+    "Never plan it here, whether `baseBehindBy` is positive or a reviewer is about to re-review: " +
+    "the acceptance ceremony brings the branch up to date once and merges in the same step, " +
+    "and a conflict it meets comes back to you as its own trigger. " +
+    // Ruling 429: the refusal stands only while the work is approved.
+    "It lifts the moment a verdict fails or a new revision awaits its verdict: the refresh is " +
+    "yours again then, here as at any stage.\n\n"
+  );
+}
+
+/**
+ * Ruling 415 (F39-41): the decisions a person made on this task.
+ *
+ * Live on ax-clone AX-19 the owner answered round five in their own words,
+ * "I am changing what may block rather than asking again", and the run that
+ * answer set up was refused for quota. The next operator turn read a six-entry
+ * window that started after the answer, and asked the reviewer again. The
+ * newest decision was then "wait for the window", which says nothing about
+ * review, so this cannot tell the operator to follow the newest one only.
+ */
+export function humanDecisionsInstruction(snapshot: OperatorTaskSnapshot): string {
+  const decisions = snapshot.humanDecisions;
+  if (!decisions || decisions.length === 0) return "";
+  return (
+    `A PERSON has decided things on this task: \`humanDecisions\` carries ${decisions.length === 1 ? "that decision" : `all ${decisions.length}`}, ` +
+    "newest first, in their own words, read from the whole timeline. Read every one before you plan. " +
+    "Each stands until a later decision contradicts it, so a newer one about something else (waiting out a " +
+    "usage window, say) does not cancel an older one about how the work or its review is run. " +
+    "Do not plan a move any of them rules out, and do not ask again a question one of them has already answered. " +
+    "Where one set something up that has since failed or finished (a run it dispatched, a window it waited for), " +
+    "carry on from its intent. If one no longer fits what has happened since, open a decision packet that says what changed.\n\n"
+  );
+}
+
+/**
+ * Ruling 413's field, explained where a Codex operator will read it. The first
+ * version explained it only in the Claude toolkit's `read_task` description,
+ * and every operator on the board it was written for runs on Codex.
+ */
+export function collisionsInstruction(snapshot: OperatorTaskSnapshot): string {
+  const collisions = snapshot.collisions;
+  // Ruling 431: the leases that bind now, said wherever leases might be quoted.
+  const leases =
+    snapshot.fileLeases && snapshot.fileLeases.length > 0
+      ? "`fileLeases` is the project's lease list as it binds now. A timeline note that a task " +
+        "leased or holds a file is history: quote only what `fileLeases` lists, and never tell an " +
+        "agent a path is held when the list does not hold it.\n\n"
+      : "";
+  if (!collisions || collisions.length === 0) return leases;
+  return (
+    "`collisions` names the OTHER open review PRs whose diff touches a file this task's PR does, with the shared paths. " +
+    "A merge on either side puts the other into conflict, so before you deliver, refresh a branch or dispatch work into " +
+    "a shared file, read it and say in your directive which files another task is holding. " +
+    // Ruling 417: the move a collision now has.
+    "If this task should land first and must change a shared file, lease exactly those paths to it " +
+    "with `lease_files`: first come, first served, and the other task's next delivery that changes them " +
+    "is refused until this one merges. Never lease a path this task does not need. " +
+    // Ruling 426: the lease that parked ax-clone's critical path.
+    "When other work waits on the task whose PR you would park, the lease is refused: which of the two " +
+    "lands first is then a person's call, so open a decision packet that names both tasks and what waits " +
+    "on each, rather than making this task wait or keeping its work off the file without saying so.\n\n" +
+    leases
+  );
+}
+
+/**
+ * Ruling 408 (F39-35): what to say when Viberr refused part of the last plan.
+ *
+ * Ruling 400 settled the shape for a WHOLLY refused plan — quote the refusals,
+ * do not send the reader to the timeline. This is the same sentence for the
+ * commoner case, a plan that did some of its work and was refused the rest,
+ * which recorded nothing and taught the next drive nothing. Live on ax-clone
+ * AX-18 that cost a second identical refusal fourteen seconds later, and the
+ * pair of them tripped the two-in-a-row hold.
+ */
+function unansweredRefusalInstruction(snapshot: OperatorTaskSnapshot): string {
+  const refusal = snapshot.unansweredRefusal;
+  if (!refusal) return "";
+  return (
+    `READ THIS FIRST. Your last plan was refused in part, at ${refusal.at}, and nothing has been ` +
+    "done on this task since. Here is that note, in full:\n\n" +
+    `${refusal.text}\n\n` +
+    "Each entry names what was wrong with the step. Do NOT plan the same refused action again: " +
+    "it will be refused the same way, and two drives that change nothing are recorded as a hold on the stage. " +
+    "Do the thing a refusal names, change what made the step impossible, or open a decision packet saying " +
+    "which refusal you cannot get past and why.\n\n"
+  );
+}
+
+/**
+ * Ruling 397 (F39-24): what to say when Viberr recorded a run as failed and the
+ * same agent had posted a report moments before.
+ *
+ * Owner's call (2026-09-22): the operator decides, rather than a human picking
+ * a new packet option. So this is written as a decision with both arms and the
+ * one fact that settles it — the failure note's "nothing was delivered" is
+ * about the PULL REQUEST, and the operator reads it as being about the work.
+ *
+ * Live on ax-clone AX-2 the two events were 24 milliseconds apart: "Done on
+ * branch `ax-2`, commit `3e0396ab` … `make gate` and `go test -race ./...`
+ * pass", then "The Implementation agent run did not complete … Nothing was
+ * delivered to a pull request." 1,531 committed lines sat in the workspace and
+ * the recommended recovery was to build them again.
+ */
+function unfinishedReportInstruction(snapshot: OperatorTaskSnapshot): string {
+  const standing = snapshot.unfinishedReport;
+  if (!standing) return "";
+  return (
+    `READ THIS FIRST. Viberr recorded ${standing.actor}'s run as failed at ${standing.failedAt}, ` +
+    `and that same agent posted a report at ${standing.reportedAt}, moments before. Both are on the timeline. ` +
+    "Viberr could not tell whether the run finished, so it recorded a failure; the report is the agent's own account of what it did. " +
+    // Ruling 415: an operator that cannot call tools is handed the report
+    // itself; the address is for one that can.
+    (standing.text
+      ? `Read the report before you dispatch anything. Here it is:\n\n${standing.text}\n\n`
+      : "Read the report (`read_timeline_entry` with that stamp returns it whole) before you dispatch anything. ") +
+    "The failure note's \"nothing was delivered to a pull request\" is about the PULL REQUEST and says nothing about the workspace: " +
+    "a commit the agent made is in the tree whether or not Viberr called the run a failure. " +
+    "If the report says the work is done, committed and its gates pass, continue from it — deliver it, or take the next stage step — rather than running the agent again. " +
+    "Re-dispatch only when the report is plainly partial, and when you do, say in the prompt what is already in the tree so it is not built twice.\n\n"
+  );
+}
 
 /** Codex cannot call the in-process tools, so it returns a constrained plan. */
 
@@ -4549,13 +5193,16 @@ export function buildCodexOperatorPrompt(
   resolvedOption?: ResolvedPacketOption,
   strandedResume?: StrandedNudge,
   dependencyRelease?: DependencyReleasePayload,
+  /** Ruling 400: quoted into a plan-refused retry's instruction. */
+  refusedSteps?: { tool: string; message: string }[],
 ): string {
   return (
     "# Task snapshot\n\n```json\n" +
     JSON.stringify(snapshot, null, 2) +
-    "\n```" + agentReportBlock(trigger, agentReply) +
+    "\n```" + agentReportBlock(trigger, agentReply, { toolless: true }) +
     "\n\n# Your decision\n\n" +
     "You cannot call tools. Return the schema-constrained action plan that the server should execute. Use only profile ids and stage ids from the snapshot. " +
+    CODEX_PLAN_WHOLE_TURN +
     "Select profiles by `desc` and `capabilities`, not their names.\n\n" +
     operatorTurnInstruction(
       snapshot,
@@ -4567,8 +5214,9 @@ export function buildCodexOperatorPrompt(
       resolvedOption,
       strandedResume,
       dependencyRelease,
+      refusedSteps,
     ) +
-    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal — the deliverable plus its acceptance criteria — because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes; `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
+    "\n\nWhen you `open_packet`, author 2–4 concrete `packetOptions` (each a stable `kind` + a short `title`, exactly one `recommended`) tailored to THIS decision — e.g. `edit_goal` to have a human refine the goal (give it `goalDraft`: the proposed goal text itself, written AS a goal — the deliverable plus its acceptance criteria — because the goal editor opens with it when the human confirms; without one the editor prefills the option's title and detail verbatim, so never phrase them as an instruction to the human), `retry_other_backend` (leave its `backend` null unless you mean a specific one — the server re-runs on the OTHER backend than the one that failed), `accept_completion`, `block_on_policy`, `archive_task` to archive the task (with `deleteBranch: true` to also delete its remote branch), `discard_branch` to delete the task's LOCAL workspace branch when it was never pushed to GitHub (a no-change task whose branch carries no commits) — the human's confirm executes the deletion, nothing on the remote changes; `question_reviewer` to put ONE question to a reviewer with no rework behind it (REQUIRED: its `profileId`, from `reviewers[].profileId` — an option that names no reviewer is refused), which is the move when a reviewer has blocked twice and you want its complete blocking set rather than another round of one finding at a time, `resolve_remote_collision` when the delivery push-conflicted because an UNRELATED remote branch (usually with an unowned PR) squats on this task's branch name — the human's confirm closes that PR, deletes the stale remote branch and re-delivers this task's local work (never author `discard_branch` for that shape: it is refused on a task with a delivered revision or an occupied branch name, because it would destroy the local delivery instead). Leave `packetOptions` null only when the type's generic default set genuinely fits. " +
     "Use `reasoning` for a concise human-visible reply only when the actions do not already narrate the turn; otherwise use an empty string. " +
     "Give governed actions a short `reason`. Return only the JSON plan."
   );
@@ -4586,6 +5234,8 @@ export function buildOperatorTurnPrompt(
   resolvedOption?: ResolvedPacketOption,
   strandedResume?: StrandedNudge,
   dependencyRelease?: DependencyReleasePayload,
+  /** Ruling 400: quoted into a plan-refused retry's instruction. */
+  refusedSteps?: { tool: string; message: string }[],
 ): string {
   return (
     `You are operating ${snapshot.key}, "${snapshot.title}", at stage "${snapshot.stageName}".\n` +
@@ -4602,6 +5252,7 @@ export function buildOperatorTurnPrompt(
       resolvedOption,
       strandedResume,
       dependencyRelease,
+      refusedSteps,
     )
   );
 }

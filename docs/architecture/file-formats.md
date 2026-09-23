@@ -273,10 +273,21 @@ workRevision:                     # the immutable revision under review, or null
                                   # `revisionLeftWorkspace` reads it (never
                                   # `github.commits`, which the workspace reconcile
                                   # writes from the local clone)
-verdicts:                         # per-engagement, each bound to a revision
+deliveredAt: null                 # ruling 388: when a DELIVERER last saved files
+                                  # into attachments/ — this task's delivery when
+                                  # the deliverable is not a commit (a report, a
+                                  # design note, an audit). It is what a review
+                                  # binds to in that case, and a later save moves
+                                  # it, which stales the old verdict exactly as a
+                                  # new revision does. Only the delivering
+                                  # engagement sets it: a reviewer's own captures
+                                  # are evidence, and a person's upload is an
+                                  # input (ruling 379), not the work.
+verdicts:                         # per-engagement, each bound to a SUBJECT
   - profileId: reviewer
-    revisionId: rev_9f2c
-    headSha: a91f7c2e…
+    revisionId: rev_9f2c          # ruling 388: the workRevision.id, or
+                                  # files:<deliveredAt> for a non-commit delivery
+    headSha: a91f7c2e…            # absent when the subject is not a commit
     result: approve               # approve | request_changes
     reason: Scope matches the goal.
     at: 2026-07-04T06:52:00.000Z
@@ -489,7 +500,7 @@ Notes:
   (or none) and keeps the legacy keys verbatim as unknown fields; nothing reads them.
   Engagements are created by the dispatch itself — write `engagements` directly only
   when hand-authoring a required reviewer (`delivers: false, verdictCapable: true`).
-- `validation`, `workRevision` and `verdicts` are a set. `validation` is a derived cache
+- `validation`, `workRevision`, `deliveredAt` and `verdicts` are a set. `validation` is a derived cache
   recomputed from the other two plus the required-reviewer set on every write; do not
   hand-edit it as a source of truth. A verdict names the `revisionId` it judged, so a new
   revision automatically staleness-expires every prior verdict. A `kind: discarded`
@@ -517,7 +528,12 @@ Notes:
   (ISO or null) — advisory metadata that reaches the operator only (R26-1) and is
   searchable on the board and in ⌘K; `acceptance: forced` when an admin force-accepted;
   `goalRef: { goalId, linkIndex }` back-reference to a chained goal; `engagements[].pinnedBackend`
-  (set by a `retry_other_backend` resolution so the switch sticks, F27-B1); `pr.checks`,
+  (set by a `retry_other_backend` resolution so the switch sticks, F27-B1);
+  `engagements[].question: { kind: completeness, runId, at }` (ruling 421: the run that is
+  putting the completeness question to this reviewer, consumed by the verdict that run returns);
+  `verdicts[].reviews` (ruling 416(b): same-result reviews of the revision, fought or not) and
+  `verdicts[].answers: completeness` (ruling 421: the reviewer answered the completeness question
+  on this revision in the current same-result streak); `pr.checks`,
   `pr.review`, `pr.mergeable`, `pr.headSha`, `pr.revisionDrift`, `pr.unpushedRevision`,
   `pr.closure` (reconciler cache, shown above; the closure's `answered` is the packet
   resolution's); each `schedules[]`

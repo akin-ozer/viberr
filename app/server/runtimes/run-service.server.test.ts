@@ -17,6 +17,7 @@ import {
   listRunsForTask,
   MODEL_SUBSTITUTED_TAG,
   noteCompletionEffectsLost,
+  registerRunAnswered,
   registerRunCompletion,
   repoWriteWithheldFromDenylist,
   reserveRun,
@@ -127,6 +128,16 @@ function startTestRun(
       ? store.users.arda.id
       : input.credentialUserId;
   return startRun(db, { ...input, agentProfileId, credentialUserId });
+}
+
+/** The `event_msg` payload fields the Codex rollout reader looks at (ruling 414). */
+interface RolloutEventPayload {
+  type: string;
+  turn_id?: string;
+  item?: { type: string; id: string };
+  info?: {
+    last_token_usage: { input_tokens: number; cached_input_tokens: number; total_tokens: number };
+  };
 }
 
 describe("run-service lifecycle", () => {
@@ -1183,6 +1194,73 @@ describe("resumeRun — continuity recovery", () => {
         }),
     };
   }
+
+  it("ruling 434: a Codex rollout whose head is torn starts a fresh session, not a resume that fails", async () => {
+    /**
+     * Live on AX-5 at 01:49: the resume went to the CLI, which answered "does
+     * not start with session metadata", and Viberr called it a failed run
+     * ("Review its authentication and runtime configuration"). The dead
+     * session was never marked, so every recovery option resumed it again.
+     *
+     * CANARY: treat `damaged` as `present` in `resumeRun`.
+     */
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = (await import("node:path")).default;
+    const { userBackendHome } = await import("./user-homes.server");
+    const sid = "01a0cbdd-c151-75b2-a067-e047586b9a72";
+    const specs: RunSpec[] = [];
+    const capture: RuntimeAdapter = {
+      backend: "codex",
+      start(spec, cb) {
+        specs.push(spec);
+        cb.onExit({ outcome: "finished", effectiveBackend: "codex", sessionId: sid });
+        return { runId: spec.runId, interrupt() {} };
+      },
+    };
+    configureRunServiceForTests({ claude: capture, codex: capture });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist",
+      kind: "primary", backend: "codex", model: "m", agentName: "dev",
+      agentProfileId: "dev", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    const dir = path.join(
+      userBackendHome(store.users.arda.id, "codex", store.dataRoot),
+      "sessions", "2026", "09", "23",
+    );
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `rollout-2026-09-23T01-25-02-${sid}.jsonl`),
+      [
+        JSON.stringify({ ordinal: 1, type: "event_msg", payload: { type: "task_started" } }),
+        'e_roots":["/data/projects/ax-clone/tasks/AX-5/workspace/ax-clone"]}}',
+      ].join("\n") + "\n",
+    );
+
+    const resumed = await resumeRun(store.db, {
+      runId,
+      prompt: "follow up",
+      credentialUserId: store.users.arda.id,
+      dataRoot: store.dataRoot,
+    });
+    await settle();
+
+    expect(resumed.continuityLossReason).toBe("transcript_damaged");
+    expect(specs.find((s) => s.runId === resumed.runId)!.resumeSessionId).toBeNull();
+    // Marked like a vanished session, so no later dispatch selects it again.
+    const marker = listRunLines(store.db, runId).find(
+      (l) => l.display.tag === "run·session_missing",
+    );
+    expect(marker!.display.text).toContain("its provider transcript is damaged");
+    const { runFailureReason } = await import("~/server/tasks/agent-reply.server");
+    expect(runFailureReason(store.db, runId)?.kind).toBe("session_missing");
+    const timeline = readTaskFile({
+      projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot,
+    })!.parsed.timeline;
+    const note = timeline.find((e) => e.text.includes("continuity was lost"));
+    expect(note?.text).toContain("damaged provider transcript");
+    expect(note?.text).not.toContain("no longer has a provider transcript");
+  });
 
   it("retries the turn as a FRESH canonical-anchored run when the transcript is gone", async () => {
     const { specs, firstRunId, resume } = await startThenResume();
@@ -2558,6 +2636,46 @@ describe("compaction at completion (ruling 376)", () => {
     expect(note?.text).toContain("from 120k to 18k tokens");
   });
 
+  it("U39-30: tells a caller the answer is written before it compacts, and only then", async () => {
+    // Live on ax-clone a controller reply sat behind a 27-second completion
+    // compaction. CANARY: drop the `answered()` call and nothing fires.
+    const before = compactedRunSpecs().length;
+    let open!: () => void;
+    queueFakeRun({ ...finished("sess-answered", 120_000), gate: new Promise<void>((r) => (open = r)) });
+    queueFakeCompaction("claude", { compacted: true, preTokens: 120_000, postTokens: 18_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    const order: string[] = [];
+    registerRunAnswered(runId, () => {
+      order.push(`answered:${compactedRunSpecs().length - before}`);
+      // The answer is already in the run's lines.
+      expect(JSON.stringify(listRunLines(store.db, runId))).toContain("read a lot");
+    });
+    registerRunCompletion(runId, () => order.push(`completed:${compactedRunSpecs().length - before}`));
+    open();
+    await settle();
+    await settle();
+    expect(order).toEqual(["answered:0", "completed:1"]);
+  });
+
+  it("U39-30: a run that is not compacted never fires the answered callback", async () => {
+    let open!: () => void;
+    queueFakeRun({ ...finished("sess-small-answer", 60_000), gate: new Promise<void>((r) => (open = r)) });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    const order: string[] = [];
+    registerRunAnswered(runId, () => order.push("answered"));
+    registerRunCompletion(runId, () => order.push("completed"));
+    open();
+    await settle();
+    await settle();
+    expect(order).toEqual(["completed"]);
+  });
+
   it("leaves a run under the threshold alone", async () => {
     const before = compactedRunSpecs().length;
     queueFakeRun(finished("sess-small", 60_000));
@@ -2659,6 +2777,82 @@ describe("compaction at completion (ruling 376)", () => {
     const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.subjectId === runId);
     expect(audit).toHaveLength(1);
     expect(audit[0]?.details).toMatchObject({ trigger: "completion", backend: "codex", preTokens: 123_508, postTokens: 6_914 });
+  });
+
+  /**
+   * Ruling 414 (F39-40). The CLI writes ONE compaction as two spellings with
+   * its own size line between them. Live on ax-clone, every one of the 69
+   * completion compactions left TWO timeline notes and two audit rows 2-11 ms
+   * apart: "Viberr summarized ... at the end of the run" and "the provider
+   * summarized ... (auto)", the second a compaction that never happened. Both
+   * printed the phantom's missing size ("to 0k tokens", then "to a summary")
+   * while the rollout had measured the real one.
+   */
+  it("on Codex one completion compaction is ONE note and ONE audit row, with the size the rollout measured", async () => {
+    const { writeFileSync, mkdirSync, appendFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const sid = "01a0ca89-0673-71c3-93c8-208b9564c414";
+    const dir = path.join(store.dataRoot, "runtimes", "users", store.users.arda.id, "codex-home", "sessions", "2026", "09", "22");
+    mkdirSync(dir, { recursive: true });
+    const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+    const ev = (ts: string, payload: RolloutEventPayload) =>
+      JSON.stringify({ timestamp: ts, type: "event_msg", payload });
+    const usage = (input: number, total: number) => ({
+      type: "token_count",
+      info: { last_token_usage: { input_tokens: input, cached_input_tokens: 0, total_tokens: total } },
+    });
+    const rollout = path.join(dir, `rollout-2026-09-22T19-12-52-${sid}.jsonl`);
+    writeFileSync(
+      rollout,
+      [
+        JSON.stringify({ timestamp: at(60_000), type: "session_meta", payload: { id: sid } }),
+        ev(at(60_100), usage(190_309, 191_202)),
+      ].join("\n") + "\n",
+    );
+    queueFakeRun({
+      ...finished(sid, 190_309),
+      backend: "codex",
+      lines: [
+        { t: "1", ev: "init", tag: "thread.started", text: "thread" },
+        { t: "2", ev: "result", tag: "turn.completed", text: "done", stats: { dur: 100, api: 90, turns: 1, cost: 0, in: 190_309, cached: 0, out: 200 } },
+      ],
+      extraFacts: [undefined, undefined],
+    });
+    // The app-server compacts the thread and the CLI writes exactly what it
+    // wrote for AX-24 at 19:28:58.
+    queueFakeCompaction("codex", { compacted: true, preTokens: null, postTokens: null }, () => {
+      appendFileSync(
+        rollout,
+        [
+          JSON.stringify({ timestamp: at(60_300), type: "compacted", payload: { message: "", replacement_history: [] } }),
+          ev(at(60_301), { type: "thread_settings_applied" }),
+          ev(at(60_302), usage(0, 9_083)),
+          ev(at(60_303), { type: "item_completed", item: { type: "ContextCompaction", id: "c1" } }),
+        ].join("\n") + "\n",
+      );
+    });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "codex", model: "gpt-5.6-luna", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const run = getRun(store.db, runId)!;
+    expect(run.compactions).toBe(1);
+    expect(run.last_prompt_tokens).toBe(9_083);
+    const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.subjectId === runId);
+    // Canary: the phantom second event is a second row, trigger "auto".
+    expect(audit.map((e) => e.details)).toEqual([
+      expect.objectContaining({ trigger: "completion", preTokens: 190_309, postTokens: 9_083 }),
+    ]);
+    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    const notes = task.parsed.timeline.filter(
+      (e) => e.type === "note" && e.title === "Context compacted" && e.text.includes("190k"),
+    );
+    expect(notes.map((n) => n.text)).toEqual([expect.stringContaining("at the end of the run")]);
+    expect(notes[0]!.text).toContain("from 190k to 9k tokens");
+    expect(notes[0]!.text).not.toContain("(auto)");
   });
 
   it("a refused compaction leaves the run finished with its size, and says why on the log", async () => {

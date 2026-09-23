@@ -468,14 +468,18 @@ export async function reconcileWorkspaceDelivery(
       const headSha = headRes.ok ? headRes.stdout.trim() : "";
       const treeSha = treeRes.ok ? treeRes.stdout.trim() || null : null;
       if (headSha) {
-        const { revision, changed } = nextWorkRevision(fm.workRevision, {
-          id: newId("rev"),
-          headSha,
-          treeSha,
-          branch: validBranch,
-          sourceProfileId: input.profileId ?? null,
-          createdAt: new Date().toISOString(),
-        });
+        const { revision, changed } = nextWorkRevision(
+          fm.workRevision,
+          {
+            id: newId("rev"),
+            headSha,
+            treeSha,
+            branch: validBranch,
+            sourceProfileId: input.profileId ?? null,
+            createdAt: new Date().toISOString(),
+          },
+          fm.baseRefreshes,
+        );
         if (changed) workRevisionPatch = revision;
       }
     }
@@ -763,6 +767,27 @@ export async function reconcileWorkspaceDelivery(
             reconciledPr = detected;
           }
         }
+      } else if (workRevisionPatch && fm.pr?.unpushedRevision) {
+        // Ruling 445: the PR could not be read here (a workspace with no
+        // GitHub credential skips `gh`), and this reconcile minted a revision.
+        // The recorded "not on the PR" line named the one it superseded until
+        // the GitHub pass, five minutes on. Live on ax-clone AX-5 the review
+        // queue said "PR #24 does not carry the delivered revision 509c0d1"
+        // eleven seconds after `b82bb93` was minted. Re-measured against the
+        // PR head on record, the line names the revision that now stands, or
+        // clears when that head already carries it.
+        const unpushed = await classifyUnpushedRevision(exec, repoDir, {
+          revisionSha: workRevisionPatch.headSha,
+          prHeadSha: fm.pr.headSha ?? null,
+          prState: fm.pr.state,
+          verified: workRevisionPatch.kind === "verified",
+        });
+        const remeasured: PrRef = { ...fm.pr };
+        if (unpushed) remeasured.unpushedRevision = unpushed;
+        else delete remeasured.unpushedRevision;
+        await patchTaskFrontmatter(ref, { pr: remeasured });
+        rebuildPath(db, resolveTaskFilePath(ref), { dataRoot });
+        reconciledPr = remeasured;
       }
     }
 

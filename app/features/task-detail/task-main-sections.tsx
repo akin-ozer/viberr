@@ -5,6 +5,7 @@ import type {
   TaskDetail,
 } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
+import type { TaskLinks } from "~/shared/task-key-links";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { Pill, ReadinessPill, ValidationPill, validationQuiet } from "~/ui/pill";
@@ -92,6 +93,7 @@ export function TaskHero({
   editGoalSignal = 0,
   editGoalDraft = null,
   pendingGoalDraft = null,
+  taskLinks,
 }: {
   task: TaskDetail;
   stage: TaskDetail["stages"][number] | undefined;
@@ -113,6 +115,8 @@ export function TaskHero({
    *  read "Goal updated" over a packet that still waits. Null when no goal
    *  edit is pending (the editor opens with the current goal). */
   pendingGoalDraft?: string | null;
+  /** U39-31: the other tasks the goal names, key to path. */
+  taskLinks?: TaskLinks;
 }) {
   const goalFetcher = useFetcher<ActionResult>();
   const csrf = useCsrfToken();
@@ -257,7 +261,8 @@ export function TaskHero({
         {task.goalRef && (
           <Link
             className="pill agent sm hero-goal-chip"
-            to={`/projects/${task.projectSlug}/controller`}
+            // Ruling 419(h): straight to THIS chain, opened, on the rail.
+            to={`/projects/${task.projectSlug}/controller#${task.goalRef.goalId}`}
           >
             <Icon name="flag" />
             {task.goalRef.goalId} · link {task.goalRef.linkIndex}
@@ -274,7 +279,7 @@ export function TaskHero({
             to={
               entry.taskKey
                 ? `/projects/${task.projectSlug}/tasks/${entry.taskKey}`
-                : `/projects/${task.projectSlug}/controller`
+                : `/projects/${task.projectSlug}/controller${entry.goalId ? `#${entry.goalId}` : ""}`
             }
             title={`Waits on ${entry.label} (${entry.state})`}
           >
@@ -370,7 +375,7 @@ export function TaskHero({
           {/* Pass 30 (owner-approved): the goal renders as markdown like every
               timeline comment — literal ** and backticks read as unfinished.
               task.md on disk stays canonical; the editor still edits raw text. */}
-          <Markdown text={task.goal} />
+          <Markdown text={task.goal} {...(taskLinks ? { taskLinks } : {})} />
           {canEditGoal && (
             <button
               type="button"

@@ -35,6 +35,7 @@ const FULL: InsightsSummary = {
         warmStarts: 5,
         warmRate: 5 / 18,
         writeTokens: 1_900_000,
+        writeReportingRuns: 20,
         readTokens: 95_000_000,
         writeReadRatio: 0.02,
         largeFirstWrites: 1,
@@ -47,6 +48,7 @@ const FULL: InsightsSummary = {
         warmStarts: 0,
         warmRate: null,
         writeTokens: 0,
+        writeReportingRuns: 7,
         readTokens: 0,
         writeReadRatio: null,
         largeFirstWrites: 0,
@@ -61,6 +63,7 @@ const FULL: InsightsSummary = {
         warmStarts: 5,
         warmRate: 5 / 18,
         writeTokens: 1_900_000,
+        writeReportingRuns: 20,
         readTokens: 95_000_000,
         writeReadRatio: 0.02,
         largeFirstWrites: 1,
@@ -764,5 +767,51 @@ describe("the prompt-cache panel (ruling 369)", () => {
     expect(panel.querySelector('[data-cache-row="by credential kind:login"]')).not.toBeNull();
     // The line the large-write column counts against is named.
     expect(panel.textContent).toContain("above 100.0K");
+  });
+});
+
+/**
+ * Ruling 395 (F39-22): the write column obeys the rule the panel's own
+ * docstring already states. Live it read `WRITTEN 0 · READ 45.0M · 0.000` for
+ * 21 Codex runs, because Codex declares `cache_write_input_tokens` and answers
+ * 0 for it every single time.
+ */
+describe("the prompt-cache panel: an unreported write (ruling 395)", () => {
+  const UNREPORTED: InsightsSummary = {
+    ...FULL,
+    cache: {
+      ...FULL.cache,
+      byKind: [
+        {
+          label: "primary",
+          runs: 21,
+          firstCalls: 21,
+          warmStarts: 3,
+          warmRate: 3 / 21,
+          writeTokens: null,
+          writeReportingRuns: 0,
+          readTokens: 45_000_000,
+          writeReadRatio: null,
+          largeFirstWrites: 0,
+          ttl: { fiveMinute: 0, oneHour: 0, mixed: 0 },
+        },
+      ],
+      byCredentialKind: [],
+    },
+  };
+
+  it("says not reported, empties the data attribute, and keeps the ratio n/a", () => {
+    const { container } = renderPage(UNREPORTED);
+    const panel = container.querySelector('[data-comment-anchor="prompt-cache"]')!;
+    const primary = panel.querySelector('[data-cache-row="by run kind:primary"]')!;
+    // CANARY: print `fmtTokens(r.writeTokens ?? 0)` here and the cell reads "0"
+    // beside a 45.0M read, which is what the live instance showed.
+    expect(primary.querySelector("[data-write]")?.textContent).toBe("not reported");
+    expect(primary.querySelector("[data-write]")?.getAttribute("data-write")).toBe("");
+    expect(primary.querySelector("[data-write-read]")?.textContent).toBe("n/a");
+    // The read beside it is a real figure and stays one.
+    expect(primary.querySelector("[data-read]")?.textContent).toBe("45.0M");
+    // And the caption says which backends answer the question at all.
+    expect(panel.textContent).toContain("Codex reports neither");
   });
 });

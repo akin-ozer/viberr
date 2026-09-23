@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import { AttachmentLightboxProvider } from "./attachment-lightbox";
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import type { TaskLinks } from "~/shared/task-key-links";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -25,6 +26,7 @@ import {
 } from "./operator-recommendations";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { AttachmentsPanel } from "./attachments-panel";
+import { MoveBackConfirm } from "./move-back-confirm";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
@@ -126,6 +128,7 @@ export function TaskDetailPage({
   me,
   myRole,
   mentionables,
+  taskLinks = {},
   recommendations,
   schedules,
   queuedQuestions = [],
@@ -135,6 +138,7 @@ export function TaskDetailPage({
   acceptance,
   githubHost,
   githubReconciledAt = null,
+  baseBehindBy = null,
   githubCheckedAt = null,
   workRevisionSha = null,
   noChanges = false,
@@ -190,6 +194,8 @@ export function TaskDetailPage({
   myRole: string | null;
   /** @-mention autocomplete directory for the comment composer (loader). */
   mentionables: Mentionables;
+  /** U39-31: the other tasks the goal and the timeline name, key to path. */
+  taskLinks?: TaskLinks;
   /** Pending operator recommendation cards (loader — from the task file). */
   recommendations: RecommendationView[];
   /** Pending scheduled runs (O-3 generalized, loader — from the task file).
@@ -215,6 +221,9 @@ export function TaskDetailPage({
   /** UI-57: newest `github.reconcile` for this task (freshness cue) — the last
    *  pass that CHANGED something, see the prop docs on `GithubTrace`. */
   githubReconciledAt?: string | null;
+  /** U39-32: base commits the branch lacked at the reconciler's last
+   *  compare; null when never compared. */
+  baseBehindBy?: number | null;
   /** F19-22: newest COMPLETED reconcile pass for this task (`github.reconcile.task`
    *  audit row). The panel needs both — one number could never say both "the
    *  poller is alive" and "nothing has moved since Tuesday". */
@@ -370,6 +379,17 @@ export function TaskDetailPage({
     acceptFetcher.submit(fd, { method: "post" });
   };
 
+  // Ruling 449 (O39-c): the dialog's "bring it up to date and re-review
+  // first". Rides the accept fetcher, so the dialog's busy state and the
+  // toast are the acceptance's own.
+  const submitRefreshFirst = () => {
+    if (acceptBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "refresh-and-review");
+    acceptFetcher.submit(fd, { method: "post" });
+  };
+
   // R15-2 safety net (b): manual delivery from the GitHub panel.
   const deliverFetcher = useFetcher<ActionResult>();
   useActionFeedback(deliverFetcher);
@@ -424,8 +444,26 @@ export function TaskDetailPage({
     acceptanceHasAuthority: acceptance.hasAuthority,
     acceptanceTerminallyBlocked: acceptance.terminallyBlocked,
   });
-  const { shownLogSel, selectLog, onViewLogs, onAgentLog } =
+  const { shownLogSel, selectLog, onViewLogs, onAgentLog, consoleOpen } =
     useLogSelection(runtime);
+  /** F39: is any run of this task streaming? While one is, its console is
+   *  disclosed on the run card; otherwise the settled-runs panel holds it. */
+  const liveRun = runtime.some((r) => r.state === "running");
+  /** ONE console element for both positions, so the props cannot drift. */
+  const agentLogs = (
+    <AgentLogsPanel
+      runtime={runtime}
+      sel={shownLogSel}
+      onSel={selectLog}
+      linesByThread={linesByThread}
+      {...(onRetryBackend ? { onRetryBackend } : {})}
+      retryBackends={retryBackends}
+      retrying={runBusy}
+      streamError={streamError}
+      olderByThread={olderByThread}
+      onLoadOlder={loadOlder}
+    />
+  );
 
   const onOwner = (action: OwnerAction, member?: TaskMemberView) => {
     if (ownerBusy) return;
@@ -623,12 +661,16 @@ export function TaskDetailPage({
     // Ruling 88: set ONLY for the stage-move-into-Done case, which the server
     // reads as an acceptance and gates on the disclosure like any other accept.
     disclosure?: AcceptanceDisclosure,
+    // Ruling 381: WHY, for a move backward. The server requires it there and
+    // refuses without it, so the dialog below collects it first.
+    reason?: string,
   ) => {
     if (transitionBusy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
     fd.set("intent", "transition");
     fd.set("to", toStageId);
+    if (reason) fd.set("reason", reason);
     if (disclosure) {
       for (const [field, value] of Object.entries(
         acceptanceDisclosureFields(disclosure),
@@ -646,8 +688,17 @@ export function TaskDetailPage({
   // last surface where dropping a card on Done merged silently. Same ceremony,
   // and the confirmed click still posts `transition` (the server's own
   // stage-move contract writes the acceptance from there).
+  /** Ruling 381: the move the operator has to act on, so it carries its reason. */
+  const [confirmMoveBack, setConfirmMoveBack] = useState<string | null>(null);
+  const stageIndexOf = (id: string) => task.stages.findIndex((s) => s.id === id);
   const onTransition = (toStageId: string) => {
     if (transitionBusy) return;
+    const fromIdx = stageIndexOf(task.stage);
+    const toIdx = stageIndexOf(toStageId);
+    if (toIdx >= 0 && fromIdx >= 0 && toIdx < fromIdx) {
+      setConfirmMoveBack(toStageId);
+      return;
+    }
     if (toStageId === terminalStageId && task.stage !== terminalStageId) {
       setConfirmAccept({
         mode: "stage-move",
@@ -718,6 +769,7 @@ export function TaskDetailPage({
           // opens with the SAME draft the decided card shows (one mapping
           // field), not the goal the decision asked to replace.
           pendingGoalDraft={task.packet?.goalDraft ?? null}
+          taskLinks={taskLinks}
         />
       </div>
 
@@ -836,6 +888,8 @@ export function TaskDetailPage({
             onInterrupt={(id) => setConfirmInterrupt(id)}
             canInterrupt={canInterrupt}
             interrupting={runBusy}
+            consoleOpen={consoleOpen}
+            console={runsVisible ? agentLogs : null}
           />
         ) : null}
 
@@ -891,20 +945,9 @@ export function TaskDetailPage({
           schedules={schedules}
         />
 
-        {runtime.length > 0 && runsVisible ? (
-          <AgentLogsPanel
-            runtime={runtime}
-            sel={shownLogSel}
-            onSel={selectLog}
-            linesByThread={linesByThread}
-            {...(onRetryBackend ? { onRetryBackend } : {})}
-            retryBackends={retryBackends}
-            retrying={runBusy}
-            streamError={streamError}
-            olderByThread={olderByThread}
-            onLoadOlder={loadOlder}
-          />
-        ) : null}
+        {/* The archive. While a run streams, its console is disclosed on the
+            run card above instead — one console either way, never two. */}
+        {runtime.length > 0 && runsVisible && !liveRun ? agentLogs : null}
         {/* UI-30: raw console output, the `{ } raw` wire envelopes and the
             provider session id are project-member material (the two routes that
             serve the same data require membership). Say so rather than render an
@@ -934,6 +977,10 @@ export function TaskDetailPage({
             browserExpected={deployedSpecialists.some(
               (s) => s.capabilities?.browser,
             )}
+            // F39-6: a contributor and above may attach a file, and an
+            // archived task takes no edits (the server refuses either way —
+            // this is what stops a person meeting the refusal).
+            canAttach={roleCan(role, "attach-file") && !archived}
           />
         ) : null}
 
@@ -945,6 +992,7 @@ export function TaskDetailPage({
           tlDefault={tlDefault}
           ask={ask}
           mentionables={mentionables}
+          taskLinks={taskLinks}
           runPrincipal={runPrincipal}
           onAgentLog={onAgentLog}
           taskClosed={taskClosed}
@@ -963,10 +1011,29 @@ export function TaskDetailPage({
         />
       </div>
 
+      {confirmMoveBack && (
+        <MoveBackConfirm
+          taskKey={task.key}
+          taskTitle={task.title}
+          fromStageName={stage?.name ?? task.stage}
+          toStageName={
+            task.stages.find((s) => s.id === confirmMoveBack)?.name ??
+            confirmMoveBack
+          }
+          busy={transitionBusy}
+          onCancel={() => setConfirmMoveBack(null)}
+          onConfirm={(reason) => {
+            const to = confirmMoveBack;
+            setConfirmMoveBack(null);
+            submitTransition(to, undefined, reason);
+          }}
+        />
+      )}
       {confirmAccept && (
         <AcceptConfirm
           task={task}
           workRevisionSha={workRevisionSha}
+          baseBehindBy={baseBehindBy}
           noChanges={noChanges}
           // F32-11: the open decision this acceptance withdraws, if any.
           // Ruling 164 + F19-7, applied to the sibling row: a PACKET resolution
@@ -1003,6 +1070,16 @@ export function TaskDetailPage({
                 }
               : { mode: confirmAccept.mode }
           }
+          // Ruling 393 (F39-20): the gate LIST, for the force path only — the
+          // dialog's "Bypassing" row and the audit row must name the same set.
+          // The packet and clean paths keep their single refusal, which is the
+          // right sentence for each: one is about a click the server will
+          // refuse, the other about a gate the resolution clears.
+          blockedGates={
+            confirmAccept.mode === "force" && !forcedCeremony
+              ? acceptance.blockedGates
+              : []
+          }
           blockedReason={
             // Ruling 164 + F19-7: the `force_accept` option is a PACKET
             // resolution, so it clears the packet before the override runs.
@@ -1037,6 +1114,16 @@ export function TaskDetailPage({
                   : acceptance.blockedReason
           }
           busy={acceptBusy || runBusy || recBusy || resolveBusy || transitionBusy}
+          // Ruling 449: only the direct Accept offers the re-review first; the
+          // other doors are answering a decision someone already framed.
+          {...(confirmAccept.mode === "accept"
+            ? {
+                onRefreshFirst: () => {
+                  setConfirmAccept(null);
+                  submitRefreshFirst();
+                },
+              }
+            : {})}
           onCancel={() => setConfirmAccept(null)}
           onConfirm={(disclosure) => {
             const pending = confirmAccept;

@@ -4,6 +4,7 @@ import type { YamlMapping } from "~/server/files/frontmatter.server";
 import { parseTaskFileContent } from "~/server/files/task-file.server";
 import {
   acceptanceBlockedReason,
+  conflictingPrBlockedReason,
   activeWorkRevision,
   currentVerdicts,
   deriveValidation,
@@ -19,6 +20,7 @@ import {
   type WorkRevision,
   DIVERGED_BRANCH_REMEDY,
 } from "./task-file.schema";
+import type { PrRef } from "./task-file.schema";
 
 describe("revision-bound review helpers (F10-15/F10-32)", () => {
   const rev1: WorkRevision = {
@@ -76,10 +78,49 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     expect(requiredReviewers(fm).map((r) => r.profileId)).toEqual(["reviewer"]);
   });
 
-  it("deriveValidation: none without a revision", () => {
+  it("deriveValidation: none when nothing has been delivered at all", () => {
     expect(
       deriveValidation({ engagements: [reviewerA], workRevision: null, verdicts: [] }),
     ).toBe("none");
+  });
+
+  /**
+   * Ruling 388 (F39-15), live on ax-clone AX-12. A research task delivers a
+   * report, not a commit. Keyed on `workRevision` alone this was forced to
+   * `none` however the reviewer had ruled, which printed "**Validation:** none.
+   * Review & validation requested changes." in one sentence and shut the rework
+   * route ruling 163 licenses, because that needs `failing` or `changed`.
+   */
+  it("ruling 388: a verdict on a non-commit DELIVERY derives like any other", () => {
+    const at = "2026-09-22T06:23:28.646Z";
+    const onFiles = (result: "approve" | "request_changes") => ({
+      profileId: "reviewer",
+      revisionId: `files:${at}`,
+      result,
+      reason: "",
+      at,
+      rounds: 1,
+    });
+    const base = {
+      engagements: [deliverer, reviewerA],
+      workRevision: null,
+      deliveredAt: at,
+    };
+    // CANARY: restore `if (!activeWorkRevision(...)) return "none"` and all
+    // three of these become "none".
+    expect(deriveValidation({ ...base, verdicts: [onFiles("request_changes")] })).toBe(
+      "failing",
+    );
+    expect(deriveValidation({ ...base, verdicts: [onFiles("approve")] })).toBe("healthy");
+    expect(deriveValidation({ ...base, verdicts: [] })).toBe("changed");
+    // A LATER delivery moves the subject, so the old verdict stops counting.
+    expect(
+      deriveValidation({
+        ...base,
+        deliveredAt: "2026-09-22T09:00:00.000Z",
+        verdicts: [onFiles("approve")],
+      }),
+    ).toBe("changed");
   });
 
   it("deriveValidation: request_changes on the current revision → failing", () => {
@@ -287,7 +328,7 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
       branch: "vib-1",
       sourceProfileId: "developer",
       createdAt: "2026-07-05T00:00:00.000Z",
-    });
+    }, []);
     expect(same.changed).toBe(false);
     expect(same.revision.id).toBe("rev_1");
 
@@ -298,9 +339,33 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
       branch: "vib-1",
       sourceProfileId: "developer",
       createdAt: "2026-07-05T00:00:00.000Z",
-    });
+    }, []);
     expect(diff.changed).toBe(true);
     expect(diff.revision.id).toBe("rev_2");
+  });
+
+  it("ruling 439: a head the revision reaches by Viberr's own base refreshes is the same subject", () => {
+    // Live on ax-clone AX-29: revision 4e6c47d, `main` merged onto it as
+    // 278c1ed, the reviewer approved, and the delivery 65 seconds later minted
+    // 278c1ed as a new revision because the merge changed the tree. CANARY:
+    // drop `refreshedOnly` and the refreshed head mints `rev_2`.
+    const merged = "d".repeat(40);
+    const refreshes = [{ mergeSha: merged, onto: rev1.headSha, commits: 2 }];
+    const head = {
+      id: "rev_2",
+      headSha: merged,
+      treeSha: "t3".padEnd(40, "0"),
+      branch: "vib-1",
+      sourceProfileId: "developer",
+      createdAt: "2026-07-05T00:00:00.000Z",
+    };
+    expect(nextWorkRevision(rev1, head, refreshes)).toEqual({ revision: rev1, changed: false });
+    // Authored work on top of the refresh is a new subject.
+    const past = nextWorkRevision(rev1, { ...head, headSha: "9".repeat(40) }, refreshes);
+    expect(past.changed).toBe(true);
+    // So is a refresh made onto a commit that was never the revision's head.
+    const elsewhere = [{ mergeSha: merged, onto: "8".repeat(40), commits: 2 }];
+    expect(nextWorkRevision(rev1, head, elsewhere).changed).toBe(true);
   });
 });
 
@@ -1185,8 +1250,8 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
       sourceProfileId: "developer",
       createdAt: "2026-09-07T08:00:00.000Z",
     };
-    expect(nextWorkRevision(delivered, same)).toEqual({ revision: delivered, changed: false });
-    const minted = nextWorkRevision(discarded, same);
+    expect(nextWorkRevision(delivered, same, [])).toEqual({ revision: delivered, changed: false });
+    const minted = nextWorkRevision(discarded, same, []);
     expect(minted.changed).toBe(true);
     expect(minted.revision.id).toBe("rev_new");
     expect(minted.revision.kind).toBe("delivered");
@@ -1287,5 +1352,53 @@ describe("DIVERGED_BRANCH_REMEDY (ruling 321)", () => {
       ).toBe(false);
     }
     expect(DIVERGED_BRANCH_REMEDY.length).toBeGreaterThan(80);
+  });
+});
+
+/**
+ * Ruling 405 (F39-32), measured live on ax-clone AX-18.
+ *
+ * The Surface Developer resolved the conflict in `internal/cli/render.go` and
+ * the operator pushed the merge commit `d44e874` to PR #16. GitHub recomputes
+ * mergeability asynchronously, so the next read answered "unknown" and the
+ * reconciler's rule -- "an unread value keeps the last-known one for the same
+ * PR" -- carried the `conflicting` measured at `5ae0752`, the commit that had
+ * just been superseded. The operator was refused `transition_stage` twice in
+ * fifteen seconds on a conflict that no longer existed, and the policy engine
+ * then told the human the operator had held the stage deliberately.
+ *
+ * `paths` has been pinned to its head since ruling 236. The verdict that
+ * BLOCKS had no pin at all.
+ */
+describe("ruling 405: a conflict verdict belongs to the head it was measured on", () => {
+  const prAt = (mergeableAt: string | null, headSha: string) => {
+    const pr: PrRef = {
+      number: 16,
+      state: "review",
+      title: "[AX-18] ax watch: the live event stream",
+      mergeable: "conflicting",
+      headSha,
+    };
+    // Absent, not null: an unpinned verdict is one no pass ever measured.
+    if (mergeableAt) pr.mergeableAt = mergeableAt;
+    return { pr };
+  };
+
+  it("blocks while the verdict and the live head are the same commit", () => {
+    const reason = conflictingPrBlockedReason(prAt("5ae0752", "5ae0752"), "AX-18");
+    expect(reason).toContain("conflicts with the base branch");
+    // Ruling 291: the remedy is a merge, and the sentence FORBIDS the rebase
+    // rather than leaving it open to the one reader with no tool.
+    expect(reason).toContain("merging the base INTO it");
+    expect(reason).toContain("never by rebasing");
+  });
+
+  it("does NOT block once the head has moved past the commit it was measured on", () => {
+    // The exact shape on disk at 17:08 on 2026-09-22.
+    expect(conflictingPrBlockedReason(prAt("5ae0752", "d44e874"), "AX-18")).toBeNull();
+  });
+
+  it("still blocks when the verdict was never pinned, so an old file is not silently unblocked", () => {
+    expect(conflictingPrBlockedReason(prAt(null, "d44e874"), "AX-18")).not.toBeNull();
   });
 });

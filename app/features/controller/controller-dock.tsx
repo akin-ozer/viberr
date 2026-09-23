@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TurnStep } from "./turn-step";
 import {
   Link,
@@ -9,8 +9,10 @@ import {
 } from "react-router";
 import { z } from "zod";
 import type { ControllerDockView } from "./controller-dock-query.server";
-import { CLAUDE_NOT_CONNECTED } from "./controller-page";
+import { CONNECT_TO_SEND, NotConnectedNote } from "./controller-page";
+import { controllerExamples } from "./controller-examples";
 import type { loader as projectLoader } from "~/routes/project";
+import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
 import {
   dockContextFromMatches,
   dockScopeKey,
@@ -24,6 +26,8 @@ import { useToast } from "~/ui/toast";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { useModifierHint } from "~/ui/use-shortcut-hint";
+import { viewerTimeZone } from "~/shared/dates/time-zone";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 
@@ -104,39 +108,16 @@ function localScopeLabel(context: DockContext): string {
   return "Instance";
 }
 
-/**
- * Ruling 314: three things to ask, scoped to where the person is standing.
- *
- * The empty dock said what the controller KNOWS ("the controller already has
- * its task file") and nothing about what it can DO, so a person who had never
- * used it was looking at a text box and a claim. The owner's call was examples
- * over a capability list: a list tells, and goes stale as the toolkit changes,
- * while an example teaches the surface by being clicked.
- *
- * Each one is a real sentence the controller can act on at that scope, and the
- * third is deliberately a DO rather than an ask — the dock's own composer says
- * "or tell it what to do here", and nothing demonstrated that half.
- */
+/** Ruling 314's examples for the scope the dock is open on (shared with the
+ *  page, ruling 419(g)). */
 function emptyExamples(view: ControllerDockView): string[] {
-  if (view.scope.kind === "task") {
-    return [
-      `What is blocking ${view.scope.taskKey}?`,
-      "Summarise where this task stands and who is waiting on whom.",
-      "Draft a directive for the agent on this task, but do not send it.",
-    ];
-  }
-  if (view.scope.kind === "board") {
-    return [
-      "What is waiting on me right now, and what is waiting on an agent?",
-      "Which tasks have been open longest, and why?",
-      "Draft a task for work this board is missing, but do not create it.",
-    ];
-  }
-  return [
-    "What is blocked across every project I can see?",
-    "What did agent runs cost this week, by project?",
-    "Show me the agent profiles on this instance and what each one can do.",
-  ];
+  return controllerExamples(
+    view.scope.kind === "task" && view.scope.taskKey
+      ? { kind: "task", taskKey: view.scope.taskKey }
+      : view.scope.kind === "board"
+        ? { kind: "board" }
+        : { kind: "instance" },
+  );
 }
 
 function emptyCopy(view: ControllerDockView): string {
@@ -148,6 +129,9 @@ function emptyCopy(view: ControllerDockView): string {
   }
   return "Ask about this instance or say what to do: projects, users, resources, agents, goal chains.";
 }
+
+/** O39-d: the viewer's unseen controller replies, for the button. */
+const UNSEEN_URL = "/resources/controller-unseen";
 
 export function ControllerDock() {
   const matches = useMatches();
@@ -183,6 +167,9 @@ function DockShell({ context }: { context: DockContext }) {
   const [threadsOpen, setThreadsOpen] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [text, setText] = useState("");
+  // Ruling 419(d): the send handler takes ⌘ OR Ctrl, so the hint names the key
+  // this keyboard has (UI-55; the page's composer shares the rule).
+  const sendHint = useModifierHint("↵");
   const restored = useRef(false);
   const panelRef = useRef<HTMLElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
@@ -218,7 +205,9 @@ function DockShell({ context }: { context: DockContext }) {
   }, [selected]);
 
   const selectedId = selected[context.key] ?? null;
-  const url = dockViewUrl(context, selectedId);
+  // O39-d: `seen` only while the panel is open. The working poll below loads
+  // this view with the panel closed too, and that load reads nothing.
+  const url = dockViewUrl(context, selectedId, open);
   const load = view.load;
   // Load whenever the panel is open and the target changes: a new scope
   // (navigation) or a new selection (threads, New, a send that started one).
@@ -263,6 +252,22 @@ function DockShell({ context }: { context: DockContext }) {
     return () => clearInterval(timer);
   }, [working, url, load]);
 
+  // O39-d: replies the viewer has not seen, whatever scope they were asked
+  // in. A turn runs one to five minutes, and a person who moved to another
+  // page learned nothing when its answer landed. Loaded on every navigation
+  // and after the panel shows a transcript (which marks it seen); React
+  // Router also revalidates it on the page's own live stream.
+  const unseenFetch = useFetcher<{ unseen: UnseenReplyView[] }>({ key: "controller-unseen" });
+  const loadUnseen = unseenFetch.load;
+  const { pathname } = useLocation();
+  const shownId = current?.conversation?.id ?? null;
+  const shownCount = current?.messages.length ?? 0;
+  useEffect(() => {
+    loadUnseen(UNSEEN_URL);
+  }, [loadUnseen, pathname, open, shownId, shownCount]);
+  // The transcript the open panel shows is being read.
+  const unseen = (unseenFetch.data?.unseen ?? []).filter((u) => !(open && u.id === shownId));
+
   // A send's result: an error is a toast (the transport failed; refusals are
   // in the transcript); a success selects the thread it landed in and reloads.
   const sentUnder = useRef(context.key);
@@ -290,7 +295,7 @@ function DockShell({ context }: { context: DockContext }) {
     // a task thread under the board's scope - a request the route cannot answer
     // (review finding 2, path (a)). Recording the selection is enough: the load
     // effect fires when the person comes back to that scope.
-    if (key === context.key) load(dockViewUrl(context, result.conversationId));
+    if (key === context.key) load(dockViewUrl(context, result.conversationId, open));
   });
 
   // Close: a pointer close plays the exit transition and unmounts on
@@ -446,6 +451,8 @@ function DockShell({ context }: { context: DockContext }) {
     body.set("intent", "send");
     body.set("text", value);
     body.set("surface", context.surface);
+    // U39-24: the controller quotes times in the zone this page prints them in.
+    body.set("timeZone", viewerTimeZone());
     if (context.projectSlug) body.set("project", context.projectSlug);
     if (context.taskKey) body.set("task", context.taskKey);
     // The SELECTION decides, not the view that happens to have landed. Between
@@ -561,6 +568,30 @@ function DockShell({ context }: { context: DockContext }) {
           <p className="dock-context fine xs dim">
             {current?.scope.contextLine ?? "Reading where you are…"}
           </p>
+          {unseen.length > 0 && (
+            <p className="dock-unseen fine xs">
+              <span className="unseen-dot" aria-hidden="true" />
+              <span>
+                New {unseen.length === 1 ? "reply" : "replies"} in{" "}
+                {unseen.slice(0, 3).map((u, i) => (
+                  <Fragment key={u.id}>
+                    {i > 0 && ", "}
+                    {threads.some((t) => t.id === u.id) ? (
+                      // A thread of this scope opens right here.
+                      <button type="button" className="linkish" onClick={() => pick(u.id)}>
+                        {u.title}
+                      </button>
+                    ) : (
+                      <Link className="linkish" to={u.href} onClick={() => closeDock(true)}>
+                        {u.taskKey ? `${u.taskKey} · ${u.title}` : u.title}
+                      </Link>
+                    )}
+                  </Fragment>
+                ))}
+                {unseen.length > 3 && ` and ${unseen.length - 3} more`}
+              </span>
+            </p>
+          )}
           {unavailable ? (
             <section className="dock-body" aria-label="Controller unavailable here">
               <p className="empty sm">
@@ -579,11 +610,15 @@ function DockShell({ context }: { context: DockContext }) {
                     <li key={t.id}>
                       <button
                         type="button"
-                        className={`ctl-conv${t.id === conversationId ? " on" : ""}`}
+                        className={`ctl-conv${t.id === conversationId ? " on" : ""}${t.unread ? " unread" : ""}`}
                         aria-current={t.id === conversationId ? "true" : undefined}
                         onClick={() => pick(t.id)}
                       >
-                        <span className="ctl-conv-title">{t.title}</span>
+                        <span className="ctl-conv-title">
+                          {t.unread && <span className="unseen-dot" aria-hidden="true" />}
+                          {t.title}
+                          {t.unread && <span className="vh">, new reply</span>}
+                        </span>
                         <span className="fine xs dim">
                           {t.lastMessageAt ? <LocalDayDotTime iso={t.lastMessageAt} /> : "empty"}
                         </span>
@@ -644,7 +679,7 @@ function DockShell({ context }: { context: DockContext }) {
                         <LocalDayDotTime iso={m.createdAt} />
                       </header>
                       <div className="md-body">
-                        <Markdown text={m.text} />
+                        <Markdown text={m.text} taskLinks={current.taskLinks} />
                       </div>
                     </article>
                   ))}
@@ -663,6 +698,7 @@ function DockShell({ context }: { context: DockContext }) {
           )}
           <div className="dock-composer">
             <div className="ctl-composer">
+              {current && !current.available && <NotConnectedNote />}
               <textarea
                 ref={composerRef}
                 value={text}
@@ -680,17 +716,21 @@ function DockShell({ context }: { context: DockContext }) {
                     : disabled
                       ? current.available
                         ? "Read-only: only the thread's owner can talk in it."
-                        : // Ruling 127: the dock bills the person reading it, so
-                          // it says what the page's composer and the refused
-                          // turn's transcript line say, from the one home.
-                          CLAUDE_NOT_CONNECTED
+                        : // Ruling 127: the dock bills the person reading it,
+                          // and says so in the note above the box (U39-10).
+                          CONNECT_TO_SEND
                       : "Ask the controller, or tell it what to do here…"
                 }
                 disabled={disabled}
                 aria-label="Message to the controller"
               />
               <div className="ctl-composer-foot">
-                <span className="fine xs dim">Acts with your permissions · ⌘↵ sends</span>
+                <span className="fine xs dim">
+                  Acts with your permissions
+                  <span className="kbd-hint" suppressHydrationWarning>
+                    {` · ${sendHint} sends`}
+                  </span>
+                </span>
                 <button
                   type="button"
                   className="btn primary sm"
@@ -708,7 +748,9 @@ function DockShell({ context }: { context: DockContext }) {
         ref={fabRef}
         type="button"
         className="dock-fab"
-        aria-label={`Controller · ${scopeLabel}`}
+        aria-label={`Controller · ${scopeLabel}${
+          unseen.length === 0 ? "" : unseen.length === 1 ? " · a new reply" : ` · ${unseen.length} new replies`
+        }`}
         aria-haspopup="dialog"
         aria-expanded={open}
         // A dangling `aria-controls` is worse than none (the repo already
@@ -726,12 +768,19 @@ function DockShell({ context }: { context: DockContext }) {
       >
         <Icon name="cpu" />
         {working && <span className="live-dot" aria-hidden="true" />}
+        {!working && unseen.length > 0 && <span className="unseen-dot" aria-hidden="true" />}
       </button>
       {/* The dot is decorative, and the panel's own status row is unmounted
           while the dock is closed — so the one programmatic form of "a turn is
           running" lives here, outside the panel (review finding 26). */}
       <span className="vh" role="status" aria-live="polite">
-        {working ? `${current?.controllerName ?? "Controller"} is working` : ""}
+        {working
+          ? `${current?.controllerName ?? "Controller"} is working`
+          : unseen.length === 1
+            ? `${current?.controllerName ?? "Controller"} replied in “${unseen[0]!.title}”`
+            : unseen.length > 1
+              ? `${current?.controllerName ?? "Controller"} replied in ${unseen.length} conversations`
+              : ""}
       </span>
     </div>
   );

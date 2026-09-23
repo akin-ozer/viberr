@@ -1,10 +1,17 @@
+import {
+  writeTaskAttachment,
+  type WrittenAttachment,
+} from "~/server/files/task-attachments.server";
 import { holdRefusalFor, resolveDependencies } from "~/server/projections/dependencies.server";
 import type { FileLease } from "~/shared/file-leases";
-import { revisionDriftNote as sharedRevisionDriftNote } from "~/shared/revision-drift";
+import {
+  headCarriesRevision,
+  revisionDriftNote as sharedRevisionDriftNote,
+} from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { requiredReviewerRefusals } from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
-import { formatUsd } from "~/shared/run-failure";
+import { formatUsd, runDidNotCompleteLead } from "~/shared/run-failure";
 import type {
   CollisionServerOutcome,
   ResolvedPacketOption,
@@ -28,6 +35,9 @@ import {
   revisionLeftWorkspace,
   type RevisionDeparture,
   activeWorkRevision,
+  currentVerdicts,
+  reviewSubjectId,
+  type ReviewVerdict,
   consecutiveRequestChanges,
   deliveringEngagement,
   type Engagement,
@@ -90,7 +100,11 @@ import {
   setTaskDependencies,
   validateDependencyRefs,
 } from "./dependencies.server";
-import { holdEntriesSentence, type DependencyReleasePayload } from "~/shared/dependencies";
+import {
+  holdEntriesSentence,
+  joinDependencyEntries,
+  type DependencyReleasePayload,
+} from "~/shared/dependencies";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -180,8 +194,8 @@ import {
   getRun,
   listRunsForTaskRows,
   patchRun,
-  profileRanSince,
 } from "~/server/runtimes/run-store.server";
+import { deliveredRoundSince } from "~/server/runtimes/provider-refusal.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   refusedPrincipalUserId,
@@ -224,6 +238,7 @@ import {
   mentionNotifiesUser,
   notifyMentionedUsers,
   withAmbiguityDisclosure,
+  stampNotifiedRecipients,
 } from "./mention-notify.server";
 import { userDisplayName } from "./user-display-name.server";
 
@@ -696,6 +711,8 @@ export async function createTask(
   const frontmatter: TaskFrontmatter = {
     key,
     title,
+    // Ruling 388: nothing delivered yet.
+    deliveredAt: null,
     stage: stageId,
     // No transition has happened yet — the previous stage is a fact only a
     // real move writes.
@@ -775,6 +792,8 @@ export async function createTask(
     ];
   }
   if (blockedBy.length > 0) {
+    const waitEntries = resolveDependencies(db, input.projectSlug, blockedBy);
+    const waitAllDone = waitEntries.every((e) => e.state === "done");
     const waitNote: TaskFileEvent = {
       occurredAt: now,
       type: "note",
@@ -784,7 +803,13 @@ export async function createTask(
       // hold sentence — 4 of 56 creation notes on the instance had named a task
       // that was already Done at creation (BNB-26: "waiting on BNB-5, BNB-22"
       // with BNB-22 closed 95 s earlier).
-      text: `Created waiting on ${holdEntriesSentence(resolveDependencies(db, input.projectSlug, blockedBy))}. Held until every entry is done; Viberr releases it then.`,
+      // F39-65: and a list that is ALL done holds nothing. Ruling 398(d)
+      // creates a chain task only once its waits are satisfied, so every
+      // chain link opened with "Held until every entry is done" over eight
+      // entries that were (AX-35), released in the same second.
+      text: waitAllDone
+        ? `Created after the work it waits on was done (${joinDependencyEntries(waitEntries.map((e) => e.label))}), so nothing holds it; Viberr releases the list at once.`
+        : `Created waiting on ${holdEntriesSentence(waitEntries)}. Held until every entry is done; Viberr releases it then.`,
       toAgent: false,
       evidence: null,
     };
@@ -935,6 +960,96 @@ type TaskMetadataPatch = {
 };
 
 /**
+ * F39-6 (pass 39): a PERSON attaches a file to a task.
+ *
+ * The attachments directory had three readers and no human writer: the browser
+ * MCP's `--output-dir` and the agent evidence drop could put files there,
+ * nobody could. Viberr's own controller, asked where a human-supplied artifact
+ * would genuinely help this project, named the task and the file and explained
+ * why — "a human-supplied fixture stops the decoder from being tested against a
+ * fixture it wrote for itself" — and the only way to do it was writing into the
+ * server's data volume by hand.
+ *
+ * Contributor-and-above (`attach-file`), the same tier that grooms a task's
+ * metadata and for the same reason: it adds evidence and changes no gate. The
+ * writer refuses a traversing or dot-prefixed name, an extension this product
+ * can neither render nor read back, and anything over the size cap. An archived
+ * task takes no attachments, like every other edit.
+ */
+export async function attachTaskFile(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    name: string;
+    data: Uint8Array;
+  },
+  actor: TaskActor,
+  ctx: TaskMutationContext = {},
+): Promise<{ attachment: WrittenAttachment }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  requireAction(db, project, actor, "attach-file", "attach a file to a task");
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
+  const existing = readTaskFile(ref);
+  if (!existing) {
+    throw AppError.notFound(`No task ${input.taskKey} in ${input.projectSlug}.`);
+  }
+  if (existing.parsed.frontmatter.archived) {
+    throw AppError.validation(
+      `${input.taskKey} is archived — restore it before attaching a file.`,
+    );
+  }
+  // A file an agent run saved can be the work under review (ruling 388 binds
+  // a review to a deliverer's saved files by WHEN they were saved, not by
+  // their bytes), so a person's upload never overwrites one: the approval
+  // would stand on content no reviewer read. Their own files they may replace.
+  const name = input.name.trim();
+  const agentSaved = existing.parsed.timeline.some(
+    (e) => e.actor.kind === "agent" && (e.attachments ?? []).includes(name),
+  );
+  const attachment = writeTaskAttachment(
+    input.projectSlug,
+    input.taskKey,
+    input.name,
+    input.data,
+    ctx.dataRoot,
+    agentSaved
+      ? `“${name}” is a file an agent run saved on ${input.taskKey}, and it may be the work under review. Attach yours under another name.`
+      : null,
+  );
+  const kb = Math.max(1, Math.round(attachment.bytes / 1024));
+  await updateTaskFile(ref, (parsed) => {
+    parsed.timeline.unshift({
+      occurredAt: new Date().toISOString(),
+      type: "note",
+      actor: humanActorRef(db, actor),
+      title: "Attachment added",
+      text:
+        `Attached \`${attachment.name}\` (${kb} KB)` +
+        `${attachment.replaced ? ", replacing a file of the same name" : ""}. ` +
+        "Agents on this task read it from the task's attachments.",
+      toAgent: false,
+      evidence: null,
+    });
+  });
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  recordAudit(db, {
+    action: "task.attachment.added",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: {
+      name: attachment.name,
+      bytes: attachment.bytes,
+      replaced: attachment.replaced,
+    },
+  });
+  return { attachment };
+}
+
+/**
  * Edit the lightweight planning metadata (priority, labels, due date).
  *
  * Distinct from `updateTaskGoal`: the goal is the reviewable acceptance
@@ -1061,6 +1176,64 @@ export async function setTaskMetadata(
     details,
   });
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey) };
+}
+
+/** A literal, for use inside a RegExp. */
+function literalPattern(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Ruling 447 (O39-a): the actor other than the asker that a person's answer to
+ * an agent's question names, if any: another deployed agent (by name or
+ * @handle) or the operator. Such an answer is routing, which is the
+ * operator's job: the asking agent, resumed with it, can only report that it
+ * cannot act on it.
+ *
+ * Live on ax-clone, three of three: AX-22 "Hand off to Surface Developer",
+ * after which the developer did the Surface Developer's edits itself; AX-20
+ * "Operator: move AX-20 back to Verify ...", which the developer spent a run
+ * finding it had no tool for; AX-27 "Offer me a create_task option for the
+ * Developer", which the Surface Developer wrote out and could not do. The
+ * asker's own name is taken out first, so "Surface Developer" never reads as
+ * naming "Developer".
+ */
+export function answerNamesAnotherActor(
+  text: string,
+  askerId: string,
+  /** The deployed agents, each with the @handle a person would type. */
+  agents: readonly { id: string; name: string; handle: string }[],
+): string | null {
+  // Never a profile id: ids are slugs.
+  const OPERATOR = "(operator)";
+  const candidates: { id: string; label: string; pattern: string }[] = [
+    { id: OPERATOR, label: "the operator", pattern: "operator" },
+  ];
+  for (const agent of agents) {
+    const label = agent.name.trim() || agent.id;
+    if (agent.name.trim()) candidates.push({ id: agent.id, label, pattern: agent.name.trim() });
+    if (agent.handle) candidates.push({ id: agent.id, label, pattern: agent.handle });
+  }
+  // Longest first, so "Surface Developer" claims its words before
+  // "Developer" can: the asker's name and another agent's can share a word.
+  candidates.sort((a, b) => b.pattern.length - a.pattern.length);
+  const claimed: { start: number; end: number }[] = [];
+  const hits: { at: number; id: string; label: string }[] = [];
+  for (const candidate of candidates) {
+    const re = new RegExp(
+      `(^|[^\\p{L}\\p{N}_-])(@?${literalPattern(candidate.pattern)})(?=$|[^\\p{L}\\p{N}_-])`,
+      "giu",
+    );
+    for (const match of text.matchAll(re)) {
+      const start = (match.index ?? 0) + (match[1] ?? "").length;
+      const end = start + (match[2] ?? "").length;
+      if (claimed.some((span) => start < span.end && span.start < end)) continue;
+      claimed.push({ start, end });
+      hits.push({ at: start, id: candidate.id, label: candidate.label });
+    }
+  }
+  const other = hits.filter((hit) => hit.id !== askerId).sort((a, b) => a.at - b.at)[0];
+  return other?.label ?? null;
 }
 
 /**
@@ -1498,7 +1671,10 @@ export async function appendComment(
   // Mention fan-out (notification kind `mention`, contracts §4) — the shared
   // helper every comment writer (human AND agent) funnels through (NEW-4).
   const actorName = userName(db, actor.userId);
-  const mentionedUserIds = notifyMentionedUsers(db, {
+  const mentionedUserIds = await stampNotifiedRecipients(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    event.occurredAt,
+    notifyMentionedUsers(db, {
     text,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
@@ -1511,7 +1687,8 @@ export async function appendComment(
       initials: initialsOfName(actorName),
       tone: avatarTone(db, actor.userId),
     },
-  });
+    }),
+  );
 
   return {
     task: summaryOrThrow(db, input.projectSlug, input.taskKey),
@@ -1565,6 +1742,15 @@ export interface CommentToAgentResult extends AppendCommentResult {
 const ANCHOR_GOAL_MAX_CHARS = 1500;
 const ANCHOR_EVENT_MAX_CHARS = 220;
 const ANCHOR_EVENT_COUNT = 5;
+/**
+ * Ruling 392 (F39-19): how much of a standing verdict's reason the anchor
+ * carries. Generous on purpose — ruling 292 already clips a stored reason at
+ * 2,000 characters, so this is the WHOLE of what viberr kept, and it is the one
+ * thing a rework run cannot proceed without.
+ */
+const ANCHOR_VERDICT_MAX_CHARS = 2000;
+/** At most this many, newest first. One per reviewer is the normal shape. */
+const ANCHOR_VERDICT_COUNT = 3;
 
 function anchorActorLabel(actor: FileActorRef): string {
   switch (actor.kind) {
@@ -1669,6 +1855,43 @@ export function canonicalTaskAnchor(input: {
     lines.push(
       `"${anchorClamp(packet.title, ANCHOR_EVENT_MAX_CHARS)}"${options ? ` — options: ${options}` : ""}`,
     );
+  }
+  /**
+   * Ruling 392 (F39-19): the verdicts that STAND, with their reasons whole.
+   *
+   * Live on ax-clone AX-12 the operator wrote "@Developer … read the Reviewer's
+   * request-changes findings in the timeline" — and no agent can. `read_board`
+   * answers a task's stage, readiness, waits, archived flag and goal, and no
+   * timeline at all; this anchor is every other word an agent gets, and it
+   * clamps each entry to 220 characters, which is shorter than any verdict
+   * worth reworking against. The deliverer did the right thing and raised a
+   * decision packet asking a human to paste them, which cost a run and a human
+   * decision to answer.
+   *
+   * The operator's playbook already says to carry the findings in its prompt.
+   * This is the half that does not depend on it remembering: the reasons are
+   * stored, bounded, and about the work in front of the agent.
+   */
+  const standing = currentVerdicts(fm).slice(0, ANCHOR_VERDICT_COUNT);
+  if (standing.length > 0) {
+    lines.push("");
+    lines.push("### Review verdicts that stand right now");
+    lines.push(
+      "These are the stored verdicts on the revision under review, whole. Nothing " +
+        "else on this task is a verdict, and an older one you remember has been " +
+        "superseded by these.",
+    );
+    for (const v of standing) {
+      const on = v.headSha ? ` on \`${v.headSha.slice(0, 12)}\`` : "";
+      lines.push(
+        `- **${v.profileId}** — ${v.result}${on} (${v.at}):`,
+      );
+      lines.push(
+        v.reason.trim()
+          ? anchorClamp(v.reason, ANCHOR_VERDICT_MAX_CHARS)
+          : "_No reason recorded._",
+      );
+    }
   }
   const recent = timeline.slice(0, input.events ?? ANCHOR_EVENT_COUNT);
   if (recent.length > 0) {
@@ -2543,6 +2766,30 @@ function duplicatedOwnCommentText(
   return null;
 }
 
+/**
+ * Ruling 388 (F39-15): record a DELIVERER's saved files as this task's
+ * non-commit delivery, and therefore as what a review of it binds to.
+ *
+ * Only the delivering engagement moves it. A reviewer's own captures are
+ * EVIDENCE for the verdict it is writing, not a new thing to review — stamping
+ * those would make the subject move under the verdict and stale it on the way
+ * in. Same division `workRevision` already draws: the deliverer mints, everyone
+ * else judges. A person's upload never reaches here at all (ruling 379 writes a
+ * plain note with no list).
+ */
+function stampNonCommitDelivery(
+  fm: TaskFrontmatter,
+  actorRef: FileActorRef,
+  attachments: readonly string[] | null,
+  at: string,
+): void {
+  if (!attachments || attachments.length === 0) return;
+  if (actorRef.kind !== "agent") return;
+  const deliverer = deliveringEngagement(fm);
+  if (!deliverer || deliverer.profileId !== actorRef.profileId) return;
+  fm.deliveredAt = at;
+}
+
 /** Build the reply event without writing so completion effects can land atomically. */
 async function prepareAgentReplyEvent(
   db: DatabaseSync,
@@ -2557,18 +2804,22 @@ async function prepareAgentReplyEvent(
   // Anti-noise guardrails on AGENT replies (owner ruling Q3): trivial status
   // chatter is rejected; raw output dumps are trimmed to a head + reference
   // (the full transcript stays in the agent logs). Both per-project toggles.
-  const { guardrailOn, isMeaninglessComment, separateEvidence } = await import(
-    "./comment-guardrails.server"
-  );
+  const { guardrailOn, isMeaninglessComment, separateEvidence, repairDoubledNewlines } =
+    await import("./comment-guardrails.server");
+  // Ruling 383: FIRST — before the fence scan, the duplicate compare and the
+  // mention source are taken from it. This path is the one that took 27KB of
+  // markdown onto AX-12 as a single line. Not a guardrail toggle: a body whose
+  // breaks are double-escaped is damaged however the project is configured.
+  const replyBody = repairDoubledNewlines(replyText);
   if (
     guardrailOn(ctx, projectSlug, "meaningful-comment") &&
-    isMeaninglessComment(replyText)
+    isMeaninglessComment(replyBody)
   ) {
     return { status: "dropped" };
   }
   const separated = guardrailOn(ctx, projectSlug, "evidence-separation")
-    ? separateEvidence(replyText)
-    : replyText;
+    ? separateEvidence(replyBody)
+    : replyBody;
   // The reply directive tells the agent to tag the human it answers, so an
   // ambiguous name is a NEW-4 failure with no other surface: the agent cannot
   // retag itself and the fan-out below would drop the handle in silence
@@ -2584,9 +2835,9 @@ async function prepareAgentReplyEvent(
   // `text` and the un-separated form (`separated === replyText` when the
   // evidence-separation guardrail is off, so no second disclosure pass).
   const candidates =
-    separated === replyText
+    separated === replyBody
       ? [text]
-      : [text, withAmbiguityDisclosure(db, replyText, projectSlug)];
+      : [text, withAmbiguityDisclosure(db, replyBody, projectSlug)];
   const duplicatedText = duplicatedOwnCommentText(
     db,
     ctx,
@@ -2607,7 +2858,7 @@ async function prepareAgentReplyEvent(
       toAgent: false,
       evidence: null,
     },
-    mentionSourceText: replyText,
+    mentionSourceText: replyBody,
     duplicate: duplicatedText !== null,
     duplicatedText,
   };
@@ -2742,6 +2993,12 @@ export async function postAgentReplyComment(
   const writeReply = () =>
     updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       parsed.timeline.unshift(event);
+      stampNonCommitDelivery(
+        parsed.frontmatter,
+        input.actorRef,
+        attachments,
+        event.occurredAt,
+      );
       if (compactOn) {
         parsed.timeline = compactTimelineEvents(
           parsed.timeline,
@@ -2757,7 +3014,7 @@ export async function postAgentReplyComment(
         );
       }
     });
-  const finalizeReply = () => {
+  const finalizeReply = async () => {
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     // When a producing note stood in for a suppressed reply, the reason stays
     // honest (the REPLY was dropped/deduped even though a files note landed);
@@ -2776,18 +3033,23 @@ export async function postAgentReplyComment(
     // handle inside a fence that evidence-separation cut away still notifies.
     // The producing-note fallback keeps its own text (a suppressed duplicate's
     // mentions were already delivered by the mid-run comment it repeats).
-    notifyMentionedUsers(db, {
-      text:
-        prepared.status === "event" && !prepared.duplicate
-          ? prepared.mentionSourceText
-          : event.text,
-      projectSlug: input.projectSlug,
-      taskKey: input.taskKey,
-      from: createActorResolver(db, {
-        agentNames: agentNamesByProfile(db, input.projectSlug),
-      })(input.actorRef),
-      occurredAt: event.occurredAt,
-    });
+    // Ruling 382: and the event records who it reached, so compaction keeps it.
+    await stampNotifiedRecipients(
+      taskRef(ctx, input.projectSlug, input.taskKey),
+      event.occurredAt,
+      notifyMentionedUsers(db, {
+        text:
+          prepared.status === "event" && !prepared.duplicate
+            ? prepared.mentionSourceText
+            : event.text,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        from: createActorResolver(db, {
+          agentNames: agentNamesByProfile(db, input.projectSlug),
+        })(input.actorRef),
+        occurredAt: event.occurredAt,
+      }),
+    );
   };
   // Returns the write promise so a caller (the operator react loop) can await
   // the reply landing before it re-reads the task. Errors are never propagated
@@ -2862,7 +3124,7 @@ export async function postAgentReplyComment(
   // audit row and the human notifications, not the reply, and re-posting the
   // reply to recover them would duplicate it on the timeline.
   try {
-    finalizeReply();
+    await finalizeReply();
   } catch (finalizeCause) {
     logger.error("agent reply finalize failed — reply posted, audit/notify lost", {
       taskKey: input.taskKey,
@@ -3020,6 +3282,10 @@ async function openStuckLoopPacket(
         "Coordination is paused until a human chooses how to proceed.",
       observations,
       options,
+      // Ruling 432: a stall is the one premise a later successful run can
+      // disprove, so this marker is what `withdrawSupersededStuckPacket` reads.
+      // The ruling 326 fallback below spreads `open`, and keeps it.
+      stalled: true,
     };
     // Ruling 315: when the failure belongs to an ACCOUNT rather than this task,
     // the packet carries that, so the N identical siblings one quota or
@@ -3171,7 +3437,20 @@ async function noteStuckLoopEscalationFailed(
   }
 }
 
-/** Withdraw a matching stale recovery packet after successful agent work. */
+/**
+ * Withdraw a matching stale STALL packet after successful agent work (owner
+ * ruling 2026-07-18).
+ *
+ * Ruling 432: only a packet `openStuckLoopPacket` raised (`stalled: true`). This
+ * used to take any blocked packet without an acceptance option, and on AX-21 at
+ * 01:24 it took the one saying "`ax-21` conflicts with `main`". The Surface
+ * Developer had been dispatched onto that conflict, found it, changed nothing
+ * and ended its run cleanly ("Blocked on the unresolved AX-21/main conflict; no
+ * lasting changes were made"). The timeline then called the conflict "moot"
+ * because the run "completed successfully", and the question the developer
+ * asked about it was held behind a decision that no longer existed. A run
+ * finishing disproves a stall and nothing else.
+ */
 async function withdrawSupersededStuckPacket(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -3186,8 +3465,7 @@ async function withdrawSupersededStuckPacket(
   try {
     const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
     const packet = existing?.parsed.packet;
-    if (!packet || packet.type !== "blocked") return;
-    if (packet.options.some((o) => o.kind === "accept_completion")) return;
+    if (!packet?.stalled) return;
     const retryOptions = packet.options.filter(
       (o) => o.kind === "retry_other_backend",
     );
@@ -3206,9 +3484,9 @@ async function withdrawSupersededStuckPacket(
     let withdrawn = false;
     await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
       const p = parsed.packet;
-      // Re-check inside the write — the read above raced other writers.
-      if (!p || p.type !== "blocked") return;
-      if (p.options.some((o) => o.kind === "accept_completion")) return;
+      // Re-check inside the write — the read above raced other writers, and a
+      // different packet may stand here now.
+      if (!p?.stalled || p.id !== packet.id) return;
       parsed.packet = null;
       // A blocked packet held the readiness gate down with it (same lift as the
       // goal-edit auto-clear above).
@@ -3541,17 +3819,22 @@ export async function recordAgentCompletion(
   // HERE, before the nothing-to-record early return, which the pure-dedup case
   // (the exact dispatch trigger: repeated body + cc line) hits.
   if (prepared.status === "event" && prepared.duplicatedText !== null) {
-    notifyMentionedUsers(db, {
-      // B-FD8b: pre-trim form, so an added @tag inside a separated fence counts.
-      text: prepared.mentionSourceText,
-      projectSlug,
-      taskKey,
-      from: createActorResolver(db, {
-        agentNames: agentNamesByProfile(db, projectSlug),
-      })(actorRef),
-      occurredAt: prepared.event.occurredAt,
-      skipUserIds: mentionedUserIdsOf(db, prepared.duplicatedText),
-    });
+    // Ruling 382: and the event records who it reached, so compaction keeps it.
+    await stampNotifiedRecipients(
+      taskRef(ctx, projectSlug, taskKey),
+      prepared.event.occurredAt,
+      notifyMentionedUsers(db, {
+        // B-FD8b: pre-trim form, so an added @tag inside a separated fence counts.
+        text: prepared.mentionSourceText,
+        projectSlug,
+        taskKey,
+        from: createActorResolver(db, {
+          agentNames: agentNamesByProfile(db, projectSlug),
+        })(actorRef),
+        occurredAt: prepared.event.occurredAt,
+        skipUserIds: mentionedUserIdsOf(db, prepared.duplicatedText),
+      }),
+    );
   }
   // Nothing to record at all. Evidence rows and attachments each count as
   // something: a run whose prose was suppressed but that still produced evidence
@@ -3675,17 +3958,26 @@ export async function recordAgentCompletion(
         // Ruling 161: a discarded revision is not a subject. A verdict must
         // never pin to a head that no longer exists, so it is recorded as
         // prose (the reply) and binds to nothing.
+        //
+        // Ruling 388: but a task whose deliverable is a saved FILE does have a
+        // subject, and used to fall into that same hole — the verdict was never
+        // stored, so `validation` stayed `none`, the rework route ruling 163
+        // licenses stayed shut, and after ruling 385 the required-reviewer gate
+        // could never be satisfied either. Live on ax-clone AX-12 that was a
+        // dead end: a reviewer returned request-changes on the report, and the
+        // record said "**Validation:** none" in the same sentence.
         const rev = activeWorkRevision(parsed.frontmatter.workRevision);
+        const subjectId = reviewSubjectId(parsed.frontmatter);
         const reviewerProfileId =
           actorRef.kind === "agent" ? actorRef.profileId : null;
-        if (rev && reviewerProfileId) {
+        if (subjectId && reviewerProfileId) {
           // Ruling 204: the overwrite keeps the latest verdict and would keep
           // nothing else. A reviewer that returns the SAME result on the SAME
           // revision has reviewed twice, and that is the only signal saying the
           // deliverer could not move — precisely the case where no new revision
           // is ever minted, so a count of distinct revisions stays at 1 forever.
           const prior = parsed.frontmatter.verdicts.find(
-            (v) => v.profileId === reviewerProfileId && v.revisionId === rev.id,
+            (v) => v.profileId === reviewerProfileId && v.revisionId === subjectId,
           );
           // Ruling 242 (F37-69): a repeat verdict counts as a new ROUND only if
           // a round was actually fought — the DELIVERER RAN between the two.
@@ -3704,32 +3996,67 @@ export async function recordAgentCompletion(
           // just paid for. Ruling 237 forbids that verdict in its prompt, which
           // is the construction ruling 186 refused; this is the part that
           // notices when the model does something else.
+          //
+          // Ruling 416 (owner, 2026-09-23): a deliverer run the PROVIDER refused
+          // fought no round. On ax-clone AX-19 a quota refusal three minutes into
+          // the rework counted, and the reviewer's re-verdict on untouched code
+          // raised "6 times running". A crash mid-work still counts.
           const deliverer = deliveringEngagement(parsed.frontmatter);
           const reworked =
             !prior ||
             !deliverer ||
-            profileRanSince(db, projectSlug, taskKey, deliverer.profileId, prior.at);
-          const rounds = prior?.result === verdict && reworked ? prior.rounds + 1 : 1;
+            deliveredRoundSince(db, projectSlug, taskKey, deliverer.profileId, prior.at);
+          // A repeat of the same result KEEPS the rounds already fought on this
+          // revision when no new one was (ruling 416): it used to fall back to
+          // 1, so a question run answered on a revision that had already cost
+          // two rounds took one of them off the deadlock count.
+          const rounds =
+            prior?.result === verdict ? (reworked ? prior.rounds + 1 : prior.rounds) : 1;
+          // Ruling 416: this objection has no rework behind it (the reviewer
+          // read the same untouched revision again), so it is an ANSWER on work
+          // that has not moved, and the packet below must not recommend asking
+          // for it a second time.
+          const noReworkBehind = prior !== undefined && !reworked;
+          // Ruling 416(b): every same-result verdict on this revision, fought
+          // or not, so a later packet can tell the question was answered here.
+          const reviews = prior?.result === verdict ? (prior.reviews ?? prior.rounds) + 1 : 1;
+          // Ruling 421 (F39-43): the run that returned this verdict was the one
+          // that put the completeness question, so this verdict IS the answer.
+          // Keyed by run id and consumed here, so no later verdict inherits it.
+          const asked = parsed.frontmatter.engagements.find(
+            (e) => e.profileId === reviewerProfileId,
+          );
+          const answersQuestion =
+            asked?.question?.kind === "completeness" && asked.question.runId === runId;
+          if (asked?.question && asked.question.runId === runId) asked.question = null;
+          const recorded: ReviewVerdict = {
+            profileId: reviewerProfileId,
+            revisionId: subjectId,
+            result: verdict,
+            // Ruling 292: a verdict's justification is a STORED record a
+            // person reads on the task page, and it was a bare `.slice` -
+            // the write-side shape ruling 288 closed for a goal. The cut
+            // stays (a verdict reason is a paragraph, not a report), and it
+            // now says it was cut and where the whole of it is: the agent's
+            // own report, on the same timeline, which is never truncated.
+            reason: clipVerdictReason(replyText ?? ""),
+            at: new Date().toISOString(),
+            rounds,
+            reviews,
+          };
+          // Kept across a same-result overwrite on this revision, as `reviews`
+          // is: a later round here must not erase that the question was answered.
+          if (answersQuestion || (prior?.result === verdict && prior.answers === "completeness")) {
+            recorded.answers = "completeness";
+          }
+          // Ruling 388: only a commit has a head sha to denormalize.
+          if (rev) recorded.headSha = rev.headSha;
           parsed.frontmatter.verdicts = [
             ...parsed.frontmatter.verdicts.filter(
               (v) =>
-                !(v.profileId === reviewerProfileId && v.revisionId === rev.id),
+                !(v.profileId === reviewerProfileId && v.revisionId === subjectId),
             ),
-            {
-              profileId: reviewerProfileId,
-              revisionId: rev.id,
-              headSha: rev.headSha,
-              result: verdict,
-              // Ruling 292: a verdict's justification is a STORED record a
-              // person reads on the task page, and it was a bare `.slice` -
-              // the write-side shape ruling 288 closed for a goal. The cut
-              // stays (a verdict reason is a paragraph, not a report), and it
-              // now says it was cut and where the whole of it is: the agent's
-              // own report, on the same timeline, which is never truncated.
-              reason: clipVerdictReason(replyText ?? ""),
-              at: new Date().toISOString(),
-              rounds,
-            },
+            recorded,
           ];
           // Ruling 237 (F37-57): a SECOND consecutive objection from this same
           // reviewer is a decision for a person, and viberr raises it rather
@@ -3770,6 +4097,12 @@ export async function recordAgentCompletion(
                 // packet, so the card's promise is built from the hold the
                 // resolution will meet — not one read a moment earlier.
                 heldBy: parsed.frontmatter.blockedBy,
+                // Ruling 416: an objection with no rework behind it is the
+                // reviewer's answer on unchanged work, not a fresh round.
+                noReworkBehind,
+                revisionLabel: rev ? rev.headSha.slice(0, 7) : null,
+                // Ruling 421: this run put the completeness question.
+                askedWithThisReview: answersQuestion,
               });
               parsed.frontmatter.waiting = "human";
               // Ruling 137 says a packet withdraws the standing acceptance
@@ -3872,6 +4205,12 @@ export async function recordAgentCompletion(
          */
         if (verdict) replyEvent = { ...replyEvent, title: VERDICT_REPORT_TITLE };
         parsed.timeline.unshift(replyEvent);
+        stampNonCommitDelivery(
+          parsed.frontmatter,
+          actorRef,
+          replyEvent.attachments ?? null,
+          replyEvent.occurredAt,
+        );
       } else if (!verdict && (attachments || hasEvidence)) {
         // The prose was suppressed (guardrail-dropped, or an F22-12 duplicate of
         // this run's own mid-run comment), but the run still produced evidence
@@ -3892,6 +4231,12 @@ export async function recordAgentCompletion(
         };
         if (attachments) producing.attachments = attachments;
         parsed.timeline.unshift(producing);
+        stampNonCommitDelivery(
+          parsed.frontmatter,
+          actorRef,
+          attachments,
+          producing.occurredAt,
+        );
       }
       if (verdict) {
         const verdictEvent: TaskFileEvent = {
@@ -4014,17 +4359,22 @@ export async function recordAgentCompletion(
     // directive explicitly instructs the agent to tag the commenter, so this
     // was the majority of agent @tags. Same helper/`from` shape as :1169.
     if (postsReplyEvent) {
-      notifyMentionedUsers(db, {
-        // B-FD8b: the PRE-trim reply text — a handle inside a separated
-        // evidence fence must still reach the tagged human's inbox.
-        text: prepared.mentionSourceText,
-        projectSlug,
-        taskKey,
-        from: createActorResolver(db, {
-          agentNames: agentNamesByProfile(db, projectSlug),
-        })(actorRef),
-        occurredAt: prepared.event.occurredAt,
-      });
+      // Ruling 382: and the event records who it reached, so compaction keeps it.
+      await stampNotifiedRecipients(
+        taskRef(ctx, projectSlug, taskKey),
+        prepared.event.occurredAt,
+        notifyMentionedUsers(db, {
+          // B-FD8b: the PRE-trim reply text — a handle inside a separated
+          // evidence fence must still reach the tagged human's inbox.
+          text: prepared.mentionSourceText,
+          projectSlug,
+          taskKey,
+          from: createActorResolver(db, {
+            agentNames: agentNamesByProfile(db, projectSlug),
+          })(actorRef),
+          occurredAt: prepared.event.occurredAt,
+        }),
+      );
     }
     // The deduped-reply case is fanned out earlier (before the nothing-to-record
     // early return), so it is NOT repeated here — see notifyAddedReplyMentions.
@@ -5081,9 +5431,12 @@ export async function applyAgentCompletionEffects(
             turns: thisRunRow?.turns ?? 0,
             attachments: runAttachments.length,
           });
+    // Ruling 397: the lead is built by the shared helper the operator's snapshot
+    // matches on, so the sentence and its matcher cannot drift apart.
+    const lead = runDidNotCompleteLead(input.role, roleLabel);
     const failureText = classified
-      ? `The ${input.role} ${roleLabel} run did not complete. ${described.reason}${outcomeClause} ${described.remedy}${providerBlock}`
-      : `The ${input.role} ${roleLabel} run did not complete: ${endSentence(reasonText)}${outcomeClause}${
+      ? `${lead}. ${described.reason}${outcomeClause} ${described.remedy}${providerBlock}`
+      : `${lead}: ${endSentence(reasonText)}${outcomeClause}${
           failure?.kind === "max_turns"
             ? " Re-prompt the agent to continue from its session, or raise the turn cap (VIBERR_CLAUDE_MAX_TURNS)."
             : failure?.kind === "max_budget"
@@ -5210,7 +5563,7 @@ export async function applyAgentCompletionEffects(
   // 1c. A SUCCESSFUL run withdraws a stale "work stalled" packet about this
   //     same agent (owner ruling 2026-07-18) — done BEFORE the operator reacts
   //     so its snapshot already sees the packet gone instead of asking a human
-  //     to dismiss it. Completion/acceptance packets are never touched.
+  //     to dismiss it. Only a stall packet is ever touched (ruling 432).
   if (finished.state === "finished") {
     // R20-3 (F20-4): a model that just RAN to completion is available, whatever
     // a stale unavailability row says. Clearing on a real success IS the
@@ -5799,6 +6152,8 @@ export async function operatorPromptAgent(
     /** The agent's @mention handle (e.g. its name), prepended to the prompt so
      *  the comment reads as directing the agent by name ("@dev implement …"). */
     handle: string;
+    /** Ruling 421: this directive puts the completeness question. */
+    completeness?: boolean;
   },
   ctx: TaskMutationContext = {},
 ): Promise<StartAgentRunResult> {
@@ -5838,14 +6193,19 @@ export async function operatorPromptAgent(
   // question naming Stripe, Adyen, and Mock-only"), re-issued on every rework
   // round. The call stays, carrying the audience, so the rule lives at the one
   // fan-out seam and the non-delivery report is still computed for the timeline.
-  notifyMentionedUsers(db, {
-    text: commentText,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    from: OPERATOR_NOTIFY_FROM,
-    occurredAt: comment.occurredAt,
-    audience: "agent",
-  });
+  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  await stampNotifiedRecipients(
+    taskRef(ctx, input.projectSlug, input.taskKey),
+    comment.occurredAt,
+    notifyMentionedUsers(db, {
+      text: commentText,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      from: OPERATOR_NOTIFY_FROM,
+      occurredAt: comment.occurredAt,
+      audience: "agent",
+    }),
+  );
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
   const { isDispatchHeld, startAgentRun } = await import("./specialist-run.server");
@@ -5860,6 +6220,7 @@ export async function operatorPromptAgent(
       directive,
     };
     if (input.delivers !== undefined) dispatch.delivers = input.delivers;
+    if (input.completeness) dispatch.completeness = true;
     started = await startAgentRun(db, dispatch, OPERATOR_TASK_ACTOR, opCtx);
   } catch (error) {
     // The directive comment above is already on the timeline — a start that
@@ -6260,6 +6621,15 @@ export async function releaseTasksOwnedBy(
 
 // -------------------------------------------------------------- transition
 
+/** Markdown blockquote, one `>` per line and no trailing space on a blank one
+ *  (ruling 381 quotes a person's move reason on the transition entry). */
+function quoteLines(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (line ? `> ${line}` : ">"))
+    .join("\n");
+}
+
 /** Apply a declared workflow transition with its configured authority boundary. */
 export async function transitionStage(
   db: DatabaseSync,
@@ -6285,6 +6655,21 @@ export async function transitionStage(
      *  manual/approval RBAC tier is not re-demanded from them. Never set by a
      *  route; forging it from a request would bypass the board-management tier. */
     recommendationAuthorized?: boolean;
+    /**
+     * Ruling 381 (F39-8): WHY a person moved it. A manual stage move is one of
+     * the strongest signals a human sends — not ready, do this first, I
+     * disagree with the verdict — and it used to be mute: the event read
+     * "moved AX-9 from Review to Verify" and nothing else, while the
+     * operator's own playbook told it to "read why (their note, decision, or
+     * steer) and act on it". Live in pass 39 a send-back carried a specific
+     * instruction, the field did not exist, and the operator inferred the work
+     * from an older decision and dispatched the wrong thing.
+     *
+     * REQUIRED on a manual BACKWARD move (the one that always means
+     * something), optional going forward. Rides the transition event's own
+     * sentence, which is where the operator already looks.
+     */
+    reason?: string;
     /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
      *  Only consulted when this move lands on the TERMINAL stage — the server
      *  reads that as accepting the completion (see below) — and threaded
@@ -6368,13 +6753,47 @@ export async function transitionStage(
     backward &&
     (existing.parsed.frontmatter.validation === "failing" ||
       (changedReworkTarget !== null && input.toStageId === changedReworkTarget));
+  const movingBack = input.manual === true && backward && !ctx.operatorAuthorized;
   if (!boundary && !input.manual && !isReworkMove) {
     // F19-39: this string is RENDERED to a human (an `AppError` message becomes
     // the toast / route error), so the copy ban applies to it exactly as it
     // applies to a JSX string — see `app/features/copy-ban.test.ts`, which now
     // scans user-facing `AppError` messages under `app/server/**` too.
+    //
+    // Ruling 412 (F39-39): and it says WHY, when the answer is in this scope.
+    // A BACKWARD move is refused for one of two reasons this function has
+    // already computed — `validation` licenses no rework at all, or it
+    // licenses exactly one target and this is not it — and the bare sentence
+    // named neither. Live on ax-clone AX-18 the operator planned Review to
+    // Verify to rework against a reviewer's complete blocker list, got "No
+    // allowed transition from Review to Verify.", and the THROW aborted the
+    // rest of its plan: "Coordination stopped". The task sat on a human. The
+    // way forward existed and nothing said so: ruling 133 lets the engaged
+    // deliverer run at EVERY stage, so the rework never needed the move.
+    // Ruling 429(b): the `changed` arm read `changedReworkTarget`, which is only
+    // computed for a move flagged as rework, so an unflagged move off a task
+    // whose revision HAD changed was told "this task has neither" (AX-20, 00:47).
+    const changedTarget =
+      backward && existing.parsed.frontmatter.validation === "changed"
+        ? (changedReworkTarget ??
+          (await verdictStageOf(ctx, input.projectSlug, project, existing.parsed.frontmatter)))
+        : null;
+    // `verdictStageFor` answers null when the re-verdict can be given where the
+    // task already stands, which is the AX-20 case exactly.
+    const why = backward
+      ? existing.parsed.frontmatter.validation === "changed"
+        ? changedTarget
+          ? ` The revision changed after the last verdict, so the only backward move is into ${stageName(project, changedTarget)} for a re-verdict.`
+          : ` The revision changed after the last verdict, and its re-verdict is given at ${stageName(project, fromStageId)}, where the task already stands.`
+        : existing.parsed.frontmatter.validation === "failing"
+          ? ""
+          : " A backward move is rework, and rework needs a failing verdict or a revision that changed after one; this task has neither."
+      : "";
+    const wayOut = backward
+      ? " The engaged deliverer runs at every stage (ruling 133), so dispatch it here instead of moving the task."
+      : "";
     throw AppError.validation(
-      `No allowed transition from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
+      `No allowed transition from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.${why}${wayOut}`,
     );
   }
 
@@ -6441,6 +6860,18 @@ export async function transitionStage(
     } else {
       requireAction(db, project, actor, "approve-transition", "change the task stage");
     }
+    // Ruling 381 (F39-8): a manual move BACKWARD says why, or it does not
+    // happen. AFTER the authority gate on purpose — someone who may not move
+    // the task at all is refused for that, not told to write a reason they
+    // could never use. No exemption: the operator's rework route never reaches
+    // this arm (it carries operator authority and its verdict), and an applied
+    // recommendation arrives with the card's own words as the reason. A forward
+    // move is ordinary progress and asks nothing.
+    if (movingBack && !(input.reason ?? "").trim()) {
+      throw AppError.validation(
+        `Moving ${input.taskKey} back from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)} needs a reason: the operator reads it to decide what to do next, and without one it has to guess. Say what should change before this comes back.`,
+      );
+    }
   } else if (boundary!.boundary === "auto") {
     // An auto boundary crossed by a human (the UI always sends manual:true, but
     // a server-side caller that omits `manual` — e.g. applyRecommendation on a
@@ -6470,6 +6901,17 @@ export async function transitionStage(
     );
   }
 
+  // One normalization for the blockquote and the audit row. Horizontal runs
+  // collapse; LINE breaks survive, because a person writing two sentences about
+  // what has to change before the task comes back meant the break, and the
+  // quote below carries it. Three-or-more blank lines fold to one.
+  const movedReason = (input.reason ?? "")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n")
+    .trim();
   const event: TaskFileEvent = {
     occurredAt: new Date().toISOString(),
     type: "transition",
@@ -6477,7 +6919,14 @@ export async function transitionStage(
     title: null,
     text: ctx.operatorAuthorized
       ? `**Transition:** operator moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`
-      : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`,
+      : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.` +
+        // Ruling 381: on the event itself, not in a separate note, so the
+        // operator reads the move and the reason as one fact — and quoted, the
+        // way a packet decision quotes the resolver's words. Appending it as a
+        // bare clause ran the person's own sentence on after a full stop
+        // ("…to In Progress. the retry path is still unhandled"), which reads
+        // as a typo rather than as an instruction.
+        (movedReason ? `\n\n${quoteLines(movedReason)}` : ""),
     toAgent: false,
     evidence: null,
   };
@@ -6577,6 +7026,14 @@ export async function transitionStage(
     // the note counts the survivors it really leaves (pass 34 review: counting
     // before this filter overstated them).
     const staleTransition = (r: Recommendation) => r.kind === "transition";
+    // Ruling 387 (F39-14): the MOVE goes on first, and the withdrawal note it
+    // causes lands above it. `event` was built before the lock; the note is
+    // stamped inside `withdrawAcceptanceOffers`, so it is always the newer of
+    // the two. Unshifting the move last put the OLDER event on top, which is
+    // how viberr's own `timeline_not_strictly_newest_first` diagnostic came to
+    // fire on AX-9 over a one-millisecond pair — and it read backwards besides,
+    // showing a consequence below its cause in a newest-first list.
+    parsed.timeline.unshift(event);
     if (moveCause) {
       moveWithdrawal.offers = withdrawAcceptanceOffers(
         parsed,
@@ -6589,7 +7046,6 @@ export async function transitionStage(
       parsed.frontmatter.recommendations =
         parsed.frontmatter.recommendations.filter((r) => !staleTransition(r));
     }
-    parsed.timeline.unshift(event);
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   // U3: the racing submit already wrote this exact move. Everything below is a
@@ -6604,6 +7060,7 @@ export async function transitionStage(
     boundary: boundary?.boundary ?? "manual",
   };
   if (input.manual) transitionDetails.manual = true;
+  if (movedReason) transitionDetails.reason = movedReason;
   if (ctx.operatorAuthorized) transitionDetails.by = "operator";
   recordAudit(db, {
     action: "task.transition",
@@ -7381,11 +7838,25 @@ export async function performDelivery(
         verifiedNoChange && preFm && !activeWorkRevision(preFm.workRevision)
           ? await resolveNoChangeBaseRevision(db, ctx, projectSlug, taskKey)
           : null;
+      // Ruling 391 (F39-18): a task whose deliverable is NOT a commit has no
+      // commits by design, and telling its operator "if the agent produced
+      // work, it never reached the task branch. Re-run the delivering agent"
+      // is advice that would run a finished research task again and still find
+      // nothing. Live on ax-clone AX-12: the report was written, attached, and
+      // sitting in `deliveredAt`, which ruling 388 had just taught the file to
+      // record — and this sentence said the work was missing.
+      const deliveredFiles = preFm?.deliveredAt ?? null;
       const message =
-        push.status === "no_commits"
-          ? `${taskKey}'s workspace carries no commits ahead of the default branch, so there is ` +
-            `nothing to review and no PR was opened. If the agent produced work, it never reached ` +
-            `the task branch. Re-run the delivering agent, then deliver again.`
+        push.status === "no_commits" && deliveredFiles
+          ? `${taskKey} carries no commits ahead of the default branch, and it is not supposed ` +
+            `to: its deliverable is the files a run saved (last on ${deliveredFiles}), not a ` +
+            `diff. Nothing was pushed and no PR was opened, which is the right outcome. Do not ` +
+            `deliver this task again; the reviewers judge what it produced, and it is accepted ` +
+            `from the review boundary like any other task.`
+          : push.status === "no_commits"
+            ? `${taskKey}'s workspace carries no commits ahead of the default branch, so there is ` +
+              `nothing to review and no PR was opened. If the agent produced work, it never reached ` +
+              `the task branch. Re-run the delivering agent, then deliver again.`
           : verifiedNoChange
             ? `${taskKey} has never produced a branch, a commit or a pull request, and the server ` +
               `inspected its workspace before recording this: ${push.reason}. The task is recorded as ` +
@@ -7489,16 +7960,27 @@ export async function performDelivery(
     // can tell a reported head from a published one without a PR to prove it.
     // A revision whose head the push did not name (a stale reconcile) is not
     // stamped: the PR that opens next is the proof for that shape.
+    // Ruling 439: a head the revision reaches through Viberr's own base
+    // refreshes carries it too, so a push of the refreshed branch publishes it.
     const pushedHead = push.headSha;
     if (pushedHead) {
       const before = readTaskFile(taskRef(ctx, projectSlug, taskKey));
       const revBefore = before
         ? activeWorkRevision(before.parsed.frontmatter.workRevision)
         : null;
-      if (revBefore && revBefore.headSha === pushedHead && !revBefore.pushedAt) {
+      if (
+        before &&
+        revBefore &&
+        !revBefore.pushedAt &&
+        headCarriesRevision(revBefore.headSha, pushedHead, before.parsed.frontmatter.baseRefreshes)
+      ) {
         await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
           const rev = activeWorkRevision(parsed.frontmatter.workRevision);
-          if (rev && rev.headSha === pushedHead && !rev.pushedAt) {
+          if (
+            rev &&
+            !rev.pushedAt &&
+            headCarriesRevision(rev.headSha, pushedHead, parsed.frontmatter.baseRefreshes)
+          ) {
             rev.pushedAt = new Date().toISOString();
           }
         });
@@ -8328,12 +8810,45 @@ async function refreshBranchForAcceptance(
   taskKey: string,
   actor: TaskActor,
 ): Promise<AcceptanceMergeOutcome | null> {
+  return (await refreshBranchAsPerson(db, ctx, projectSlug, taskKey, actor, ACCEPTANCE_REFRESH))
+    .outcome;
+}
+
+/** What a person's branch refresh is for, in the words its record uses. */
+interface PersonRefreshPurpose {
+  /** The refresh sentence's lead (`recordBranchRefresh`). */
+  lead: string;
+  /** What the conflict note says did not happen. */
+  refused: string;
+}
+
+const ACCEPTANCE_REFRESH: PersonRefreshPurpose = {
+  lead: "Accepting the completion brought",
+  refused: "the acceptance was refused",
+};
+
+/**
+ * A person's refresh of the task branch from its base: the acceptance
+ * ceremony's, and ruling 449's "bring it up to date and re-review first".
+ * Returns the refresh's own status (null when there was nothing to refresh)
+ * and, on a conflict, the acceptance outcome that names it.
+ */
+async function refreshBranchAsPerson(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  actor: TaskActor,
+  purpose: PersonRefreshPurpose,
+): Promise<{ status: string | null; outcome: AcceptanceMergeOutcome | null }> {
   const ref = taskRef(ctx, projectSlug, taskKey);
   const before = readTaskFile(ref)?.parsed.frontmatter ?? null;
   // Nothing to refresh without an open PR on a branch: no-change completions
   // and merged PRs never reach here with work to move.
-  if (!before?.pr || !before.branch) return null;
-  if (before.pr.state !== "review" && before.pr.state !== "accepted") return null;
+  if (!before?.pr || !before.branch) return { status: null, outcome: null };
+  if (before.pr.state !== "review" && before.pr.state !== "accepted") {
+    return { status: null, outcome: null };
+  }
   const updateBranch =
     ctx.deps?.updateBranchFromBase ??
     (await import("~/server/github/update-branch.server")).updateWorkspaceBranchFromBase;
@@ -8368,11 +8883,11 @@ async function refreshBranchForAcceptance(
     await recordBranchRefresh(db, reconcileCtx, { projectSlug, taskKey }, result, {
       timelineActor: humanActorRef(db, actor),
       reconcileActor: { userId: actor.userId, label: actor.label },
-      lead: "Accepting the completion brought",
+      lead: purpose.lead,
     });
-    return null;
+    return { status: result.status, outcome: null };
   }
-  if (result.status !== "conflict") return null;
+  if (result.status !== "conflict") return { status: result.status, outcome: null };
   await updateTaskFile(ref, (parsed) => {
     const pr = parsed.frontmatter.pr;
     if (pr && pr.number === before.pr!.number) pr.mergeable = "conflicting";
@@ -8384,7 +8899,7 @@ async function refreshBranchForAcceptance(
       text:
         `The acceptance-time refresh found \`${result.branch}\` in CONFLICT with \`${result.base}\`` +
         (result.files.length ? ` in ${result.files.join(", ")}` : "") +
-        `. The merge was aborted, the branch is untouched and the acceptance was refused.` +
+        `. The merge was aborted, the branch is untouched and ${purpose.refused}.` +
         (result.detail ? `\n\n\`\`\`\n${result.detail}\n\`\`\`` : ""),
       toAgent: false,
       evidence: null,
@@ -8429,7 +8944,7 @@ async function refreshBranchForAcceptance(
   void autoInvokeOperator(db, ctx, projectSlug, taskKey, "pr-conflicting").catch(() => {});
   const after = readTaskFile(ref)?.parsed.frontmatter ?? null;
   const reason = after ? mergeReadinessRefusal(after, taskKey) : null;
-  return {
+  return { status: result.status, outcome: {
     kind: "unmergeable",
     reason:
       reason ??
@@ -8438,7 +8953,141 @@ async function refreshBranchForAcceptance(
       `${taskKey}'s review PR #${before.pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it — never by rebasing, which rewrites commits the pull request already published — then re-review, or archive the task.`,
     // Ruling 291: the short cause, in the same voice as the long reason above.
     cause: "the PR conflicts with the base branch; merge the base into it, then merge",
-  };
+  } };
+}
+
+/** Ruling 449: the refresh a person asks for before a re-review. */
+const RE_REVIEW_REFRESH: PersonRefreshPurpose = {
+  lead: "Asked for a re-review before accepting, brought",
+  refused: "no re-review was started",
+};
+
+/** Ruling 449: the directive each re-run reviewer receives. */
+export function reReviewDirective(branch: string, base: string, mergeSha: string | null): string {
+  return (
+    `A person asked for a re-review before accepting. \`${branch}\` was brought up to date ` +
+    `with \`${base}\`${mergeSha ? ` (merge commit \`${mergeSha.slice(0, 7)}\`)` : ""}, so the ` +
+    "head that will merge is the reviewed work on the current base, and no review has run on " +
+    "that combination. Run the gates on the head you are given and give your verdict on it."
+  );
+}
+
+export interface RefreshAndReviewResult {
+  /** `refreshed`: reviewers started · `current`: nothing to re-review ·
+   *  `conflict`: the refresh met one · `unavailable`: it could not run. */
+  status: "refreshed" | "current" | "conflict" | "unavailable";
+  /** The reviewers whose re-review started, by display name. */
+  reviewers: string[];
+  message: string;
+}
+
+/**
+ * Ruling 449 (O39-c; default, owner may revisit): "bring it up to date and
+ * re-review first", the safe answer to U39-32's "N commits behind … No review
+ * has run on that combination".
+ *
+ * Live on ax-clone, two green pull requests merged a minute apart left main
+ * red. Each passed its gates and review on its own base; the acceptance
+ * ceremony merged the newer base into the second and merged the result, a
+ * head nobody had run. The owner's own method afterwards was to test the
+ * merged combination in a container before accepting. This is that method as
+ * one click: the branch is brought up to date as the person (the ceremony's
+ * own refresh, `refreshBranchAsPerson`), and every reviewer whose verdict
+ * stands on the revision re-reviews the refreshed head (ruling 439 keeps the
+ * revision and moves the review subject to the chain's end). Acceptance then
+ * merges the head the re-review ran on.
+ */
+export async function refreshAndReview(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  ctx: TaskActionContext = {},
+): Promise<RefreshAndReviewResult> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
+  const existing = readTaskFile(ref);
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const fm = existing.parsed.frontmatter;
+  requireAcceptCompletion(
+    db,
+    project,
+    actor,
+    fm.ownerUserId,
+    "bring the branch up to date and re-review it before accepting",
+  );
+  const revision = activeWorkRevision(fm.workRevision);
+  const reviewers = [
+    ...new Set(
+      fm.verdicts.filter((v) => revision && v.revisionId === revision.id).map((v) => v.profileId),
+    ),
+  ];
+  if (reviewers.length === 0) {
+    return {
+      status: "unavailable",
+      reviewers: [],
+      message: `No reviewer's verdict stands on ${input.taskKey}'s delivered revision, so there is no review to run again. Nothing was changed.`,
+    };
+  }
+  const { status, outcome } = await refreshBranchAsPerson(
+    db,
+    ctx,
+    input.projectSlug,
+    input.taskKey,
+    actor,
+    RE_REVIEW_REFRESH,
+  );
+  if (outcome?.kind === "unmergeable") {
+    return { status: "conflict", reviewers: [], message: outcome.reason };
+  }
+  if (status === "already_current") {
+    return {
+      status: "current",
+      reviewers: [],
+      message: `\`${fm.branch}\` already carries the base branch, so the reviewed head merges as it is. Nothing was started.`,
+    };
+  }
+  if (status !== "updated") {
+    return {
+      status: "unavailable",
+      reviewers: [],
+      message: `\`${fm.branch ?? input.taskKey}\` could not be brought up to date here (${status ?? "no open pull request"}). Nothing was started.`,
+    };
+  }
+  const after = readTaskFile(ref)?.parsed.frontmatter ?? fm;
+  const refresh = after.baseRefreshes.at(-1) ?? null;
+  const base = refresh?.base ?? "the base branch";
+  const directive = reReviewDirective(after.branch ?? "", base, refresh?.mergeSha ?? null);
+  const startAgentRun =
+    ctx.deps?.startAgentRun ?? (await import("./specialist-run.server")).startAgentRun;
+  const opCtx: TaskActionContext = { ...ctx, operatorAuthorized: true };
+  const started: string[] = [];
+  const failed: string[] = [];
+  for (const profileId of reviewers) {
+    const name =
+      after.engagements.find((e) => e.profileId === profileId)?.role ?? profileId;
+    try {
+      await startAgentRun(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          profileId,
+          directive,
+          directiveFrom: actor.label,
+        },
+        OPERATOR_TASK_ACTOR,
+        opCtx,
+      );
+      started.push(name);
+    } catch (error) {
+      failed.push(`${name} (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  const message =
+    `Brought \`${after.branch}\` up to date with \`${base}\`` +
+    (started.length ? `; re-review started: ${started.join(", ")}.` : ".") +
+    (failed.length ? ` Could not start: ${failed.join("; ")}.` : "");
+  return { status: "refreshed", reviewers: started, message };
 }
 
 /**
@@ -8606,6 +9255,9 @@ export async function reorderTask(
      *  and an ordinary column move is ack-free. Three states, documented on
      *  `assertAcceptanceDisclosure`. */
     ack?: AcceptanceDisclosure | null;
+    /** Ruling 381 (F39-8): why a person dragged it BACK; forwarded verbatim to
+     *  the manual transition, which requires one for a backward move. */
+    reason?: string;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -8648,6 +9300,10 @@ export async function reorderTask(
     // Ruling 88: see the `ack` field above — the key is set only when the caller
     // is a disclosure-bearing door, so an in-process reorder stays omitted.
     if ("ack" in input) move.ack = input.ack ?? null;
+    // Ruling 381: a backward DRAG is the same act as the stage menu's move, so
+    // it answers the same question rather than being refused with nowhere to
+    // type the answer.
+    if (input.reason) move.reason = input.reason;
     await transitionStage(db, move, actor, ctx);
   }
 
@@ -9104,6 +9760,36 @@ export function packetIdentity(p: TaskPacket): string {
       backend: o.backend ?? null,
     })),
   })}`;
+}
+
+/** Ruling 189: the sentence that makes a person's decision part of the
+ *  task's contract. O39-b finds an earlier copy of the same decision by it. */
+const CONTRACT_CLAUSE = "This decision is part of the task's contract from here on.";
+
+/** Every decision block the contract holds: the question it answered and the
+ *  answer, as `resolvePacket` writes them. */
+const CONTRACT_DECISION_RE = new RegExp(
+  String.raw`answered “([^”]*)”:\*\*\n\n([\s\S]*?)\n\n` + literalPattern(CONTRACT_CLAUSE),
+  "g",
+);
+
+/**
+ * O39-b: does the contract already hold this decision, to this question?
+ *
+ * The answer alone is not the decision. An agent's options are often a bare
+ * "Yes", so a second question answered "Yes" is a different decision, and
+ * matching on the answer dropped it from the contract. The question is
+ * compared with its numbers blanked, because the one that asks again round
+ * after round (the review deadlock, "… has requested changes 3 times
+ * running") only changes its count.
+ */
+export function contractHoldsDecision(goal: string, question: string, answer: string): boolean {
+  const asked = (title: string) => title.replace(/\d+/g, "#");
+  const wanted = asked(question);
+  for (const block of goal.matchAll(CONTRACT_DECISION_RE)) {
+    if (block[2] === answer && asked(block[1] ?? "") === wanted) return true;
+  }
+  return false;
 }
 
 export async function resolvePacket(
@@ -10223,26 +10909,22 @@ export async function resolvePacket(
   // contract amendment on a task being closed in the same breath binds no
   // future run's work, which is the whole test the exclusion applies.
   const endsTheTask = acceptsInto !== null || option.kind === "force_accept";
-  const goalAmendment: string | null =
+  const goalAnswer: string | null =
     endsTheTask ||
     !clearPacket ||
     customDirective !== "" ||
     PROCESS_ONLY_OPTION_KINDS.has(option.kind)
       ? null
-      : (() => {
-          const when = now.slice(0, 10);
-          const answer = [option.t, option.d]
-            .filter((part) => part.trim())
-            .join(" — ");
-          return (
-            `---\n\n` +
-            `**Decision — ${when}, ${human.nameHint} answered “${packet.title}”:**\n\n` +
-            `${answer}\n\n` +
-            `This decision is part of the task's contract from here on. Where anything ` +
-            `above contradicts it, the decision wins — it was made by the person the ` +
-            `question was put to, and it is not an agent overstepping.`
-          );
-        })();
+      : [option.t, option.d].filter((part) => part.trim()).join(" — ");
+  const goalAmendment: string | null =
+    goalAnswer === null
+      ? null
+      : `---\n\n` +
+        `**Decision — ${now.slice(0, 10)}, ${human.nameHint} answered “${packet.title}”:**\n\n` +
+        `${goalAnswer}\n\n` +
+        `${CONTRACT_CLAUSE} Where anything ` +
+        `above contradicts it, the decision wins — it was made by the person the ` +
+        `question was put to, and it is not an agent overstepping.`;
 
   // U3 (NFR16): set when the acceptance arm found the task already terminal
   // under the lock — the write, and the audit row that belongs to it, are the
@@ -10292,7 +10974,19 @@ export async function resolvePacket(
     // run READS, so the goal won. Appending it here, in the same locked write
     // that clears the packet, needs no model judgement and cannot be forgotten
     // by a turn that fails or is interrupted.
-    if (goalAmendment) parsed.goal = `${parsed.goal.trimEnd()}\n\n${goalAmendment}`;
+    // O39-b: a decision the contract already holds, to the same question,
+    // is not written again. Live on ax-clone AX-22 a review deadlock asked
+    // round after round, and every "Let the rework continue" answer appended
+    // the same block: four copies in the text every fresh run re-anchors on.
+    // Each answer is still on the timeline, and ruling 415 carries every one
+    // to the operator.
+    if (
+      goalAmendment &&
+      goalAnswer !== null &&
+      !contractHoldsDecision(parsed.goal, packet.title, goalAnswer)
+    ) {
+      parsed.goal = `${parsed.goal.trimEnd()}\n\n${goalAmendment}`;
+    }
     if (clearPacket) parsed.packet = null;
     // Ruling 160 (pass 35, F35-11): a PERSON answering a packet while the
     // task's pull request stands closed without merging is the answer to that
@@ -10451,15 +11145,52 @@ export async function resolvePacket(
           ? (packet.askedBy?.trim() ?? "")
           : "";
       if (askedBy) {
-        const answer: Parameters<typeof answerAskingAgent>[2] = {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          profileId: askedBy,
-          question: packet.title,
-          decision: option.t,
-        };
-        if (decisionNote) answer.note = decisionNote;
-        answeredAsker = await answerAskingAgent(db, ctx, answer, actor);
+        // Ruling 447 (O39-a): an answer that names another actor goes to the
+        // operator, which routes it; only an answer for the asker goes back.
+        const { listDeployedSpecialists } = await import("./specialist-run.server");
+        const { agentMentionHandle } = await import("./agent-reply.server");
+        const deployed = listDeployedSpecialists(
+          input.projectSlug,
+          ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {},
+        ).map((a: { id: string; name: string }) => ({
+          id: a.id,
+          name: a.name,
+          handle: agentMentionHandle({ profileId: a.id, name: a.name }),
+        }));
+        // The person's words: the option they chose and anything they typed.
+        // Never the option's description, which the ASKER wrote, and which
+        // narrates what happens next ("the operator then moves it to
+        // Verify") as often as it names who should act.
+        const routedTo = answerNamesAnotherActor(
+          [option.t, decisionNote ?? ""].join("\n"),
+          askedBy,
+          deployed,
+        );
+        if (routedTo) {
+          const askerName = deployed.find((a) => a.id === askedBy)?.name ?? askedBy;
+          await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), {
+            occurredAt: new Date().toISOString(),
+            type: "note",
+            actor: { kind: "system", systemId: "policy-engine" },
+            title: null,
+            text:
+              `The answer names ${routedTo}, so it went to the operator to route, ` +
+              `not back to ${askerName}, who asked.`,
+            toAgent: false,
+            evidence: null,
+          });
+          reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+        } else {
+          const answer: Parameters<typeof answerAskingAgent>[2] = {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            profileId: askedBy,
+            question: packet.title,
+            decision: option.t,
+          };
+          if (decisionNote) answer.note = decisionNote;
+          answeredAsker = await answerAskingAgent(db, ctx, answer, actor);
+        }
       }
     }
     // No asker (an operator/policy packet), or its session is gone / the profile
@@ -11241,6 +11972,15 @@ export async function resolvePacket(
   if (option.kind === "move_stage") {
     const target = moveStageTarget(option, project.stages, input.taskKey);
     if (target.ok) {
+      // Ruling 381: a backward move says why, and a packet resolution is a
+      // door onto it like the stage menu. The person's own words when they
+      // gave any, else the option they chose, which is what they agreed to.
+      // Without it every move_stage option that goes back was refused after
+      // the packet had already cleared.
+      const why =
+        customDirective ||
+        input.note?.trim() ||
+        [option.t, option.d].filter((part) => part.trim()).join(" — ");
       try {
         await transitionStage(
           db,
@@ -11249,6 +11989,7 @@ export async function resolvePacket(
             taskKey: input.taskKey,
             toStageId: target.stage.id,
             manual: true,
+            reason: why,
           },
           actor,
           ctx,
@@ -12512,6 +13253,21 @@ export interface AcceptanceAffordance {
   /** null when acceptance would succeed right now; else the exact refusal. */
   blockedReason: string | null;
   /**
+   * Ruling 393 (F39-20): EVERY standing refusal, in gate order — what a
+   * force-accept would bypass, whole.
+   *
+   * `blockedReason` is the first one, which is right for the one-line "Not
+   * acceptable yet" summary and wrong for the force dialog: U35-3 made the
+   * audit row and the forced completion event name every gate precisely so the
+   * record could not under-report an override, and its own docstring says "the
+   * timeline, the audit log and the confirm dialog list the same bypasses" —
+   * but the dialog only ever received the first. Live on ax-clone AX-12 a human
+   * confirmed "Bypassing: Waiting on 1 required reviewer approval of the
+   * current revision." and the audit row recorded that gate AND the project's
+   * required-reviewer rule.
+   */
+  blockedGates: string[];
+  /**
    * F19-7: the refusal a PACKET `accept_completion` resolution would hit.
    *
    * `resolvePacket` evaluates the same contract with `blockedPacket: false` —
@@ -12567,6 +13323,7 @@ export function resolveAcceptanceAffordance(
     hasAuthority: false,
     atBoundary: false,
     blockedReason: null,
+    blockedGates: [],
     blockedReasonViaPacket: null,
     canAccept: false,
     terminallyBlocked: false,
@@ -12605,13 +13362,18 @@ export function resolveAcceptanceAffordance(
   }
   const atBoundary =
     !fm.archived && acceptanceStageBlockedReason(project, fm.stage, input.taskKey) === null;
-  const blockedReason = acceptanceRefusalReason(project, fm, input.taskKey, {
+  // Ruling 393: the WHOLE list once, and the first of it is `blockedReason`.
+  // Computing them separately is how the dialog and the audit row came to
+  // disagree about what an override was bypassing.
+  const blockedGates = acceptanceRefusalReasons(project, fm, input.taskKey, {
     blockedPacket: fm.readiness === "blocked" && existing.parsed.packet?.type === "blocked",
   });
+  const blockedReason = blockedGates[0] ?? null;
   return {
     hasAuthority,
     atBoundary,
     blockedReason,
+    blockedGates,
     // F19-7: what a packet resolution would hit — see the field's docstring.
     blockedReasonViaPacket: acceptanceRefusalReason(project, fm, input.taskKey, {
       blockedPacket: false,
@@ -13868,6 +14630,8 @@ export async function applyRecommendation(
     // Apply installs exactly what was recommended — re-deriving here could
     // flip a "supporting" recommendation into a delivery hand-off.
     if (rec.delivers !== undefined) dispatch.delivers = rec.delivers;
+    // Ruling 421: a recommended completeness question is stamped on Apply too.
+    if (rec.completeness) dispatch.completeness = true;
     await startAgentRun(db, dispatch, runActor, runCtx);
   } else if (rec.kind === "transition" && rec.toStageId) {
     // Owner ruling 2026-07-26: the operator may recommend a move OFF the
@@ -13890,6 +14654,13 @@ export async function applyRecommendation(
     };
     if (!declaredEdge) move.manual = true;
     if (asCoordination("approve-transition")) move.recommendationAuthorized = true;
+    // Ruling 381: a backward move says why. On this path the card IS the why —
+    // the operator wrote it — so its own words ride onto the transition entry
+    // instead of the human being asked to retype them into a dialog they never
+    // see. `detail` is the operator's reasoning; `label` is the button text and
+    // is never empty, so the move can never be refused for a reason the Apply
+    // click has no way to supply.
+    move.reason = (rec.detail ?? "").trim() || rec.label;
     // Ruling 88: a recommended move onto the TERMINAL stage is an acceptance
     // (`transitionStage` routes it to `acceptCompletion` — the real merge), and
     // that is exactly the F19-3 card whose Apply the ceremony now fronts. The

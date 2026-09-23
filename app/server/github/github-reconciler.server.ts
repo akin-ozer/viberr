@@ -46,7 +46,7 @@ import {
   encodeRefPath,
   GITHUB_API_BASE,
   githubFailureMessage,
-  isMissingRefAnswer,
+  isMissingCommitAnswer,
 } from "./github-client.server";
 import {
   prAdoptionText,
@@ -89,6 +89,7 @@ import {
   POLICY_ENGINE_ACTOR,
   flagScopeViolation,
   policyViolationText,
+  scopeFlagText,
   resolveScopeViolationWithEvent,
 } from "./scope-flag.server";
 import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
@@ -490,7 +491,10 @@ async function reconcileTaskUnlocked(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         scope: "checks:read",
-        detail: policyViolationText(
+        // F39-5: `checks:read` is advisory (ruling 360 says merging never
+        // needed it), so the picker writes the advisory sentence and a neutral
+        // note rather than a violation under a shield.
+        detail: scopeFlagText(
           "checks:read",
           "Reading the pull request's check results was refused during reconcile, so the PR card and the accept dialog say the checks could not be read, and a merge proceeds without them.",
         ),
@@ -514,10 +518,17 @@ async function reconcileTaskUnlocked(
   // (merged/closed) PR drops it, because "conflicting" frozen on a merged PR is
   // a lie. This is the fact that told the human the truth about VM-4's failed
   // merge instead of blaming their credentials.
-  const mergeableLive =
-    pr?.mergeable !== undefined ? pr.mergeable : (cachedPr?.mergeable ?? null);
+  const mergeableMeasuredNow = pr?.mergeable !== undefined;
+  const mergeableLive = mergeableMeasuredNow ? pr.mergeable : (cachedPr?.mergeable ?? null);
   const mergeable =
     prState === "review" || prState === "accepted" ? mergeableLive : null;
+  // Ruling 405: the head this verdict was measured on travels WITH it. A value
+  // measured this pass is pinned to the head this pass read; a carried one
+  // keeps the pin it already had, so a conflict cannot outlive the commit that
+  // resolved it. Same discipline `paths` has carried since ruling 236.
+  const mergeableAt = mergeableMeasuredNow
+    ? (pr.headSha ?? null)
+    : (cachedPr?.mergeableAt ?? null);
   // R15-15 / R16-1 — OWNERSHIP. `findPrForBranch` matches on branch NAME alone,
   // and a task-key branch is not a unique identifier: task keys restart at 1 on
   // a new data root, so a brand-new VIB-1 gets branch `vib-1` — which on GitHub
@@ -628,7 +639,14 @@ async function reconcileTaskUnlocked(
           `/repos/${gh.repo}/commits/${reviewedSha}`,
           commitShaSchema,
         );
-        if (!probe.ok && isMissingRefAnswer(probe)) {
+        // Ruling 427: the commit read answers a well-formed sha it cannot find
+        // with 422 "No commit found for SHA", not 404 (ruling 223 found it on
+        // the acceptance probe). Asking the ref predicate here meant this
+        // record could never be written on the real API: live on ax-clone
+        // AX-20's rework 7ce74b2 sat in the workspace while PR #13 carried
+        // c5001a3, `unpushedRevision` stayed null, and the operator sent the
+        // reviewer back to the head it had already rejected.
+        if (!probe.ok && isMissingCommitAnswer(probe)) {
           unpushedMeasured = true;
           if (!verifiedRevision) {
             unpushed = { revisionSha: reviewedSha, prHeadSha: pr.headSha, relation: "unknown" };
@@ -674,7 +692,10 @@ async function reconcileTaskUnlocked(
     if (checks) owned.checks = checks;
     if (!checks && checksUnread) owned.checksUnread = checksUnread;
     if (review) owned.review = review;
-    if (mergeable) owned.mergeable = mergeable;
+    if (mergeable) {
+      owned.mergeable = mergeable;
+      if (mergeableAt) owned.mergeableAt = mergeableAt;
+    }
     // Ruling 236: measured this pass wins; otherwise the SAME PR's cached list
     // is carried, because a skipped read means "unchanged", not "unknown". A
     // list read for a DIFFERENT head than the one now live is dropped rather

@@ -244,6 +244,56 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(unread.c).toBe(1);
   });
 
+  it("ruling 439: a delivery after Viberr's own base refresh keeps the revision and the approval on it", async () => {
+    // Live on ax-clone AX-29: revision 4e6c47d, `main` merged onto it by
+    // update_branch_from_base as 278c1ed, the reviewer approved, and the
+    // deliver_for_review reconcile 65 seconds later minted 278c1ed as a NEW
+    // revision (the merge changed the tree), so the approval went stale and the
+    // task sat at Review waiting for a verdict nobody was producing. CANARY:
+    // pass `[]` instead of `fm.baseRefreshes` to nextWorkRevision.
+    const delivered = "4e6c47d51283c3f457b040d4d685ccf1edc373d5";
+    const store = setupTask("ATL-3", {
+      stage: "review",
+      branch: BRANCH,
+      engagements: [
+        { profileId: "developer", backend: "codex", role: "Developer", delivers: true, verdictCapable: false },
+        { profileId: "reviewer", backend: "codex", role: "Reviewer", delivers: false, verdictCapable: true },
+      ],
+      workRevision: {
+        id: "rev_1",
+        headSha: delivered,
+        treeSha: "01d7000000000000000000000000000000000000",
+        branch: BRANCH,
+        createdAt: "2026-09-23T02:20:00.000Z",
+        sourceProfileId: "developer",
+        kind: "delivered",
+      },
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: delivered, result: "approve", reason: "ok", at: "2026-09-23T02:58:05.000Z", rounds: 1 },
+      ],
+      validation: "healthy",
+      baseRefreshes: [
+        { mergeSha: HEAD_SHA, baseSha: "b".repeat(40), base: "main", commits: 2, at: "2026-09-23T02:44:06.000Z", onto: delivered },
+      ],
+    });
+    const res = await reconcileWorkspaceDelivery({
+      db: store.db,
+      projectSlug: store.slug,
+      taskKey: "ATL-3",
+      profileId: "developer",
+      workdir: makeWorkspaceRepo(),
+      dataRoot: store.dataRoot,
+      backend: "codex",
+      role: "Developer",
+      exec: fakeExec({ branch: BRANCH, commits: COMMITS }),
+    });
+    expect(res.status).toBe("reconciled");
+    const fm = readFm(store).frontmatter;
+    expect(fm.workRevision).toMatchObject({ id: "rev_1", headSha: delivered });
+    expect(fm.validation).toBe("healthy");
+    expect(fm.verdicts).toHaveLength(1);
+  });
+
   it("locates the repo via the conventional <taskDir>/workspace/<name> path when no workdir is given", async () => {
     const store = setupTask();
     // "akin-ozer/viberr" → repo name "viberr".
@@ -858,6 +908,44 @@ describe("ruling 135: the workspace reconcile records the unpushed revision", ()
     expect(fm.pr).toMatchObject({ number: 9, headSha: HEAD_SHA, checks: { total: 1, passing: 1, failing: 0, pending: 0 } });
     expect(fm.pr).not.toHaveProperty("unpushedRevision");
     expect(readFm(cleared).timeline[0]!.text).toContain("carries the workspace revision");
+  });
+
+  /**
+   * Ruling 445, live on ax-clone AX-5: eleven seconds after the delivery
+   * reconcile minted `b82bb93`, the review queue still said "PR #24 does not
+   * carry the delivered revision 509c0d1", because the workspace could not
+   * read the PR and the line is only re-measured beside that read.
+   */
+  it("ruling 445: a mint the PR cannot be read for re-points the line at the revision that now stands", async () => {
+    const SUPERSEDED = "5".repeat(40);
+    const stale = () =>
+      setupTask("ATL-3", {
+        branch: BRANCH,
+        pr: {
+          number: 9, state: "review", title: "t", headSha: PR_HEAD,
+          unpushedRevision: { revisionSha: SUPERSEDED, prHeadSha: PR_HEAD, relation: "behind" },
+        },
+      });
+    const repointed = stale();
+    // `gh` cannot answer, as in a workspace with no GitHub credential.
+    await reconcile(repointed, fakeExec({ branch: BRANCH, commits: COMMITS, ghMissing: true, ancestry: { prHeadIsAncestor: true } }));
+    // CANARY: drop the re-measure and the line keeps naming 5555555.
+    expect(readFm(repointed).frontmatter.pr?.unpushedRevision).toEqual({
+      revisionSha: HEAD_SHA,
+      prHeadSha: PR_HEAD,
+      relation: "behind",
+    });
+    // A PR head on record that already carries the new revision clears it.
+    const carried = setupTask("ATL-3", {
+      branch: BRANCH,
+      pr: {
+        number: 9, state: "review", title: "t", headSha: HEAD_SHA,
+        unpushedRevision: { revisionSha: SUPERSEDED, prHeadSha: HEAD_SHA, relation: "behind" },
+      },
+    });
+    await reconcile(carried, fakeExec({ branch: BRANCH, commits: COMMITS, ghMissing: true }));
+    expect(readFm(carried).frontmatter.pr).not.toHaveProperty("unpushedRevision");
+    expect(readFm(carried).frontmatter.pr).toMatchObject({ number: 9, headSha: HEAD_SHA });
   });
 
   it("a settled PR gets no record", async () => {

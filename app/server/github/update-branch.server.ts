@@ -17,8 +17,11 @@ import {
   isWorkflowScopeRejection,
   storeLayoutFilesInTree,
   storeLayoutPrefix,
+  changedFilesOnBranch,
   type Exec,
 } from "./push-workspace.server";
+import { activeFileLeases } from "~/server/tasks/file-leases.server";
+import { leaseConflictFor, leaseRefusal } from "~/shared/file-leases";
 
 /**
  * Bring a task branch up to date with its base (N19 gap 9).
@@ -96,7 +99,8 @@ export type UpdateBranchResult =
    *  `baseSha` the base tip it merged (both read BEFORE the push, so a merge is
    *  never published unrecorded). Ruling 134(c): `remoteBefore` is origin's copy
    *  as it stood before this update and `remote` as the push left it
-   *  (`current` by construction: the push published HEAD). */
+   *  (`current` by construction: the push published HEAD). Ruling 439: `onto`
+   *  is the branch head the merge was made on, its first parent. */
   | {
       status: "updated";
       branch: string;
@@ -104,6 +108,7 @@ export type UpdateBranchResult =
       commits: number;
       mergeSha: string;
       baseSha: string;
+      onto: string;
       remoteBefore: RemoteBranchState;
       remote: RemoteBranchState;
     }
@@ -140,6 +145,14 @@ export type UpdateBranchResult =
    * branch is exactly as it was, and the paths say what to remove.
    */
   | { status: "store_layout"; branch: string; files: string[]; reason: string }
+  /**
+   * Ruling 428: a file this branch changes is leased to another task, so this
+   * door refuses as the delivery push does (ruling 245). It publishes the
+   * whole workspace head, so unpushed work rides along; live on ax-clone
+   * AX-22's refresh at 00:11 published its rework while AX-20 held
+   * `internal/controller/task.go`. Nothing is merged and nothing is pushed.
+   */
+  | { status: "lease_held"; branch: string; path: string; holder: string; reason: string }
   /**
    * The residual failure bucket. `reason` is Viberr's own sentence; `detail` is
    * git's text, scrubbed (`redactGitOutput`). A git failure whose reason is
@@ -357,6 +370,38 @@ export async function updateWorkspaceBranchFromBase(
           `which is Viberr's own store layout (\`${storeLayoutPrefix(projectSlug)}\`), not part of ` +
           `the repository, so the branch was not moved and nothing was pushed`,
       };
+    }
+
+    // Ruling 428: the lease gate, at the same seam and read the same way as
+    // the delivery push's (the BRANCH's files, ruling 353; the resolved list,
+    // ruling 245(b)). Before the fetch and the merge, like the store-layout
+    // check above: a refusal costs no network and leaves nothing to roll back.
+    const leases = activeFileLeases(projectSlug, dataRoot ? { dataRoot } : {});
+    if (leases.length > 0) {
+      const changed = await changedFilesOnBranch(exec, repoDir, base);
+      if (changed === null) {
+        logger.info("could not measure the files this branch changes; no lease gate", {
+          taskKey,
+          branch,
+        });
+      } else {
+        const conflict = leaseConflictFor(changed, leases, taskKey);
+        if (conflict) {
+          logger.info("branch update refused: file lease", {
+            taskKey,
+            branch,
+            path: conflict.path,
+            holder: conflict.lease.taskKey,
+          });
+          return {
+            status: "lease_held",
+            branch,
+            path: conflict.path,
+            holder: conflict.lease.taskKey,
+            reason: leaseRefusal(taskKey, conflict, "its branch is moved and pushed"),
+          };
+        }
+      }
     }
 
     const credential = getProjectCredential(db, projectSlug);
@@ -623,6 +668,7 @@ export async function updateWorkspaceBranchFromBase(
         commits: behind,
         mergeSha,
         baseSha,
+        onto: preSha,
         remoteBefore: remote,
         remote: { kind: "current", headSha: mergeSha },
       };

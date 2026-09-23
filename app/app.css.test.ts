@@ -1015,11 +1015,20 @@ describe("app.css breakpoints (P16-F8)", () => {
       ".activity-cols",
       ".profile-cols",
       ".rq-row",
-      ".log-line",
       ".pj-row .pj-stats .pill",
     ]) {
       expect(block![1], `${selector} must still collapse at 1100px`).toContain(selector);
     }
+    // U39-11: the log line's collapse follows the CONSOLE's width, not the
+    // viewport's; at 1100px it only narrowed the columns and left a phone's
+    // text 89px wide. CANARY: drop the console's container query.
+    expect(block![1], "the log line collapses on its console's width now").not.toContain(".log-line");
+    expect(CODE.match(/\n\.console \{([^}]*)\}/)?.[1]).toMatch(/container-type:\s*inline-size/);
+    const narrowConsole = [...CODE.matchAll(/@container \(max-width: 30rem\)\s*\{([\s\S]*?)\n\}/g)].find((m) =>
+      m[1]!.includes(".log-line"),
+    );
+    expect(narrowConsole, "the narrow-console container query must exist").toBeTruthy();
+    expect(narrowConsole![1]).toMatch(/\.log-line \.lx\s*\{\s*grid-column:\s*1 \/ -1;\s*\}/);
     expect(block![1], "the dead `.board` duplicate must not come back").not.toMatch(
       /\.board\s*\{/,
     );
@@ -3391,5 +3400,146 @@ describe("app.css stage colour presets (ruling 364)", () => {
       expect(CODE, consumer).toContain(consumer);
     }
     expect(CODE).toMatch(/\.pj-meter\.is-empty span\[data-stage-color\] \{\s*flex: 1;\s*background: color-mix\(in srgb, var\(--stage\), transparent 82%\);\s*\}/);
+  });
+});
+
+/**
+ * Ruling 419(b): the controller page's rail scrolls itself and the conversation
+ * stays a capped scroller at every width. jsdom has no layout, so the rules that
+ * produce the layout are pinned here; the live measurements are in the ruling
+ * (rail 4,539px scrolling with the page, a 12,625px phone transcript).
+ */
+describe("app.css controller layout (ruling 419)", () => {
+  const ruleBody = (css: string, selector: string): string => {
+    const m = css.match(new RegExp(`(?:^|\\n|\\})\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`));
+    expect(m, `${selector} must have a rule`).toBeTruthy();
+    return m![1]!;
+  };
+  const collapse = () => CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
+
+  it("pins the rail beside the conversation and makes it its own scroller", () => {
+    // CANARY: drop `position: sticky` or `overflow-y: auto` from `.ctl-side`.
+    const side = ruleBody(CODE, ".ctl-side");
+    expect(side).toMatch(/position:\s*sticky/);
+    expect(side).toMatch(/align-self:\s*start/);
+    expect(side).toMatch(/overflow-y:\s*auto/);
+    // Capped at the scrollport: under the top bar, clear of the dock button.
+    expect(side).toMatch(/max-height:\s*calc\(100dvh - var\(--topbar-h\) - var\(--dock-clear\)\)/);
+  });
+
+  it("keeps the transcript a capped scroller in the one-column layout", () => {
+    // CANARY: restore `.ctl-wrap .ctl-transcript { max-height: none; }`.
+    const narrow = ruleBody(collapse(), ".ctl-wrap .ctl-transcript");
+    expect(narrow).not.toMatch(/max-height:\s*none/);
+    expect(narrow).toMatch(/max-height:\s*calc\(100dvh - \d+px\)/);
+    // One column: the rail flows after the conversation instead of pinning.
+    expect(ruleBody(collapse(), ".ctl-wrap .ctl-side")).toMatch(/position:\s*static/);
+  });
+
+  it("ruling 419(j): the open dock's button perches ABOVE the phone sheet, clear of its header", () => {
+    // Measured live at 375×812: the sheet's top at y=172 and the perched button
+    // at 169-203, across the header's pop-out and Close buttons. The travel
+    // must count the dock's own bottom inset and the scaled button's
+    // half-height. CANARY: restore `- 56px`.
+    const collapse720 = CODE.match(/\.dock\[data-open="true"\] \.dock-fab \{([^}]*)\}/);
+    expect(collapse720, "the perch rule must exist").toBeTruthy();
+    expect(collapse720![1]).toContain(
+      "calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px))",
+    );
+  });
+
+  it("ruling 425(b): a wait list's entries line up in columns, and stack in the narrow rail", () => {
+    // Measured in a production preview: at 1440 wide the rail gives the list
+    // 258px, and a third column truncated every title after four words; at
+    // 375 it showed "ax log…". CANARY: drop the container query.
+    expect(ruleBody(CODE, ".ctl-link-waits")).toMatch(/container-type:\s*inline-size/);
+    expect(ruleBody(CODE, ".ctl-link-waits li")).toMatch(/grid-template-columns:\s*subgrid/);
+    const narrow = [...CODE.matchAll(/@container \(max-width: 30rem\)\s*\{([\s\S]*?)\n\}/g)].find((m) =>
+      m[1]!.includes(".ctl-wait-title"),
+    );
+    expect(narrow, "the narrow-list container query must exist").toBeTruthy();
+    expect(narrow![1]).toMatch(/\.ctl-wait-title\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*white-space:\s*normal/);
+  });
+
+  it("U39-11: a console tool chip wraps rather than pushing its detail past a phone's edge", () => {
+    // Measured at 375px: `mcp__viberr_controller__write_knowledge_doc` is one
+    // unbreakable run, and the console scrolled sideways (285px of 271).
+    // CANARY: drop `flex-wrap: wrap` from `.log-chip`.
+    expect(ruleBody(CODE, ".log-chip")).toMatch(/flex-wrap:\s*wrap/);
+    expect(ruleBody(CODE, ".log-chip .lc-name")).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("ruling 425(c): a link's title wraps beside its pill, which stays on the title's first line", () => {
+    // Measured live at 1440: with a 12rem basis the title dropped under "held
+    // AX-6" whole; centred alignment then floated the pill mid-block.
+    // CANARY: restore `align-items: center`.
+    expect(ruleBody(CODE, ".ctl-link-title")).toMatch(/flex:\s*1 1 8rem/);
+    expect(ruleBody(CODE, ".ctl-links li")).toMatch(/align-items:\s*baseline/);
+  });
+
+  it("U39-17: a long sha in a stream notice may break rather than push the page sideways", () => {
+    // Measured at 375px: a 40-character sha made the overlay 413px wide inside
+    // 323. CANARY: drop the rule.
+    const all = [...CODE.matchAll(/\n\.pev-main \{([^}]*)\}/g)].map((m) => m[1]).join(" ");
+    expect(all).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("U39-16: on a phone a notification's trailing controls take their own line", () => {
+    // Measured at 375px: the text column was 90px beside Mark read, the dot
+    // and the time. CANARY: drop `flex-wrap: wrap` from the phone rule.
+    const phone = CODE.match(/@media \(max-width: 560px\) \{([\s\S]*?)\n\}/);
+    expect(phone, "the 560px block must exist").toBeTruthy();
+    expect(phone![1]).toMatch(/\.ntf-ev \{[^}]*flex-wrap:\s*wrap/);
+  });
+
+  it("U39-13: a wrapped review-queue row reads its chips left to right from the row's edge", () => {
+    // CANARY: drop the `.rq-meta` override from the 1100px block.
+    const narrow = collapse();
+    expect(ruleBody(narrow, ".rq-meta")).toMatch(/justify-content:\s*flex-start/);
+    expect(ruleBody(narrow, ".rq-meta")).toMatch(/max-width:\s*none/);
+    expect(ruleBody(narrow, ".rq-meta .wait-tag")).toMatch(/margin-left:\s*0/);
+  });
+
+  it("U39-12: the dock's scope pill gives way before the controller's name", () => {
+    // Measured at 375px: "Contro…" beside "AX-21 · ax-cl…". CANARY: drop the
+    // pill's shrink weight and the two shrink alike again.
+    expect(ruleBody(CODE, ".dock-head .pill")).toMatch(/flex:\s*0 100 auto/);
+    // Measured in the preview with only the pill's weight: the title still
+    // lost a pixel (79 of 80). It does not shrink at all now; a long name is
+    // capped instead.
+    expect(ruleBody(CODE, ".dock-title")).toMatch(/flex:\s*0 0 auto;\s*max-width:\s*45%/);
+  });
+
+  it("ruling 419(i): inline code in markdown may break a long token rather than overflow", () => {
+    // CANARY: drop `overflow-wrap: anywhere` from `.md-body code.mono`.
+    expect(ruleBody(CODE, ".md-body code.mono")).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("ruling 419(e): a packet's code observation keeps its line breaks", () => {
+    // CANARY: drop `white-space: pre-wrap` from `.obs code`.
+    expect(ruleBody(CODE, ".obs code")).toMatch(/white-space:\s*pre-wrap/);
+  });
+
+  it("shows the thread switcher only in the one-column layout, and no key hint on touch", () => {
+    expect(ruleBody(CODE, ".ctl-picker")).toMatch(/display:\s*none/);
+    expect(ruleBody(collapse(), ".ctl-wrap .ctl-picker")).toMatch(/display:\s*block/);
+    const coarse = CODE.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/);
+    expect(coarse, "a coarse-pointer block must exist").toBeTruthy();
+    expect(coarse![1]).toMatch(/\.kbd-hint\s*\{\s*display:\s*none;\s*\}/);
+  });
+
+  it("U39-27: on a touch screen the goal chains' controls are tall enough for a finger", () => {
+    // Measured at 375px: 15-16px tall. CANARY: drop the padding rule.
+    const coarse = CODE.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/)![1];
+    for (const selector of [
+      ".ctl-link-waits > summary",
+      ".ctl-link-waits li > a.mono",
+      ".ctl-links .ctl-link-task",
+      ".ctl-goal-more .linkish",
+      ".ctl-all-toggle .linkish",
+    ]) {
+      expect(coarse, selector).toContain(selector);
+    }
+    expect(coarse).toMatch(/\.ctl-all-toggle \.linkish\s*\{\s*padding-block:\s*\.3rem;\s*\}/);
   });
 });

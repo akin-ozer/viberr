@@ -147,6 +147,13 @@ interface ServiceState {
    */
   completions: Map<string, RunCompletionCallback>;
   /**
+   * U39-30: one-shot callbacks for a run whose answer is complete while a
+   * completion compaction (ruling 376) still holds its settle back. Fired
+   * just before that compaction, only for a run that finished, and dropped
+   * at settle whether or not it fired. In-process only, like `completions`.
+   */
+  answered: Map<string, RunAnsweredCallback>;
+  /**
    * Runs admitted past the concurrency cap: their DB row is `queued` and their
    * adapter has NOT been launched. The drain (run onExit) promotes the oldest
    * whose row is still `queued` when a live slot frees. In-process only — a
@@ -228,6 +235,21 @@ function canAdmit(state: ServiceState, cap: number, lane: RunLane): boolean {
 /** Invoked once when a registered run reaches a terminal state. */
 export type RunCompletionCallback = (finished: AgentRunRow) => void;
 
+/** U39-30: told that a run's answer is complete and in its lines. */
+export type RunAnsweredCallback = (runId: string) => void;
+
+/**
+ * U39-30: register a one-shot callback for the moment a run's answer is
+ * complete but its settle is still waiting on a completion compaction. The
+ * completion callback still fires afterwards, as always; this only lets a
+ * caller show the answer the person is waiting for without making them sit
+ * through the housekeeping. It never fires for a run that is not compacted
+ * at completion, or that did not finish.
+ */
+export function registerRunAnswered(runId: string, cb: RunAnsweredCallback): void {
+  getState().answered.set(runId, cb);
+}
+
 const SERVICE_KEY = Symbol.for("viberr.runService");
 
 function getState(): ServiceState {
@@ -239,6 +261,7 @@ function getState(): ServiceState {
       reserved: new Map(),
       adapters: createAdapters(),
       completions: new Map(),
+      answered: new Map(),
       pending: emptyQueues(),
     };
     cache[SERVICE_KEY] = state;
@@ -340,6 +363,7 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
     reserved: new Map(),
     adapters,
     completions: new Map(),
+    answered: new Map(),
     pending: emptyQueues(),
   };
 }
@@ -411,6 +435,10 @@ export interface StartRunInput {
   /** Ruling 371/373: the anchor the run is handed back after a compaction
    *  (see `RunSpec.compactAnchor`). */
   compactAnchor?: string;
+  /** U39-30: told the run's answer is written, before the completion
+   *  compaction that holds its settle back (`registerRunAnswered`). Registered
+   *  before the run launches, so a run cannot finish ahead of it. */
+  onAnswered?: RunAnsweredCallback;
   /** Portable HTTP/stdio MCPs, or Claude-only in-process SDK governance tools. */
   mcpServers?: RunMcpServers;
   /** Tool allowlist confining the run (operator → its governance tools only). */
@@ -807,7 +835,7 @@ type RunStartedAudit = {
   failedUnavailable?: true;
   /** Ruling 372: this is the fresh turn `resumeRun` started INSTEAD of a
    *  replay, and why (`stale_large_session`, `transcript_gone`,
-   *  `owner_changed`). */
+   *  `transcript_damaged`, `owner_changed`). */
   continuityReset?: ContinuityLossReason;
 };
 
@@ -1099,6 +1127,8 @@ export async function startRun(
   if (!credential.ok) return refuse(credential.message);
   if (refusal !== null) return refuse(refusal);
 
+  // U39-30: before the launch, so the run cannot answer ahead of its hook.
+  if (input.onAnswered) state.answered.set(runId, input.onAnswered);
   const launchOpts: Parameters<typeof launch>[4] = {};
   if (reservation) launchOpts.startedAt = reservation.startedAt;
   if (modelSubstitution) launchOpts.notice = modelSubstitution;
@@ -1302,7 +1332,14 @@ const SESSION_MISSING_TAG = "run·session_missing";
  *  chose not to replay it — idle past its cache TTL and above the replay
  *  threshold, so a resume would re-write the whole history as one cache
  *  write. */
-export type ContinuityLossReason = "transcript_gone" | "owner_changed" | "stale_large_session";
+export type ContinuityLossReason =
+  | "transcript_gone"
+  /** Ruling 434: the transcript is there and the CLI refuses it (a Codex
+   *  rollout whose head is torn). A fault, like `transcript_gone`, and marked
+   *  the same way so the dead session is never selected again. */
+  | "transcript_damaged"
+  | "owner_changed"
+  | "stale_large_session";
 
 /** Ruling 372: the tag of the meta line a set-aside session's last run gets.
  *  Not `·session_missing` on purpose: `runIdsWithMissingSession` must not skip
@@ -1340,6 +1377,9 @@ function sessionMissingMessage(
   const label = backend === "claude" ? "Claude" : "Codex";
   if (reason === "owner_changed") {
     return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 127). Nothing is wrong with the credential, and the transcript is not gone — it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
+  }
+  if (reason === "transcript_damaged") {
+    return `The ${label} session ${sessionId} could not be resumed: its provider transcript is damaged. The rollout does not start with the session's metadata, and the CLI refuses to resume it without that. Nothing is wrong with the credential. The agent re-anchored on task.md and continued with a fresh session.`;
   }
   return `The ${label} session ${sessionId} no longer exists on this machine. Its provider transcript is gone (retention sweep or a wiped runtime volume), so the conversation could not be resumed. The agent re-anchored on task.md and continued with a fresh session.`;
 }
@@ -1501,6 +1541,9 @@ async function noteContinuityReset(
               `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${k(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
             : reason === "owner_changed"
             ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands — so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
+            : reason === "transcript_damaged"
+            ? // Ruling 434: there, and refused. Not a sweep, and not the credential.
+              `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread has a damaged provider transcript. Its rollout does not start with the session's metadata, which the CLI needs to resume it. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`
             : `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
         toAgent: false,
         evidence: null,
@@ -1673,6 +1716,8 @@ export interface ResumeRunInput {
   /** Ruling 371: re-apply the compaction anchor on resume, or a resumed run
    *  would lose it mid-thread (the XS-1 fresh-vs-resume parity class). */
   compactAnchor?: string;
+  /** U39-30: see `StartRunInput.onAnswered`. */
+  onAnswered?: RunAnsweredCallback;
   /** Ruling 372: the instant the resume is decided at. Tests pin it; the
    *  product passes nothing and the service reads its clock ONCE here. */
   nowIso?: string;
@@ -1716,6 +1761,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.mcpServers) target.mcpServers = input.mcpServers;
   if (input.systemPrompt) target.systemPrompt = input.systemPrompt;
   if (input.compactAnchor) target.compactAnchor = input.compactAnchor;
+  if (input.onAnswered) target.onAnswered = input.onAnswered;
   if (input.outputSchema) target.outputSchema = input.outputSchema;
   if (input.attachmentsWritableDir) {
     target.attachmentsWritableDir = input.attachmentsWritableDir;
@@ -1814,12 +1860,14 @@ export async function resumeRun(
             : null;
         })()
       : null;
-  if (continuity === "missing" || stale) {
+  if (continuity === "missing" || continuity === "damaged" || stale) {
     const lossReason: ContinuityLossReason = stale
       ? "stale_large_session"
       : ownerChanged
         ? "owner_changed"
-        : "transcript_gone";
+        : continuity === "damaged"
+          ? "transcript_damaged"
+          : "transcript_gone";
     logger.warn(
       stale
         ? "stale large session set aside — starting fresh on task.md and the last report"
@@ -2219,6 +2267,21 @@ function launch(
           exit.outcome !== "interrupted" &&
           replaySize > COMPACT_AT_COMPLETION_TOKENS
         ) {
+          // U39-30: the answer is written; only the housekeeping is left.
+          // Live on ax-clone a controller turn's compaction held its reply off
+          // the page for 27 seconds, and ruling 371 measured one at 131.
+          const answered = getState().answered.get(spec.runId);
+          getState().answered.delete(spec.runId);
+          if (answered && exit.outcome === "finished") {
+            try {
+              answered(spec.runId);
+            } catch (error) {
+              logger.error("run answered callback failed", {
+                runId: spec.runId,
+                err: error instanceof Error ? error : new Error(String(error)),
+              });
+            }
+          }
           const compactionsBefore = stats?.compactionEvents.length ?? 0;
           const outcome = await adapter.compact(spec, exit.sessionId, {
             onLine: (line) => sink.line(line),
@@ -2247,13 +2310,21 @@ function launch(
             const event = stats?.compactionEvents.at(-1) ?? null;
             if (stats && stats.compactionEvents.length > compactionsBefore && event) {
               const occurredAt = new Date().toISOString();
+              // Ruling 414: the CLI writes this compaction's own size line
+              // between its two spellings, so the rollout has measured it.
+              // Ruling 403: when it has not (a marker with nothing after it),
+              // the figure is unknown rather than zero. Say so.
+              const post =
+                event.postTokens === null
+                  ? "a summary"
+                  : `${Math.round(event.postTokens / 1000)}k tokens`;
               sink.line({
                 raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion", ...event }),
                 display: {
                   t: occurredAt.slice(11, 19),
                   ev: "meta",
                   tag: "run·compacted·completion",
-                  text: `context compacted at the end of the run · ${Math.round(event.preTokens / 1000)}k → ${Math.round(event.postTokens / 1000)}k tokens`,
+                  text: `context compacted at the end of the run · ${Math.round(event.preTokens / 1000)}k → ${post}`,
                 },
                 facts: { compaction: { trigger: "completion", ...event } },
                 occurredAt,
@@ -2270,6 +2341,8 @@ function launch(
         });
       }
       state.handles.delete(spec.runId);
+      // U39-30: an answered callback the settle never needed goes with it.
+      state.answered.delete(spec.runId);
       // Ruling 180: the settled run's skill plugin goes with it — the CLI
       // that read it has exited, and nothing else names the path.
       removeSkillPlugin(spec.skillPlugin);

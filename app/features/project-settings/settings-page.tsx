@@ -38,7 +38,7 @@ import { MiniModal } from "~/features/org-settings/mini-modal";
 // The one shared "Escape or an outside press closes me" hook.
 import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
-import type { SettingsViewData } from "./settings-query.server";
+import type { FileLeaseView, SettingsViewData } from "./settings-query.server";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 import { isTerminalStage, stageLockReason } from "~/shared/workflow/stage-roles";
 import {
@@ -1246,6 +1246,234 @@ export function RequiredReviewersPanel({
   );
 }
 
+// ------------------------------------------------------------- file leases
+
+/** One lease row as the form holds it. Paths are edited as one line. */
+interface FileLeaseDraft {
+  paths: string;
+  taskKey: string;
+  reason: string;
+}
+
+const leaseKey = (rows: readonly FileLeaseDraft[]) =>
+  JSON.stringify(rows.map((r) => [splitPaths(r.paths), r.taskKey, r.reason.trim()]));
+
+/** The one place the panel turns a typed line into the writer's path list, so
+ *  the change check and the save can never disagree about what was typed. */
+function splitPaths(line: string): string[] {
+  return [...new Set(line.split(/[\s,]+/).map((p) => p.trim()).filter(Boolean))];
+}
+
+/**
+ * Ruling 396 (F39-23): the project's file leases, on a page a person can open.
+ *
+ * Ruling 245 built leases and gave them no human surface at all. They were
+ * declared by one controller tool, read by another, injected into every
+ * specialist's prompt, and ENFORCED at delivery — `push-workspace` refuses the
+ * push before anything reaches GitHub and says "clear the lease once AX-9 has
+ * landed", an instruction with nowhere to carry it out. Live on the ax-clone
+ * board the controller, reading the mechanism correctly, wrote into the project
+ * knowledge base every agent reads: "Current leases are on the project's
+ * settings page." There was no such panel. This is it.
+ *
+ * Saved WHOLE through one intent, like the required reviewers above it and
+ * through the same writer the controller's `set_file_leases` calls, so the two
+ * doors cannot validate differently. A role without `edit-policy` reads the
+ * leases as text — it still needs to know who owns a file it is about to touch.
+ */
+export function FileLeasesPanel({
+  leases,
+  candidates,
+  canManage,
+  busy,
+  onSave,
+}: {
+  leases: FileLeaseView[];
+  candidates: { key: string; title: string }[];
+  canManage: boolean;
+  busy: boolean;
+  onSave: (leases: { paths: string[]; taskKey: string; reason: string }[]) => void;
+}) {
+  const asDraft = (rows: readonly FileLeaseView[]): FileLeaseDraft[] =>
+    rows.map((l) => ({ paths: l.paths.join(" "), taskKey: l.taskKey, reason: l.reason }));
+  const [draft, setDraft] = useState<FileLeaseDraft[]>(() => asDraft(leases));
+  const changed = leaseKey(draft) !== leaseKey(asDraft(leases));
+  const spentCount = leases.filter((l) => l.spent).length;
+  const add = () =>
+    setDraft((rows) => [
+      ...rows,
+      { paths: "", taskKey: candidates[0]?.key ?? "", reason: "" },
+    ]);
+  const update = (i: number, patch: Partial<FileLeaseDraft>) =>
+    setDraft((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
+  const remove = (i: number) => setDraft((rows) => rows.filter((_, j) => j !== i));
+  /** Ruling 245(b): a lease whose holder finished binds nobody. Dropping every
+   *  spent row at once is the tidy `staleFileLeases` was named for. */
+  const clearSpent = () => {
+    const spent = new Set(
+      leases.filter((l) => l.spent).map((l) => `${l.taskKey} ${l.paths.join(" ")}`),
+    );
+    onSave(
+      draft
+        .filter((r) => !spent.has(`${r.taskKey} ${splitPaths(r.paths).join(" ")}`))
+        .map((r) => ({ paths: splitPaths(r.paths), taskKey: r.taskKey, reason: r.reason.trim() })),
+    );
+  };
+  return (
+    <div className="panel" data-panel="file-leases">
+      <div className="panel-head">
+        <Icon name="lock" />
+        <h2>File leases</h2>
+        <span className="right sub fine">{countLabel(leases.length, "lease")}</span>
+      </div>
+      {!canManage && (
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            Read-only. Declaring or clearing a lease needs the{" "}
+            <strong>Edit workflow &amp; policy</strong> grant (project admin).
+          </span>
+        </div>
+      )}
+      {spentCount > 0 && (
+        <div className="pol-note">
+          <Icon name="alert" />
+          <span>
+            {countLabel(spentCount, "lease")} held by a task that has finished.
+            {" "}
+            {spentCount === 1 ? "It binds" : "They bind"} nobody and can be cleared.
+          </span>
+        </div>
+      )}
+      {canManage ? (
+        <div className="guard-list">
+          {draft.map((row, i) => (
+            <div className="guard-row lease-row" key={i} data-lease-row={i}>
+              <label className="guard-ctl grow">
+                Paths
+                <input
+                  type="text"
+                  aria-label={`Lease ${i + 1} paths`}
+                  placeholder="go.mod make/**"
+                  value={row.paths}
+                  disabled={busy}
+                  onChange={(e) => update(i, { paths: e.target.value })}
+                />
+              </label>
+              <label className="guard-ctl">
+                Held by
+                <select
+                  aria-label={`Lease ${i + 1} holder`}
+                  value={row.taskKey}
+                  disabled={busy}
+                  onChange={(e) => update(i, { taskKey: e.target.value })}
+                >
+                  {/* A lease naming a task off this board keeps its key in the
+                      picker so the row is readable and removable, never
+                      silently rewritten to another task's name. */}
+                  {!candidates.some((c) => c.key === row.taskKey) && (
+                    <option value={row.taskKey}>{row.taskKey} (not on this board)</option>
+                  )}
+                  {candidates.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.key}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="guard-ctl grow">
+                Why
+                <input
+                  type="text"
+                  aria-label={`Lease ${i + 1} reason`}
+                  placeholder="Quoted in every refusal"
+                  value={row.reason}
+                  disabled={busy}
+                  onChange={(e) => update(i, { reason: e.target.value })}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn ghost sm"
+                aria-label={`Remove lease ${i + 1} on ${splitPaths(row.paths).join(", ") || "no path"}`}
+                disabled={busy}
+                onClick={() => remove(i)}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          {draft.length === 0 && (
+            <p className="empty sm">
+              No file leases. Every task may change any file its work needs.
+            </p>
+          )}
+        </div>
+      ) : leases.length === 0 ? (
+        <p className="empty sm">No file leases declared.</p>
+      ) : (
+        <div className="guard-list">
+          {leases.map((l) => (
+            <div className="guard-row" key={`${l.taskKey} ${l.paths.join(" ")}`}>
+              <div className="guard-main">
+                <span className="guard-name">
+                  <code>{l.paths.join(" ")}</code>
+                </span>
+                <span className="guard-desc">
+                  {l.taskKey}
+                  {l.taskTitle ? ` · ${l.taskTitle}` : ""}
+                  {l.reason ? `: ${l.reason}` : ""}
+                  {l.spent ? " (holder finished; binds nobody)" : ""}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {canManage && (
+        <div className="rr-actions">
+          <button type="button" className="btn ghost sm" disabled={busy} onClick={add}>
+            <Icon name="plus" />
+            Add lease
+          </button>
+          {spentCount > 0 && (
+            <button type="button" className="btn ghost sm" disabled={busy} onClick={clearSpent}>
+              Clear finished
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn primary sm"
+            disabled={!changed || busy}
+            aria-busy={busy || undefined}
+            onClick={() =>
+              onSave(
+                draft.map((r) => ({
+                  paths: splitPaths(r.paths),
+                  taskKey: r.taskKey,
+                  reason: r.reason.trim(),
+                })),
+              )
+            }
+          >
+            Save
+          </button>
+        </div>
+      )}
+      <div className="pol-note after last">
+        <Icon name="shield" />
+        <span>
+          One task owns a shared path until it merges. Another task whose branch
+          changes a leased path is refused at delivery, by name, before anything
+          reaches GitHub. Globs: <code>*</code> matches within one path segment,{" "}
+          <code>**</code> spans segments. Every agent on this project is told
+          which paths are leased before it starts.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ members
 
 /** Which invite field a refused submit named. */
@@ -2095,6 +2323,7 @@ export function SettingsPage({
   const credFetcher = useFetcher<ActionResult>();
   const dangerFetcher = useFetcher<ActionResult>();
   const reviewerFetcher = useFetcher<ActionResult>();
+  const leaseFetcher = useFetcher<ActionResult>();
   useActionToast(identityFetcher);
   useActionToast(stageFetcher);
   useActionToast(memberFetcher);
@@ -2209,7 +2438,7 @@ export function SettingsPage({
               stack-of-panels-in-a-cell, as Policy stacks Guardrails). */}
           <div className="profile-col">
             <RequiredReviewersPanel
-              key={JSON.stringify(data.requiredReviewers)}
+              key={`reviewers:${JSON.stringify(data.requiredReviewers)}`}
               rules={data.requiredReviewers}
               stages={data.stages}
               candidates={data.reviewerCandidates}
@@ -2221,6 +2450,26 @@ export function SettingsPage({
                     intent: "set-required-reviewers",
                     _csrf: csrf,
                     rules: JSON.stringify(rules),
+                  },
+                  { method: "post" },
+                )
+              }
+            />
+            {/* Ruling 396: a lease names a task and a path, and it is policy in
+                the same sense the reviewer rules are, so it stacks in the same
+                column under them. */}
+            <FileLeasesPanel
+              key={`leases:${JSON.stringify(data.fileLeases)}`}
+              leases={data.fileLeases}
+              candidates={data.leaseCandidates}
+              canManage={canEditPolicy}
+              busy={leaseFetcher.state !== "idle"}
+              onSave={(leases) =>
+                leaseFetcher.submit(
+                  {
+                    intent: "set-file-leases",
+                    _csrf: csrf,
+                    leases: JSON.stringify(leases),
                   },
                   { method: "post" },
                 )

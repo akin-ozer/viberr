@@ -712,7 +712,7 @@ describe("B1: accepting from the board asks first", () => {
     expect(submitted).toHaveLength(0);
   });
 
-  it("a move to a NON-final stage still commits straight from the gesture", async () => {
+  it("a FORWARD move to a NON-final stage still commits straight from the gesture", async () => {
     const submitted: string[] = [];
     const { getByLabelText, getByRole } = renderBoard(
       [task({ key: "VIB-1", stage: "triage" })],
@@ -726,6 +726,40 @@ describe("B1: accepting from the board asks first", () => {
     fireEvent.click(getByLabelText("Change stage (currently Triage)"));
     fireEvent.click(getByRole("menuitemradio", { name: "In Progress" }));
     await waitFor(() => expect(submitted.length).toBeGreaterThan(0));
+  });
+
+  it("ruling 381: the keyboard move BACK asks why, and sends the answer", async () => {
+    // The board's own keyboard door. Without the dialog the server refuses the
+    // move with a 400 and the menu offers nowhere to answer it — the dead end
+    // this ruling exists to close, one door over from the drag.
+    const posted: Record<string, string>[] = [];
+    const { container, getByLabelText, getByRole, getByText } = renderBoard(
+      [task({ key: "VIB-1", stage: "done" })],
+      {
+        action: async ({ request }) => {
+          const fd = await request.formData();
+          const row: Record<string, string> = {};
+          for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
+          posted.push(row);
+          return { ok: true as const, toast: "moved" };
+        },
+      },
+    );
+    fireEvent.click(getByLabelText("Change stage (currently Done)"));
+    fireEvent.click(getByRole("menuitemradio", { name: "In Progress" }));
+    expect(posted).toHaveLength(0);
+    expect(getByText("Move back to In Progress?")).toBeTruthy();
+    const why = container.ownerDocument.querySelector("dialog textarea")!;
+    fireEvent.change(why, { target: { value: "the WAL torn-frame case is untested" } });
+    fireEvent.click(
+      Array.from(container.ownerDocument.querySelectorAll("button")).find(
+        (b) => b.textContent === "Move back",
+      )!,
+    );
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]!.intent).toBe("reorder");
+    expect(posted[0]!.to).toBe("impl");
+    expect(posted[0]!.reason).toBe("the WAL torn-frame case is untested");
   });
 });
 

@@ -252,7 +252,9 @@ describe("ProfilePage", () => {
     expect(
       getByText("and what a task waits on, which releases it when cleared"),
     ).toBeTruthy();
-    expect(container.querySelectorAll(".rbac-yes")).toHaveLength(14);
+    // Ruling 379 added the `attach-file` row (contributor and above), so a
+    // maintainer holds one more.
+    expect(container.querySelectorAll(".rbac-yes")).toHaveLength(15);
     expect(container.querySelectorAll(".rbac-no")).toHaveLength(5);
     // Ruling 148: each cell says the fact. The check is aria-hidden, so a
     // glyph-only pair announced nothing at all, and the denied "−" read as a

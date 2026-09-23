@@ -18,6 +18,7 @@ import type {
 } from "@openai/codex-sdk";
 import {
   answeredStep,
+  postTurnTransportLine,
   RUN_PHASE,
   stepUpdateForLine,
   type RunCallbacks,
@@ -29,6 +30,7 @@ import {
 } from "./adapter.server";
 import { withProviderText } from "~/shared/provider-marker";
 import {
+  SESSION_DAMAGED_RE,
   SESSION_MISSING_RE,
   SESSION_STORE_UNREADABLE_MARK,
   SESSION_STORE_UNREADABLE_RE,
@@ -56,10 +58,11 @@ import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server"
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
- * v0.153.4 — {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the
+ * v0.156.0 — {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the
  * DECLARED dependency so this line cannot go stale again; 0.146.0 → 0.153.4
  * moved the SDK's surface in three additive places, listed on that constant,
- * and none of the event shapes this adapter or the wire normalizer reads).
+ * and none of the event shapes this adapter or the wire normalizer reads;
+ * 0.153.4 → 0.156.0 moved only the pinned CLI).
  * `new Codex()`, `codex.startThread({ workingDirectory,
  * skipGitRepoCheck, sandboxMode, model })` (or `resumeThread(threadId, …)`),
  * then `thread.runStreamed(prompt, { signal })` → `{ events }`, an async
@@ -107,8 +110,21 @@ import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server"
  * source) and `login status` markers `backend-login` parses. `--add-dir` still
  * reads "writable alongside the primary workspace", so the ruling-109 carve-out
  * (ruling 185: `danger-full-access`, always) stands.
+ *
+ * 0.156.0 (2026-09-23, from 0.153.4, owner's request for GPT-6 Luna): the
+ * SDK's own `dist` is byte-identical, so only the pinned CLI moved. The move
+ * is the point: the account's server-sent model list is filtered by client
+ * version, and GPT-6 Luna and GPT-6 Sol declare `minimal_client_version`
+ * 0.155.0, so a 0.153.4 client was never offered either (its cached list, read
+ * off the account's own home, had no `gpt-6-*` but Astra). Re-checked on the
+ * 0.156.0 binary: every flag the SDK emits parses (a real `exec` with all of
+ * them reached the API and stopped at the 401 of an empty home), every config
+ * key `codexConfigForRun` writes is present, as are `thread/compact/start`,
+ * the `contextCompaction` item and the `login` markers `backend-login` reads.
+ * `--help` after a value flag now exits 2 where 0.153.4 exited 0, which is the
+ * CLI's argument parser, not a flag it lost.
  */
-export const CODEX_SDK_VERIFIED_VERSION = "0.153.4";
+export const CODEX_SDK_VERIFIED_VERSION = "0.156.0";
 
 /** Narrow injectable seam, derived from the installed SDK's public types. */
 export type CodexThread = Pick<Thread, "id" | "runStreamed">;
@@ -610,6 +626,20 @@ function classifyCodexFailure(
       origin: null,
     };
   }
+  // Ruling 434: the rollout is there and its head is torn. The resume probe
+  // catches this before a spawn; this is the run that got there first.
+  if (SESSION_DAMAGED_RE.test(raw)) {
+    return {
+      kind: "session_missing",
+      message:
+        "The Codex session could not be resumed — its rollout is damaged: the CLI says it does not " +
+        "start with the session's metadata. Nothing is wrong with the credential and no rewritten " +
+        "directive changes it: every resume of this session fails, while fresh runs still work. " +
+        "Re-run the agent to start a fresh session anchored on task.md.",
+      providerText,
+      origin: null,
+    };
+  }
   if (SESSION_MISSING_RE.test(raw)) {
     return {
       kind: "session_missing",
@@ -765,6 +795,16 @@ export function createCodexAdapter(
       let sessionId: string | null = spec.resumeSessionId ?? null;
       let sawTurnCompleted = false;
       let sawFatalError = false;
+      /**
+       * Ruling 394: work the agent started AFTER its last completed turn.
+       *
+       * `turn.completed` clears it; a new turn or a new item sets it. It is the
+       * difference between a transport failure that CUT work short and one that
+       * arrived when the agent had already stopped — which is the difference
+       * between a failed run and a finished one, and the old flat conjunction
+       * below could not tell them apart.
+       */
+      let workAfterLastTurn = false;
       // F22-08: the SDK streams the real failure reason as a `turn.failed` /
       // `error` event (e.g. "You've hit your usage limit — try again Sep 18"),
       // then throws a bare `"Codex Exec exited with code 1: Reading prompt from
@@ -939,6 +979,29 @@ export function createCodexAdapter(
         });
       };
 
+      /**
+       * Ruling 394: did the run's work stand finished when this failure landed?
+       *
+       * The old gate was `sawTurnCompleted && !sawFatalError` — a conjunction
+       * over the WHOLE stream, blind to order. This asks the question that
+       * decides the outcome instead: the provider announced a completed turn,
+       * and nothing has started since.
+       */
+      const turnStoodComplete = () => sawTurnCompleted && !workAfterLastTurn;
+
+      /**
+       * Record a transport failure that arrived after the turn completed.
+       *
+       * Deliberately NOT {@link emitAdapterFailure}: that stamps a typed
+       * `failure` record onto the line, and `runFailureReason` reads the last
+       * such line as the run's cause. This run has no cause — it finished. The
+       * drop is still written down, because hiding it would be its own lie, but
+       * it is written as what it is.
+       */
+      const emitPostTurnTransport = (detail: string) => {
+        cb.onLine(postTurnTransportLine(detail));
+      };
+
       const run = async () => {
         // Before anything can be awaited: the SDK import, the `codex` spawn and
         // the first turn all run with no event at all, and that window is what
@@ -1041,8 +1104,13 @@ export function createCodexAdapter(
             );
             if (facts.sessionId) sessionId = facts.sessionId;
             const type = event.type;
+            if (type === "turn.started" || type === "item.started") {
+              // Ruling 394: something is in flight again.
+              workAfterLastTurn = true;
+            }
             if (type === "turn.completed") {
               sawTurnCompleted = true;
+              workAfterLastTurn = false;
               // Running turn count so the live Turns counter climbs across a
               // multi-turn run (codex reports no cumulative num_turns).
               turnCount += 1;
@@ -1093,6 +1161,20 @@ export function createCodexAdapter(
             return settle("error");
           }
           if (interrupted) return settle("interrupted");
+          // Ruling 394: the turn had completed and nothing was in flight, so
+          // the iterator threw on teardown, not on the work. Live this was the
+          // socket dying under Viberr's OWN end-of-run compaction — its
+          // housekeeping turning a finished run into a failed one.
+          if (turnStoodComplete()) {
+            const thrown = classifyCodexFailure(error, "execution", lastFatalMessage);
+            logger.info("codex transport dropped after the turn completed", {
+              runId: spec.runId,
+              runOutcome: "finished",
+            });
+            emitPostTurnTransport(thrown.providerText || thrown.message);
+            if (thread.id) sessionId = thread.id;
+            return settle("finished");
+          }
           logger.error("codex thread error", {
             runId: spec.runId,
             err: safeCodexError(error),
@@ -1111,6 +1193,13 @@ export function createCodexAdapter(
 
         if (interrupted) return settle("interrupted");
         if (sawTurnCompleted && !sawFatalError) return settle("finished");
+        // Ruling 394: a fatal event that landed AFTER the completed turn, with
+        // nothing started since. Same judgement as the catch above — the work
+        // stood finished, so the drop is transport and the run is not failed.
+        if (turnStoodComplete()) {
+          emitPostTurnTransport(lastFatalMessage ?? "the provider stream ended in an error");
+          return settle("finished");
+        }
         // A fatal `turn.failed` / `error` event can arrive WITHOUT the iterator
         // throwing (F22-08): classify it from the event message so the failure
         // is surfaced instead of settling error silently.

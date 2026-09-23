@@ -1,6 +1,7 @@
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import { systemIdToName } from "~/server/files/actor-ref.server";
 import type { DatabaseSync } from "node:sqlite";
+import { actorProseName } from "./user-display-name.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { z } from "zod";
 import { AppError } from "~/server/errors/app-error.server";
@@ -28,6 +29,7 @@ import {
   formatDependencyRef,
   parseDependencyRef,
   type DependencyRef,
+  type DependencyReleasePayload,
 } from "~/shared/dependencies";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import {
@@ -192,7 +194,14 @@ export function validateDependencyRefs(
       if (!links) throw AppError.validation(`${ref.goal} is not a goal in this project.`);
       const link = links.find((l) => l.index === ref.link);
       if (!link) throw AppError.validation(`${ref.goal} has no link ${ref.link} (it has ${links.length}).`);
-      if (link.taskKey && taskRow(db, slug, link.taskKey)?.archived) {
+      // Ruling 398(b): a link the chain has SETTLED — `done`, or `skipped` by
+      // an onFailure=continue ride-through — is a valid thing to wait on
+      // however its task ended. The refusal below is about a live link whose
+      // work was abandoned; reading the task alone refused a wait on a link
+      // that had already completed, and refused the ride-through's own next
+      // link in the name of the failure it was riding past.
+      const settled = link.status === "done" || link.status === "skipped";
+      if (!settled && link.taskKey && taskRow(db, slug, link.taskKey)?.archived) {
         throw AppError.validation(`${spelled} (${link.taskKey}) is archived; a task cannot wait on abandoned work.`);
       }
     }
@@ -292,11 +301,30 @@ export async function setTaskDependencies(
   const previous = [...fm.blockedBy];
   const added = next.filter((r) => !previous.includes(r));
   const removed = previous.filter((r) => !next.includes(r));
+  // F39-63 (pass 39): a wait on a task that is already done holds nothing. It
+  // was written anyway ("Held until every entry is done"), the engine released
+  // it on its next sweep, and the release note told the task "the base branch
+  // has changed since the hold" when nothing had merged. Live on ax-clone AX-29
+  // the operator re-applied a finished directive's first step this way, and
+  // the release it paid for sent the next drive to refresh a current branch
+  // instead of re-running the review it owed. Only an ADDED entry is judged:
+  // one already on the list that finished since is the engine's to release.
+  // A settled goal link stays a valid wait (ruling 398(b)).
+  const alreadyDone = resolveDependencies(db, input.projectSlug, added).filter(
+    (e) => e.state === "done" && e.goalId === null,
+  );
+  if (alreadyDone.length > 0) {
+    const one = alreadyDone.length === 1;
+    throw AppError.validation(
+      `${alreadyDone.map((e) => e.label).join(", ")} ${one ? "is" : "are"} already done, so waiting on ` +
+        `${one ? "it" : "them"} holds nothing. Leave ${one ? "it" : "them"} off the list.`,
+    );
+  }
   if (JSON.stringify(next) === JSON.stringify(previous)) {
     // Ruling 155: the record the link carries is brought back in step even
     // when the task's own list did not move (a stale link heals on the next
     // write instead of waiting for a different one).
-    await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(actor, ctx));
+    await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(db, actor, ctx));
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false, blockedBy: next, added, removed };
   }
   const releasing = next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized;
@@ -340,11 +368,11 @@ export async function setTaskDependencies(
     details: { blockedBy: next, added, removed },
   });
   // Ruling 155: a link's task owns the wait; the goal file follows it.
-  await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(actor, ctx));
+  await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(db, actor, ctx));
   if (releasing) {
     await announceRelease(db, ctx, input.projectSlug, input.taskKey, {
       entries: previous,
-      clearedBy: actor.label,
+      clearedBy: actorProseName(db, actor),
     });
   } else if (previous.length > 0 && next.length === 0) {
     // Ruling 241, corrected by self-review: the drain belongs wherever the HOLD
@@ -430,8 +458,8 @@ export async function mirrorLinkWait(
 }
 
 /** Who a task-list change is attributed to on the goal timeline. */
-function changedByOf(actor: TaskActor, ctx: TaskActionContext): string {
-  return ctx.operatorAuthorized ? "the operator" : actor.label;
+function changedByOf(db: DatabaseSync, actor: TaskActor, ctx: TaskActionContext): string {
+  return ctx.operatorAuthorized ? "the operator" : actorProseName(db, actor);
 }
 
 // --------------------------------------------------------------- release
@@ -456,6 +484,15 @@ export interface AnnounceReleaseInput {
   entries: readonly string[];
   /** The person who emptied the list by hand, when it was not the engine. */
   clearedBy?: string;
+  /**
+   * F39-65: every entry was done before the task existed. Ruling 358 releases
+   * a chain link the moment it is minted by the completion it waits on, and
+   * the note then said "the base branch has changed since the hold" about a
+   * hold that never was, and told a task with no delivered work to re-read the
+   * base. Live on ax-clone AX-35, 0.7 s after "Created after the work it waits
+   * on was done".
+   */
+  atBirth?: boolean;
 }
 
 /**
@@ -475,7 +512,9 @@ export async function announceRelease(
   const list = input.entries.join(", ");
   const text = input.clearedBy
     ? `Released: ${input.clearedBy} cleared the wait on ${list}. The task can move again; the base branch may have changed since the hold.`
-    : `Released: everything this task waited on is done (${list}). The task can move again; the base branch has changed since the hold, so the work re-reads it before continuing.`;
+    : input.atBirth
+      ? `Released: everything this task waits on was done before it was created (${list}), so nothing held it.`
+      : `Released: everything this task waited on is done (${list}). The task can move again; the base branch has changed since the hold, so the work re-reads it before continuing.`;
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),
@@ -495,9 +534,15 @@ export async function announceRelease(
     subjectId: taskKey,
     projectSlug,
     taskKey,
-    details: { entries: [...input.entries], clearedBy: input.clearedBy ?? null },
+    details: {
+      entries: [...input.entries],
+      clearedBy: input.clearedBy ?? null,
+      atBirth: input.atBirth === true,
+    },
   });
-  notifyTaskWatchers(
+  // F39-65: a task born free cannot "move again", and its people were told a
+  // moment ago that it started.
+  if (!input.atBirth) notifyTaskWatchers(
     db,
     {
       projectSlug,
@@ -519,8 +564,13 @@ export async function announceRelease(
   await drainQueuedQuestions(db, ctx, projectSlug, taskKey);
   try {
     const { autoInvokeOperator } = await import("./task-actions.server");
+    const dependencyRelease: DependencyReleasePayload = {
+      entries: [...input.entries],
+      clearedBy: input.clearedBy ?? null,
+    };
+    if (input.atBirth) dependencyRelease.atBirth = true;
     await autoInvokeOperator(db, ctx, projectSlug, taskKey, "dependencies-released", {
-      dependencyRelease: { entries: [...input.entries], clearedBy: input.clearedBy ?? null },
+      dependencyRelease,
     });
   } catch (error) {
     logger.warn("dependency release could not re-invoke the operator", {
@@ -631,6 +681,9 @@ export async function releaseTask(
   ctx: TaskActionContext,
   projectSlug: string,
   taskKey: string,
+  /** F39-65: the caller has just minted this task; a release now means its
+   *  waits were all done before it existed. */
+  opts: { atBirth?: boolean } = {},
 ): Promise<boolean> {
   const ref = taskRef(ctx, projectSlug, taskKey);
   const existing = readTaskFile(ref);
@@ -666,7 +719,9 @@ export async function releaseTask(
   // Ruling 155: the engine's release is a change to the list like any other;
   // the goal file follows it, so a retried link is born free.
   await mirrorLinkWait(db, ctx, projectSlug, taskKey, fm.goalRef, [], RELEASE_BY);
-  await announceRelease(db, ctx, projectSlug, taskKey, { entries: cleared });
+  const release: AnnounceReleaseInput = { entries: cleared };
+  if (opts.atBirth) release.atBirth = true;
+  await announceRelease(db, ctx, projectSlug, taskKey, release);
   return true;
 }
 

@@ -21,6 +21,7 @@ import {
   type ProjectCredentialHealth,
 } from "~/server/secrets/pat-store.server";
 import type { SyncState } from "./github-pills";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import {
   mapPrChecks,
   mapPrChecksUnread,
@@ -220,12 +221,23 @@ export async function getGithubViewData(
         // otherwise a branch with NO compare data reports `unknown`
         // ("not compared") rather than borrowing `deriveSyncState`'s
         // "behindBy === 0 → synced" rule for a measurement that never ran.
+        //
+        // Ruling 401: and a FINISHED task that never committed anything has no
+        // execution branch at all — the name was allocated at creation and
+        // nothing was ever pushed to it. Whatever the last compare said about
+        // its recorded revision, "behind main" is a demand nobody can meet on
+        // work that is done. Checked before the compare, because the compare
+        // is exactly what produces the wrong answer here.
         sync:
           t.pr?.state === "merged"
             ? deriveSyncState({ prMerged: true, behindBy: 0 })
-            : behindBy === null
-              ? ("unknown" as const)
-              : deriveSyncState({ prMerged: false, behindBy }),
+            : isTerminalStage(t.stage, project.stages) &&
+                !t.pr &&
+                t.commits.length === 0
+              ? ("no_branch" as const)
+              : behindBy === null
+                ? ("unknown" as const)
+                : deriveSyncState({ prMerged: false, behindBy }),
         commitCount: t.commits.length,
         // Ruling 187 (pass 37, F37-8): how many of those the REMOTE does not
         // have. A commit an agent made in its workspace is real work and

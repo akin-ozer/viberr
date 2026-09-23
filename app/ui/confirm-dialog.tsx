@@ -30,9 +30,14 @@ export function ConfirmDialog({
   screenLabel,
   onCancel,
   onConfirm,
+  children,
 }: {
   title: string;
   body: ReactNode;
+  /** Ruling 419(c): a field the decision carries, such as the optional reason a
+   *  goal cancel records on the chain's history. Rendered under the body, so
+   *  the consequence is read before anything is typed. */
+  children?: ReactNode;
   /** Names the outcome, the way the hand-written dialogs do ("Remove stage",
    *  "Interrupt run") — never a bare verb the reader has to pair with the head. */
   confirmLabel: string;
@@ -67,6 +72,7 @@ export function ConfirmDialog({
       </div>
       <h3>{title}</h3>
       <p>{body}</p>
+      {children}
       <div className="confirm-actions">
         <button type="button" className="btn ghost" onClick={close}>
           {cancelLabel}

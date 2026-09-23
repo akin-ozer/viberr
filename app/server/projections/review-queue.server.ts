@@ -19,6 +19,7 @@ import {
   stageName,
 } from "~/shared/workflow/stage-roles";
 import { getProject, listProjectTasks } from "./board-query.server";
+import { liveMergeable } from "~/features/github/github-pills";
 
 /**
  * Review-queue read model (review-queue.md §1/§3, Phase 9C).
@@ -85,6 +86,41 @@ export interface PrOverlap {
    *  LARGER than this. Never smaller: a clipped list can only miss a collision.
    *  A surface that shows the count must say so. */
   partial: boolean;
+}
+
+/** Ruling 413: one side of the pairwise intersection, as either caller has it. */
+export interface PrDiffPaths {
+  taskKey: string;
+  prNumber: number;
+  changed: readonly string[];
+  truncated: boolean;
+}
+
+/**
+ * Ruling 236's pairwise path intersection, as a pure rule.
+ *
+ * Extracted (ruling 413) because the operator needs the same answer the review
+ * queue renders, and ruling 407 is the standing lesson about re-deriving a
+ * predicate in a second surface instead of reusing it.
+ */
+export function prPathOverlaps(
+  mine: PrDiffPaths,
+  others: readonly PrDiffPaths[],
+): PrOverlap[] {
+  const minePaths = new Set(mine.changed);
+  const found: PrOverlap[] = [];
+  for (const other of others) {
+    if (other.taskKey === mine.taskKey) continue;
+    const shared = other.changed.filter((path) => minePaths.has(path));
+    if (shared.length === 0) continue;
+    found.push({
+      taskKey: other.taskKey,
+      prNumber: other.prNumber,
+      paths: shared,
+      partial: mine.truncated || other.truncated,
+    });
+  }
+  return found;
 }
 
 export interface ReviewQueueRow {
@@ -276,7 +312,11 @@ export function getReviewQueue(
       pr = { number: t.pr.number, state: t.pr.state };
       // Omitted rather than nulled when GitHub was never asked — the key's
       // absence is the "never read" signal the file format itself uses.
-      if (t.pr.mergeable) pr.mergeable = t.pr.mergeable;
+      // Ruling 435: through the head pin (ruling 405), as the GitHub page and
+      // the task page read it; raw, the row's subline called a PR conflicting
+      // after the push that resolved it.
+      const mergeable = liveMergeable(t.pr);
+      if (mergeable) pr.mergeable = mergeable;
       // Ruling 132: the whole record rides through — projecting only a count
       // here is what dropped `baseRefresh` before the row was built.
       if (t.pr.revisionDrift) pr.revisionDrift = t.pr.revisionDrift;
@@ -401,25 +441,19 @@ export function getReviewQueue(
       diffs.set(t.key, { changed: paths.changed, truncated: paths.truncated });
     }
   }
+  const sides: PrDiffPaths[] = rows.flatMap((row) => {
+    const diff = row.pr ? diffs.get(row.key) : undefined;
+    return diff
+      ? [{ taskKey: row.key, prNumber: row.pr!.number, changed: diff.changed, truncated: diff.truncated }]
+      : [];
+  });
   for (const row of rows) {
     const mineDiff = diffs.get(row.key);
     if (!row.pr || !mineDiff) continue;
-    const mine = new Set(mineDiff.changed);
-    const found: PrOverlap[] = [];
-    for (const other of rows) {
-      if (other.key === row.key || !other.pr) continue;
-      const theirs = diffs.get(other.key);
-      if (!theirs) continue;
-      const shared = theirs.changed.filter((path) => mine.has(path));
-      if (shared.length === 0) continue;
-      found.push({
-        taskKey: other.key,
-        prNumber: other.pr.number,
-        paths: shared,
-        partial: mineDiff.truncated || theirs.truncated,
-      });
-    }
-    row.pr.overlaps = found;
+    row.pr.overlaps = prPathOverlaps(
+      { taskKey: row.key, prNumber: row.pr.number, changed: mineDiff.changed, truncated: mineDiff.truncated },
+      sides,
+    );
   }
 
   const isReady = (r: ReviewQueueRow): boolean =>

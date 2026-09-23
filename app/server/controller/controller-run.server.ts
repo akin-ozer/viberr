@@ -46,6 +46,7 @@ import { RUN_PHASE, type RunMcpServers } from "~/server/runtimes/adapter.server"
 import {
   interruptRun,
   registerRunCompletion,
+  type RunAnsweredCallback,
   resumeRun,
   startRun,
   type InterruptResult,
@@ -88,6 +89,7 @@ import {
   type PromptPrefix,
 } from "~/server/runtimes/prompt-prefix.server";
 import { controllerCompactAnchor } from "~/server/runtimes/context-policy.server";
+import { normalizeTimeZone } from "~/shared/dates/time-zone";
 
 /**
  * The controller conversation engine (ruling 99).
@@ -112,7 +114,7 @@ const LEASE_KEY = Symbol.for("viberr.controllerLease");
 
 interface LeaseEntry {
   runId: string | null;
-  queue: { messageId: string; text: string; surface: string | null }[];
+  queue: { messageId: string; text: string; surface: string | null; timeZone: string | null }[];
 }
 
 interface LeaseHost {
@@ -156,6 +158,10 @@ export interface ControllerTurnInput {
   /** Ruling 121: the page the person sent from (pathname + query). Stored on
    *  the user message and handed to the model as a hint. */
   surface?: string | null;
+  /** U39-24: the IANA zone the person's browser reads times in, as posted.
+   *  Normalized here; the turn's context states it so quoted times match
+   *  the page. */
+  timeZone?: string | null;
   dataRoot?: string;
 }
 
@@ -286,6 +292,7 @@ export async function runControllerTurn(
   }
 
   const surface = normalizeSurface(input.surface);
+  const timeZone = normalizeTimeZone(input.timeZone);
   const message = appendMessage(db, {
     conversationId: conversation.id,
     author: "user",
@@ -329,7 +336,7 @@ export async function runControllerTurn(
       });
       return { state: "refused", reason: note };
     }
-    held.queue.push({ messageId: message.id, text, surface });
+    held.queue.push({ messageId: message.id, text, surface, timeZone });
     return { state: "queued", messageId: message.id };
   }
   const entry: LeaseEntry = { runId: null, queue: [] };
@@ -343,6 +350,7 @@ export async function runControllerTurn(
       text,
       principal.principal.userId,
       surface,
+      timeZone,
     );
     return { state: "started", runId, messageId: message.id };
   } catch (error) {
@@ -430,6 +438,8 @@ async function startTurnRun(
   /** The surface of THIS message (a queued turn carries its own, not the
    *  first message's). */
   surface: string | null,
+  /** U39-24: this message's reader zone, carried the same way. */
+  timeZone: string | null,
 ): Promise<string> {
   const dataRoot = input.dataRoot;
   const config = resolveControllerConfig(dataRoot);
@@ -492,16 +502,32 @@ async function startTurnRun(
     taskKey: conversation.taskKey,
     user: { id: input.user.id, email: input.user.email, name: input.user.name },
     surface,
+    timeZone,
   };
   if (dataRoot) contextInput.dataRoot = dataRoot;
   const context = gatherControllerContext(db, contextInput);
-  const prompt = buildTurnPrompt(db, conversation, text, context.text);
+  const prompt = buildTurnPrompt(db, conversation, text, context.text, config.model ?? null);
 
   const actor = {
     userId: input.user.id,
     label: encodeControllerInstrument(input.user.email),
   };
 
+  // U39-30: the answer goes on the page the moment it is written, not after
+  // the completion compaction (ruling 376) that follows a long turn. The
+  // settle still waits for the compaction before it starts the next queued
+  // turn, which resumes this same session.
+  const answered: RunAnsweredCallback = (answeredRunId) => {
+    try {
+      postReply(db, conversation.id, answeredRunId);
+    } catch (error) {
+      logger.error("controller answer could not be posted early", {
+        conversationId: conversation.id,
+        runId: answeredRunId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  };
   let runId: string;
   if (prior?.session_id) {
     const resumeInput: ResumeRunInput = {
@@ -527,6 +553,7 @@ async function startTurnRun(
     resumeInput.model = resolveRunModel("claude", config.model);
     if (config.effort) resumeInput.effort = config.effort;
     if (dataRoot) resumeInput.dataRoot = dataRoot;
+    resumeInput.onAnswered = answered;
     const resumed = await resumeRun(db, resumeInput);
     runId = resumed.runId;
   } else {
@@ -552,6 +579,7 @@ async function startTurnRun(
     };
     if (config.effort) startInput.effort = config.effort;
     if (dataRoot) startInput.dataRoot = dataRoot;
+    startInput.onAnswered = answered;
     const started = await startRun(db, startInput);
     runId = started.runId;
   }
@@ -568,10 +596,16 @@ async function startTurnRun(
     taskKey: conversation.id,
     threadId: conversation.id,
     backend: "claude",
+    kind: "controller",
     dataRoot,
     inputs: {
       ...promptBuild.inputs,
       promptChars: prompt.length,
+      // U39-25: every server this turn mounts, as the specialist path counts
+      // them. The prompt's list is the org grants only, so the headline said
+      // "0 MCP servers" two lines above a `system·init` naming
+      // viberr_controller and viberr_ops.
+      mcp: { ...promptBuild.inputs.mcp, mounted: Object.keys(mcpServers).sort() },
       // A controller turn has no canonical TASK state: its conversation may be
       // scoped to a project or to nothing, and ruling 121's context read is
       // part of the prompt rather than an anchor block. `null` is the true
@@ -696,6 +730,30 @@ function absoluteUtcLabel(iso: string): string {
   return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
+/** Whether this run's reply is already in the transcript: posted early by
+ *  U39-30, or written by a settle or a boot catch-up. */
+function replyPosted(db: DatabaseSync, conversationId: string, runId: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 AS posted FROM controller_messages
+          WHERE conversation_id = ? AND run_id = ? AND author = 'controller' LIMIT 1`,
+      )
+      .get(conversationId, runId) !== undefined
+  );
+}
+
+/** U39-30: post a finished run's answer, once. False when it wrote nothing
+ *  (no answer text, or already posted). */
+function postReply(db: DatabaseSync, conversationId: string, runId: string): boolean {
+  if (replyPosted(db, conversationId, runId)) return false;
+  const text = fullReplyTextForRun(db, runId);
+  const reply = text ? normalizeEscapedNewlines(text).trim() : "";
+  if (!reply) return false;
+  appendMessage(db, { conversationId, author: "controller", text: reply, runId });
+  return true;
+}
+
 /** Record the reply, release the lease, fire the next queued message. */
 async function settleTurn(
   db: DatabaseSync,
@@ -705,7 +763,8 @@ async function settleTurn(
   input: ControllerTurnInput,
 ): Promise<void> {
   const conversation = getConversation(db, conversationId);
-  if (conversation) {
+  // U39-30: a reply the answered hook already posted is this turn's reply.
+  if (conversation && !replyPosted(db, conversationId, runId)) {
     let reply: string | null = null;
     if (state === "finished") {
       reply = fullReplyTextForRun(db, runId);
@@ -750,6 +809,7 @@ async function settleTurn(
       next.text,
       input.user.id,
       next.surface,
+      next.timeZone,
     );
   } catch (error) {
     logger.error("queued controller turn failed to start", {
@@ -858,9 +918,10 @@ export function recoverControllerConversations(db: DatabaseSync): number {
   // TWO arms, because message ORDER cannot see the common case. A turn taken
   // off the FIFO always has the PREVIOUS turn's reply sitting after its own
   // user message, so "the newest message is the user's" misses every queued
-  // turn a restart killed. The RUN identifies those: `settleTurn` is the only
-  // writer of a run-linked controller message, so a terminal controller run
-  // with no message carrying its id is exactly a turn whose settle never ran.
+  // turn a restart killed. The RUN identifies those: a run-linked controller
+  // message is written only as a turn's reply (by `settleTurn`, or early by
+  // U39-30's answered hook), so a terminal controller run with no message
+  // carrying its id is exactly a turn that was never answered.
   //
   // SAFETY: `agent_runs.id` and `.task_key` are both declared NOT NULL TEXT
   // (0001_baseline). A controller run's `task_key` is its conversation id
@@ -942,6 +1003,8 @@ export function buildTurnPrompt(
   text: string,
   /** The context read (controller-context.server.ts), already labelled. */
   context: string | null = null,
+  /** The model this turn runs on, as the controller's settings name it. */
+  model: string | null = null,
 ): string {
   // Every turn carries a SHORT recent-exchange digest: cheap insurance that
   // keeps the conversation coherent even when the provider session behind the
@@ -953,7 +1016,14 @@ export function buildTurnPrompt(
     ? `Recent exchange (for orientation; the store is the truth for anything that may have changed):\n\n${digest}\n\n---\n\n`
     : "";
   const lead = context ? `${context}\n---\n\n` : "";
-  return `${lead}${head}${conversation.userLabel} says:\n\n${text}`;
+  // Ruling 444: the model is named here, in the one part of the request
+  // rendered fresh every turn. The system prompt is recorded when the
+  // conversation starts (ruling 373) and kept until it compacts, so a model
+  // changed in settings reached the run and not its own description of it.
+  const runtime = model
+    ? `You run on model \`${model}\` this turn. Where your system prompt or earlier turns name another model, this line is current.\n\n---\n\n`
+    : "";
+  return `${lead}${runtime}${head}${conversation.userLabel} says:\n\n${text}`;
 }
 
 /** Bounded transcript digest, oldest first. */
@@ -1071,9 +1141,12 @@ export function buildControllerSystemPrompt(
 
   parts.push(
     "\n\n---\n# Your runtime\n\n" +
-      "You are the instance controller, running on the Claude backend" +
-      (input.config.model ? `, model \`${input.config.model}\`` : "") +
-      ".\n" +
+      // Ruling 444: the model is named in each turn's message instead. This
+      // prompt is recorded for the conversation (ruling 373), so a model named
+      // here went stale the day settings changed it: live on the ax-clone
+      // controller, "Opus 5 ... claude-opus-5[1m]" after the switch to 5.5.
+      "You are the instance controller, running on the Claude backend. Each turn's message names " +
+      "the model you run on, because it can change between turns and this prompt cannot.\n" +
       // "org" is load-bearing in both arms: `mountedMcps` is ORG grants only,
       // and the flat negation used to sit one line above the built-in
       // diagnostics sentence, telling the model in consecutive breaths that it

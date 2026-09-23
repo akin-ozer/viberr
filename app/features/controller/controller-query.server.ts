@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { TaskLinks } from "~/shared/task-key-links";
 import { data } from "react-router";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { getProject } from "~/server/projections/board-query.server";
@@ -8,6 +9,8 @@ import {
   getConversation,
   listConversations,
   listMessages,
+  listUnseenReplies,
+  markConversationSeen,
   type ControllerConversation,
   type ControllerMessage,
   type ListConversationsInput,
@@ -19,7 +22,9 @@ import {
 } from "~/server/controller/controller-run.server";
 import { listRunsForTask } from "~/server/runtimes/run-service.server";
 import type { RunView } from "~/features/runtime/runtime-types";
-import { listGoals, type GoalView } from "~/server/tasks/goal-actions.server";
+import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-actions.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
+import { taskKeyLinks } from "~/server/projections/task-key-links.server";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own
@@ -39,6 +44,9 @@ export interface ControllerSurfaceView {
   conversations: ConversationListItem[];
   conversation: ControllerConversation | null;
   messages: ControllerMessage[];
+  /** U39-29: the task keys the transcript names that this viewer can open,
+   *  key to path. */
+  taskLinks: TaskLinks;
   /** Ruling 250: `phase`/`step` say what the live turn is doing, for the row
    *  the person is watching. */
   turn: ConversationTurnState;
@@ -72,6 +80,9 @@ export interface ConversationListItem {
   projectSlug: string | null;
   /** Ruling 121: the task this thread is anchored to, when it is. */
   taskKey: string | null;
+  /** O39-d: the viewer's own thread holds a controller reply they have not
+   *  seen. Never set on someone else's thread (?all=1). */
+  unread: boolean;
 }
 
 export function getControllerSurface(
@@ -119,7 +130,33 @@ export function getControllerSurface(
     conversation = found;
   }
 
+  // O39-d: the transcript this page opens is seen by its owner now, before the
+  // list is marked, so the thread being read is never flagged.
+  if (conversation && conversation.userId === viewer.id) {
+    markConversationSeen(db, conversation.id, viewer.id);
+  }
+  const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
   const config = resolveControllerConfig(input.dataRoot);
+  // Ruling 419(f): a person is named on this page the way the rest of the app
+  // names them. A conversation stores its owner's EMAIL at creation (the
+  // controller's prompt keeps it: an address is unambiguous to a model), and
+  // the transcript and the rail printed that address beside every message
+  // where the task timeline says "Arda". Read at render time, so a rename
+  // shows at once; an owner with no row keeps the stored label.
+  const names = new Map<string, string>();
+  const nameOf = (userId: string, stored: string): string => {
+    let name = names.get(userId);
+    if (name === undefined) {
+      const found = userDisplayName(db, userId);
+      name = found === userId || !found.trim() ? stored : found;
+      names.set(userId, name);
+    }
+    return name;
+  };
+  if (conversation) {
+    conversation = { ...conversation, userLabel: nameOf(conversation.userId, conversation.userLabel) };
+  }
+  const messages = conversation ? listMessages(db, conversation.id) : [];
   return {
     // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
     // "is the controller available" is a question about the person looking at
@@ -133,14 +170,20 @@ export function getControllerSurface(
     conversations: rows.map((c) => ({
       id: c.id,
       title: c.title || "New conversation",
-      ownerLabel: c.userLabel,
+      ownerLabel: nameOf(c.userId, c.userLabel),
       own: c.userId === viewer.id,
       lastMessageAt: c.lastMessageAt,
       projectSlug: c.projectSlug,
       taskKey: c.taskKey,
+      unread: c.userId === viewer.id && unseen.has(c.id),
     })),
     conversation,
-    messages: conversation ? listMessages(db, conversation.id) : [],
+    messages,
+    taskLinks: taskKeyLinks(
+      db,
+      messages.map((m) => m.text),
+      { projectSlug: scope, viewerId: viewer.id },
+    ),
     turn: conversation
       ? conversationTurnState(db, conversation.id)
       : { working: false, runId: null, phase: null, step: null },
@@ -151,7 +194,14 @@ export function getControllerSurface(
     canInterruptTurn: conversation
       ? conversation.userId === viewer.id || admin
       : false,
-    goals: scope ? listGoals(db, scope) : null,
+    // Ruling 419(h): each chain carries its history from its own file, so the
+    // page can show why it paused and what a person said when they cancelled it.
+    goals: scope
+      ? listGoals(db, scope).map((goal) => ({
+          ...goal,
+          history: readGoalHistory(scope, goal.id, { dataRoot: input.dataRoot }),
+        }))
+      : null,
     // Ruling 260 (pass 37, F37-91): the goal-redirect gate is a DISJUNCTION —
     // the chain's creator, or run-agents. The page knew only the role half, so
     // it hid Pause, Resume, Cancel, Retry and Skip from the person who created

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { Markdown } from "./markdown";
 
 /**
@@ -295,5 +296,27 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
     expect(container.querySelector("a")!.getAttribute("href")).toBe(
       "../../attachments/shot.png",
     );
+  });
+
+  it("U39-29: links the task keys it was given, in the same tab, and leaves the rest as text", () => {
+    // CANARY: drop `rehypeTaskLinks` from the plugin list and nothing links.
+    const { container } = render(
+      <MemoryRouter>
+        <Markdown
+          text={"Created AX-33 and AX-34. AX-99 is unknown, `AX-33` is code, and [AX-34](https://x.test) is a link already."}
+          taskLinks={{ "AX-33": "/projects/ax-clone/tasks/AX-33", "AX-34": "/projects/ax-clone/tasks/AX-34" }}
+        />
+      </MemoryRouter>,
+    );
+    const refs = [...container.querySelectorAll("a.task-ref")];
+    expect(refs.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["AX-33", "/projects/ax-clone/tasks/AX-33"],
+      ["AX-34", "/projects/ax-clone/tasks/AX-34"],
+    ]);
+    // Same tab: a task is a page of this app.
+    expect(refs.every((a) => !a.hasAttribute("target"))).toBe(true);
+    expect(container.textContent).toContain("AX-99 is unknown");
+    expect(container.querySelector("code")!.textContent).toBe("AX-33");
+    expect(container.querySelector("a:not(.task-ref)")!.getAttribute("href")).toBe("https://x.test");
   });
 });

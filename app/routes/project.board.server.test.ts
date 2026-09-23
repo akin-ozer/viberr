@@ -200,13 +200,30 @@ describe("board reorder — the acceptance disclosure (ruling 88)", () => {
     expect(result.error).toContain("changed after the accept dialog");
   });
 
-  it("an ordinary column move still POSTs bare", async () => {
+  it("ruling 381: a backward drop with no reason is refused by the route", async () => {
+    // Runs BEFORE the move below, which lands VIB-142 on impl for good.
+    const result = reply(
+      await post("viberr-core", ids.arda, {
+        intent: "reorder",
+        taskKey: "VIB-142",
+        to: "impl",
+        beforeKey: "",
+      }),
+    );
+    expect(result.status).toBe(400);
+    expect(result.error).toContain("needs a reason");
+  });
+
+  it("an ordinary column move needs no acceptance echo", async () => {
     // Same intent, a non-terminal target: no acceptance, no ceremony, no echo.
+    // It carries a ruling 381 reason because the drop is backward, which is a
+    // different rule with a different shape (a sentence, not three fields).
     const result = await post("viberr-core", ids.arda, {
       intent: "reorder",
       taskKey: "VIB-142",
       to: "impl",
       beforeKey: "",
+      reason: "the retry path is still unhandled",
     });
     expect(reply(result).status).toBeUndefined();
     expect("stage" in result ? result.stage : null).toBe("impl");

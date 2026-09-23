@@ -530,6 +530,62 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     expect(view.connection.status).toBe("connected");
   });
 
+  /**
+   * Ruling 401 (F39-28), live on ax-clone AX-12. A task can finish without ever
+   * committing anything — that one delivered an upstream comparison as an
+   * attachment, `noChanges: true`, no PR, zero commits, and no `ax-12` branch
+   * anywhere on the remote or in the mirror. Viberr allocates the branch NAME
+   * at creation, so the row existed and carried whatever the last compare had
+   * said about its recorded revision: "behind main", in a RISK fill. A demand,
+   * on finished work, for a branch that does not exist and never will — and
+   * one that could never clear, because nothing about a completed task moves.
+   *
+   * VIB-151 is the perfect A/B: the ruling-12 `behind_main` case above, with
+   * zero commits and no PR. Only its stage differs.
+   */
+  it("ruling 401: a finished task that committed nothing has no branch to be behind", async () => {
+    const { getGithubViewData } = await import("./github-query.server");
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildTaskFile } = await import("~/server/projections/rebuilder.server");
+    const syncOf = async (key: string) => {
+      const view = (await getGithubViewData(app.db, "viberr-core", {
+        fetchImpl: fakeGithubFetch({
+          [`GET /repos/${REPO}`]: {
+            status: 200,
+            body: { full_name: REPO, private: true, default_branch: "main" },
+          },
+        }).fetchImpl,
+      }))!;
+      return view.branches.find((b) => b.taskKey === key)!;
+    };
+
+    // Control, and the state the previous test left: still in flight, really
+    // behind, and the pill is a demand someone can meet.
+    const before = await syncOf("VIB-151");
+    expect(before.sync).toBe("behind_main");
+    expect(before.pr).toBeNull();
+    expect(before.commitCount).toBe(0);
+
+    await updateTaskFile(
+      { projectSlug: "viberr-core", taskKey: "VIB-151", dataRoot: app.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.previousStageId = parsed.frontmatter.stage;
+        parsed.frontmatter.stage = "done";
+      },
+    );
+    rebuildTaskFile(app.db, "viberr-core", "VIB-151", { dataRoot: app.dataRoot });
+
+    // CANARY: drop the terminal-stage arm and this stays `behind_main` — a red
+    // pill on a completed task, forever, which is AX-12's row verbatim.
+    const after = await syncOf("VIB-151");
+    expect(after.sync).toBe("no_branch");
+
+    // A finished task that DID commit keeps its real comparison: this arm is
+    // about work that never reached a branch, not about being done.
+    expect((await syncOf("VIB-142")).sync).toBe("synced");
+    expect((await syncOf("VIB-139")).sync).toBe("merged");
+  });
+
   // F10-28 (second half): a reconcile that just ran must flip the disclosure
   // from "never / stale" to a real timestamp, so the freshness badge is
   // evidence of the last sync rather than decoration.

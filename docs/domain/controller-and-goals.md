@@ -32,7 +32,7 @@
 > ruling 127 (branch `claude/per-user-codex-auth-difdnn`): §1 and §2 (a turn runs on the
 > asker's own Claude account), §5 (`instance_health`'s new per-backend shape, and a dated
 > correction to ruling 107). Updated 2026-09-11 for pass 36 cluster 4 (ruling 183, U36-3,
-> U36-4, U36-5, G36-1): §3 and §4.1 (`save_knowledge_base` and `save_skill` answer with the
+> U36-4, U36-5, G36-1): §3 and §4.1 (`save_knowledge_base` takes `doc.append` (ruling 377/F39-1: add to the end, create when absent, no `replace`/`replaces` because an append destroys nothing, and the two modes together are refused) so a long document is built in bounded calls instead of one large one; `save_knowledge_base` and `save_skill` answer with the
 > id and grantKey, a `disk:<dir>` id whose folder has a row updates that row, `save_skill`
 > refuses a body that is not a skill, `update_agent_deployment` takes `skills` / `mcps` /
 > `kbs` for every kind) and §4.2 (the reply lists every changed field old → new, the
@@ -229,6 +229,17 @@ threads, a key = that task's); `createConversation` refuses a task without a pro
 characters) a USER message was sent from; controller rows carry null. The title is the
 first user message clipped to 80 characters. Every appended message publishes the
 owner-routed SSE event `controller.updated`.
+
+**A reply the owner has not seen (O39-d, ruling 448).** `seen_seq` on the conversation is
+the highest message `seq` its owner has looked at. The two surfaces that show a transcript,
+the controller page and the open dock, set it when its owner is the one looking
+(`markConversationSeen`: monotonic, publishes nothing, so a revalidation can run it
+again). A controller message above it is unseen (`listUnseenReplies`). The dock's button
+carries a dot and says "a new reply" on every page. `/resources/controller-unseen` lists the
+viewer's unseen replies in any scope, with the page that opens each, and leaves out any
+thread in a project the viewer can no longer open. The open panel links to replies from
+other places and marks unread threads here, and the page's rail and phone picker mark them
+too. None of this is a notification row: replies stay out of the bell (§8).
 
 **One user message is one run** (`runControllerTurn` in `controller-run.server.ts`):
 
@@ -464,8 +475,10 @@ legitimately preserves advisory and retired ids a strict catalogue check would r
 
 For every such catalogue there is a read the same person may call first, and the write's
 description names it. `get_project` returns each deployment's RESOLVED grants (every
-governed id at the mode the runtime applies, with its label), model, effort and, for the
-operator, autonomy, derived by the Agents page's own `assembleAgentRoster` from the
+stored id at the mode the runtime applies, with its label — and, ruling 377(a), an
+`advisory` note on a matrix-only row, which is persona guidance nothing enforces and
+`update_agent_deployment` refuses; no such key means a real, settable grant), model, effort
+and, for the operator, autonomy, derived by the Agents page's own `assembleAgentRoster` from the
 projection (every agent writer reprojects before it returns), so the controller reads what
 the roster renders: an absent `deliver-review-pr` at the project's delivery-gate mode, the
 grant-required family at `off`. `list_capabilities` (instance scope, any signed-in person,
@@ -521,7 +534,7 @@ pinned, non-interactive chip.
 
 | Tool | What it returns | Gate |
 |---|---|---|
-| `instance_health` | The same `healthSnapshot` the `/resources/health` route serves (status, degraded subsystems, projections, watchers, lock holder, `backends.<b>.connectedUsers`, browser, disk, maintenance, build), plus `backendCredentials: [{ backend, connectedUsers, askerConnected }]` and the run concurrency snapshot `{cap, lane, live, queued}` (`lane` is the ruling-152(b) coordination lane beyond the cap) | Open to anyone: nothing here names another person or any deployment configuration. The browser executable **path** stays org-admin only (`browserDetail`) |
+| `instance_health` | The same `healthSnapshot` the `/resources/health` route serves (status, degraded subsystems, projections, watchers, lock holder, `backends.<b>.connectedUsers`, browser, disk, maintenance, build), plus `backendCredentials: [{ backend, connectedUsers, askerConnected }]` and the run concurrency snapshot `{cap, lane, live, queued}` (`lane` is the ruling-152(b) coordination lane beyond the cap). Ruling 377(b): an optional `probe: string[]` (≤ 8 bare names) answers `present` + version, or `present: false` + the reason, for any command the fixed `toolchain` struct does not name — the gate binary a project declares and nothing could verify | Open to anyone: nothing here names another person or any deployment configuration; a probe reports presence and version, never a path. The browser executable **path** stays org-admin only (`browserDetail`) |
 | `read_run_log` | A bounded page of a run's console: `run {…, logLines}`, `page {firstSeq, lastSeq, olderExist, newerExist, next}`, `lines[{seq, at, display}]`. Default 200 newest lines, max 500, in either direction; `since` together with `before` is refused | A member of the run's project; a controller turn's log follows conversation ownership with org-admin supervision. A missing run, a forbidden project and a forbidden conversation all answer the same not-visible sentence |
 | `read_store_doc` | One store document with `truncated` reported honestly | org admin |
 
@@ -685,6 +698,7 @@ currently sees no controls, and must redirect conversationally.
 - Notification kind: `controller`, created only for goal progress (started, attention,
   completed), addressed to the goal creator, from the "Controller" agent identity.
   The category has a routing toggle in the profile, default on.
+  A conversation reply is not a notification: the unseen-reply dot (§3) is its signal.
 - SSE: `controller.updated {conversationId, userId}` (owner-routed),
   `controller.log-appended {conversationId, userId, runId, threadId, seq}` (owner-routed,
   one per stored console line of a controller run; a stream event, tailed by the console
@@ -699,9 +713,10 @@ currently sees no controls, and must redirect conversationally.
 `list_projects` mention and its "a comment mention can start a run" sentence — were fixed
 by ruling 121's doctrine and skill rewrite, shipped through the hash upgrade.)*
 
+*(2026-09-23, pass 39: the notification-kind comments that described a "controller
+conversation reply" notification now say what happens, a `controller.updated`
+revalidation and no row, so that item is gone from this list.)*
+
 - Ruling 108's note that the panel "skips the P13-KM-01 display-name repair" under a
   lock is stale wording: the panel runs the repair for display and posts blank for
   locked sections; the byte-for-byte outcome holds through the server.
-- The notification-kind comment describing a "controller conversation reply"
-  notification describes something never created; replies arrive through
-  `controller.updated` revalidation, not a notification row.

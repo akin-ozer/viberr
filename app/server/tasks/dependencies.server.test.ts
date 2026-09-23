@@ -153,34 +153,63 @@ describe("setTaskDependencies", () => {
     await seed(store);
     const result = await setTaskDependencies(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["goal-1 link 2", "VIB-2"] },
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["goal-1 link 2", "VIB-5"] },
       actor(store, "arda"),
       { dataRoot: store.dataRoot },
     );
-    expect(result).toMatchObject({ changed: true, blockedBy: ["goal-1 link 2", "VIB-2"], added: ["goal-1 link 2", "VIB-2"], removed: [] });
+    expect(result).toMatchObject({ changed: true, blockedBy: ["goal-1 link 2", "VIB-5"], added: ["goal-1 link 2", "VIB-5"], removed: [] });
     const parsed = file(store, "VIB-1");
-    expect(parsed.frontmatter.blockedBy).toEqual(["goal-1 link 2", "VIB-2"]);
+    expect(parsed.frontmatter.blockedBy).toEqual(["goal-1 link 2", "VIB-5"]);
     expect(parsed.frontmatter.waiting).toBe("none");
     expect(parsed.timeline[0]).toMatchObject({ type: "note", title: "Dependencies updated" });
-    expect(parsed.timeline[0]!.text).toContain("Waits on goal-1 link 2, VIB-2 (added goal-1 link 2, VIB-2)");
+    expect(parsed.timeline[0]!.text).toContain("Waits on goal-1 link 2, VIB-5 (added goal-1 link 2, VIB-5)");
     expect(result.task.readiness).toBe("blocked");
     expect(result.task.blockedBy.map((e) => [e.ref, e.state])).toEqual([
       ["goal-1 link 2", "open"],
-      ["VIB-2", "done"],
+      ["VIB-5", "open"],
     ]);
     const rows = listAuditEvents(store.db).filter((e) => e.action === "task.dependencies.updated");
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.details).toMatchObject({ blockedBy: ["goal-1 link 2", "VIB-2"], added: ["goal-1 link 2", "VIB-2"], removed: [] });
+    expect(rows[0]!.details).toMatchObject({ blockedBy: ["goal-1 link 2", "VIB-5"], added: ["goal-1 link 2", "VIB-5"], removed: [] });
 
     const again = await setTaskDependencies(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["goal-1 link 2", "vib-2"] },
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["goal-1 link 2", "vib-5"] },
       actor(store, "arda"),
       { dataRoot: store.dataRoot },
     );
     expect(again.changed).toBe(false);
     expect(file(store, "VIB-1").timeline).toHaveLength(parsed.timeline.length);
     expect(listAuditEvents(store.db).filter((e) => e.action === "task.dependencies.updated")).toHaveLength(1);
+  });
+
+  it("F39-63: refuses to ADD a wait on a task that is already done, and keeps one that finished while on the list", async () => {
+    // Live on ax-clone AX-29 the operator re-added a wait on the merged AX-32:
+    // "Held until every entry is done", released 37 seconds later with "the
+    // base branch has changed since the hold". CANARY: drop the refusal and
+    // the first call writes the hold.
+    const store = setupTestStore(ctx);
+    await seed(store);
+    await expect(
+      setTaskDependencies(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-2"] },
+        actor(store, "arda"),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow("VIB-2 is already done, so waiting on it holds nothing. Leave it off the list.");
+    expect(file(store, "VIB-1").frontmatter.blockedBy).toEqual([]);
+    // VIB-4 waits on VIB-5; VIB-5 finishes; adding another entry keeps the
+    // finished one, which is the engine's to release.
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-5", { stage: "done", waiting: "none" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const kept = await setTaskDependencies(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-4", blockedBy: ["VIB-5", "goal-1 link 2"] },
+      actor(store, "arda"),
+      { dataRoot: store.dataRoot },
+    );
+    expect(kept.blockedBy).toEqual(["VIB-5", "goal-1 link 2"]);
   });
 
   it("keeps waiting when a packet or a running agent still owes something; refuses an archived task and a viewer", async () => {
@@ -237,7 +266,9 @@ describe("setTaskDependencies", () => {
     const notes = parsed.timeline.filter((e) => e.type === "note");
     expect(notes).toHaveLength(1);
     expect(notes[0]!.title).toBe("Dependencies released");
-    expect(notes[0]!.text).toContain(`${store.users.murat.email} cleared the wait on VIB-5`);
+    // U39-18: the note names the person who cleared it, not their address.
+    expect(notes[0]!.text).toContain(`${store.users.murat.name} cleared the wait on VIB-5`);
+    expect(notes[0]!.text).not.toContain(store.users.murat.email);
     const actions = listAuditEvents(store.db).map((e) => e.action);
     expect(actions).toContain("task.dependencies.updated");
     expect(actions).toContain("task.dependencies.released");
@@ -353,6 +384,44 @@ describe("ruling 331: a failed auto-invocation names its cause and claims nothin
 
 /** Ruling 131(e): the release engine. */
 describe("the release engine", () => {
+  /**
+   * F39-65: a chain link minted by the completion it waits on is released by
+   * its mint (ruling 358). Nothing held it, so the operator's release turn is
+   * told there is nothing from before a hold to bring up to date.
+   */
+  it("F39-65: a release at birth reaches the operator as one, and tells nobody the task can move again", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-11", {
+        stage: "impl",
+        waiting: "none",
+        readiness: "blocked",
+        blockedBy: ["VIB-2"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const runOperator = runOperatorStub();
+    expect(
+      await releaseTask(store.db, { dataRoot: store.dataRoot, deps: { runOperator } }, store.slug, "VIB-11", { atBirth: true }),
+    ).toBe(true);
+    await eventually(() =>
+      expect(runOperator.mock.calls.some((c) => c[1].trigger === "dependencies-released")).toBe(true),
+    );
+    // CANARY: drop the payload's `atBirth` and the release turn tells a task
+    // born a moment ago that the base "CHANGED since the hold".
+    const release = runOperator.mock.calls.find((c) => c[1].trigger === "dependencies-released")!;
+    expect(release[1].dependencyRelease).toEqual({ entries: ["VIB-2"], clearedBy: null, atBirth: true });
+    const note = file(store, "VIB-11").timeline.find((e) => e.title === "Dependencies released")!;
+    expect(note.text).toBe("Released: everything this task waits on was done before it was created (VIB-2), so nothing held it.");
+    // SAFETY: COUNT(*) always answers one row, and `n` is its number.
+    const told = store.db
+      .prepare(`SELECT COUNT(*) AS n FROM notifications WHERE task_key = 'VIB-11' AND kind = 'dependency'`)
+      .get() as { n: number };
+    expect(told.n).toBe(0);
+  });
+
   it("completing the LAST dependency releases the dependent through the transition hook: list cleared, note, readiness lifted, hold cleared, watchers notified, operator re-invoked with the payload; a partial completion releases nothing", async () => {
     // Canaries: delete the `autoInvokeOperator` call in `announceRelease`
     // (no re-invoke); treat `failed` as satisfied in `dependenciesSatisfied`
@@ -825,7 +894,7 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
     expect(file(store, "VIB-7").frontmatter.blockedBy).toEqual([]);
     expect(goal().frontmatter.links[0]!.blockedBy).toEqual([]);
     expect(goal().timeline[0]!.text).toBe(
-      `Link 1 (Log view) now waits on nothing: VIB-7's list was changed by ${store.users.arda.email}.`,
+      `Link 1 (Log view) now waits on nothing: VIB-7's list was changed by ${store.users.arda.name}.`,
     );
     // The panel reads the projection, which the mirror rebuilt.
     expect(projected()[0]!.blockedBy).toEqual([]);
@@ -833,12 +902,14 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
     expect(goal().frontmatter.links[1]!.blockedBy).toEqual([]);
 
     // A new list on the task lands on the link too.
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: ["VIB-2"] }, actor(store, "arda"), ctxWith);
-    expect(goal().frontmatter.links[0]!.blockedBy).toEqual(["VIB-2"]);
-    expect(goal().timeline[0]!.text).toMatch(/^Link 1 \(Log view\) now waits on VIB-2: VIB-7's list was changed by /);
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: ["VIB-5"] }, actor(store, "arda"), ctxWith);
+    expect(goal().frontmatter.links[0]!.blockedBy).toEqual(["VIB-5"]);
+    expect(goal().timeline[0]!.text).toMatch(/^Link 1 \(Log view\) now waits on VIB-5: VIB-7's list was changed by /);
 
-    // VIB-2 is done: the engine releases VIB-7 and the link follows, under
-    // the engine's own name.
+    // VIB-5 finishes: the engine releases VIB-7 and the link follows, under
+    // the engine's own name. (F39-63: a wait is added while its entry is open.)
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-5", { stage: "done", waiting: "none" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     expect(await releaseTask(store.db, ctxWith, store.slug, "VIB-7")).toBe(true);
     expect(file(store, "VIB-7").frontmatter.blockedBy).toEqual([]);
     expect(goal().frontmatter.links[0]!.blockedBy).toEqual([]);
@@ -1044,5 +1115,25 @@ describe("F37-68 / ruling 241: a reviewer question the hold refused survives the
       // reads ["operator", "question"].
       expect(order).toEqual(["question", "operator"]);
     }
+  });
+});
+
+/**
+ * U39-18 (pass 39): a person, in a sentence people read, is named. Live on
+ * AX-20: "Released: arda@viberr.dev · via controller cleared the wait on
+ * AX-22", and the goal history said "edited by arda@viberr.dev · via
+ * controller".
+ */
+describe("U39-18: actorProseName", () => {
+  it("names the person, says the controller in words, and leaves an unknown label alone", async () => {
+    // CANARY: return `actor.label` from `actorProseName`.
+    const { actorProseName } = await import("./user-display-name.server");
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    expect(actorProseName(store.db, { userId: arda.id, label: arda.email })).toBe(arda.name);
+    expect(actorProseName(store.db, { userId: arda.id, label: `${arda.email} · via controller` })).toBe(
+      `${arda.name} (via the controller)`,
+    );
+    expect(actorProseName(store.db, { userId: "u_nobody", label: "ghost@viberr.test" })).toBe("ghost@viberr.test");
   });
 });

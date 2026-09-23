@@ -102,7 +102,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   const view = getControllerDock(
     db,
     { id: auth.user.id, email: auth.user.email },
-    { ...scope, conversationId: c },
+    // O39-d: only an OPEN panel reads the transcript it loads.
+    { ...scope, conversationId: c, markSeen: url.searchParams.get("seen") === "1" },
   );
   return { view };
 }
@@ -127,6 +128,8 @@ export async function action({ request }: Route.ActionArgs) {
   try {
     const text = textField.parse(formData.get("text"));
     const surface = textField.parse(formData.get("surface")) || null;
+    // U39-24: the reader's zone; normalized by the engine.
+    const timeZone = textField.parse(formData.get("timeZone")) || null;
     let conversationId = textField.parse(formData.get("conversationId")).trim();
     if (!conversationId || conversationId === DOCK_NEW_CONVERSATION) {
       // U35-4 (pass 35): the dock disables its composer for a person with no
@@ -174,6 +177,7 @@ export async function action({ request }: Route.ActionArgs) {
         orgRole: auth.user.role,
       },
       surface,
+      timeZone,
     });
     if (result.state === "refused") {
       // The refusal note is in the transcript (a reload still shows it); the

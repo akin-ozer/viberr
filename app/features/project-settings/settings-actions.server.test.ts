@@ -1298,6 +1298,48 @@ describe("setProjectFileLeases (ruling 245)", () => {
     expect(leases()).toEqual([]);
   });
 
+  it("ruling 417: refuses two ACTIVE holders whose globs overlap, not only identical ones", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    // CANARY: go back to the exact-glob check and this saves, and each lease
+    // refuses the other holder's delivery forever.
+    await expect(
+      setProjectFileLeases(
+        store.db,
+        {
+          projectSlug: store.slug,
+          leases: [
+            { paths: ["internal/sandbox/**"], taskKey: holderA, reason: "rewriting the sandbox" },
+            { paths: ["internal/sandbox/local.go"], taskKey: holderB, reason: "one file" },
+          ],
+        },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/Two leases overlap: `internal\/sandbox\/\*\*` \(.+\) and `internal\/sandbox\/local.go`/);
+    expect(leases()).toEqual([]);
+  });
+
+  it("ruling 417: a lease whose holder has FINISHED overlaps nothing, since it binds nobody", async () => {
+    const { setProjectFileLeases } = await import("./settings-actions.server");
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile({ projectSlug: store.slug, taskKey: holderA, dataRoot: store.dataRoot }, (f) => {
+      f.frontmatter.archived = true;
+    });
+    const saved = await setProjectFileLeases(
+      store.db,
+      {
+        projectSlug: store.slug,
+        leases: [
+          { paths: ["internal/**"], taskKey: holderA, reason: "spent" },
+          { paths: ["internal/cli/render.go"], taskKey: holderB, reason: "live" },
+        ],
+      },
+      admin(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(saved.changed).toBe(true);
+  });
+
   it("clears with an empty list, and reports an unchanged write as unchanged", async () => {
     const { setProjectFileLeases } = await import("./settings-actions.server");
     const args = {

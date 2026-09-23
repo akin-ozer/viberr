@@ -1072,8 +1072,9 @@ export function DecisionPacket({
               >
                 <span className="radio" />
                 <span>
-                  <div className="ot">{o.t}</div>
-                  <div className="od">{o.d}</div>
+                  {/* U39-21: an option is written like the body, with `code`. */}
+                  <div className="ot">{renderInlineCode(o.t)}</div>
+                  <div className="od">{renderInlineCode(o.d)}</div>
                 </span>
                 {i === decided.optionIndex && (
                   <span className="rec-tag">
@@ -1227,12 +1228,15 @@ export function DecisionPacket({
               >
                 <span className="radio" />
                 <span>
-                  <div className="ot">{o.t}</div>
+                  {/* U39-21: an option is written like the body, with `code`,
+                      and printed its backticks ("It answered this on
+                      \`7920943\` in this streak"). */}
+                  <div className="ot">{renderInlineCode(o.t)}</div>
                   {/* The refusal belongs in the DESCRIPTION, not only in the
                       `title`: a title needs a pointer, and a keyboard or touch
                       user reading a dimmed option has nothing else to go on. */}
                   <div className="od">
-                    {o.d}
+                    {renderInlineCode(o.d)}
                     {refusal ? refusal.note : ""}
                   </div>
                   {/* Ruling 269: a create_task option writes a NEW task, and
@@ -1401,7 +1405,9 @@ export function DecisionPacket({
               className="packet-note"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. what to change before reopening"
+              // U39-7: this box sits under every packet, and "before
+              // reopening" fitted only the closed-pull-request one.
+              placeholder="e.g. anything the operator should also know"
               rows={1}
               // The browser stops the paste at the cap rather than letting the
               // server refuse a confirm the person has already committed to.

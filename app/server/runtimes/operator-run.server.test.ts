@@ -33,6 +33,7 @@ import {
   connectFakeBackends,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
+import { assertStrictSchema } from "../../../test-support/strict-schema";
 import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import {
   getRun,
@@ -47,6 +48,8 @@ import {
   deliveredFollowUpFor,
   executeStrandedCodexPlan,
   maybeResumeStrandedOperator,
+  CODEX_PLAN_WHOLE_TURN,
+  REFRESH_ENDED_NUDGE,
   operatorPlanToolsFor,
   ownOperatorRunForTests,
   resetOperatorLeasesForTests,
@@ -56,10 +59,12 @@ import {
 } from "./operator-run.server";
 import * as operatorPrompts from "./operator-run.server";
 import { readDefaultBranchFile } from "~/server/tasks/operator-repo-read.server";
-import type {
-  OperatorAuthority,
-  OperatorAutonomy,
-  OperatorTaskSnapshot,
+import {
+  AGENT_REPORT_CAP_TOOLLESS,
+  CREATE_TASK_BASE_NOTE,
+  type OperatorAuthority,
+  type OperatorAutonomy,
+  type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
@@ -447,6 +452,117 @@ describe("Codex structured operator completion", () => {
     expect(task().frontmatter.stage).toBe("impl");
   });
 
+  /**
+   * Ruling 430 (F39-52), live on AX-21 at 01:18: the plan's refresh met a
+   * conflict and opened the blocking conflict packet, and its next step still
+   * dispatched the Surface Developer with "The operator has updated the branch
+   * from the changed base". A plan is written before any step runs; once one
+   * of its steps leaves a decision in front of a person, the rest does not act.
+   */
+  it("ruling 430: once a step leaves a new decision packet, the plan's remaining acting steps are not carried out", async () => {
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Escalate the scope question, then advance.",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Which of the two scopes should the task take?",
+            reason: "A person owns the scope.",
+            packetOptions: null,
+          },
+          transitionAction(),
+        ],
+      }),
+      "finished",
+    );
+    // CANARY: drop the `pausedBy` guard and the transition is recommended on
+    // top of the open question.
+    await eventually(() => {
+      const paused = task().timeline.find((e) => e.type === "note" && e.title === "Coordination paused");
+      expect(paused).toBeDefined();
+      expect(paused!.text).toContain("the `open_packet` step left a decision for a person");
+      expect(paused!.text).toContain("`transition_stage`");
+    });
+    expect(task().packet).not.toBeNull();
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations ?? []).toEqual([]);
+  });
+
+  /**
+   * F39-70, live on ax-clone AX-5 at 05:35. The plan leased three shared
+   * paths, then dispatched the Developer with "Do not modify any path the
+   * lease action refuses; report the refused path". The lease was refused,
+   * and the note naming the paths landed 46 ms after the dispatch, because the
+   * narration runs after the plan's last step. The Developer's prompt held the
+   * instruction and not the refusal.
+   */
+  it("F39-70: a dispatch carries the refusals its own plan collected before it", async () => {
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        ...project.parsed.frontmatter.agents,
+        {
+          profileId: "developer",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Dev",
+            role: "Implementation",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await start();
+    const operatorRun = adapter.pending!.spec.runId;
+    const directive = "Carry on with the parser. If the move to Done was refused, say what blocks it.";
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          // Impl -> Done is no transition this workflow has: refused.
+          transitionAction({ toStageId: "done", reason: "Close it out." }),
+          {
+            tool: "run_agent",
+            profileId: "developer",
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: directive,
+            reason: null,
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+    // CANARY: dispatch `a.text` bare and the agent is handed a question about
+    // a refusal it has no way to read.
+    await eventually(() => {
+      expect(adapter.pending?.spec.runId).not.toBe(operatorRun);
+      const prompt = adapter.pending!.spec.prompt;
+      expect(prompt).toContain(directive);
+      expect(prompt).toContain("Viberr did not carry out this earlier step of the operator's plan");
+      expect(prompt).toContain("- `transition_stage`: ");
+    });
+    // The person reading the timeline sees the same directive the agent got.
+    const handoff = task().timeline.find((e) => e.type === "comment" && e.text.includes(directive));
+    expect(handoff?.text).toContain("- `transition_stage`: ");
+    // A plan with nothing refused before the dispatch passes the directive as written.
+    expect(operatorPrompts.withEarlierRefusals(directive, [])).toBe(directive);
+  });
+
   it("F28-O1: a mid-plan abort is narrated even when append-typed-events is WITHHELD", async () => {
     // The operator can dispatch agents but CANNOT append typed events. Its
     // plan's run_agent throws mid-plan (a single-flight 409: the profile
@@ -661,6 +777,88 @@ describe("Codex structured operator completion", () => {
     expect(task().packet!.title).toBe("Which endpoint should this target?");
   });
 
+  /**
+   * F39-10 (pass 39, live on ax-clone AX-9): the same misblame, reached through
+   * a DIFFERENT door. `update-task-branch` was granted `direct` on that board
+   * and the operator planned `update_branch_from_base` at Review twice, twelve
+   * minutes apart. Both landed as `policy` events reading "refused by its
+   * capability policy" — against a grant that was wide open. What ruled the
+   * step out was the task's STAGE (ruling 162), which is state.
+   */
+  it("the acceptance boundary is a STATE refusal, not a policy one, on a grant that is wide open", async () => {
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [
+            ...OPERATOR_POLICY,
+            { capabilityId: "update-task-branch", mode: "direct" },
+          ],
+          extras: [],
+          definition: {
+            kind: "operator",
+            name: "Operator",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+            autonomy: "full",
+          },
+        },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        title: "Codex operator plan",
+        stage: "review",
+        readiness: "ready",
+        waiting: "none",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+      }),
+      goal: "Coordinate a finished implementation into review.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "Refresh the branch before acceptance.",
+        actions: [
+          {
+            tool: "update_branch_from_base",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: null,
+            reason: null,
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      const narration = task().timeline.find((e) =>
+        e.text.includes("not carried out in full"),
+      );
+      expect(narration).toBeDefined();
+      expect(narration!.text).toContain("the acceptance boundary");
+      expect(narration!.text).toContain("did not apply to the task's current state");
+      // CANARY: return `denied` from `acceptanceBoundaryRefusal`'s arm and both
+      // of these flip — the sentence blames the policy and the type becomes the
+      // governance signal LV-03 reserves for a real one.
+      expect(narration!.text).not.toContain("refused by its capability policy");
+      expect(narration!.type).toBe("note");
+    });
+  });
+
   it("names BOTH reasons separately when a plan hits policy and state in one turn", async () => {
     // `stage-transitions: off` (authority) + an already-Done-style state
     // refusal from resolve_packet with no packet open.
@@ -866,6 +1064,67 @@ describe("Codex structured operator completion", () => {
     expect(titles).toContain("Confirm it's intentionally broad");
     // Not the canned default set.
     expect(titles).not.toContain("Send back to the specialist for changes");
+  });
+
+  it("ruling 433: a Codex plan's create_task option reaches the packet with the task it creates", async () => {
+    /**
+     * Live on AX-27 at 01:40, after the owner asked for exactly this option:
+     * "`open_packet` — \"Create core task: Persist terminal Task execution
+     * details\" is a create_task option with no task on it. Give newTask a
+     * title and a goal". The Codex plan's option object had no newTask field,
+     * so the refusal asked for something the operator could not send. AX-4
+     * hit the same refusal twice. Ruling 270 fixed this door on the Claude
+     * tool only.
+     *
+     * CANARY: stop carrying newTask in `authoredPacketOptions`.
+     */
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "The status data is core-owned; the owner asked for its own task.",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Create the core status task?",
+            reason: "The owner asked for a create_task option.",
+            packetOptions: [
+              {
+                kind: "create_task",
+                title: "Create the core status task",
+                detail: "The Developer adds the fields; this task waits on it.",
+                recommended: true,
+                newTask: {
+                  title: " Persist terminal Task execution details ",
+                  goal: "Add exitCode, reason and sandboxHandle to TaskStatus. Done when a live control plane shows them on a Failed Task.",
+                  blockedBy: null,
+                  blocks: null,
+                  labels: ["core"],
+                },
+              },
+              { kind: "custom", title: "Narrow this task instead", detail: null, recommended: false, newTask: null },
+            ],
+          },
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      expect(task().packet?.options?.length).toBe(2);
+    });
+    const created = task().packet!.options[0]!;
+    expect(created.kind).toBe("create_task");
+    expect(created.newTask).toEqual({
+      title: "Persist terminal Task execution details",
+      goal: "Add exitCode, reason and sandboxHandle to TaskStatus. Done when a live control plane shows them on a Failed Task.",
+      labels: ["core"],
+    });
+    expect(task().packet!.options[1]!.newTask).toBeUndefined();
   });
 
   // B-OP4: the flat Codex plan may leave `packetOptions` null on a genuine
@@ -1166,11 +1425,48 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     );
     // Dynamic-dispatch rework: engage_agent + prompt_agent collapsed into ONE
     // run_agent, so the fallback list shrank from 10 to 8; ruling 131 added
-    // `set_dependencies` (in-Viberr, no outside effect), so it is 9.
-    expect(tools).toHaveLength(9);
+    // `set_dependencies` (in-Viberr, no outside effect), so it was 9; ruling
+    // 378 added `propose_ruling`, also in-Viberr and also destroying nothing,
+    // so it is 10.
+    // Ruling 417's `lease_files` rides the delivery gate, so it is withheld
+    // with delivery and the count stays 10.
+    expect(tools).toHaveLength(10);
     expect(tools).toContain("set_dependencies");
+    expect(tools).toContain("propose_ruling");
     expect(tools).not.toContain("deliver_for_review");
+    expect(tools).not.toContain("lease_files");
     expect(tools).toContain("flag_context_conflict");
+  });
+
+  it("ruling 417: lease_files is offered exactly where delivery is", () => {
+    // CANARY: map it to a grant nobody holds and a Codex operator can never
+    // lease, which is every operator on the board the ruling was written for.
+    expect(operatorPlanToolsFor(authority({ "deliver-review-pr": "direct" }))).toContain("lease_files");
+    expect(operatorPlanToolsFor(authority({ "deliver-review-pr": "off", "dispatch-agents": "direct" }))).not.toContain(
+      "lease_files",
+    );
+    // The plan schema carries the field it needs, required like every other.
+    const schema = operatorPlanSchemaFor(authority({ "deliver-review-pr": "direct" }));
+    const item = schema.properties.actions.items;
+    expect(item.properties.paths.type).toEqual(["array", "null"]);
+    expect(item.required).toContain("paths");
+  });
+
+  it("F39-68: the plan's create_task says a created task starts from the base branch", () => {
+    // CANARY: drop the sentence and the Codex operator is told only to use the
+    // kind for "another owner's package", which is how AX-5 was nearly made
+    // to wait on a task that could never reach its code.
+    const schema = operatorPlanSchemaFor(authority({ "generate-packets": "direct" }));
+    expect(JSON.stringify(schema)).toContain(JSON.stringify(CREATE_TASK_BASE_NOTE).slice(1, -1));
+  });
+
+  it("ruling 421: the plan schema carries run_agent's `completeness`, required like every other field", () => {
+    // CANARY: drop the property or its `required` entry, and a strict Codex
+    // plan can never say the question was put.
+    const schema = operatorPlanSchemaFor(authority({ "dispatch-agents": "direct" }));
+    const item = schema.properties.actions.items;
+    expect(item.properties.completeness.type).toEqual(["boolean", "null"]);
+    expect(item.required).toContain("completeness");
   });
 
   it("dispatchGate: an ABSENT dispatch-agents grant keeps run_agent — pre-rework deployments store only the retired ids (hunt 2026-08-29)", () => {
@@ -1240,6 +1536,28 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     expect(item.properties.goalDraft.description).toContain("written AS a goal");
   });
 
+  it("ruling 433: the plan's option carries the payloads of block_on_dependencies and wait_for_window, and requires every key", () => {
+    // CANARY: drop the blockedBy or dueAt carry, or a key from `required`.
+    const carried = authoredPacketOptions([
+      { kind: "block_on_dependencies", title: "Hold until AX-22 lands", detail: null, recommended: true, blockedBy: ["AX-22", "goal-4 link 3"], dueAt: null, newTask: null },
+      { kind: "wait_for_window", title: "Wait for the window", detail: null, recommended: false, blockedBy: null, dueAt: " 2026-09-23T05:00:00.000Z ", newTask: null },
+    ]);
+    expect(carried?.[0]?.blockedBy).toEqual(["AX-22", "goal-4 link 3"]);
+    expect(carried?.[0]?.dueAt).toBeUndefined();
+    expect(carried?.[1]?.dueAt).toBe("2026-09-23T05:00:00.000Z");
+    expect(carried?.[1]?.blockedBy).toBeUndefined();
+
+    const schema = operatorPlanSchemaFor(
+      authority({ "append-typed-events": "direct", "generate-packets": "direct" }),
+    );
+    const item = schema.properties.actions.items.properties.packetOptions.items;
+    for (const key of ["blockedBy", "dueAt", "newTask"] as const) {
+      expect(item.required).toContain(key);
+    }
+    expect(item.properties.newTask.required).toEqual(["title", "goal", "blockedBy", "blocks", "labels"]);
+    expect(assertStrictSchema(schema)).toEqual([]);
+  });
+
 });
 
 describe("pr-diverged turn instruction (both backends)", () => {
@@ -1283,7 +1601,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       ...over,
     };
   }
-  const { buildOperatorTurnPrompt, buildCodexOperatorPrompt } = operatorPrompts;
+  const { buildOperatorTurnPrompt, buildCodexOperatorPrompt, agentReportBlock } = operatorPrompts;
 
   it("closed PR on an active task → ONE recovery packet with rework/archive/archive+deleteBranch, acceptance forbidden", () => {
     const prompt = buildOperatorTurnPrompt(snapshot(), "pr-diverged");
@@ -1322,6 +1640,376 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(prompt).toContain("terminal stage");
     expect(prompt).toContain("`custom` options");
     expect(prompt).not.toContain("archive_task");
+  });
+
+  /**
+   * Ruling 397 (F39-24): the owner chose "the operator decides" over a new
+   * packet option, so the fact has to reach the operator's own turn. It is
+   * prepended by the wrapper rather than by any one trigger's branch, because
+   * every early-returning branch is a turn that can be about to re-dispatch
+   * work that is already done.
+   */
+  const STANDING = {
+    actor: "agent",
+    failedAt: "2026-09-22T08:33:08.205Z",
+    reportedAt: "2026-09-22T08:33:08.181Z",
+  };
+
+  it("ruling 397: a standing report is named FIRST, on every trigger", () => {
+    for (const trigger of ["packet-resolved", "manual", "agent-reply", "pr-diverged"] as const) {
+      const prompt = buildOperatorTurnPrompt(snapshot({ unfinishedReport: STANDING }), trigger);
+      // CANARY: drop `unfinishedReportInstruction` from the wrapper and none of
+      // these carry it, which is the prompt AX-2's operator actually got.
+      expect(prompt, trigger).toContain("READ THIS FIRST");
+      expect(prompt, trigger).toContain(STANDING.reportedAt);
+      expect(prompt, trigger).toContain("is about the PULL REQUEST");
+      expect(prompt, trigger).toContain("read_timeline_entry");
+      // It must not read as an order to accept the report either.
+      expect(prompt, trigger).toContain("Re-dispatch only when the report is plainly partial");
+    }
+    // And the Codex plan prompt, which is a different builder over the same
+    // instruction, carries it too.
+    expect(buildCodexOperatorPrompt(snapshot({ unfinishedReport: STANDING }), "manual")).toContain(
+      "READ THIS FIRST",
+    );
+  });
+
+  /**
+   * Ruling 408 (F39-35): ruling 400 quotes the refusals of a WHOLLY refused
+   * plan. Live on ax-clone AX-18 the plan was `[deliver_for_review,
+   * transition_stage]` — the delivery ran, so nothing was recorded, and the
+   * next drive re-planned the refused transition and was refused identically.
+   * The carry is the same sentence for the partial case, reaching the ordinary
+   * turn rather than the paid nudge.
+   */
+  const REFUSED_NOTE = {
+    at: "2026-09-22T17:07:51.797Z",
+    text:
+      "**The operator's plan was not carried out in full.** This step did not apply:\n\n" +
+      "- `transition_stage` — AX-18's review PR #16 conflicts with the base branch.",
+  };
+
+  it("ruling 408: an unanswered refusal is quoted in full, on every trigger", () => {
+    for (const trigger of ["packet-resolved", "manual", "agent-reply", "pr-diverged"] as const) {
+      const prompt = buildOperatorTurnPrompt(
+        snapshot({ unansweredRefusal: REFUSED_NOTE }),
+        trigger,
+      );
+      // CANARY: drop `unansweredRefusalInstruction` from the wrapper and none
+      // of these carry it — the prompt AX-18's second drive actually got.
+      expect(prompt, trigger).toContain("Your last plan was refused in part");
+      expect(prompt, trigger).toContain("conflicts with the base branch");
+      expect(prompt, trigger).toContain("Do NOT plan the same refused action again");
+      // It names the consequence the operator cannot otherwise see (ruling 406).
+      expect(prompt, trigger).toContain("recorded as a hold on the stage");
+      // And it never sends the reader to the timeline (ruling 392/400).
+      expect(prompt, trigger).not.toContain("read them and follow them");
+    }
+    expect(
+      buildCodexOperatorPrompt(snapshot({ unansweredRefusal: REFUSED_NOTE }), "manual"),
+    ).toContain("Your last plan was refused in part");
+  });
+
+  /**
+   * Ruling 415 (F39-41), live on ax-clone AX-19. The owner's round-five answer
+   * ("changing what may block rather than asking again") reached one operator
+   * turn; the next, a scheduled resume, never saw it and asked again. The
+   * newest decision by then was "wait for the window", which says nothing
+   * about review, so the instruction must not tell the operator to follow the
+   * newest decision only.
+   */
+  const DECISIONS = [
+    { at: "2026-09-22T19:34:20.283Z", by: "Arda", decision: "wait for the Codex window to reopen.", words: "Wait for the window." },
+    {
+      at: "2026-09-22T19:27:09.023Z",
+      by: "Arda",
+      decision: "answered with a custom directive.",
+      words: "So I am changing what may block rather than asking again.",
+    },
+  ];
+
+  it("ruling 415: a person's decisions are named on every trigger, on both backends, older ones included", () => {
+    for (const trigger of ["packet-resolved", "manual", "agent-reply", "pr-diverged", "scheduled"] as const) {
+      const prompt = buildOperatorTurnPrompt(snapshot({ humanDecisions: DECISIONS }), trigger);
+      // CANARY: drop `humanDecisionsInstruction` from the wrapper and none of
+      // these carry it, which is the prompt AX-19's 20:13 turn got.
+      expect(prompt, trigger).toContain("A PERSON has decided things on this task");
+      expect(prompt, trigger).toContain("does not cancel an older one");
+      expect(prompt, trigger).toContain("do not ask again a question one of them has already answered");
+    }
+    const codex = buildCodexOperatorPrompt(snapshot({ humanDecisions: DECISIONS }), "scheduled");
+    expect(codex).toContain("A PERSON has decided things on this task");
+    // The snapshot the Codex plan reads carries the older decision's words.
+    expect(codex).toContain("rather than asking again");
+    expect(buildCodexOperatorPrompt(snapshot({}), "manual")).not.toContain("A PERSON has decided");
+  });
+
+  it("ruling 421: the completeness question is flagged on the turn a verdict arrives and in the stage rules", () => {
+    // The turn a second objection lands on tells the operator to set it.
+    // CANARY: drop the ruling-421 sentence from the agent-reply branch.
+    const reply = "Verdict: request-changes\n\nStill blocking.";
+    const onVerdict = buildCodexOperatorPrompt(snapshot({}), "agent-reply", undefined, reply);
+    expect(onVerdict).toContain("set `completeness: true` on it");
+    // And the stage rules' fallback arm names it with the dispatch it goes on.
+    const later = buildCodexOperatorPrompt(snapshot({}), "manual");
+    expect(later).toContain("`completeness: true` (ruling 421");
+  });
+
+  it("ruling 424: at the acceptance stage every turn says the branch refresh is not the operator's, the report's turn included", () => {
+    // CANARY: drop `refreshBoundaryInstruction` from `operatorTurnInstruction`.
+    // Live, the refused refreshes were planned on the turn a report came in,
+    // which returns before the stage rules, so the stage rules alone miss it.
+    const reason =
+      "AX-22 is at Review, the acceptance boundary: the branch is brought up to date once, at acceptance time, and merged in the same ceremony. Do not refresh it here; recommend or accept the completion instead.";
+    const atBoundary = snapshot({ notRefreshableReason: reason, baseBehindBy: 7 });
+    for (const trigger of ["agent-reply", "manual", "scheduled"] as const) {
+      const prompt = buildCodexOperatorPrompt(atBoundary, trigger, undefined, trigger === "agent-reply" ? "Rework committed." : undefined);
+      expect(prompt, trigger).toContain("Never plan it here, whether `baseBehindBy` is positive or a reviewer is about to re-review");
+    }
+    expect(buildCodexOperatorPrompt(snapshot({ baseBehindBy: 7 }), "agent-reply", undefined, "Rework committed.")).not.toContain("Never plan it here");
+    // Ruling 429: and when it lifts. CANARY: drop the 429 sentence.
+    expect(buildCodexOperatorPrompt(atBoundary, "agent-reply", undefined, "Needs main.")).toContain(
+      "It lifts the moment a verdict fails or a new revision awaits its verdict",
+    );
+  });
+
+  it("ruling 437: a packet the operator did not raise is named as not its own, on every trigger", () => {
+    // Live on AX-28 (02:12) and AX-31 (02:39): `resolve_packet` planned on an
+    // agent's question and refused. CANARY: drop `packetAuthorInstruction`.
+    const question = {
+      type: "input" as const,
+      title: "Choose the signal-classification contract",
+      body: "",
+      options: ["Use a wait-status supervisor"],
+      awaiting: null,
+      raisedBy: "agent:codex/developer (Implementation)",
+      yours: false,
+    };
+    for (const trigger of ["agent-reply", "manual", "scheduled"] as const) {
+      const prompt = buildCodexOperatorPrompt(
+        snapshot({ openPacket: true, packet: question }),
+        trigger,
+        undefined,
+        trigger === "agent-reply" ? "Asked the owner." : undefined,
+      );
+      expect(prompt, trigger).toContain(
+        "The open decision packet was raised by agent:codex/developer (Implementation), not by you",
+      );
+      expect(prompt, trigger).toContain("`resolve_packet` is refused, however moot it looks");
+    }
+    const own = { ...question, raisedBy: "operator", yours: true };
+    expect(buildCodexOperatorPrompt(snapshot({ openPacket: true, packet: own }), "manual")).not.toContain("not by you");
+  });
+
+  it("ruling 418: a reviewer's defect class becomes a proposed convention, on the turn the verdict arrives and on the stage rules", () => {
+    // CANARY: drop either sentence and the turn the verdict lands on, or every
+    // later manual/scheduled turn, says nothing about the rulings learning.
+    const reply = "Verdict: request-changes\n\ngit args are passed without --.";
+    const onVerdict = buildCodexOperatorPrompt(snapshot({}), "agent-reply", undefined, reply);
+    expect(onVerdict).toContain("also `propose_ruling` that convention");
+    expect(onVerdict).toContain("one per class, never one per finding");
+    // Ruling 410's round-two duty is on this turn too, not only in the skill.
+    // CANARY: drop that sentence and the only instruction on the turn a second
+    // objection lands on is "move back and rework", the loop 410 ended.
+    expect(onVerdict).toContain("At the SECOND consecutive objection from the same reviewer");
+    const later = buildCodexOperatorPrompt(snapshot({}), "manual");
+    expect(later).toContain("`propose_ruling` the convention in the rulings document it belongs to");
+  });
+
+  it("ruling 431: the live lease list is explained on every turn it is present, collisions or not", () => {
+    // CANARY: drop the `leases` sentence from `collisionsInstruction`.
+    const fileLeases = [{ taskKey: "AX-20", paths: ["internal/controller/task.go"], reason: "lands first" }];
+    expect(buildCodexOperatorPrompt(snapshot({ fileLeases }), "manual")).toContain(
+      "A timeline note that a task leased or holds a file is history",
+    );
+    expect(buildCodexOperatorPrompt(snapshot({}), "manual")).not.toContain("is the project's lease list as it binds now");
+  });
+
+  it("ruling 413 reaches a Codex operator: collisions are explained in the shared instruction", () => {
+    const collisions = [{ taskKey: "AX-21", prNumber: 15, paths: ["internal/cli/render.go"], partial: false }];
+    // CANARY: drop `collisionsInstruction` from the wrapper; the field alone
+    // arrived unexplained on every operator of the board it was written for.
+    expect(buildCodexOperatorPrompt(snapshot({ collisions }), "manual")).toContain(
+      "names the OTHER open review PRs whose diff touches a file",
+    );
+    expect(buildCodexOperatorPrompt(snapshot({}), "manual")).not.toContain("names the OTHER open review PRs");
+    // Ruling 426: the refusal a lease now meets, and what to do about it.
+    // CANARY: drop the ruling-426 sentence from `collisionsInstruction`.
+    expect(buildCodexOperatorPrompt(snapshot({ collisions }), "manual")).toContain(
+      "which of the two lands first is then a person's call",
+    );
+  });
+
+  it("ruling 415: a tool-less operator is handed an unfinished report, not an address", () => {
+    const withText = { ...STANDING, text: "Done on branch `ax-2`, commit `3e0396ab`." };
+    const codex = buildCodexOperatorPrompt(snapshot({ unfinishedReport: withText }), "manual");
+    // CANARY: drop the `standing.text` arm and this points at a tool again.
+    expect(codex).toContain("Here it is:\n\nDone on branch `ax-2`");
+    expect(codex).not.toContain("`read_timeline_entry` with that stamp");
+  });
+
+  it("ruling 443: a step whose outcome is the packet it opened is not a refusal", () => {
+    const { planRefusalOf } = operatorPrompts;
+    const conflict = "`ax-5` CONFLICTS with `main`. Opened a blocking decision packet for a human to resolve.";
+    // CANARY: drop the `openedPacket` check and AX-5's refresh is narrated
+    // "This step did not apply" beside the packet it opened.
+    expect(planRefusalOf("update_branch_from_base", { outcome: "noop", message: conflict, openedPacket: true })).toBeNull();
+    // Without the packet it is still what it was: a state refusal.
+    const stuck = "`ax-5` CONFLICTS with `main`. A decision packet could NOT be opened (one is open).";
+    expect(planRefusalOf("update_branch_from_base", { outcome: "noop", message: stuck })).toEqual({
+      tool: "update_branch_from_base",
+      message: stuck,
+      kind: "state",
+    });
+    expect(planRefusalOf("run_agent", { outcome: "denied", message: "No." })?.kind).toBe("authority");
+    expect(planRefusalOf("run_agent", { outcome: "done", message: "Started." })).toBeNull();
+  });
+
+  it("F39-69: a Codex plan is told it is the whole turn, a refresh and its next step together", () => {
+    // CANARY: drop the sentence and nothing tells a plan that stopping after
+    // the refresh leaves the task idle.
+    expect(buildCodexOperatorPrompt(snapshot(), "manual")).toContain(CODEX_PLAN_WHOLE_TURN);
+    expect(CODEX_PLAN_WHOLE_TURN).toContain("A walk across `auto` stages where nothing needs an agent is one `transition_stage` per stage");
+  });
+
+  it("ruling 415: a tool-less operator gets a long report whole, and an honest note when even that is cut", () => {
+    const long = `${"finding ".repeat(1200)}`; // ~9,600 chars: past 4,000, inside 16,000
+    const codex = agentReportBlock("agent-reply", long, { toolless: true });
+    // CANARY: cap the tool-less report at 4,000 again and the findings past it
+    // are gone with nowhere to fetch them from, the SHOP-42 loss on Codex.
+    expect(codex).toContain(long.trim());
+    expect(codex).not.toContain("is CUT");
+    const huge = "x".repeat(AGENT_REPORT_CAP_TOOLLESS + 10);
+    const cut = agentReportBlock("agent-reply", huge, { toolless: true });
+    expect(cut).toContain("this turn cannot fetch the rest");
+    expect(cut).not.toMatch(/get_task|read_timeline_entry/);
+    // An operator with tools keeps ruling 285's cut and its address.
+    expect(agentReportBlock("agent-reply", long)).toContain("read_timeline_entry");
+  });
+
+  /**
+   * Ruling 409 (F39-36), live on ax-clone AX-18.
+   *
+   * Ruling 237 REFUSES a `question_reviewer` option that names no reviewer
+   * ("A question_reviewer option needs the reviewer it asks"). The option's own
+   * `profileId` description told the operator the field was
+   * "retry_other_backend only", and `question_reviewer` appeared nowhere in the
+   * packet-authoring guidance at all. So the operator reached for the option
+   * this product recommends for a review deadlock, read the schema, correctly
+   * left the field null, and was refused twice -- and the task stranded.
+   *
+   * Load-bearing after ruling 410, which makes putting that question the
+   * operator's own move at the second objection.
+   */
+  it("ruling 409: the plan schema and the guidance both say a question_reviewer names its reviewer", () => {
+    const schema = JSON.stringify(
+      operatorPlanSchemaFor({
+        policy: new Map<string, CapabilityMode>([
+          ["append-typed-events", "direct"],
+          ["generate-packets", "direct"],
+          ["stage-transitions", "direct"],
+          ["dispatch-agents", "direct"],
+        ]),
+        autonomy: "supervised",
+        backend: "codex",
+        model: defaultModelFor("codex"),
+        effort: "",
+        name: "Operator",
+        skills: [],
+        kb: [],
+        mcps: [],
+        persona: null,
+        deployed: true,
+        humanGatedBeforeWork: false,
+      }),
+    );
+    // CANARY: restore "retry_other_backend only" and the first two fail.
+    expect(schema).toContain("question_reviewer");
+    expect(schema).toContain("reviewers[].profileId");
+    expect(schema).not.toContain("retry_other_backend only: the agent profile to re-run");
+
+    const prompt = buildCodexOperatorPrompt(snapshot({}), "manual");
+    expect(prompt).toContain("`question_reviewer`");
+    expect(prompt).toContain("an option that names no reviewer is refused");
+  });
+
+  /**
+   * Ruling 400 (F39-27): the plan-refused retry QUOTES the refusals.
+   *
+   * It used to say "The refusals are on the timeline, and each one names what
+   * to do instead — read them and follow them", which is the instruction
+   * ruling 392 retired for agents, one level up. Live on ax-clone AX-4 the
+   * operator got exactly that, planned the same malformed `create_task` option
+   * again, and the board recorded a deliberate hold on a task nobody held.
+   */
+  const REFUSED = [
+    {
+      tool: "open_packet",
+      message:
+        '"Create a follow-on task for the missing logs baseline" is a create_task option with no task on it. Give newTask a title and a goal.',
+    },
+  ];
+
+  it("ruling 400: the plan-refused retry carries the refusal text", () => {
+    const prompt = buildOperatorTurnPrompt(
+      snapshot(),
+      "transition",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "plan-refused",
+      undefined,
+      REFUSED,
+    );
+    // CANARY: stop passing `refusedSteps` and this falls back to "read them on
+    // the timeline", which is the sentence AX-4's operator was given.
+    expect(prompt).toContain("Here is what was refused, in full");
+    expect(prompt).toContain("create_task option with no task on it");
+    expect(prompt).toContain("Each one names what was wrong with the step");
+    // The standing prohibition is shared by both branches, not lost to the quote.
+    expect(prompt).toContain("Do NOT plan the same refused action again");
+    expect(prompt).not.toContain("read them and follow them");
+  });
+
+  it("ruling 400: falls back to the timeline only when there is nothing to quote", () => {
+    const prompt = buildOperatorTurnPrompt(
+      snapshot(),
+      "transition",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "plan-refused",
+    );
+    expect(prompt).toContain("EVERY action your previous run planned was refused");
+    expect(prompt).toContain("read them and follow them");
+    expect(prompt).not.toContain("Here is what was refused");
+  });
+
+  it("ruling 400: the Codex plan prompt carries it too", () => {
+    const prompt = buildCodexOperatorPrompt(
+      snapshot(),
+      "transition",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "plan-refused",
+      undefined,
+      REFUSED,
+    );
+    expect(prompt).toContain("create_task option with no task on it");
+  });
+
+  it("ruling 397: says nothing at all when no report is standing", () => {
+    expect(buildOperatorTurnPrompt(snapshot(), "manual")).not.toContain("READ THIS FIRST");
   });
 
   it("the Codex plan prompt carries the same instruction plus the archive_task option vocabulary", () => {
@@ -1634,6 +2322,44 @@ describe("stranded auto-stage resume", () => {
       expect(resumed).toBe(false);
     });
 
+    /**
+     * Ruling 450, live on ax-clone AX-1: walking Design to Review with nothing
+     * to do at Build or Verify took five operator runs, one per stage. A plan
+     * carries the whole walk, each move checked from the stage it runs at.
+     */
+    it("ruling 450: a plan walks two auto stages in one drive", async () => {
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      const walker = operatorRuns()[0]!.id;
+      adapter2.finish(
+        store2,
+        JSON.stringify({
+          reasoning: "",
+          actions: [
+            transitionAction({ toStageId: "ready", reason: "Triage done." }),
+            transitionAction({ toStageId: "impl", reason: "Nothing to do at Ready." }),
+          ],
+        }),
+        "finished",
+      );
+      await eventually(() => {
+        const parsed = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!.parsed;
+        expect(parsed.frontmatter.stage).toBe("impl");
+      });
+      // CANARY: make the executor stop after its first transition and the walk
+      // needs a drive per stage again.
+      const moves = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
+        .parsed.timeline.filter((e) => e.type === "transition" && e.actor.kind === "operator");
+      expect(moves).toHaveLength(2);
+      expect(operatorRuns().find((r) => r.id === walker)?.state).toBe("finished");
+    });
+
     it("a drive that ends doing NOTHING at an auto stage is resumed; a pending decision ends the chain", async () => {
       await runOperator(store2.db, {
         projectSlug: store2.slug,
@@ -1905,6 +2631,93 @@ describe("stranded auto-stage resume", () => {
     });
 
     /**
+     * Ruling 399 (F39-26), live on ax-clone AX-4. The operator planned one
+     * `open_packet` twice; both times Viberr refused the step, because a
+     * `create_task` option carried no `newTask` title or goal. Then the
+     * backstop wrote, 37 milliseconds after the second refusal note:
+     *
+     *   "the operator held it twice in a row without advancing, dispatching,
+     *    or opening a packet — treating that as a deliberate hold. Coordination
+     *    is paused here: run the operator manually when the hold should end"
+     *
+     * Two falsehoods and a remedy that reproduces the problem. It DID try to
+     * open a packet, twice; nothing about it was deliberate; and running the
+     * operator again plans the same refused step, which is exactly what the one
+     * automatic retry had already proved.
+     *
+     * `planWhollyRefused` is read eleven lines above this note to decide the
+     * task is stranded at all — the fact was in the same function the whole
+     * time. This pass's signature shape, in the pause that is supposed to tell
+     * a human what happened.
+     */
+    it("ruling 399: a plan Viberr REFUSED is not a deliberate hold", async () => {
+      const finishedRun = (id: string, taskKey: string) => {
+        store2.db
+          .prepare(
+            `INSERT INTO agent_runs
+               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+                created_at, updated_at, agent_profile_id)
+             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
+          )
+          .run(
+            id,
+            taskKey,
+            store2.slug,
+            `t_${id}`,
+            "2026-09-13T00:00:00.000Z",
+            "2026-09-13T00:00:00.000Z",
+          );
+      };
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-9", {
+          title: "the refused plan",
+          stage: "triage",
+          readiness: "ready",
+          waiting: "agent",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "Do the thing.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      finishedRun("run_refused", "VIB-9");
+      const resumed = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-9",
+        dataRoot: store2.dataRoot,
+        runId: "run_refused",
+        stageAtStart: "triage",
+        strandedResume: true,
+        ownRun: {
+          backend: "codex",
+          autonomy: "supervised",
+          reactDepth: 0,
+          movedToStageId: "triage",
+          planWhollyRefused: true,
+        },
+      });
+      expect(resumed).toBe(false);
+      const parsed = readTaskFile({
+        projectSlug: store2.slug,
+        taskKey: "VIB-9",
+        dataRoot: store2.dataRoot,
+      })!.parsed;
+      // The pause itself is right and stays: something IS wrong here.
+      expect(parsed.frontmatter.heldAtStage).toBe("triage");
+      const note = parsed.timeline[0]!.text;
+      // CANARY: drop the `planRefused` branch and this note calls a refused
+      // plan a deliberate hold, which is what AX-4's timeline says verbatim.
+      expect(note).toContain("did not hold this stage");
+      expect(note).toContain("Every action it planned was refused");
+      expect(note).not.toContain("deliberate hold");
+      // …and the remedy no longer sends the reader at the one move that
+      // reproduces it.
+      expect(note).not.toContain("run the operator manually");
+      expect(note).toContain("take the action yourself");
+    });
+
+    /**
      * Ruling 202 (F37-22, live on SHOP-10). A nudged drive whose single action
      * was `deliver_for_review` — it pushed the branch and opened PR #8 — was
      * recorded by this backstop as having "held it twice in a row without
@@ -2000,6 +2813,163 @@ describe("stranded auto-stage resume", () => {
       expect(resumed).toBe(true);
       expect(held("VIB-2").frontmatter.heldAtStage).toBeNull();
       expect(held("VIB-2").timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
+    });
+
+    /**
+     * Ruling 406 (F39-33), measured live on ax-clone AX-18.
+     *
+     * Viberr refused the transition -- "Open the conflict packet
+     * (update_branch_from_base) or deliver the revision instead of moving the
+     * task" -- and the operator planned exactly the action that sentence
+     * names. `operatorUpdateBranchFromBase` succeeded; the branch was already
+     * current, so it moved nothing and recorded no base refresh. A refresh is
+     * not a transition, a dispatch, a delivery or a packet, so Viberr wrote
+     * "the operator held it twice in a row without advancing, dispatching, or
+     * opening a packet", stamped `heldAtStage` and paused coordination on a
+     * task whose operator had done what it was told.
+     *
+     * The three clauses before this one were each added the same way (152(a),
+     * 202, 228). This one is not a fourth effect: it is the fact that the
+     * drive ACTED, which is what "held" was always meant to deny.
+     */
+    it("ruling 406: a nudged drive that CARRIED OUT its action is not a deliberate hold", async () => {
+      const finishedRun = (id: string, taskKey: string) => {
+        store2.db
+          .prepare(
+            `INSERT INTO agent_runs
+               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+                created_at, updated_at, agent_profile_id)
+             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
+          )
+          .run(id, taskKey, store2.slug, `t_${id}`, "2026-09-13T00:00:00.000Z", "2026-09-13T00:00:00.000Z");
+      };
+      const held = (taskKey: string) =>
+        readTaskFile({ projectSlug: store2.slug, taskKey, dataRoot: store2.dataRoot })!.parsed;
+
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-9", {
+          title: "refresh the branch Viberr asked for",
+          stage: "triage",
+          readiness: "ready",
+          waiting: "agent",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "Do the thing the refusal named.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      finishedRun("run_acted", "VIB-9");
+
+      // CANARY: drop `|| ref.ownRun?.carriedOutAction === true` from
+      // nudgeMadeProgress and this returns false, `heldAtStage` is stamped,
+      // and the note lands on a drive that did exactly what Viberr asked.
+      const resumedAfterAction = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-9",
+        dataRoot: store2.dataRoot,
+        runId: "run_acted",
+        stageAtStart: "triage",
+        strandedResume: true,
+        ownRun: {
+          backend: "codex",
+          autonomy: "supervised",
+          reactDepth: 0,
+          // The drive ended where it started and delivered nothing -- exactly
+          // AX-18's shape. The only thing that distinguishes it is that it
+          // ACTED.
+          movedToStageId: "triage",
+          carriedOutAction: true,
+        },
+      });
+      expect(resumedAfterAction).toBe(true);
+      expect(held("VIB-9").frontmatter.heldAtStage).toBeNull();
+      expect(held("VIB-9").timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
+    });
+
+    /**
+     * F39-69, live on ax-clone AX-5. A person's directive had three steps:
+     * bring the branch up to date, rework with one agent, then another. The
+     * Codex operator planned only the refresh. It merged two commits and the
+     * turn ended. Review's way out is a person's, so the backstop (auto stages
+     * only) did not resume it, and the board read "waiting on a human" with
+     * nothing to answer until the owner pressed Run operator.
+     */
+    it("F39-69: a drive that refreshed and stopped at Review is resumed once, and told why", async () => {
+      const finishedRun = (id: string, taskKey: string) => {
+        store2.db
+          .prepare(
+            `INSERT INTO agent_runs
+               (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+                turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+                created_at, updated_at, agent_profile_id)
+             VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                     1, 0, 0, 0, 1, ?, ?, 'operator')`,
+          )
+          .run(id, taskKey, store2.slug, `t_${id}`, "2026-09-23T05:10:09.000Z", "2026-09-23T05:10:18.000Z");
+      };
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-11", {
+          title: "ax ssh",
+          stage: "review",
+          readiness: "ready",
+          waiting: "agent",
+          ownerUserId: store2.users.arda.id,
+        }),
+        goal: "Rework after the refresh.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      finishedRun("run_refreshed", "VIB-11");
+      finishedRun("run_nudged", "VIB-11");
+      const ownRun = { backend: "codex" as const, autonomy: "supervised" as const, reactDepth: 0 };
+      const ref = {
+        projectSlug: store2.slug,
+        taskKey: "VIB-11",
+        dataRoot: store2.dataRoot,
+        stageAtStart: "review",
+      };
+      // A drive that acted without refreshing, at a stage a person closes,
+      // is not stranded: the refresh is the whole difference.
+      expect(
+        await maybeResumeStrandedOperator(store2.db, {
+          ...ref,
+          runId: "run_refreshed",
+          ownRun: { ...ownRun, carriedOutAction: true },
+        }),
+      ).toBe(false);
+      // The nudge itself refreshing and stopping again re-arms nothing.
+      expect(
+        await maybeResumeStrandedOperator(store2.db, {
+          ...ref,
+          runId: "run_nudged",
+          strandedResume: true,
+          ownRun: { ...ownRun, carriedOutAction: true, refreshed: true },
+        }),
+      ).toBe(false);
+      // A drive that refreshed AND delivered took the step the refresh was
+      // for; the nudge would open "nothing was dispatched, delivered or asked".
+      // CANARY: drop the `delivered` check and this drive is nudged anyway.
+      expect(
+        await maybeResumeStrandedOperator(store2.db, {
+          ...ref,
+          runId: "run_refreshed",
+          ownRun: { ...ownRun, carriedOutAction: true, refreshed: true, delivered: true },
+        }),
+      ).toBe(false);
+      // CANARY: drop the `refreshedAndStopped` arm and AX-5 sits at Review
+      // with nobody coming.
+      const resumed = await maybeResumeStrandedOperator(store2.db, {
+        ...ref,
+        runId: "run_refreshed",
+        ownRun: { ...ownRun, carriedOutAction: true, refreshed: true },
+      });
+      expect(resumed).toBe(true);
+      await eventually(() => expect(adapter2.pending).not.toBeNull());
+      const prompt = adapter2.pending!.spec.prompt;
+      // CANARY: drop the `refreshNudge` mapping and it is told the stage is an
+      // idle auto-advance one, which Review is not.
+      expect(prompt).toContain(REFRESH_ENDED_NUDGE);
+      expect(prompt).not.toContain("auto-advance stage idle");
     });
 
     /**
@@ -2499,6 +3469,21 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(byHand).toContain("arda@viberr.dev cleared the wait on JC-3");
   });
 
+  it("F39-65: a release at birth tells the operator nothing held the task and there is nothing to refresh", () => {
+    const atStart = snap({ stage: "design", stageName: "Design", goal: "Ship it." });
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(atStart, "dependencies-released", undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      entries: ["AX-4", "goal-4 link 7 (AX-27)"],
+      clearedBy: null,
+      atBirth: true,
+    });
+    // CANARY: drop the `atBirth` arm and a task born minutes ago is told the
+    // base "CHANGED since the hold" and that its delivered work may need it.
+    expect(prompt).toContain("was done before it was created (AX-4, goal-4 link 7 (AX-27)), so nothing held it");
+    expect(prompt).toContain("there is nothing to bring up to date");
+    expect(prompt).not.toContain("CHANGED since the hold");
+    expect(prompt).not.toContain("delivered work from before the hold");
+  });
+
   it("ruling 133 (A19): the agent-reply doctrine re-prompts the deliverer in place on BOTH builders", () => {
     // Canary: restore either builder's old rework sentence.
     const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it." });
@@ -2695,6 +3680,136 @@ describe("pending trigger queue", () => {
       .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator' ORDER BY rowid`)
       .all()
       .map((row) => ({ id: String(row.id) }));
+
+  it("ruling 417: a Codex plan's lease_files step lands the lease on the project", async () => {
+    await drive({ trigger: "manual" });
+    // CANARY: drop the executor's `lease_files` case and the step is skipped
+    // as an unknown tool; the project holds no lease.
+    adapter3.finish(
+      store3,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "lease_files",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: "Rewriting the sandbox lifetime; AX-21 waits on it.",
+            reason: null,
+            packetOptions: null,
+            kbSource: null,
+            repoSource: null,
+            blockedBy: null,
+            paths: ["internal/sandbox/**"],
+          },
+        ],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      const leases = readProjectFile({ projectSlug: store3.slug, dataRoot: store3.dataRoot })!.parsed
+        .frontmatter.fileLeases;
+      expect(leases).toEqual([
+        {
+          paths: ["internal/sandbox/**"],
+          taskKey: "VIB-1",
+          reason: "Rewriting the sandbox lifetime; AX-21 waits on it.",
+        },
+      ]);
+    });
+  });
+
+  it("ruling 421: a Codex plan's run_agent with `completeness` stamps the engagement with the run it started", async () => {
+    const project = readProjectFile({ projectSlug: store3.slug, dataRoot: store3.dataRoot })!;
+    writeProject(store3.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        ...project.parsed.frontmatter.agents,
+        {
+          profileId: "reviewer",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Reviewer",
+            role: "Review & validation",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ],
+    });
+    rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
+    await drive({ trigger: "manual" });
+    // CANARY: drop `if (a.completeness) dispatch.completeness = true` from the
+    // executor and the engagement carries no question.
+    adapter3.finish(
+      store3,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "run_agent",
+            profileId: "reviewer",
+            delivers: false,
+            toStageId: null,
+            packetType: null,
+            text: "Review the rework and name everything you would still block on.",
+            reason: null,
+            packetOptions: null,
+            kbSource: null,
+            repoSource: null,
+            blockedBy: null,
+            paths: null,
+            completeness: true,
+          },
+        ],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      const task = readTaskFile({ projectSlug: store3.slug, taskKey: "VIB-1", dataRoot: store3.dataRoot })!;
+      const engaged = task.parsed.frontmatter.engagements.find((e) => e.profileId === "reviewer");
+      const reviewerRun = store3.db
+        .prepare(`SELECT id FROM agent_runs WHERE agent_profile_id = 'reviewer' ORDER BY rowid DESC LIMIT 1`)
+        .get();
+      expect(engaged?.question).toMatchObject({ kind: "completeness", runId: String(reviewerRun?.id) });
+    });
+  });
+
+  it("ruling 415: the Codex plan's snapshot never sends it to a tool it cannot call", async () => {
+    // A timeline longer than the six-entry window, so the window note is
+    // written, as it was on every ax-clone task by mid-afternoon.
+    writeTask(store3.dataRoot, store3.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        readiness: "ready",
+        waiting: "agent",
+        ownerUserId: store3.users.arda.id,
+      }),
+      goal: "Ship the parser.",
+      timeline: Array.from({ length: 10 }, (_, i) => ({
+        occurredAt: `2026-09-22T20:${String(10 + i).padStart(2, "0")}:00.000Z`,
+        type: "note" as const,
+        actor: { kind: "system" as const, systemId: "schedule-runner" },
+        title: null,
+        text: `note ${i}`,
+        toAgent: false,
+        evidence: null,
+      })).reverse(),
+    });
+    rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
+    await drive({ trigger: "manual" });
+    const prompt = adapter3.pending!.spec.prompt;
+    // CANARY: drop `{ toolless: true }` at the Codex call site and this is
+    // "Call get_task with events up to 50", which the same prompt says a
+    // Codex operator cannot do.
+    expect(prompt).toContain("You cannot call tools");
+    expect(prompt).toContain("This turn cannot fetch them");
+    expect(prompt).not.toContain("Call get_task with events");
+  });
 
   it("FR39: a queued scheduled re-check survives a later machine trigger", async () => {
     // CANARY: route `scheduled` back into the newest-wins `latest` slot — the

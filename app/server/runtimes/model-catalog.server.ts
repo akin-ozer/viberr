@@ -114,9 +114,12 @@ const CLAUDE_CURATED: ModelCatalog = {
 };
 
 /** Codex has no account-scoped list endpoint in the TypeScript SDK, so this is
- *  a hand-maintained snapshot of the model catalog the PINNED CLI bundles
- *  (`CODEX_SDK_VERIFIED_VERSION`, codex-runtime.server.ts; the catalog JSON is
- *  embedded in the `codex` binary and was read off 0.153.4). Effort values
+ *  a hand-maintained snapshot of the models the PINNED CLI can run
+ *  (`CODEX_SDK_VERIFIED_VERSION`, codex-runtime.server.ts): the catalog JSON
+ *  embedded in the `codex` binary (read off 0.153.4), plus the models the
+ *  account's server sends only to a new enough client (GPT-6 Sol and Luna,
+ *  added with 0.156.0; the CLI caches that list as `models_cache.json` in the
+ *  principal's CODEX_HOME, with the `client_version` it was fetched for). Effort values
  *  stay inside the SDK's `ModelReasoningEffort` union, which gained `max`,
  *  `ultra` and `persistent` in 0.149–0.153. `max` is offered per model exactly
  *  where the catalog lists it. `ultra` is NOT offered: the catalog describes it
@@ -161,18 +164,38 @@ const CODEX_MODELS: CatalogModel[] = [
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },
+  // Codex CLI 0.156.0 (2026-09-23, owner's request): GPT-6 Sol and GPT-6 Luna
+  // are NOT in the binary's bundled catalog. The account's server sends them,
+  // and only to a client at `minimal_client_version` 0.155.0 or later, so
+  // 0.153.4 could never run them. Their levels are the server's: both stop at
+  // `max` here, since `ultra` (Sol's) is the sub-agent tier Viberr never
+  // offers. Offered, NOT the default (F20-33 still holds for the fallback).
+  {
+    value: "gpt-6-sol",
+    displayName: "GPT-6 Sol",
+    description: "Workhorse model for coding and everyday work.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  {
+    value: "gpt-6-luna",
+    displayName: "GPT-6 Luna",
+    description: "Fast and affordable model for well-scoped tasks.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
   {
     value: "gpt-5.6-sol",
     displayName: "GPT-5.6 Sol",
     description:
-      "Flagship model for complex coding, research, and high-value work.",
+      "Previous-generation flagship for complex coding, research, and high-value work.",
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },
   {
     value: "gpt-5.6-luna",
     displayName: "GPT-5.6 Luna",
-    description: "Fast model for clear, repeatable, well-scoped tasks.",
+    description: "Previous-generation fast model; GPT-6 Luna supersedes it.",
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },

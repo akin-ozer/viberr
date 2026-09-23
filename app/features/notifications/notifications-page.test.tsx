@@ -368,6 +368,42 @@ describe("NotificationsPage", () => {
     expect(read.querySelector(".unread-dot")).toBeNull();
   });
 
+  /**
+   * U39-14 (pass 39): a resolved decision falls to the stream with the whole
+   * packet body as its text. Live, ax-clone's deadlock notices were fourteen
+   * lines each on this page, with no title, while the bell showed a title and
+   * two lines.
+   */
+  it("U39-14: a titled notice in the stream reads as its title, with its body clamped", () => {
+    // CANARY: render `n.text` in place of the title and drop the clamped body.
+    const body = "@Reviewer returned its 7th consecutive request for changes on AX-20. ".repeat(12);
+    const { container } = renderPage([
+      {
+        id: "n-deadlock",
+        kind: "packet",
+        ptype: "input",
+        title: "Decision needed: Reviewer has requested changes 7 times running",
+        text: body,
+        projectSlug: "ax-clone",
+        projectName: "ax-clone",
+        taskKey: "AX-20",
+        href: "/projects/ax-clone/tasks/AX-20",
+        occurredAt: iso(0, 3, 21),
+        unread: false,
+        waitingOnYou: false,
+        from: { name: "Policy engine" },
+      },
+    ]);
+    const row = container.querySelector(".ntf-ev")!;
+    expect(row.querySelector(".ntf-ev-title")?.textContent).toBe(
+      "Decision needed: Reviewer has requested changes 7 times running",
+    );
+    const clamped = row.querySelector(".ntf-ev-text[data-clamped]");
+    expect(clamped?.textContent).toBe(body);
+    // The body appears once, inside the clamp, never as the row's headline.
+    expect(row.textContent?.split("7th consecutive request").length).toBe(13);
+  });
+
   // UI-54: REWRITTEN — this pinned the bug. `splitNotifications` applied the
   // All/Unread filter BEFORE the needs-you split, so a set of already-READ
   // pending decisions rendered "0 decisions · Nothing is waiting on you" under

@@ -10,6 +10,10 @@ import type { McpToolDenial } from "~/shared/mcp-tools";
 import type { SkillPlugin } from "./skill-mount.server";
 import type { EnvelopeFacts } from "./wire-format.server";
 import type { RunPrompt } from "./prompt-prefix.server";
+import {
+  POST_TURN_TRANSPORT_TAG,
+  postTurnTransportText,
+} from "~/shared/run-failure";
 
 /**
  * Common runtime-adapter interface. Each backend implements it; run-service is the only
@@ -173,6 +177,36 @@ export interface EmittedLine {
   facts: EnvelopeFacts;
   /** UTC ISO occurrence time. */
   occurredAt: string;
+}
+
+/**
+ * Ruling 394: the line a run carries when its transport died AFTER the agent's
+ * work stood finished — a completed Codex turn with nothing in flight behind
+ * it, or Claude's single terminal non-error result.
+ *
+ * Deliberately not a failure line. `runFailureReason` reads the last `err` line
+ * as a run's cause, and this run has no cause: it finished. The drop is still
+ * written down, because hiding it would be its own lie, but it is written as
+ * what it is — a fact about the socket, not a verdict on the work.
+ */
+export function postTurnTransportLine(detail: string): EmittedLine {
+  const occurredAt = new Date().toISOString();
+  return {
+    raw: JSON.stringify({
+      type: "transport",
+      source: "viberr",
+      after: "turn.completed",
+      message: detail,
+    }),
+    display: {
+      t: occurredAt.slice(11, 19),
+      ev: "meta",
+      tag: POST_TURN_TRANSPORT_TAG,
+      text: postTurnTransportText(detail),
+    },
+    facts: {},
+    occurredAt,
+  };
 }
 
 /** How the run ended (from the stream, not the exit code — see research §1.6). */

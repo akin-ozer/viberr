@@ -123,6 +123,7 @@ function dock(
     projectSlug: string | null;
     taskKey: string | null;
     conversationId: string | null;
+    markSeen?: boolean;
   },
 ) {
   return getControllerDock(
@@ -337,6 +338,55 @@ describe("getControllerDock — the dock lists one place's threads", () => {
     // Supervision is a read of ONE named thread, never a browse: the admin's
     // own (empty) thread list is what the panel offers.
     expect(view.threads).toEqual([]);
+  });
+});
+
+/**
+ * O39-d: the open dock is the other place a transcript is read. Opening a
+ * thread there makes its replies seen, and the list marks the rest.
+ */
+describe("getControllerDock — replies the viewer has not seen (O39-d)", () => {
+  it("the thread the panel opens is seen, and the other threads here are flagged", async () => {
+    const { appendMessage, listUnseenReplies } = await import("~/server/controller/controller-conversations.server");
+    const store = storeWithTwoProjects();
+    const selin = store.users.selin;
+    const older = thread(store, selin, { projectSlug: SLUG, taskKey: null });
+    const newer = thread(store, selin, { projectSlug: SLUG, taskKey: null });
+    for (const c of [older, newer]) {
+      appendMessage(store.db, { conversationId: c.id, author: "controller", text: "Done." });
+    }
+    // CANARY: drop `markConversationSeen` from the dock and the thread the
+    // person is reading stays a "new reply".
+    const view = dock(store, selin, {
+      projectSlug: SLUG,
+      taskKey: null,
+      conversationId: older.id,
+      markSeen: true,
+    });
+    expect(Object.fromEntries(view.threads.map((t) => [t.id, t.unread]))).toEqual({
+      [older.id]: false,
+      [newer.id]: true,
+    });
+    expect(listUnseenReplies(store.db, selin.id).map((r) => r.id)).toEqual([newer.id]);
+  });
+
+  /**
+   * The dock loads this view with the panel CLOSED too: its working poll keeps
+   * the button's dot honest while a turn runs. That load is nobody reading,
+   * and marking it seen erased the one reply O39-d exists to announce — the
+   * one that lands while a person has closed the dock and stayed on the page.
+   */
+  it("a load with the panel closed marks nothing seen", async () => {
+    const { appendMessage, listUnseenReplies } = await import("~/server/controller/controller-conversations.server");
+    const store = storeWithTwoProjects();
+    const selin = store.users.selin;
+    const asked = thread(store, selin, { projectSlug: SLUG, taskKey: null });
+    appendMessage(store.db, { conversationId: asked.id, author: "controller", text: "Done." });
+    // CANARY: mark seen on every load again and the reply is gone before the
+    // person ever opens the dock.
+    const polled = dock(store, selin, { projectSlug: SLUG, taskKey: null, conversationId: asked.id });
+    expect(polled.messages.map((m) => m.text)).toContain("Done.");
+    expect(listUnseenReplies(store.db, selin.id).map((r) => r.id)).toEqual([asked.id]);
   });
 });
 

@@ -809,6 +809,24 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       // …and it says WHO tagged them: a bare row with no author is how a
       // machine-authored ping reads as a system notice instead of an answer.
       expect(mentions[0]!.actor_json).toBeTruthy();
+      // Ruling 382 (F39-9): the EVENT records who the fan-out reached, so
+      // compaction can never fold a comment somebody was told about. Asserted
+      // here, on the same enumerated table, because a writer that notifies but
+      // does not stamp leaves the notification pointing at text the canonical
+      // file will delete — and the marker would still read "human comments are
+      // never compacted". CANARY: drop `stampNotifiedRecipients` from any
+      // writer and that writer's row fails with its own name.
+      const stamped = readTaskFile({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      })!.parsed.timeline.filter((e) =>
+        (e.notified ?? []).includes(store.users.arda.id),
+      );
+      expect(
+        stamped.length,
+        `${writer.name} notified Arda but stamped no event with it`,
+      ).toBe(1);
     });
   }
 

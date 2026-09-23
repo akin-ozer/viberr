@@ -936,6 +936,20 @@ describe("codex failure classification survives redaction into runFailureReason 
     expect(reason?.providerText).toContain("401 unauthorized for token [redacted]");
   });
 
+  it("ruling 434: a torn rollout classifies as 'session_missing' with its own sentence, not 'unknown'", async () => {
+    // Live on AX-5: "Codex execution failed. Review its authentication and
+    // runtime configuration", for a session whose rollout head was torn.
+    // CANARY: drop the SESSION_DAMAGED_RE branch.
+    const reason = await classifyThrownFailure(
+      "rollout at /data/runtimes/users/u_1/codex-home/sessions/2026/09/23/rollout-2026-09-23T01-25-02-01a0cbdd.jsonl does not start with session metadata (code -32603)",
+    );
+    expect(reason?.kind).toBe("session_missing");
+    expect(reason?.text).toContain("its rollout is damaged");
+    expect(reason?.text).toContain("Nothing is wrong with the credential");
+    expect(reason?.text).not.toMatch(/review .*(authentication|credential)/i);
+    expect(reason?.text).not.toContain("/data/runtimes");
+  });
+
   it("a vanished rollout classifies as 'session_missing', not 'auth' (P13-D-2)", async () => {
     const reason = await classifyThrownFailure(
       "session not found: 0199a2c4-7b31-7802 (no rollout under /data/codex/sessions)",
@@ -1026,6 +1040,20 @@ describe("codex failure classification survives redaction into runFailureReason 
       "Reconnecting... 2/5 (stream disconnected before completion: failed to lookup address information: Name does not resolve)",
       "stream error: temporary failure in name resolution",
       "IO error: peer closed connection without sending TLS close_notify",
+      // Ruling 389 (F39-16), verbatim from the live packet on ax-clone AX-11.
+      // reqwest's own transport failure, which the Rust CLI surfaces unchanged.
+      // The list had "connection error" and not "connection failed", so this
+      // classified `unknown`: the packet told the owner to review their
+      // authentication one line above the provider saying the network dropped,
+      // and it came out as a stalled-work packet recommending a re-prompt
+      // instead of the backend-failure packet that offers waiting.
+      "Reconnecting... waiting for network (Connection failed: error sending request)",
+      // Ruling 394's sibling, verbatim from the live packet on ax-clone AX-3
+      // the same morning: the SAME "Reconnecting..." banner with the other
+      // wording the CLI uses for it. "connection timed out" was on the list and
+      // "request timed out" was not, so this one still classified `unknown` and
+      // still told the owner to review their authentication.
+      "Reconnecting... 5/5 (request timed out)",
     ]) {
       // CANARY: drop the new alternatives from LOCAL_NETWORK_FAILURE_RE and the
       // first two classify `unknown` and tell the reader to check their auth.
@@ -2056,3 +2084,170 @@ describe("codex adapter compact() (ruling 376)", () => {
   });
 });
 
+
+/**
+ * Ruling 394 (F39-21) — a completed turn is a completed turn.
+ *
+ * Live on the ax-clone board, twice inside ten minutes: a Codex developer run
+ * emitted a complete outcome envelope, the provider emitted `turn.completed`,
+ * and THEN the socket died while Viberr ran its own end-of-run compaction. The
+ * adapter's gate read `sawTurnCompleted && !sawFatalError` — a conjunction over
+ * the whole stream with no regard for ORDER — so the drop settled the run
+ * `error`. AX-2 had 1,531 lines of committed Go across seven files in its
+ * workspace and AX-3 two commits; both tasks were parked `waiting: human`
+ * under a packet whose RECOMMENDED option was to re-run the agent that had
+ * already finished.
+ *
+ * What the provider actually streamed, in this order (run_Ys0uzCRS_twA):
+ *   item.completed(agent_message, the envelope) -> turn.completed -> error
+ */
+function fakeCodexThenThrow(
+  events: unknown[],
+  error: Error,
+): (options?: CodexOptions) => CodexClient {
+  const makeThread = (): CodexThread => ({
+    id: "0199a1f3-4c02-7d31",
+    async runStreamed() {
+      const gen = (async function* () {
+        for (const e of events) {
+          yield e;
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        throw error;
+      })();
+      return { events: asSdkEvents(gen) };
+    },
+  });
+  const client: CodexClient = {
+    startThread: () => makeThread(),
+    resumeThread: () => makeThread(),
+  };
+  return () => client;
+}
+
+describe("ruling 394: the transport died after the turn completed", () => {
+  const ENVELOPE = {
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: '{"evidence":[],"summary":"@operator Done on branch `ax-2`, commit `3e0396ab`.","verdict":null,"question":null}',
+    },
+  };
+  const TURN_DONE = {
+    type: "turn.completed",
+    usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 20 },
+  };
+  const DROP =
+    "Reconnecting... waiting for network (Connection failed: error sending request)";
+
+  async function runWith(
+    factory: (options?: CodexOptions) => CodexClient,
+  ): Promise<{ lines: EmittedLine[]; exit: RunExit | null }> {
+    const lines: EmittedLine[] = [];
+    let exit: RunExit | null = null;
+    createCodexAdapter({ codexFactory: factory }).start(SPEC, {
+      onLine: (l) => lines.push(l),
+      onExit: (e) => (exit = e),
+    });
+    await drain();
+    return { lines, exit };
+  }
+
+  it("finishes the run when the STREAM THROWS after turn.completed", async () => {
+    // CANARY: drop the `turnStoodComplete()` branch from the catch and this
+    // run settles `error` again, which is the live defect verbatim.
+    const { lines, exit } = await runWith(
+      fakeCodexThenThrow(
+        [{ type: "turn.started" }, ENVELOPE, TURN_DONE],
+        new Error(DROP),
+      ),
+    );
+    expect(exit).toMatchObject({ outcome: "finished" });
+    // The agent's own final message survives for the completion pipeline.
+    expect(lines.some((l) => l.raw.includes("3e0396ab"))).toBe(true);
+    // The drop is recorded, and NOT as the run's cause.
+    const note = lines.at(-1)!;
+    expect(note.display?.tag).toBe("run·transport·after-turn");
+    expect(note.display?.ev).toBe("meta");
+    expect(note.display?.text).toContain(
+      "the connection dropped after the agent's turn had completed",
+    );
+    expect(lines.some((l) => l.display?.ev === "err")).toBe(false);
+  });
+
+  it("finishes the run when a fatal ERROR EVENT lands after turn.completed", async () => {
+    const { lines, exit } = await runWith(
+      fakeCodex([
+        { type: "turn.started" },
+        ENVELOPE,
+        TURN_DONE,
+        { type: "error", message: DROP },
+      ]).factory,
+    );
+    expect(exit).toMatchObject({ outcome: "finished" });
+    expect(
+      lines.some((l) => l.display?.tag === "run·transport·after-turn"),
+    ).toBe(true);
+  });
+
+  it("finishes when the provider RECOVERED from a blip and then completed the turn", async () => {
+    // Live on ax-clone AX-4 (run_PmefJ4iUKtTQ), the third occurrence of this
+    // shape in one morning and the sharpest: the CLI printed its reconnect
+    // banner mid-turn, recovered, emitted a complete operator decision plan
+    // (engage the reviewer on revision ed4a600 — the one action that would
+    // have cleared AX-4's review gate), and completed the turn. `sawFatalError`
+    // is sticky, so the old gate could never settle this finished however the
+    // stream ended, and Viberr threw the plan away and asked a human to
+    // "Re-run the operator now".
+    const { lines, exit } = await runWith(
+      fakeCodexThenThrow(
+        [
+          { type: "turn.started" },
+          { type: "error", message: DROP },
+          ENVELOPE,
+          TURN_DONE,
+        ],
+        new Error(DROP),
+      ),
+    );
+    expect(exit).toMatchObject({ outcome: "finished" });
+    expect(lines.some((l) => l.raw.includes("3e0396ab"))).toBe(true);
+  });
+
+  it("still FAILS a run cut off while work was in flight", async () => {
+    // The whole point of the order test: turn 1 completed, the agent started
+    // another item, and THAT is what the drop cut. Nothing stands finished.
+    const { exit } = await runWith(
+      fakeCodexThenThrow(
+        [
+          { type: "turn.started" },
+          TURN_DONE,
+          { type: "item.started", item: { type: "command_execution" } },
+        ],
+        new Error(DROP),
+      ),
+    );
+    expect(exit).toMatchObject({ outcome: "error" });
+  });
+
+  it("still FAILS a run that never completed a turn at all", async () => {
+    const { exit } = await runWith(
+      fakeCodexThenThrow([{ type: "turn.started" }], new Error(DROP)),
+    );
+    expect(exit).toMatchObject({ outcome: "error" });
+  });
+
+  it("still FAILS when the error arrives BEFORE the completed turn", async () => {
+    // A provider that reports its refusal and then completes the turn anyway
+    // has not done the work; order is what this ruling reads, in both
+    // directions.
+    const { exit } = await runWith(
+      fakeCodex([
+        { type: "turn.started" },
+        { type: "error", message: "You've hit your usage limit" },
+        { type: "item.started", item: { type: "command_execution" } },
+      ]).factory,
+    );
+    expect(exit).toMatchObject({ outcome: "error" });
+  });
+});

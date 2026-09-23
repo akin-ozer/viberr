@@ -132,6 +132,15 @@ export function compactTimelineEvents(
     // "human comments are never compacted", so nobody who noticed the gap would
     // even look.
     e.actor.kind !== "controller" &&
+    // Ruling 382 (F39-9): viberr TOLD somebody this comment was here. Live on
+    // ax-clone AX-9 the folded one was the operator answering Arda by name
+    // about a correction they had just filed — their question survived (human
+    // prose), the answer did not, and canonical task.md, which the next agent
+    // anchors on, read as a person correcting the record and nobody replying.
+    // The notification row still quotes it and still offers a button to the
+    // task, so following it lands on a page the text is no longer on: the same
+    // dangling pointer ruling 317 closed for a verdict's justification.
+    (e.notified === undefined || e.notified.length === 0) &&
     // Ruling 209: a comment carrying EVIDENCE is not prose — it is the pointer
     // to files the evidence-separation guardrail moved out of the timeline and
     // onto disk. Folding it keeps a count and drops the reference, orphaning

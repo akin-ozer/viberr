@@ -33,9 +33,12 @@ export function compactionNoteText(
   compaction: NonNullable<EnvelopeFacts["compaction"]>,
   anchored: boolean,
 ): string {
+  // Ruling 403: "tokens" belongs to the MEASURED branch. An unmeasured post
+  // size reads "from 112k to a summary", not "to a summary tokens" -- and
+  // never "to 0k tokens", which is what a seeded placeholder used to print.
   const sizes =
     compaction.preTokens !== null
-      ? ` from ${k(compaction.preTokens)} to ${compaction.postTokens !== null ? k(compaction.postTokens) : "a summary"} tokens`
+      ? ` from ${k(compaction.preTokens)} to ${compaction.postTokens !== null ? `${k(compaction.postTokens)} tokens` : "a summary"}`
       : "";
   if (compaction.trigger === "completion") {
     // Ruling 376: the run is over; the summary is what the next resume replays.

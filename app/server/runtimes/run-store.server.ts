@@ -654,39 +654,36 @@ export function insertRunLine(
 }
 
 /**
- * Ruling 242 (pass 37, F37-69): did `profileId` RUN on this task since `since`?
+ * Ruling 242 (pass 37, F37-69): the runs `profileId` made on this task since
+ * `since`, oldest first, with their states.
  *
  * The signal ruling 204's round counter was reaching for. That ruling made a
  * reviewer's repeat objection on the same revision count as a fresh round,
  * because in a real deadlock the deliverer commits nothing and no new revision
- * is ever minted — SHOP-9, where the count would otherwise have sat at 1 while
- * the loop ran. What it could not distinguish is a repeat objection with NO
+ * is ever minted (SHOP-9, where the count would otherwise have sat at 1 while
+ * the loop ran). What it could not distinguish is a repeat objection with NO
  * rework behind it at all, which is what ruling 237's own escalation question
  * provokes: the reviewer is asked to answer, answers, and verdicts again on an
- * untouched revision.
+ * untouched revision. A DELIVERER RUN is the thing that separates them.
  *
- * A DELIVERER RUN is the thing that separates them. In SHOP-9 the deliverer ran
- * and reported it had nothing in scope to change; on SHOP-25's question run
- * nobody reworked anything.
- *
- * Counts every run row whatever its state: a deliverer that was dispatched and
- * crashed still means a round was fought, and reading `finished` only would let
- * a failing rework loop climb forever without the counter noticing.
+ * Which of these runs count is `deliveredRoundSince`'s call (ruling 416): every
+ * state does, except a run the PROVIDER refused.
  */
-export function profileRanSince(
+export function profileRunsSince(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
   profileId: string,
   since: string,
-): boolean {
-  // SAFETY: `COUNT(*)` always returns exactly one row holding one integer.
-  const row = db
+): { id: string; state: RunState }[] {
+  // SAFETY: `id` is the TEXT primary key and `state` is CHECK-constrained to
+  // exactly the RunState union (0001_baseline.sql).
+  return db
     .prepare(
-      `SELECT COUNT(*) AS n FROM agent_runs
+      `SELECT id, state FROM agent_runs
         WHERE project_slug = ? AND task_key = ? AND agent_profile_id = ?
-          AND created_at > ?`,
+          AND created_at > ?
+        ORDER BY created_at ASC`,
     )
-    .get(projectSlug, taskKey, profileId, since) as { n: number };
-  return row.n > 0;
+    .all(projectSlug, taskKey, profileId, since) as { id: string; state: RunState }[];
 }

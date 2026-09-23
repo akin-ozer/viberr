@@ -134,10 +134,20 @@ function resolveWithStages(
       continue;
     }
     if (link.taskKey) {
+      // Ruling 398(b): the LINK's own settlement outranks what later happened
+      // to its task. `done` and `skipped` are the chain's decisions that it has
+      // moved past this link, and `reconcileGoal` already refuses to undo them
+      // on an archive ("archiving a COMPLETED link's task does not
+      // retroactively fail the link"). This reader did undo them: it went
+      // straight to the task's state, so archiving a finished link's task — or
+      // the archive that CAUSED a ride-through skip under onFailure=continue —
+      // turned every wait declared on that link into a dead one, parking the
+      // chains behind it in the name of work that was already settled.
+      const settled = link.status === "done" || link.status === "skipped";
       out.push({
         ref: canonical,
         label: `${canonical} (${link.taskKey})`,
-        state: taskState(db, slug, link.taskKey, stages),
+        state: settled ? "done" : taskState(db, slug, link.taskKey, stages),
         taskKey: link.taskKey,
         goalId: ref.goal,
       });
@@ -250,6 +260,25 @@ export function listHeldTasks(
  * warn "do not sort by it alone". A number that mixes "frees now" with "frees
  * after another human decision" is wrong for the one job it has.
  */
+/**
+ * Ruling 426: every open task that still WAITS on `taskKey`, directly or
+ * through a goal link that task answers, in key order.
+ *
+ * Not `tasksReleasedBy`: that counts only the tasks whose LAST wait this is,
+ * which is a release count. This is the question a lease asks before it holds
+ * a task back: would anything else be held with it? A wait that can never
+ * clear still counts here, because the task is still parked behind this one.
+ */
+export function tasksWaitingOn(db: DatabaseSync, slug: string, taskKey: string): string[] {
+  const out: string[] = [];
+  for (const held of listHeldTasks(db, slug)) {
+    if (held.taskKey === taskKey) continue;
+    const entries = resolveDependencies(db, slug, held.blockedBy);
+    if (entries.some((e) => e.state === "open" && e.taskKey === taskKey)) out.push(held.taskKey);
+  }
+  return out.sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+}
+
 export interface ReleasedTasks {
   /** Unblocked by this task completing, full stop. */
   direct: string[];

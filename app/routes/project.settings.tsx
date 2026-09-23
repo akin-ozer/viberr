@@ -25,6 +25,7 @@ import {
   deleteProject,
   setProjectArchived,
   inviteMember,
+  parseFileLeasesField,
   parseRequiredReviewerRulesField,
   removeMember,
   removeStage,
@@ -32,6 +33,7 @@ import {
   reorderStages,
   repairProjectRepo,
   setBranchCleanup,
+  setProjectFileLeases,
   setRequiredReviewers,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
@@ -211,6 +213,16 @@ export async function action({ request, params }: Route.ActionArgs) {
         const result = await setRequiredReviewers(
           db,
           { projectSlug: slug, rules: parseRequiredReviewerRulesField(field("rules")) },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      // Ruling 396: the lease table, posted whole through the writer the
+      // controller's `set_file_leases` already calls.
+      case "set-file-leases": {
+        const result = await setProjectFileLeases(
+          db,
+          { projectSlug: slug, leases: parseFileLeasesField(field("leases")) },
           actor,
         );
         return { ok: true as const, toast: result.toast };

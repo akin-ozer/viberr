@@ -116,6 +116,8 @@ function seedTask(
     stage?: string;
     recommendations?: Recommendation[];
     packet?: TaskPacket | null;
+    /** Ruling 391: this task's deliverable is the files a run saved. */
+    deliveredAt?: string;
   } = {},
 ): void {
   // `recommendations` and `packet` are set only when the case supplies them —
@@ -126,6 +128,7 @@ function seedTask(
     ownerUserId: store.users.arda.id,
     title: "Add the KB grounding probe",
   };
+  if (patch.deliveredAt) frontmatterPatch.deliveredAt = patch.deliveredAt;
   if (patch.recommendations) frontmatterPatch.recommendations = patch.recommendations;
   const file: Partial<ParsedTaskFile> & { frontmatter: TaskFrontmatter } = {
     frontmatter: baseTaskFrontmatter("VIB-1", frontmatterPatch),
@@ -150,6 +153,15 @@ async function deliver(): Promise<string> {
     OPERATOR_TASK_ACTOR,
   );
   return outcome.status;
+}
+
+/** Ruling 391: the timeline as text, for a case about what a note SAYS. */
+function timelineTexts(): string[] {
+  return readTaskFile({
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    dataRoot: store.dataRoot,
+  })!.parsed.timeline.map((e) => e.text);
 }
 
 function recs(): Recommendation[] {
@@ -638,6 +650,30 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
     });
     expect(await deliver()).toBe("nothing_to_review");
     expect(recs()).toHaveLength(0);
+  });
+
+  /**
+   * Ruling 391 (F39-18), live on ax-clone AX-12. A research task's deliverable
+   * is the report a run saved, so it has no commits BY DESIGN — and the
+   * no-commits note told its operator the work "never reached the task branch.
+   * Re-run the delivering agent", which would run a finished task again and
+   * still find nothing. `deliveredAt`, which ruling 388 had just taught the
+   * file to record, says the work is there.
+   */
+  it("ruling 391: a task whose deliverable is FILES is not told its work went missing", async () => {
+    deployOperator("supervised");
+    seedTask({ deliveredAt: "2026-09-22T06:23:28.646Z" });
+    pushMock.mockResolvedValue({
+      status: "no_commits",
+      reason: "no commits ahead of the default branch",
+    });
+    await deliver();
+    const note = timelineTexts().find((t) => t.includes("no commits ahead"));
+    expect(note).toBeTruthy();
+    // CANARY: drop the `deliveredAt` arm and both of these flip.
+    expect(note).toContain("it is not supposed to");
+    expect(note).toContain("2026-09-22T06:23:28.646Z");
+    expect(note).not.toContain("Re-run the delivering agent");
   });
 
   it("D. a SECOND delivery does not add a second card (NFR16)", async () => {
