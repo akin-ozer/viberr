@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RouterContextProvider } from "react-router";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import { connectFakeBackend } from "../../test-support/backend-credentials";
-import { startedRunSpecs } from "../../test-support/fake-runtime";
+import { queueFakeRun, startedRunSpecs } from "../../test-support/fake-runtime";
 import type { RunSpec } from "~/server/runtimes/adapter.server";
 
 /**
@@ -172,5 +172,62 @@ describe("ruling 375: a prompted manual dispatch runs once", () => {
         (event) => event.type === "comment" && event.actor.kind === "human",
       ).length ?? 0;
     expect(commentsAfter).toBe(commentsBefore);
+  });
+});
+
+/**
+ * Ruling 452 (owner, 2026-09-24): a prompted dispatch refused because the agent
+ * is already running on the task. The directive is recorded first (ruling 375),
+ * so it sits inside the live run's window and ruling 203 delivers it when that
+ * run finishes. The person's note used to say "No run started", beside an error
+ * telling them to wait and start another, which would deliver the words twice.
+ */
+describe("ruling 452: a dispatch refused because the agent is running is delivered when it finishes", () => {
+  it("says so in the toast and the note, and the finished run hands the words over once", async () => {
+    // Held live until released, then finished normally. VIB-151's developer
+    // runs on Codex; were that to change, nothing would hold the run and the
+    // prompted dispatch would start its own, failing this case loudly.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    queueFakeRun({ lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }], gate }, "codex");
+    const before = developerRuns().length;
+    expect(await post({ intent: "run-agent", profileId: "developer" })).toMatchObject({
+      ok: true,
+      intent: "run-agent",
+    });
+    expect(developerRuns().length).toBe(before + 1);
+
+    const prompt = "Also look at the retention window while you are in there.";
+    const result = await post({ intent: "run-agent", profileId: "developer", prompt });
+    // CANARY: drop the busy arm of the catch and this throws the 409.
+    expect(result).toMatchObject({
+      ok: true,
+      intent: "run-agent",
+      toast:
+        "Developer is already running on this task, so no second run started. " +
+        "Your prompt is on the timeline and is delivered to it when that run finishes.",
+    });
+    const [{ readTaskFile }, { taskRef }] = await Promise.all([
+      import("~/server/files/task-writer.server"),
+      import("~/server/tasks/task-mutation.server"),
+    ]);
+    const [note, directive] =
+      readTaskFile(taskRef({ dataRoot: app.dataRoot }, SLUG, TASK))?.parsed.timeline.filter(
+        (event) => event.type === "comment" && event.actor.kind === "human",
+      ) ?? [];
+    expect(directive?.text).toBe(`@Developer ${prompt}`);
+    expect(note?.text).toBe(
+      "Developer is already running on this task, so no second run started. " +
+        "These words are delivered to it when that run finishes.",
+    );
+    expect(note?.toAgent).toBe(false);
+
+    release();
+    for (let i = 0; i < 80 && developerRuns().length < before + 2; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    await settle();
+    expect(developerRuns().length, "delivered once, not twice").toBe(before + 2);
+    expect(developerRuns().at(-1)?.prompt).toContain(prompt);
   });
 });

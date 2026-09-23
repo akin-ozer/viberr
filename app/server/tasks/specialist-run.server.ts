@@ -1337,12 +1337,12 @@ async function dispatchAgentRun(
         r.kind === "primary" && (r.state === "running" || r.state === "queued"),
     );
     if (liveDelivering) {
-      throw new AppError({
-        code: ERROR_CODES.CONFLICT,
-        status: 409,
-        userMessage:
-          "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
-      });
+      // Ruling 452: typed with the live run's agent, which is not always this
+      // one — only a directive to the SAME agent is delivered on its finish.
+      throw new AgentBusyError(
+        "A delivering agent run is already in progress on this task — wait for it to finish or interrupt it before starting another.",
+        liveDelivering.agent_profile_id,
+      );
     }
   } else {
     // P8/Finding-2 (pass 25): a SUPPORTING run now has its OWN isolated checkout
@@ -1364,12 +1364,10 @@ async function dispatchAgentRun(
         (r.state === "running" || r.state === "queued"),
     );
     if (liveSameEngagement) {
-      throw new AppError({
-        code: ERROR_CODES.CONFLICT,
-        status: 409,
-        userMessage:
-          "This agent already has a run in progress on this task — wait for it to finish or interrupt it before starting another.",
-      });
+      throw new AgentBusyError(
+        "This agent already has a run in progress on this task — wait for it to finish or interrupt it before starting another.",
+        engagement.profileId,
+      );
     }
   }
 
@@ -2664,6 +2662,41 @@ export class DispatchHeldError extends AppError {
 
 export function isDispatchHeld(cause: unknown): cause is DispatchHeldError {
   return cause instanceof DispatchHeldError;
+}
+
+/**
+ * Ruling 452: the single-flight refusal, typed, naming whose run is live. A
+ * dispatch door records a person's directive before the start (ruling 375),
+ * so when the live run is the SAME agent's, the directive sits inside that
+ * run's window and ruling 203 delivers it when the run finishes. The door says
+ * so instead of "No run started" and "wait, then start another", which a
+ * person who obeyed turned into a second delivery of the same words.
+ */
+export class AgentBusyError extends AppError {
+  /** The profile whose run is live; ruling 203 delivers to that profile only. */
+  readonly busyProfileId: string | null;
+  constructor(userMessage: string, busyProfileId: string | null) {
+    super({
+      code: ERROR_CODES.CONFLICT,
+      status: 409,
+      userMessage,
+      details: { busyProfileId },
+    });
+    this.busyProfileId = busyProfileId;
+  }
+}
+
+export function isAgentBusy(cause: unknown): cause is AgentBusyError {
+  return cause instanceof AgentBusyError;
+}
+
+/** Ruling 452: the person's note beside a directive whose agent was already
+ *  running — one sentence for every dispatch door that records one. */
+export function directiveDeferredNote(agentName: string): string {
+  return (
+    `${agentName} is already running on this task, so no second run started. ` +
+    "These words are delivered to it when that run finishes."
+  );
 }
 
 // ----------------------------------------------------------------- persona
