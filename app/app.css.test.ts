@@ -3477,6 +3477,14 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".ctl-links li")).toMatch(/align-items:\s*baseline/);
   });
 
+  it("U39-16: on a phone a notification's trailing controls take their own line", () => {
+    // Measured at 375px: the text column was 90px beside Mark read, the dot
+    // and the time. CANARY: drop `flex-wrap: wrap` from the phone rule.
+    const phone = CODE.match(/@media \(max-width: 560px\) \{([\s\S]*?)\n\}/);
+    expect(phone, "the 560px block must exist").toBeTruthy();
+    expect(phone![1]).toMatch(/\.ntf-ev \{[^}]*flex-wrap:\s*wrap/);
+  });
+
   it("U39-13: a wrapped review-queue row reads its chips left to right from the row's edge", () => {
     // CANARY: drop the `.rq-meta` override from the 1100px block.
     const narrow = collapse();

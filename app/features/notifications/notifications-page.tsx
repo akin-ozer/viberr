@@ -213,7 +213,16 @@ function NtfStream({
                       <span className="act-sep">·</span>
                     </>
                   )}
-                  <RichText text={n.text} mentions={false} />{" "}
+                  {/* U39-14: a titled notice (a decision packet, an approval)
+                      carries the whole packet body as its text, and the stream
+                      printed all of it: a deadlock notice was a fourteen-line
+                      wall. It reads as the bell does now: the title, then the
+                      body clamped to two lines; the task holds the rest. */}
+                  {n.title ? (
+                    <strong className="ntf-ev-title">{n.title}</strong>
+                  ) : (
+                    <RichText text={n.text} mentions={false} />
+                  )}{" "}
                   {/* B-FD6: the keybtn NAVIGATES, so it renders only when the row
                       has a destination. An org-wide row has none (nothing shown).
                       F18-1: an ORPHAN (its project was deleted) also has no
@@ -240,6 +249,11 @@ function NtfStream({
                       {keybtnLabel(n)}
                     </span>
                   ) : null}
+                  {n.title && (
+                    <span className="ntf-ev-text" data-clamped>
+                      <RichText text={n.text} mentions={false} />
+                    </span>
+                  )}
                 </span>
                 {n.unread && (
                   <button

@@ -32,6 +32,21 @@ describe("RichText (THE shared micro-format renderer, ruling 14)", () => {
     );
   });
 
+  it("U39-15: renders `code` inside a **bold** run instead of printing the backticks", () => {
+    // The lease notice's headline, as operator-actions writes it. CANARY:
+    // render the bold run's inner text as a plain string again.
+    const { container } = render(
+      <RichText text="**AX-22 now holds `internal/controller/task.go`, `task_test.go`** (leased)" mentions={false} />,
+    );
+    const strong = container.querySelector("strong")!;
+    expect([...strong.querySelectorAll("code.mono")].map((c) => c.textContent)).toEqual([
+      "internal/controller/task.go",
+      "task_test.go",
+    ]);
+    expect(container.textContent).toBe("AX-22 now holds internal/controller/task.go, task_test.go (leased)");
+    expect(container.textContent).not.toContain("`");
+  });
+
   it("gives every mention chip a visually-hidden label (P16-UI-20)", () => {
     // The chip's only distinction from the prose around it is colour +
     // background, so a screen reader read "@Selin" exactly like the word
@@ -111,10 +126,12 @@ describe("RichText (THE shared micro-format renderer, ruling 14)", () => {
     expect(container.textContent).toBe("bold and @operator");
   });
 
-  it("does not nest: bold containing backticks stays one strong token", () => {
+  it("bold containing backticks is one strong token with the code inside it (U39-15)", () => {
+    // This pinned the limitation: "a `b` c" printed its backticks inside the
+    // strong. The one pass still takes the bold run whole (`[^*]+` crosses
+    // backticks); the code is rendered inside it now.
     const { container } = render(<RichText text="**a `b` c**" />);
-    // `[^*]+` matches across backticks — single strong, no inner code.
-    expect(container.querySelector("strong")!.textContent).toBe("a `b` c");
-    expect(container.querySelector("code")).toBeNull();
+    expect(container.querySelector("strong")!.textContent).toBe("a b c");
+    expect(container.querySelector("strong code.mono")!.textContent).toBe("b");
   });
 });

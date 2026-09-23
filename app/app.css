@@ -3426,6 +3426,14 @@ dialog[data-closing]::backdrop {
 .ntf-ev { cursor: pointer; border-radius: var(--radius-button); margin-inline: -.45rem; padding-inline: .5rem; transition: background .12s ease; }
 .ntf-ev:hover { background: var(--tint-well); }
 .ntf-ev.unread .pev-main { color: var(--fg); }
+/* U39-14: a titled notice reads as its title, then its body clamped as the
+   bell's `.tx` is. */
+.ntf-ev-title { color: var(--fg); font-weight: 600; }
+.ntf-ev-text {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; margin-top: .125rem;
+  font-size: .75rem; color: var(--faint); line-height: 1.45;
+}
 /* P16-UI-02: the "showing the most recent N" footer on the notifications page,
    shown when the loader's over-fetch proves the inbox is longer than the page.
    It had no rule; its three declarations were an inline style. */
@@ -4861,6 +4869,13 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   .pj-row .pj-meter { display: none; }
   .pj-row .pj-name { min-width: 0; }
   .pj-row .pj-link { padding-right: 4.4rem; }
+  /* U39-16: a notification row's trailing controls (Mark read, the dot, the
+     time) took the right half of a 241px row, and the notice itself read a
+     word per line ("Policy / engine · GitHub / sync / is"). On a phone they
+     take their own line, under the text. */
+  .ntf-ev { flex-wrap: wrap; row-gap: .25rem; }
+  .ntf-ev .pev-main { flex: 1 1 calc(100% - 26px - .75rem); }
+  .ntf-ev .pev-main + * { margin-left: calc(26px + .75rem); }
 }
 
 /* Neutralize anchor defaults on link-shaped controls. */

@@ -79,7 +79,7 @@ export function RichText({
     pushProse(text.slice(last, m.index));
     const tok = m[0];
     if (tok.startsWith("**")) {
-      parts.push(<strong key={key++}>{tok.slice(2, -2)}</strong>);
+      parts.push(<strong key={key++}>{codeSpans(tok.slice(2, -2))}</strong>);
     } else {
       parts.push(
         <code key={key++} className="mono">
@@ -91,4 +91,30 @@ export function RichText({
   }
   pushProse(text.slice(last));
   return <Fragment>{parts}</Fragment>;
+}
+
+/**
+ * U39-15: `code` inside a **bold** run. The one pass above matches the bold
+ * run whole, so its backticks printed literally: the lease notice's own
+ * headline, "**AX-22 now holds `internal/controller/task.go`**", read with
+ * the marks in it on every notification row. Mentions inside bold stay prose,
+ * as before.
+ */
+function codeSpans(text: string): ReactNode {
+  const out: ReactNode[] = [];
+  const re = /`[^`]+`/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push(
+      <code key={m.index} className="mono">
+        {m[0].slice(1, -1)}
+      </code>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (out.length === 0) return text;
+  if (last < text.length) out.push(text.slice(last));
+  return out;
 }

@@ -174,6 +174,22 @@ what they strand, and record an optional reason.
   "U39-13".
 - **Also (425(c) follow-up):** in the rail a long link title now wraps beside its pill (8rem
   basis) with the pill on the title's first line (`align-items: baseline`).
+- **U39-14 (MED) — a decision notice in the notification stream is the whole packet body.** A
+  resolved decision falls from "Waiting on you" to the stream, which printed `from · text` and no
+  title. The text of a deadlock notice is the full packet body, so the notifications page showed
+  fourteen-line walls (AX-20 round 7, AX-22 round 9). The bell already showed a title plus two
+  clamped lines. **Fixed:** a titled notice reads as its title, then its body clamped to two lines,
+  and the task holds the rest. Test: `notifications-page.test.tsx` "U39-14".
+- **U39-15 (LOW) — `code` inside **bold** printed its backticks.** The lease notice's headline is
+  written as "**AX-22 now holds `internal/controller/task.go`…**", and every notification row and
+  timeline line using the one-line renderer showed the marks. A test pinned the limitation
+  ("does not nest"). **Fixed:** `RichText` renders code inside a bold run. The test now pins the
+  rendering, and the "U39-15" canary goes red without it.
+- **U39-16 (MED) — on a phone the notification stream reads a word per line.** Measured at
+  375px: the text column was 90px beside Mark read, the dot and the time, and the overlay scrolled
+  sideways (372px of 241). **Fixed:** in the 560px block the trailing controls take their own line
+  under the text. Checked in a production preview with the rule injected: text 201px, controls
+  below. Test: `app.css.test.ts` "U39-16".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
