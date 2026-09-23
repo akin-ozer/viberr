@@ -14,6 +14,8 @@ import {
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import { newId } from "~/shared/ids/new-id.server";
 import { taskClosure } from "~/server/tasks/task-closure.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
+import { POLICY_ENGINE_NOTIFY_FROM } from "~/server/tasks/task-mutation.server";
 import {
   recordAudit,
   type AuditActor,
@@ -223,17 +225,6 @@ function recordGithubProvenance(
   );
 }
 
-/** `users.name` is NOT NULL, so a row that fails this parse is a missing user —
- *  the id is then the honest display fallback. */
-const userNameRow = z.object({ name: z.string() });
-
-function userName(db: DatabaseSync, userId: string): string {
-  const row = userNameRow.safeParse(
-    db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId),
-  );
-  return row.success ? row.data.name : userId;
-}
-
 // ------------------------------------------------------------- reconcile
 
 export type TaskReconcileResult =
@@ -264,13 +255,6 @@ export type TaskReconcileResult =
    * with an honest count instead of a 500.
    */
   | { status: "task_error"; taskKey: string; message: string };
-
-/** Notification sender for R8-6 GitHub divergence alerts (an `ActorRender`
- * system identity, matching the "Policy engine" timeline actor). */
-const POLICY_ENGINE_NOTIFY_FROM = {
-  kind: "system" as const,
-  name: "Policy engine",
-};
 
 /**
  * F19-19: ONE reconcile pass per task at a time.
@@ -1875,7 +1859,7 @@ export async function mergeTaskPr(
       actor: {
         kind: "human",
         userId: actor.userId,
-        nameHint: userName(db, actor.userId),
+        nameHint: userDisplayName(db, actor.userId),
       },
       title: null,
       text: `Merged **PR #${prNumber}** into \`${gh.defaultBranch}\`.`,
@@ -2217,7 +2201,7 @@ export async function deleteTaskRemoteBranch(
       actor: {
         kind: "human",
         userId,
-        nameHint: userName(db, userId),
+        nameHint: userDisplayName(db, userId),
       },
       title: null,
       text:
@@ -2410,7 +2394,7 @@ export async function resolveRemoteBranchCollision(
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
         type: "github",
-        actor: { kind: "human", userId, nameHint: userName(db, userId) },
+        actor: { kind: "human", userId, nameHint: userDisplayName(db, userId) },
         title: null,
         text: `Branch collision cleared: ${fate}. PR #${unowned} was not ${input.taskKey}'s review PR; it only stood on the name.`,
         toAgent: false,

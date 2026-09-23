@@ -5,6 +5,7 @@ import {
   agentRoleDisplay,
   systemIdToName,
 } from "~/server/files/actor-ref.server";
+import { initialsOf } from "~/ui/initials";
 
 /**
  * Actor render shapes — exactly the mock's polymorphic `who`/`actor`/`from`
@@ -44,16 +45,6 @@ export type ActorRender =
  *  set only for a non-member — see `createActorResolver`). */
 type HumanActorRender = Extract<ActorRender, { kind: "human" }>;
 
-/** First letters of the first two words, uppercased ("Deniz Şahin" → "DŞ"). */
-export function initialsOfName(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return parts
-    .slice(0, 2)
-    .map((word) => word[0]!.toUpperCase())
-    .join("");
-}
-
 interface UserDisplayRow {
   id: string;
   name: string;
@@ -88,7 +79,7 @@ export function createActorRenderOverlay(
     return {
       ...actor,
       name: row.name,
-      initials: initialsOfName(row.name),
+      initials: initialsOf(row.name),
       tone: row.avatar_tone ?? actor.tone,
     };
   };
@@ -146,7 +137,7 @@ export function createActorResolver(
           kind: "human",
           userId: ref.userId,
           name,
-          initials: initialsOfName(name),
+          initials: initialsOf(name),
           tone: row?.avatar_tone ?? "",
         };
         // `guest` is a marker: the key is ABSENT for a member, never `false`.
@@ -161,10 +152,12 @@ export function createActorResolver(
  * C5 (pass 34, U34-4): the controller INSTRUMENT on a human's audit label.
  *
  * Ruling 99(b) requires a controller-driven write to disclose the instrument:
- * the person is the authority, the controller is the tool they used. Both
- * producers (`controller-tool-guards.server.ts`, `controller-run.server.ts`)
- * build that label here, so there is no second literal to drift from, and the
- * Activity column decodes it here too.
+ * the person is the authority, the controller is the tool they used, so an
+ * audit row a person writes THROUGH the controller carries it in its
+ * `actor_label`. Both producers (`controller-tool-guards.server.ts`,
+ * `controller-run.server.ts`) build that label here and both readers (the
+ * Activity page's audit column, U34-4, and `actorProseName`) decode it here, so
+ * there is no second literal to drift from.
  */
 const CONTROLLER_INSTRUMENT_SUFFIX = " \u00b7 via controller";
 
@@ -172,8 +165,8 @@ export function encodeControllerInstrument(email: string): string {
   return `${email}${CONTROLLER_INSTRUMENT_SUFFIX}`;
 }
 
-/** The person behind an instrumented label, or null when there is no
- *  instrument on it. */
+/** The person's own label (the email) behind an instrumented label, or null
+ *  when there is no instrument on it. */
 export function decodeControllerInstrument(raw: string): string | null {
   return raw.endsWith(CONTROLLER_INSTRUMENT_SUFFIX)
     ? raw.slice(0, -CONTROLLER_INSTRUMENT_SUFFIX.length)

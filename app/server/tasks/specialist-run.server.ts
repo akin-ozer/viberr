@@ -50,6 +50,7 @@ import type {
 } from "~/schemas/project-file.schema";
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import {
+  OPERATOR_AUDIT_ACTOR,
   recordAudit,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
@@ -4322,7 +4323,7 @@ function runtimeAuditActor(
   actor: TaskActor,
   what: string,
 ): AuditActor {
-  if (ctx.operatorAuthorized) return { userId: null, label: "operator" };
+  if (ctx.operatorAuthorized) return OPERATOR_AUDIT_ACTOR;
   requireRuntimeRole(db, ctx, projectSlug, actor, what);
   return { userId: actor.userId, label: actor.label };
 }

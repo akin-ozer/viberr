@@ -256,6 +256,12 @@ export function stageDisplayName(
 
 export const OPERATOR_NOTIFY_FROM: ActorRender = { kind: "agent", name: "Operator" };
 
+/** The policy engine as a notification sender: the `ActorRender` of the
+ *  `system:policy-engine` timeline actor. GitHub divergence alerts (R8-6), the
+ *  reconcile poller's notices, scope violations and the review-deadlock
+ *  escalation (ruling 237) all send as it. */
+export const POLICY_ENGINE_NOTIFY_FROM: ActorRender = { kind: "system", name: "Policy engine" };
+
 export interface TaskWatcherNotice {
   projectSlug: string;
   taskKey: string;

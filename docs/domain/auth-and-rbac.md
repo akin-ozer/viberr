@@ -352,7 +352,7 @@ at boot, every 6 hours and on disk pressure.
 
 **Reading a controller-driven write** (ruling 99(b)). A write the controller makes for a
 person is audited under that person with the controller named as the instrument
-(`encodeControllerInstrument` in `app/server/files/actor-ref.server.ts`). The Activity
+(`encodeControllerInstrument` in `app/shared/mapping/actor.server.ts`). The Activity
 audit column renders it as "<name> (via the controller)" through `auditActorDisplay`, on
 both the joined-name and the userless leg. The org Audit log and `inspect_audit_log`
 keep the RAW stored label deliberately: they are the forensic surfaces, and the raw

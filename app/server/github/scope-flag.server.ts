@@ -16,7 +16,10 @@ import {
   type ScopeViolationRecord,
 } from "~/server/projections/policy-violations.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { notifyTaskWatchers } from "~/server/tasks/task-mutation.server";
+import {
+  notifyTaskWatchers,
+  POLICY_ENGINE_NOTIFY_FROM,
+} from "~/server/tasks/task-mutation.server";
 
 /**
  * Policy-engine side effects around scope violations (ruling 5 + github
@@ -189,7 +192,7 @@ export async function flagScopeViolation(
         taskKey: input.taskKey,
         kind: "policy",
         text: input.detail,
-        from: { kind: "system", name: "Policy engine" },
+        from: POLICY_ENGINE_NOTIFY_FROM,
       },
       { dataRoot: ctx.dataRoot },
     );

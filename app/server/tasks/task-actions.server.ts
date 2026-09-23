@@ -160,6 +160,7 @@ import {
   notifyTaskWatchers,
   loadProjectContext,
   OPERATOR_NOTIFY_FROM,
+  POLICY_ENGINE_NOTIFY_FROM,
   type TaskActor,
   type TaskWatcherNotice,
   type TaskMutationContext,
@@ -225,10 +226,8 @@ import {
   clearModelMark,
 } from "~/server/runtimes/model-availability.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
-import {
-  createActorResolver,
-  initialsOfName,
-} from "~/shared/mapping/actor.server";
+import { createActorResolver } from "~/shared/mapping/actor.server";
+import { initialsOf } from "~/ui/initials";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { logger } from "~/server/logging/logger.server";
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
@@ -1668,7 +1667,7 @@ export async function appendComment(
       kind: "human",
       userId: actor.userId,
       name: actorName,
-      initials: initialsOfName(actorName),
+      initials: initialsOf(actorName),
       tone: avatarTone(db, actor.userId),
     },
     }),
@@ -4330,7 +4329,7 @@ export async function recordAgentCompletion(
           // Operator raised it — contradicting the card, which says
           // `from: policy-engine`, and contradicting the ruling, whose whole
           // point is that this is not the operator's judgement.
-          from: { kind: "system", name: "Policy engine" },
+          from: POLICY_ENGINE_NOTIFY_FROM,
         },
         ctx,
       );
@@ -9666,7 +9665,7 @@ export async function retryReviewDeadlockEscalation(
         ptype: "input",
         title: `Decision needed: ${packet.title}`,
         text: packet.body,
-        from: { kind: "system", name: "Policy engine" },
+        from: POLICY_ENGINE_NOTIFY_FROM,
       },
       ctx,
     );
@@ -12380,7 +12379,7 @@ export async function requestPacketMaintainerDecision(
           kind: "human",
           userId: actor.userId,
           name: fromName,
-          initials: initialsOfName(fromName),
+          initials: initialsOf(fromName),
           tone: avatarTone(db, actor.userId),
         }
       : OPERATOR_NOTIFY_FROM,

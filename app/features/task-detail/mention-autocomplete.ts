@@ -1,4 +1,5 @@
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
+import { initialsOf } from "~/ui/initials";
 import {
   backendRunMark,
   type TaskRunPrincipalView,
@@ -100,18 +101,6 @@ export function flattenMentionables(
     });
   }
   return out;
-}
-
-function initialsOf(name: string): string {
-  return (
-    name
-      .trim()
-      .split(/\s+/)
-      .map((w) => w[0] ?? "")
-      .slice(0, 2)
-      .join("")
-      .toUpperCase() || "?"
-  );
 }
 
 // ------------------------------------------------------------ token detect

@@ -7,6 +7,7 @@ import type {
   RunView,
 } from "~/features/runtime/runtime-types";
 import {
+  OPERATOR_AUDIT_ACTOR,
   recordAudit,
   SYSTEM_ACTOR,
   type AuditActor,
@@ -724,9 +725,6 @@ export function reserveRun(
   };
 }
 
-/** Runs started by the operator runtime itself (scheduling reactions). */
-const OPERATOR_ACTOR: AuditActor = { userId: null, label: "operator" };
-
 const DEFAULT_THREAD = {
   operator: "op",
   primary: "primary",
@@ -1105,7 +1103,9 @@ export async function startRun(
   // Phase 10 / contracts — run start + interrupt both leave audit rows).
   recordAudit(db, {
     action: "runtime.run.started",
-    actor: input.actor ?? OPERATOR_ACTOR,
+    // No actor: the operator runtime started the run itself (a scheduling
+    // reaction).
+    actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     subjectKind: "run",
     subjectId: runId,
     projectSlug: input.projectSlug,

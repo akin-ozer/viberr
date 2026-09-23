@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { decodeControllerInstrument } from "~/server/files/actor-ref.server";
+import { decodeControllerInstrument } from "~/shared/mapping/actor.server";
 
 const userNameRowSchema = z.object({ name: z.string() });
 
@@ -16,7 +16,9 @@ const userNameRowSchema = z.object({ name: z.string() });
  * keep the two out of a module cycle (ruling 207(e)).
  *
  * Returns the id when no such user exists, so a caller can tell "resolved" from
- * "unknown" by comparing against the id it passed.
+ * "unknown" by comparing against the id it passed. `users.name` is NOT NULL, so
+ * a row that fails the parse is a missing user, and the id is then the honest
+ * display fallback.
  */
 export function userDisplayName(db: DatabaseSync, userId: string): string {
   const row = userNameRowSchema.safeParse(
@@ -40,8 +42,8 @@ export function actorProseName(
   db: DatabaseSync,
   actor: { userId: string | null; label: string },
 ): string {
-  const { label, viaController } = decodeControllerInstrument(actor.label);
+  const person = decodeControllerInstrument(actor.label);
   const name = actor.userId ? userDisplayName(db, actor.userId) : null;
-  const who = name && name !== actor.userId ? name : label;
-  return viaController ? `${who} (via the controller)` : who;
+  const who = name && name !== actor.userId ? name : (person ?? actor.label);
+  return person !== null ? `${who} (via the controller)` : who;
 }

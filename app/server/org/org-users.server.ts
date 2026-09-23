@@ -40,7 +40,7 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { releaseTasksOwnedBy } from "~/server/tasks/task-actions.server";
 import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { newId } from "~/shared/ids/new-id.server";
-import { initialsOfName } from "~/shared/mapping/actor.server";
+import { initialsOf } from "~/ui/initials";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
 
 /**
@@ -112,7 +112,7 @@ export function toOrgUserView(user: UserRecord): OrgUserView {
     id: user.id,
     name: user.name,
     email: user.email,
-    initials: initialsOfName(user.name),
+    initials: initialsOf(user.name),
     tone: user.avatarTone ?? "",
     role: user.role,
     status,

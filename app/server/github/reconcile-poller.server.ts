@@ -3,6 +3,7 @@ import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
+import { POLICY_ENGINE_NOTIFY_FROM } from "~/server/tasks/task-mutation.server";
 import {
   reconcileProject,
   RECONCILE_POLL_TASK_BUDGET,
@@ -39,11 +40,6 @@ export function reconcileSummaryFailed(summary: ProjectReconcileSummary): boolea
  */
 
 export const RECONCILE_POLL_MS = 5 * 60_000; // 5 minutes
-
-const POLICY_ENGINE_NOTIFY_FROM = {
-  kind: "system" as const,
-  name: "Policy engine",
-};
 
 /**
  * Nudge for tasks accepted into Done whose PR is still OPEN on GitHub — the

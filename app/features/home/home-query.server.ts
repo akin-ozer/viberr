@@ -13,10 +13,8 @@ import {
   listMcpServers,
   listSkills,
 } from "~/server/org/resources.server";
-import {
-  createActorResolver,
-  initialsOfName,
-} from "~/shared/mapping/actor.server";
+import { createActorResolver } from "~/shared/mapping/actor.server";
+import { initialsOf } from "~/ui/initials";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { indexDecisionInbox } from "~/server/projections/notifications.server";
 
@@ -372,7 +370,7 @@ export function getHomeOrgSummary(
       disabled,
       first: users.slice(0, 5).map((u) => ({
         name: u.name,
-        initials: initialsOfName(u.name),
+        initials: initialsOf(u.name),
         tone: u.avatarTone ?? "",
       })),
     },

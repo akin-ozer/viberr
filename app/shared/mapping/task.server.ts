@@ -63,6 +63,7 @@ export function nextScheduleDueAt(schedulesJson: string): string | null {
   return due[0] ?? null;
 }
 import {
+  agentBackendName,
   agentRoleDisplay,
   decodeActorRef,
   systemIdToName,
@@ -534,10 +535,6 @@ export function isAtAcceptanceBoundary(
     workflow.some((w) => w.from === stageId && w.to === terminalId) ||
     stageId === reviewId
   );
-}
-
-function agentBackendName(backend: "codex" | "claude"): string {
-  return backend === "codex" ? "Codex" : "Claude";
 }
 
 export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
