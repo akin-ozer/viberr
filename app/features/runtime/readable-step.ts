@@ -27,6 +27,10 @@ export function readableStep(detail: string): string {
     .replace(/\bmcp__[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*__([A-Za-z0-9_]+)/g, (_m, tool: string) =>
       tool.replace(/_/g, " "),
     )
+    // A tool id the 120-character cap cut before its name ("mcp__viberr_
+    // controller_…", live on the second tool of a loading step) names nothing
+    // a person can read, so only the ellipsis stays.
+    .replace(/\bmcp__[A-Za-z0-9_-]*…/g, "…")
     .replace(/\{[^{}]*\}/g, (json) => flatValues(json) ?? json);
 }
 

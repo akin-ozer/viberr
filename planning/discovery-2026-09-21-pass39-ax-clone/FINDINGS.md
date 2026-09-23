@@ -280,7 +280,10 @@ what they strand, and record an optional reason.
   the first thing a person reads about the work is the loader's query syntax. **Fixed:**
   `readableStep` reads it as "loading tools · get task, list decisions", and a keyword search as
   "looking up tools · …". The stored text stays on the `title`. Test:
-  `controller-page.test.tsx` "U39-28".
+  `controller-page.test.tsx` "U39-28". Live after deploy 2 (03:58) the strip read "loading tools ·
+  read knowledge base doc, mcp__viberr_controller_… answered": the 120-character cap had cut the
+  second id before its tool name, so the prefix pattern could not match it. A cut id now reads as
+  the ellipsis alone.
 
 - **U39-29 (MED) — the controller answers in task keys, and none of them could be clicked.**
   03:30, the reply to my request: "I created two urgent core tasks for the Developer, AX-33 and

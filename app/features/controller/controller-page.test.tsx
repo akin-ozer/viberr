@@ -683,6 +683,13 @@ describe("the open conversation's execution", () => {
       ),
     ).toBe("composing · loading tools · get task, list decisions… answered");
     expect(readableStep("ToolSearch · query: slack send")).toBe("looking up tools · slack send");
+    // Live after the deploy: the cap cut the second id before its tool name.
+    // CANARY: drop the truncated-id replacement.
+    expect(
+      readableStep(
+        "composing · ToolSearch · query: select:mcp__viberr_controller__read_knowledge_base_doc,mcp__viberr_controller_… answered",
+      ),
+    ).toBe("composing · loading tools · read knowledge base doc, … answered");
   });
 
   it("U39-29: the tasks a reply names open from the transcript", async () => {

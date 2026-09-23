@@ -1353,3 +1353,41 @@ not lost work.
   handed delivery to the Developer: "Resolve the authorized base conflict in your workspace:
   merge `origin/main` into the AX-28 task branch, preserving AX-22, AX-26, and AX-32's changes
   in `internal/controller/task.go` … Do not push or open a PR."
+
+## 49. Four merges, two core tasks, and deploy 2 (03:00 to 04:05 UTC)
+
+- **The board moved on the owner's decisions.** I accepted AX-28 (PR #22, 03:31), AX-29 (PR #23,
+  03:34) and AX-33 (PR #26, 03:56). Before each, I checked that the branch contained main, or
+  merged main into it in a scratch clone inside the container and ran `go test ./...`. AX-29 onto
+  AX-28's main: every package ok. Main after AX-28 (`3355c6a`): every package ok. AX-33 already
+  contained main, so the tree the reviewer tested is the tree that merged.
+- **The controller made the two core tasks the surface work needed** (03:30): AX-33 (the log
+  store's `Reset` wakes its followers) and AX-34 (a suspended group survives the death of the
+  control plane that started it). It confirmed AX-31 covers neither and set AX-21 to wait on
+  AX-33 and AX-30 on AX-34. Its explanation of AX-34 is the real mechanism: POSIX sends SIGHUP
+  and SIGCONT to an orphaned process group that has stopped members. AX-33 went from Triage to
+  approved in 21 minutes and released AX-21 on its merge (03:53:17).
+- **Deploy 2** (`540dcb9c`, built 03:52:07) carries rulings 437 to 439, F39-59, F39-63, F39-64
+  and U39-26 to U39-29. The boot re-invoked the operators of the four interrupted tasks (AX-34,
+  AX-5, AX-31, AX-27) within 0.3 seconds of the integrity check. The browser stayed signed in.
+- **Seen live after the deploy, on the controller page:**
+  - U39-29: 91 task keys in the open transcript are links, none with a `target`. Clicking AX-33
+    opened `/projects/ax-clone/tasks/AX-33` in the same tab.
+  - U39-26: the Live run strip's step matches the working row's, word for word ("read pull
+    request · prNumber: 26 · path: internal/runtime/logs.go").
+  - U39-28: the first step read "loading tools · read knowledge base doc, …". The second id was
+    cut by the cap before its tool name and stayed raw, which the follow-up in U39-28 fixes.
+  - Ruling 436: the controller paged a default-branch file with `fromLine: 140`
+    (`internal/apis/types.go`).
+- **Ruling 439, live on AX-27 (03:56 to 03:58).** The Surface Developer resolved the `cli.go`
+  conflict I routed to it, and its delivery minted `rev_ed08HCSA0heL` at `126c4ba` (authored
+  work, so a new revision is right). At 03:57:56 the operator's refresh merged three `main`
+  commits onto it as `6f9bd00` and recorded `onto: 126c4ba`, the revision's own head. The same
+  write stamped the revision's `pushedAt` (03:57:56.400, the refresh's own instant), because the
+  push that published the merge published the revision under it. `deliver_for_review` then
+  opened PR #27 on `6f9bd00` at 03:58:01, and the revision is still `rev_ed08HCSA0heL` at
+  `126c4ba`. Before 439 that delivery's reconcile minted the refreshed head as a new revision,
+  which is what staled AX-29's approval. The refresh sentence made no drift claim, because no PR
+  existed yet.
+- **Not yet seen live:** 439's review re-pin, which needs a reviewer on AX-27, and F39-64, which
+  needs a refresh on a task that already has a PR.
