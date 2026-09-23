@@ -1508,3 +1508,22 @@ not lost work.
   Developer fixed the command-path finding and stopped at findings 2 and 3 (F39-70's cost, exactly
   as logged), and AX-31's reviewer approved `19dc607`.
 
+## 55. The owner signed in: AX-31 accepted, two packets answered (16:05 to 16:08 UTC)
+
+- **AX-31 accepted and merged.** Before accepting I checked on the host clone that `ax-31`
+  (`5269341`) contained `main` (`00bc520`); the reviewer had run `make gate` and `make race` on that
+  head. The dialog said the same: "ax-31 carried main at the last GitHub check, so the reviewed head
+  merges as it is". MERGE HEAD `5269341` · base refreshed · 1 merge commit · 2 base commits, and no
+  re-review button, correct with nothing behind (ruling 449). PR #25 merged at 16:05:49, and the
+  completion record names the base refresh it shipped. AX-34, held on AX-31 since 04:15, was released
+  at 16:05:50 with the "since the hold" wording, which is right for a real hold (F39-65's birth wording
+  applies only to a link released at its mint).
+- **AX-5, ruling 447 live.** The Developer's lease question was moot once AX-31 landed. My directive
+  said "Operator: bring ax-5 up to date with main …". At 16:06:34 the timeline reads "The answer names
+  the operator, so it went to the operator to route, not back to Developer, who asked."
+- **AX-5, rulings 442 and 450 live.** The operator's one turn refreshed `ax-5` (9 base commits,
+  merge `1238685`, which also published the Developer's unpushed `88b5e2e`) at 16:07:38 and dispatched
+  the Developer on findings 2 and 3 at 16:07:39: the refresh and the step it prepares in one plan.
+- **AX-35:** "Continue AX-35 review now", with a note applying the AX-31 rule (neither waits, nothing
+  leased; the second to land resolves `cli.go` and `server.go` on its own branch).
+
