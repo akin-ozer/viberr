@@ -209,6 +209,9 @@ what they strand, and record an optional reason.
   fits (80 at most). Otherwise the text is clipped at a word. "(PR #19)." ends a sentence and
   "0.19.0" does not. Existing threads keep their stored titles. Test:
   `controller-conversations.server.test.ts` "U39-19".
+- **U39-20 (LOW) — the home page's project card prints the description's backticks.** "A working
+  Go clone of Google's \`ax\` (github.com/google/ax)…", as the controller wrote it. **Fixed:** the
+  card renders it with `RichText`. Test: `home-page.test.tsx` "U39-20".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47

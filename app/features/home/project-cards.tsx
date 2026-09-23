@@ -5,6 +5,7 @@ import { AvatarGroup } from "~/ui/avatar";
 import { useRelativeTime } from "~/ui/use-relative-time";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
+import { RichText } from "~/ui/rich-text";
 import { connectionPill } from "~/features/github/github-pills";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import type { HomeMember, HomeProjectCard } from "./home-query.server";
@@ -258,7 +259,14 @@ export function ProjectCard({
             <RepoLine repo={p.repo} access={repoAccess} />
           </span>
         </div>
-        {showDesc && <p className="pj-desc">{p.desc}</p>}
+        {/* U39-20: a description is written with `code` and **bold**, as the
+            controller wrote ax-clone's ("Google's `ax`"), and the card
+            printed the backticks. */}
+        {showDesc && (
+          <p className="pj-desc">
+            <RichText text={p.desc} mentions={false} />
+          </p>
+        )}
         <StageMeter stages={p.stages} dist={p.dist} />
         <ProjectStats p={p} />
         <div className="pj-foot">
