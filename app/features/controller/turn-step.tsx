@@ -27,9 +27,27 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
   // ("Preparing workspace") is worth the row.
   const detail = [turn.phase, turn.step].filter(Boolean).join(" · ");
   if (!detail) return null;
+  // Ruling 451(a): keyed on the step, so a new step is a new line that rises
+  // in (the sheet's `swap-in`) instead of words changing under the reader.
   return (
-    <span className="ctl-working-step mono" title={detail}>
+    <span key={detail} className="ctl-working-step mono" title={detail}>
       {readableStep(detail)}
+    </span>
+  );
+}
+
+/**
+ * Ruling 451(a): the sentence that says a controller turn is working, on the
+ * dock and the page. A highlight band crosses it while the turn holds (the
+ * sheet's `.ctl-working-text`, transitions.dev's "Shimmer text"): the band is
+ * a copy of these words drawn on `::before` from `data-text`, so the two must
+ * always carry the same string.
+ */
+export function WorkingSentence({ name }: { name: string }): React.ReactNode {
+  const sentence = `${name} is working…`;
+  return (
+    <span className="ctl-working-text" data-text={sentence}>
+      {sentence}
     </span>
   );
 }

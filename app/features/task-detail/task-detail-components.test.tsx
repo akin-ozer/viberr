@@ -3575,6 +3575,33 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     expect(saves).toBe(1);
   });
 
+  it("ruling 451(g): the goal refusal shakes per refused click, never on a keystroke", async () => {
+    // Found in review: after a refused "ab", typing "abc" and then a backspace
+    // mounted the same refusal's box again, and it shook with no click.
+    // CANARY: put `.refused` back on the box whenever `refused` is set.
+    const { container, getByText, queryByRole } = renderWithRouter(
+      <TaskHero task={heroTask()} stage={undefined} canEditGoal />,
+    );
+    fireEvent.click(getByText("Edit"));
+    const ta = container.querySelector<HTMLTextAreaElement>("textarea.goal-textarea")!;
+    const save = [...container.querySelectorAll("button")].find((b) => b.textContent === "Save goal")!;
+    fireEvent.change(ta, { target: { value: "ab" } });
+    fireEvent.click(save);
+    await act(async () => {});
+    const refusal = queryByRole("alert")!;
+    expect(refusal.classList.contains("refused")).toBe(true);
+    fireEvent.animationEnd(refusal);
+    fireEvent.change(ta, { target: { value: "abc" } });
+    expect(queryByRole("alert")).toBeNull();
+    fireEvent.change(ta, { target: { value: "ab" } });
+    expect(queryByRole("alert")).not.toBeNull();
+    expect(queryByRole("alert")!.classList.contains("refused")).toBe(false);
+    // The next refused click shakes again.
+    fireEvent.click(save);
+    await act(async () => {});
+    expect(queryByRole("alert")!.classList.contains("refused")).toBe(true);
+  });
+
   it("ruling 147: a re-opened editor is pristine, never still marked", async () => {
     const { container, getByText, queryByRole } = renderWithRouter(
       <TaskHero task={heroTask()} stage={undefined} canEditGoal />,

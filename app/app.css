@@ -2656,9 +2656,11 @@ dialog[data-closing]::backdrop {
 .cap-msum { margin-left: auto; display: inline-flex; gap: .5rem; }
 .cap-msum .cs { display: inline-flex; align-items: center; gap: .25rem; font-family: var(--font-mono); font-size: .75rem; color: var(--faint); }
 .cap-msum .cs .d { width: .5rem; height: .5rem; border-radius: 50%; }
-/* Entrance matches the rotating chevron's .15s beat (reuses the board's
-   dropPreviewIn keyframes); collapse stays instant — exits faster than enters. */
-.cap-mbody { padding: .25rem .75rem .5rem; animation: dropPreviewIn .16s var(--ease-out); }
+/* Entrance matches the rotating chevron's .15s beat; collapse stays instant —
+   exits faster than enters. It named the board's `dropPreviewIn`, which the
+   drag rebuild deleted (7c24fabc), so it did not play for anyone but a
+   reduced-motion reader; `reveal-down` is that keyframe, kept (ruling 451(b)). */
+.cap-mbody { padding: .25rem .75rem .5rem; animation: reveal-down .16s var(--ease-out); }
 .ctx-empty { margin: .25rem 0 .125rem; font-size: .75rem; color: var(--faint); }
 .cap-mrow { display: flex; align-items: center; gap: .75rem; padding: .375rem 0; border-bottom: 1px solid var(--hairline); flex-wrap: wrap; }
 .cap-mbody .cap-mrow:last-child { border-bottom: 0; }
@@ -6470,8 +6472,9 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 .dock-msgs .ctl-msg { max-width: 100%; }
 .dock-msgs .ctl-msg.from-user { max-width: 92%; }
 /* Only a message that arrives while the conversation is already on screen
-   animates (the component marks it); history never does. */
-.dock-msgs .ctl-msg[data-fresh] { animation: dock-msg-in .2s var(--ease-out); }
+   animates (the component marks it); history never does. The dock and the
+   full controller page share the rule (ruling 451(d)). */
+.ctl-msg[data-fresh] { animation: dock-msg-in .2s var(--ease-out); }
 @keyframes dock-msg-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
@@ -6499,7 +6502,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
     transition: opacity .12s ease;
   }
   .dock .dock-panel[data-closing] { opacity: 0; transform: none; }
-  .dock-msgs .ctl-msg[data-fresh] { animation: fade-in .12s ease; }
+  .ctl-msg[data-fresh] { animation: fade-in .12s ease; }
   /* Both dots: the one on the trigger and the one in the panel's working row,
      which kept pulsing forever inside the sheet. */
   .dock .live-dot::after { animation: none; }
@@ -6913,3 +6916,95 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 .cache-table tbody tr:last-child td { border-bottom: 0; }
 .cache-table .group td { padding-top: .625rem; font-weight: 600; color: var(--muted); text-align: left; border-bottom: 0; }
 .cache-table .na { color: var(--faint); }
+
+/* ---------- appended: ruling 451, motion from transitions.dev ---------- */
+/* Seven places the owner asked to move (2026-09-23), drawn from the
+   transitions.dev catalogue. Its smooth-out curve, cubic-bezier(.22,1,.36,1),
+   is this sheet's --ease-out in all but rounding, so every rule here uses
+   --ease-out; its durations stand, trimmed where a glyph is a third of the size
+   the recipe was tuned for. Every rule has its reduced-motion answer in the
+   block that closes this section. */
+
+/* swap-in: a line whose words were replaced rises in through a 2px blur
+   ("Text states swap", the entering half; the outgoing words leave at once,
+   exits faster than enters). */
+@keyframes swap-in { from { opacity: 0; transform: translateY(4px); filter: blur(2px); } to { opacity: 1; transform: none; filter: none; } }
+/* reveal-down: a body opening under its own header drops into place. */
+@keyframes reveal-down { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* (a) The live status line ("Thinking states"). A new phase or step is keyed
+   on its text, so it arrives as a new line that rises in. The sentence that
+   says a controller turn is working carries a highlight band while the turn
+   holds. The live-run panel takes the swap only, because its spinner and dot
+   already say it is alive. The band is a copy of the words on ::before,
+   clipped to the glyphs, so the real text keeps its colour and selection. The
+   `/ ""` alt text stops a screen reader reading the sentence twice. */
+.run-phase .ph, .run-phase .step, .ctl-working-step { animation: swap-in .15s var(--ease-out); }
+.ctl-working-text { position: relative; }
+.ctl-working-text::before {
+  content: attr(data-text) / "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 40%, var(--fg) 50%, transparent 60%) 100% 0 / 400% 100% no-repeat;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; -webkit-text-fill-color: transparent;
+  animation: shimmer 2s linear infinite;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* (c) A copy control trades its copy mark for the check and back ("Icon swap":
+   both glyphs in one grid cell, the hidden one at scale .25 behind a 2px blur;
+   .2s where the recipe says .25s, for a 13-15px glyph). The word "Copied"
+   rises in with the check (alone, on the console's word-only control); the
+   resting word returns at once. An inline-block takes no underline from its
+   parent, so it inherits the console control's hover underline itself. */
+.copy-glyph { display: inline-grid; flex: none; }
+.copy-glyph > .ico { grid-area: 1 / 1; transition: opacity .2s var(--ease-out), transform .2s var(--ease-out), filter .2s var(--ease-out); }
+.copy-glyph > .ico + .ico,
+.copy-glyph[data-copied] > .ico:first-child { opacity: 0; transform: scale(.25); filter: blur(2px); }
+.copy-glyph[data-copied] > .ico + .ico { opacity: 1; transform: none; filter: none; }
+.copy-done { display: inline-block; text-decoration: inherit; animation: swap-in .15s var(--ease-out); }
+
+/* (f) A sign-in step that completes draws its check ("Success check", sized to
+   the 13px mark, without the recipe's rotate and bob, which it tunes for a
+   40px badge). The mark settles in from .8 while the stroke draws. The dash is
+   the check path's length (M5 12.5l4.5 4.5L19 7, about 20.2, rounded up). The
+   draw's `from` holds through its 80ms delay, so a check whose animation never
+   runs is drawn whole, never missing. */
+.signin-step[data-state="done"] .signin-mark .ico { animation: mark-in .2s var(--ease-out); }
+.signin-step[data-state="done"] .signin-mark .ico path { stroke-dasharray: 21; animation: check-draw .3s var(--ease-out) 80ms backwards; }
+@keyframes mark-in { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: none; } }
+@keyframes check-draw { from { stroke-dashoffset: 21; } to { stroke-dashoffset: 0; } }
+
+/* (g) A refusal the person just caused shakes once ("Error state shake": the
+   recipe's own stops, four legs of 80/80/60/60ms, 6px each way, then a 4px
+   overshoot, each leg on its own --ease-out). Every box that can carry
+   `.refused` is keyed on its refusal, so a second refused click mounts a new
+   box and shakes it again. Before, the same sentence stood still, as if the
+   click had been ignored. The class comes from `useRefusalShake`, which drops
+   it once that refusal's shake has played, so a box that mounts again for the
+   same refusal (typing made the field valid and then invalid) stays still.
+   Every box is a flex item or a flex box itself, so the transform lands. */
+.refused { animation: shake .28s linear; }
+@keyframes shake {
+  0% { transform: translateX(0); animation-timing-function: var(--ease-out); }
+  28.57% { transform: translateX(6px); animation-timing-function: var(--ease-out); }
+  57.14% { transform: translateX(-6px); animation-timing-function: var(--ease-out); }
+  78.57% { transform: translateX(4px); animation-timing-function: var(--ease-out); }
+  100% { transform: translateX(0); }
+}
+
+/* Reduced motion: words still replace words, with a fade. Nothing slides,
+   blurs, sweeps, draws or shakes. The check is drawn whole, and the refusal's
+   own sentence carries the news. */
+@media (prefers-reduced-motion: reduce) {
+  .run-phase .ph, .run-phase .step, .ctl-working-step, .copy-done,
+  .signin-step[data-state="done"] .signin-mark .ico { animation: fade-in .12s ease; }
+  .ctl-working-text::before { display: none; }
+  .copy-glyph > .ico,
+  .copy-glyph > .ico + .ico,
+  .copy-glyph[data-copied] > .ico:first-child,
+  .copy-glyph[data-copied] > .ico + .ico { transform: none; filter: none; transition: opacity .12s ease; }
+  .signin-step[data-state="done"] .signin-mark .ico path { animation: none; }
+  .refused { animation: none; }
+}

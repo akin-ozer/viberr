@@ -10,6 +10,7 @@ import {
   projectNameFromRepo,
   slugifyProjectName,
 } from "./project-name";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * The new-project dialog (home spec §4.9) and its fields: name + task key,
@@ -411,6 +412,8 @@ function NewProjectFooter({
   onClose: () => void;
   submit: () => void;
 }) {
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(attempted);
   return (
     <div className="modal-foot">
       <span className="foot-hint mono">
@@ -420,7 +423,8 @@ function NewProjectFooter({
         {blockedReason && (
           <span
             key={attempted ? "alert-" + attempted : "status"}
-            className={"foot-hint" + (attempted ? " err" : "")}
+            className={"foot-hint" + (attempted ? " err" : "") + (attempted && refusalShake.shake ? " refused" : "")}
+            onAnimationEnd={attempted ? refusalShake.onAnimationEnd : undefined}
             role={attempted ? "alert" : "status"}
             id={BLOCK_REASON_ID}
           >

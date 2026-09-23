@@ -5,7 +5,8 @@ import {
   type DependencyRender,
 } from "~/shared/dependencies";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { TurnStep } from "./turn-step";
+import { TurnStep, WorkingSentence } from "./turn-step";
+import { useFreshMessageIds } from "./use-fresh-messages";
 import {
   Link,
   useFetcher,
@@ -563,6 +564,9 @@ function Transcript({
 }) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const count = view.messages.length;
+  // Ruling 451(d): a reply that lands while the transcript is up enters the way
+  // it does in the dock; history never animates.
+  const fresh = useFreshMessageIds(view.messages, view.conversation?.id ?? null);
   useEffect(() => {
     // Ruling 419(b): scroll the TRANSCRIPT, never the page. This used to be
     // `scrollIntoView` on an end marker, which scrolls every scrollable
@@ -625,6 +629,7 @@ function Transcript({
           <article
             key={m.id}
             className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
+            data-fresh={fresh.has(m.id) ? "true" : undefined}
           >
             <header>
               <span className="ctl-msg-who">
@@ -650,7 +655,8 @@ function Transcript({
         ))}
         {view.turn.working && (
           <div className="ctl-working" role="status">
-            <span className="live-dot" /> {view.controllerName} is working…
+            <span className="live-dot" />
+            <WorkingSentence name={view.controllerName} />
             {/* Ruling 250 (F37-79): the turn's own phase and step, in the place
                 the person is waiting. Both are on the run row already and both
                 already render in the live-run panel further down this page;
