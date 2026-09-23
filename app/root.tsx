@@ -12,7 +12,7 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "./app.css";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { z } from "zod";
 import {
   data,
@@ -118,6 +118,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // SSR renders the explicit preference; "system" starts light and is
   // corrected pre-paint by the inline script (hence suppressHydrationWarning).
   const ssrTheme = theme === "dark" ? "dark" : "light";
+  // Ruling 454: one `{__html}` object per preference. React compares it by
+  // identity, and the root loader re-runs on every revalidation, so a fresh
+  // object rewrote the script's text each time (the icon cost, in <head>).
+  const bootScript = useMemo(() => ({ __html: themeBootScript(theme) }), [theme]);
   return (
     <html lang="en" data-theme={ssrTheme} suppressHydrationWarning>
       <head>
@@ -125,9 +129,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
-        <script
-          dangerouslySetInnerHTML={{ __html: themeBootScript(theme) }}
-        />
+        <script dangerouslySetInnerHTML={bootScript} />
       </head>
       <body>
         {children}
