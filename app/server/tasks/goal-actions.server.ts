@@ -1234,7 +1234,7 @@ async function startLinkTaskLocked(
   // Ask the engine once, now that the link carries its task; it is convergent,
   // so an unsatisfied or lagging read leaves the tick to do what it always did.
   if (linkInput.blockedBy) {
-    await releaseTask(db, ctx, projectSlug, created.key).catch((error) => {
+    await releaseTask(db, ctx, projectSlug, created.key, { atBirth: true }).catch((error) => {
       logger.warn("release check after the link's mint failed — the tick will retry", {
         goalId,
         linkIndex,

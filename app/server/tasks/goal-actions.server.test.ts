@@ -255,6 +255,20 @@ describe("chained goals", () => {
     expect(task.frontmatter.blockedBy).toEqual([]);
     expect(task.frontmatter.readiness).not.toBe("blocked");
     expect(task.timeline.some((e) => e.title === "Dependencies released")).toBe(true);
+    // F39-65: and it says what happened. CANARY: drop `{ atBirth: true }`
+    // from the mint's release and the note claims a hold the base "has changed
+    // since", and the owner is told the task "can move again".
+    const released = task.timeline.find((e) => e.title === "Dependencies released")!;
+    expect(released.text).toContain("was done before it was created");
+    expect(released.text).not.toContain("since the hold");
+    // SAFETY: COUNT(*) always answers one row, and `n` is its number.
+    const told = app.db
+      .prepare(`SELECT COUNT(*) AS n FROM notifications WHERE kind = 'dependency' AND title = ?`)
+      .get(`${minted} can move again`) as { n: number };
+    expect(told.n).toBe(0);
+    const { listAuditEvents } = await import("../../../test-support/audit-log");
+    const audit = listAuditEvents(app.db, { action: "task.dependencies.released" }).find((e) => e.taskKey === minted);
+    expect(audit?.details).toMatchObject({ atBirth: true });
   });
 
   it("ruling 359: listGoals resolves each link's wait with its live states", async () => {

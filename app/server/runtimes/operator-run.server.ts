@@ -2955,18 +2955,16 @@ async function executeCodexPlan(
   const consultedProfileIds: string[] = [];
   const record = (toolName: string, result: OperatorActionResult | undefined) => {
     if (!result) return;
-    if (result.outcome === "denied" || result.outcome === "noop") {
-      refused.push({
-        tool: toolName,
-        message: result.message,
-        kind: result.outcome === "denied" ? "authority" : "state",
-      });
+    const refusal = planRefusalOf(toolName, result);
+    if (refusal) {
+      refused.push(refusal);
       return;
     }
     // Ruling 406: the drive acted. Stamped HERE, on the one funnel every plan
     // step already passes through, so a new action shape is covered the day it
     // is added instead of the day it is mistaken for a deliberate hold.
-    if (result.outcome === "done" && ctx.operatorRun) {
+    // Ruling 443: a step whose outcome is the packet it opened acted too.
+    if ((result.outcome === "done" || result.openedPacket) && ctx.operatorRun) {
       ctx.operatorRun.carriedOutAction = true;
     }
   };
@@ -3054,7 +3052,10 @@ async function executeCodexPlan(
               ...base,
               profileId: a.profileId,
             };
-            if (a.text) dispatch.prompt = a.text;
+            // Ruling 446 (F39-70): the directive travels with what this plan's earlier steps
+            // were refused, which the narration below only writes after the
+            // agent has started.
+            if (a.text) dispatch.prompt = withEarlierRefusals(a.text, refused);
             if (a.delivers != null) dispatch.delivers = a.delivers;
             if (a.reason) dispatch.reason = a.reason;
             if (a.completeness) dispatch.completeness = true;
@@ -3303,10 +3304,54 @@ async function narratePausedPlan(
 /** A plan step that did not run, and WHY it did not (see OperatorActionResult):
  *  `authority` = the capability policy (or ownership) refused it;
  *  `state` = the task's current state, or the step itself, ruled it out. */
-interface RefusedPlanStep {
+export interface RefusedPlanStep {
   tool: string;
   message: string;
   kind: "authority" | "state";
+}
+
+/**
+ * Ruling 443: what one plan step's result adds to the plan's refusals, if
+ * anything. `denied` is a refusal by authority and `noop` one by state (the
+ * LV-03 split), except a step whose outcome is the decision packet it opened.
+ * Live on ax-clone AX-21, AX-28 and AX-5 a refresh that met a conflict was
+ * narrated "This step did not apply to the task's current state" beside the
+ * packet it had just opened. The step ran, and its outcome was the packet.
+ */
+export function planRefusalOf(
+  toolName: string,
+  result: OperatorActionResult,
+): RefusedPlanStep | null {
+  if (result.outcome !== "denied" && result.outcome !== "noop") return null;
+  if (result.openedPacket) return null;
+  return {
+    tool: toolName,
+    message: result.message,
+    kind: result.outcome === "denied" ? "authority" : "state",
+  };
+}
+
+/**
+ * Ruling 446 (F39-70): a dispatch in a Codex plan carries the refusals the same plan has
+ * already collected. A plan is written before any step runs, so a directive
+ * can only say "if the lease is refused, ...". The note that answers it is
+ * narrated after the plan's last step, when the agent is already running.
+ * Live on ax-clone AX-5 the Developer was told "Do not modify any path the
+ * lease action refuses" and was never told which paths those were: the note
+ * naming them landed 46 ms after its run started.
+ */
+export function withEarlierRefusals(
+  directive: string,
+  refused: readonly { tool: string; message: string }[],
+): string {
+  if (refused.length === 0) return directive;
+  const one = refused.length === 1;
+  return (
+    `${directive}\n\nViberr did not carry out ${one ? "this earlier step" : "these earlier steps"} ` +
+    "of the operator's plan for this turn. Read the directive above against what actually " +
+    `happened (${one ? "it is" : "each is"} Viberr's answer to the operator):\n` +
+    refused.map((r) => `- \`${r.tool}\`: ${r.message}`).join("\n")
+  );
 }
 
 /**
@@ -4909,10 +4954,15 @@ function dependenciesInstruction(
   const entries = release?.entries.length ? release.entries.join(", ") : "everything it waited on";
   const by = release?.clearedBy ? `${release.clearedBy} cleared the wait on ${entries}` : `${entries} is done`;
   return (
-    `The work this task waited on has landed: ${by}. Viberr released the task (the list is empty, the hold is cleared) and re-invoked you. ` +
-    // Ruling 291: the old wording told the OPERATOR to want the one
-    // operation its own `update_branch_from_base` text forbids it to ask for.
-    "The base branch has CHANGED since the hold: any specialist you dispatch must start from a fresh read of it (say so in the prompt), and delivered work from before the hold may need the base merged into its branch — `update_branch_from_base`, never a rebase. " +
+    (release?.atBirth
+      ? // F39-65: a chain link minted by the completion it waits on. It has no
+        // work from before a hold, so the refresh advice has nothing to act on.
+        `Everything this task waits on was done before it was created (${entries}), so nothing held it. Viberr cleared the list and invoked you. ` +
+        "No work was delivered before now, so there is nothing to bring up to date: any specialist you dispatch starts from the current base. "
+      : `The work this task waited on has landed: ${by}. Viberr released the task (the list is empty, the hold is cleared) and re-invoked you. ` +
+        // Ruling 291: the old wording told the OPERATOR to want the one
+        // operation its own `update_branch_from_base` text forbids it to ask for.
+        "The base branch has CHANGED since the hold: any specialist you dispatch must start from a fresh read of it (say so in the prompt), and delivered work from before the hold may need the base merged into its branch — `update_branch_from_base`, never a rebase. ") +
     (snapshot.openPacket
       ? "A decision packet is open on this task. If it is a hold packet you opened about this very wait, it is now MOOT: `resolve_decision_packet` it first and say why. "
       : "") +

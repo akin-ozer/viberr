@@ -9527,6 +9527,10 @@ export function packetIdentity(p: TaskPacket): string {
   })}`;
 }
 
+/** Ruling 189: the sentence that makes a person's decision part of the
+ *  task's contract. O39-b finds an earlier copy of the same decision by it. */
+const CONTRACT_CLAUSE = "This decision is part of the task's contract from here on.";
+
 export async function resolvePacket(
   db: DatabaseSync,
   input: {
@@ -10644,26 +10648,22 @@ export async function resolvePacket(
   // contract amendment on a task being closed in the same breath binds no
   // future run's work, which is the whole test the exclusion applies.
   const endsTheTask = acceptsInto !== null || option.kind === "force_accept";
-  const goalAmendment: string | null =
+  const goalAnswer: string | null =
     endsTheTask ||
     !clearPacket ||
     customDirective !== "" ||
     PROCESS_ONLY_OPTION_KINDS.has(option.kind)
       ? null
-      : (() => {
-          const when = now.slice(0, 10);
-          const answer = [option.t, option.d]
-            .filter((part) => part.trim())
-            .join(" — ");
-          return (
-            `---\n\n` +
-            `**Decision — ${when}, ${human.nameHint} answered “${packet.title}”:**\n\n` +
-            `${answer}\n\n` +
-            `This decision is part of the task's contract from here on. Where anything ` +
-            `above contradicts it, the decision wins — it was made by the person the ` +
-            `question was put to, and it is not an agent overstepping.`
-          );
-        })();
+      : [option.t, option.d].filter((part) => part.trim()).join(" — ");
+  const goalAmendment: string | null =
+    goalAnswer === null
+      ? null
+      : `---\n\n` +
+        `**Decision — ${now.slice(0, 10)}, ${human.nameHint} answered “${packet.title}”:**\n\n` +
+        `${goalAnswer}\n\n` +
+        `${CONTRACT_CLAUSE} Where anything ` +
+        `above contradicts it, the decision wins — it was made by the person the ` +
+        `question was put to, and it is not an agent overstepping.`;
 
   // U3 (NFR16): set when the acceptance arm found the task already terminal
   // under the lock — the write, and the audit row that belongs to it, are the
@@ -10713,7 +10713,19 @@ export async function resolvePacket(
     // run READS, so the goal won. Appending it here, in the same locked write
     // that clears the packet, needs no model judgement and cannot be forgotten
     // by a turn that fails or is interrupted.
-    if (goalAmendment) parsed.goal = `${parsed.goal.trimEnd()}\n\n${goalAmendment}`;
+    // O39-b: a decision the contract already holds, word for word, is not
+    // written again. Live on ax-clone AX-22 a review deadlock asked round after
+    // round, and every "Let the rework continue" answer appended the same
+    // block: four copies in the text every fresh run re-anchors on. Each
+    // answer is still on the timeline, and ruling 415 carries every one to
+    // the operator.
+    if (
+      goalAmendment &&
+      goalAnswer !== null &&
+      !parsed.goal.includes(`${goalAnswer}\n\n${CONTRACT_CLAUSE}`)
+    ) {
+      parsed.goal = `${parsed.goal.trimEnd()}\n\n${goalAmendment}`;
+    }
     if (clearPacket) parsed.packet = null;
     // Ruling 160 (pass 35, F35-11): a PERSON answering a packet while the
     // task's pull request stands closed without merging is the answer to that

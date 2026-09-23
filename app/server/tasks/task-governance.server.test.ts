@@ -20,7 +20,7 @@ import {
   type TaskPacket,
   type WorkRevision,
 } from "~/schemas/task-file.schema";
-import { readTaskFile } from "~/server/files/task-writer.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import {
   createNotification,
   listNotifications,
@@ -3800,6 +3800,39 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     // The clause that settles the contradiction the amendment may create — the
     // reviewer must not read the answer as an agent overstepping.
     expect(goal).toContain("the decision wins");
+  });
+
+  /**
+   * O39-b, live on ax-clone AX-22: a review deadlock asked round after round,
+   * and every "Let the rework continue" answer appended the same block, four
+   * copies in the goal every fresh run re-anchors on.
+   */
+  it("O39-b: the same decision again is written into the contract once", async () => {
+    const store = prepared();
+    withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
+    const answer = async (optionIndex: number) => {
+      await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+        parsed.packet = QUESTION;
+      });
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex },
+        actor(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+    };
+    const copies = (text: string) => goalOf(store).split(text).length - 1;
+    await answer(0);
+    await answer(0);
+    // CANARY: drop the `includes` guard and the goal holds the block twice.
+    expect(copies("Stripe — Hosted Stripe Checkout.")).toBe(1);
+    // A different answer is a new decision, and it is written.
+    await answer(1);
+    expect(copies("Mock-only — Deterministic, non-monetary.")).toBe(1);
+    expect(copies("the decision wins")).toBe(2);
+    // Each answer is still on the timeline.
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.filter((e) => e.text.startsWith("**Decision:**")).length).toBe(3);
   });
 
   it("writes a CHOSEN option into the goal too, title and description", async () => {

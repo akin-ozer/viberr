@@ -253,6 +253,14 @@ export interface OperatorActionResult {
    */
   outcome: "done" | "recommended" | "denied" | "noop";
   message: string;
+  /**
+   * Ruling 443: the step's outcome IS a decision packet it opened, as when a
+   * base refresh meets a conflict. It tried what it could and left the choice
+   * to a person, which is not a refusal: `outcome` stays `noop` (the state
+   * split above), and a plan's narration does not file it as a step that "did
+   * not apply". Ruling 430 already pauses the acting steps after it.
+   */
+  openedPacket?: true;
   /** Users the action's own watcher notification actually REACHED (routing
    *  prefs applied per recipient). Set by the packet writer so a caller that
    *  owes a fallback notice about the same event (T13) can dedupe per

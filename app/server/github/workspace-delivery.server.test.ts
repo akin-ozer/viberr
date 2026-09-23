@@ -910,6 +910,44 @@ describe("ruling 135: the workspace reconcile records the unpushed revision", ()
     expect(readFm(cleared).timeline[0]!.text).toContain("carries the workspace revision");
   });
 
+  /**
+   * Ruling 445, live on ax-clone AX-5: eleven seconds after the delivery
+   * reconcile minted `b82bb93`, the review queue still said "PR #24 does not
+   * carry the delivered revision 509c0d1", because the workspace could not
+   * read the PR and the line is only re-measured beside that read.
+   */
+  it("ruling 445: a mint the PR cannot be read for re-points the line at the revision that now stands", async () => {
+    const SUPERSEDED = "5".repeat(40);
+    const stale = () =>
+      setupTask("ATL-3", {
+        branch: BRANCH,
+        pr: {
+          number: 9, state: "review", title: "t", headSha: PR_HEAD,
+          unpushedRevision: { revisionSha: SUPERSEDED, prHeadSha: PR_HEAD, relation: "behind" },
+        },
+      });
+    const repointed = stale();
+    // `gh` cannot answer, as in a workspace with no GitHub credential.
+    await reconcile(repointed, fakeExec({ branch: BRANCH, commits: COMMITS, ghMissing: true, ancestry: { prHeadIsAncestor: true } }));
+    // CANARY: drop the re-measure and the line keeps naming 5555555.
+    expect(readFm(repointed).frontmatter.pr?.unpushedRevision).toEqual({
+      revisionSha: HEAD_SHA,
+      prHeadSha: PR_HEAD,
+      relation: "behind",
+    });
+    // A PR head on record that already carries the new revision clears it.
+    const carried = setupTask("ATL-3", {
+      branch: BRANCH,
+      pr: {
+        number: 9, state: "review", title: "t", headSha: HEAD_SHA,
+        unpushedRevision: { revisionSha: SUPERSEDED, prHeadSha: HEAD_SHA, relation: "behind" },
+      },
+    });
+    await reconcile(carried, fakeExec({ branch: BRANCH, commits: COMMITS, ghMissing: true }));
+    expect(readFm(carried).frontmatter.pr).not.toHaveProperty("unpushedRevision");
+    expect(readFm(carried).frontmatter.pr).toMatchObject({ number: 9, headSha: HEAD_SHA });
+  });
+
   it("a settled PR gets no record", async () => {
     const store = owned();
     await reconcile(store, fakeExec({

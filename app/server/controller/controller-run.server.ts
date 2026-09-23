@@ -506,7 +506,7 @@ async function startTurnRun(
   };
   if (dataRoot) contextInput.dataRoot = dataRoot;
   const context = gatherControllerContext(db, contextInput);
-  const prompt = buildTurnPrompt(db, conversation, text, context.text);
+  const prompt = buildTurnPrompt(db, conversation, text, context.text, config.model ?? null);
 
   const actor = {
     userId: input.user.id,
@@ -1003,6 +1003,8 @@ export function buildTurnPrompt(
   text: string,
   /** The context read (controller-context.server.ts), already labelled. */
   context: string | null = null,
+  /** The model this turn runs on, as the controller's settings name it. */
+  model: string | null = null,
 ): string {
   // Every turn carries a SHORT recent-exchange digest: cheap insurance that
   // keeps the conversation coherent even when the provider session behind the
@@ -1014,7 +1016,14 @@ export function buildTurnPrompt(
     ? `Recent exchange (for orientation; the store is the truth for anything that may have changed):\n\n${digest}\n\n---\n\n`
     : "";
   const lead = context ? `${context}\n---\n\n` : "";
-  return `${lead}${head}${conversation.userLabel} says:\n\n${text}`;
+  // Ruling 444: the model is named here, in the one part of the request
+  // rendered fresh every turn. The system prompt is recorded when the
+  // conversation starts (ruling 373) and kept until it compacts, so a model
+  // changed in settings reached the run and not its own description of it.
+  const runtime = model
+    ? `You run on model \`${model}\` this turn. Where your system prompt or earlier turns name another model, this line is current.\n\n---\n\n`
+    : "";
+  return `${lead}${runtime}${head}${conversation.userLabel} says:\n\n${text}`;
 }
 
 /** Bounded transcript digest, oldest first. */
@@ -1132,9 +1141,12 @@ export function buildControllerSystemPrompt(
 
   parts.push(
     "\n\n---\n# Your runtime\n\n" +
-      "You are the instance controller, running on the Claude backend" +
-      (input.config.model ? `, model \`${input.config.model}\`` : "") +
-      ".\n" +
+      // Ruling 444: the model is named in each turn's message instead. This
+      // prompt is recorded for the conversation (ruling 373), so a model named
+      // here went stale the day settings changed it: live on the ax-clone
+      // controller, "Opus 5 ... claude-opus-5[1m]" after the switch to 5.5.
+      "You are the instance controller, running on the Claude backend. Each turn's message names " +
+      "the model you run on, because it can change between turns and this prompt cannot.\n" +
       // "org" is load-bearing in both arms: `mountedMcps` is ORG grants only,
       // and the flat negation used to sit one line above the built-in
       // diagnostics sentence, telling the model in consecutive breaths that it

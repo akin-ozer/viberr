@@ -494,6 +494,75 @@ describe("Codex structured operator completion", () => {
     expect(task().frontmatter.recommendations ?? []).toEqual([]);
   });
 
+  /**
+   * F39-70, live on ax-clone AX-5 at 05:35. The plan leased three shared
+   * paths, then dispatched the Developer with "Do not modify any path the
+   * lease action refuses; report the refused path". The lease was refused,
+   * and the note naming the paths landed 46 ms after the dispatch, because the
+   * narration runs after the plan's last step. The Developer's prompt held the
+   * instruction and not the refusal.
+   */
+  it("F39-70: a dispatch carries the refusals its own plan collected before it", async () => {
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        ...project.parsed.frontmatter.agents,
+        {
+          profileId: "developer",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Dev",
+            role: "Implementation",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    await start();
+    const operatorRun = adapter.pending!.spec.runId;
+    const directive = "Carry on with the parser. If the move to Done was refused, say what blocks it.";
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          // Impl -> Done is no transition this workflow has: refused.
+          transitionAction({ toStageId: "done", reason: "Close it out." }),
+          {
+            tool: "run_agent",
+            profileId: "developer",
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: directive,
+            reason: null,
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+    // CANARY: dispatch `a.text` bare and the agent is handed a question about
+    // a refusal it has no way to read.
+    await eventually(() => {
+      expect(adapter.pending?.spec.runId).not.toBe(operatorRun);
+      const prompt = adapter.pending!.spec.prompt;
+      expect(prompt).toContain(directive);
+      expect(prompt).toContain("Viberr did not carry out this earlier step of the operator's plan");
+      expect(prompt).toContain("- `transition_stage`: ");
+    });
+    // The person reading the timeline sees the same directive the agent got.
+    const handoff = task().timeline.find((e) => e.type === "comment" && e.text.includes(directive));
+    expect(handoff?.text).toContain("- `transition_stage`: ");
+    // A plan with nothing refused before the dispatch passes the directive as written.
+    expect(operatorPrompts.withEarlierRefusals(directive, [])).toBe(directive);
+  });
+
   it("F28-O1: a mid-plan abort is narrated even when append-typed-events is WITHHELD", async () => {
     // The operator can dispatch agents but CANNOT append typed events. Its
     // plan's run_agent throws mid-plan (a single-flight 409: the profile
@@ -1777,6 +1846,23 @@ describe("pr-diverged turn instruction (both backends)", () => {
     // CANARY: drop the `standing.text` arm and this points at a tool again.
     expect(codex).toContain("Here it is:\n\nDone on branch `ax-2`");
     expect(codex).not.toContain("`read_timeline_entry` with that stamp");
+  });
+
+  it("ruling 443: a step whose outcome is the packet it opened is not a refusal", () => {
+    const { planRefusalOf } = operatorPrompts;
+    const conflict = "`ax-5` CONFLICTS with `main`. Opened a blocking decision packet for a human to resolve.";
+    // CANARY: drop the `openedPacket` check and AX-5's refresh is narrated
+    // "This step did not apply" beside the packet it opened.
+    expect(planRefusalOf("update_branch_from_base", { outcome: "noop", message: conflict, openedPacket: true })).toBeNull();
+    // Without the packet it is still what it was: a state refusal.
+    const stuck = "`ax-5` CONFLICTS with `main`. A decision packet could NOT be opened (one is open).";
+    expect(planRefusalOf("update_branch_from_base", { outcome: "noop", message: stuck })).toEqual({
+      tool: "update_branch_from_base",
+      message: stuck,
+      kind: "state",
+    });
+    expect(planRefusalOf("run_agent", { outcome: "denied", message: "No." })?.kind).toBe("authority");
+    expect(planRefusalOf("run_agent", { outcome: "done", message: "Started." })).toBeNull();
   });
 
   it("F39-69: a Codex plan is told it is the whole turn, a refresh and its next step together", () => {
@@ -3332,6 +3418,21 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
       clearedBy: "arda@viberr.dev",
     });
     expect(byHand).toContain("arda@viberr.dev cleared the wait on JC-3");
+  });
+
+  it("F39-65: a release at birth tells the operator nothing held the task and there is nothing to refresh", () => {
+    const atStart = snap({ stage: "design", stageName: "Design", goal: "Ship it." });
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(atStart, "dependencies-released", undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      entries: ["AX-4", "goal-4 link 7 (AX-27)"],
+      clearedBy: null,
+      atBirth: true,
+    });
+    // CANARY: drop the `atBirth` arm and a task born minutes ago is told the
+    // base "CHANGED since the hold" and that its delivered work may need it.
+    expect(prompt).toContain("was done before it was created (AX-4, goal-4 link 7 (AX-27)), so nothing held it");
+    expect(prompt).toContain("there is nothing to bring up to date");
+    expect(prompt).not.toContain("CHANGED since the hold");
+    expect(prompt).not.toContain("delivered work from before the hold");
   });
 
   it("ruling 133 (A19): the agent-reply doctrine re-prompts the deliverer in place on BOTH builders", () => {

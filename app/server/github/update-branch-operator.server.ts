@@ -628,7 +628,7 @@ export async function operatorUpdateBranchFromBase(
       },
       authority,
     );
-    return {
+    const conflicted: OperatorActionResult = {
       outcome: "noop",
       message:
         `${outcomeSentence(result)} ` +
@@ -636,6 +636,9 @@ export async function operatorUpdateBranchFromBase(
           ? "Opened a blocking decision packet for a human to resolve — do not retry this yourself."
           : `A decision packet could NOT be opened (${packet.message}) — say so and ask a human to resolve the branch.`),
     };
+    // Ruling 443: the packet is this step's outcome, not a refusal of it.
+    if (packet.outcome === "done") conflicted.openedPacket = true;
+    return conflicted;
   }
 
   // Ruling 229: the other already-current shape — the remote is level too, so

@@ -87,9 +87,35 @@ export function splitFrontmatter(content: string): FrontmatterSplit {
   }
 }
 
-/** Stable YAML serialization: no line folding (round-trip friendly). */
+/**
+ * A plain string a YAML 1.1 reader takes for a boolean. The `yaml` package
+ * reads YAML 1.2 core, where `off` is text; PyYAML's `safe_load`, Ruby's
+ * Psych and most CI tooling read 1.1, where the same line is `false`.
+ */
+const YAML11_BOOLEAN =
+  /^(?:y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$/;
+/** A scalar's value, when it is text. */
+const YAML_TEXT = z.string();
+
+/**
+ * Stable YAML serialization: no line folding (round-trip friendly).
+ *
+ * Files are truth, and other tools read them. The live ax-clone store held
+ * 21 `capabilities[].mode: off` lines that `yaml.safe_load` returns as
+ * `False`. Every string a 1.1 reader would take for a boolean is written
+ * double-quoted; a 1.2 reader parses the quoted form to the same string, so
+ * nothing Viberr reads changes.
+ */
 export function toYaml(value: YamlMapping): string {
-  return YAML.stringify(value, { lineWidth: 0 });
+  const doc = new YAML.Document(value);
+  YAML.visit(doc, {
+    Scalar(_key, node) {
+      // Only a STRING is quoted: a real boolean must stay a boolean.
+      const text = YAML_TEXT.safeParse(node.value);
+      if (text.success && YAML11_BOOLEAN.test(text.data)) node.type = "QUOTE_DOUBLE";
+    },
+  });
+  return doc.toString({ lineWidth: 0 });
 }
 
 /**

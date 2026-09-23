@@ -276,6 +276,9 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(res.outcome).toBe("noop");
     expect(res.message).toContain("CONFLICTS");
     expect(res.message).toContain("decision packet");
+    // Ruling 443: the packet is the step's outcome. CANARY: drop the mark and
+    // a Codex plan narrates this step as one that "did not apply".
+    expect(res.openedPacket).toBe(true);
     const file = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -311,6 +314,21 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(file.parsed.frontmatter.waiting).toBe("human");
     // The branch itself was left alone.
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+  });
+
+  it("ruling 443: a conflict whose packet could not open carries no packet mark", async () => {
+    // An operator that may not open packets: the conflict has no decision to
+    // point at, so it stays a state refusal the plan narrates.
+    const noPackets = authority({
+      policy: new Map([
+        ["generate-packets", "off"],
+        ["append-typed-events", "direct"],
+      ]),
+    });
+    const res = await act(fakeGit({ conflict: true }).exec, noPackets);
+    expect(res.outcome).toBe("noop");
+    expect(res.message).toContain("could NOT be opened");
+    expect(res.openedPacket).toBeUndefined();
   });
 
   it("ruling 133(b): with NO delivering agent the packet offers only what can execute and says why", async () => {

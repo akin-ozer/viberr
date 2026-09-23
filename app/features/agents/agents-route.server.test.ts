@@ -1501,8 +1501,9 @@ describe("F15-05/06 — a brand-new profile claims no verdict authority", () => 
       path.join(app.dataRoot, "agents", "profiles", `${orgProfileId}.md`),
       "utf8",
     );
-    expect(template).toMatch(/capabilityId: approve-review\n\s+mode: off/);
-    expect(template).toMatch(/capabilityId: request-changes\n\s+mode: off/);
+    // Quoted, so a YAML 1.1 reader does not take it for `false`.
+    expect(template).toMatch(/capabilityId: approve-review\n\s+mode: "off"/);
+    expect(template).toMatch(/capabilityId: request-changes\n\s+mode: "off"/);
 
     await postAction(ids.arda, {
       intent: "delete-profile",

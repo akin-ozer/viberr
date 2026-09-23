@@ -228,7 +228,8 @@ describe("set-guardrail (E32-6, pass 32)", () => {
       path.join(app.dataRoot, "projects", "viberr-core", "project.md"),
       "utf8",
     );
-    expect(raw).toMatch(/id: meaningful-comment[\s\S]*?on: false/);
+    // The key is quoted, so a YAML 1.1 reader does not take it for `true`.
+    expect(raw).toMatch(/id: meaningful-comment[\s\S]*?"on": false/);
     const audit = listAuditEvents(app.db, { action: "project.policy.guardrail_changed" });
     expect(audit[0]).toMatchObject({
       subjectId: "meaningful-comment",

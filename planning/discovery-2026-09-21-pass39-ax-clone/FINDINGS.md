@@ -570,8 +570,8 @@ what they strand, and record an optional reason.
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
-- **F39-70 (MED, open: the run's window closed before it could be fixed) — an agent was told to
-  act on a refusal it could not see.** AX-5, 05:35 UTC, the first operator turn after deploy 5. Its
+- ~~**F39-70 (MED) — an agent was told to
+  act on a refusal it could not see.**~~ AX-5, 05:35 UTC, the first operator turn after deploy 5. Its
   plan was `transition_stage`, `lease_files` (the three paths AX-31's PR shares), then `run_agent`
   Developer with "Do not modify any path the lease action refuses; report the refused path and any
   resulting blocker." The lease was refused (ruling 426: AX-34 waits on AX-31). The dispatch started
@@ -584,8 +584,10 @@ what they strand, and record an optional reason.
   steps after a packet, but a refusal is not a packet. Related, and not a bug: my 05:26 decision on AX-31
   ("nothing is leased") is recorded on AX-31 only, so AX-5's operator planned the lease without it.
   A decision that governs two tasks lives on one of them.
+  **Fixed, ruling 446** (2026-09-23): a dispatch in a Codex plan carries the refusals its plan has
+  already collected, appended to the directive in Viberr's own words. Test: `operator-run.server.test.ts` "F39-70".
 
-- **F39-65 (LOW) — every chain task opened by claiming a hold over work that was already done.**
+- ~~**F39-65 (LOW) — every chain task opened by claiming a hold over work that was already done.**~~
   AX-35, 04:08:21: "Created waiting on AX-4, goal-2 link 2 (AX-19), … and goal-4 link 7 (AX-27).
   Held until every entry is done; Viberr releases it then." All eight were done: ruling 398(d)
   creates a chain task only once its waits are satisfied and lets the list ride on at birth, and
@@ -597,8 +599,12 @@ what they strand, and record an optional reason.
   this link because the previous link's work merged), and a new task has no delivered work for
   the refresh advice to apply to. Test: `task-actions.server.test.ts` "ruling 131: createTask
   with blockedBy".
+  **The rest fixed** (2026-09-23): the chain link's release at birth says "was done before it was
+  created … so nothing held it", tells nobody the task "can move again", and the operator's release
+  turn is told there is nothing from before a hold to refresh. Tests: `dependencies.server.test.ts`
+  "F39-65", `goal-actions.server.test.ts` "ruling 358", `operator-run.server.test.ts` "F39-65".
 
-- **A base conflict is narrated as a step that "did not apply".** AX-21 01:18 and AX-28 02:43:
+- ~~**A base conflict is narrated as a step that "did not apply".**~~ AX-21 01:18 and AX-28 02:43:
   "The operator's plan was not carried out in full. This step did not apply to the task's
   current state: `update_branch_from_base` — `ax-28` CONFLICTS with `main` … Opened a blocking
   decision packet". The step did apply: it tried the merge and opened the decision. The body is
@@ -607,6 +613,8 @@ what they strand, and record an optional reason.
   split keeps a state refusal from being blamed on policy, and five tests pin it). Returning
   `done` when the packet opened would drop the note, and ruling 430's pause note would still
   cover any later steps. Left for the next pass.
+  **Fixed, ruling 443** (2026-09-23): a step whose outcome is the packet it opened is not a refusal.
+  `outcome` stays `noop`, so the LV-03 split and its tests stand.
 
 - **O39-a (owner's call) — an answer that routes work to ANOTHER agent summons the asking one.**
   AX-22 23:38: the developer asked "Route the Gateway CLI and documentation follow-up?" and
@@ -632,8 +640,8 @@ what they strand, and record an optional reason.
   @operator" (01:38). Three of three answers that named another actor went to an agent that could
   not act on them. Each cost one agent run, and each recovered on the operator's next turn.
   AX-27's operator did try the create_task option at 01:40, which is where F39-55 surfaced.
-- **O39-b (owner's call) — a deadlock streak writes the same canned decision into the contract
-  every round.** AX-22's goal now carries four identical "Let the rework continue — Each round has
+- ~~**O39-b (owner's call) — a deadlock streak writes the same canned decision into the contract
+  every round.**~~ AX-22's goal now carries four identical "Let the rework continue — Each round has
   found something real and the work is converging on it" blocks, each followed by the same
   "part of the task's contract from here on" paragraph. The substance, my note each time, goes to
   the timeline and the summon (ruling 284). Ruling 329 chose deliberately that the option's `d` is
@@ -641,6 +649,10 @@ what they strand, and record an optional reason.
   Options: treat "Let the rework continue" as process-only (ruling 189's own test: it decides
   what happens next, not what the work is), or append a repeated decision once. Not changed: it
   re-opens a ruling the owner made.
+  **Fixed** (2026-09-23) with the option that re-opens no ruling: a decision whose answer the contract
+  already holds word for word is not appended again. Ruling 329 stands (a chosen option is contract),
+  and every answer is still on the timeline **(default, owner may revisit)**. Test:
+  `task-governance.server.test.ts` "O39-b".
 
 - ~~**A full 40-character sha scrolls a task page sideways on a phone.**~~ **Fixed, ruling 419(i)**
   (2026-09-23): re-measured on AX-19 the page no longer scrolled, but inline code (the sha, long
@@ -666,13 +678,15 @@ what they strand, and record an optional reason.
   changes partly for it. Design (2) above would have caught it on the first run after the merge.
   U39-32 now at least tells the accepting person when the merge head is an unreviewed
   combination.
-- **A resumed controller session keeps the model identity it started with until it compacts.**
+- ~~**A resumed controller session keeps the model identity it started with until it compacts.**~~
   After the switch to Opus 5.5 the controller found "Opus 5 ... claude-opus-5[1m]" in its own
   context: ruling 373 records its prompt on the session's first request and replays it. It trusted
   the SDK's start record instead and said why, so nothing it told a person was wrong, and the
   next completion compaction re-renders the prompt.
+  **Fixed, ruling 444** (2026-09-23): the model is named in each turn's message, never in the recorded
+  system prompt.
 
-- **`mode: off` is written unquoted, which YAML 1.1 reads as `false`.** 21 instances in the
+- ~~**`mode: off` is written unquoted, which YAML 1.1 reads as `false`.**~~ 21 instances in the
   live store, all of them `capabilities[].mode`, and it is the ONLY ambiguous bare value the
   store contains (no `on`/`yes`/`no` anywhere). Viberr itself is correct — the `yaml` package
   parses YAML 1.2 core, where `off` is a string — but "files are truth" means other tools read
@@ -680,6 +694,9 @@ what they strand, and record an optional reason.
   practice, since `off` and `false` mean the same thing to a reader; recorded so the next pass
   does not re-derive it, and because quoting the enum in the serializer would cost nothing.
   (Found by misreading it myself.)
+  **Fixed** (2026-09-23): `toYaml` double-quotes every string a YAML 1.1 reader takes for a boolean,
+  keys included (the guardrails' `on:` key was the one this entry missed). Test:
+  `frontmatter.server.test.ts`, which reads the output as YAML 1.1.
 - **O39-d (owner question): nothing tells a person who left the page that a long answer landed.**
   A controller turn runs one to five minutes. Its reply reaches open surfaces by the
   owner-routed `controller.updated` revalidation and never as a notification row, by design
@@ -689,7 +706,7 @@ what they strand, and record an optional reason.
   so a board conversation finishes with no signal anywhere. One option is a `controller`
   notification per reply, marked read when the conversation is opened on the page. Not built,
   because it reverses a documented design and adds a bell item to every turn.
-- **A refresh that meets a conflict is also narrated as a step that "did not apply".** AX-5,
+- ~~**A refresh that meets a conflict is also narrated as a step that "did not apply".**~~ AX-5,
   03:59:35: the correct "Blocked: `ax-5` conflicts with `main`" event and the packet, and beside
   them "The operator's plan was not carried out in full. This step did not apply to the task's
   current state: `update_branch_from_base` — `ax-5` CONFLICTS with `main` …". The step ran; its
@@ -697,13 +714,17 @@ what they strand, and record an optional reason.
   plan narration files as a refusal (ruling 229 fixed the same framing for an already-current
   branch). Left as is because ruling 408's refusal carry reads the same outcome, and changing it
   this late would change what the next drive is told.
-- **The "not on the PR" line can name a superseded revision for one reconcile pass.** AX-5,
+  **Fixed, ruling 443** (2026-09-23), with the entry above.
+- ~~**The "not on the PR" line can name a superseded revision for one reconcile pass.**~~ AX-5,
   04:14:40: the review queue said "PR #24 does not carry the delivered revision 509c0d1" eleven
   seconds after the delivery reconcile minted `b82bb93`. The workspace reconcile re-measures
   `unpushedRevision` only inside its `gh pr view` step, which a credential-less workspace skips.
   The GitHub pass re-measures within five minutes, and the sentence stays true in substance
   (the new head is not on the PR either). Dropping or re-pointing the record at the mint would
   trade one stale sentence for another, so it is left.
+  **Fixed, ruling 445** (2026-09-23): when a reconcile mints a revision and cannot read the PR, it
+  re-measures the line against the PR head on record, so it names the revision that stands, or
+  clears. The trade feared above does not happen, because the new head is not on the PR either.
 - ~~**The accept dialog hedges a fact it has.**~~ **Fixed, U39-32** (2026-09-23): the dialog
   reads the reconciler's last compare. At 0 behind it says the reviewed head merges as it is;
   behind by N it says the ceremony merges N base commits first and that "No review has run on

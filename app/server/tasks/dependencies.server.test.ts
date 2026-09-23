@@ -384,6 +384,44 @@ describe("ruling 331: a failed auto-invocation names its cause and claims nothin
 
 /** Ruling 131(e): the release engine. */
 describe("the release engine", () => {
+  /**
+   * F39-65: a chain link minted by the completion it waits on is released by
+   * its mint (ruling 358). Nothing held it, so the operator's release turn is
+   * told there is nothing from before a hold to bring up to date.
+   */
+  it("F39-65: a release at birth reaches the operator as one, and tells nobody the task can move again", async () => {
+    const store = setupTestStore(ctx);
+    await seed(store);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-11", {
+        stage: "impl",
+        waiting: "none",
+        readiness: "blocked",
+        blockedBy: ["VIB-2"],
+        ownerUserId: store.users.arda.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const runOperator = runOperatorStub();
+    expect(
+      await releaseTask(store.db, { dataRoot: store.dataRoot, deps: { runOperator } }, store.slug, "VIB-11", { atBirth: true }),
+    ).toBe(true);
+    await eventually(() =>
+      expect(runOperator.mock.calls.some((c) => c[1].trigger === "dependencies-released")).toBe(true),
+    );
+    // CANARY: drop the payload's `atBirth` and the release turn tells a task
+    // born a moment ago that the base "CHANGED since the hold".
+    const release = runOperator.mock.calls.find((c) => c[1].trigger === "dependencies-released")!;
+    expect(release[1].dependencyRelease).toEqual({ entries: ["VIB-2"], clearedBy: null, atBirth: true });
+    const note = file(store, "VIB-11").timeline.find((e) => e.title === "Dependencies released")!;
+    expect(note.text).toBe("Released: everything this task waits on was done before it was created (VIB-2), so nothing held it.");
+    // SAFETY: COUNT(*) always answers one row, and `n` is its number.
+    const told = store.db
+      .prepare(`SELECT COUNT(*) AS n FROM notifications WHERE task_key = 'VIB-11' AND kind = 'dependency'`)
+      .get() as { n: number };
+    expect(told.n).toBe(0);
+  });
+
   it("completing the LAST dependency releases the dependent through the transition hook: list cleared, note, readiness lifted, hold cleared, watchers notified, operator re-invoked with the payload; a partial completion releases nothing", async () => {
     // Canaries: delete the `autoInvokeOperator` call in `announceRelease`
     // (no re-invoke); treat `failed` as satisfied in `dependenciesSatisfied`

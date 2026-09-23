@@ -146,6 +146,9 @@ export function splitDependencyText(text: string): string[] {
 export interface DependencyReleasePayload {
   entries: string[];
   clearedBy: string | null;
+  /** F39-65: every entry was done before the task was created (a chain link
+   *  minted by the completion it waits on). Nothing ever held it. */
+  atBirth?: boolean;
 }
 
 /**
