@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { actorProseName } from "./user-display-name.server";
 import {
   deadDependencies,
   dependenciesSatisfied,
@@ -577,7 +578,8 @@ export async function updateGoal(
     (goal) => {
       const fm = goal.frontmatter;
       const terminal = fm.status === "completed" || fm.status === "cancelled";
-      const by = actor.label;
+      // U39-18: the chain's history is read by people, so it names them.
+      const by = actorProseName(db, actor);
       switch (op.op) {
         case "rename": {
           // Ruling 267 (pass 37, F37-97): the ONE op a settled chain still

@@ -195,6 +195,13 @@ what they strand, and record an optional reason.
   The overlay measured 413px of scroll in a 323px box. **Fixed:** stream text wraps long tokens
   anywhere (`.pev-main`). Measured with the rule injected: 323 of 323. Test: `app.css.test.ts`
   "U39-17".
+- **U39-18 (LOW) — the task page and the chain history name people by their address.** "Released:
+  arda@viberr.dev · via controller cleared the wait on AX-22" on AX-20's timeline, and "Link 2
+  edited by arda@viberr.dev · via controller" in the chain's history. The label is the audit form
+  (ruling 99(b)). **Fixed:** `actorProseName` gives the display name, with the controller in words
+  ("Arda (via the controller)"). Used by the release note, the link-wait mirror and every goal edit.
+  The four tests that pinned the address now pin the name. Test: `dependencies.server.test.ts`
+  "U39-18".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47

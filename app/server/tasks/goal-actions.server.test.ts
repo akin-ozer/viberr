@@ -1605,7 +1605,8 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
     expect(link().blockedBy).toEqual([]);
     const view = getGoalView(SLUG, held.goalId, ctx)!;
     expect(view.links[0]!.blockedBy).toEqual([]);
-    expect(view.history[0]!.text).toBe(`Link 1 (Log view) now waits on nothing: ${taskKey}'s list was changed by selin@viberr.dev.`);
+    // U39-18: the chain's history names the person, not the address.
+    expect(view.history[0]!.text).toBe(`Link 1 (Log view) now waits on nothing: ${taskKey}'s list was changed by Selin Aksoy.`);
     // The task's own record says a person cleared it (ruling 131(e)).
     const timeline = readTaskFile({ projectSlug: SLUG, taskKey, dataRoot: app.dataRoot })!.parsed.timeline;
     expect(timeline.some((e) => e.title === "Dependencies released")).toBe(true);
@@ -2044,7 +2045,7 @@ describe("ruling 192: a chain can be renamed (ruling 267: a settled one too)", (
     // CANARY: append the clause unconditionally and the history tells a reader
     // the chain was renamed when only its prose moved.
     expect(after.history[0]!.text).toBe(
-      "Goal description rewritten by arda@viberr.dev.",
+      "Goal description rewritten by Arda Kaya.",
     );
   });
 
@@ -2311,7 +2312,7 @@ describe("ruling 192 (+335): the drift split stops claiming changes that never h
     expect(after.description).toBe("After.");
     // CANARY: derive `renamed` from `fm.title === title` again and this says
     // link tasks keep "the old name" after an edit that changed no name.
-    expect(after.history[0]!.text).toBe("Goal description rewritten by arda@viberr.dev.");
+    expect(after.history[0]!.text).toBe("Goal description rewritten by Arda Kaya.");
   });
 });
 

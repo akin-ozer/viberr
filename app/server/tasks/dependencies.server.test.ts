@@ -237,7 +237,9 @@ describe("setTaskDependencies", () => {
     const notes = parsed.timeline.filter((e) => e.type === "note");
     expect(notes).toHaveLength(1);
     expect(notes[0]!.title).toBe("Dependencies released");
-    expect(notes[0]!.text).toContain(`${store.users.murat.email} cleared the wait on VIB-5`);
+    // U39-18: the note names the person who cleared it, not their address.
+    expect(notes[0]!.text).toContain(`${store.users.murat.name} cleared the wait on VIB-5`);
+    expect(notes[0]!.text).not.toContain(store.users.murat.email);
     const actions = listAuditEvents(store.db).map((e) => e.action);
     expect(actions).toContain("task.dependencies.updated");
     expect(actions).toContain("task.dependencies.released");
@@ -825,7 +827,7 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
     expect(file(store, "VIB-7").frontmatter.blockedBy).toEqual([]);
     expect(goal().frontmatter.links[0]!.blockedBy).toEqual([]);
     expect(goal().timeline[0]!.text).toBe(
-      `Link 1 (Log view) now waits on nothing: VIB-7's list was changed by ${store.users.arda.email}.`,
+      `Link 1 (Log view) now waits on nothing: VIB-7's list was changed by ${store.users.arda.name}.`,
     );
     // The panel reads the projection, which the mirror rebuilt.
     expect(projected()[0]!.blockedBy).toEqual([]);
@@ -1044,5 +1046,25 @@ describe("F37-68 / ruling 241: a reviewer question the hold refused survives the
       // reads ["operator", "question"].
       expect(order).toEqual(["question", "operator"]);
     }
+  });
+});
+
+/**
+ * U39-18 (pass 39): a person, in a sentence people read, is named. Live on
+ * AX-20: "Released: arda@viberr.dev · via controller cleared the wait on
+ * AX-22", and the goal history said "edited by arda@viberr.dev · via
+ * controller".
+ */
+describe("U39-18: actorProseName", () => {
+  it("names the person, says the controller in words, and leaves an unknown label alone", async () => {
+    // CANARY: return `actor.label` from `actorProseName`.
+    const { actorProseName } = await import("./user-display-name.server");
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    expect(actorProseName(store.db, { userId: arda.id, label: arda.email })).toBe(arda.name);
+    expect(actorProseName(store.db, { userId: arda.id, label: `${arda.email} · via controller` })).toBe(
+      `${arda.name} (via the controller)`,
+    );
+    expect(actorProseName(store.db, { userId: "u_nobody", label: "ghost@viberr.test" })).toBe("ghost@viberr.test");
   });
 });

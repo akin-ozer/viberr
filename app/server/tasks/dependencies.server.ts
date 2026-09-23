@@ -1,6 +1,7 @@
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import { systemIdToName } from "~/server/files/actor-ref.server";
 import type { DatabaseSync } from "node:sqlite";
+import { actorProseName } from "./user-display-name.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { z } from "zod";
 import { AppError } from "~/server/errors/app-error.server";
@@ -303,7 +304,7 @@ export async function setTaskDependencies(
     // Ruling 155: the record the link carries is brought back in step even
     // when the task's own list did not move (a stale link heals on the next
     // write instead of waiting for a different one).
-    await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(actor, ctx));
+    await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(db, actor, ctx));
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false, blockedBy: next, added, removed };
   }
   const releasing = next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized;
@@ -347,11 +348,11 @@ export async function setTaskDependencies(
     details: { blockedBy: next, added, removed },
   });
   // Ruling 155: a link's task owns the wait; the goal file follows it.
-  await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(actor, ctx));
+  await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(db, actor, ctx));
   if (releasing) {
     await announceRelease(db, ctx, input.projectSlug, input.taskKey, {
       entries: previous,
-      clearedBy: actor.label,
+      clearedBy: actorProseName(db, actor),
     });
   } else if (previous.length > 0 && next.length === 0) {
     // Ruling 241, corrected by self-review: the drain belongs wherever the HOLD
@@ -437,8 +438,8 @@ export async function mirrorLinkWait(
 }
 
 /** Who a task-list change is attributed to on the goal timeline. */
-function changedByOf(actor: TaskActor, ctx: TaskActionContext): string {
-  return ctx.operatorAuthorized ? "the operator" : actor.label;
+function changedByOf(db: DatabaseSync, actor: TaskActor, ctx: TaskActionContext): string {
+  return ctx.operatorAuthorized ? "the operator" : actorProseName(db, actor);
 }
 
 // --------------------------------------------------------------- release
