@@ -33,6 +33,7 @@ import {
   connectFakeBackends,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
+import { assertStrictSchema } from "../../../test-support/strict-schema";
 import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import {
   getRun,
@@ -992,6 +993,67 @@ describe("Codex structured operator completion", () => {
     expect(titles).not.toContain("Send back to the specialist for changes");
   });
 
+  it("ruling 433: a Codex plan's create_task option reaches the packet with the task it creates", async () => {
+    /**
+     * Live on AX-27 at 01:40, after the owner asked for exactly this option:
+     * "`open_packet` — \"Create core task: Persist terminal Task execution
+     * details\" is a create_task option with no task on it. Give newTask a
+     * title and a goal". The Codex plan's option object had no newTask field,
+     * so the refusal asked for something the operator could not send. AX-4
+     * hit the same refusal twice. Ruling 270 fixed this door on the Claude
+     * tool only.
+     *
+     * CANARY: stop carrying newTask in `authoredPacketOptions`.
+     */
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "The status data is core-owned; the owner asked for its own task.",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Create the core status task?",
+            reason: "The owner asked for a create_task option.",
+            packetOptions: [
+              {
+                kind: "create_task",
+                title: "Create the core status task",
+                detail: "The Developer adds the fields; this task waits on it.",
+                recommended: true,
+                newTask: {
+                  title: " Persist terminal Task execution details ",
+                  goal: "Add exitCode, reason and sandboxHandle to TaskStatus. Done when a live control plane shows them on a Failed Task.",
+                  blockedBy: null,
+                  blocks: null,
+                  labels: ["core"],
+                },
+              },
+              { kind: "custom", title: "Narrow this task instead", detail: null, recommended: false, newTask: null },
+            ],
+          },
+        ],
+      }),
+      "finished",
+    );
+
+    await eventually(() => {
+      expect(task().packet?.options?.length).toBe(2);
+    });
+    const created = task().packet!.options[0]!;
+    expect(created.kind).toBe("create_task");
+    expect(created.newTask).toEqual({
+      title: "Persist terminal Task execution details",
+      goal: "Add exitCode, reason and sandboxHandle to TaskStatus. Done when a live control plane shows them on a Failed Task.",
+      labels: ["core"],
+    });
+    expect(task().packet!.options[1]!.newTask).toBeUndefined();
+  });
+
   // B-OP4: the flat Codex plan may leave `packetOptions` null on a genuine
   // multi-way decision. The fallback card then offered only "send back" and
   // "redirect" — neither of which is the real answer to "which of these should
@@ -1391,6 +1453,28 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     expect(item.required).toContain("goalDraft");
     expect(item.properties.goalDraft.type).toEqual(["string", "null"]);
     expect(item.properties.goalDraft.description).toContain("written AS a goal");
+  });
+
+  it("ruling 433: the plan's option carries the payloads of block_on_dependencies and wait_for_window, and requires every key", () => {
+    // CANARY: drop the blockedBy or dueAt carry, or a key from `required`.
+    const carried = authoredPacketOptions([
+      { kind: "block_on_dependencies", title: "Hold until AX-22 lands", detail: null, recommended: true, blockedBy: ["AX-22", "goal-4 link 3"], dueAt: null, newTask: null },
+      { kind: "wait_for_window", title: "Wait for the window", detail: null, recommended: false, blockedBy: null, dueAt: " 2026-09-23T05:00:00.000Z ", newTask: null },
+    ]);
+    expect(carried?.[0]?.blockedBy).toEqual(["AX-22", "goal-4 link 3"]);
+    expect(carried?.[0]?.dueAt).toBeUndefined();
+    expect(carried?.[1]?.dueAt).toBe("2026-09-23T05:00:00.000Z");
+    expect(carried?.[1]?.blockedBy).toBeUndefined();
+
+    const schema = operatorPlanSchemaFor(
+      authority({ "append-typed-events": "direct", "generate-packets": "direct" }),
+    );
+    const item = schema.properties.actions.items.properties.packetOptions.items;
+    for (const key of ["blockedBy", "dueAt", "newTask"] as const) {
+      expect(item.required).toContain(key);
+    }
+    expect(item.properties.newTask.required).toEqual(["title", "goal", "blockedBy", "blocks", "labels"]);
+    expect(assertStrictSchema(schema)).toEqual([]);
   });
 
 });

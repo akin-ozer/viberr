@@ -83,6 +83,7 @@ per item and each one was applied to the source and observed failing.
 | 70 | A successful run withdraws a stall packet and nothing else (F39-54) | — | **done**, ruling 432 |
 | 71 | An agent's recommendation mark decides the pill and leaves the title (U39-23) | owner: "UI improvements for end users" | **done** (no ruling) |
 | 72 | The controller quotes times in the zone the page prints them in (U39-24) | owner: "UI improvements for end users, especially the controller page" | **done** (no ruling) |
+| 73 | The Codex plan authors every option the Claude tool does (F39-55) | — | **done**, ruling 433 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

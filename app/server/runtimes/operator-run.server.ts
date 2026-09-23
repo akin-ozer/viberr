@@ -2291,8 +2291,51 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   description:
                     "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Null on every other kind.",
                 },
+                // Ruling 433 (F39-55): ruling 270 gave the Claude tool the
+                // payloads of rulings 224, 230 and 269, and this schema never
+                // got them. A Codex operator could name the three kinds, was
+                // refused for the missing payload, and had no field to send
+                // it in. Live on ax-clone: AX-4 twice, AX-27 once.
+                blockedBy: {
+                  type: ["array", "null"],
+                  items: { type: "string" },
+                  description:
+                    "block_on_dependencies only (ruling 230): what THIS task waits on, as task keys or `goal-N link M`. Required on that kind, since an option that names nothing to wait on resolves into a hold that releases on nothing. Null on every other kind. Not the action-level blockedBy, which is set_dependencies'.",
+                },
+                dueAt: {
+                  type: ["string", "null"],
+                  description:
+                    "wait_for_window only (ruling 224): the instant the provider said its window reopens, as an ISO timestamp. The resolution schedules the re-dispatch just after it. Required on that kind; null on every other. Viberr raises the quota packet itself, so author one only when no packet was raised.",
+                },
+                newTask: {
+                  type: ["object", "null"],
+                  additionalProperties: false,
+                  description:
+                    "create_task only (ruling 269): the task the person's confirm CREATES, under their own authority. Use it for work that belongs outside this task (another owner's package, a contract nobody produces, a gap a report named), instead of an option whose text tells the reader to create a task. Required on that kind; null on every other.",
+                  properties: {
+                    title: { type: "string", description: "The new task's title." },
+                    goal: {
+                      type: "string",
+                      description:
+                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria). It is the contract whoever works it is held to.",
+                    },
+                    blockedBy: {
+                      type: ["array", "null"],
+                      items: { type: "string" },
+                      description: "What the NEW task waits on (task keys, or `goal-N link M`), not what this task waits on. Null for nothing.",
+                    },
+                    blocks: {
+                      type: ["array", "null"],
+                      items: { type: "string" },
+                      description:
+                        "Ruling 287: the EXISTING tasks that must wait on the new one, usually the direction that matters, since a task is created to unblock something. Each key gets the new task added to its own blockedBy when the person confirms. This task's own key belongs here whenever it is the work that must wait (ruling 322). Null for none.",
+                    },
+                    labels: { type: ["array", "null"], items: { type: "string" }, description: "Labels for the new task; null for none." },
+                  },
+                  required: ["title", "goal", "blockedBy", "blocks", "labels"],
+                },
               },
-              required: ["kind", "title", "detail", "recommended", "backend", "profileId", "deleteBranch", "toStage", "goalDraft"],
+              required: ["kind", "title", "detail", "recommended", "backend", "profileId", "deleteBranch", "toStage", "goalDraft", "blockedBy", "dueAt", "newTask"],
             },
           },
         },
@@ -2345,6 +2388,19 @@ const operatorPlanActionSchema = z.strictObject({
         deleteBranch: z.boolean().nullable().optional(),
         toStage: z.string().nullable().optional(),
         goalDraft: z.string().nullable().optional(),
+        // Ruling 433: `.optional()` for the same replay reason.
+        blockedBy: z.array(z.string()).nullable().optional(),
+        dueAt: z.string().nullable().optional(),
+        newTask: z
+          .strictObject({
+            title: z.string(),
+            goal: z.string(),
+            blockedBy: z.array(z.string()).nullable().optional(),
+            blocks: z.array(z.string()).nullable().optional(),
+            labels: z.array(z.string()).nullable().optional(),
+          })
+          .nullable()
+          .optional(),
       }),
     )
     .nullable(),
@@ -2382,6 +2438,15 @@ export function authoredPacketOptions(
         deleteBranch?: boolean | null;
         toStage?: string | null;
         goalDraft?: string | null;
+        blockedBy?: string[] | null;
+        dueAt?: string | null;
+        newTask?: {
+          title: string;
+          goal: string;
+          blockedBy?: string[] | null;
+          blocks?: string[] | null;
+          labels?: string[] | null;
+        } | null;
       }[]
     | null,
 ): OperatorPacketOptionInput[] | null {
@@ -2416,6 +2481,22 @@ export function authoredPacketOptions(
     // it on any other kind and validates the stage id against the board.
     const toStage = o.toStage?.trim();
     if (toStage) option.toStage = toStage;
+    // Ruling 433: the payloads rulings 230, 224 and 269 require, carried the
+    // way the Claude tool carries them (ruling 270). `operatorOpenPacket`
+    // refuses each off its kind and its kind without it.
+    if (o.blockedBy?.length) option.blockedBy = [...o.blockedBy];
+    const dueAt = o.dueAt?.trim();
+    if (dueAt) option.dueAt = dueAt;
+    if (o.newTask) {
+      const newTask: NonNullable<OperatorPacketOptionInput["newTask"]> = {
+        title: o.newTask.title.trim(),
+        goal: o.newTask.goal.trim(),
+      };
+      if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
+      if (o.newTask.blocks?.length) newTask.blocks = [...o.newTask.blocks];
+      if (o.newTask.labels?.length) newTask.labels = [...o.newTask.labels];
+      option.newTask = newTask;
+    }
     return option;
   });
 }

@@ -305,6 +305,17 @@ what they strand, and record an optional reason.
   took every blocked packet without an acceptance option, which includes conflicts, lease orders,
   agent questions and every decision the operator writes. **Fixed: ruling 432.**
 
+- **F39-55 (HIGH) — a Codex operator could name three option kinds and never complete them.**
+  AX-27, 01:40. I answered the Surface Developer's question with "Offer me a create_task option
+  for the Developer (the core owner)". The operator tried, and its plan was refused:
+  "`open_packet` — \"Create core task: Persist terminal Task execution details\" is a
+  create_task option with no task on it. Give newTask a title and a goal". The Codex plan's
+  option object has no `newTask` field, nor the `blockedBy` of `block_on_dependencies` or the
+  `dueAt` of `wait_for_window`. All three kinds were in its enum, and each refusal asked for a
+  field the plan could not send. AX-4 hit the same refusal twice earlier in the pass. Ruling 270
+  fixed exactly this on the Claude tool in pass 37. The Codex door was never touched, and on this
+  board every operator is Codex. **Fixed: ruling 433.**
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

@@ -15,7 +15,7 @@ import {
   OPERATOR_TOOLKIT_INSTRUCTIONS,
 } from "./operator-toolkit.server";
 import type { OperatorAuthority } from "./operator-actions.server";
-import { operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
+import { operatorPlanSchemaFor, operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -939,6 +939,37 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     // Ruling 269's payload rides the same door, and was written with it.
     expect(declared).toContain('"newTask"');
     expect(declared).toContain("create_task only");
+  });
+
+  /**
+   * Ruling 433 (F39-55): ruling 270 opened this door on the Claude tool and
+   * left the Codex plan's closed. The same three kinds stayed named, refused
+   * and impossible to satisfy for every Codex operator, and on ax-clone, where
+   * every operator is Codex, that was AX-4 twice and AX-27 once. A new option
+   * field is added to both doors or the suite goes red.
+   */
+  it("ruling 433: the Codex plan's option carries every field the Claude tool's option does", async () => {
+    // CANARY: drop any option field from the Codex plan schema.
+    const auth = authority([]);
+    auth.policy.set("generate-packets", "direct");
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: auth,
+    });
+    const published = await publishedSchemas(toolkit.mcpServers.viberr);
+    const claudeOption = z
+      .object({
+        properties: z.object({
+          options: z.object({ items: z.object({ properties: z.record(z.string(), z.unknown()) }) }),
+        }),
+      })
+      .parse(published.get("open_decision_packet")).properties.options.items.properties;
+    const codexOption =
+      operatorPlanSchemaFor(auth).properties.actions.items.properties.packetOptions.items.properties;
+    expect(Object.keys(codexOption).sort()).toEqual(Object.keys(claudeOption).sort());
   });
 
   /**
