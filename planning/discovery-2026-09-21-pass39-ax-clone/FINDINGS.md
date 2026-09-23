@@ -130,7 +130,8 @@ what they strand, and record an optional reason.
   which sits in Triage held by ten links. Goal-6 link 5's wait was a thirteen-entry sentence of
   references ("goal-4 link 6, goal-4 link 7, goal-5 link 1 (AX-5) …") that a person can only
   decode by scrolling to each chain. Goal-4 link 5 read "waits on AX-20 AX-21", AX-21 being its
-  own task. **Fixed: ruling 425** (default, owner may revisit): held links read "held"; each wait
+  own task. **Fixed: ruling 425** (default, owner may revisit): held links read "blocked", as the board's
+  card for the same task does; each wait
   is a count ("waits on 6 · 4 done") that opens to state, key and title per entry; the link's own
   task sits beside its title.
 

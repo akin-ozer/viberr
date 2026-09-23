@@ -793,9 +793,10 @@ const LINK_PILL = {
  * Ruling 425(a): a link whose task exists but is still held by unfinished work.
  * The chain calls it `active` from the moment its task is created, and live on
  * ax-clone goal-6 link 1 read "active" over AX-6, which sat in Triage waiting
- * on ten other links.
+ * on ten other links. It says what the board's card for the same task says,
+ * "blocked", in the same colour: one task, one word, on every surface.
  */
-const HELD_PILL = { kind: "info", label: "held" } satisfies { kind: PillKind; label: string };
+const HELD_PILL = { kind: "blocked", label: "blocked" } satisfies { kind: PillKind; label: string };
 
 /** Ruling 425(b): the one word each entry of a wait list gets. */
 function waitStateWord(entry: DependencyRender): string {

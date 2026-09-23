@@ -1234,7 +1234,8 @@ held | AX-5 | ax ssh: interactive shell into a live task | waits on 1 · 1 done
 active | AX-22 | Gateway data path: actually proxy model traffic |
 ```
 
-AX-6 and AX-5 read "held", no longer "active". AX-22 reads "active" because it has no wait. Each
+AX-6 and AX-5 read "held", no longer "active" (renamed "blocked" at 00:40 to match the board card's
+word for the same tasks). AX-22 reads "active" because it has no wait. Each
 wait is a count. Layout was checked before the deploy in a production preview (copy of the data)
 at 1440×900 and 375×812, light and dark: at 1440 the rail gives the list 258px and the rows
 stack; at 375 there is no horizontal overflow.

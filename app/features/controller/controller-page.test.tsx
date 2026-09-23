@@ -195,7 +195,7 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
       ];
     }
 
-    it("(a) a link whose task is still held reads held, and one whose waits are all done reads active", async () => {
+    it("(a) a link whose task is still held reads blocked, as its board card does, and one whose waits are all done reads active", async () => {
       // CANARY: drop `held` and use LINK_PILL[l.status] alone.
       const { container } = renderPage(view({ goals: chains() }));
       await screen.findByText("End-to-end test harness");
@@ -203,8 +203,9 @@ describe("ruling 131(c): the Goals panel names what a link waits on", () => {
         [...container.querySelectorAll(".ctl-links li")]
           .find((li) => li.querySelector(".ctl-link-title")?.textContent === title)
           ?.querySelector(".pill")?.textContent;
-      expect(pillOf("End-to-end test harness")).toBe("held");
-      expect(pillOf("ax logs: the server route and the command")).toBe("held");
+      // The board's word for the same task (card-status `blocked`).
+      expect(pillOf("End-to-end test harness")).toBe("blocked");
+      expect(pillOf("ax logs: the server route and the command")).toBe("blocked");
       expect(pillOf("Released once its waits are done")).toBe("active");
       expect(pillOf("ax delete, and the deletion cascade rule")).toBe("pending");
     });
