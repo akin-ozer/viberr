@@ -185,6 +185,27 @@ describe("a refused sign-in names its field", () => {
     expect(container.querySelector("#lg-email")!.getAttribute("aria-invalid")).toBeNull();
   });
 
+  it("ruling 451(g): a second refused submit without typing is a new alert", async () => {
+    // The person clicks Sign in again on the same wrong password. Nothing was
+    // typed, so nothing dismissed the first box; the second answer must still
+    // arrive as a new one.
+    const { container } = renderWithAction(() => ({
+      error: "Wrong password. Ask an admin to reset it if you're locked out.",
+      field: "password",
+    }));
+    fireEvent.change(container.querySelector("#lg-email")!, {
+      target: { value: "arda@viberr.dev" },
+    });
+    fireEvent.change(container.querySelector("#lg-pw")!, { target: { value: "nope" } });
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(container.querySelector("#lg-err")).not.toBeNull());
+    const first = container.querySelector("#lg-err")!;
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(container.querySelector("#lg-err")).not.toBe(first));
+    expect(container.querySelector("#lg-err")!.textContent).toContain("Wrong password");
+    expect(container.querySelector("#lg-err")!.classList.contains("refused")).toBe(true);
+  });
+
   it("re-shows the same refusal after it was dismissed by typing", async () => {
     // Dismissal is keyed on the result object, not its text: a second submit
     // that fails the same way is a new result and must surface again.
@@ -203,6 +224,28 @@ describe("a refused sign-in names its field", () => {
     expect(container.querySelector("#lg-err")).toBeNull();
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => expect(container.querySelector("#lg-err")).not.toBeNull());
+  });
+});
+
+/**
+ * Ruling 451(g): a second refusal that reads the same is still a second
+ * refusal. The box stayed mounted across it, so the sentence stood still as if
+ * the click had been ignored, and an unchanged `role="alert"` is not announced
+ * again. Keyed on the refusal itself, the box remounts and shakes (`.refused`).
+ */
+describe("ruling 451(g): every refused sign-in is a new alert", () => {
+  it("client-side: a second empty submit replaces the box, and each one shakes", () => {
+    // CANARY: drop `key={refusalKey(...)}` from #lg-err and the second submit
+    // leaves the first node in place.
+    const { container } = renderLogin({ github: false, google: false });
+    fireEvent.submit(container.querySelector("form")!);
+    const first = container.querySelector("#lg-err")!;
+    expect(first.classList.contains("refused")).toBe(true);
+    fireEvent.submit(container.querySelector("form")!);
+    const second = container.querySelector("#lg-err")!;
+    expect(second).not.toBe(first);
+    expect(second.textContent).toBe(first.textContent);
+    expect(second.classList.contains("refused")).toBe(true);
   });
 });
 

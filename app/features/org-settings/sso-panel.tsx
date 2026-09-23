@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { AuthProviderView } from "~/server/org/org-view.server";
 import { oauthCallbackUrl } from "~/shared/auth/auth-paths";
 import { LocalCalendarDate } from "~/ui/local-time";
+import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
@@ -180,8 +181,8 @@ function CallbackUrl({ url }: { url: string }) {
         onClick={copy}
         aria-label={"Copy the callback URL " + url}
       >
-        <Icon name={copied ? "check" : "copy"} />
-        {copied ? "Copied" : "Copy"}
+        <CopyGlyph copied={copied} />
+        {copied ? <span className="copy-done">Copied</span> : "Copy"}
       </button>
     </span>
   );

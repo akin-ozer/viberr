@@ -275,7 +275,7 @@ export function humanApprovalRefusalNote(fm: {
     case "unlinked_handle":
       return (
         `@${approval.login} approved the pull request on GitHub, but no Viberr account carries ` +
-        `that GitHub handle. An org admin can link it under Org settings, Users & access; ` +
+        `that GitHub handle. An org admin can link it under Instance settings, Users & access; ` +
         `where GitHub sign-in is configured the person can connect it on their profile.`
       );
     case "ambiguous_handle":

@@ -19,6 +19,7 @@ import {
 } from "./execution-profile";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * The task-detail MAIN column sections, in their contracted order (spec §2):
@@ -129,6 +130,8 @@ export function TaskHero({
   // It is reset wherever the editor opens or closes, so a re-opened editor is
   // pristine and never accused.
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   const goalRef = useRef<HTMLTextAreaElement>(null);
   const goalErrId = "goal-err";
   const short = draft.trim().length < 3;
@@ -351,7 +354,8 @@ export function TaskHero({
               <span
                 key={refused ? `alert-${refused}` : "hint"}
                 id={goalErrId}
-                className={refused ? "composer-err" : "fine xs dim"}
+                className={refused ? "composer-err" + (refusalShake.shake ? " refused" : "") : "fine xs dim"}
+                onAnimationEnd={refused ? refusalShake.onAnimationEnd : undefined}
                 role={refused ? "alert" : undefined}
               >
                 A goal needs at least 3 characters.

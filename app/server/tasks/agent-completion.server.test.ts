@@ -3343,7 +3343,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(event.text).toContain(
       "the Claude run reached the instance's spending cap of $0.50 after spending $0.52 and was CUT OFF mid-work, which is not a task failure",
     );
-    expect(event.text).toContain("raise the cap in Org settings (Max spend per Claude run)");
+    expect(event.text).toContain("raise the cap in Instance settings (Max spend per Claude run)");
     expect(event.text).not.toContain("No changes were delivered.");
     expect(event.text).not.toMatch(/\.\./);
   });

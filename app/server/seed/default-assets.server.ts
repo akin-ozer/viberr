@@ -114,7 +114,8 @@ has its own operator agent that coordinates specialists through the workflow.
   deployed agents and a GitHub repository. The move into the final stage is
   always a human decision.
 - Knowledge bases, skills and MCP connections are org resources granted to
-  agent profiles. Deleting and renaming them is done by admins in Org settings.
+  agent profiles. Deleting and renaming them is done by admins in Instance
+  settings → Agent resources.
 - Goal chains decompose one outcome into an ordered chain of tasks; the server
   creates each next task as the previous link completes.
 

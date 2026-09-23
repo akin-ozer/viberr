@@ -3956,6 +3956,11 @@ describe("operatorProposeRuling", () => {
     );
     expect(noKb.outcome).toBe("noop");
     expect(noKb.message).toContain("names no rulings knowledge base");
+    // The rulings KB is named through the controller (`set_project_rulings_kb`,
+    // edit-policy): no settings page has a control for it, so the way out must
+    // not send anyone to one.
+    expect(noKb.message).toContain("a project admin can name one by asking the controller");
+    expect(noKb.message).not.toContain("settings");
 
     await seedRulingsKb("# Gates\n\n- Run every gate.\n");
     const wrongDoc = await operatorProposeRuling(

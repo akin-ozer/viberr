@@ -45,7 +45,7 @@ export function workspaceViewFromPathname(pathname: string): WorkspaceNavItem["i
 
 /**
  * P13-D-35 (UX-7): "Filters, queue position, and recent focus should not reset
- * unnecessarily" (ux-design-specification.md:824-825). The board's filter,
+ * unnecessarily" (ux-design-specification.md §Navigation Patterns). The board's filter,
  * layout and search live ONLY in URL params — there is no sessionStorage — so
  * every in-app link written as the bare path `/projects/:slug/board` resets them
  * to `filter=all, view=stage, q=""` (React Router drops `search` for an absolute
