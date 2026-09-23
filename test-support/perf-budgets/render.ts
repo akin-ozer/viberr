@@ -85,4 +85,28 @@ export const RENDER_BUDGETS: PerfBudgetTable = {
     journey: "task-open",
     fixture: `${LOCAL_STAMPS}; characterData MutationObserver records`,
   },
+  // BOARD-8 / CSS-1: 6 before (five pulse-a selectors animated box-shadow);
+  // the one left is ruling 451(a)'s controller shimmer.
+  "render:css.main-thread-infinite-loops": {
+    ceiling: 1,
+    unit: "count",
+    journey: "board-live",
+    fixture:
+      "app/app.css: selectors outside a reduced-motion block playing an infinite animation whose @keyframes set anything but transform/opacity/translate/scale/rotate",
+  },
+  // CSS-4 (owner, 2026-09-24): 6 before.
+  "render:css.live-scrollers-without-gutter": {
+    ceiling: 0,
+    unit: "count",
+    journey: "board-live",
+    fixture:
+      "app/app.css: .col-body, .board.list, .detail, .console, .ctl-transcript and .dock-body without a top-level scrollbar-gutter: stable",
+  },
+  // CSS-7: 1 before (the timeline thumbnail's picture had only a max-height).
+  "render:css.feed-thumbs-without-a-box": {
+    ceiling: 0,
+    unit: "count",
+    journey: "task-open",
+    fixture: "app/app.css: .attach-thumb img / .tl-attach-thumb img rules with neither height nor aspect-ratio",
+  },
 };
