@@ -3544,7 +3544,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               blockedBy: z
                 .array(z.string())
                 .optional()
-                .describe("What this link waits for. EMPTY MEANS NOTHING: the link starts the moment the goal is written, alongside link 1 (ruling 398). A sibling of this same goal is `link 2`; another goal's link is `goal-1 link 3`; a task is its key. The task is born held when the wait names work that is still open."),
+                .describe("What this link waits for. EMPTY MEANS NOTHING: the link starts the moment the goal is written, alongside link 1 (ruling 398). A sibling of this same goal is `link 2`; another goal's link is `goal-1 link 3`; a task is its key. While the wait names work that is still open, the link stays pending with no task; it starts when that work lands."),
             }),
           )
           .min(1)

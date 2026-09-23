@@ -116,8 +116,9 @@ has its own operator agent that coordinates specialists through the workflow.
 - Knowledge bases, skills and MCP connections are org resources granted to
   agent profiles. Deleting and renaming them is done by admins in Instance
   settings → Agent resources.
-- Goal chains decompose one outcome into an ordered chain of tasks; the server
-  creates each next task as the previous link completes.
+- Goals decompose one outcome into links, each of which becomes a task. The
+  server starts every link whose declared wait (\`blockedBy\`) is satisfied, so
+  position in the list holds nothing back; a sequence is a chain of waits.
 
 ## House rules for you
 
@@ -190,8 +191,22 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // comment mention could start a run, and knew nothing of the per-turn
     // context read or `update_task`.
     "8dcb2d1bb8f3668bcc9337af2d07be196ed704b66d70b699b2ac55e39ebf258c",
+    // Seeded-prompt sweep (2026-09-23): before the goal paragraph learned
+    // ruling 398. It said only the first link's task is created up front and
+    // each next one when the previous link completes, and that a waiting
+    // link's task is born held; every link whose wait is satisfied starts.
+    "d7387a588a1c5425648c030293a893e6dee648bac2576231ab9386e083da1fb0",
+    // The same text after PR #321 renamed "Org settings" to "Instance
+    // settings", which shipped without recording its outgoing hash.
+    "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Seeded-prompt sweep (2026-09-23): before the goal section learned
+    // ruling 398 (same sentences as the definition), and before the gate line
+    // stopped saying GitHub reads need maintainer (they need membership).
+    "6bb9b30dcae4b9c6f6504899ab476c63c00f76b417535c113f355a1165d5195a",
+    // The same text after PR #321's "Instance settings" rename.
+    "7ef616ce31f8f0821caa59e8a0532813bb24b4782e4ae103a1cacfd9dc3bd63f",
     // Pass 38 F38-5: before the dispatch sentence stopped telling the controller to
     // "push a task forward" with an @operator comment, a route ruling 252 made
     // start nothing (four controller comments on the shopify board followed it).
@@ -202,6 +217,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Seeded-prompt sweep (2026-09-23): before "advancing a single `auto`
+    // boundary and stopping is correct" gave way to ruling 152(a): the
+    // operator's own transition starts no new turn, so it walks consecutive
+    // `auto` boundaries in one.
+    "96d88b2c779416d83501463cf8c3023f77d05504938bd3d578eb680edea2c778",
     // Pass 37 F37-56: before the pronoun sentence. Agents had written "asking
     // him to choose" and "Her words" about the SAME owner in one project, which
     // is the record inventing a fact about a real person two incompatible ways.
@@ -293,8 +313,18 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // the server delivers on entering Review (contradicting R15-2), and a Tools
     // list omitting deliver_for_review / update_branch_from_base.
     "11715eaceefcc11c7cc408e66eb037ab324b637c26ee5792e6824763887ec0b7",
+    // Seeded-prompt sweep (2026-09-23): before a missing grant stopped reading
+    // as "do not attempt" (four capabilities resolve an absent grant to a
+    // default) and `read_board` stopped being promised to every agent (Claude
+    // only, beside another Viberr tool).
+    "2eaebf8040fe4a8047dc7f78f39482549b15cafeeb2ad18d127264a15113ecc8",
   ],
   [path.join("skills", "developer-expertise", "SKILL.md")]: [
+    // Seeded-prompt sweep (2026-09-23): before the Developer stopped being told
+    // to open the review PR (the server does, on `deliver_for_review`), to work
+    // only at the implementation stage (ruling 133), and to prefix commits with
+    // a literal `[TASK]`.
+    "d22b14d8171f832b7f67e79b4899f1e84c97e6d093ed022efd970ed9b0c30cb0",
     "2cd21e2f0b11a3d35ca0188bf1d42af66f4149b5d7ad3bbb2162cdeb712d91fa",
     "9eed9c7c574b54491362374b8feff9760ab3401b48b60d077b889e60999ebe1f",
     // pass-21 outgoing (humanizer sweep).
@@ -306,6 +336,27 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // outgoing before the evidence-rows-are-citations guidance
     "b2fdfb7f86bb294beabf836f59050d1d57eb429a9d787937783eb972b5a33c85",
     "c32401d03e628093ddaec888efdac35ad79e4ee3604502104fb5bf016adda025",
+    // Seeded-prompt sweep (2026-09-23): before the verdict moved from a parsed
+    // `Verdict:` line to the outcome channel, the Reviewer stopped authoring
+    // the suite (no repo-write grant), and raw output left the evidence rows.
+    "eb2e5ebd17f890a65377d8ce016ddc6e105d92a260d7ee4f9d1ef0262be18774",
+  ],
+  // Seeded-prompt sweep (2026-09-23): the first recorded versions of three
+  // assets the sweep rewrote. The handbook said each next goal task is created
+  // as the previous link completes (ruling 398). The Developer and Reviewer
+  // templates carry their persona as the body (F10-30), so their hashes moved
+  // with `developer.definition.md` ("opens the review pull request") and
+  // `reviewer.definition.md` ("typed quality flags") and the Reviewer's `desc`.
+  [path.join("kb", "controller-handbook", "handbook.md")]: [
+    "a3072990165c8cd4a67d3227d032825bdcb9f33ab82ab7752edf0d6afee9d08b",
+    // PR #321's "Instance settings → Agent resources" version.
+    "3237777fc90a1082f0e01b72f843ec6b68d70639628a55403ed7d2b5f61baa27",
+  ],
+  [path.join("agents", "profiles", "developer.md")]: [
+    "bf84fe28d0f2d21172f415f4c49ceb2aaf10bc824d14bc01d82e391d90bbde19",
+  ],
+  [path.join("agents", "profiles", "reviewer.md")]: [
+    "cbb114a5d3e41103ddf201f40f7e549739de05c659f40ed9b87b3c35372f3055",
   ],
 };
 
