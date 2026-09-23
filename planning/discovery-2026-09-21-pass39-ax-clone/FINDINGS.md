@@ -176,6 +176,12 @@ what they strand, and record an optional reason.
   `unpushedRevision: null`. Cause: the reconciler's never-pushed probe asked the 404 predicate of
   an endpoint that answers 422 (ruling 223 fixed only the acceptance probe), and its test fixture
   answered 404. **Fixed: ruling 427** (the live AX-20 record needs the deploy to correct itself).
+- **F39-50 (MED) — a base refresh publishes work past a file lease.** At 00:11:38 AX-22's operator
+  ran `update_branch_from_base` at Verify. The push "published it, so origin now carries the
+  workspace head, including the 1 workspace commit origin was missing", which was the unreviewed
+  allow-list rework. AX-22's branch changes `internal/controller/task.go`, leased to AX-20 a minute
+  earlier. The delivery push would have refused it (ruling 245). The refresh door carried the
+  store-layout gate (ruling 159(b)) and not the lease gate. **Fixed: ruling 428.**
 
 ---
 

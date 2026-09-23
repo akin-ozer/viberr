@@ -106,6 +106,8 @@ function fakeGit(
     pushRefused?: boolean;
     /** Ruling 159(b): the store-layout paths HEAD's tree carries. */
     storeLayoutFiles?: string[];
+    /** Ruling 428: the files the branch changes since it forked. */
+    branchFiles?: string[];
   } = {},
 ) {
   const calls: string[][] = [];
@@ -130,6 +132,12 @@ function fakeGit(
     }
     if (args.includes("--verify")) {
       return { ok: true, stdout: remote === "current" ? PRE_SHA : REMOTE_SHA, stderr: "" };
+    }
+    if (opts.branchFiles && args.includes("merge-base") && !args.includes("--is-ancestor")) {
+      return { ok: true, stdout: "f".repeat(40), stderr: "" };
+    }
+    if (opts.branchFiles && args.includes("--name-only") && args.includes("--no-merges")) {
+      return { ok: true, stdout: `${opts.branchFiles.join("\n")}\n`, stderr: "" };
     }
     if (args.includes("merge-base")) {
       return remote === "behind"
@@ -347,6 +355,27 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(res.message).toContain("Remove those paths");
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
     expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(false);
+  });
+
+  it("ruling 428: a branch that changes a leased path is not refreshed, and the operator is told to wait for the holder", async () => {
+    // CANARY: drop the `lease_held` arm from `outcomeSentence` and the message
+    // falls to the generic "The branch was not updated" with no next step.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review", branch: "vib-2" }),
+    });
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      fileLeases: [{ paths: ["internal/controller/task.go"], taskKey: "VIB-2", reason: "lands first" }],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const git = fakeGit({ behind: 2, branchFiles: ["internal/controller/task.go"] });
+    const res = await act(git.exec);
+    expect(res.outcome).toBe("noop");
+    expect(res.message).toContain("was NOT updated, and nothing was merged or pushed");
+    expect(res.message).toContain("which VIB-2 holds (lands first)");
+    expect(res.message).toContain("Do not retry the refresh until VIB-2 has merged.");
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
   });
 
   it("ruling 229: an already-current branch is never narrated as a refused plan step", async () => {

@@ -9,9 +9,11 @@ import {
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   createPat,
   setProjectCredential,
@@ -92,6 +94,9 @@ function fakeGit(opts: {
   /** Ruling 159(b): the store-layout paths HEAD's tree carries, as
    *  `git ls-tree -r -z` reports them (NUL-terminated, unquoted). */
   storeLayoutFiles?: string[];
+  /** Ruling 428: the files the branch changes since it forked from the base,
+   *  as the lease gate reads them (`merge-base`, then `log --name-only`). */
+  branchFiles?: string[];
 } = {}) {
   const calls: string[][] = [];
   const branch = opts.branch ?? "vib-1";
@@ -131,6 +136,12 @@ function fakeGit(opts: {
     }
     if (args.includes("--verify")) {
       return { ok: true, stdout: remote.kind === "current" ? PRE_SHA : REMOTE_SHA, stderr: "" };
+    }
+    if (opts.branchFiles && args.includes("merge-base") && !args.includes("--is-ancestor")) {
+      return { ok: true, stdout: "f".repeat(40), stderr: "" };
+    }
+    if (opts.branchFiles && args.includes("--name-only") && args.includes("--no-merges")) {
+      return { ok: true, stdout: `${opts.branchFiles.join("\n")}\n`, stderr: "" };
     }
     if (args.includes("merge-base")) {
       return remote.kind === "behind"
@@ -479,5 +490,53 @@ describe("ruling 159: the base refresh will not publish the store layout either"
     const git = fakeGit({ behind: 2, storeLayoutFiles: [] });
     expect(await run(git.exec)).toMatchObject({ status: "updated" });
     expect(git.calls.some((c) => c.includes("push"))).toBe(true);
+  });
+});
+
+/**
+ * Ruling 428 (pass 39): the base refresh is a door that publishes the branch,
+ * and ruling 245's lease gate stood only at the delivery push. Live on
+ * ax-clone at 00:11, AX-22's refresh published its rework commit while AX-20
+ * held `internal/controller/task.go`, which AX-22's branch changes.
+ */
+describe("ruling 428: the base refresh honours file leases", () => {
+  function leaseTo(holder: string, paths: string[]): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(holder, { stage: "review", branch: holder.toLowerCase() }),
+    });
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      fileLeases: [{ paths, taskKey: holder, reason: "lands first" }],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  it("refuses a branch that changes a path another task holds, merging and pushing nothing", async () => {
+    // CANARY: drop the lease gate from `updateWorkspaceBranchFromBase`.
+    bindPat();
+    leaseTo("VIB-2", ["internal/controller/task.go"]);
+    const git = fakeGit({ behind: 2, branchFiles: ["internal/controller/gateway.go", "internal/controller/task.go"] });
+    const res = await run(git.exec);
+    expect(res).toMatchObject({ status: "lease_held", branch: "vib-1", path: "internal/controller/task.go", holder: "VIB-2" });
+    expect(res.status === "lease_held" ? res.reason : "").toContain(
+      "VIB-1 changes `internal/controller/task.go`, which VIB-2 holds (lands first).",
+    );
+    expect(git.calls.some((c) => c.includes("push"))).toBe(false);
+    expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(false);
+  });
+
+  it("a branch clear of every leased path still updates, and a finished holder binds nobody", async () => {
+    bindPat();
+    leaseTo("VIB-2", ["internal/controller/task.go"]);
+    const clear = fakeGit({ behind: 2, branchFiles: ["internal/controller/gateway.go"] });
+    expect(await run(clear.exec)).toMatchObject({ status: "updated" });
+    // Ruling 245(b): the holder merged, so the lease is spent.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "done", branch: "vib-2" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const spent = fakeGit({ behind: 2, branchFiles: ["internal/controller/task.go"] });
+    expect(await run(spent.exec)).toMatchObject({ status: "updated" });
   });
 });

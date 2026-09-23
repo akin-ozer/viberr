@@ -335,7 +335,7 @@ async function changedWorkflowFiles(
  *
  * `null` keeps its meaning: history could not answer.
  */
-async function changedFilesOnBranch(
+export async function changedFilesOnBranch(
   exec: Exec,
   repoDir: string,
   defaultBranch: string,

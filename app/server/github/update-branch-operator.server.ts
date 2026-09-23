@@ -74,6 +74,9 @@ type BranchUpdateAuditDetails = {
   /** Ruling 133(b): conflict packets only — who the packet offered as the
    *  resolver: the deployed, repo-write delivering agent, or nobody. */
   resolver?: "deliverer" | "none";
+  /** Ruling 428: the leased path that refused the update, and its holder. */
+  path?: string;
+  holder?: string;
 };
 
 /** Ruling 133(b): who can resolve a conflict in product. A deliverer only
@@ -291,6 +294,12 @@ function outcomeSentence(r: UpdateBranchResult, lead = "Brought"): string {
       // Ruling 159(b): the same refusal the delivery push reports, through the
       // door that pushes the workspace head. Naming the paths is the remedy.
       return `\`${r.branch}\` was NOT updated: ${r.reason}. Remove those paths from the branch, then update it again.`;
+    case "lease_held":
+      // Ruling 428: the delivery push's lease refusal, through this door.
+      return (
+        `\`${r.branch}\` was NOT updated, and nothing was merged or pushed: ${r.reason} ` +
+        `Do not retry the refresh until ${r.holder} has merged.`
+      );
     case "update_failed":
       return `The branch was not updated: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`;
     default:
@@ -461,6 +470,10 @@ export async function operatorUpdateBranchFromBase(
   }
   if (result.status === "conflict" || result.status === "store_layout") {
     details.files = result.files;
+  }
+  if (result.status === "lease_held") {
+    details.path = result.path;
+    details.holder = result.holder;
   }
   // Ruling 133(b): who the conflict packet will offer as the resolver, decided
   // once here so the audit row and the packet cannot disagree.
