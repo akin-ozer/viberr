@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * Operator recommendations panel — a SUPERVISED operator recommends governed
@@ -111,6 +112,9 @@ export function OperatorRecommendations({
 }) {
   // A refused Apply re-keys the alert so the sentence is announced again.
   const [refused, setRefused] = useState<{ id: string; n: number } | null>(null);
+  // Ruling 451(g): the note shakes once per refused click. A note that comes
+  // back when the gate blocks again, after a refresh, answers no click.
+  const refusalShake = useRefusalShake(refused ? `${refused.id}:${refused.n}` : null);
   if (recommendations.length === 0) return null;
   return (
     <div className="panel op-recs">
@@ -171,7 +175,10 @@ export function OperatorRecommendations({
               {acceptanceRefusal && reachesAcceptance(r, terminalStageId) && (
                 <p
                   key={`refusal-${r.id}-${refused?.id === r.id ? refused.n : 0}`}
-                  className="deny-note spaced"
+                  // Ruling 451(g): the note stands on its own before any click;
+                  // it shakes only as the answer to a refused one.
+                  className={"deny-note spaced" + (refused?.id === r.id && refusalShake.shake ? " refused" : "")}
+                  onAnimationEnd={refused?.id === r.id ? refusalShake.onAnimationEnd : undefined}
                   role="alert"
                 >
                   <Icon name="alert" />
