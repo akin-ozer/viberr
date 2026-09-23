@@ -49,6 +49,7 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     },
     conversation: null,
     messages: [],
+    taskLinks: {},
     turn: { working: false, runId: null, phase: null, step: null },
     threads: [],
     viewerOwnsActive: false,
@@ -518,6 +519,25 @@ describe("the controller dock (ruling 121)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("U39-29: a task the reply names opens from the dock too", async () => {
+    // CANARY: drop `taskLinks={current.taskLinks}` from the dock's Markdown.
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          conversation: conversationFixture(),
+          messages: [
+            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "VIB-2 waits on VIB-1.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+          ],
+          taskLinks: { "VIB-2": "/projects/viberr/tasks/VIB-2", "VIB-1": "/projects/viberr/tasks/VIB-1" },
+          viewerOwnsActive: true,
+        }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    const link = await screen.findByRole("link", { name: "VIB-2" });
+    expect(link.getAttribute("href")).toBe("/projects/viberr/tasks/VIB-2");
   });
 
   it("returns focus to the trigger on close from a REMEMBERED-open panel too", async () => {

@@ -639,7 +639,7 @@ function Transcript({
               )}
             </header>
             <div className="md-body">
-              <Markdown text={m.text} />
+              <Markdown text={m.text} taskLinks={view.taskLinks} />
             </div>
           </article>
         ))}

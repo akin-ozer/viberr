@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { TaskLinks } from "~/shared/task-key-links";
+import { controllerTaskLinks } from "~/server/controller/controller-task-links.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import { getProject } from "~/server/projections/board-query.server";
@@ -72,6 +74,9 @@ export interface ControllerDockView {
   scope: ControllerDockScope;
   conversation: ControllerConversation | null;
   messages: ControllerMessage[];
+  /** U39-29: the task keys the transcript names that this viewer can open,
+   *  key to path. */
+  taskLinks: TaskLinks;
   /** Ruling 250: `phase`/`step` say what the live turn is doing, for the row
    *  the person is watching. */
   turn: ConversationTurnState;
@@ -181,6 +186,7 @@ export function getControllerDock(
     }
   }
   const config = resolveControllerConfig(input.dataRoot);
+  const messages = conversation ? listMessages(db, conversation.id) : [];
   return {
     // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
     // the dock's "available" is a fact about the person the panel is open for,
@@ -193,7 +199,12 @@ export function getControllerDock(
     staleSelection,
     scope,
     conversation,
-    messages: conversation ? listMessages(db, conversation.id) : [],
+    messages,
+    taskLinks: controllerTaskLinks(
+      db,
+      messages.map((m) => m.text),
+      { projectSlug: binding.projectSlug, viewerId: viewer.id },
+    ),
     turn: conversation
       ? conversationTurnState(db, conversation.id)
       : { working: false, runId: null, phase: null, step: null },
@@ -252,6 +263,7 @@ export function unavailableDockView(
     },
     conversation: null,
     messages: [],
+    taskLinks: {},
     turn: { working: false, runId: null, phase: null, step: null },
     threads: [],
     viewerOwnsActive: false,

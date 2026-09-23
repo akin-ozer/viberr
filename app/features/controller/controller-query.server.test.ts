@@ -208,6 +208,32 @@ describe("getControllerSurface — people are named by display name (ruling 419(
   });
 });
 
+describe("getControllerSurface — the tasks a transcript names (U39-29)", () => {
+  it("resolves the keys the open conversation names on this board", async () => {
+    // CANARY: return `taskLinks: {}` from getControllerSurface.
+    const [{ createConversation, appendMessage }, { writeTask, baseTaskFrontmatter }, { rebuildAll }] = await Promise.all([
+      import("~/server/controller/controller-conversations.server"),
+      import("../../../test-support/test-store"),
+      import("~/server/projections/rebuilder.server"),
+    ]);
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-100") });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const conversation = createConversation(store.db, {
+      userId: store.users.arda.id,
+      userLabel: store.users.arda.email,
+      projectSlug: store.slug,
+    });
+    appendMessage(store.db, { conversationId: conversation.id, author: "controller", text: "I created VIB-100; VIB-5 is gone." });
+    const view = getControllerSurface(store.db, store.users.arda, {
+      projectSlug: store.slug,
+      conversationId: conversation.id,
+      all: false,
+      dataRoot: store.dataRoot,
+    });
+    expect(view.taskLinks).toEqual({ "VIB-100": "/projects/viberr-core/tasks/VIB-100" });
+  });
+});
+
 /**
  * Ruling 419(h): the page the task's chain chip sends a person to carries each
  * chain's history, which the projection never held (`listGoals` returns it

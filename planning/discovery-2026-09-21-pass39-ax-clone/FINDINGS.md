@@ -282,6 +282,22 @@ what they strand, and record an optional reason.
   "looking up tools · …". The stored text stays on the `title`. Test:
   `controller-page.test.tsx` "U39-28".
 
+- **U39-29 (MED) — the controller answers in task keys, and none of them could be clicked.**
+  03:30, the reply to my request: "I created two urgent core tasks for the Developer, AX-33 and
+  AX-34 … AX-21 now waits on AX-33 and AX-30 waits on AX-34." Five tasks, all plain text, on the
+  page whose whole job is directing work on those tasks. Opening any of them meant leaving for
+  the board or the search. **Fixed (default, owner may revisit):** the controller page's and the
+  dock's loaders resolve the keys the open transcript names (`controllerTaskLinks`) to the tasks
+  this viewer can open: a project surface links its own project's tasks, the instance surface
+  the projects the viewer belongs to, and every project for an org admin. A key two visible
+  projects share stays text, as does any key in code or inside a link. The renderer
+  (`rehypeTaskLinks`, beside the @mention pass) links only what it was given, the same "known
+  names only" rule the mention chip follows. It links in the same tab with client navigation,
+  because a new tab per task would also hold two more live-event streams against the browser's
+  six-per-origin limit. Tests: `markdown.test.tsx`, `controller-task-links.server.test.ts`,
+  `controller-query.server.test.ts`, `controller-page.test.tsx` and `controller-dock.test.tsx`,
+  each "U39-29".
+
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
   (following a decision that said "resolve the overlap before delivery"), although AX-20's open

@@ -42,6 +42,7 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     ],
     conversation: null,
     messages: [],
+    taskLinks: {},
     turn: { working: false, runId: null, phase: null, step: null },
     runtime: [],
     canInterruptTurn: false,
@@ -682,6 +683,37 @@ describe("the open conversation's execution", () => {
       ),
     ).toBe("composing · loading tools · get task, list decisions… answered");
     expect(readableStep("ToolSearch · query: slack send")).toBe("looking up tools · slack send");
+  });
+
+  it("U39-29: the tasks a reply names open from the transcript", async () => {
+    // Live on ax-clone, "I created two urgent core tasks … AX-33 and AX-34"
+    // named five tasks as plain text. CANARY: drop `taskLinks={view.taskLinks}`
+    // from the transcript's Markdown.
+    renderPage(
+      view({
+        conversation: {
+          id: "cnv_b",
+          userId: "u1",
+          userLabel: "arda@viberr.dev",
+          projectSlug: "viberr-core",
+          taskKey: null,
+          title: "Board thread",
+          createdAt: "2026-09-01T10:00:00.000Z",
+          updatedAt: "2026-09-01T10:00:00.000Z",
+          lastMessageAt: "2026-09-01T10:00:05.000Z",
+        },
+        messages: [
+          { id: "m2", conversationId: "cnv_b", seq: 2, author: "controller", userId: null, text: "I created VIB-142. VIB-7 is not on this board.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+        ],
+        taskLinks: { "VIB-142": "/projects/viberr-core/tasks/VIB-142" },
+        viewerOwnsActive: true,
+      }),
+      "?c=cnv_b",
+    );
+    const link = await screen.findByRole("link", { name: "VIB-142" });
+    expect(link.getAttribute("href")).toBe("/projects/viberr-core/tasks/VIB-142");
+    expect(link.hasAttribute("target")).toBe(false);
+    expect(screen.queryByRole("link", { name: "VIB-7" })).toBeNull();
   });
 
   it("ruling 250: a phase that only repeats the sentence is not printed twice", async () => {

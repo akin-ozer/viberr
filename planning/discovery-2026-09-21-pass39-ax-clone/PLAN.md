@@ -97,6 +97,7 @@ per item and each one was applied to the source and observed failing.
 | 84 | A new wait on a task that is already done is refused with its own sentence (F39-63) | — | **done** (no ruling) |
 | 85 | The run loading its tools reads as words (U39-28) | — | **done** (no ruling) |
 | 86 | A refresh's drift sentence reads the refresh record when GitHub lags (F39-64) | — | **done**, extends ruling 439 |
+| 87 | Task keys in the controller's transcript link to the tasks the viewer can open (U39-29) | — | **done** (no ruling; default, owner may revisit) |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

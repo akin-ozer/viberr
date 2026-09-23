@@ -5,6 +5,8 @@ import type {
 } from "react";
 import { createContext, useContext, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { Link } from "react-router";
+import { TASK_KEY_IN_TEXT_RE, type TaskLinks } from "~/shared/task-key-links";
 import { Icon } from "./icon";
 
 /**
@@ -56,6 +58,8 @@ import { findMentionSpans } from "./mention-spans";
  */
 interface MentionChipProperties {
   className: string[];
+  /** Set on a task link (U39-29). */
+  href?: string;
 }
 interface HastText {
   type: "text";
@@ -136,6 +140,54 @@ function rehypeMentions(names: string[] = []) {
       } else if (child.type === "text") {
         if (child.value.indexOf("@") === -1) continue;
         const parts = chipMentions(child.value, names);
+        if (parts) {
+          children.splice(i, 1, ...parts);
+          i += parts.length - 1;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * U39-29: split a text value into text nodes and links for the task keys the
+ * page resolved (`links`, key to path). Null when it names none of them.
+ */
+function linkTaskKeys(value: string, links: TaskLinks): HastNode[] | null {
+  const out: HastNode[] = [];
+  let last = 0;
+  for (const match of value.matchAll(TASK_KEY_IN_TEXT_RE)) {
+    const key = match[0];
+    const href = Object.hasOwn(links, key) ? links[key] : undefined;
+    if (!href) continue;
+    if (match.index > last) out.push({ type: "text", value: value.slice(last, match.index) });
+    out.push({
+      type: "element",
+      tagName: "a",
+      properties: { className: ["task-ref"], href },
+      children: [{ type: "text", value: key }],
+    });
+    last = match.index + key.length;
+  }
+  if (out.length === 0) return null;
+  if (last < value.length) out.push({ type: "text", value: value.slice(last) });
+  return out;
+}
+
+/** rehype plugin factory: link the resolved task keys in text nodes, leaving
+ *  code, preformatted blocks and existing links alone. */
+function rehypeTaskLinks(links: TaskLinks = {}) {
+  return function transform(tree: HastRoot) {
+    walk(tree.children);
+  };
+  function walk(children: HastNode[]) {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]!;
+      if (child.type === "element") {
+        if (child.tagName === "code" || child.tagName === "pre" || child.tagName === "a") continue;
+        walk(child.children);
+      } else if (child.type === "text") {
+        const parts = linkTaskKeys(child.value, links);
         if (parts) {
           children.splice(i, 1, ...parts);
           i += parts.length - 1;
@@ -268,7 +320,17 @@ function componentsFor(
   onAttachmentOpen?: AttachmentOpenFactory,
 ) {
   return {
-    a({ children, href }: ComponentPropsWithoutRef<"a">) {
+    a({ children, href, className }: ComponentPropsWithoutRef<"a">) {
+      // U39-29: a task the text names is a page of this app, so it opens here
+      // with client navigation. A new tab per task would also hold two more
+      // live-event streams against the browser's six-per-origin limit.
+      if (className === "task-ref" && href) {
+        return (
+          <Link to={href} className="task-ref">
+            {children}
+          </Link>
+        );
+      }
       // Mark the subtree so a nested attachment image renders WITHOUT its
       // lightbox <button> (a <button> inside this <a> is nested-interactive).
       // The link is the interactive element.
@@ -342,10 +404,14 @@ export function Markdown({
   attachmentNames,
   attachmentsBase,
   onAttachmentOpen,
+  taskLinks,
 }: {
   text: string;
   /** Known mentionable names, so a multi-word "@Arda Kaya" chips as one span. */
   mentionNames?: string[];
+  /** U39-29: the task keys this text may name, resolved by the page's loader
+   *  to the paths the viewer can open. Absent ⇒ keys stay text. */
+  taskLinks?: TaskLinks;
   /** The surrounding task's REAL attachment filenames — enables rewriting
    *  agent-written workspace-relative attachment links to the serving route.
    *  Absent (every non-task surface) ⇒ links render exactly as written. */
@@ -363,7 +429,10 @@ export function Markdown({
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[[rehypeMentions, mentionNames ?? []]]}
+      rehypePlugins={[
+        [rehypeMentions, mentionNames ?? []],
+        [rehypeTaskLinks, taskLinks ?? {}],
+      ]}
       components={components}
     >
       {text}

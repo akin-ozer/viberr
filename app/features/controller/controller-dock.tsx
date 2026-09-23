@@ -629,7 +629,7 @@ function DockShell({ context }: { context: DockContext }) {
                         <LocalDayDotTime iso={m.createdAt} />
                       </header>
                       <div className="md-body">
-                        <Markdown text={m.text} />
+                        <Markdown text={m.text} taskLinks={current.taskLinks} />
                       </div>
                     </article>
                   ))}

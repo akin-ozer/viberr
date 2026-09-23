@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { TaskLinks } from "~/shared/task-key-links";
 import { data } from "react-router";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { getProject } from "~/server/projections/board-query.server";
@@ -21,6 +22,7 @@ import { listRunsForTask } from "~/server/runtimes/run-service.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-actions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
+import { controllerTaskLinks } from "~/server/controller/controller-task-links.server";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own
@@ -40,6 +42,9 @@ export interface ControllerSurfaceView {
   conversations: ConversationListItem[];
   conversation: ControllerConversation | null;
   messages: ControllerMessage[];
+  /** U39-29: the task keys the transcript names that this viewer can open,
+   *  key to path. */
+  taskLinks: TaskLinks;
   /** Ruling 250: `phase`/`step` say what the live turn is doing, for the row
    *  the person is watching. */
   turn: ConversationTurnState;
@@ -140,6 +145,7 @@ export function getControllerSurface(
   if (conversation) {
     conversation = { ...conversation, userLabel: nameOf(conversation.userId, conversation.userLabel) };
   }
+  const messages = conversation ? listMessages(db, conversation.id) : [];
   return {
     // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
     // "is the controller available" is a question about the person looking at
@@ -160,7 +166,12 @@ export function getControllerSurface(
       taskKey: c.taskKey,
     })),
     conversation,
-    messages: conversation ? listMessages(db, conversation.id) : [],
+    messages,
+    taskLinks: controllerTaskLinks(
+      db,
+      messages.map((m) => m.text),
+      { projectSlug: scope, viewerId: viewer.id },
+    ),
     turn: conversation
       ? conversationTurnState(db, conversation.id)
       : { working: false, runId: null, phase: null, step: null },
