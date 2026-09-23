@@ -126,7 +126,8 @@ export function NotConnectedNote() {
  * different answer depending on which entry point they used. The page now
  * follows the dock — which leaves "start a fresh thread" needing a token of
  * its own. It is the same `"new"` the dock sends (`DOCK_NEW_CONVERSATION` in
- * controller-dock-query.server.ts); the two route loaders resolve it.
+ * controller-dock-query.server.ts); `selectedConversationId` in
+ * controller-query.server.ts resolves it for both route loaders.
  */
 export const NEW_CONVERSATION_PARAM = "new";
 

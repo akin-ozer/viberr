@@ -5,19 +5,16 @@ import { appErrorResponse } from "~/server/auth/form-action.server";
 import { requireAuth } from "~/server/auth/require-user.server";
 import { csrfError } from "~/features/shell/csrf-result.server";
 import { getDb } from "~/server/db/sqlite.server";
-import {
-  createConversation,
-  listConversations,
-} from "~/server/controller/controller-conversations.server";
+import { createConversation } from "~/server/controller/controller-conversations.server";
 import {
   interruptControllerTurn,
   runControllerTurn,
 } from "~/server/controller/controller-run.server";
+import { ControllerPage } from "~/features/controller/controller-page";
 import {
-  ControllerPage,
-  NEW_CONVERSATION_PARAM,
-} from "~/features/controller/controller-page";
-import { getControllerSurface } from "~/features/controller/controller-query.server";
+  getControllerSurface,
+  selectedConversationId,
+} from "~/features/controller/controller-query.server";
 
 /**
  * /controller — the instance controller surface (ruling 99). Every signed-in
@@ -30,37 +27,6 @@ export function meta() {
   return [{ title: pageTitle("Controller") }];
 }
 
-/**
- * U33-8: which thread this visit opens.
- *
- * The dock's continuity rule (ruling 121) is "the newest thread of the scope
- * you are standing in"; this page answered a blank composer instead, so one
- * person on one scope got two different answers from the two entry points.
- * Same rule here: no `?c=` opens this scope's newest thread, `?c=new` is the
- * blank composer the New link asks for, and an explicit id still wins —
- * `getControllerSurface` is what judges whether that id is theirs and in
- * scope, and still 404s when it is not.
- *
- * The default is drawn from the viewer's OWN threads, exactly as the dock's
- * is: an org admin reading everyone's (`?all=1`) lands on a thread they can
- * actually talk in rather than on someone else's read-only transcript.
- */
-function selectedConversationId(
-  db: ReturnType<typeof getDb>,
-  url: URL,
-  userId: string,
-): string | null {
-  const requested = url.searchParams.get("c");
-  if (requested === NEW_CONVERSATION_PARAM) return null;
-  if (requested !== null) return requested;
-  const newest = listConversations(db, {
-    userId,
-    projectSlug: null,
-    limit: 1,
-  })[0];
-  return newest?.id ?? null;
-}
-
 export async function loader({ request }: Route.LoaderArgs) {
   const { user } = await requireAuth(request);
   const url = new URL(request.url);
@@ -70,7 +36,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     { id: user.id, email: user.email },
     {
       projectSlug: null,
-      conversationId: selectedConversationId(db, url, user.id),
+      conversationId: selectedConversationId(db, url, {
+        userId: user.id,
+        projectSlug: null,
+      }),
       all: url.searchParams.get("all") === "1",
     },
   );
