@@ -1242,3 +1242,21 @@ stack; at 375 there is no horizontal overflow.
 
 **U39-7 live:** the packet note box reads "e.g. anything the operator should also know" on the
 AX-20 and AX-22 deadlock packets.
+
+## 44. Ruling 424 on the live board, and the AX-20 base problem that led to 429
+
+**424, first operator turns on the new build (00:27).** Both operators ran on reports that before
+the deploy had drawn a refused `update_branch_from_base` (AX-20 three times, AX-22 three times).
+Neither planned one. AX-20's directive said instead: "The delivered revision `7ce74b2` is not yet on
+PR #13; include this fix in your committed work so the operator can deliver the updated revision
+before the next review." That is 427's record, read from the snapshot.
+
+**Why 429 exists (00:41 to 00:59).** AX-20's developer asked for main (AX-19's
+WorkspaceController) to build the regression the owner asked for. The operator had no door. The
+refresh was refused at Review (162/424), and the move back to Verify was refused at 00:47 with
+"rework needs a failing verdict or a revision that changed after one; this task has neither". The
+task's `validation` was `changed`. The controller, asked by the owner, moved AX-20 back as the
+owner's move at 00:57:02. The operator refreshed at 00:57:32 ("29 commits merged in, merge commit
+`b0ad2f0`"), and the developer was dispatched at 00:59:46. With 429 the operator does that itself at
+Review, and the refusal says where the re-verdict is given. (429 is verified by tests; it was not
+yet deployed at this point.)
