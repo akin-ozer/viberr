@@ -26,6 +26,7 @@ import {
   prettySize,
   type StoreNode,
 } from "./tree";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * Store-folder file manager popup.
@@ -965,6 +966,8 @@ export function StoreBrowser({
   // repeated press inserts a fresh alert; cleared wherever a draft opens or
   // closes, so a new document is never accused before it is submitted.
   const [refusedDoc, setRefusedDoc] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const docShake = useRefusalShake(refusedDoc);
   const docNameRef = useRef<HTMLInputElement>(null);
 
   /** Pick the destination folder AND reveal it, so the two never disagree. */
@@ -1160,7 +1163,8 @@ export function StoreBrowser({
                 <div
                   key={`refused-${refusedDoc}`}
                   id="fm-doc-err"
-                  className="form-err refused"
+                  className={"form-err" + (docShake.shake ? " refused" : "")}
+                  onAnimationEnd={docShake.onAnimationEnd}
                   role="alert"
                 >
                   <Icon name="alert" />

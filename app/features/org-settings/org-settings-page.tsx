@@ -21,6 +21,7 @@ import {
   type ControllerConfigView,
   type ControllerSectionLocks,
 } from "./controller-admin-panel";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * /org/settings page shell (org-settings spec §4.0, markup 1:1): back
@@ -719,6 +720,8 @@ function RunConcurrencyControl({
   const { submit, busy } = useOrgAction();
   const [value, setValue] = useState(String(runConcurrency.cap));
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   const capRef = useRef<HTMLInputElement>(null);
   // Re-seed the field when the server value changes (a save round-trips a fresh
   // loader value through this prop), and drop any standing refusal with it.
@@ -797,7 +800,8 @@ function RunConcurrencyControl({
         )}
         {invalid && (
           <span
-            className="form-err refused"
+            className={"form-err" + (refusalShake.shake ? " refused" : "")}
+            onAnimationEnd={refusalShake.onAnimationEnd}
             role="alert"
             id={errId}
             key={`refused-${refused}`}
@@ -830,6 +834,8 @@ function RunSpendCapControl({ spendCapUsd }: { spendCapUsd: number | null }) {
   const current = spendCapUsd === null ? "" : spendCapUsd.toFixed(2);
   const [value, setValue] = useState(current);
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   const capRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     setValue(current);
@@ -891,7 +897,13 @@ function RunSpendCapControl({ spendCapUsd }: { spendCapUsd: number | null }) {
         cap. Codex has no budget option, so a Codex run is bounded by its idle timer only.
       </span>
       {invalid && (
-        <span className="form-err refused" role="alert" id={errId} key={`refused-${refused}`}>
+        <span
+          className={"form-err" + (refusalShake.shake ? " refused" : "")}
+          onAnimationEnd={refusalShake.onAnimationEnd}
+          role="alert"
+          id={errId}
+          key={`refused-${refused}`}
+        >
           <Icon name="alert" />
           <span>
             Enter a dollar amount above zero with at most two decimals, or leave it blank for no cap.

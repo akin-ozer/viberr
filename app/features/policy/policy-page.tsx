@@ -35,6 +35,7 @@ import {
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageFlowPath } from "~/shared/workflow/transitions";
 import { isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * Policy view:
@@ -723,6 +724,10 @@ export function Guardrails({
   // Counted per row, so a repeated press re-announces; cleared as soon as the
   // draft is edited, so a pristine row is never accused.
   const [refusedFor, setRefusedFor] = useState<Record<string, number>>({});
+  // Ruling 451(g): the row refused last, as `id:count`. Its box shakes once
+  // per refusal, and no other row's box shakes with it.
+  const [lastRefused, setLastRefused] = useState<string | null>(null);
+  const refusalShake = useRefusalShake(lastRefused);
   const valueRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const enforced = guardrails.filter((g) => g.kind === "default");
   const on = enforced.filter((g) => g.on).length;
@@ -770,6 +775,7 @@ export function Guardrails({
             if (busy || !valueChanged) return;
             if (!valid) {
               setRefusedFor((r) => ({ ...r, [g.id]: (r[g.id] ?? 0) + 1 }));
+              setLastRefused(`${g.id}:${refusedCount + 1}`);
               valueRefs.current[g.id]?.focus();
               return;
             }
@@ -851,7 +857,11 @@ export function Guardrails({
                       key={`refused-${refusedCount}`}
                       id={errId}
                       role="alert"
-                      className="guard-ctl err refused"
+                      className={
+                        "guard-ctl err" +
+                        (refusalShake.shake && lastRefused === `${g.id}:${refusedCount}` ? " refused" : "")
+                      }
+                      onAnimationEnd={refusalShake.onAnimationEnd}
                     >
                       {g.label} needs a whole number above zero.
                     </span>

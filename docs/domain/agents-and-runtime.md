@@ -789,7 +789,9 @@ marked by whose tool it is: the product's own carry the agent tint and the V mar
 server's prints `server · tool`, a built-in stays neutral; a row that clipped or elided an
 argument links to it by name (`+ full prompt`), and Bash's description prints beside its
 command. The footer's event total counts up to its figure, a frame-loop ticker with the
-figure itself on `data-count` (ruling 366(f)). The strip's
+figure itself on `data-count` (ruling 366(f)). The strip's phase and step arrive as a new
+line when their words change, and its Elapsed, Turns and Tokens figures roll their digits
+(rulings 366(e), 451). The strip's
 **Tokens** cell (F35-1) reads `RunView.tokens` and `tokensEstimated`: `~1.2M` with the
 tooltip "Estimated from the streamed text. The provider's own total replaces it when one
 lands; a run that was stopped never gets one" whenever the row's `usage_final` is 0

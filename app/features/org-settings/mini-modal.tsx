@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * Shared dialog chrome for every org-settings create/edit modal
@@ -65,6 +66,8 @@ export function MiniModal({
   // Counted, not boolean: each refusal re-inserts the alert, because readers
   // announce an alert's insertion, not a role flip on unchanged text.
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   const save = () => {
     if (busy) return;
     if (!canSave) {
@@ -105,7 +108,8 @@ export function MiniModal({
         {!canSave && (
           <span
             key={refused ? "alert-" + refused : "hint"}
-            className={refused ? "foot-hint err refused" : "fine xs dim"}
+            className={refused ? "foot-hint err" + (refusalShake.shake ? " refused" : "") : "fine xs dim"}
+            onAnimationEnd={refused ? refusalShake.onAnimationEnd : undefined}
             role={refused ? "alert" : undefined}
           >
             {unmetHint ?? "Fill the required fields (*) to continue."}

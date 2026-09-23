@@ -93,6 +93,37 @@ describe("OperatorRecommendations: the acceptance gate's refusal on the card (ru
     { id: "r-run", kind: "run_agent", profileId: "dev", label: "Run Developer", detail: "" },
   ];
 
+  it("ruling 451(g): a note that returns on a refresh does not shake again", () => {
+    // Found in review: the gate cleared (the note unmounted), then blocked
+    // again on a later refresh, and the note came back still carrying the
+    // shake of a click made minutes before. CANARY: put `.refused` back on the
+    // note whenever `refused` names this card.
+    const props = {
+      recommendations: cards,
+      canApply: true,
+      busy: false,
+      onApply: () => {},
+      onDismiss: () => {},
+      terminalStageId: "done",
+    };
+    const { container, rerender, getAllByRole } = render(
+      <OperatorRecommendations {...props} acceptanceRefusal={REFUSAL} />,
+    );
+    fireEvent.click(getAllByRole("button", { name: /Apply/ })[0]!);
+    const note = container.querySelector('[role="alert"]')!;
+    expect(note.classList.contains("refused")).toBe(true);
+    fireEvent.animationEnd(note);
+    rerender(<OperatorRecommendations {...props} acceptanceRefusal={null} />);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    rerender(<OperatorRecommendations {...props} acceptanceRefusal={REFUSAL} />);
+    const back = container.querySelector('[role="alert"]')!;
+    expect(back.textContent).toContain("Not acceptable now.");
+    expect(back.classList.contains("refused")).toBe(false);
+    // The next refused click is a new refusal, and shakes.
+    fireEvent.click(getAllByRole("button", { name: /Apply/ })[0]!);
+    expect(container.querySelector('[role="alert"]')!.classList.contains("refused")).toBe(true);
+  });
+
   it("renders the refusal on the acceptance cards only, and Apply there refuses the click", () => {
     // Canary: drop the `acceptanceRefusal` branch from the Apply handler.
     const onApply = vi.fn();

@@ -6955,13 +6955,15 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 /* (c) A copy control trades its copy mark for the check and back ("Icon swap":
    both glyphs in one grid cell, the hidden one at scale .25 behind a 2px blur;
    .2s where the recipe says .25s, for a 13-15px glyph). The word "Copied"
-   rises in with the check; the resting word returns at once. */
+   rises in with the check (alone, on the console's word-only control); the
+   resting word returns at once. An inline-block takes no underline from its
+   parent, so it inherits the console control's hover underline itself. */
 .copy-glyph { display: inline-grid; flex: none; }
 .copy-glyph > .ico { grid-area: 1 / 1; transition: opacity .2s var(--ease-out), transform .2s var(--ease-out), filter .2s var(--ease-out); }
 .copy-glyph > .ico + .ico,
 .copy-glyph[data-copied] > .ico:first-child { opacity: 0; transform: scale(.25); filter: blur(2px); }
 .copy-glyph[data-copied] > .ico + .ico { opacity: 1; transform: none; filter: none; }
-.copy-done { display: inline-block; animation: swap-in .15s var(--ease-out); }
+.copy-done { display: inline-block; text-decoration: inherit; animation: swap-in .15s var(--ease-out); }
 
 /* (f) A sign-in step that completes draws its check ("Success check", sized to
    the 13px mark, without the recipe's rotate and bob, which it tunes for a
@@ -6974,12 +6976,15 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 @keyframes mark-in { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: none; } }
 @keyframes check-draw { from { stroke-dashoffset: 21; } to { stroke-dashoffset: 0; } }
 
-/* (g) A refusal the person just caused shakes once ("Error state shake": four
-   legs of 80/60/80/60ms, 6px each way, then a 4px overshoot, each leg on its
-   own --ease-out). Every box carrying `.refused` is keyed on its refusal, so a
-   second refused click remounts the box and shakes it again. Before, the same
-   sentence stood still, as if the click had been ignored. Every box is a flex
-   item or a flex box itself, so the transform lands. */
+/* (g) A refusal the person just caused shakes once ("Error state shake": the
+   recipe's own stops, four legs of 80/80/60/60ms, 6px each way, then a 4px
+   overshoot, each leg on its own --ease-out). Every box that can carry
+   `.refused` is keyed on its refusal, so a second refused click mounts a new
+   box and shakes it again. Before, the same sentence stood still, as if the
+   click had been ignored. The class comes from `useRefusalShake`, which drops
+   it once that refusal's shake has played, so a box that mounts again for the
+   same refusal (typing made the field valid and then invalid) stays still.
+   Every box is a flex item or a flex box itself, so the transform lands. */
 .refused { animation: shake .28s linear; }
 @keyframes shake {
   0% { transform: translateX(0); animation-timing-function: var(--ease-out); }

@@ -4,6 +4,7 @@ import type { PacketRender } from "~/shared/mapping/task.server";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * Decision packet card — 1:1 port of DecisionPacket (task.jsx, spec §4.2).
@@ -896,6 +897,8 @@ export function DecisionPacket({
   // click is refused here. Counted, so a repeated press inserts a fresh alert;
   // reset by every choice change, so returning to the directive is pristine.
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   const customRef = useRef<HTMLTextAreaElement>(null);
   const customInvalid =
     refused > 0 && customSelected && customText.trim() === "";
@@ -1354,7 +1357,8 @@ export function DecisionPacket({
               <p
                 key={`refused-${refused}`}
                 id={CUSTOM_ERR_ID}
-                className="deny-note spaced refused"
+                className={"deny-note spaced" + (refusalShake.shake ? " refused" : "")}
+                onAnimationEnd={refusalShake.onAnimationEnd}
                 role="alert"
               >
                 <Icon name="alert" />

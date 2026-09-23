@@ -1960,7 +1960,7 @@ function sweep(): Sweep {
           target = part.slice(DARK_SCOPE.length);
         } else if (part.startsWith(":root")) continue;
         const acc = effective.get(target) ?? new Map<string, string>();
-        for (const prop of ["color", "background", "background-color", "background-clip", "font-size", "font-weight"]) {
+        for (const prop of ["color", "background", "background-color", "background-clip", "content", "font-size", "font-weight"]) {
           const value = rule.decls.get(prop);
           if (value !== undefined) acc.set(prop, value);
         }
@@ -1970,11 +1970,18 @@ function sweep(): Sweep {
     for (const [part, decls] of effective) {
       const colour = decls.get("color");
       if (!colour || /^(inherit|currentcolor|unset|initial)$/i.test(colour.trim())) continue;
-      // A glyph layer whose ink IS its background (`color: transparent` +
-      // `background-clip: text`: ruling 451(a)'s shimmer band) is no
+      // An overlay copy of an element's own words, whose ink IS its background
+      // (a `::before`/`::after` drawing `attr(…)` with `color: transparent` and
+      // `background-clip: text`: ruling 451(a)'s shimmer band), is no
       // text-on-backdrop pair. It lays a band over words the element already
-      // draws, and those words are measured on the element itself.
-      if (/^transparent$/i.test(colour.trim()) && /\btext\b/i.test(decls.get("background-clip") ?? "")) {
+      // draws, and those words are measured on the element itself. Real text
+      // painted this way (not a pseudo copy of attr()) is still swept.
+      if (
+        /::(before|after)$/.test(part) &&
+        (decls.get("content") ?? "").startsWith("attr(") &&
+        /^transparent$/i.test(colour.trim()) &&
+        /\btext\b/i.test(decls.get("background-clip") ?? "")
+      ) {
         continue;
       }
       const fg = resolveColor(colour, tokens);
@@ -3655,49 +3662,84 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     expect(CODE).toMatch(new RegExp(`@keyframes check-draw \\{ from \\{ stroke-dashoffset: ${dash}; \\}`));
   });
 
-  it("(g) .refused shakes once, and every element that carries it is keyed on its refusal", () => {
+  it("(g) .refused plays the recipe's shake: legs of 80/80/60/60ms over .28s", () => {
+    // The record says which legs the stops make, so the stops are pinned.
+    // CANARY: move the second stop to 50% (80/60/80/60).
     expect(rule(plain, ".refused").get("animation")).toMatch(/^shake \.28s linear$/);
-    // A box that stays mounted across a second refusal never replays its
-    // shake, and that repeat is the case the shake exists for. So every JSX
-    // element whose className can carry `refused` must carry a `key`.
-    // CANARY: drop the key from any of them (login.tsx's #lg-err).
+    const body = CODE.match(/@keyframes shake \{([\s\S]*?)\n\}/)![1]!;
+    const stops = [...body.matchAll(/([\d.]+)% \{ transform: translateX\((-?\d+)(?:px)?\)/g)].map((m) => ({
+      at: Number(m[1]),
+      x: Number(m[2]),
+    }));
+    expect(stops.map((s) => s.x)).toEqual([0, 6, -6, 4, 0]);
+    const legs = stops.slice(1).map((s, i) => Math.round(((s.at - stops[i]!.at) / 100) * 280));
+    expect(legs).toEqual([80, 80, 60, 60]);
+  });
+
+  it("(g) every refusal box carries .refused, keyed on its refusal, and shakes once per refusal", () => {
+    // Two-way. A box that answers a refused click (an alert keyed on the
+    // refusal, so a repeat mounts a new one) must be able to shake; a box that
+    // can shake must be keyed on its refusal (a stable key never replays), and
+    // must say when its shake has played (`useRefusalShake`'s onAnimationEnd),
+    // or else be keyed on the refusal object itself (login's `refusalKey`), so
+    // that typing it invalid again does not shake it. CANARY: drop `.refused`
+    // from any box (the five this check found first were new-project-modal,
+    // create-profile-modal, execution-profile and settings-page's invite and
+    // repair boxes), or its onAnimationEnd.
+    /** Every JSX opening tag in a source, braces, strings and comments skipped. */
+    const openingTags = (src: string): { tag: string; line: number }[] => {
+      const out: { tag: string; line: number }[] = [];
+      for (const m of src.matchAll(/<([A-Za-z][\w.]*)[\s>]/g)) {
+        let depth = 0;
+        let i = m.index! + 1;
+        for (; i < src.length; i++) {
+          const c = src[i]!;
+          if (c === "/" && src[i + 1] === "/" && depth === 0) i = src.indexOf("\n", i);
+          else if (c === "/" && src[i + 1] === "*") i = src.indexOf("*/", i) + 1;
+          else if ((c === '"' || c === "'" || c === "`") && (depth > 0 || c === '"')) {
+            const close = src.indexOf(c, i + 1);
+            if (close < 0) break;
+            i = close;
+          } else if (c === "{") depth++;
+          else if (c === "}") depth--;
+          else if (c === ">" && depth === 0) break;
+          if (i < 0) break;
+        }
+        out.push({ tag: src.slice(m.index!, i + 1), line: src.slice(0, m.index).split("\n").length });
+      }
+      return out;
+    };
+    // A regex, not a string: the sheet's own class scan reads this file too,
+    // and takes a quoted attribute name followed by a quote for markup.
+    const CLASS_ATTR = /className=/;
+    const classExpr = (tag: string): string => {
+      const hit = CLASS_ATTR.exec(tag);
+      if (!hit) return "";
+      const start = hit.index + hit[0].length;
+      if (tag[start] === '"') return tag.slice(start, tag.indexOf('"', start + 1) + 1);
+      return balanced(tag, start).body;
+    };
     const carriers: string[] = [];
-    const unkeyed: string[] = [];
+    const problems: string[] = [];
     for (const file of sourceFiles(APP_DIR)) {
       if (!file.endsWith(".tsx") || file.endsWith(".test.tsx")) continue;
       const src = readFileSync(file, "utf8");
-      for (const m of src.matchAll(/className=/g)) {
-        let expr: string;
-        let end: number;
-        const start = m.index! + "className=".length;
-        if (src[start] === '"') {
-          end = src.indexOf('"', start + 1);
-          expr = src.slice(start, end + 1);
-        } else {
-          const { body, end: close } = balanced(src, start);
-          expr = body;
-          end = close;
+      for (const { tag, line } of openingTags(src)) {
+        const where = `${path.relative(APP_DIR, file)}:${line}`;
+        const alert = /\brole=(?:"alert"|\{[^{}]*"alert"[^{}]*\})/.test(tag);
+        const dynamicKey = /\bkey=\{/.test(tag);
+        const carries = /"[^"]*\brefused\b[^"]*"/.test(classExpr(tag));
+        if (carries) carriers.push(where);
+        if (alert && dynamicKey && !carries) problems.push(`${where}: an alert keyed per refusal that never shakes`);
+        if (carries && !dynamicKey) problems.push(`${where}: shakes, but a stable key never replays it`);
+        if (carries && !/\bonAnimationEnd=/.test(tag) && !/\bkey=\{refusalKey\(/.test(tag)) {
+          problems.push(`${where}: shakes on every mount, not once per refusal`);
         }
-        if (!/"[^"]*\brefused\b[^"]*"/.test(expr)) continue;
-        const open = src.lastIndexOf("<", m.index);
-        // The tag closes at the first `>` outside any `{…}` after the class.
-        let depth = 0;
-        let close = end + 1;
-        for (; close < src.length; close++) {
-          const c = src[close];
-          if (c === "{") depth++;
-          else if (c === "}") depth--;
-          else if (c === ">" && depth === 0 && src[close - 1] !== "=") break;
-        }
-        const tag = src.slice(open, close + 1);
-        const where = `${path.relative(APP_DIR, file)}:${src.slice(0, m.index).split("\n").length}`;
-        carriers.push(where);
-        if (!/\bkey=/.test(tag)) unkeyed.push(where);
       }
     }
-    // The eleven refusal boxes plus the login page's two.
-    expect(carriers.length).toBeGreaterThanOrEqual(12);
-    expect(unkeyed).toEqual([]);
+    expect(problems).toEqual([]);
+    // Sixteen boxes keyed on a refusal counter, and the login page's two.
+    expect(carriers).toHaveLength(18);
   });
 
   it("every motion this ruling adds has a reduced-motion answer that does not move", () => {
