@@ -1416,6 +1416,13 @@ not lost work.
   report: line 80 is the cleanup every CLI test shares, whose 1-second shutdown limit is the "about
   1 s", so the test's own assertions pass and the server fails to shut down after it.
 - **U39-29 on the new build:** the reply's twelve task keys are links.
-- **U39-30 not yet seen live:** this turn ended below the 100k completion-compaction threshold (the
+- **U39-30 not seen on that turn:** it ended below the 100k completion-compaction threshold (the
   previous turn had compacted to 4k), so no compaction followed it and the reply landed with the
   run's end.
+- **U39-30, live on the next turn (04:30:51 to 04:32:16).** I asked for the main's-defect rule in
+  environment-and-gates. Polling the page every 3 seconds: at 04:31:52 the controller's reply was
+  the last message in the transcript while the working row still read "Compacting context", and
+  the row cleared at 04:32:16. The server logged "run compaction at completion … replaySize 119136,
+  compacted: true" at 04:32:11. Before U39-30 the reply would have appeared at 04:32:16, 24 seconds
+  later. The transcript holds the reply once. The rule itself is in `environment-and-gates.md` §2,
+  and the controller listed the three things it added beyond my words so I could check them.
