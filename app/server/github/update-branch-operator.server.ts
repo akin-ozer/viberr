@@ -6,7 +6,7 @@ import {
   resolveTaskFilePath,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
-import { describeRevisionDrift, headCarriesRevision } from "~/shared/revision-drift";
+import { describeRevisionDrift, headCarriesRevision, refreshOnlyDrift } from "~/shared/revision-drift";
 import { reconcileTask, type GithubActionContext } from "./github-reconciler.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
@@ -360,16 +360,41 @@ export async function recordBranchRefresh(
     }
   });
   const reconcile = await reconcileTask(db, ref, by.reconcileActor, ctx);
+  // F39-64 (pass 39): GitHub shows a pushed head on the pull request some
+  // seconds after the push, and the reconcile above can read the PR first.
+  // It then measured no drift at the head it was shown, the reviewed one, and
+  // this wrote "The review PR's head now equals the reviewed revision" one line
+  // after the merge commit it had just pushed. Live on ax-clone AX-29 the
+  // acceptance ceremony did that and merged, so the permanent completion
+  // record left out the refresh the acceptance itself shipped. The pushed head
+  // is in hand, and Viberr recorded every commit between it and the reviewed
+  // revision, so the drift is read from that record (ruling 439) until GitHub
+  // catches up. The same record answers when GitHub could not be read at all.
+  let lagging = false;
+  let fromRecord: ReturnType<typeof refreshOnlyDrift> = null;
+  await updateTaskFile(fileRef, (parsed) => {
+    const pr = parsed.frontmatter.pr;
+    const rev = activeWorkRevision(parsed.frontmatter.workRevision);
+    if (!pr || pr.headSha === result.mergeSha) return;
+    lagging = true;
+    fromRecord = rev
+      ? refreshOnlyDrift(rev.headSha, result.mergeSha, parsed.frontmatter.baseRefreshes)
+      : null;
+    if (fromRecord) pr.revisionDrift = fromRecord;
+  });
   const after = readTaskFile(fileRef)?.parsed.frontmatter ?? null;
   const drift = describeRevisionDrift(after?.pr?.revisionDrift);
-  const measured =
-    reconcile.status === "reconciled"
-      ? after?.pr
-        ? drift.kind === "none"
-          ? `The review PR's head now equals the reviewed revision.`
-          : `Drift re-measured: ${drift.sentence}.`
-        : ""
-      : `Drift could not be re-measured now (${reconcile.status}); the next GitHub pass will.`;
+  const measured = fromRecord
+    ? `Drift, from Viberr's own refresh record (GitHub had not shown the new head on the pull request): ${drift.sentence}.`
+    : reconcile.status !== "reconciled"
+      ? `Drift could not be re-measured now (${reconcile.status}); the next GitHub pass will.`
+      : !after?.pr
+        ? ""
+        : lagging
+          ? `GitHub has not shown the new head on the pull request yet, so the drift was not re-measured; the next GitHub pass will.`
+          : drift.kind === "none"
+            ? `The review PR's head now equals the reviewed revision.`
+            : `Drift re-measured: ${drift.sentence}.`;
   const sentence = `${outcomeSentence(result, by.lead)}${measured ? ` ${measured}` : ""}`;
   // A branch that moved must SAY it moved. The tool result is text the model
   // reads; the timeline is the record the humans read, and a base merge

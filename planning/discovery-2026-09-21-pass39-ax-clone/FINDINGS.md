@@ -452,6 +452,20 @@ what they strand, and record an optional reason.
   "F39-63". Two existing tests had added a done task to set up a later state. They now add it
   while it is open and finish it afterwards, which is the order the product allows.
 
+- **F39-64 (MED) — the refresh wrote "the heads are equal" one line below the merge it had just
+  pushed.** AX-29 03:34:55, accepting as the owner: "Accepting the completion brought `ax-29` up
+  to date with `main` (4 commits merged in, merge commit `8c73b62` …). The review PR's head now
+  equals the reviewed revision." It did not: the reviewed revision was `278c1ed`. The reconcile
+  after the push read PR #23 before GitHub showed the new head, so the task file still carries
+  `pr.headSha: 278c1ed` and no drift. The ceremony merged `8c73b62` two seconds later, and the
+  permanent completion record ("Human acceptance recorded …") says nothing about the refresh the
+  acceptance shipped. That record is exactly what ruling 318 exists to keep honest, and the fact
+  was in hand: Viberr had just pushed that sha. **Fixed, extending ruling 439:** when the PR's
+  recorded head is not the pushed merge, the drift comes from Viberr's own refresh record, and
+  when that cannot reach the head either, the sentence says the drift was not re-measured.
+  AX-29's live record stays as written; it is history. Tests: `update-branch-operator.server.test.ts`
+  "F39-64" and the ceremony test in `task-actions.server.test.ts`.
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

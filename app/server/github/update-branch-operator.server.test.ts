@@ -631,6 +631,58 @@ describe("ruling 134(c): the remote report", () => {
     expect(listAuditEvents(store.db, { action: "github.branch_update.operator" })[0]!.details).toMatchObject({ mergeSha: MERGE_SHA, remote: "current" });
   });
 
+  /**
+   * F39-64: GitHub shows a pushed head on the PR some seconds after the push.
+   * Live on ax-clone AX-29 the acceptance ceremony's reconcile read the PR at
+   * the reviewed head, measured no drift, and the timeline said "The review
+   * PR's head now equals the reviewed revision" one line after the merge commit
+   * it had pushed; the completion record then left the refresh out.
+   */
+  describe("F39-64: the reconcile reads the PR before GitHub shows the pushed head", () => {
+    function lagging(reviewedHead: string) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          branch: "vib-1",
+          workRevision: { id: "rev_1", headSha: reviewedHead, treeSha: null, branch: "vib-1", createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+          pr: { number: 5, state: "review", title: "[VIB-1] t", headSha: PRE_SHA },
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      // GitHub still answers the pre-push head.
+      return fakeGithubFetch({
+        [`GET ${REPO_PATH}/compare/main...vib-1`]: { body: { ahead_by: 1, behind_by: 0, status: "ahead", commits: [] } },
+        [`GET ${REPO_PATH}/pulls`]: { body: [{ number: 5, title: "[VIB-1] t", state: "open", draft: false, merged_at: null, head: { sha: PRE_SHA } }] },
+        [`GET ${REPO_PATH}/pulls/5`]: { body: { number: 5, title: "[VIB-1] t", state: "open", merged: false, merged_at: null, head: { sha: PRE_SHA }, additions: 1, deletions: 0, changed_files: 1 } },
+        [`GET ${REPO_PATH}/commits/${PRE_SHA}/check-runs`]: { body: { total_count: 0, check_runs: [] } },
+      });
+    }
+
+    it("reads the drift from the refresh record, never claims the heads are equal", async () => {
+      // CANARY: drop the `lagging` arm and the sentence is the AX-29 one.
+      const gh = lagging(PRE_SHA);
+      const res = await act(fakeGit({ behind: 2 }).exec, authority(), gh.fetchImpl);
+      expect(res.outcome).toBe("done");
+      expect(res.message).not.toContain("now equals the reviewed revision");
+      expect(res.message).toContain(
+        "Drift, from Viberr's own refresh record (GitHub had not shown the new head on the pull request): base refreshed · 1 merge commit · 2 base commits · 0 authored commits since review.",
+      );
+      const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
+      // What the completion record and the accept dialog read.
+      expect(fm.pr?.revisionDrift).toEqual({ headSha: MERGE_SHA, authored: 0, baseRefresh: { merges: 1, commits: 2 } });
+    });
+
+    it("says it did not re-measure when the record cannot reach the pushed head", async () => {
+      // The refresh was made onto a head that is not the reviewed revision's.
+      const gh = lagging("f".repeat(40));
+      const res = await act(fakeGit({ behind: 2 }).exec, authority(), gh.fetchImpl);
+      expect(res.message).not.toContain("now equals the reviewed revision");
+      expect(res.message).toContain(
+        "GitHub has not shown the new head on the pull request yet, so the drift was not re-measured; the next GitHub pass will.",
+      );
+    });
+  });
+
   it("ruling 132: when the reconcile cannot run, the row still lands and the message says the drift was not re-measured", async () => {
     // Canary: swallow the reconcile result silently (no "could not be re-measured").
     const gh = fakeGithubFetch({

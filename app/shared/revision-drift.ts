@@ -221,6 +221,29 @@ export function refreshChainFrom(
   return links.length > 0 ? { links } : null;
 }
 
+/**
+ * Ruling 439: the drift `headSha` carries when the reviewed revision reaches it
+ * through Viberr's own refreshes alone: no authored commits, and the merges and
+ * base commits of the refreshes along the way. Null when the chain does not
+ * reach it. It needs no GitHub read, because every commit on the way is one
+ * Viberr made or merged in and recorded.
+ */
+export function refreshOnlyDrift(
+  reviewedSha: string,
+  headSha: string,
+  refreshes: readonly RefreshLink[],
+): RevisionDrift | null {
+  const chain = refreshChainFrom(reviewedSha, refreshes);
+  const upTo = chain ? chain.links.findIndex((l) => l.head === headSha) : -1;
+  if (!chain || upTo < 0) return null;
+  const reached = chain.links.slice(0, upTo + 1);
+  return {
+    headSha,
+    authored: 0,
+    baseRefresh: { merges: reached.length, commits: reached.reduce((n, l) => n + l.commits, 0) },
+  };
+}
+
 /** Ruling 439: is `headSha` the revision's own head, or one it reaches through
  *  Viberr's base refreshes alone? */
 export function headCarriesRevision(
@@ -302,22 +325,8 @@ export function reviewSubjectSha(input: {
   // Without a PR the offered head is where the chain ends: the branch as
   // Viberr's last refresh pushed it. With one, only a PR head the chain
   // reaches is offered; anything else keeps the pin.
-  const chain = refreshChainFrom(reviewedSha, input.refreshes);
-  if (!chain) return stand;
-  const upTo = prHeadSha
-    ? chain.links.findIndex((l) => l.head === prHeadSha)
-    : chain.links.length - 1;
-  const reached = chain.links.slice(0, upTo + 1);
-  const head = reached.at(-1)?.head;
-  if (upTo < 0 || !head) return stand;
-  return {
-    sha: head,
-    rePinned: {
-      reviewedSha,
-      baseRefresh: {
-        merges: reached.length,
-        commits: reached.reduce((n, l) => n + l.commits, 0),
-      },
-    },
-  };
+  const offered = prHeadSha ?? refreshChainFrom(reviewedSha, input.refreshes)?.links.at(-1)?.head;
+  const refreshed = offered ? refreshOnlyDrift(reviewedSha, offered, input.refreshes) : null;
+  if (!refreshed?.baseRefresh) return stand;
+  return { sha: refreshed.headSha, rePinned: { reviewedSha, baseRefresh: refreshed.baseRefresh } };
 }

@@ -96,6 +96,7 @@ per item and each one was applied to the source and observed failing.
 | 83 | A base refresh keeps the revision and moves the review subject, with or without a PR (F39-62) | — | **done**, ruling 439 |
 | 84 | A new wait on a task that is already done is refused with its own sentence (F39-63) | — | **done** (no ruling) |
 | 85 | The run loading its tools reads as words (U39-28) | — | **done** (no ruling) |
+| 86 | A refresh's drift sentence reads the refresh record when GitHub lags (F39-64) | — | **done**, extends ruling 439 |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

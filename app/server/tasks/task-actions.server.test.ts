@@ -5581,7 +5581,13 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(parsed.frontmatter.baseRefreshes[0]).toMatchObject({ mergeSha: "m".repeat(40), base: "main", commits: 2 });
     expect(parsed.timeline.some((e) => e.text.startsWith("Accepting the completion brought `vib-1-work` up to date with `main`"))).toBe(true);
     expect(listAuditEvents(store.db, { action: "github.branch_update.acceptance" })[0]?.details).toMatchObject({ status: "updated", commits: 2 });
-
+    // F39-64: GitHub never showed the merge head here (no transport), and the
+    // permanent record still names the refresh this acceptance shipped, from
+    // Viberr's own record. CANARY: drop `pr.revisionDrift = fromRecord`.
+    const completion = parsed.timeline.find((e) => e.type === "completion");
+    expect(completion?.text).toContain(
+      "carries a base refresh made after the review (1 merge commit, 2 base commits) and no authored commits outside the reviewed revision",
+    );
   });
 
   /**
