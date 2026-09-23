@@ -411,6 +411,16 @@ what they strand, and record an optional reason.
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
+- **A base conflict is narrated as a step that "did not apply".** AX-21 01:18 and AX-28 02:43:
+  "The operator's plan was not carried out in full. This step did not apply to the task's
+  current state: `update_branch_from_base` — `ax-28` CONFLICTS with `main` … Opened a blocking
+  decision packet". The step did apply: it tried the merge and opened the decision. The body is
+  accurate and the "Blocked: … conflicts" event above it says the same, so it is a headline
+  repeated, not a lie that costs anyone. The conflict arm returns `noop` on purpose (the LV-03
+  split keeps a state refusal from being blamed on policy, and five tests pin it). Returning
+  `done` when the packet opened would drop the note, and ruling 430's pause note would still
+  cover any later steps. Left for the next pass.
+
 - **O39-a (owner's call) — an answer that routes work to ANOTHER agent summons the asking one.**
   AX-22 23:38: the developer asked "Route the Gateway CLI and documentation follow-up?" and
   offered "Hand off to Surface Developer (Recommended)". I picked it. `resolvePacket` summoned the
