@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TurnStep } from "./turn-step";
+import { TurnStep, WorkingSentence } from "./turn-step";
+import { useFreshMessageIds } from "./use-fresh-messages";
 import {
   Link,
   useFetcher,
@@ -388,20 +389,10 @@ function DockShell({ context }: { context: DockContext }) {
   }, [open, focusInside]);
 
   // Message entry motion: only a message that arrives while THIS conversation
-  // is already on screen animates. Ids seen in the previous render of the same
-  // conversation are settled; a switched conversation settles everything.
-  const seenIds = useRef<Set<string>>(new Set());
-  const seenConversation = useRef<string | null>(null);
+  // is already on screen animates (the page shares the rule, ruling 451(d)).
   const conversationId = current?.conversation?.id ?? null;
   const messages = current?.messages ?? [];
-  const fresh = useMemo(() => {
-    if (seenConversation.current !== conversationId) return new Set<string>();
-    return new Set(messages.filter((m) => !seenIds.current.has(m.id)).map((m) => m.id));
-  }, [messages, conversationId]);
-  useEffect(() => {
-    seenIds.current = new Set(messages.map((m) => m.id));
-    seenConversation.current = conversationId;
-  }, [messages, conversationId]);
+  const fresh = useFreshMessageIds(messages, conversationId);
 
   // Keep the newest message in view without scrolling the page underneath.
   // `open` is in the deps because closing unmounts the scroll container and
@@ -685,7 +676,8 @@ function DockShell({ context }: { context: DockContext }) {
                   ))}
                   {current.turn.working && (
                     <div className="ctl-working" role="status">
-                      <span className="live-dot" /> {current.controllerName} is working…
+                      <span className="live-dot" />
+                      <WorkingSentence name={current.controllerName} />
                       {/* Ruling 250: the dock follows a person onto every page
                           and has no live-run panel at all, so this row is the
                           ONLY place the turn's own step can reach them here. */}

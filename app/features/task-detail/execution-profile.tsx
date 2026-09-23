@@ -21,6 +21,7 @@ import {
   backendRunRefusal,
   type TaskRunPrincipalView,
 } from "./run-principal-view";
+import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * One engagement's LIVE run, as the task loader ships it: which profile, and
@@ -615,6 +616,8 @@ function AgentRunControl({
   // Ruling 147: counted, not boolean — each refused start re-inserts the alert,
   // because readers announce an insertion, not a role flip on unchanged text.
   const [refused, setRefused] = useState(0);
+  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  const refusalShake = useRefusalShake(refused);
   const pickRef = useRef<HTMLInputElement>(null);
   const pickErrId = useId();
   // Any pick (or a pick cleared by typing) retires the accusation: the mark
@@ -796,7 +799,8 @@ function AgentRunControl({
         <span
           key={"pick-refused-" + refused}
           id={pickErrId}
-          className="sub err"
+          className={"sub err" + (refusalShake.shake ? " refused" : "")}
+          onAnimationEnd={refusalShake.onAnimationEnd}
           role="alert"
         >
           Choose an agent first.

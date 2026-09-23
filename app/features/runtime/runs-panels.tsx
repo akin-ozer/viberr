@@ -10,6 +10,7 @@ import NumberFlow, { NumberFlowGroup } from "@number-flow/react";
 import { ThinkingOrb } from "thinking-orbs";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import { AgentGlyph } from "~/ui/identity";
+import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { NumberTicker } from "~/ui/number-ticker";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
@@ -121,6 +122,16 @@ function WaitClock({ seconds, title }: { seconds: number; title: string }) {
           <NumberFlow value={s} suffix="s" trend={1} willChange />
         )}
       </NumberFlowGroup>
+    </span>
+  );
+}
+
+/** Ruling 451(e): the strip's Turns cell rolls as Elapsed and Tokens beside
+ *  it do; it used to be the one figure in the row that jumped. */
+function TurnCount({ n }: { n: number }) {
+  return (
+    <span className="lw-clock" data-turns={n}>
+      <NumberFlow value={n} trend={1} />
     </span>
   );
 }
@@ -349,11 +360,16 @@ export function LiveRunPanel({
                 — so the heading falls back to the one thing that IS known from
                 the row's state rather than rendering an empty bold line, and
                 the step row is omitted entirely when there is no step. */}
-            <div className="ph">{run.phase ?? "Working"}</div>
+            {/* Ruling 451(a): phase and step are keyed on their text, so a
+                new one is a new line that rises in (the sheet's `swap-in`)
+                rather than words changing under the reader. */}
+            <div key={"ph:" + (run.phase ?? "Working")} className="ph">
+              {run.phase ?? "Working"}
+            </div>
             {/* U39-26: read as words, as the conversation's working row
                 reads it; the stored step stays on hover. */}
             {run.step ? (
-              <div className="step mono" title={run.step}>
+              <div key={"step:" + run.step} className="step mono" title={run.step}>
                 {readableStep(run.step)}
               </div>
             ) : null}
@@ -368,7 +384,9 @@ export function LiveRunPanel({
           </div>
           <div className="run-cell">
             <div className="lbl">Turns</div>
-            <div className="val mono">{run.turns}</div>
+            <div className="val mono">
+              <TurnCount n={run.turns} />
+            </div>
           </div>
           <div className="run-cell">
             <div className="lbl">Tokens</div>
@@ -620,7 +638,7 @@ function SessionIdChip({
         title="Copy full session id"
         aria-label={copied ? "Copied session id" : "Copy full session id"}
       >
-        <Icon name={copied ? "check" : "copy"} />
+        <CopyGlyph copied={copied} />
       </button>
       {exportable && runId && (
         <a
@@ -847,7 +865,8 @@ function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
           onClick={copy}
           aria-label="Copy this output"
         >
-          {copied ? "copied" : "copy"}
+          {/* Ruling 451(c): the confirmation rises in; "copy" returns at once. */}
+          {copied ? <span className="copy-done">copied</span> : "copy"}
         </button>
       </span>
       <span className="lk-body">
