@@ -216,12 +216,12 @@ account is gone or disabled. No process was ever started in either case.
 | Table | Indexes |
 |---|---|
 | `users` | `idx_users__email` UNIQUE (`email`) |
-| `audit_events` | `idx_audit_events__occurred_at`, `idx_audit_events__actor_user_id`, `idx_audit_events__action` |
+| `audit_events` | `idx_audit_events__occurred_at`, `idx_audit_events__actor_user_id`, `idx_audit_events__action`, `idx_audit_events__task_action` (`project_slug`, `task_key`, `action`, `occurred_at`; the task page's last-check read, ruling 454) |
 | `project_members` | `idx_project_members__user_id` |
 | `task_projections` | `idx_task_projections__stage` (`project_slug`, `stage`) |
 | `task_events` | `idx_task_events__task` (`project_slug`, `task_key`, `position`), `idx_task_events__occurred_at` |
 | `diagnostics` | `idx_diagnostics__source_path`, `idx_diagnostics__task` (`project_slug`, `task_key`) |
-| `provenance` | `idx_provenance__source_path`, `idx_provenance__observed_at` |
+| `provenance` | `idx_provenance__source_path`, `idx_provenance__observed_at`, `idx_provenance__path_action` (`source_path`, `action`; the per-task reconcile reads, ruling 454) |
 | `notifications` | `idx_notifications__user` (`user_id`, `occurred_at DESC`), `idx_notifications__user_task` (`user_id`, `task_key`, `kind`) |
 | `github_pats` | `idx_github_pats__user_id` |
 | `scope_violations` | `idx_scope_violations__project_status` (`project_slug`, `status`), `idx_scope_violations__task` (`project_slug`, `task_key`), `idx_scope_violations__open_unique` UNIQUE (`project_slug`, `scope`, `coalesce(task_key, '')`) WHERE `status = 'open'` |
@@ -301,7 +301,8 @@ second adds each missing `BASELINE_COLUMNS` entry with `ALTER TABLE … ADD COLU
 - `task_projections`: `recommendation_kinds`.
 
 It also creates the `BASELINE_TABLES` (`project_github_health`, `user_backend_credentials`) and
-`BASELINE_INDEXES` (`idx_controller_conversations__scope`) with `IF NOT EXISTS`. A CHECK
+`BASELINE_INDEXES` (`idx_controller_conversations__scope`, `idx_audit_events__task_action`,
+`idx_provenance__path_action`) with `IF NOT EXISTS`. A CHECK
 cannot be added by ALTER, so an upgraded root lacks the CHECKs on the added columns and the
 conversation-scope CHECK; the writers enforce those values instead.
 

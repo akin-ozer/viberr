@@ -248,6 +248,51 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
   });
 
   /**
+   * Ruling 454: the task page's freshness reads got composite indexes after
+   * roots had applied the baseline; boot adds them to an older root.
+   */
+  it("adds the freshness indexes a pre-454 root lacks", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-freshidx-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE audit_events (
+           id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL, actor_user_id TEXT,
+           actor_label TEXT NOT NULL, action TEXT NOT NULL, subject_kind TEXT,
+           subject_id TEXT, project_slug TEXT, task_key TEXT, details_json TEXT);
+         CREATE INDEX idx_audit_events__action ON audit_events (action);
+         CREATE TABLE provenance (
+           id INTEGER PRIMARY KEY AUTOINCREMENT, source_path TEXT NOT NULL,
+           content_hash TEXT, observed_at TEXT NOT NULL, action TEXT NOT NULL,
+           details_json TEXT);
+         CREATE INDEX idx_provenance__source_path ON provenance (source_path);`,
+      );
+      ensureBaselineColumns(db);
+      // SAFETY: sqlite_master rows carry a TEXT `name`; only `name` is read.
+      const indexes = (
+        db.prepare(`SELECT name FROM sqlite_master WHERE type = 'index'`).all() as {
+          name: string;
+        }[]
+      ).map((r) => r.name);
+      expect(indexes).toContain("idx_audit_events__task_action");
+      expect(indexes).toContain("idx_provenance__path_action");
+      // SAFETY: EXPLAIN QUERY PLAN rows always carry a TEXT `detail`.
+      const plan = db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT MAX(occurred_at) FROM audit_events
+           WHERE action = ? AND project_slug = ? AND task_key = ?`,
+        )
+        .all("github.reconcile.task", "p", "P-1") as { detail: string }[];
+      expect(plan.map((p) => p.detail).join("\n")).toContain(
+        "COVERING INDEX idx_audit_events__task_action",
+      );
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
    * O39-d: `seen_seq` says what a conversation's owner has seen. A root that
    * predates it has conversations with replies in them already, and a
    * default of 0 would mark every one a new reply on the first page after

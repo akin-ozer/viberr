@@ -131,8 +131,9 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     fixture: DOCK,
   },
   // SRV-2: freshness reads whose index binds fewer columns than they filter.
+  // 4 before idx_audit_events__task_action and idx_provenance__path_action.
   "server-read:task-freshness.partially-indexed-reads": {
-    ceiling: 4,
+    ceiling: 0,
     unit: "count",
     journey: "task-open",
     fixture:

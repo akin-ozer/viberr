@@ -42,14 +42,17 @@ describe("task freshness reads (ruling 454)", () => {
       latestReconcileSync(db, path);
     });
     expect(tally.statements).toHaveLength(4);
-    const partial = tally.statements.filter(({ sql }) => {
+    const plans = tally.statements.map(({ sql }) => {
       const filtered = (sql.match(/=\s*\?/g) ?? []).length;
       const params = Array.from({ length: filtered }, () => "x");
       // SAFETY: EXPLAIN QUERY PLAN rows always carry a TEXT `detail`.
       const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[];
       const search = plan.map((p) => p.detail).find((d) => d.startsWith("SEARCH ")) ?? "";
-      return boundColumns(search) < filtered;
+      return { filtered, search };
     });
+    // The "last checked" MAX is answered from the index alone.
+    expect(plans[0]?.search).toContain("COVERING INDEX idx_audit_events__task_action");
+    const partial = plans.filter((p) => boundColumns(p.search) < p.filtered);
     expectWithinBudget("server-read:task-freshness.partially-indexed-reads", partial.length);
   });
 });

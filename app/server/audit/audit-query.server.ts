@@ -22,7 +22,9 @@ import type { DatabaseSync } from "node:sqlite";
  *    after every early return in `reconcileTaskExclusive`, so a row exists iff a
  *    pass completed for that task, changed or not;
  *  - **bounded** — `AUDIT_RETENTION_DAYS` (90) caps it at roughly 26k rows per
- *    task-year (288 ticks/day), and `idx_audit_events__action` serves the read.
+ *    task-year (288 ticks/day). `idx_audit_events__task_action` (project_slug,
+ *    task_key, action, occurred_at) serves the per-task read from one task's
+ *    rows (ruling 454); the action-only index made it walk every task's.
  *
  * DG-3 stays exactly as it is. Nothing here writes.
  */
