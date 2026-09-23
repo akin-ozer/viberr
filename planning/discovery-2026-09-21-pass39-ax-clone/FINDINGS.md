@@ -334,8 +334,10 @@ what they strand, and record an optional reason.
   `session_meta`, whose tail sat on line two. 3 of 541 rollouts here have that shape, all Codex
   CLI 0.156, so the collision is inside the CLI. Viberr's part: the probe said `present`, the
   classifier said "Review its authentication and runtime configuration", and the run was never
-  marked, so "Send back", "Redirect" and any later dispatch would all have resumed the same dead
-  session. **Fixed: ruling 434.**
+  marked, so an @mention or an answered question (the two paths that resume) would have picked
+  the same dead session again. The packet's options were fine: they dispatch through the
+  operator, which starts fresh, and that is how AX-5 recovered at 02:18:49 (I first wrote that
+  every option resumed; the live run showed otherwise). **Fixed: ruling 434.**
 
 - **F39-57 (MED) — the operator was told a resolved PR still conflicted.** AX-21, 01:57:47: the
   refresh merged main in cleanly and pushed `5241ef1`. GitHub answers "unknown" for a while after a
