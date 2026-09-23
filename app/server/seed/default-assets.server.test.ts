@@ -557,7 +557,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       "./default-assets.server"
     );
     // Two versions where PR #321 ("Instance settings") shipped in between.
-    const outgoing: Record<string, readonly string[]> = {
+    const outgoing = {
       [path.join("agents", "definitions", "controller.md")]: [
         "d7387a588a1c5425648c030293a893e6dee648bac2576231ab9386e083da1fb0",
         "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
@@ -588,7 +588,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       [path.join("agents", "profiles", "reviewer.md")]: [
         "cbb114a5d3e41103ddf201f40f7e549739de05c659f40ed9b87b3c35372f3055",
       ],
-    };
+    } satisfies Record<string, readonly string[]>;
     const dataRoot = seededStore();
     seedDefaultAgentAssets(dataRoot);
     // What this build ships, as the store's own manifest recorded it: that
