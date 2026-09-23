@@ -1027,3 +1027,38 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     );
   });
 });
+
+/**
+ * U39-19 (pass 39): a conversation is titled by the person's first sentence,
+ * not by 79 characters cut mid-word. The live rail's titles, before and after.
+ */
+describe("U39-19: deriveTitle", () => {
+  it("titles a thread by its first sentence, and clips a long one at a word", async () => {
+    // CANARY: return the 79-character slice again.
+    const { deriveTitle } = await import("./controller-conversations.server");
+    expect(deriveTitle("Knowledge base check, please. Since the ax-clone knowledge bases were last written, AX-17 merged.")).toBe(
+      "Knowledge base check, please.",
+    );
+    expect(deriveTitle("AX-24 merged a few minutes ago (PR #19). Please bring the rulings knowledge base up to date.")).toBe(
+      "AX-24 merged a few minutes ago (PR #19).",
+    );
+    // A first sentence too short to name anything falls back to the clip.
+    expect(deriveTitle("Good graph. AX-2 and AX-3 are both building, which is what I was after. One correction about the graph.")).toBe(
+      "Good graph. AX-2 and AX-3 are both building, which is what I was after. One…",
+    );
+    // A version number is not a sentence end.
+    expect(deriveTitle("Deployed build 0.19.0 with the new rail. Check the goals.")).toBe(
+      "Deployed build 0.19.0 with the new rail.",
+    );
+    // No sentence end and short: the text itself.
+    expect(deriveTitle("Anyone there?")).toBe("Anyone there?");
+    // A first sentence longer than the rail shows is clipped at a word.
+    const long =
+      "Separate from the build: I need this board's access model exercised for real, not in a test, by the people who will use it.";
+    const title = deriveTitle(long);
+    expect(title.endsWith("…")).toBe(true);
+    expect(title.length).toBeLessThanOrEqual(80);
+    expect(title.slice(0, -1).endsWith(" ")).toBe(false);
+    expect(long.startsWith(title.slice(0, -1))).toBe(true);
+  });
+});

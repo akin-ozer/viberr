@@ -489,10 +489,31 @@ export function releaseProjectConversations(
   return rows.length;
 }
 
-/** First user message, flattened and clipped, as the conversation title. */
+/** The longest title the rail and the thread switcher show whole. */
+const TITLE_MAX = 80;
+/** A first sentence shorter than this ("Good graph.") names nothing. */
+const TITLE_SENTENCE_MIN = 20;
+
+/**
+ * First user message, as the conversation title.
+ *
+ * U39-19 (pass 39): it was the first 79 characters, cut mid-word. The rail
+ * and the phone's thread switcher read "Knowledge base check, please. Since the
+ * ax-clone knowledge bases were last writ…" and "AX-20 has to land before
+ * AX-22. AX-21, AX-5 and goal-6 wait o…". A person's first sentence is usually
+ * the ask, so it is the title when it is long enough to name something and
+ * short enough to show whole. Otherwise the text is clipped at a word.
+ */
 export function deriveTitle(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > 80 ? `${flat.slice(0, 79)}…` : flat;
+  // A sentence ends at . ! or ? (after any closing quote or bracket) followed
+  // by a space: "(PR #19)." ends one, "0.19.0" and "e.g" do not.
+  const first = /^(.+?[.!?]["'”’)\]]*)(?= )/.exec(flat)?.[1];
+  if (first && first.length >= TITLE_SENTENCE_MIN && first.length <= TITLE_MAX) return first;
+  if (flat.length <= TITLE_MAX) return flat;
+  const cut = flat.slice(0, TITLE_MAX - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${space >= TITLE_MAX / 2 ? cut.slice(0, space) : cut}…`;
 }
 
 /** Owner-routed compact reference — the conversation surface revalidates. */

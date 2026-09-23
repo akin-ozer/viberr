@@ -202,6 +202,13 @@ what they strand, and record an optional reason.
   ("Arda (via the controller)"). Used by the release note, the link-wait mirror and every goal edit.
   The four tests that pinned the address now pin the name. Test: `dependencies.server.test.ts`
   "U39-18".
+- **U39-19 (LOW) — conversation titles are 79 characters cut mid-word.** The rail and the phone's
+  thread switcher read "Knowledge base check, please. Since the ax-clone knowledge bases were last
+  writ…" and "AX-20 has to land before AX-22. AX-21, AX-5 and goal-6 wait o…". **Fixed:** a thread
+  is titled by the person's first sentence when that names something (at least 20 characters) and
+  fits (80 at most). Otherwise the text is clipped at a word. "(PR #19)." ends a sentence and
+  "0.19.0" does not. Existing threads keep their stored titles. Test:
+  `controller-conversations.server.test.ts` "U39-19".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
