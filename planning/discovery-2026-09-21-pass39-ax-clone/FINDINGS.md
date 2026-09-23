@@ -219,6 +219,17 @@ what they strand, and record an optional reason.
   this streak" on every deadlock packet). **Fixed:** option titles and descriptions use the card's
   own `renderInlineCode`, on both the live and the decided card. Test:
   `task-detail-components.test.tsx` "U39-21".
+- **U39-23 (LOW-MED) — an agent's question says "(Recommended)" twice, and could put the pill on
+  the wrong option.** Codex agents mark their pick in the option title, as in "Coordinate core
+  status work (Recommended)" on AX-27 at 01:21. The builder also marks the FIRST option `rec`, so
+  the card showed the mark beside its own `recommended` pill. The answer, the summon note and the
+  decision record carried it too: "**Decision:** Coordinate core status work (Recommended)." Four
+  such questions on this board (AX-9, AX-12, AX-22, AX-27). Every one marked its first option. A
+  mark on any later option would have put the pill on one choice and the agent's words on another,
+  because the Codex envelope never said which option is presented as suggested; `ask_human` tells
+  Claude. **Fixed:** `buildAgentQuestionPacket` strips a trailing "(Recommended)" and recommends
+  the option it marked, or the first when none is. The envelope's `options` now says the first is
+  presented as suggested. Test: `agent-outcome.server.test.ts` "U39-23".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
@@ -301,6 +312,14 @@ what they strand, and record an optional reason.
   have the operator do it (00:45:39). Meanwhile the operator's run from the developer's previous
   report posted "Recommend holding review until you resolve the existing packet's sync choice"
   (00:44:14), 23 seconds after I had resolved it, reading a snapshot taken before the answer.
+  **Third instance (AX-27, 01:37):** the Surface Developer asked "Resolve missing status data for
+  AX-27" with "Coordinate core status work" as its pick. My note asked for an operator action
+  ("Offer me a create_task option for the Developer (the core owner)"). The Surface Developer was
+  summoned, wrote out the task it would propose, and ended with "I can't create the task or post a
+  separate timeline comment because this run has no Viberr task-creation or comment tool … cc
+  @operator" (01:38). Three of three answers that named another actor went to an agent that could
+  not act on them. Each cost one agent run. The first two recovered on the operator's next
+  turn; AX-27's is being watched.
 - **O39-b (owner's call) — a deadlock streak writes the same canned decision into the contract
   every round.** AX-22's goal now carries four identical "Let the rework continue — Each round has
   found something real and the work is converging on it" blocks, each followed by the same

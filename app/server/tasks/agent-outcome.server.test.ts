@@ -187,6 +187,41 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     expect(packet.options.filter((o) => o.rec)).toHaveLength(1);
     expect(packet.options[0]!.rec).toBe(true);
   });
+
+  it("U39-23: an agent's '(Recommended)' mark leaves the title and decides the pill", async () => {
+    /**
+     * Four agent questions on the ax-clone board carried the mark in a title
+     * ("Coordinate core status work (Recommended)"). The card showed it beside
+     * its own `recommended` pill, and the answer, the summon note and the
+     * decision record all repeated it ("**Decision:** Coordinate core status
+     * work (Recommended).").
+     *
+     * CANARY: stop stripping the mark, or recommend the first option again.
+     */
+    const { buildAgentQuestionPacket } = await import("./agent-outcome.server");
+    const agent = { kind: "agent", backend: "codex", profileId: "surface-developer", roleHint: "Surface Developer" } as const;
+    const first = buildAgentQuestionPacket(agent, {
+      title: "Resolve missing status data for AX-27",
+      options: [
+        { title: "Coordinate core status work (Recommended)", detail: "Have the core owner add it." },
+        { title: "Narrow to existing status fields" },
+      ],
+    });
+    expect(first.options.map((o) => [o.t, o.rec])).toEqual([
+      ["Coordinate core status work", true],
+      ["Narrow to existing status fields", false],
+    ]);
+    // A mark on a later option moves the pill to it, so the card never shows
+    // the pill on one option and the agent's recommendation on another.
+    const second = buildAgentQuestionPacket(agent, {
+      title: "Which gate?",
+      options: [{ title: "Skip the race gate" }, { title: "Rerun on a cgo host ( recommended )" }],
+    });
+    expect(second.options.map((o) => [o.t, o.rec])).toEqual([
+      ["Skip the race gate", false],
+      ["Rerun on a cgo host", true],
+    ]);
+  });
 });
 
 describe("evidence is a BOTH-backend channel (P13-D-26)", () => {
