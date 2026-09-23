@@ -202,7 +202,9 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   // `user` covers the bell (notification.created is user-targeted; the
   // badge updates silently — shell spec defines no incoming-notification
   // toast), and the open task adds its own `task:` scope (task-detail
-  // brief) — any matching event revalidates layout + child loaders.
+  // brief) — any matching event revalidates layout + child loaders, except a
+  // run's console line: that revalidates only the page of the task it belongs
+  // to, at most every 2 s (`SSE_RUN_LINE_EVENTS`).
   const slug = board.project.slug;
   // UI-03: `paused` is true once the stream has failed (an expired session 401s
   // and an EventSource never retries a failed connection) — the topbar says so.
