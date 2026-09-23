@@ -29,6 +29,7 @@ import type { Route } from "./+types/root";
 import { RoutePendingBar } from "./features/shell/route-pending-bar";
 import { setDocumentTheme } from "./features/shell/theme-preference";
 import { ControllerDock } from "./features/controller/controller-dock";
+import { SHELL_FONT_PRELOADS } from "./features/shell/font-preloads";
 import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
 import { requestContextMiddleware } from "./server/logging/request-context.server";
@@ -40,6 +41,8 @@ import {
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+  // Ruling 454: the faces every first paint draws, fetched alongside the CSS.
+  ...SHELL_FONT_PRELOADS,
 ];
 
 /**

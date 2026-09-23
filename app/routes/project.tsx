@@ -30,6 +30,7 @@ import { SkipLink } from "~/ui/skip-link";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { Rail } from "~/features/shell/rail";
 import { Topbar } from "~/features/shell/topbar";
+import { WORKSPACE_FONT_PRELOADS } from "~/features/shell/font-preloads";
 
 /**
  * Workspace shell layout for /projects/:slug (shell spec): rail with live
@@ -70,6 +71,9 @@ export function meta({ loaderData }: Route.MetaArgs) {
     { title: pageTitle(loaderData?.board.project.name) },
   ];
 }
+
+// Ruling 454: the rail, crumbs and board chrome draw at 500 on first paint.
+export const links: Route.LinksFunction = () => WORKSPACE_FONT_PRELOADS;
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const user = await requireUser(request);

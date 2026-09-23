@@ -184,9 +184,10 @@
      the one sanctioned non-step.) */
   /* Ruling 365: ONE UI typeface. Inter carries the body and the display
      token alike (Manrope and Noto Sans are gone); the mono face stays for
-     code and for identifiers that are code. */
-  --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+     code and for identifiers that are code. "Inter Fallback" (ruling 454,
+     the last section of this file) is what text draws in until Inter arrives. */
+  --font-display: "Inter", "Inter Fallback", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Fallback", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Elevation scale — four resting steps + one interaction step, chosen by
@@ -6988,4 +6989,35 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   .copy-glyph[data-copied] > .ico + .ico { transform: none; filter: none; transition: opacity .12s ease; }
   .signin-step[data-state="done"] .signin-mark .ico path { animation: none; }
   .refused { animation: none; }
+}
+
+/* ---------- Ruling 454: the metric-matched Inter fallback ----------
+   Every Inter face is `font-display: swap`, so a first visit paints in the
+   next family of the stack until the woff2 arrives. That used to be the
+   system face, whose different widths re-wrapped every line when Inter
+   swapped in. "Inter Fallback" is Arial (or its metric twins Liberation Sans
+   and Arimo) resized to Inter's average advance and given Inter's ascent and
+   descent, so the swap changes the letterforms but barely moves the text.
+   Values come from the font files themselves (hhea metrics; advance widths
+   weighted by English letter frequency, space included):
+   size-adjust = Inter avg / Arial avg; each override = Inter metric / size-adjust.
+   Regular is fitted to Inter 400 (500 resolves to it), bold to Inter 700
+   (600 and 800 resolve to it), so no weight is synthesised. */
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Arial"), local("ArialMT"), local("Liberation Sans"), local("Arimo");
+  font-weight: 400;
+  size-adjust: 107.32%;
+  ascent-override: 90.27%;
+  descent-override: 22.48%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Arial Bold"), local("Arial-BoldMT"), local("Liberation Sans Bold"), local("Arimo Bold");
+  font-weight: 700;
+  size-adjust: 101.94%;
+  ascent-override: 95.03%;
+  descent-override: 23.66%;
+  line-gap-override: 0%;
 }
