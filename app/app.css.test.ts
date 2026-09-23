@@ -3053,6 +3053,41 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
     expect(CODE).toMatch(/\.activity-cols\s*\{[^}]*align-items:\s*start/);
   });
 
+  it("(c) the OS preference stills every `pulse-a` 'agent working' dot", () => {
+    // With the in-app kill switch gone, `prefers-reduced-motion` is the one
+    // signal, and the stilling rule named three of the five dots on this loop.
+    // `.chip .working` (the status-chip dot on EVERY board card with an agent
+    // at work) and `.rdot.running` kept pulsing forever under the preference.
+    // The loop's users are read from the sheet, so a sixth dot is in scope the
+    // moment it is written; the two named ones keep the scan from going vacuous.
+    // Spinners (`runSpin`, `spin`) are a different loop: they convey loading
+    // and stay essential motion.
+    //
+    // Canary: drop either selector from the reduced-motion list and this goes red.
+    const parts = (rule: CssRule) => rule.selector.split(",").map((s) => s.trim());
+    const reduced = (rule: CssRule) =>
+      rule.at.some((q) => /prefers-reduced-motion:\s*reduce/.test(q));
+    const pulsing = RULES.flatMap((rule, index) =>
+      !reduced(rule) && /^pulse-a\b[^;]*\binfinite\b/.test(rule.decls.get("animation") ?? "")
+        ? parts(rule).map((selector) => ({ selector, index }))
+        : [],
+    );
+    expect(pulsing.map((p) => p.selector)).toEqual(
+      expect.arrayContaining([".chip .working", ".rdot.running"]),
+    );
+    for (const { selector, index } of pulsing) {
+      // Same selector, same specificity: the stilling rule has to come later.
+      const stilled = RULES.some(
+        (rule, at) =>
+          at > index &&
+          reduced(rule) &&
+          rule.decls.get("animation") === "none" &&
+          parts(rule).includes(selector),
+      );
+      expect(stilled, `${selector} must hold still under prefers-reduced-motion`).toBe(true);
+    }
+  });
+
   it("(d) the warning pair is GitHub's, and dark boxes print their sentence in --fg", () => {
     const light = themeTokens(false);
     const dark = themeTokens(true);
