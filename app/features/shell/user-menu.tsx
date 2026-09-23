@@ -1,39 +1,30 @@
-import { useState } from "react";
-import { Form, Link, useFetcher, useLocation, useNavigate } from "react-router";
-import { DropdownMenu } from "radix-ui";
+import {
+  lazy,
+  startTransition,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Avatar } from "~/ui/avatar";
 import { initialsOf } from "~/ui/initials";
-import { CsrfInput, useCsrfToken } from "~/ui/csrf-input";
-import { applyThemePreference } from "./theme-preference";
-import { Icon } from "~/ui/icon";
-import { useFetcherResult } from "~/ui/use-fetcher-result";
-import { useToast } from "~/ui/toast";
 
 /**
- * Account menu (`user-menu`) — ONE implementation for the workspace topbar and
- * the Home header (the mock duplicates it). Real session identity, real logout
- * POST, theme cycling persisted to the user row + cookie via /prefs/theme.
+ * The account menu as pages ship it. Ruling 454: the menu itself
+ * (`user-menu-panel.tsx`, a Radix DropdownMenu per ruling 166) and the Radix
+ * primitives under it were about 32 KB gzip on every signed-in page, for a
+ * menu that opens a few times a session. So pages render only its trigger,
+ * the same button with the same classes, name and ARIA, and the menu module
+ * is fetched on intent: the pointer over the trigger or focus on it. Once it
+ * is there the real Radix trigger replaces this one (taking the focus if a
+ * Tab had put it here), and every interaction after that is Radix's own.
  *
- * Deliberate mock behavior kept: the Theme item does NOT close the menu
- * (rapid cycling UX). Additions (sanctioned): Escape closes; admins get an
- * "Instance settings" quick link to the instance admin surface.
- *
- * Ruling 166 (2026-09-08): this is a real ARIA menu again. UI-45 had DROPPED
- * `role="menu"`/`role="menuitem"` because they were declared with no arrow-key
- * handling — a contract that tells a screen-reader user to expect Up/Down
- * navigation that does not exist — and hand-rolling a full menu widget (roving
- * tabindex, typeahead, Home/End) for six links was not worth it. Radix ships
- * exactly that widget, unstyled, so the roles come back and this time they are
- * honoured: arrows, typeahead, Home/End, focus in on open and back to the
- * avatar on close, and outside-press dismissal.
- *
- * That also retires three hand-rolled pieces: the `menu-scrim` div (Radix
- * dismisses on outside press), the `useDismiss` subscription, and the
- * focus-in/focus-restore effect that existed because the panel used to be
- * rendered BEFORE its trigger. Placement is floating-ui's now — collision
- * aware, so the menu no longer runs off a narrow viewport — and `app.css`
- * keeps only the menu's appearance.
+ * A press that beats the fetch is not lost: pointerdown (left button, no
+ * Ctrl) or Enter / Space / ArrowDown, the keys Radix's trigger opens on,
+ * opens the menu as soon as it arrives, and a keyboard open puts the focus
+ * on the first item as Radix does for a keyboard open.
  */
 
 export interface MenuUser {
@@ -44,26 +35,46 @@ export interface MenuUser {
   avatarTone: string;
 }
 
-const NEXT_THEME = {
-  light: "dark",
-  dark: "system",
-  system: "light",
-} satisfies Record<ThemePreference, ThemePreference>;
+/** The trigger's accessible name, shared by this trigger and the menu's. */
+export const ACCOUNT_MENU_LABEL = "Account menu";
 
-function themeLabel(theme: ThemePreference): string {
-  return theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light";
+/** The trigger's classes, shared by this trigger and the menu's. */
+export function accountTriggerClass(open: boolean): string {
+  return "home-user" + (open ? " open" : "");
 }
 
-function themeToast(theme: ThemePreference): string {
-  return (
-    "Theme · " +
-    (theme === "system"
-      ? "System (follows your OS)"
-      : theme === "dark"
-        ? "Dark"
-        : "Light")
-  );
+/** What this trigger hands the menu when the menu replaces it. */
+export interface MenuHandOver {
+  /** A Tab had put the focus on this trigger; the menu's trigger takes it. */
+  focused: boolean;
+  /** The first open came from the keyboard: the first item takes the focus. */
+  keyboard: boolean;
 }
+
+let panelModule: Promise<typeof import("./user-menu-panel")> | null = null;
+let panelLoaded = false;
+
+/** Starts (once) fetching the menu's chunk; a failed fetch is forgotten so
+ *  the next intent retries. */
+function loadPanel(): Promise<typeof import("./user-menu-panel")> {
+  if (!panelModule) {
+    const pending = import("./user-menu-panel");
+    panelModule = pending;
+    pending.then(
+      () => {
+        panelLoaded = true;
+      },
+      () => {
+        panelModule = null;
+      },
+    );
+  }
+  return panelModule;
+}
+
+const LazyUserMenuPanel = lazy(() =>
+  loadPanel().then((module) => ({ default: module.UserMenuPanel })),
+);
 
 export function UserMenu({
   user,
@@ -75,135 +86,86 @@ export function UserMenu({
   showSwitchProject?: boolean;
 }) {
   const [menu, setMenu] = useState(false);
-  const navigate = useNavigate();
-  const location = useLocation();
-  const fetcher = useFetcher<{ ok: boolean; theme?: ThemePreference; error?: string }>();
-  const csrf = useCsrfToken();
-  const push = useToast();
+  // Every mount renders the plain trigger first: the server has no menu to
+  // render, so hydration must see the plain trigger too.
+  const [wanted, setWanted] = useState(false);
+  const handOver = useRef<MenuHandOver>({ focused: false, keyboard: false });
 
-  // Toast only once the server confirms the theme write — a failed POST
-  // (expired session/CSRF) reports the failure, not a false success (P11-40).
-  useFetcherResult(fetcher, (data) => {
-    if (data.ok && data.theme) push(themeToast(data.theme));
-    else if (!data.ok)
-      push(data.error ?? "Theme change failed. Try again", "error");
-  });
+  const want = useCallback(() => {
+    loadPanel().then(
+      // A transition keeps this trigger on screen until the menu can render
+      // in its place in one commit.
+      () => startTransition(() => setWanted(true)),
+      // Offline or a stale deploy: nothing to open; the next intent retries.
+      () => setMenu(false),
+    );
+  }, []);
 
-  const person = { initials: initialsOf(user.name), tone: user.avatarTone };
+  // A later page in the same session already has the chunk: swap at once.
+  useEffect(() => {
+    if (panelLoaded) want();
+  }, [want]);
 
-  const cycleTheme = () => {
-    const next = NEXT_THEME[theme] ?? "light";
-    applyThemePreference(next);
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("theme", next);
-    fetcher.submit(fd, { method: "post", action: "/prefs/theme" });
-    // Toast fires on the server result (effect above), not on submit.
+  const openFrom = (keyboard: boolean) => {
+    handOver.current.keyboard = keyboard;
+    setMenu(true);
+    want();
   };
 
-  const triggerProps = { className: "home-user" + (menu ? " open" : "") };
-  const contentProps = { className: "user-menu" };
+  // Runs when the menu replaces this trigger, in the same commit and before
+  // the menu's layout effect reads it.
+  const capture = useCallback((el: HTMLButtonElement | null) => {
+    if (!el) return;
+    return () => {
+      handOver.current.focused = el.ownerDocument.activeElement === el;
+    };
+  }, []);
+
+  const trigger = (
+    <button
+      ref={capture}
+      type="button"
+      className={accountTriggerClass(menu)}
+      aria-label={ACCOUNT_MENU_LABEL}
+      aria-haspopup="menu"
+      aria-expanded={menu}
+      onPointerEnter={want}
+      onFocus={want}
+      onPointerDown={(e) => {
+        if (e.button !== 0 || e.ctrlKey) return;
+        // As Radix does: the menu, not the trigger, takes the focus.
+        e.preventDefault();
+        openFrom(false);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " " && e.key !== "ArrowDown") return;
+        e.preventDefault();
+        openFrom(true);
+      }}
+    >
+      <Avatar person={{ initials: initialsOf(user.name), tone: user.avatarTone }} size="lg" />
+    </button>
+  );
 
   return (
     <div className="home-user-wrap">
-      <DropdownMenu.Root
-        open={menu}
-        onOpenChange={setMenu}
-        // Not modal: this is a six-item account menu in the page header, not a
-        // task that owns the screen. `modal` would mark the rest of the page
-        // aria-hidden and lock scrolling for it, which is heavier than the
-        // interaction deserves — and heavier than the scrim it replaces was.
-        modal={false}
-      >
-        <DropdownMenu.Trigger asChild>
-          <button type="button" {...triggerProps} aria-label="Account menu">
-            <Avatar person={person} size="lg" />
-          </button>
-        </DropdownMenu.Trigger>
-        {/* No Portal on purpose. Radix positions the popper `fixed`, so no
-            ancestor can clip it, and staying in the tree keeps the menu inside
-            the component's own DOM — which is what the shell tests query and
-            what keeps `.home-user-wrap` meaningful. */}
-        <DropdownMenu.Content
-          {...contentProps}
-          side="bottom"
-          align="end"
-          // `.55rem` — the gap the stylesheet used to express as
-          // `top: calc(100% + .55rem)`.
-          sideOffset={9}
-          // No aria-label here: Radix points the menu's `aria-labelledby` at
-          // the trigger, so the panel is named by the control that opened it —
-          // one source for the name instead of two that can drift.
-        >
-          <DropdownMenu.Label className="user-menu-head">
-            <Avatar person={person} size="lg" />
-            <span>
-              <div className="who">{user.name}</div>
-              <div className="role">{user.email}</div>
-            </span>
-          </DropdownMenu.Label>
-          <DropdownMenu.Item
-            className="menu-item"
-            onSelect={() =>
-              navigate("/profile", {
-                state: { returnTo: location.pathname + location.search },
-              })
-            }
-          >
-            <Icon name="user" />
-            Profile &amp; preferences
-          </DropdownMenu.Item>
-          {showSwitchProject && (
-            <DropdownMenu.Item asChild>
-              <Link className="menu-item" to="/">
-                <Icon name="board" />
-                Switch project
-              </Link>
-            </DropdownMenu.Item>
-          )}
-          <DropdownMenu.Item
-            className="menu-item"
-            // The one item that does not close the menu: theme is cycled in
-            // place (light → dark → system), so closing after every press would
-            // make three presses into three round trips through the trigger.
-            onSelect={(e) => {
-              e.preventDefault();
-              cycleTheme();
-            }}
-          >
-            <Icon name="sparkle" />
-            Switch theme ·{" "}
-            <span className="faint">{themeLabel(theme)}</span>
-          </DropdownMenu.Item>
-          {user.role === "admin" && (
-            <DropdownMenu.Item asChild>
-              <Link className="menu-item" to="/org/settings">
-                <Icon name="sliders" />
-                {/* D2 (pass 23): the destination's own H1 and every other
-                    direction call it "Instance settings"; the only nav entry to
-                    it said "Org settings", so users relaying an error hunted for
-                    a name the menu doesn't show. One name. */}
-                Instance settings
-              </Link>
-            </DropdownMenu.Item>
-          )}
-          <DropdownMenu.Separator className="menu-sep" />
-          <Form method="post" action="/logout">
-            <CsrfInput />
-            <DropdownMenu.Item
-              asChild
-              // Closing unmounts the form mid-submit. Let the POST and its
-              // redirect take the page instead; nothing is left to return to.
-              onSelect={(e) => e.preventDefault()}
-            >
-              <button className="menu-item danger" type="submit">
-                <Icon name="ext" />
-                Sign out
-              </button>
-            </DropdownMenu.Item>
-          </Form>
-        </DropdownMenu.Content>
-      </DropdownMenu.Root>
+      {/* The boundary stays mounted and its child changes inside a
+          transition, so React keeps this trigger instead of the fallback
+          while the lazy module settles. The fallback is only a guard. */}
+      <Suspense fallback={trigger}>
+        {wanted ? (
+          <LazyUserMenuPanel
+            user={user}
+            theme={theme}
+            showSwitchProject={showSwitchProject}
+            open={menu}
+            onOpenChange={setMenu}
+            handOver={handOver}
+          />
+        ) : (
+          trigger
+        )}
+      </Suspense>
     </div>
   );
 }
