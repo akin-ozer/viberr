@@ -301,6 +301,23 @@ what they strand, and record an optional reason.
   `controller-query.server.test.ts`, `controller-page.test.tsx` and `controller-dock.test.tsx`,
   each "U39-29".
 
+- **U39-30 (MED) — a long turn's answer waited for the housekeeping behind it.** 03:59, the rulings
+  upkeep turn: the page said "Controller is working… Compacting context" while the last message
+  in the transcript was still mine. The answer existed: the run had finished and its lines were
+  stored. Ruling 376 compacts a session above 100k at completion, and the completion callback that
+  posts the reply fires only after that compaction. The order exists so that the NEXT queued turn
+  cannot resume the session mid-compaction, and only that turn needs it. Measured: 27 seconds on
+  an earlier turn, 131 in ruling 371's case. **Fixed:** run-service has a one-shot "answered"
+  callback that fires just before the completion compaction, for a finished run, registered
+  through `StartRunInput.onAnswered` before the launch so a run cannot answer ahead of it. The
+  controller posts its reply there. The settle still starts the next queued turn only after the
+  compaction, and it skips the append when a reply carrying the run's id is already there. That
+  is also the fact the boot catch-up keys on, so a restart mid-compaction adds no second note.
+  Tests: `run-service.server.test.ts` "U39-30" (the order, and no callback without a compaction)
+  and `controller-conversations.server.test.ts` "U39-30" (the reply is in the transcript during
+  the compaction, exactly once after it, on the start door and the resume door). The fake
+  runtime gained `gate`, so a test can attach callbacks before a fake run plays.
+
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
   (following a decision that said "resolve the overlap before delivery"), although AX-20's open

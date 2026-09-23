@@ -1062,3 +1062,121 @@ describe("U39-19: deriveTitle", () => {
     expect(long.startsWith(title.slice(0, -1))).toBe(true);
   });
 });
+
+/**
+ * U39-30: a long turn's answer reaches the transcript the moment it is
+ * written, not after the completion compaction (ruling 376) behind it. Live on
+ * ax-clone the page showed "Compacting context" for 27 seconds while the reply
+ * already existed, and ruling 371 measured one compaction at 131.
+ */
+describe("U39-30: the answer does not wait for the compaction", () => {
+  it("is in the transcript while the compaction runs, and only once after it", async () => {
+    // CANARY: drop the `registerRunAnswered` hook and the transcript is empty
+    // of the reply during the compaction; drop the settle's `replyPosted`
+    // check and the reply is posted twice.
+    const { createConversation, listMessages } = await import("./controller-conversations.server");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { queueFakeRun, queueFakeCompaction } = await import("../../../test-support/fake-runtime");
+    const { getRun } = await import("~/server/runtimes/run-store.server");
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    const answer = "Three tasks are open on the board.";
+    queueFakeRun({
+      sessionId: "sess-u39-30",
+      lines: [
+        { t: "1", ev: "init", tag: "system·init", text: "session" },
+        { t: "2", ev: "text", tag: "assistant", text: answer },
+        { t: "3", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 1, in: 150_000, cached: 0, out: 500 } },
+      ],
+      extraFacts: [
+        undefined,
+        {
+          cache: {
+            messageId: "m1",
+            promptTokens: 150_000,
+            cacheWrite: 1_000,
+            cacheRead: 149_000,
+            perCall: true,
+            ttl: { fiveMinute: 0, oneHour: 1_000 },
+            missReason: null,
+          },
+        },
+        undefined,
+      ],
+    });
+    let duringCompaction: string[] | null = null;
+    queueFakeCompaction("claude", { compacted: true, preTokens: 150_000, postTokens: 12_000 }, () => {
+      duringCompaction = listMessages(app.db, conversation.id)
+        .filter((m) => m.author === "controller")
+        .map((m) => m.text);
+    });
+    const result = await runControllerTurn(app.db, {
+      conversationId: conversation.id,
+      text: "How many tasks are open?",
+      user: { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" },
+      dataRoot: app.dataRoot,
+    });
+    if (result.state !== "started") throw new Error(`turn ${result.state}`);
+    for (let i = 0; i < 400; i += 1) {
+      const state = getRun(app.db, result.runId)?.state;
+      const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
+      if (state && state !== "running" && state !== "queued" && replies.length > 0 && duringCompaction) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // Let the settle that follows the compaction run.
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(duringCompaction).toEqual([answer]);
+    const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
+    expect(replies.map((m) => [m.text, m.runId])).toEqual([[answer, result.runId]]);
+
+    // The next turn in the thread takes the resume door. CANARY: drop
+    // `resumeInput.onAnswered = answered`.
+    const second = "Two of them are waiting on review.";
+    queueFakeRun({
+      sessionId: "sess-u39-30-b",
+      lines: [
+        { t: "1", ev: "init", tag: "system·init", text: "session" },
+        { t: "2", ev: "text", tag: "assistant", text: second },
+        { t: "3", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 1, in: 150_000, cached: 0, out: 500 } },
+      ],
+      extraFacts: [
+        undefined,
+        {
+          cache: {
+            messageId: "m2",
+            promptTokens: 150_000,
+            cacheWrite: 1_000,
+            cacheRead: 149_000,
+            perCall: true,
+            ttl: { fiveMinute: 0, oneHour: 1_000 },
+            missReason: null,
+          },
+        },
+        undefined,
+      ],
+    });
+    let duringSecond: string[] | null = null;
+    queueFakeCompaction("claude", { compacted: true, preTokens: 150_000, postTokens: 12_000 }, () => {
+      duringSecond = listMessages(app.db, conversation.id)
+        .filter((m) => m.author === "controller")
+        .map((m) => m.text);
+    });
+    const next = await runControllerTurn(app.db, {
+      conversationId: conversation.id,
+      text: "And which are waiting?",
+      user: { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" },
+      dataRoot: app.dataRoot,
+    });
+    if (next.state !== "started") throw new Error(`turn ${next.state}`);
+    for (let i = 0; i < 400; i += 1) {
+      const state = getRun(app.db, next.runId)?.state;
+      if (state && state !== "running" && state !== "queued" && duringSecond) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(duringSecond).toEqual([answer, second]);
+  });
+});

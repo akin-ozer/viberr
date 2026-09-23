@@ -17,6 +17,7 @@ import {
   listRunsForTask,
   MODEL_SUBSTITUTED_TAG,
   noteCompletionEffectsLost,
+  registerRunAnswered,
   registerRunCompletion,
   repoWriteWithheldFromDenylist,
   reserveRun,
@@ -2633,6 +2634,46 @@ describe("compaction at completion (ruling 376)", () => {
     const note = task.parsed.timeline.find((e) => e.type === "note" && e.title === "Context compacted");
     expect(note?.text).toContain("at the end of the run");
     expect(note?.text).toContain("from 120k to 18k tokens");
+  });
+
+  it("U39-30: tells a caller the answer is written before it compacts, and only then", async () => {
+    // Live on ax-clone a controller reply sat behind a 27-second completion
+    // compaction. CANARY: drop the `answered()` call and nothing fires.
+    const before = compactedRunSpecs().length;
+    let open!: () => void;
+    queueFakeRun({ ...finished("sess-answered", 120_000), gate: new Promise<void>((r) => (open = r)) });
+    queueFakeCompaction("claude", { compacted: true, preTokens: 120_000, postTokens: 18_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    const order: string[] = [];
+    registerRunAnswered(runId, () => {
+      order.push(`answered:${compactedRunSpecs().length - before}`);
+      // The answer is already in the run's lines.
+      expect(JSON.stringify(listRunLines(store.db, runId))).toContain("read a lot");
+    });
+    registerRunCompletion(runId, () => order.push(`completed:${compactedRunSpecs().length - before}`));
+    open();
+    await settle();
+    await settle();
+    expect(order).toEqual(["answered:0", "completed:1"]);
+  });
+
+  it("U39-30: a run that is not compacted never fires the answered callback", async () => {
+    let open!: () => void;
+    queueFakeRun({ ...finished("sess-small-answer", 60_000), gate: new Promise<void>((r) => (open = r)) });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    const order: string[] = [];
+    registerRunAnswered(runId, () => order.push("answered"));
+    registerRunCompletion(runId, () => order.push("completed"));
+    open();
+    await settle();
+    await settle();
+    expect(order).toEqual(["completed"]);
   });
 
   it("leaves a run under the threshold alone", async () => {

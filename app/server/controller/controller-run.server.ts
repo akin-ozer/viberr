@@ -46,6 +46,7 @@ import { RUN_PHASE, type RunMcpServers } from "~/server/runtimes/adapter.server"
 import {
   interruptRun,
   registerRunCompletion,
+  type RunAnsweredCallback,
   resumeRun,
   startRun,
   type InterruptResult,
@@ -512,6 +513,21 @@ async function startTurnRun(
     label: encodeControllerInstrument(input.user.email),
   };
 
+  // U39-30: the answer goes on the page the moment it is written, not after
+  // the completion compaction (ruling 376) that follows a long turn. The
+  // settle still waits for the compaction before it starts the next queued
+  // turn, which resumes this same session.
+  const answered: RunAnsweredCallback = (answeredRunId) => {
+    try {
+      postReply(db, conversation.id, answeredRunId);
+    } catch (error) {
+      logger.error("controller answer could not be posted early", {
+        conversationId: conversation.id,
+        runId: answeredRunId,
+        err: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  };
   let runId: string;
   if (prior?.session_id) {
     const resumeInput: ResumeRunInput = {
@@ -537,6 +553,7 @@ async function startTurnRun(
     resumeInput.model = resolveRunModel("claude", config.model);
     if (config.effort) resumeInput.effort = config.effort;
     if (dataRoot) resumeInput.dataRoot = dataRoot;
+    resumeInput.onAnswered = answered;
     const resumed = await resumeRun(db, resumeInput);
     runId = resumed.runId;
   } else {
@@ -562,6 +579,7 @@ async function startTurnRun(
     };
     if (config.effort) startInput.effort = config.effort;
     if (dataRoot) startInput.dataRoot = dataRoot;
+    startInput.onAnswered = answered;
     const started = await startRun(db, startInput);
     runId = started.runId;
   }
@@ -712,6 +730,30 @@ function absoluteUtcLabel(iso: string): string {
   return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
+/** Whether this run's reply is already in the transcript: posted early by
+ *  U39-30, or written by a settle or a boot catch-up. */
+function replyPosted(db: DatabaseSync, conversationId: string, runId: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 AS posted FROM controller_messages
+          WHERE conversation_id = ? AND run_id = ? AND author = 'controller' LIMIT 1`,
+      )
+      .get(conversationId, runId) !== undefined
+  );
+}
+
+/** U39-30: post a finished run's answer, once. False when it wrote nothing
+ *  (no answer text, or already posted). */
+function postReply(db: DatabaseSync, conversationId: string, runId: string): boolean {
+  if (replyPosted(db, conversationId, runId)) return false;
+  const text = fullReplyTextForRun(db, runId);
+  const reply = text ? normalizeEscapedNewlines(text).trim() : "";
+  if (!reply) return false;
+  appendMessage(db, { conversationId, author: "controller", text: reply, runId });
+  return true;
+}
+
 /** Record the reply, release the lease, fire the next queued message. */
 async function settleTurn(
   db: DatabaseSync,
@@ -721,7 +763,8 @@ async function settleTurn(
   input: ControllerTurnInput,
 ): Promise<void> {
   const conversation = getConversation(db, conversationId);
-  if (conversation) {
+  // U39-30: a reply the answered hook already posted is this turn's reply.
+  if (conversation && !replyPosted(db, conversationId, runId)) {
     let reply: string | null = null;
     if (state === "finished") {
       reply = fullReplyTextForRun(db, runId);
@@ -875,9 +918,10 @@ export function recoverControllerConversations(db: DatabaseSync): number {
   // TWO arms, because message ORDER cannot see the common case. A turn taken
   // off the FIFO always has the PREVIOUS turn's reply sitting after its own
   // user message, so "the newest message is the user's" misses every queued
-  // turn a restart killed. The RUN identifies those: `settleTurn` is the only
-  // writer of a run-linked controller message, so a terminal controller run
-  // with no message carrying its id is exactly a turn whose settle never ran.
+  // turn a restart killed. The RUN identifies those: a run-linked controller
+  // message is written only as a turn's reply (by `settleTurn`, or early by
+  // U39-30's answered hook), so a terminal controller run with no message
+  // carrying its id is exactly a turn that was never answered.
   //
   // SAFETY: `agent_runs.id` and `.task_key` are both declared NOT NULL TEXT
   // (0001_baseline). A controller run's `task_key` is its conversation id

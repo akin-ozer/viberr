@@ -147,6 +147,13 @@ interface ServiceState {
    */
   completions: Map<string, RunCompletionCallback>;
   /**
+   * U39-30: one-shot callbacks for a run whose answer is complete while a
+   * completion compaction (ruling 376) still holds its settle back. Fired
+   * just before that compaction, only for a run that finished, and dropped
+   * at settle whether or not it fired. In-process only, like `completions`.
+   */
+  answered: Map<string, RunAnsweredCallback>;
+  /**
    * Runs admitted past the concurrency cap: their DB row is `queued` and their
    * adapter has NOT been launched. The drain (run onExit) promotes the oldest
    * whose row is still `queued` when a live slot frees. In-process only — a
@@ -228,6 +235,21 @@ function canAdmit(state: ServiceState, cap: number, lane: RunLane): boolean {
 /** Invoked once when a registered run reaches a terminal state. */
 export type RunCompletionCallback = (finished: AgentRunRow) => void;
 
+/** U39-30: told that a run's answer is complete and in its lines. */
+export type RunAnsweredCallback = (runId: string) => void;
+
+/**
+ * U39-30: register a one-shot callback for the moment a run's answer is
+ * complete but its settle is still waiting on a completion compaction. The
+ * completion callback still fires afterwards, as always; this only lets a
+ * caller show the answer the person is waiting for without making them sit
+ * through the housekeeping. It never fires for a run that is not compacted
+ * at completion, or that did not finish.
+ */
+export function registerRunAnswered(runId: string, cb: RunAnsweredCallback): void {
+  getState().answered.set(runId, cb);
+}
+
 const SERVICE_KEY = Symbol.for("viberr.runService");
 
 function getState(): ServiceState {
@@ -239,6 +261,7 @@ function getState(): ServiceState {
       reserved: new Map(),
       adapters: createAdapters(),
       completions: new Map(),
+      answered: new Map(),
       pending: emptyQueues(),
     };
     cache[SERVICE_KEY] = state;
@@ -340,6 +363,7 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
     reserved: new Map(),
     adapters,
     completions: new Map(),
+    answered: new Map(),
     pending: emptyQueues(),
   };
 }
@@ -411,6 +435,10 @@ export interface StartRunInput {
   /** Ruling 371/373: the anchor the run is handed back after a compaction
    *  (see `RunSpec.compactAnchor`). */
   compactAnchor?: string;
+  /** U39-30: told the run's answer is written, before the completion
+   *  compaction that holds its settle back (`registerRunAnswered`). Registered
+   *  before the run launches, so a run cannot finish ahead of it. */
+  onAnswered?: RunAnsweredCallback;
   /** Portable HTTP/stdio MCPs, or Claude-only in-process SDK governance tools. */
   mcpServers?: RunMcpServers;
   /** Tool allowlist confining the run (operator → its governance tools only). */
@@ -1099,6 +1127,8 @@ export async function startRun(
   if (!credential.ok) return refuse(credential.message);
   if (refusal !== null) return refuse(refusal);
 
+  // U39-30: before the launch, so the run cannot answer ahead of its hook.
+  if (input.onAnswered) state.answered.set(runId, input.onAnswered);
   const launchOpts: Parameters<typeof launch>[4] = {};
   if (reservation) launchOpts.startedAt = reservation.startedAt;
   if (modelSubstitution) launchOpts.notice = modelSubstitution;
@@ -1686,6 +1716,8 @@ export interface ResumeRunInput {
   /** Ruling 371: re-apply the compaction anchor on resume, or a resumed run
    *  would lose it mid-thread (the XS-1 fresh-vs-resume parity class). */
   compactAnchor?: string;
+  /** U39-30: see `StartRunInput.onAnswered`. */
+  onAnswered?: RunAnsweredCallback;
   /** Ruling 372: the instant the resume is decided at. Tests pin it; the
    *  product passes nothing and the service reads its clock ONCE here. */
   nowIso?: string;
@@ -1729,6 +1761,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.mcpServers) target.mcpServers = input.mcpServers;
   if (input.systemPrompt) target.systemPrompt = input.systemPrompt;
   if (input.compactAnchor) target.compactAnchor = input.compactAnchor;
+  if (input.onAnswered) target.onAnswered = input.onAnswered;
   if (input.outputSchema) target.outputSchema = input.outputSchema;
   if (input.attachmentsWritableDir) {
     target.attachmentsWritableDir = input.attachmentsWritableDir;
@@ -2234,6 +2267,21 @@ function launch(
           exit.outcome !== "interrupted" &&
           replaySize > COMPACT_AT_COMPLETION_TOKENS
         ) {
+          // U39-30: the answer is written; only the housekeeping is left.
+          // Live on ax-clone a controller turn's compaction held its reply off
+          // the page for 27 seconds, and ruling 371 measured one at 131.
+          const answered = getState().answered.get(spec.runId);
+          getState().answered.delete(spec.runId);
+          if (answered && exit.outcome === "finished") {
+            try {
+              answered(spec.runId);
+            } catch (error) {
+              logger.error("run answered callback failed", {
+                runId: spec.runId,
+                err: error instanceof Error ? error : new Error(String(error)),
+              });
+            }
+          }
           const compactionsBefore = stats?.compactionEvents.length ?? 0;
           const outcome = await adapter.compact(spec, exit.sessionId, {
             onLine: (line) => sink.line(line),
@@ -2293,6 +2341,8 @@ function launch(
         });
       }
       state.handles.delete(spec.runId);
+      // U39-30: an answered callback the settle never needed goes with it.
+      state.answered.delete(spec.runId);
       // Ruling 180: the settled run's skill plugin goes with it — the CLI
       // that read it has exited, and nothing else names the path.
       removeSkillPlugin(spec.skillPlugin);

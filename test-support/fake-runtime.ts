@@ -22,6 +22,9 @@ export interface FakeRun {
   sessionId?: string;
   keepRunning?: boolean;
   outcome?: "finished" | "error";
+  /** Hold the run's lines (and its exit) until this settles, so a test can
+   *  attach callbacks to the run id first. Absent: the run plays at once. */
+  gate?: Promise<void>;
 }
 
 /** The runs a test queued, per backend, consumed oldest-first by the adapters. */
@@ -153,7 +156,7 @@ function playFakeRun(
   const lines = queuedRun?.lines ?? defaultLines(spec.backend, spec.prompt);
   let stopped = false;
 
-  queueMicrotask(() => {
+  const play = () => {
     if (stopped) return;
     for (const [index, line] of lines.entries()) {
       if (stopped) return;
@@ -168,6 +171,11 @@ function playFakeRun(
         sessionId,
       });
     }
+  };
+  const gate = queuedRun?.gate;
+  queueMicrotask(() => {
+    if (gate) void gate.then(play);
+    else play();
   });
 
   return {
