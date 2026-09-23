@@ -437,6 +437,28 @@ function sameLinks(a: TaskLinks | undefined, b: TaskLinks | undefined): boolean 
   return keys.every((key) => a[key] === b[key]);
 }
 
+function linkOf(links: TaskLinks | undefined, key: string): string | undefined {
+  return links && Object.hasOwn(links, key) ? links[key] : undefined;
+}
+
+/**
+ * Ruling 454 (CTL-7): the links THIS text can render. A transcript hands every
+ * message one conversation-wide map, so a reply that names a new key changed
+ * the map under all thirty messages above it and re-parsed each one. Only a key
+ * the text names can change its output, so the maps are compared on those.
+ */
+function sameLinksForText(
+  text: string,
+  a: TaskLinks | undefined,
+  b: TaskLinks | undefined,
+): boolean {
+  if (sameLinks(a, b)) return true;
+  for (const [key] of text.matchAll(TASK_KEY_IN_TEXT_RE)) {
+    if (linkOf(a, key) !== linkOf(b, key)) return false;
+  }
+  return true;
+}
+
 /**
  * Equal by CONTENT, not identity. A live page re-renders on every revalidation
  * and every console append, and a revalidation hands it brand-new loader
@@ -446,14 +468,14 @@ function sameLinks(a: TaskLinks | undefined, b: TaskLinks | undefined): boolean 
  * remark/rehype pipeline; on AX-31's timeline this memo took a page re-render
  * from ~26 ms to ~16 ms (jsdom, React dev build, 2026-09-23).
  */
-function sameMarkdownProps(a: MarkdownProps, b: MarkdownProps): boolean {
+export function sameMarkdownProps(a: MarkdownProps, b: MarkdownProps): boolean {
   return (
     a.text === b.text &&
     a.attachmentsBase === b.attachmentsBase &&
     a.onAttachmentOpen === b.onAttachmentOpen &&
     sameList(a.mentionNames, b.mentionNames) &&
     sameSet(a.attachmentNames, b.attachmentNames) &&
-    sameLinks(a.taskLinks, b.taskLinks)
+    sameLinksForText(a.text, a.taskLinks, b.taskLinks)
   );
 }
 
