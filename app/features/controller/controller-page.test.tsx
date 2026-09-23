@@ -542,9 +542,14 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
   });
 
   it("ruling 259: a successful send clears it", async () => {
+    const posted: Record<string, string>[] = [];
     const { container } = renderInstancePage(
       view({ available: true, projectName: null, conversations: [], goals: null }),
-      () => ({ ok: true, conversationId: "cv_new" }),
+      async ({ request }) => {
+        const form = await request.formData();
+        posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+        return { ok: true, conversationId: "cv_new" };
+      },
     );
     await screen.findByText("Managing this instance with your own permissions.");
     const box = composer(container);
@@ -554,6 +559,9 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     });
     // CANARY: clear on neither path and the box keeps every message ever sent.
     expect(box.value).toBe("");
+    // U39-24: the zone this page prints times in goes with the message, so
+    // the controller quotes times in it. CANARY: drop it from `sendForm`.
+    expect(posted[0]?.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
   });
 });
 

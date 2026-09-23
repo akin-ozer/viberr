@@ -17,6 +17,7 @@ import {
   type HomeProjectCard,
 } from "~/features/home/home-query.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { zoneClock, zoneOffsetLabel } from "~/shared/dates/time-zone";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import {
   conversationScopeOf,
@@ -67,6 +68,8 @@ export interface ControllerContextInput {
   user: { id: string; email: string; name: string };
   /** The page the person sent from (already normalized by the store). */
   surface?: string | null;
+  /** U39-24: the IANA zone their browser reads times in (already normalized). */
+  timeZone?: string | null;
   now?: Date;
   dataRoot?: string;
 }
@@ -508,6 +511,22 @@ function instanceContext(
   );
 }
 
+/**
+ * U39-24: the zone the person reads times in, stated where the turn's other
+ * facts about them are. The page prints every time in that zone and every tool
+ * answers in UTC, so a bare clock copied from a tool read three hours off, in
+ * a bubble the page had stamped correctly, to a person in Istanbul.
+ */
+function readerZoneLine(zone: string, now: Date): string {
+  return (
+    `\nThey read times in ${zone} (${zoneOffsetLabel(zone, now)}), where it is ` +
+    `${zoneClock(zone, now)} now. The page shows every time in that zone, and every instant a ` +
+    `tool returns is UTC (it ends in Z). Quote a time to them in their zone, the way the page ` +
+    `shows it, never as a bare UTC clock. In text you write onto a task or a goal, which people ` +
+    `read in their own zones, give the zone with the time.\n`
+  );
+}
+
 /** Gather the context read for one turn. Never throws: a place that cannot be
  *  read says so in the block, and the tools will refuse on their own. */
 export function gatherControllerContext(
@@ -515,7 +534,8 @@ export function gatherControllerContext(
   input: ControllerContextInput,
 ): ControllerContextRead {
   const scope = conversationScopeOf(input);
-  const at = (input.now ?? new Date()).toISOString();
+  const now = input.now ?? new Date();
+  const at = now.toISOString();
   // SAFETY: `conversationScopeOf` returns a bound scope only with a slug set.
   const grant =
     scope === "instance"
@@ -553,10 +573,11 @@ export function gatherControllerContext(
   // standing fact that lived only in a conversation that ended.
   const pending = openRequestsContextLine(input.dataRoot);
   const surface = input.surface ? `\nThey are looking at: ${input.surface}\n` : "";
+  const zone = input.timeZone ? readerZoneLine(input.timeZone, now) : "";
   let text =
     `Context gathered by the server when this turn started (a read as of ${at}; ` +
     `the store is the truth for anything that changed since, and every action still runs through a tool):\n\n` +
-    `${body}\n${pending}${surface}`;
+    `${body}\n${pending}${surface}${zone}`;
   if (text.length > CONTEXT_BLOCK_CHARS) {
     const marker = "\n[... context cut to its budget ...]\n";
     text = text.slice(0, CONTEXT_BLOCK_CHARS - marker.length) + marker;

@@ -88,6 +88,7 @@ import {
   type PromptPrefix,
 } from "~/server/runtimes/prompt-prefix.server";
 import { controllerCompactAnchor } from "~/server/runtimes/context-policy.server";
+import { normalizeTimeZone } from "~/shared/dates/time-zone";
 
 /**
  * The controller conversation engine (ruling 99).
@@ -112,7 +113,7 @@ const LEASE_KEY = Symbol.for("viberr.controllerLease");
 
 interface LeaseEntry {
   runId: string | null;
-  queue: { messageId: string; text: string; surface: string | null }[];
+  queue: { messageId: string; text: string; surface: string | null; timeZone: string | null }[];
 }
 
 interface LeaseHost {
@@ -156,6 +157,10 @@ export interface ControllerTurnInput {
   /** Ruling 121: the page the person sent from (pathname + query). Stored on
    *  the user message and handed to the model as a hint. */
   surface?: string | null;
+  /** U39-24: the IANA zone the person's browser reads times in, as posted.
+   *  Normalized here; the turn's context states it so quoted times match
+   *  the page. */
+  timeZone?: string | null;
   dataRoot?: string;
 }
 
@@ -286,6 +291,7 @@ export async function runControllerTurn(
   }
 
   const surface = normalizeSurface(input.surface);
+  const timeZone = normalizeTimeZone(input.timeZone);
   const message = appendMessage(db, {
     conversationId: conversation.id,
     author: "user",
@@ -329,7 +335,7 @@ export async function runControllerTurn(
       });
       return { state: "refused", reason: note };
     }
-    held.queue.push({ messageId: message.id, text, surface });
+    held.queue.push({ messageId: message.id, text, surface, timeZone });
     return { state: "queued", messageId: message.id };
   }
   const entry: LeaseEntry = { runId: null, queue: [] };
@@ -343,6 +349,7 @@ export async function runControllerTurn(
       text,
       principal.principal.userId,
       surface,
+      timeZone,
     );
     return { state: "started", runId, messageId: message.id };
   } catch (error) {
@@ -430,6 +437,8 @@ async function startTurnRun(
   /** The surface of THIS message (a queued turn carries its own, not the
    *  first message's). */
   surface: string | null,
+  /** U39-24: this message's reader zone, carried the same way. */
+  timeZone: string | null,
 ): Promise<string> {
   const dataRoot = input.dataRoot;
   const config = resolveControllerConfig(dataRoot);
@@ -492,6 +501,7 @@ async function startTurnRun(
     taskKey: conversation.taskKey,
     user: { id: input.user.id, email: input.user.email, name: input.user.name },
     surface,
+    timeZone,
   };
   if (dataRoot) contextInput.dataRoot = dataRoot;
   const context = gatherControllerContext(db, contextInput);
@@ -750,6 +760,7 @@ async function settleTurn(
       next.text,
       input.user.id,
       next.surface,
+      next.timeZone,
     );
   } catch (error) {
     logger.error("queued controller turn failed to start", {

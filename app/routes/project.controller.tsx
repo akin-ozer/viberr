@@ -144,6 +144,8 @@ export async function action({ request, params }: Route.ActionArgs) {
         },
         // Ruling 121(d): the page a user message was sent from (finding 23).
         surface: String(formData.get("surface") ?? "") || null,
+        // U39-24: the reader's zone; normalized by the engine.
+        timeZone: String(formData.get("timeZone") ?? "") || null,
       });
       if (result.state === "refused") {
         // U35-4 (pass 35): the refusal is in the transcript, and the door

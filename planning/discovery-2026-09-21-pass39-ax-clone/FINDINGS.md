@@ -230,6 +230,19 @@ what they strand, and record an optional reason.
   Claude. **Fixed:** `buildAgentQuestionPacket` strips a trailing "(Recommended)" and recommends
   the option it marked, or the first when none is. The envelope's `options` now says the first is
   presented as suggested. Test: `agent-outcome.server.test.ts` "U39-23".
+- **U39-24 (MED) — the controller quotes UTC clocks on a page that prints local ones.** On the
+  ax-clone controller page, in a bubble the page stamped 03:57: "AX-20 is back in Verify. The move
+  went through as yours at 00:57:02 … Your 00:43 directive tells the operator …". The person reads
+  in Istanbul (UTC+3), so every time in the reply was three hours off from the timeline beside
+  it. The page renders every instant in the viewer's zone (`format.ts`), and every tool gives the
+  controller UTC ISO strings. It copied the clock and dropped the `Z`, so nothing marked the times
+  as UTC. **Fixed:** both composers post the browser's zone with each message. The engine
+  normalizes it: anything `Intl` refuses, or anything too long to be a zone name, is dropped. A
+  queued message carries its own zone. The turn's context read says "They read times in
+  Europe/Istanbul (GMT+03:00), where it is 03:57 now", tells the controller to quote times in
+  that zone, and to give the zone with a time it writes onto a task or goal, where others read
+  in their own zones. Tests: `time-zone.test.ts`, `controller-context.server.test.ts` "U39-24",
+  and the assembled-prompt, page and dock send tests.
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47

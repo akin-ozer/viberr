@@ -323,6 +323,36 @@ describe("gatherControllerContext", () => {
     expect(without.text).not.toContain("They are looking at");
   });
 
+  it("U39-24: states the zone the person reads times in, and its clock now, and never otherwise", async () => {
+    /**
+     * Live at 03:57 on the ax-clone controller page: a bubble the page
+     * stamped 03:57 said "The move went through as yours at 00:57:02", to a
+     * person in Istanbul. The page prints local times; the tools answer in UTC.
+     *
+     * CANARY: drop the zone line from the context.
+     */
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const withZone = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: null,
+      user: arda,
+      timeZone: "Europe/Istanbul",
+      now: new Date("2026-09-23T00:57:02Z"),
+      dataRoot: app.dataRoot,
+    });
+    expect(withZone.text).toContain(
+      "They read times in Europe/Istanbul (GMT+03:00), where it is 03:57 now.",
+    );
+    expect(withZone.text).toContain("never as a bare UTC clock");
+    const without = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: null,
+      user: arda,
+      dataRoot: app.dataRoot,
+    });
+    expect(without.text).not.toContain("They read times in");
+  });
+
   it("says so, and does not throw, when the anchored task cannot be read", async () => {
     const { gatherControllerContext } = await import("./controller-context.server");
     const read = gatherControllerContext(app.db, {

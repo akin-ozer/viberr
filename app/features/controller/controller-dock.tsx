@@ -26,6 +26,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
+import { viewerTimeZone } from "~/shared/dates/time-zone";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 
@@ -428,6 +429,8 @@ function DockShell({ context }: { context: DockContext }) {
     body.set("intent", "send");
     body.set("text", value);
     body.set("surface", context.surface);
+    // U39-24: the controller quotes times in the zone this page prints them in.
+    body.set("timeZone", viewerTimeZone());
     if (context.projectSlug) body.set("project", context.projectSlug);
     if (context.taskKey) body.set("task", context.taskKey);
     // The SELECTION decides, not the view that happens to have landed. Between

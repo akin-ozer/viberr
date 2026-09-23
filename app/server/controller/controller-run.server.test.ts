@@ -500,6 +500,8 @@ describe("the turn carries the context read (ruling 121)", () => {
         text: "what is this task?",
         user: { ...user, orgRole: "admin" },
         surface: "/projects/viberr-core/tasks/VIB-142?events=50",
+        // U39-24: posted by the composer; the engine normalizes it.
+        timeZone: " europe/istanbul ",
         dataRoot: app.dataRoot,
       });
     } finally {
@@ -507,6 +509,8 @@ describe("the turn carries the context read (ruling 121)", () => {
     }
     const spec = lastRunSpec();
     expect(spec, "a controller run must have started").toBeTruthy();
+    // CANARY: stop passing the zone into the context read.
+    expect(spec!.prompt).toContain("They read times in Europe/Istanbul (GMT+03:00)");
     // The context read is FIRST, and it is the task's own file.
     expect(spec!.prompt.startsWith("Context gathered by the server when this turn started")).toBe(
       true,

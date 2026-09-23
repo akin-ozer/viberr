@@ -583,6 +583,8 @@ describe("the controller dock (ruling 121)", () => {
     expect(form.get("project")).toBe("viberr");
     expect(form.get("task")).toBe("VIB-1");
     expect(form.get("surface")).toBe("/projects/viberr/tasks/VIB-1");
+    // U39-24. CANARY: drop the zone from the dock's send.
+    expect(form.get("timeZone")).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
     expect(form.get("_csrf")).toBe("tok");
     expect(form.get("conversationId")).toBe("");
     await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("cnv_new"));

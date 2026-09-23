@@ -33,6 +33,7 @@ import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { controllerExamples } from "./controller-examples";
+import { viewerTimeZone } from "~/shared/dates/time-zone";
 
 /**
  * The controller surface (ruling 99): a conversation list, one transcript,
@@ -145,6 +146,8 @@ function sendForm(
   body.set("intent", "send");
   body.set("text", text);
   body.set("surface", surface);
+  // U39-24: the controller quotes times in the zone this page prints them in.
+  body.set("timeZone", viewerTimeZone());
   if (conversationId) body.set("conversationId", conversationId);
   return body;
 }
