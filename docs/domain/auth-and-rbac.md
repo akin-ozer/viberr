@@ -169,9 +169,10 @@ Agents are governed by capability grants, not roles; see
 
 ## 4. Instance settings (`/org/settings`, org admin only)
 
-The page is headed "Instance settings", and the header crumb and user menu use the same name;
-several server sentences (the spending-cap refusals and remedies, for one) still say "Org
-settings", which is this page. Tabs ride `?tab=`, in this order:
+The page is headed "Instance settings", and everything that points at it uses the same
+name: the header crumb, the user menu, and the server and agent sentences (the
+spending-cap refusals and remedies, the controller's credential and grant-request
+replies, the unlinked GitHub approval note). Tabs ride `?tab=`, in this order:
 `connections` (the default), `users`, `sso`, `resources`, `controller`. Below the
 tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
 

@@ -301,7 +301,7 @@ describe("runInputRows (P19-G11)", () => {
       "the instance caps a Claude run at $2.50, but Codex has no budget option: this run is bounded by its idle timer only",
     );
     expect(spend({ ...emptyInputs, spendCapUsd: null }, "claude")).toBe(
-      "no spending cap (Org settings → Max spend per Claude run)",
+      "no spending cap (Instance settings → Max spend per Claude run)",
     );
     // A line written before the ruling says nothing it cannot know.
     expect(spend(emptyInputs, "claude")).toBeUndefined();

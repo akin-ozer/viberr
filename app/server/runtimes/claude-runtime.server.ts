@@ -1763,7 +1763,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
                   `The run reached ${spec.maxSpendUsd ? `its ${formatUsd(spec.maxSpendUsd)} spending cap` : "its spending cap"}` +
                   `${resultCostUsd !== null ? ` after spending ${formatUsd(resultCostUsd)}` : ""} and was cut off — ` +
                   "not a task failure. Re-prompt the agent to continue from its session, or " +
-                  "raise the cap in Org settings (Max spend per Claude run).",
+                  "raise the cap in Instance settings (Max spend per Claude run).",
                 failure,
               },
               facts: {},

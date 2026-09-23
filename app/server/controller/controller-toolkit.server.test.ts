@@ -1008,7 +1008,7 @@ describe("instance scope: org-role gate on every management tool", () => {
     });
     expect(mcp).toContain("[done]");
     // Secrets never travel through chat — the reply says where they go.
-    expect(mcp).toContain("Org settings");
+    expect(mcp).toContain("Instance settings → Agent resources");
     const agents = await call(ids.orgAdmin, "save_global_agent", {
       name: "Docs Writer Probe",
       backend: "claude",

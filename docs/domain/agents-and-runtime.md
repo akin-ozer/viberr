@@ -237,7 +237,7 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   prompt in a server-spawned run, so a tool the mode would ask about is denied at once
   with a reason the model can act on; binds only on the `default` seam, bypass never
   prompts), `maxTurns` (default 2000, `VIBERR_CLAUDE_MAX_TURNS`), `maxBudgetUsd` when the
-  instance has a spending cap (ruling 175: Org settings → Max spend per Claude run,
+  instance has a spending cap (ruling 175: Instance settings → Max spend per Claude run,
   stamped on every run by `startRun` as `RunSpec.maxSpendUsd`; none by default),
   `strictMcpConfig: true`, `settingSources: []` on EVERY run (ruling 180: no host tier and
   no project source over the checkout, so the repository under review's `.claude` and
@@ -633,7 +633,7 @@ outcome, refusal }` with `outcome ∈ started | queued | refused` (ruling 263), 
 which of the three happened; a refusal quotes the run's own sentence. A queued run that
 later gets a slot writes a "Run started" note on its task ("The queued … run … got a slot
 and started — streaming to the agent logs", `noteRunStarted`, ruling 311). The cap is the
-instance setting `maxConcurrentRuns` (0 = unlimited, ceiling 64, Org settings →
+instance setting `maxConcurrentRuns` (0 = unlimited, ceiling 64, Instance settings →
 set-concurrency).
 
 **The coordination lane (ruling 152(b), pass 35).** A positive cap carries a lane of
@@ -751,7 +751,7 @@ the task, ended a Claude run. Its record carries the cap and the spend; the spec
 blocked event reads "the Claude run reached the instance's spending cap of $X after
 spending $Y and was CUT OFF mid-work, which is not a task failure" and says no "No changes
 were delivered"; the remedy (operator and specialist alike, `describeRunFailure`) is to
-re-run it or have an org admin raise the cap in Org settings; the operator's options are
+re-run it or have an org admin raise the cap in Instance settings; the operator's options are
 the ordinary re-run set, never another-backend retry; the pill reads `cut off · spending
 cap`; the controller's turn note names the cap and the spend.
 
@@ -1118,8 +1118,8 @@ denylist (`webSearchWithheldFromDenylist`), which sets `webSearchMode: "disabled
 `repoWriteWithheld` (`repoWriteWithheldFromDenylist`: `Edit|Write|NotebookEdit`
 denied), which the Codex adapter does not read. Ruling 176 adds one row that does not
 come from `CAP_DENY_RULES`: a withheld `execute-code-or-write-repo` also removes the org
-MCP tools an admin marked as write tools on the server (Org settings, MCP server editor),
-per mounted server, derived from the same denylist.
+MCP tools an admin marked as write tools on the server (Instance settings → Agent
+resources, MCP server editor), per mounted server, derived from the same denylist.
 
 | Withheld capability | Claude denies | Codex |
 |---|---|---|
@@ -1569,6 +1569,6 @@ raises a drift warning. Deployment overrides (`project.md` `agents[]`) carry aut
 The tuning knobs above (turn caps, timeouts, retention, the browser executable) are
 environment variables and are listed in
 [../operations/configuration.md](../operations/configuration.md); the concurrency cap and
-the spending cap are instance settings (Org settings). The agent CREDENTIALS are neither:
+the spending cap are set on Instance settings. The agent CREDENTIALS are neither:
 each person connects Claude and Codex on Profile → Agent accounts (ruling 127), and
 nothing about a backend account is read from the deployment environment.

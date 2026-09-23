@@ -396,7 +396,7 @@ writer.
     instance's spending cap of $X after spending $Y and was CUT OFF mid-work, which is not a
     task failure", says nothing about undelivered changes, and ends with the remedy
     `describeRunFailure` words for it: re-run it to continue from its session, or have an
-    org admin raise the cap in Org settings (Max spend per Claude run). The packet's
+    org admin raise the cap in Instance settings (Max spend per Claude run). The packet's
     options are the ones a turn-cap cut-off gets (redirect for a specialist; re-run,
     redirect or hold for the operator), never another backend.
   - a **hand-off changes whose account pays** from the next run on. An in-flight run
