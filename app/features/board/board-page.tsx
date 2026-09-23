@@ -61,6 +61,7 @@ import {
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
 import { stageName } from "~/shared/workflow/stage-roles";
+import { countLabel } from "~/shared/text/plural";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -1402,8 +1403,8 @@ function BoardHeader({
   // (deliberate — see the `waitingHuman` comment below).
   const countLine =
     shownCount === taskCount
-      ? `${taskCount} task${taskCount === 1 ? "" : "s"}`
-      : `${shownCount} of ${taskCount} task${taskCount === 1 ? "" : "s"}`;
+      ? countLabel(taskCount, "task")
+      : `${shownCount} of ${countLabel(taskCount, "task")}`;
   return (
     <div className="board-head">
       <div>

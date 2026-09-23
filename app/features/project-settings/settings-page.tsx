@@ -1686,7 +1686,7 @@ export function MembersPanel({
         <span className="right sub fine">
           {members.length - stale.length} active
           {stale.length > 0
-            ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
+            ? ` · ${countLabel(stale.length, "removed account")}`
             : ""}
         </span>
         {/* Ruling 148(b): the panel's one create action sits in its head, the

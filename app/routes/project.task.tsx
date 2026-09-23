@@ -13,6 +13,7 @@ import {
   useRouteLoaderData,
 } from "react-router";
 import { pageTitle } from "~/shared/page-title";
+import { countLabel } from "~/shared/text/plural";
 import type { Route } from "./+types/project.task";
 import type { loader as projectLoader } from "./project";
 import {
@@ -818,7 +819,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast:
             notified > 0
-              ? `Sent to ${notified} maintainer${notified === 1 ? "" : "s"} · they'll decide`
+              ? `Sent to ${countLabel(notified, "maintainer")} · they'll decide`
               : "Sent · a maintainer will decide",
         };
       }

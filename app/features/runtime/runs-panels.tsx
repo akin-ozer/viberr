@@ -14,6 +14,7 @@ import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { NumberTicker } from "~/ui/number-ticker";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
+import { countLabel } from "~/shared/text/plural";
 import { useHydrated } from "~/ui/local-time";
 import { useDismiss } from "~/ui/use-dismiss";
 
@@ -1305,7 +1306,7 @@ export function AgentLogsPanel({
               <span className="log-more-note">
                 {older.error
                   ? " · " + older.error
-                  : ` · ${older.withheld} earlier line${older.withheld === 1 ? "" : "s"} not loaded`}
+                  : ` · ${countLabel(older.withheld, "earlier line")} not loaded`}
               </span>
             </span>
           </div>

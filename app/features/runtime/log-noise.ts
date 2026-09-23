@@ -1,3 +1,4 @@
+import { countLabel } from "~/shared/text/plural";
 import type { LogLine } from "./runtime-types";
 
 /**
@@ -73,7 +74,7 @@ export function telemetryLabel(entry: {
   tags: string[];
 }): string {
   return (
-    `${entry.count} telemetry event${entry.count === 1 ? "" : "s"} ` +
+    `${countLabel(entry.count, "telemetry event")} ` +
     `(${entry.tags.join(", ")}): token and rate-limit accounting, hidden here; ` +
     `“{ } raw” shows them`
   );

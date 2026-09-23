@@ -8,6 +8,7 @@ import { EditIco } from "./mini-modal";
 import { rel, updatedLabel } from "./resource-helpers";
 import { isMcpHealthStale } from "~/shared/freshness";
 import { looksLikeWriteTool } from "~/shared/mcp-tools";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * The four resource list panels (knowledge bases, MCP servers, skills, global
@@ -169,12 +170,12 @@ export function KbPanel({
 function writeToolPosture(m: McpView): string {
   if (m.writeTools.length > 0) {
     const n = m.writeTools.length;
-    return ` · ${n} write tool${n === 1 ? "" : "s"} withheld from read-only runs`;
+    return ` · ${countLabel(n, "write tool")} withheld from read-only runs`;
   }
   const writeSuspects = (m.discoveredTools ?? []).filter(looksLikeWriteTool);
   if (m.writeToolsReviewed) {
     return writeSuspects.length > 0
-      ? ` · reviewed: none of its ${writeSuspects.length} write-looking tool${writeSuspects.length === 1 ? "" : "s"} is withheld`
+      ? ` · reviewed: none of its ${countLabel(writeSuspects.length, "write-looking tool")} is withheld`
       : " · reviewed: no write tools";
   }
   if (writeSuspects.length === 0) return "";

@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { PACKET_NOTE_MAX, type PacketOptionKind } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
+import { countLabel } from "~/shared/text/plural";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -290,11 +291,7 @@ function PacketArchiveConfirm({
   const withdrawn = [
     `the open “${packetTitle}” decision`,
     ...(pending > 0
-      ? [
-          `${pending} pending operator recommendation${
-            pending === 1 ? "" : "s"
-          }`,
-        ]
+      ? [countLabel(pending, "pending operator recommendation")]
       : []),
   ];
   return (

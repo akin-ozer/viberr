@@ -700,7 +700,7 @@ export function LibraryPicker({
                   <Pill kind="neutral" sm>
                     {everywhere
                       ? "every stage here"
-                      : `${here.length} stage${here.length === 1 ? "" : "s"} here`}
+                      : `${countLabel(here.length, "stage")} here`}
                   </Pill>
                 </button>
               );

@@ -7,6 +7,7 @@ import {
   type DragEvent as ReactDragEvent,
 } from "react";
 import { useFetcher } from "react-router";
+import { countLabel } from "~/shared/text/plural";
 import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
@@ -639,7 +640,7 @@ function useStoreOps(
       // successful upload looks like. Say which of the two nothings happened.
       if (skipped > 0) {
         push(
-          `Nothing uploaded: ${skipped} hidden item${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`,
+          `Nothing uploaded: ${countLabel(skipped, "hidden item")} skipped (names starting with “.” are never stored).`,
           "error",
         );
       }
