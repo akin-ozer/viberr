@@ -6188,7 +6188,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 }
 .ctl-links li {
   display: flex;
-  align-items: center;
+  /* Ruling 425(c): a title that wraps beside its pill keeps the pill and key
+     on its FIRST line, not centred against the whole block. */
+  align-items: baseline;
   gap: .5rem;
   flex-wrap: wrap;
   font-size: .88rem;
@@ -6197,8 +6199,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 }
 .ctl-links li.on { background: var(--tint-well); }
 /* Ruling 425(c): the title takes the rest of the row beside its pill and task,
-   and wraps inside it, instead of dropping under them whole. */
-.ctl-link-title { flex: 1 1 12rem; min-width: 0; }
+   and wraps inside it, instead of dropping under them whole (8rem: the rail
+   leaves about 172px beside a pill and a key at 1440px). */
+.ctl-link-title { flex: 1 1 8rem; min-width: 0; }
 .ctl-link-task { color: var(--blue-pressed); text-decoration: none; font-size: .75rem; }
 .ctl-link-task:hover { text-decoration: underline; }
 .ctl-link-acts { display: inline-flex; gap: .25rem; margin-left: auto; }

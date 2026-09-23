@@ -3469,6 +3469,14 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".log-chip .lc-name")).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
+  it("ruling 425(c): a link's title wraps beside its pill, which stays on the title's first line", () => {
+    // Measured live at 1440: with a 12rem basis the title dropped under "held
+    // AX-6" whole; centred alignment then floated the pill mid-block.
+    // CANARY: restore `align-items: center`.
+    expect(ruleBody(CODE, ".ctl-link-title")).toMatch(/flex:\s*1 1 8rem/);
+    expect(ruleBody(CODE, ".ctl-links li")).toMatch(/align-items:\s*baseline/);
+  });
+
   it("U39-12: the dock's scope pill gives way before the controller's name", () => {
     // Measured at 375px: "Contro…" beside "AX-21 · ax-cl…". CANARY: drop the
     // pill's shrink weight and the two shrink alike again.
