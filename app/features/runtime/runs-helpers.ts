@@ -302,15 +302,16 @@ export function runInputRows(
         : "viberr tools: none",
       inputs.tools.denied.length
         ? // F-P10 (pass 25): the deny list binds on Claude (SDK denylist);
-          // codex-runtime never consults `disallowedTools` directly. Since the
-          // parity ruling (2026-08-31) two families DO bind on Codex through
-          // derived flags: a withheld repo-write family forces the read-only
-          // sandbox, and withheld web egress disables web search. The
-          // command-level entries (git push, gh pr ...) remain advisory there.
-          // This console is the per-run audit surface, so it says exactly that
-          // rather than a flat "denied" or a flat "advisory".
+          // codex-runtime never consults `disallowedTools` directly. Ruling 185
+          // removed the Codex OS sandbox, so one family still binds there
+          // through a derived flag: withheld web egress turns the CLI's own
+          // web search off (`webSearchMode: "disabled"`). The repo-write tools
+          // and the command-level entries (git push, gh pr ...) are advisory;
+          // the server-owned delivery gate is the boundary. This console is
+          // the per-run audit surface, so it says exactly that rather than a
+          // flat "denied" or a flat "advisory".
           backend === "codex"
-          ? `capability grants deny (on this Codex run the repo-write and web families bind via sandbox and search toggles; command-level entries are advisory): ${inputs.tools.denied.join(", ")}`
+          ? `capability grants deny (on this Codex run only a withheld web search binds, through the CLI's search toggle; the repo-write and command-level entries are advisory, and the server-owned delivery gate is the boundary): ${inputs.tools.denied.join(", ")}`
           : `denied by its capability grants: ${inputs.tools.denied.join(", ")}`
         : "no built-in tools denied",
     ].join(" · "),

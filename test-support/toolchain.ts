@@ -1,17 +1,15 @@
 import type { Toolchain } from "~/server/ops/toolchain.server";
 
 /**
- * The suite's hermetic toolchain reading (ruling 182).
+ * The suite's hermetic toolchain reading (ruling 182, narrowed by ruling 185).
  *
- * `cachedToolchain()` spawns `npm`, `git`, `python3`, `go` and the Codex CLI's
- * own sandbox helper once per process. A unit test must never do that: the
- * versions are the host's, the sandbox verdict depends on the kernel and the
- * seccomp profile the process runs under, and the probe runs a vendor binary.
- * So `setup-env.ts` primes the override slot the server module reads — the
- * same shape as `setBackendBinariesForTests` — with the reading below before
- * any app module loads, and a test that needs a different verdict (the
- * ruling-182 refusal) sets its own through `primeToolchain` and restores this
- * one afterwards.
+ * `cachedToolchain()` spawns `npm`, `git`, `python3`, `go`, `make`, `docker`,
+ * `pnpm`, `yarn` and `curl` once per process for their versions. A unit test
+ * must never do that: the answers are the host's. So `setup-env.ts` primes the
+ * override slot the server module reads — the same shape as
+ * `setBackendBinariesForTests` — with the reading below before any app module
+ * loads, and a test that needs a different reading sets its own through
+ * `primeToolchain` and restores this one afterwards.
  *
  * `Symbol.for` is a registry: this key IS the one `toolchain.server.ts` reads,
  * by construction, without importing that module into every test file's

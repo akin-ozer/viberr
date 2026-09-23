@@ -93,12 +93,12 @@ export interface HealthSnapshot {
    */
   quota: BackendQuotaRow[];
   /**
-   * Ruling 182 (pass 36, G36-4): what this host can run — the versions of the
-   * tools an agent's shell finds (null when absent), the pinned CLI packages,
-   * and whether a sandboxed Codex run can exec at all. Probed once per
-   * process; the same verdict `startRun` reads to refuse a sandboxed Codex
-   * dispatch with a named remedy. Informational here, like `browser`: a host
-   * that runs no Codex is a correct host, so it never degrades health.
+   * Ruling 182 (pass 36, G36-4), narrowed by ruling 185: what this host can
+   * run — the versions of the tools an agent's shell finds (null when absent)
+   * and the pinned CLI packages. Probed once per process. The sandbox verdict
+   * and the `startRun` refusal it fed went with the sandbox. Informational
+   * here, like `browser`: a missing tool is something a run should know about,
+   * not a broken host, so it never degrades health.
    */
   toolchain: Toolchain;
 }

@@ -158,14 +158,13 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     expect(entry.promotable).toBe(false);
   });
 
-  it("matrix badges: claude-only for the SCOPED delivery commands; the headline binds on both", () => {
+  it("matrix badges: claude-only for the SCOPED delivery commands and, since ruling 185, the headline", () => {
     // What the CapabilityMatrixModal actually does: label → id → enforcement.
-    // Parity ruling (2026-08-31): the headline "Execute code or write to the
-    // repo" moved back to both-backend enforcement (read-only sandbox on a
-    // withheld Codex run); the scoped commands stay claude-only at the tool
-    // layer — the codex sandbox cannot deny `git push` for a write-granted
-    // run, and their real Codex boundary is the credential-less agent + the
-    // server-owned delivery gate.
+    // The scoped commands are claude-only at the tool layer — Codex has no
+    // denylist channel, and their real Codex boundary is the credential-less
+    // agent + the server-owned delivery gate. The headline "Execute code or
+    // write to the repo" joined them when ruling 185 removed the Codex OS
+    // sandbox that had bound it (the 2026-08-31 parity ruling).
     const claudeOnlyLabels = [
       "Create the task-key branch",
       "Commit & push to the branch",

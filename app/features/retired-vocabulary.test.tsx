@@ -288,11 +288,13 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
     expect(html).toContain("What differs between the two runtimes");
     expect(html).toContain("An agent profile running on");
     expect(html).toContain("gets the persona alone");
-    // V11-1 (pass 32): the intro states ruling 101 — the write family binds on
-    // both backends (Codex via the read-only sandbox) with the one disclosed
-    // carve-out; "not process-sandboxed" was pre-parity copy.
-    expect(html).toContain("Codex runs a read-only sandbox");
+    // V11-1 (pass 32), then ruling 185: the intro states that the write family
+    // binds on Claude only — Codex runs are not OS-confined, so it is advisory
+    // there. "Codex runs a read-only sandbox" was ruling 101's copy, true until
+    // the sandbox was removed; "not process-sandboxed" was pre-parity copy.
+    expect(html).toContain("Codex runs are not OS-confined");
     expect(html).toContain("advisory on Codex");
+    expect(html).not.toContain("read-only sandbox");
     expect(html).not.toContain("not process-sandboxed");
     expect(
       BARE_SPECIALIST.test(html),

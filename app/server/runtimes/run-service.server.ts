@@ -752,11 +752,12 @@ const REPO_WRITE_DENY_MARKERS = ["Edit", "Write", "NotebookEdit"] as const;
  * `resolveSpecialistDisallowedTools` policy, backend-agnostically — it just had
  * no effect on Codex, which has no denylist channel. Deriving the flag from it
  * means the spec records the withholding for exactly the profiles the matrix
- * already shows as withheld, with no second source of truth to drift. It
- * drives the Codex read-only sandbox again since ruling 101 (R22 had removed
- * that sandbox; the parity ruling restored it for withheld runs, with the
- * evidence carve-out disclosed as advisory). Callers that know the grant
- * directly may still pass `repoWriteWithheld` explicitly.
+ * already shows as withheld, with no second source of truth to drift. It no
+ * longer drives a sandbox: ruling 101 bound it through Codex's read-only mode,
+ * and ruling 185 removed the OS sandbox, so on Codex the withholding is
+ * advisory. What it still decides is the admin-marked MCP write tools a run
+ * loses (ruling 176) and the `repoWriteWithheld` the spec records. Callers
+ * that know the grant directly may still pass `repoWriteWithheld` explicitly.
  */
 export function repoWriteWithheldFromDenylist(
   disallowedTools?: readonly string[],

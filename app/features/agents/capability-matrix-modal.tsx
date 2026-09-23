@@ -97,13 +97,12 @@ export function CapabilityMatrixModal({
             Delivery (push · open/merge PR) is <b>server-owned</b> and gated
             server-side on the delivering profile's grant, enforced on both
             backends. Withholding <b>Execute code or write to the repo</b> binds on
-            both too: Claude drops the write tools, Codex runs a read-only sandbox
-            (ruling 101). The one exception is a Codex profile that withholds it
-            while granting <b>Attach evidence references</b>: its runs keep a
-            writable checkout, tagged "advisory on Codex" below. The scoped delivery
-            commands bind only on Claude, and the <b>server-side delivery gate</b>
-            is what constrains what ships on either backend. Web egress stays gated
-            on both.
+            Claude, which drops the write tools. Codex runs are not OS-confined
+            (ruling 185), so there it is advisory: the prompt omits every delivery
+            step, and the row is tagged "advisory on Codex" below. The scoped
+            delivery commands bind only on Claude too, and the <b>server-side
+            delivery gate</b> is what constrains what ships on either backend. Web
+            egress stays gated on both.
           </div>
         </div>
         <button
@@ -316,9 +315,8 @@ export function CapabilityMatrixModal({
               <li>
                 Both operators can reach the web (WebFetch/WebSearch) when
                 <b> Search &amp; fetch from the web</b> is granted. The Codex
-                operator's OS-sandbox network stays off, but its web search
-                follows the grant the same way an agent's does; a withheld grant
-                disables it on either backend.
+                operator's web search follows the grant the same way an agent's
+                does; a withheld grant disables it on either backend.
               </li>
               <li>
                 A browser screenshot returns to the model as an image on Claude

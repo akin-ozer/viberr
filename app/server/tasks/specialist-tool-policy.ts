@@ -21,13 +21,12 @@ import {
  * Scope (deliberate + honest): only the high-consequence, cleanly command-
  * mappable capabilities are enforced at the tool layer (branch, push, open PR,
  * merge PR). Finer-grained delivery capabilities remain advisory in the run
- * persona. Codex has no denylist channel of its own; two derived flags carry
- * the grants there instead: `webSearchWithheldFromDenylist` →
- * `webSearchMode: "disabled"` (P14-RT-06), and `repoWriteWithheldFromDenylist`
- * → the read-only sandbox (parity ruling 2026-08-31 — the headline write
- * family binds on BOTH backends; only the SCOPED commands stay advisory on
- * Codex, where the server-owned delivery gate plus credential-less agents are
- * the boundary — see CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS).
+ * persona. Codex has no denylist channel of its own, and since ruling 185 no
+ * OS sandbox: one derived flag still binds there,
+ * `webSearchWithheldFromDenylist` → `webSearchMode: "disabled"` (P14-RT-06).
+ * The write family and the scoped commands are advisory on Codex, where the
+ * server-owned delivery gate plus credential-less agents are the boundary —
+ * see CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS and `codexRepoWriteAdvisory`.
  *
  * Polarity (P14-LV-01, safe-by-default and now actually safe): a delivery or
  * verdict capability is granted ONLY when a grant says so. Withheld means mode

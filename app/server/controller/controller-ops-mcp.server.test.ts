@@ -227,9 +227,9 @@ const HEALTH_REPLY = z.object({
   runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
   // C05-A (pass 32): the pinned browser executable's PATH, org admins only.
   browserDetail: z.string().optional(),
-  // Ruling 182: what this host can run — tool versions (null when absent) and
-  // whether a sandboxed Codex run can exec at all, with the CLI's own words
-  // when it cannot. Inherited from `healthSnapshot`, never a second probe.
+  // Ruling 182, narrowed by ruling 185: what this host can run — tool versions
+  // (null when absent) and the pinned CLI packages; the sandbox verdict went
+  // with the sandbox. Inherited from `healthSnapshot`, never a second probe.
   toolchain: z.strictObject({
     node: z.string().nullable(),
     npm: z.string().nullable(),
@@ -369,9 +369,9 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     expect(body.runs.cap).toBe(runConcurrencySnapshot(app.db).cap);
     // F32-9: the quota/credential store rides along, one row per backend.
     expect(body.quota.map((q) => q.backend)).toEqual(["claude", "codex"]);
-    // Ruling 182: the toolchain and the Codex sandbox verdict, the same
-    // reading the health route serves — the controller answers "can a
-    // sandboxed Codex run exec here" from the probe, not from a guess.
+    // Ruling 182: the toolchain, the same reading the health route serves —
+    // the controller answers "can this host build a Go service" from the
+    // probe, not from a guess.
     expect(body.toolchain).toEqual(snapshot.toolchain);
   });
 
