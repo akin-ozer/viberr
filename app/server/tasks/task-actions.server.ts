@@ -100,7 +100,11 @@ import {
   setTaskDependencies,
   validateDependencyRefs,
 } from "./dependencies.server";
-import { holdEntriesSentence, type DependencyReleasePayload } from "~/shared/dependencies";
+import {
+  holdEntriesSentence,
+  joinDependencyEntries,
+  type DependencyReleasePayload,
+} from "~/shared/dependencies";
 import {
   compactTimelineEvents,
   DEFAULT_COMPACTION,
@@ -788,6 +792,8 @@ export async function createTask(
     ];
   }
   if (blockedBy.length > 0) {
+    const waitEntries = resolveDependencies(db, input.projectSlug, blockedBy);
+    const waitAllDone = waitEntries.every((e) => e.state === "done");
     const waitNote: TaskFileEvent = {
       occurredAt: now,
       type: "note",
@@ -797,7 +803,13 @@ export async function createTask(
       // hold sentence — 4 of 56 creation notes on the instance had named a task
       // that was already Done at creation (BNB-26: "waiting on BNB-5, BNB-22"
       // with BNB-22 closed 95 s earlier).
-      text: `Created waiting on ${holdEntriesSentence(resolveDependencies(db, input.projectSlug, blockedBy))}. Held until every entry is done; Viberr releases it then.`,
+      // F39-65: and a list that is ALL done holds nothing. Ruling 398(d)
+      // creates a chain task only once its waits are satisfied, so every
+      // chain link opened with "Held until every entry is done" over eight
+      // entries that were (AX-35), released in the same second.
+      text: waitAllDone
+        ? `Created after the work it waits on was done (${joinDependencyEntries(waitEntries.map((e) => e.label))}), so nothing holds it; Viberr releases the list at once.`
+        : `Created waiting on ${holdEntriesSentence(waitEntries)}. Held until every entry is done; Viberr releases it then.`,
       toAgent: false,
       evidence: null,
     };

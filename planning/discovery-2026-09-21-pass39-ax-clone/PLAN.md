@@ -101,6 +101,7 @@ per item and each one was applied to the source and observed failing.
 | 88 | A long turn's answer shows before the completion compaction (U39-30) | — | **done** (no ruling) |
 | 89 | Task keys on a task's goal and timeline link to the other tasks (U39-31) | — | **done** (no ruling; default, owner may revisit) |
 | 90 | The accept dialog says whether the reviewed head merges as it is or behind the base (U39-32) | — | **done** (no ruling) |
+| 91 | A chain task born with all its waits done says so (F39-65) | — | **done** (no ruling) |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

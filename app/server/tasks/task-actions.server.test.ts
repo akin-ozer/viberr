@@ -339,6 +339,19 @@ describe("createTask", () => {
     );
     const mixed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-101", dataRoot: store.dataRoot })!.parsed;
     expect(mixed.timeline[0]!.text).toContain("Created waiting on VIB-1 and VIB-2 (done)");
+    // F39-65: a list that is all done holds nothing, and says so. Live on
+    // AX-35, every chain task's first note claimed a hold over done work.
+    // CANARY: drop the `waitAllDone` branch.
+    await createTask(
+      store.db,
+      { projectSlug: store.slug, title: "Waits on done work only", blockedBy: ["VIB-2"] },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const allDone = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-102", dataRoot: store.dataRoot })!.parsed;
+    expect(allDone.timeline.find((e) => e.title === "Waits on other work")?.text).toBe(
+      "Created after the work it waits on was done (VIB-2), so nothing holds it; Viberr releases the list at once.",
+    );
 
     /**
      * Ruling 255 (pass 37, F37-84): one creation is one instant.

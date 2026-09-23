@@ -518,6 +518,19 @@ what they strand, and record an optional reason.
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)
 
+- **F39-65 (LOW) — every chain task opened by claiming a hold over work that was already done.**
+  AX-35, 04:08:21: "Created waiting on AX-4, goal-2 link 2 (AX-19), … and goal-4 link 7 (AX-27).
+  Held until every entry is done; Viberr releases it then." All eight were done: ruling 398(d)
+  creates a chain task only once its waits are satisfied and lets the list ride on at birth, and
+  `holdEntriesSentence` drops the "(done)" tags when every entry is done. The release note 0.7
+  seconds later completed the pair. **Fixed:** a creation whose list is all done says "Created
+  after the work it waits on was done (…), so nothing holds it; Viberr releases the list at
+  once." Left: the release note that follows still says "the base branch has changed since the
+  hold", and the operator's release turn repeats it. The base did just change (the chain started
+  this link because the previous link's work merged), and a new task has no delivered work for
+  the refresh advice to apply to. Test: `task-actions.server.test.ts` "ruling 131: createTask
+  with blockedBy".
+
 - **A base conflict is narrated as a step that "did not apply".** AX-21 01:18 and AX-28 02:43:
   "The operator's plan was not carried out in full. This step did not apply to the task's
   current state: `update_branch_from_base` — `ax-28` CONFLICTS with `main` … Opened a blocking
