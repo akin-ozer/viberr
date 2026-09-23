@@ -62,6 +62,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countTaskAttachments,
   listTaskAttachments,
+  MAX_UPLOAD_BYTES,
 } from "~/server/files/task-attachments.server";
 import {
   listDeployedSpecialists,
@@ -561,7 +562,27 @@ function runAgentsAuthority(
   };
 }
 
+/**
+ * F39-6: the largest body this route reads. One attachment at its cap, plus
+ * the multipart envelope and the form's other fields; every other intent
+ * posts a few kilobytes.
+ */
+const MAX_TASK_ACTION_BODY_BYTES = MAX_UPLOAD_BYTES + 64 * 1024;
+
 export async function action({ request, params }: Route.ActionArgs) {
+  // Refused before the body is read: `requireFormAction` parses the whole
+  // multipart form into memory, and the attachment's own size check runs only
+  // after that, so an oversized upload used to be buffered whole first.
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (declared > MAX_TASK_ACTION_BODY_BYTES) {
+    return data(
+      {
+        ok: false as const,
+        error: `That is ${Math.round(declared / 1024 / 1024)} MB; an attachment may be up to ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`,
+      },
+      { status: 413 },
+    );
+  }
   const {
     auth: ctx,
     db,

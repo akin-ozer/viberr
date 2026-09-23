@@ -538,6 +538,42 @@ describe("the controller dock (ruling 121)", () => {
     }
   });
 
+  /**
+   * O39-d: the working poll runs with the panel closed too, and a load nobody
+   * is reading must not mark the reply it fetches as seen. Only the open
+   * panel's loads say `seen`.
+   */
+  it("O39-d: only an OPEN panel's load marks its transcript seen", async () => {
+    const { loads } = mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView({ turn: { working: true, runId: "run_1", phase: null, step: null } }),
+    });
+    const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
+    await restored();
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(trigger);
+      });
+      expect(loads.at(-1)!.searchParams.get("seen")).toBe("1");
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /^Controller · VIB-1/ }));
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull();
+      const closedAt = loads.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      // CANARY: build the dock URL with `seen` always set and this poll marks
+      // the reply read while nobody is looking.
+      expect(loads.length).toBeGreaterThan(closedAt);
+      expect(loads.at(-1)!.searchParams.get("seen")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("animates only a reply that arrives while the panel is open (finding 32)", async () => {
     const first: ControllerDockView["messages"][number] = {
       id: "m1",

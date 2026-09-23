@@ -1666,8 +1666,9 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
       ),
     ).rejects.toMatchObject({
       // Ruling 398(c): position no longer implies order, so a forward wait is
-      // ordinary. What is refused is the CYCLE this particular edit closes.
-      message: expect.stringContaining("would close a cycle"),
+      // ordinary. What is refused is the CYCLE this particular edit closes,
+      // by the goal's own check over the graph the edit makes.
+      message: expect.stringContaining("these links wait on each other"),
     });
     expect(task().blockedBy).toEqual([]);
   });
@@ -2472,6 +2473,17 @@ describe("ruling 398(c): a link may wait on any sibling except in a cycle", () =
   const ctx = () => ({ dataRoot: app.dataRoot });
   const actor = () => actorOf(contributorId, "selin@viberr.dev");
 
+  /**
+   * A 400 refusal whose message matches. Not `rejects.toMatchObject({
+   * message: /…/ })`: vitest 4 matches a RegExp value there against ANY
+   * string, so the four checks this block started with never read the
+   * message at all. `toThrow` does.
+   */
+  async function expectRefusal(call: Promise<unknown>, message: RegExp) {
+    await expect(call).rejects.toMatchObject({ status: 400 });
+    await expect(call).rejects.toThrow(message);
+  }
+
   async function make(links: { title: string; goal: string; blockedBy?: string[] }[]) {
     const { createGoal, getGoalView } = await import("./goal-actions.server");
     const created = await createGoal(
@@ -2495,32 +2507,63 @@ describe("ruling 398(c): a link may wait on any sibling except in a cycle", () =
   });
 
   it("still refuses a link that waits on itself", async () => {
-    await expect(
+    await expectRefusal(
       make([{ title: "Only link here", goal: "x.", blockedBy: ["link 1"] }]),
-    ).rejects.toMatchObject({ status: 400, message: /cannot wait on itself/ });
+      /cannot wait on itself/,
+    );
   });
 
   it("refuses a cycle that runs through a sibling", async () => {
     // What actually has to be refused now: neither could ever start.
-    await expect(
+    await expectRefusal(
       make([
         { title: "First of the pair", goal: "a.", blockedBy: ["link 2"] },
         { title: "Second of the pair", goal: "b.", blockedBy: ["link 1"] },
       ]),
-    ).rejects.toMatchObject({
-      status: 400,
-      message: /wait on each other, so none of them could ever start/,
-    });
+      /wait on each other, so none of them could ever start/,
+    );
   });
 
   it("refuses a three-link cycle, naming the loop", async () => {
-    await expect(
+    await expectRefusal(
       make([
         { title: "Cycle link one", goal: "a.", blockedBy: ["link 3"] },
         { title: "Cycle link two", goal: "b.", blockedBy: ["link 1"] },
         { title: "Cycle link three", goal: "c.", blockedBy: ["link 2"] },
       ]),
-    ).rejects.toMatchObject({ message: /link 1 waits on link 3 waits on link 2 waits on link 1/ });
+      /link 1 waits on link 3 waits on link 2 waits on link 1/,
+    );
+  });
+
+  /**
+   * An ACTIVE link's new wait is written to its task, not to the link, so the
+   * link list still holds the old wait while the edit is checked. The cycle
+   * check has to look at the graph the edit makes.
+   */
+  it("refuses an ACTIVE link's edit that closes a cycle", async () => {
+    const { updateGoal } = await import("./goal-actions.server");
+    const view = await make([
+      { title: "Starts at once", goal: "a." },
+      { title: "Waits on the first", goal: "b.", blockedBy: ["link 1"] },
+    ]);
+    expect(view.links[0]!.taskKey).toBeTruthy();
+    // CANARY: check `fm.links` as it stands and this edit is let through.
+    // The goal's own refusal. Without it the task validator further down
+    // still refuses, but in words about a task ("VIB-7 waits on goal-1
+    // link 2 …") rather than about the goal being edited.
+    await expectRefusal(
+      updateGoal(
+        app.db,
+        {
+          projectSlug: SLUG,
+          goalId: view.id,
+          action: { op: "edit_link", index: 1, blockedBy: ["link 2"] },
+        },
+        actor(),
+        ctx(),
+      ),
+      /link 1 waits on link 2 waits on link 1: these links wait on each other/,
+    );
   });
 
   it("accepts a diamond, which is not a cycle", async () => {

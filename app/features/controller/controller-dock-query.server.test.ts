@@ -123,6 +123,7 @@ function dock(
     projectSlug: string | null;
     taskKey: string | null;
     conversationId: string | null;
+    markSeen?: boolean;
   },
 ) {
   return getControllerDock(
@@ -356,12 +357,36 @@ describe("getControllerDock — replies the viewer has not seen (O39-d)", () => 
     }
     // CANARY: drop `markConversationSeen` from the dock and the thread the
     // person is reading stays a "new reply".
-    const view = dock(store, selin, { projectSlug: SLUG, taskKey: null, conversationId: older.id });
+    const view = dock(store, selin, {
+      projectSlug: SLUG,
+      taskKey: null,
+      conversationId: older.id,
+      markSeen: true,
+    });
     expect(Object.fromEntries(view.threads.map((t) => [t.id, t.unread]))).toEqual({
       [older.id]: false,
       [newer.id]: true,
     });
     expect(listUnseenReplies(store.db, selin.id).map((r) => r.id)).toEqual([newer.id]);
+  });
+
+  /**
+   * The dock loads this view with the panel CLOSED too: its working poll keeps
+   * the button's dot honest while a turn runs. That load is nobody reading,
+   * and marking it seen erased the one reply O39-d exists to announce — the
+   * one that lands while a person has closed the dock and stayed on the page.
+   */
+  it("a load with the panel closed marks nothing seen", async () => {
+    const { appendMessage, listUnseenReplies } = await import("~/server/controller/controller-conversations.server");
+    const store = storeWithTwoProjects();
+    const selin = store.users.selin;
+    const asked = thread(store, selin, { projectSlug: SLUG, taskKey: null });
+    appendMessage(store.db, { conversationId: asked.id, author: "controller", text: "Done." });
+    // CANARY: mark seen on every load again and the reply is gone before the
+    // person ever opens the dock.
+    const polled = dock(store, selin, { projectSlug: SLUG, taskKey: null, conversationId: asked.id });
+    expect(polled.messages.map((m) => m.text)).toContain("Done.");
+    expect(listUnseenReplies(store.db, selin.id).map((r) => r.id)).toEqual([asked.id]);
   });
 });
 

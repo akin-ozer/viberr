@@ -151,13 +151,6 @@ export function stripChainHeader(goal: string): string {
 // ------------------------------------------------------------------ create
 
 /**
- * Ruling 131(c): validate one link's declared wait. References to THIS
- * chain's own links are checked here (an existing link, never itself, never
- * a later link of the same chain, which the chain order already forbids);
- * everything else goes through the shared validator, whose cycle walk
- * traverses declared goal-link edges as well as created tasks.
- */
-/**
  * Ruling 398: can this link start, must it wait, or is its wait dead?
  *
  * A wait on a link of this SAME goal is answered from the frontmatter being
@@ -201,6 +194,14 @@ function linkWaitState(
  *  the only spelling available before the goal has an id. */
 const RELATIVE_LINK_RE = /^link\s+(\d+)$/i;
 
+/**
+ * Ruling 131(c): validate one link's declared wait. References to THIS
+ * chain's own links are checked here (an existing link, never itself; a
+ * later link is fine since ruling 398(c), and a cycle among them is
+ * `refuseLinkCycles`' question); everything else goes through the shared
+ * validator, whose cycle walk traverses declared goal-link edges as well as
+ * created tasks.
+ */
 function validateLinkWait(
   db: DatabaseSync,
   projectSlug: string,
@@ -395,11 +396,12 @@ export async function createGoal(
     },
   );
   rebuildGoalFile(db, input.projectSlug, goalId, { dataRoot: ctx.dataRoot });
-  // Ruling 398: link 1 is created above under the ASKING user's own authority,
-  // so a refusal leaves no orphan goal file. Every other link that nothing
-  // makes wait starts here, through the one selector, rather than sitting until
-  // the goal runner's next tick — a person who declares three independent
-  // links means three tasks now.
+  // Ruling 398: every link that nothing makes wait starts here, link 1
+  // included, through the one selector (`startLinkTask`, under the creator's
+  // re-proved authority), rather than sitting until the goal runner's next
+  // tick: a person who declares three independent links means three tasks
+  // now. A start that fails parks the goal in `attention` by name; the file
+  // is already written, so nothing here is rolled back.
   await reconcileGoal(db, input.projectSlug, goalId, ctx);
   const startedList =
     readGoalFile(goalRef(ctx, input.projectSlug, goalId))?.parsed.frontmatter.links.filter(
@@ -728,8 +730,15 @@ export async function updateGoal(
                 op.blockedBy,
               ),
             };
-            // Ruling 398(c): the whole graph, after the edit lands on it.
-            refuseLinkCycles(fm.id, fm.links);
+            // Ruling 398(c): the whole graph, after the edit lands on it. This
+            // arm writes the new wait to the TASK, so `fm.links` still holds
+            // the old one: check the graph the edit makes, not the one it
+            // replaces.
+            const wait = forward.wait.blockedBy;
+            refuseLinkCycles(
+              fm.id,
+              fm.links.map((l) => (l.index === link.index ? { ...l, blockedBy: wait } : l)),
+            );
             return;
           }
           if (link.status !== "pending" && link.status !== "failed") {
@@ -1776,7 +1785,6 @@ const goalProjectionRowSchema = z.object({
   updated_at: z.string().nullable(),
 });
 
-/** List a project's goals from the projection (board panel read model). */
 /**
  * Ruling 419(h): a chain's history, newest first, straight from its canonical
  * file. The projection carries no history (`listGoals` returns it empty), and
@@ -1792,6 +1800,7 @@ export function readGoalHistory(
   return readGoalFile(goalRef(ctx, projectSlug, goalId))?.parsed.timeline ?? [];
 }
 
+/** List a project's goals from the projection (board panel read model). */
 export function listGoals(db: DatabaseSync, projectSlug: string): GoalView[] {
   const rows = db
     .prepare(

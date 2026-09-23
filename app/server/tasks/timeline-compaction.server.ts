@@ -134,7 +134,7 @@ export function compactTimelineEvents(
     e.actor.kind !== "controller" &&
     // Ruling 382 (F39-9): viberr TOLD somebody this comment was here. Live on
     // ax-clone AX-9 the folded one was the operator answering Arda by name
-    // about a correction he had just filed — his question survived (human
+    // about a correction they had just filed — their question survived (human
     // prose), the answer did not, and canonical task.md, which the next agent
     // anchors on, read as a person correcting the record and nobody replying.
     // The notification row still quotes it and still offers a button to the

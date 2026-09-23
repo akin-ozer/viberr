@@ -198,6 +198,18 @@ describe("the tool surface itself encodes the invariants", () => {
     expect(described).toContain("STARTS that link in the same call");
     expect(described).toContain("never create a task for a link you are about to unblock");
     expect(described).toContain("RULING 411");
+    // The reply names the started task in its message. `activeTaskKey` is the
+    // chain's current link (goal-actions' own ruling 411 test pins that it is
+    // NOT the started one), so the text must never send the reader there.
+    // CANARY: restore "names it in activeTaskKey" to either text and this fails.
+    // `strictTool` hands the SDK a whole `z.strictObject` as the tool's input
+    // schema (strict-tool.server.ts); parsed as one rather than asserted.
+    const schema = z.instanceof(z.ZodType).parse(updateGoal!.inputSchema);
+    const fields = JSON.stringify(z.toJSONSchema(schema));
+    for (const text of [described, fields]) {
+      expect(text).toContain("Link N started as KEY");
+      expect(text).not.toMatch(/activeTaskKey names|names it in activeTaskKey/);
+    }
   });
 });
 

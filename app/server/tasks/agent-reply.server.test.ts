@@ -2041,6 +2041,74 @@ describe("commentToAgent", () => {
     expect(file.parsed.timeline.some((e) => e.text.includes("has been answered by a human"))).toBe(false);
   });
 
+  /**
+   * The option's DESCRIPTION is the asker's own text, and it narrates what
+   * happens next as often as it names who acts. A person who picks it names
+   * nobody, so the answer goes back to the agent that asked.
+   */
+  it("ruling 447: an option whose description mentions the operator still answers the asker", async () => {
+    const priorSessionId = "sess_r447_desc";
+    upsertRun(store.db, {
+      id: "run_r447_desc",
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "t_r447_desc",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sessionId: priorSessionId,
+      sdk: "test",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    writeTranscript(priorSessionId);
+    const existing = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    writeTask(store.dataRoot, store.slug, {
+      ...existing.parsed,
+      packet: {
+        id: "pkt_r447_desc",
+        type: "input",
+        kind: "Agent question",
+        from: "agent:claude/dev (developer)",
+        askedBy: "dev",
+        title: "Keep the retry loop?",
+        body: "It doubles the test time.",
+        observations: [],
+        options: [
+          {
+            kind: "custom",
+            t: "Keep it",
+            d: "I finish the loop here and the operator then moves the task to Verify.",
+            rec: true,
+          },
+          { kind: "custom", t: "Drop it", d: "", rec: false },
+        ],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { resolvePacket } = await import("./task-actions.server");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actor(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: scan `option.d` again and the answer is routed to the operator.
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.timeline.some((e) => e.text.startsWith("The answer names"))).toBe(false);
+    expect(
+      await waitFor(
+        () =>
+          listRunsForTaskRows(store.db, store.slug, "VIB-1").some(
+            (r) => r.session_id === priorSessionId && r.id !== "run_r447_desc",
+          ),
+        10_000,
+      ),
+    ).toBe(true);
+  });
+
   // P14-RT-02 / LV-04: the WIRING, not just the prompt builder. `commentToAgent`
   // threaded the human's words into the RESUMED path and the operator-prompt
   // path but neither FRESH branch, so a first-ever @mention started a run that

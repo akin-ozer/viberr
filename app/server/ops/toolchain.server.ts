@@ -319,8 +319,11 @@ export function probeTool(name: string, deps: ToolchainDeps = {}): ProbedTool {
 
 /**
  * Probe up to {@link PROBE_LIMIT} names, de-duplicated, in the order asked.
- * Memoized per name for the life of the process, like every other probe here:
- * a binary does not appear while the server runs, and each miss costs a spawn.
+ * A tool that was FOUND is memoized for the life of the process, like every
+ * other probe here. A miss is asked again: the probe exists so a gate is
+ * checked before it is promised, and the usual answer to "golangci-lint is
+ * not on PATH" is a person installing it, which a cached miss would deny
+ * until the next restart.
  */
 const probeCache = new Map<string, ProbedTool>();
 
@@ -341,8 +344,9 @@ export function probeTools(
       continue;
     }
     const probed = probeTool(name, deps);
-    // A malformed NAME is not a host fact, so it is never cached.
-    if (PROBE_NAME_RE.test(name)) probeCache.set(name, probed);
+    // Only a tool that is there. A malformed NAME is not a host fact, and an
+    // absent tool is one a person can fix while the server runs.
+    if (probed.present) probeCache.set(name, probed);
     out.push(probed);
   }
   return out;

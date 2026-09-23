@@ -1857,6 +1857,80 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
     expect(await attachmentsOf("VIB-141")).not.toContain("page.html");
   });
 
+  /**
+   * Ruling 388 binds a review to WHEN a deliverer saved its files, not to
+   * their bytes, so a person's upload over one of them would leave an
+   * approval standing on content no reviewer read.
+   */
+  it("never overwrites a file an agent run saved, and still lets a person replace their own", async () => {
+    const { updateTaskFile, readTaskFile } = await import("~/server/files/task-writer.server");
+    const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
+    const ref = { projectSlug: "viberr-core", taskKey: "VIB-141", dataRoot: app.dataRoot };
+    writeTaskAttachment("viberr-core", "VIB-141", "report.md", new TextEncoder().encode("the agent's report"), app.dataRoot);
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "comment",
+        actor: { kind: "agent", backend: "codex", profileId: "dev", roleHint: "Developer" },
+        title: null,
+        text: "Report attached.",
+        toAgent: false,
+        evidence: null,
+        attachments: ["report.md"],
+      });
+    });
+
+    // SAFETY: a refused write throws AppError, rendered by the refusal arm.
+    const refused = (await postFile("VIB-141", ids.selin, "report.md", "mine")) as ActionRefusal;
+    // CANARY: pass no refusal to the writer and the agent's report is replaced.
+    expect(refused.data.ok).toBe(false);
+    expect(refused.data.error).toContain("an agent run saved");
+    const { readTaskAttachmentText } = await import("~/server/files/task-attachments.server");
+    expect(JSON.stringify(readTaskAttachmentText("viberr-core", "VIB-141", "report.md", app.dataRoot))).toContain(
+      "the agent's report",
+    );
+    expect(readTaskFile(ref)!.parsed.timeline[0]!.title).not.toBe("Attachment added");
+
+    await postFile("VIB-141", ids.selin, "notes.md", "first");
+    const again = await postFile("VIB-141", ids.selin, "notes.md", "second");
+    expect(again).toMatchObject({ ok: true, intent: "attach-file" });
+    // SAFETY: the assertion above proved the success arm.
+    expect((again as Extract<ActionData, { intent: "attach-file" }>).toast).toContain("(replaced)");
+  });
+
+  it("refuses an oversized body before reading it", async () => {
+    const { action } = await import("~/routes/project.task");
+    const { cookie } = await app.cookieFor(ids.selin);
+    let read = false;
+    // A zero high-water mark: `pull` runs only when something reads the body.
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          read = true;
+          controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    // SAFETY: as in postIntent, the action reads `request` and `params` only.
+    const result = (await action({
+      request: app.request("/projects/viberr-core/tasks/VIB-141", {
+        method: "POST",
+        cookie,
+        headers: { "content-length": String(40 * 1024 * 1024) },
+        body,
+        duplex: "half",
+      } as RequestInit),
+      params: { slug: "viberr-core", key: "VIB-141" },
+      context: {},
+    } as never)) as ActionRefusal;
+    // CANARY: drop the content-length check and the whole form is parsed
+    // (the stream is read) before any size refusal.
+    expect(result.init?.status).toBe(413);
+    expect(result.data.error).toContain("up to 10 MB");
+    expect(read).toBe(false);
+  });
+
   it("refuses an empty submit by name", async () => {
     const { action } = await import("~/routes/project.task");
     const { cookie, sessionId } = await app.cookieFor(ids.selin);

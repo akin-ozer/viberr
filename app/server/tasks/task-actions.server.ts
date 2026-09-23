@@ -960,19 +960,6 @@ type TaskMetadataPatch = {
 };
 
 /**
- * Edit the lightweight planning metadata (priority, labels, due date).
- *
- * Distinct from `updateTaskGoal`: the goal is the reviewable acceptance
- * contract, so a human editing it re-anchors every downstream agent and clears
- * scope packets. Metadata changes NO gate and NO agent's instructions, so this
- * writes the frontmatter, reprojects, audits, and stops — no operator re-invoke.
- * A `patch` only touches the fields it names (partial update), so the create
- * form, the board, and the detail panel can each set one axis independently.
- *
- * `urgent` is kept as a derived mirror of `priority === "urgent"` so the board
- * highlight / "risk" filter that read it keep agreeing with the graded scale.
- */
-/**
  * F39-6 (pass 39): a PERSON attaches a file to a task.
  *
  * The attachments directory had three readers and no human writer: the browser
@@ -1012,12 +999,23 @@ export async function attachTaskFile(
       `${input.taskKey} is archived — restore it before attaching a file.`,
     );
   }
+  // A file an agent run saved can be the work under review (ruling 388 binds
+  // a review to a deliverer's saved files by WHEN they were saved, not by
+  // their bytes), so a person's upload never overwrites one: the approval
+  // would stand on content no reviewer read. Their own files they may replace.
+  const name = input.name.trim();
+  const agentSaved = existing.parsed.timeline.some(
+    (e) => e.actor.kind === "agent" && (e.attachments ?? []).includes(name),
+  );
   const attachment = writeTaskAttachment(
     input.projectSlug,
     input.taskKey,
     input.name,
     input.data,
     ctx.dataRoot,
+    agentSaved
+      ? `“${name}” is a file an agent run saved on ${input.taskKey}, and it may be the work under review. Attach yours under another name.`
+      : null,
   );
   const kb = Math.max(1, Math.round(attachment.bytes / 1024));
   await updateTaskFile(ref, (parsed) => {
@@ -1051,6 +1049,19 @@ export async function attachTaskFile(
   return { attachment };
 }
 
+/**
+ * Edit the lightweight planning metadata (priority, labels, due date).
+ *
+ * Distinct from `updateTaskGoal`: the goal is the reviewable acceptance
+ * contract, so a human editing it re-anchors every downstream agent and clears
+ * scope packets. Metadata changes NO gate and NO agent's instructions, so this
+ * writes the frontmatter, reprojects, audits, and stops — no operator re-invoke.
+ * A `patch` only touches the fields it names (partial update), so the create
+ * form, the board, and the detail panel can each set one axis independently.
+ *
+ * `urgent` is kept as a derived mirror of `priority === "urgent"` so the board
+ * highlight / "risk" filter that read it keep agreeing with the graded scale.
+ */
 export async function setTaskMetadata(
   db: DatabaseSync,
   input: {
@@ -2755,7 +2766,6 @@ function duplicatedOwnCommentText(
   return null;
 }
 
-/** Build the reply event without writing so completion effects can land atomically. */
 /**
  * Ruling 388 (F39-15): record a DELIVERER's saved files as this task's
  * non-commit delivery, and therefore as what a review of it binds to.
@@ -2780,6 +2790,7 @@ function stampNonCommitDelivery(
   fm.deliveredAt = at;
 }
 
+/** Build the reply event without writing so completion effects can land atomically. */
 async function prepareAgentReplyEvent(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -6610,8 +6621,6 @@ export async function releaseTasksOwnedBy(
 
 // -------------------------------------------------------------- transition
 
-/** Apply a declared workflow transition with its configured authority boundary. */
-
 /** Markdown blockquote, one `>` per line and no trailing space on a blank one
  *  (ruling 381 quotes a person's move reason on the transition entry). */
 function quoteLines(text: string): string {
@@ -6621,6 +6630,7 @@ function quoteLines(text: string): string {
     .join("\n");
 }
 
+/** Apply a declared workflow transition with its configured authority boundary. */
 export async function transitionStage(
   db: DatabaseSync,
   input: {
@@ -9756,6 +9766,32 @@ export function packetIdentity(p: TaskPacket): string {
  *  task's contract. O39-b finds an earlier copy of the same decision by it. */
 const CONTRACT_CLAUSE = "This decision is part of the task's contract from here on.";
 
+/** Every decision block the contract holds: the question it answered and the
+ *  answer, as `resolvePacket` writes them. */
+const CONTRACT_DECISION_RE = new RegExp(
+  String.raw`answered “([^”]*)”:\*\*\n\n([\s\S]*?)\n\n` + literalPattern(CONTRACT_CLAUSE),
+  "g",
+);
+
+/**
+ * O39-b: does the contract already hold this decision, to this question?
+ *
+ * The answer alone is not the decision. An agent's options are often a bare
+ * "Yes", so a second question answered "Yes" is a different decision, and
+ * matching on the answer dropped it from the contract. The question is
+ * compared with its numbers blanked, because the one that asks again round
+ * after round (the review deadlock, "… has requested changes 3 times
+ * running") only changes its count.
+ */
+export function contractHoldsDecision(goal: string, question: string, answer: string): boolean {
+  const asked = (title: string) => title.replace(/\d+/g, "#");
+  const wanted = asked(question);
+  for (const block of goal.matchAll(CONTRACT_DECISION_RE)) {
+    if (block[2] === answer && asked(block[1] ?? "") === wanted) return true;
+  }
+  return false;
+}
+
 export async function resolvePacket(
   db: DatabaseSync,
   input: {
@@ -10938,16 +10974,16 @@ export async function resolvePacket(
     // run READS, so the goal won. Appending it here, in the same locked write
     // that clears the packet, needs no model judgement and cannot be forgotten
     // by a turn that fails or is interrupted.
-    // O39-b: a decision the contract already holds, word for word, is not
-    // written again. Live on ax-clone AX-22 a review deadlock asked round after
-    // round, and every "Let the rework continue" answer appended the same
-    // block: four copies in the text every fresh run re-anchors on. Each
-    // answer is still on the timeline, and ruling 415 carries every one to
-    // the operator.
+    // O39-b: a decision the contract already holds, to the same question,
+    // is not written again. Live on ax-clone AX-22 a review deadlock asked
+    // round after round, and every "Let the rework continue" answer appended
+    // the same block: four copies in the text every fresh run re-anchors on.
+    // Each answer is still on the timeline, and ruling 415 carries every one
+    // to the operator.
     if (
       goalAmendment &&
       goalAnswer !== null &&
-      !parsed.goal.includes(`${goalAnswer}\n\n${CONTRACT_CLAUSE}`)
+      !contractHoldsDecision(parsed.goal, packet.title, goalAnswer)
     ) {
       parsed.goal = `${parsed.goal.trimEnd()}\n\n${goalAmendment}`;
     }
@@ -11121,8 +11157,12 @@ export async function resolvePacket(
           name: a.name,
           handle: agentMentionHandle({ profileId: a.id, name: a.name }),
         }));
+        // The person's words: the option they chose and anything they typed.
+        // Never the option's description, which the ASKER wrote, and which
+        // narrates what happens next ("the operator then moves it to
+        // Verify") as often as it names who should act.
         const routedTo = answerNamesAnotherActor(
-          [option.t, option.d, decisionNote ?? ""].join("\n"),
+          [option.t, decisionNote ?? ""].join("\n"),
           askedBy,
           deployed,
         );
@@ -11932,6 +11972,15 @@ export async function resolvePacket(
   if (option.kind === "move_stage") {
     const target = moveStageTarget(option, project.stages, input.taskKey);
     if (target.ok) {
+      // Ruling 381: a backward move says why, and a packet resolution is a
+      // door onto it like the stage menu. The person's own words when they
+      // gave any, else the option they chose, which is what they agreed to.
+      // Without it every move_stage option that goes back was refused after
+      // the packet had already cleared.
+      const why =
+        customDirective ||
+        input.note?.trim() ||
+        [option.t, option.d].filter((part) => part.trim()).join(" — ");
       try {
         await transitionStage(
           db,
@@ -11940,6 +11989,7 @@ export async function resolvePacket(
             taskKey: input.taskKey,
             toStageId: target.stage.id,
             manual: true,
+            reason: why,
           },
           actor,
           ctx,

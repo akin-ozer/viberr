@@ -428,13 +428,13 @@ describe("F39-1: probeTool", () => {
     expect(PROBE_NAME_RE.test("g++")).toBe(true);
   });
 
-  it("probeTools de-duplicates, keeps order, caps the count and memoizes each name", () => {
+  it("probeTools de-duplicates, keeps order, caps the count and memoizes a tool it found", () => {
     const { run, calls } = runnerFor(["go"]);
     const first = probeTools(["go", "gofmt", "go", " gofmt "], { run });
     expect(first.map((p) => p.name)).toEqual(["go", "gofmt"]);
     const spawnsAfterFirst = calls.length;
-    // Memoized: a second ask for the same names spawns nothing more.
-    probeTools(["go", "gofmt"], { run });
+    // Memoized: a second ask for a tool that was there spawns nothing more.
+    probeTools(["go"], { run });
     expect(calls).toHaveLength(spawnsAfterFirst);
 
     const many = probeTools(
@@ -444,5 +444,22 @@ describe("F39-1: probeTool", () => {
     // CANARY: drop the cap and an unbounded list becomes an unbounded number of
     // child processes on a read any asker can make.
     expect(many).toHaveLength(PROBE_LIMIT);
+  });
+
+  /**
+   * The probe is how a gate is checked before it is promised, and the answer
+   * to "golangci-lint is not on PATH" is a person installing it. A cached miss
+   * kept saying it was absent until the server restarted.
+   */
+  it("asks again about a tool it did not find, so an install is seen", () => {
+    const before = runnerFor([]);
+    expect(probeTools(["golangci-lint"], { run: before.run })[0]!.present).toBe(false);
+    const after = runnerFor(["golangci-lint"]);
+    // CANARY: cache the miss again and this still reads absent.
+    expect(probeTools(["golangci-lint"], { run: after.run })[0]).toEqual({
+      name: "golangci-lint",
+      present: true,
+      version: "2.6.0",
+    });
   });
 });

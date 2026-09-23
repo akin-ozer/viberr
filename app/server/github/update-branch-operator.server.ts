@@ -412,17 +412,17 @@ export async function recordBranchRefresh(
   return sentence;
 }
 
-/**
- * Bring the task branch up to date with the project's base branch, as an
- * operator decision. Never throws; every outcome is a typed
- * {@link OperatorActionResult} whose message says what actually happened.
- */
 /** F39-69: tell the drive it refreshed, so its settle can see a drive that
  *  stopped right after preparing the branch. */
 function stampRefreshed(ctx: TaskActionContext): void {
   if (ctx.operatorRun) ctx.operatorRun.refreshed = true;
 }
 
+/**
+ * Bring the task branch up to date with the project's base branch, as an
+ * operator decision. Never throws; every outcome is a typed
+ * {@link OperatorActionResult} whose message says what actually happened.
+ */
 export async function operatorUpdateBranchFromBase(
   db: DatabaseSync,
   /** The action context: `fetchImpl` (tests) reaches the post-update reconcile. */

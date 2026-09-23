@@ -10,7 +10,6 @@
 /** Types the serving route may render INLINE on the app origin. Deliberately
  *  without `.html`, `.svg` and `.js`: a stored page served here is stored XSS. */
 export const INLINE_TYPES = new Map<string, string>([
-
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
   [".jpeg", "image/jpeg"],

@@ -1113,7 +1113,12 @@ export async function maybeResumeStrandedOperator(
   );
   // F39-69: a drive that refreshed and stopped. Never the nudge itself: the
   // nudge that refreshes again and stops has had its one automatic resume.
-  const refreshedAndStopped = ref.ownRun?.refreshed === true && ref.strandedResume !== true;
+  // A drive that DELIVERED after its refresh took the step the refresh
+  // prepared, and REFRESH_ENDED_NUDGE would tell it that it had not.
+  const refreshedAndStopped =
+    ref.ownRun?.refreshed === true &&
+    ref.ownRun.delivered !== true &&
+    ref.strandedResume !== true;
   const stranded = operatorLeftTaskStranded(
     {
       archived: file.parsed.frontmatter.archived,
@@ -4344,12 +4349,6 @@ type OperatorTrigger = NonNullable<RunOperatorInput["trigger"]>;
 type StrandedNudge = boolean | "idle-stage" | "plan-refused" | "refresh-ended";
 
 /**
- * F39-69: the instruction for a drive resumed because the previous one
- * refreshed the branch and stopped. It is not the idle-stage nudge's "this
- * auto-advance stage" (a Review stage is not one), and not an accusation of
- * holding: the previous drive acted.
- */
-/**
  * F39-69: a Codex plan is the whole turn. Nothing re-invokes the operator for
  * a step of its own, and a plan may safely chain a refresh and the step it
  * prepares because ruling 430 stops the acting steps after one that opens a
@@ -4367,6 +4366,12 @@ export const CODEX_PLAN_WHOLE_TURN =
   "checked against the stage it runs from). If a step opens a decision packet (a refresh that meets " +
   "a conflict does), Viberr carries out none of the acting steps after it (ruling 430). ";
 
+/**
+ * F39-69: the instruction for a drive resumed because the previous one
+ * refreshed the branch and stopped. It is not the idle-stage nudge's "this
+ * auto-advance stage" (a Review stage is not one), and not an accusation of
+ * holding: the previous drive acted.
+ */
 export const REFRESH_ENDED_NUDGE =
   "You are re-invoked ONCE because your previous run brought the branch up to date " +
   "(`update_branch_from_base`) and stopped there: nothing was dispatched, delivered or asked. " +

@@ -181,8 +181,13 @@ export function acceptanceOfferBasis(
   rules: readonly RequiredReviewerView[],
 ): string {
   const rev = activeWorkRevision(fm.workRevision);
-  const approvals = rev
-    ? fm.verdicts.filter((v) => v.revisionId === rev.id && v.result === "approve")
+  // Ruling 388: the subject, not the revision, the same one the verdict
+  // writer and the gate read. Keyed on the revision alone, a task whose
+  // deliverable is a saved file was told "No review verdict is recorded" over
+  // the approval its reviewer had just given.
+  const subject = reviewSubjectId(fm);
+  const approvals = subject
+    ? fm.verdicts.filter((v) => v.revisionId === subject && v.result === "approve")
     : [];
   if (approvals.length === 0) {
     // Named, because "no verdict" reads as an oversight and the reader needs to
@@ -197,5 +202,7 @@ export function acceptanceOfferBasis(
     const rule = rules.find((r) => r.profileId === v.profileId);
     return rule?.agentName ?? v.profileId;
   });
-  return `${names.join(", ")} approved \`${rev!.headSha.slice(0, 7)}\`.`;
+  return rev
+    ? `${names.join(", ")} approved \`${rev.headSha.slice(0, 7)}\`.`
+    : `${names.join(", ")} approved the files delivered on this task.`;
 }

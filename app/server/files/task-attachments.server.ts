@@ -35,7 +35,7 @@ import {
  *
  * F39-6: the human writer was missing, and it cost a real answer. Viberr's own
  * controller, asked where a human-supplied artifact would genuinely help,
- *named the task and the file — "a human-supplied fixture stops the decoder
+ * named the task and the file — "a human-supplied fixture stops the decoder
  * from being tested against a fixture it wrote for itself" — and there was no
  * way to supply it. The only route was writing into the data volume by hand.
  *
@@ -291,10 +291,9 @@ export function resolveTaskAttachment(
   return resolveStoreSegment(taskAttachmentsDir(slug, key, dataRoot), name);
 }
 
-/** Extension → inline content type. Anything absent here is served as a
- *  download (`application/octet-stream`), never rendered on the app origin. */
-
-
+/** Extension → inline content type (`INLINE_TYPES`). Anything absent there is
+ *  served as a download (`application/octet-stream`), never rendered on the
+ *  app origin. */
 export function attachmentContentType(name: string): {
   type: string;
   inline: boolean;
@@ -307,8 +306,6 @@ export function attachmentContentType(name: string): {
 }
 
 // ------------------------------------------------------- the human writer
-
-
 
 export {
   MAX_UPLOAD_BYTES,
@@ -336,6 +333,9 @@ export function writeTaskAttachment(
   name: string,
   data: Uint8Array,
   dataRoot?: string,
+  /** The sentence that refuses overwriting a file already there, or null to
+   *  allow it. The caller knows whose file it is; the store does not. */
+  refuseReplace: string | null = null,
 ): WrittenAttachment {
   const cleaned = name.trim();
   if (!cleaned) {
@@ -365,6 +365,7 @@ export function writeTaskAttachment(
   // this accepts is a name that route can serve and vice versa.
   const abs = resolveStoreSegment(dir, cleaned);
   const replaced = existsSync(abs);
+  if (replaced && refuseReplace) throw AppError.validation(refuseReplace);
   mkdirSync(dir, { recursive: true });
   writeFileSync(abs, data);
   return { name: cleaned, bytes: data.byteLength, replaced };
@@ -393,9 +394,6 @@ export function writeTaskAttachment(
  * describe as if it had looked.
  */
 export const ATTACHMENT_READ_CHARS = 40_000;
-
-/** Extensions this returns as text. The inline set above is about what a
- *  BROWSER may render on the app origin, which is a different question. */
 
 export interface TaskAttachmentRead {
   name: string;

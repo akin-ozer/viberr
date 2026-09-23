@@ -2171,9 +2171,12 @@ export async function operatorProposeRuling(
     `- **[${input.taskKey}, ${new Date().toISOString().slice(0, 10)}]** ${text}\n` +
     `  Evidence: ${evidence}\n`;
   const body = existing.includes(PROPOSED_RULINGS_HEADING)
-    ? existing.replace(
+    ? // A replacer FUNCTION: a replacement string expands `$&`, `$'`, `` $` ``
+      // and `$$`, and the operator's own text is shell and Makefile evidence
+      // (`for p in $$(go list ./...)` would be filed as `$(go list ./...)`).
+      existing.replace(
         PROPOSED_RULINGS_HEADING,
-        `${PROPOSED_RULINGS_HEADING}\n\n${entry.trimEnd()}`,
+        () => `${PROPOSED_RULINGS_HEADING}\n\n${entry.trimEnd()}`,
       )
     : `${existing.trimEnd()}\n\n${PROPOSED_RULINGS_HEADING}\n\n` +
       "Raised by an operator from evidence on a task. **Nothing here is binding.** " +
@@ -2605,7 +2608,8 @@ export interface OperatorTaskSnapshot {
    * has been made by then, and repeating it every turn is noise.
    */
   unfinishedReport?: {
-    /** The agent, as `recentTimeline` names actors. */
+    /** The agent whose run failed, by its role (its profile id when the
+     *  event carries none). */
     actor: string;
     /** The failure event's stamp. */
     failedAt: string;
@@ -3068,18 +3072,30 @@ export interface OperatorTimelineRow {
 function findUnfinishedReport(
   timeline: readonly TaskFileEvent[],
 ): OperatorTaskSnapshot["unfinishedReport"] {
-  const actorOf = (e: TaskFileEvent) =>
-    e.actor.kind === "human" ? (e.actor.nameHint ?? "human") : e.actor.kind;
+  // WHO wrote an event, as one key. Every agent is `kind: "agent"`, so the
+  // kind alone paired a failed run with any agent's comment: the reviewer's
+  // verdict from the round before was handed over as the developer's report.
+  const whoOf = (e: TaskFileEvent): string =>
+    e.actor.kind === "agent"
+      ? `agent:${e.actor.profileId}`
+      : e.actor.kind === "human"
+        ? `human:${e.actor.userId}`
+        : e.actor.kind;
   for (let i = 0; i < timeline.length; i++) {
     const event = timeline[i]!;
     // Something was dispatched after the failure: the question is settled.
     if (event.type === "agent") return undefined;
     if (event.type !== "blocked") continue;
     if (!RUN_DID_NOT_COMPLETE_RE.test(event.text)) continue;
-    const actor = actorOf(event);
+    if (event.actor.kind !== "agent") return undefined;
+    const who = whoOf(event);
+    const actor = event.actor.roleHint ?? event.actor.profileId;
     for (let j = i + 1; j < timeline.length; j++) {
       const older = timeline[j]!;
-      if (actorOf(older) !== actor) continue;
+      // The run's own start: everything older belongs to an earlier run, so
+      // this one posted no report.
+      if (older.type === "agent") return undefined;
+      if (whoOf(older) !== who) continue;
       // The same agent's own previous event. A comment is its report; anything
       // else means this run posted none and there is nothing to weigh.
       if (older.type !== "comment") return undefined;

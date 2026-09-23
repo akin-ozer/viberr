@@ -205,7 +205,9 @@ function DockShell({ context }: { context: DockContext }) {
   }, [selected]);
 
   const selectedId = selected[context.key] ?? null;
-  const url = dockViewUrl(context, selectedId);
+  // O39-d: `seen` only while the panel is open. The working poll below loads
+  // this view with the panel closed too, and that load reads nothing.
+  const url = dockViewUrl(context, selectedId, open);
   const load = view.load;
   // Load whenever the panel is open and the target changes: a new scope
   // (navigation) or a new selection (threads, New, a send that started one).
@@ -293,7 +295,7 @@ function DockShell({ context }: { context: DockContext }) {
     // a task thread under the board's scope - a request the route cannot answer
     // (review finding 2, path (a)). Recording the selection is enough: the load
     // effect fires when the person comes back to that scope.
-    if (key === context.key) load(dockViewUrl(context, result.conversationId));
+    if (key === context.key) load(dockViewUrl(context, result.conversationId, open));
   });
 
   // Close: a pointer close plays the exit transition and unmounts on

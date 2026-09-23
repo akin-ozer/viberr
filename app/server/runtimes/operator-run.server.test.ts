@@ -2946,6 +2946,16 @@ describe("stranded auto-stage resume", () => {
           ownRun: { ...ownRun, carriedOutAction: true, refreshed: true },
         }),
       ).toBe(false);
+      // A drive that refreshed AND delivered took the step the refresh was
+      // for; the nudge would open "nothing was dispatched, delivered or asked".
+      // CANARY: drop the `delivered` check and this drive is nudged anyway.
+      expect(
+        await maybeResumeStrandedOperator(store2.db, {
+          ...ref,
+          runId: "run_refreshed",
+          ownRun: { ...ownRun, carriedOutAction: true, refreshed: true, delivered: true },
+        }),
+      ).toBe(false);
       // CANARY: drop the `refreshedAndStopped` arm and AX-5 sits at Review
       // with nobody coming.
       const resumed = await maybeResumeStrandedOperator(store2.db, {

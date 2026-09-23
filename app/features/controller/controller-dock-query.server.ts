@@ -152,6 +152,13 @@ export function getControllerDock(
     taskKey: string | null;
     /** A conversation id, `DOCK_NEW_CONVERSATION`, or null for the newest. */
     conversationId: string | null;
+    /**
+     * O39-d: the panel is OPEN and shows this transcript, so its owner has
+     * seen it. The dock also loads this view while it is closed (the working
+     * poll keeps the button's dot honest), and a load nobody looked at must
+     * not mark the reply it fetched as read.
+     */
+    markSeen?: boolean;
     dataRoot?: string;
   },
 ): ControllerDockView {
@@ -190,7 +197,7 @@ export function getControllerDock(
     }
   }
   // O39-d: the open panel shows this transcript to its owner, so it is seen.
-  if (conversation && conversation.userId === viewer.id) {
+  if (input.markSeen === true && conversation && conversation.userId === viewer.id) {
     markConversationSeen(db, conversation.id, viewer.id);
   }
   const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));

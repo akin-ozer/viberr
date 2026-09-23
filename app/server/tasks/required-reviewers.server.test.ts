@@ -18,6 +18,7 @@ import type {
 } from "~/schemas/task-file.schema";
 import type { AgentDeployment } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import type { RequiredReviewerView } from "./required-reviewers.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
@@ -422,5 +423,74 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
       viewerUserId: store.users.arda.id,
     });
     expect(ready.ready.map((t) => t.key)).toEqual(["VIB-1"]);
+  });
+});
+
+/**
+ * Ruling 384's clause reads the review SUBJECT (ruling 388). A task whose
+ * deliverable is a saved file has no commit revision, and keyed on the
+ * revision alone its acceptance card said "No review verdict is recorded"
+ * over the approval its reviewer had just given.
+ */
+describe("ruling 384: the acceptance card's basis reads the review subject", () => {
+  const RULES: RequiredReviewerView[] = [
+    { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Reviewer" },
+  ];
+
+  it("names the approval of a FILES delivery", async () => {
+    const { acceptanceOfferBasis } = await import("./required-reviewers.server");
+    const deliveredAt = "2026-09-22T10:00:00.000Z";
+    const basis = acceptanceOfferBasis(
+      {
+        workRevision: null,
+        deliveredAt,
+        pr: null,
+        verdicts: [
+          {
+            profileId: "reviewer",
+            revisionId: `files:${deliveredAt}`,
+            result: "approve",
+            reason: "The report covers every package.",
+            at: "2026-09-22T10:05:00.000Z",
+            rounds: 1,
+          },
+        ],
+      },
+      RULES,
+    );
+    // CANARY: key the approvals on the commit revision alone again and this
+    // reads "No review verdict is recorded on this task…".
+    expect(basis).toBe("Reviewer approved the files delivered on this task.");
+  });
+
+  it("still names the commit it approved, and says so when nobody approved", async () => {
+    const { acceptanceOfferBasis } = await import("./required-reviewers.server");
+    const sha = "b".repeat(40);
+    const fm = {
+      workRevision: {
+        id: "rev_1",
+        headSha: sha,
+        treeSha: null,
+        branch: "vib-1",
+        createdAt: "2026-09-22T10:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+      pr: null,
+      verdicts: [
+        {
+          profileId: "reviewer",
+          revisionId: "rev_1",
+          headSha: sha,
+          result: "approve" as const,
+          reason: "",
+          at: "2026-09-22T10:05:00.000Z",
+          rounds: 1,
+        },
+      ],
+    };
+    expect(acceptanceOfferBasis(fm, RULES)).toBe("Reviewer approved `bbbbbbb`.");
+    expect(acceptanceOfferBasis({ ...fm, verdicts: [] }, RULES)).toContain(
+      "No review verdict is recorded on this task",
+    );
   });
 });

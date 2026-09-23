@@ -3904,6 +3904,41 @@ describe("operatorProposeRuling", () => {
     expect(body).toContain("Second correction.");
   });
 
+  /**
+   * The entry goes in with `String.replace`, and a replacement STRING expands
+   * `$&`, `$'`, `` $` `` and `$$`. Operator evidence is shell and Makefile
+   * text, where `$$` is ordinary.
+   */
+  it("files a proposal's `$` characters exactly as written", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const root = await seedRulingsKb("# Gates\n\n- Run every gate.\n");
+    const base = { projectSlug: store.slug, taskKey: "VIB-1", doc: "environment-and-gates.md" };
+    await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { ...base, text: "First correction.", evidence: "run A" },
+      authority("full"),
+    );
+    // The heading now exists, so this one is spliced in after it.
+    await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        ...base,
+        text: "The race gate needs cgo: keep `$&` and `$'` literal.",
+        evidence: "`for p in $$(go list ./...); do go test -race $$p; done` exited 2",
+      },
+      authority("full"),
+    );
+    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
+    // CANARY: pass the replacement as a string again and `$$` collapses to `$`,
+    // `$&` becomes the heading and `$'` splices the rest of the document in.
+    expect(body).toContain("for p in $$(go list ./...); do go test -race $$p; done");
+    expect(body).toContain("keep `$&` and `$'` literal");
+    expect(body.split(PROPOSED_RULINGS_HEADING)).toHaveLength(2);
+  });
+
   it("refuses by name when the project names no rulings KB, and when the document is not in it", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
@@ -6469,7 +6504,7 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
  * operator is told when it happens anyway.
  */
 describe("ruling 397: the snapshot names a report a failed run left standing", () => {
-  const AGENT = { kind: "agent" as const, backend: "codex" as const, profileId: "dev", role: "Implementation" };
+  const AGENT = { kind: "agent" as const, backend: "codex" as const, profileId: "dev", roleHint: "Implementation" };
   const REPORT = {
     occurredAt: "2026-09-22T08:33:08.181Z",
     type: "comment" as const,
@@ -6520,7 +6555,7 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
     // CANARY: drop `findUnfinishedReport` from the snapshot and this is
     // undefined, which is the state that let the operator re-dispatch AX-2.
     expect(snapWith([FAILURE, REPORT]).unfinishedReport).toEqual({
-      actor: "agent",
+      actor: "Implementation",
       failedAt: FAILURE.occurredAt,
       reportedAt: REPORT.occurredAt,
     });
@@ -6547,6 +6582,30 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
     expect(snapWith([FAILURE, note]).unfinishedReport).toBeUndefined();
   });
 
+  /**
+   * Every agent is `kind: "agent"`, and the walk used to compare kinds: a run
+   * that failed with no report was paired with any agent's older comment, and
+   * a Codex operator was handed the reviewer's last verdict as the failed
+   * developer's report.
+   */
+  it("pairs a failure only with the SAME agent's report from the SAME run", () => {
+    const reviewerVerdict = {
+      ...REPORT,
+      occurredAt: "2026-09-22T08:20:00.000Z",
+      actor: { kind: "agent" as const, backend: "codex" as const, profileId: "reviewer", roleHint: "Review" },
+      text: "Verdict: request_changes. The race test is missing.",
+    };
+    // CANARY: compare actor kinds again and this pairs with the reviewer.
+    expect(snapWith([FAILURE, reviewerVerdict]).unfinishedReport).toBeUndefined();
+    // The same agent's comment from an EARLIER run, behind this run's start.
+    const earlier = { ...REPORT, occurredAt: "2026-09-22T08:10:00.000Z", text: "Round one done." };
+    // CANARY: drop the stop at the run's `agent` start event and this pairs
+    // with round one's report.
+    expect(
+      snapWith([FAILURE, dispatched("2026-09-22T08:30:00.000Z"), earlier]).unfinishedReport,
+    ).toBeUndefined();
+  });
+
   it("ignores a blocked event that is not a run failure", () => {
     const asked = { ...FAILURE, text: "I cannot reach the repository and have stopped." };
     expect(snapWith([asked, REPORT]).unfinishedReport).toBeUndefined();
@@ -6563,7 +6622,7 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
       text: `filler ${i}`,
     }));
     expect(snapWith([...filler, FAILURE, REPORT]).unfinishedReport).toEqual({
-      actor: "agent",
+      actor: "Implementation",
       failedAt: FAILURE.occurredAt,
       reportedAt: REPORT.occurredAt,
     });
@@ -6801,7 +6860,7 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
   });
 
   it("hands a tool-less operator the unfinished report itself", () => {
-    const AGENT = { kind: "agent" as const, backend: "codex" as const, profileId: "dev", role: "Implementation" };
+    const AGENT = { kind: "agent" as const, backend: "codex" as const, profileId: "dev", roleHint: "Implementation" };
     const report = {
       occurredAt: "2026-09-22T08:33:08.181Z",
       type: "comment" as const,
