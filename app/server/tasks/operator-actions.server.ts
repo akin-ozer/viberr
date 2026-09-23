@@ -2590,6 +2590,8 @@ export interface OperatorTaskSnapshot {
     /** Ruling 415: the report itself, for an operator that cannot call
      *  `read_timeline_entry` (a Codex plan). Absent for one that can. */
     text?: string;
+    /** Ruling 440: present only when `text` was cut. */
+    clipped?: string;
   };
   /**
    * Ruling 408 (F39-35): a refusal this task has not answered yet.
@@ -3085,9 +3087,21 @@ function findUnansweredRefusal(
 
 /** Ruling 415: how many of a task's human decisions the snapshot carries. */
 export const HUMAN_DECISIONS_MAX = 5;
+/** Ruling 285: the window cuts an entry here for an operator that can read
+ *  the rest with `read_timeline_entry`. */
+const TIMELINE_ENTRY_CAP = 1500;
 /** Ruling 415: an OLDER decision's words are cut here, at the timeline
  *  window's own per-entry cap; the newest is whole. */
-const OLDER_DECISION_WORDS_CAP = 1500;
+const OLDER_DECISION_WORDS_CAP = TIMELINE_ENTRY_CAP;
+/**
+ * Ruling 440 (F39-67): the one cut for everything an operator that cannot
+ * call tools (a Codex plan) is handed in place of an address. That covers a
+ * window entry, a decision's words, an unfinished report, and the report that
+ * woke it (`agentReportBlock`). Ruling 415 raised only the last of those to
+ * this. So the same reviewer report read whole on the turn it woke, and cut
+ * at 1,500 characters on any other turn, which "cannot fetch the rest".
+ */
+export const AGENT_REPORT_CAP_TOOLLESS = 16000;
 /** Every packet resolution a person makes is written with this label. */
 const DECISION_LEAD = "**Decision:**";
 
@@ -3124,8 +3138,13 @@ function findHumanDecisions(
     };
     if (quoted) {
       // The newest decision governs, so it is carried whole (it is bounded by
-      // the directive field's own limit); older ones are context.
-      const cap = found.length === 0 ? PACKET_NOTE_MAX : OLDER_DECISION_WORDS_CAP;
+      // the directive field's own limit); older ones are context. Ruling 440:
+      // context an operator cannot fetch is carried whole too.
+      const cap = toolless
+        ? AGENT_REPORT_CAP_TOOLLESS
+        : found.length === 0
+          ? PACKET_NOTE_MAX
+          : OLDER_DECISION_WORDS_CAP;
       if (quoted.length > cap) {
         entry.words = `${quoted.slice(0, cap - 1)}…`;
         entry.clipped = toolless
@@ -3317,7 +3336,15 @@ export function operatorSnapshot(
       // is clipped — an entry that ends mid-sentence with a "…" and no way to
       // ask for the rest is how a coordinator states half a report as the whole
       // of it, which it did, live, on SHOP-42.
-      const clipped = e.text.length > 1500;
+      //
+      // Ruling 440 (F39-67): an operator that cannot go to the address is
+      // handed the content. Live on ax-clone AX-5 a restart re-invoked a Codex
+      // operator without the reviewer report that had woken the interrupted
+      // turn. It read that report here, cut partway into finding 3 of 4. It
+      // opened a packet asking the owner to "confirm the full report", and
+      // proposed a follow-up task that left out finding 4.
+      const cap = toolless ? AGENT_REPORT_CAP_TOOLLESS : TIMELINE_ENTRY_CAP;
+      const clipped = e.text.length > cap;
       const row: OperatorTimelineRow = {
         occurredAt: e.occurredAt,
         type: e.type,
@@ -3325,12 +3352,13 @@ export function operatorSnapshot(
           e.actor.kind === "human"
             ? (e.actor.nameHint ?? "human")
             : e.actor.kind,
-        text: clipped ? e.text.slice(0, 1497) + "…" : e.text,
+        text: clipped ? e.text.slice(0, cap - 3) + "…" : e.text,
       };
       if (clipped) {
+        const at = `cut at ${cap.toLocaleString("en-US")} chars`;
         row.clipped = toolless
-          ? "cut at 1,500 chars; this turn cannot fetch the rest"
-          : "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole";
+          ? `${at}; this turn cannot fetch the rest`
+          : `${at} — read_timeline_entry with this occurredAt returns it whole`;
       }
       return row;
     }),
@@ -3366,14 +3394,18 @@ export function operatorSnapshot(
       const found = findUnfinishedReport(file.parsed.timeline);
       if (!found) return {};
       // Ruling 415: an operator that cannot call read_timeline_entry gets the
-      // report itself, bounded like any other long entry it is handed.
+      // report itself. Ruling 440: bounded by the one cut such an operator
+      // gets everywhere, and saying so when that cut lands.
       if (toolless) {
         const report = file.parsed.timeline.find((e) => e.occurredAt === found.reportedAt);
         if (report) {
-          found.text =
-            report.text.length > PACKET_NOTE_MAX
-              ? `${report.text.slice(0, PACKET_NOTE_MAX - 1)}…`
-              : report.text;
+          const cut = report.text.length > AGENT_REPORT_CAP_TOOLLESS;
+          found.text = cut
+            ? `${report.text.slice(0, AGENT_REPORT_CAP_TOOLLESS - 1)}…`
+            : report.text;
+          if (cut) {
+            found.clipped = `cut at ${AGENT_REPORT_CAP_TOOLLESS.toLocaleString("en-US")} chars; this turn cannot fetch the rest`;
+          }
         }
       }
       return { unfinishedReport: found };

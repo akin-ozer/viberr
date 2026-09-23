@@ -514,6 +514,39 @@ what they strand, and record an optional reason.
   AX-29's live record stays as written; it is history. Tests: `update-branch-operator.server.test.ts`
   "F39-64" and the ceremony test in `task-actions.server.test.ts`.
 
+- **F39-67 (MED) — a restart cost the Codex operator the second half of the reviewer's report, and
+  the owner was asked to fill the gap.** AX-5, 05:03:07 UTC: packet "Route the second review's
+  cross-ownership findings". Its body: "Reviewer's second request-changes report says it gives the
+  complete blocker set, but the snapshot clips it at the start of finding 3 … confirm the full
+  report before adding any further findings to that task." The chain: the reviewer's report
+  (2,570 characters, four blockers) woke a Codex operator at 04:55:33. Deploy 4 stopped the server
+  at 04:59 mid-run. Restart recovery re-invokes with `trigger: "manual"` and no report. The new
+  turn met the report only in the snapshot's window, which cuts each entry at 1,500 characters
+  (ruling 285), and a Codex plan cannot call `read_timeline_entry`. So it saw finding 3's first
+  sentence and not finding 4 at all. Its recommended option, a core follow-up task, covered
+  findings 2 and 3 and left out finding 4 (commands looked up on the control plane's PATH).
+  Ruling 415 had handed a Codex operator the report that woke it at up to 16,000 characters. It did
+  not do the same for any other turn, so the same report read whole on one turn and cut on the
+  next. **Fixed as ruling 440:** one cut (16,000) for everything a tool-less operator is handed in
+  place of an address: each window entry, every human decision's words, the unfinished report
+  (which used the packet note's 4,000), and the report that woke it. Where even that lands, the
+  entry says so and names no tool. Resolved as the owner with my own directive, which quotes
+  findings 3 and 4 whole. Tests: `operator-actions.server.test.ts` "ruling 440".
+
+- **F39-68 (MED) — the operator recommended a follow-up task that could never reach the code it
+  was meant to fix.** Same packet. The recommended option created "Core PTY session fixes for
+  AX-5" and made AX-5 wait on it. The code in question (`internal/sandbox/pty_linux.go`, the
+  session path in `internal/runtime`) exists only on `ax-5`: Developer's seam commit `18a8263`,
+  never merged (checked: `main` at `00bc520` has no `pty_linux.go`). A task created now branches
+  from `main`, so it could not have changed that code. AX-5, waiting on it, would be held with
+  `run_agent` and `deliver_for_review` refused (ruling 186) until a person found the cycle and
+  removed the wait. The operator followed its own guidance: the `create_task` option says to use
+  it "for work that belongs outside this task (another owner's package …)". Nothing in that
+  guidance said a created task starts from the base branch. Resolved as the owner by declining
+  the follow-up: Developer is re-engaged on `ax-5` for findings 2 to 4, then Surface Developer
+  for finding 1, one delivery, one review. My 01:49 "Developer's part is done" decision is
+  superseded for this rework only **(default, owner may revisit)**.
+
 ---
 
 ## Open: noted, not worked (nitpicks, recorded so the next pass does not re-find them)

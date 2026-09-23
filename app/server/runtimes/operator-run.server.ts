@@ -80,6 +80,7 @@ import {
   operatorTransitionStage,
   operatorResolvePacket,
   resolveOperatorAuthority,
+  AGENT_REPORT_CAP_TOOLLESS,
   OPERATOR_POLICY_SCOPE_NOTE,
   OPERATOR_TIMELINE_DEFAULT,
   type OperatorActionResult,
@@ -4288,9 +4289,10 @@ function transitionContextOf(input: RunOperatorInput): TransitionContext | undef
 
 /** Ruling 285's cut, for an operator that can fetch the rest. */
 const AGENT_REPORT_CAP = 4000;
-/** Ruling 415: the cut for one that cannot (a Codex plan). A reviewer's findings
- *  past 4,000 characters were unreachable there, so it is handed far more. */
-export const AGENT_REPORT_CAP_TOOLLESS = 16000;
+// Ruling 415: the cut for one that cannot (a Codex plan) is far larger: a
+// reviewer's findings past 4,000 characters were unreachable there. Ruling
+// 440 made it the one cut for everything such an operator is handed, so it
+// lives beside the snapshot (`AGENT_REPORT_CAP_TOOLLESS`).
 
 export function agentReportBlock(
   trigger: OperatorTrigger,

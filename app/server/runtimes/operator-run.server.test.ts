@@ -57,10 +57,11 @@ import {
 } from "./operator-run.server";
 import * as operatorPrompts from "./operator-run.server";
 import { readDefaultBranchFile } from "~/server/tasks/operator-repo-read.server";
-import type {
-  OperatorAuthority,
-  OperatorAutonomy,
-  OperatorTaskSnapshot,
+import {
+  AGENT_REPORT_CAP_TOOLLESS,
+  type OperatorAuthority,
+  type OperatorAutonomy,
+  type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
@@ -1520,8 +1521,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       ...over,
     };
   }
-  const { buildOperatorTurnPrompt, buildCodexOperatorPrompt, agentReportBlock, AGENT_REPORT_CAP_TOOLLESS } =
-    operatorPrompts;
+  const { buildOperatorTurnPrompt, buildCodexOperatorPrompt, agentReportBlock } = operatorPrompts;
 
   it("closed PR on an active task → ONE recovery packet with rework/archive/archive+deleteBranch, acceptance forbidden", () => {
     const prompt = buildOperatorTurnPrompt(snapshot(), "pr-diverged");

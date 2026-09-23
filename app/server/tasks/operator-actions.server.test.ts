@@ -45,6 +45,7 @@ import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
+  AGENT_REPORT_CAP_TOOLLESS,
   AUTONOMY_CLAMPED_AUDIT_ACTION,
   clampAutonomy,
   deliverGate,
@@ -6774,13 +6775,17 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
     ]);
   });
 
-  it("cuts an OLDER decision's words and says where the rest is, per backend", () => {
+  it("cuts an OLDER decision's words only for an operator that can fetch the rest", () => {
     const long = decided("2026-09-22T19:00:00.000Z", `**Decision:** answered.\n\n> ${"x".repeat(2000)}`);
-    const toolless = snap([WAIT, long], { toolless: true }).humanDecisions![1]!;
-    expect(toolless.words!.length).toBe(1500);
-    expect(toolless.clipped).toBe("cut at 1,500 chars; this turn cannot fetch the rest");
     const withTools = snap([WAIT, long]).humanDecisions![1]!;
+    expect(withTools.words!.length).toBe(1500);
     expect(withTools.clipped).toContain("read_timeline_entry");
+    // Ruling 440: one that cannot is handed the words whole.
+    // CANARY: cut a tool-less operator's older decisions at 1,500 again and
+    // the rest of the person's words is out of its reach.
+    const toolless = snap([WAIT, long], { toolless: true }).humanDecisions![1]!;
+    expect(toolless.words).toBe("x".repeat(2000));
+    expect(toolless.clipped).toBeUndefined();
     // The newest is the one that governs, so it is carried whole.
     expect(snap([long]).humanDecisions![0]!.clipped).toBeUndefined();
   });
@@ -6816,6 +6821,93 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
     // point at read_timeline_entry, which a Codex plan cannot call.
     expect(snap([failure, report], { toolless: true }).unfinishedReport?.text).toBe(report.text);
     expect(snap([failure, report]).unfinishedReport?.text).toBeUndefined();
+  });
+
+  /**
+   * Ruling 440 (F39-67). Live on ax-clone AX-5 a deploy restarted the server
+   * while a Codex operator was reacting to the reviewer's second report.
+   * Recovery re-invoked it with no report in hand (`trigger: "manual"`), so
+   * the report reached it only as a window entry, cut at 1,500 characters,
+   * partway into finding 3 of 4. The owner got a packet asking to "confirm
+   * the full report", and its follow-up task left out finding 4.
+   */
+  describe("ruling 440: a tool-less operator is handed what it cannot fetch", () => {
+    const REVIEWER = { kind: "agent" as const, backend: "codex" as const, profileId: "reviewer", role: "Review & validation" };
+    const finding = (n: number, head: string) =>
+      `${n}. **${head}.** ${"The evidence for this finding, with file and line. ".repeat(9).trim()}`;
+    const REPORT_TEXT = [
+      "Verdict: request-changes",
+      "**Blocking findings — complete set for this revision:**",
+      finding(1, "The served runtime cannot start Tasks through the executor used for SSH"),
+      finding(2, "The remote PTY has no controlling terminal or foreground process group"),
+      finding(3, "SSH commands bypass Task resource limits"),
+      finding(4, "Bare command names resolve using the control-plane PATH"),
+    ].join("\n\n");
+    const report = {
+      occurredAt: "2026-09-23T04:55:32.998Z",
+      type: "comment" as const,
+      actor: REVIEWER,
+      title: "Review verdict",
+      text: REPORT_TEXT,
+      toAgent: false,
+      evidence: null,
+    };
+    const restart = {
+      occurredAt: "2026-09-23T04:59:48.317Z",
+      type: "note" as const,
+      actor: { kind: "system" as const, systemId: "policy-engine" },
+      title: "Interrupted by a restart",
+      text: "**Restart:** the run was still running when the server stopped.",
+      toAgent: false,
+      evidence: null,
+    };
+    const rowOf = (s: ReturnType<typeof snap>) =>
+      s.recentTimeline.find((e) => e.occurredAt === report.occurredAt)!;
+
+    it("carries AX-5's report whole in the window, finding 4 included", () => {
+      // The shape that bit: finding 4 starts past the 1,500 cut.
+      expect(REPORT_TEXT.indexOf("4. **Bare command names")).toBeGreaterThan(1500);
+      // CANARY: cut a tool-less operator's window at 1,500 again and finding
+      // 4 is gone, with "this turn cannot fetch the rest" beside it.
+      const row = rowOf(snap([restart, report], { toolless: true }));
+      expect(row.text).toBe(REPORT_TEXT);
+      expect(row.clipped).toBeUndefined();
+      // An operator with tools keeps ruling 285's cut and the address.
+      const withTools = rowOf(snap([restart, report]));
+      expect(withTools.text).not.toContain("Bare command names");
+      expect(withTools.text.length).toBe(1498);
+      expect(withTools.clipped).toBe(
+        "cut at 1,500 chars — read_timeline_entry with this occurredAt returns it whole",
+      );
+    });
+
+    it("says so when even the tool-less cut lands, and names no tool", () => {
+      const huge = { ...report, text: "y".repeat(AGENT_REPORT_CAP_TOOLLESS + 10) };
+      const row = rowOf(snap([restart, huge], { toolless: true }));
+      expect(row.text.length).toBe(AGENT_REPORT_CAP_TOOLLESS - 2);
+      expect(row.clipped).toBe("cut at 16,000 chars; this turn cannot fetch the rest");
+      expect(row.clipped).not.toMatch(/get_task|read_timeline_entry/);
+    });
+
+    it("hands over an unfinished report past 4,000 characters whole, and says when it is cut", () => {
+      const failure = {
+        ...report,
+        occurredAt: "2026-09-23T04:55:33.100Z",
+        type: "blocked" as const,
+        title: null,
+        text: "The Review & validation agent run did not complete.",
+      };
+      const long = { ...report, text: "z".repeat(5000) };
+      // CANARY: bound it by the packet note's 4,000 again and the last 1,000
+      // characters never reach the operator.
+      const found = snap([failure, long], { toolless: true }).unfinishedReport!;
+      expect(found.text).toBe(long.text);
+      expect(found.clipped).toBeUndefined();
+      const huge = { ...report, text: "z".repeat(AGENT_REPORT_CAP_TOOLLESS + 1) };
+      const cut = snap([failure, huge], { toolless: true }).unfinishedReport!;
+      expect(cut.text!.length).toBe(AGENT_REPORT_CAP_TOOLLESS);
+      expect(cut.clipped).toBe("cut at 16,000 chars; this turn cannot fetch the rest");
+    });
   });
 });
 
