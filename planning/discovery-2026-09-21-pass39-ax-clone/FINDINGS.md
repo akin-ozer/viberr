@@ -243,6 +243,17 @@ what they strand, and record an optional reason.
   that zone, and to give the zone with a time it writes onto a task or goal, where others read
   in their own zones. Tests: `time-zone.test.ts`, `controller-context.server.test.ts` "U39-24",
   and the assembled-prompt, page and dock send tests.
+- **U39-25 (LOW-MED) — every controller turn's console opens by calling itself a faulty
+  specialist run.** The Live run panel on the controller page, 04:49: "Run inputs — supporting
+  engagement · NO canonical anchor · persona 39315 chars · prompt 6999 chars · 1 skill · 2
+  knowledge bases · 0 MCP servers". Two lines below, `system·init` reads "mcp: viberr_controller,
+  viberr_ops". A controller turn is not an engagement. It is never handed a canonical block, so
+  the capitalized NO flagged the design as a fault. It mounts two servers, not zero, because the
+  count came from the prompt's list of org grants. Ruling 346 had fixed the same vocabulary in the
+  expandable detail rows, by run kind, and left the headline everyone reads. **Fixed:** the
+  headline takes the run's kind ("controller turn", "operator drive"; specialists unchanged) and
+  drops the anchor bit where no anchor is ever given. A controller turn records every server it
+  mounted. Tests: `run-inputs.server.test.ts` and `controller-run.server.test.ts` "ruling 344".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
@@ -342,8 +353,8 @@ what they strand, and record an optional reason.
   summoned, wrote out the task it would propose, and ended with "I can't create the task or post a
   separate timeline comment because this run has no Viberr task-creation or comment tool … cc
   @operator" (01:38). Three of three answers that named another actor went to an agent that could
-  not act on them. Each cost one agent run. The first two recovered on the operator's next
-  turn; AX-27's is being watched.
+  not act on them. Each cost one agent run, and each recovered on the operator's next turn.
+  AX-27's operator did try the create_task option at 01:40, which is where F39-55 surfaced.
 - **O39-b (owner's call) — a deadlock streak writes the same canned decision into the contract
   every round.** AX-22's goal now carries four identical "Let the rework continue — Each round has
   found something real and the work is converging on it" blocks, each followed by the same

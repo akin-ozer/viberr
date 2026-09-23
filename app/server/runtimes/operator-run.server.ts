@@ -2679,6 +2679,7 @@ async function startCodexOperatorRun(
     taskKey: input.taskKey,
     threadId: start.threadId,
     backend: "codex",
+    kind: "operator",
     dataRoot: input.dataRoot,
     inputs: {
       ...promptBuild.inputs,
@@ -3516,6 +3517,7 @@ async function startRealOperatorRun(
     taskKey: input.taskKey,
     threadId: start.threadId,
     backend: "claude",
+    kind: "operator",
     dataRoot: input.dataRoot,
     inputs: {
       ...promptBuild.inputs,

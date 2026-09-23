@@ -591,6 +591,17 @@ describe("the turn carries the context read (ruling 121)", () => {
         from: user.email,
         chars: "which tasks are waiting on me?".length,
       });
+      // U39-25: the headline names a controller turn, never "supporting
+      // engagement · NO canonical anchor", and counts the servers this turn
+      // really mounted, which its own `system·init` line lists.
+      // CANARY: drop `kind: "controller"`, or the `mounted` override.
+      const headline = listRunLines(app.db, first).find(
+        (l) => l.display.tag === RUN_INPUTS_TAG,
+      )!.display.text;
+      expect(headline.startsWith("Run inputs — controller turn · persona ")).toBe(true);
+      expect(headline).not.toContain("anchor");
+      expect(inputs!.mcp.mounted).toEqual(["viberr_controller", "viberr_ops"]);
+      expect(headline).toContain("2 MCP servers");
 
       // The SECOND turn resumes, and must disclose too. CANARY: move the
       // `recordRunInputs` call inside the `else` (fresh-start) branch and this

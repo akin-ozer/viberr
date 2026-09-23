@@ -3,6 +3,7 @@ import {
   RUN_INPUTS_TAG,
   type LogLine,
   type RunInputs,
+  type RunKind,
 } from "~/features/runtime/runtime-types";
 import { logger } from "~/server/logging/logger.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
@@ -106,19 +107,38 @@ export function resolvedResourceInputs(input: {
   return resolved;
 }
 
-/** One-line console summary of `RunInputs` (the expandable detail is the rest). */
-function runInputsSummary(inputs: RunInputs): string {
+/**
+ * One-line console summary of `RunInputs` (the expandable detail is the rest).
+ *
+ * U39-25: `kind` does for the headline what ruling 346 did for the detail
+ * rows. Every controller turn opened "supporting engagement · NO canonical
+ * anchor": a controller turn is not an engagement, and it is never handed a
+ * canonical block, so the capitals flagged the design as a fault on the one
+ * line everyone reads. Absent keeps the specialist wording, as it does there.
+ */
+export function runInputsSummary(inputs: RunInputs, kind?: RunKind): string {
+  const coordinates = kind === "operator" || kind === "controller";
   const bits: string[] = [
-    inputs.delivers ? "delivering engagement" : "supporting engagement",
-    inputs.anchor
-      ? `canonical anchor ${inputs.anchor.length} chars`
-      : "NO canonical anchor",
+    kind === "controller"
+      ? "controller turn"
+      : kind === "operator"
+        ? "operator drive"
+        : inputs.delivers
+          ? "delivering engagement"
+          : "supporting engagement",
+  ];
+  if (!coordinates) {
+    bits.push(
+      inputs.anchor ? `canonical anchor ${inputs.anchor.length} chars` : "NO canonical anchor",
+    );
+  }
+  bits.push(
     `persona ${inputs.personaChars} chars`,
     `prompt ${inputs.promptChars} chars`,
     `${inputs.skills.granted.length} skill${inputs.skills.granted.length === 1 ? "" : "s"}`,
     `${inputs.knowledge.length} knowledge base${inputs.knowledge.length === 1 ? "" : "s"}`,
     `${inputs.mcp.mounted.length} MCP server${inputs.mcp.mounted.length === 1 ? "" : "s"}`,
-  ];
+  );
   if (inputs.workspaceRefresh) bits.push(`workspace ${inputs.workspaceRefresh}`);
   const missing =
     inputs.unresolvedResources.length +
@@ -168,6 +188,9 @@ export function recordRunInputs(
     threadId: string;
     backend: RealBackend;
     inputs: RunInputs;
+    /** U39-25: which kind of run, for the headline; absent reads as a
+     *  specialist's, the only kind that recorded this before ruling 344. */
+    kind?: RunKind;
     dataRoot?: string;
   },
 ): void {
@@ -177,7 +200,7 @@ export function recordRunInputs(
     t: now.slice(11, 19),
     ev: "meta",
     tag: RUN_INPUTS_TAG,
-    text: runInputsSummary(input.inputs),
+    text: runInputsSummary(input.inputs, input.kind),
     inputs: input.inputs,
   };
   const displayJson = redact(JSON.stringify(display));

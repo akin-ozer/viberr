@@ -578,10 +578,16 @@ async function startTurnRun(
     taskKey: conversation.id,
     threadId: conversation.id,
     backend: "claude",
+    kind: "controller",
     dataRoot,
     inputs: {
       ...promptBuild.inputs,
       promptChars: prompt.length,
+      // U39-25: every server this turn mounts, as the specialist path counts
+      // them. The prompt's list is the org grants only, so the headline said
+      // "0 MCP servers" two lines above a `system·init` naming
+      // viberr_controller and viberr_ops.
+      mcp: { ...promptBuild.inputs.mcp, mounted: Object.keys(mcpServers).sort() },
       // A controller turn has no canonical TASK state: its conversation may be
       // scoped to a project or to nothing, and ruling 121's context read is
       // part of the prompt rather than an anchor block. `null` is the true
