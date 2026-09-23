@@ -173,6 +173,32 @@ export async function action({ request }: Route.ActionArgs) {
 /** The error the card shows, with the input it belongs to. */
 type ShownError = { text: string; field: ErrorField };
 
+/** What refused a submission on this page: the client's own check, or the
+ *  action's answer. Each refusal is a new object; a re-render keeps the same one. */
+type Refusal = ShownError | NonNullable<Route.ComponentProps["actionData"]>;
+
+const refusalKeys = new WeakMap<Refusal, string>();
+let refusalsSeen = 0;
+
+/**
+ * Ruling 451(g): a React key that is new for every NEW refusal. The error box
+ * stays mounted across a second refused submission, so without a new key the
+ * same sentence stood in place: nothing moved, and a `role="alert"` whose text
+ * did not change is not announced again. Keyed on the refusal's identity, the
+ * box remounts, which replays its shake and re-announces it, while a mere
+ * re-render of the same refusal keeps its key.
+ */
+function refusalKey(refusal: Refusal | null | undefined): string | undefined {
+  if (!refusal) return undefined;
+  let key = refusalKeys.get(refusal);
+  if (key === undefined) {
+    refusalsSeen += 1;
+    key = `refusal-${refusalsSeen}`;
+    refusalKeys.set(refusal, key);
+  }
+  return key;
+}
+
 function SetNewPassword({
   returnTo,
   actionData,
@@ -287,7 +313,12 @@ function SetNewPassword({
             />
           </div>
           {err && (
-            <div className="login-err" role="alert" id="npw-err">
+            <div
+              key={refusalKey(clientErr ?? actionData)}
+              className="login-err refused"
+              role="alert"
+              id="npw-err"
+            >
               <Icon name="alert" />
               {err.text}
             </div>
@@ -583,7 +614,15 @@ export default function Login({
             />
           </div>
           {err && (
-            <div className="login-err" role="alert" id="lg-err">
+            // Ruling 451(g): keyed on the refusal itself, so a second refused
+            // sign-in remounts the box (shake, re-announce) instead of leaving
+            // the same sentence standing as if the click had been ignored.
+            <div
+              key={refusalKey(clientErr ?? actionData)}
+              className="login-err refused"
+              role="alert"
+              id="lg-err"
+            >
               <Icon name="alert" />
               {err.text}
             </div>
