@@ -3469,6 +3469,12 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".log-chip .lc-name")).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
+  it("U39-12: the dock's scope pill gives way before the controller's name", () => {
+    // Measured at 375px: "Contro…" beside "AX-21 · ax-cl…". CANARY: drop the
+    // pill's shrink weight and the two shrink alike again.
+    expect(ruleBody(CODE, ".dock-head .pill")).toMatch(/flex:\s*0 100 auto/);
+  });
+
   it("ruling 419(i): inline code in markdown may break a long token rather than overflow", () => {
     // CANARY: drop `overflow-wrap: anywhere` from `.md-body code.mono`.
     expect(ruleBody(CODE, ".md-body code.mono")).toMatch(/overflow-wrap:\s*anywhere/);

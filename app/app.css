@@ -6400,7 +6400,10 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   flex: 0 1 auto; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.dock-head .pill { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+/* U39-12: on a phone the title and the scope pill split one 167px gap, and
+   both were cut ("Contro…", "AX-21 · ax-cl…"). The pill gives way first: the
+   context line under the header names the scope in full. */
+.dock-head .pill { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
 .dock-head-acts { margin-left: auto; display: inline-flex; gap: .25rem; flex: none; }
 .dock-head-acts .icon-btn { width: 30px; height: 30px; text-decoration: none; }
 .dock-head-acts .icon-btn .ico { width: 15px; height: 15px; }

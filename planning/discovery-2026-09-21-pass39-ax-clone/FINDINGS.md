@@ -160,6 +160,11 @@ what they strand, and record an optional reason.
   a size container; under 30rem the time and tag share a row and the text takes the next one, full
   width (247px). A tool chip wraps, and its name may break anywhere. Tests: `app.css.test.ts`
   "U39-11" and the 1100px-collapse test, each red under its canary.
+- **U39-12 (LOW) — the dock's header cuts the controller's own name on a phone.** At 375px the
+  title and the scope pill share about 167px beside four icon buttons, and both were cut:
+  "Contro…" next to "AX-21 · ax-cl…". **Fixed:** the pill shrinks first (`flex: 0 100 auto`),
+  because the context line under the header names the scope in full. Measured live with the rule
+  injected: title 80/80px, pill 85 of 101px. Test: `app.css.test.ts` "U39-12".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
