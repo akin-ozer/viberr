@@ -51,3 +51,26 @@ if ("window" in globalThis && !Object.hasOwn(window, "ResizeObserver")) {
 if ("window" in globalThis && "HTMLCanvasElement" in window) {
   window.HTMLCanvasElement.prototype.getContext = () => null;
 }
+
+/**
+ * jsdom has no AnimationEvent. React picks, once as it loads, the event name
+ * its `onAnimationEnd` listens for: with no AnimationEvent it falls back to the
+ * prefixed `webkitAnimationEnd`, a name no current browser fires, so a test's
+ * `fireEvent.animationEnd` never reached a handler (ruling 451(g) records a
+ * refusal's shake as played at its `animationend`). Installed before any test
+ * imports react-dom, the shim gives React the browsers' unprefixed wiring.
+ */
+if ("window" in globalThis && !Object.hasOwn(window, "AnimationEvent")) {
+  class AnimationEventShim extends window.Event {
+    readonly animationName: string;
+    readonly elapsedTime: number;
+    readonly pseudoElement: string;
+    constructor(type: string, init: AnimationEventInit = {}) {
+      super(type, init);
+      this.animationName = init.animationName ?? "";
+      this.elapsedTime = init.elapsedTime ?? 0;
+      this.pseudoElement = init.pseudoElement ?? "";
+    }
+  }
+  Object.defineProperty(window, "AnimationEvent", { value: AnimationEventShim, configurable: true, writable: true });
+}

@@ -33,9 +33,22 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { composePort } from "../app/server/ops/compose-port.server";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const HEALTH_URL = "http://127.0.0.1:5173/resources/health";
+
+function readDotenv(): string | null {
+  try {
+    return readFileSync(path.join(ROOT, ".env"), "utf8");
+  } catch {
+    // No `.env` is a valid compose setup: the port is then the default.
+    return null;
+  }
+}
+
+/** Polled on the port `compose.yml` publishes, from the same shell and `.env`
+ *  compose reads — never a literal (see `composePort`). */
+const HEALTH_URL = `http://127.0.0.1:${composePort(process.env, readDotenv())}/resources/health`;
 /** Long enough for a cold container to finish migrations and answer. */
 const VERIFY_TIMEOUT_MS = 180_000;
 
@@ -143,6 +156,7 @@ async function readBuild(): Promise<HealthBuild | null> {
   return null;
 }
 
+console.log(`verifying ${HEALTH_URL} (up to ${VERIFY_TIMEOUT_MS / 1000}s)`);
 const serving = await readBuild();
 if (!serving) {
   console.error(`x ${HEALTH_URL} did not answer within ${VERIFY_TIMEOUT_MS / 1000}s.`);

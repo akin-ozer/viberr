@@ -1,20 +1,45 @@
 # Deployment — single-node Docker
 
+> How to build, run, back up, upgrade and restore the shipped container, and what it
+> expects from the host and the proxy in front of it. Source of truth: `Dockerfile`,
+> `.dockerignore`, `compose.yml`, `compose.e2e.yml`, `scripts/deploy.ts`,
+> `app/server/config/env.server.ts`, `app/server/db/backup.server.ts`,
+> `app/server/db/data-root-lock.server.ts`, `app/server/db/sqlite.server.ts`,
+> `app/server/boot.server.ts`, `app/routes/resources.health.ts`.
+> Verified against `main` @ `7d9fbf72` (2026-09-23).
+
 Viberr is a single-node, self-hosted monolith: one Node process serving the SSR app,
 SSE live updates, and an embedded SQLite projection database, with all authoritative
 state on the local filesystem. There is no external database, cache, or queue to run.
 
-*Updated 2026-09-02 for ruling 127 (branch `claude/per-user-codex-auth-difdnn`): agent
-backends are connected per person in the app, not configured in the deployment
-environment. "Agent backends in the container" below was rewritten; the persistence tree,
-the backup notes and the health example follow it.*
-
 ## What runs
 
-- One container (see [`Dockerfile`](../../Dockerfile) + [`compose.yml`](../../compose.yml)).
-- `react-router-serve` on `$PORT` (default `3000` in the image).
-- SQLite projections + app data at `$VIBERR_DATA_ROOT` (default `/data` in the image),
-  which **must** be a persistent volume.
+- One container (see [`Dockerfile`](../../Dockerfile) + [`compose.yml`](../../compose.yml)),
+  built from `node:26-slim` in three stages: `prod-deps` (`npm ci --omit=dev`, keyed on
+  the lockfile only, so a source edit never reinstalls it), `build` (`npm ci` +
+  `npm run build`) and the runtime stage.
+- `react-router-serve` on `$PORT` (`3000` in the image), started as
+  `node /app/node_modules/@react-router/serve/bin.cjs ./build/server/index.js`, not
+  `npm run start`: with node as pid 1 a `docker compose stop` SIGTERM reaches the process
+  whose shutdown handler checkpoints the WAL and releases the writer lock. There is no
+  `ENTRYPOINT`; compose's `init: true` reaps orphaned children.
+- The app runs as the non-root `node` user (uid 1000). `EXPOSE 3000`.
+- SQLite projections + app data at `$VIBERR_DATA_ROOT` (`/data` in the image), which
+  **must** be a persistent volume. Compose bind-mounts `./docker-data` there.
+- The image also carries `db/`, `scripts/`, `app/` and `tsconfig.json`, so the maintenance
+  CLIs (`npm run backup`, `keys`, `store:check`, …) run inside the container through `tsx`.
+
+What `compose.yml` adds around it: `env_file: .env`; `NODE_ENV=production` and
+`VIBERR_DATA_ROOT=/data` forced over whatever `.env` says; the four controller unlock
+flags defaulting to `disabled`; the three `VIBERR_BUILD_*` build args (ruling 345);
+`hostname: viberr` (the writer lock's holder identity, see
+[Single-writer safety](#single-writer-safety-b-fd1--f18-5)); `ports:
+"${PORT:-3000}:${PORT:-3000}"`; a healthcheck that fetches `/resources/health` every 30 s
+(timeout 5 s, 3 retries, 20 s start period); `restart: unless-stopped`; and
+`cpus: "7"`. That CPU line is a ceiling, not a reservation: the run-concurrency cap
+counts runs, and one run can fork a test worker per host CPU (measured on a 10-core Mac
+with the cap at 0: six live runs, the container at 723% CPU and 5.4 GB). Tune it to your
+host, roughly cores minus 3.
 
 ## Secrets & configuration
 
@@ -22,29 +47,31 @@ All configuration comes from environment variables, validated at startup
 ([`app/server/config/env.server.ts`](../../app/server/config/env.server.ts)) — the
 process refuses to boot and prints every missing/invalid variable if configuration is
 incomplete. Two secrets are required; everything else is optional (see
-[`.env.example`](../../.env.example)).
+[`.env.example`](../../.env.example) and [configuration.md](configuration.md)).
 
 ```bash
 VIBERR_SESSION_SECRET=$(openssl rand -base64 48)        # ≥ 32 chars
-VIBERR_SECRET_ENCRYPTION_KEY=$(openssl rand -base64 32)  # decodes to exactly 32 bytes (AES-256-GCM for PATs)
+VIBERR_SECRET_ENCRYPTION_KEY=$(openssl rand -base64 32)  # decodes to exactly 32 bytes (AES-256-GCM)
 ```
 
-Inject them at runtime — do not bake them into the image. With Compose they come from
-`.env` via `env_file`; on a container platform, set them as runtime secrets/env vars.
-`VIBERR_SECRET_ENCRYPTION_KEY` encrypts stored GitHub PATs and MCP credentials;
-**losing it makes existing encrypted tokens undecryptable** (users must re-add PATs).
-Rotating is supported and finishable: set `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` to
-the old key, run `npm run keys -- status` (read-only, works on a live instance) to see
-how many secrets still open only under it, `npm run keys -- reseal` to move them, and
-drop the previous key once status reports none. Without that count there is no moment
-at which removing the old key is known to be safe.
+Inject them at runtime — do not bake them into the image (`.dockerignore` excludes
+`.env` and `.env.*` except `.env.example`). With Compose they come from `.env` via
+`env_file`; on a container platform, set them as runtime secrets/env vars.
+`VIBERR_SECRET_ENCRYPTION_KEY` seals stored GitHub PATs, MCP credentials, OAuth client
+secrets, the S3 audit-export secret and the personal backend API keys people paste;
+**losing it makes every one of them undecryptable** (users must re-add PATs and
+reconnect pasted keys). Rotating is supported and finishable: set
+`VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` to the old key, run `npm run keys -- status`
+(read-only, works on a live instance) to see how many secrets still open only under it,
+`npm run keys -- reseal` (writer lock, app stopped) to move them, and drop the previous
+key once status reports none. Without that count there is no moment at which removing
+the old key is known to be safe.
 
 Optional integrations, enabled only when their vars are present:
-`GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in) and `VIBERR_SEED_ADMIN_*` (bootstrap
-admin on first boot of an empty DB). Agent backends are **not** among them: since ruling
-127 they carry no environment variables at all, and are connected per person in the app
-(below). `VIBERR_SECRET_ENCRYPTION_KEY` also seals the personal backend API keys people
-paste, so losing it costs those too.
+`GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in; an `oauth_providers` row set in the
+app overrides them) and `VIBERR_SEED_ADMIN_*` (bootstrap admin on first boot of an empty
+DB). Agent backends are **not** among them: they carry no environment variables at all
+(ruling 127) and are connected per person in the app (below).
 
 ## TLS and the reverse proxy
 
@@ -61,9 +88,11 @@ BETTER_AUTH_URL=https://viberr.example.com   # the PUBLIC https origin, no trail
 ```
 
 That variable is what makes the proxied topology work. better-auth builds OAuth callback
-URLs and cookie attributes from it; unset behind a proxy, `trustedOrigins` collapses to
-`[]` and the OAuth flow breaks. The boot log warns when OAuth is configured and
-`BETTER_AUTH_URL` is not.
+URLs and cookie attributes from it, and PR bodies link back to tasks through it; unset
+behind a proxy, `trustedOrigins` collapses to `[]` and the OAuth flow breaks. Boot logs
+two warnings about it: when an OAuth client id is configured and `BETTER_AUTH_URL` is
+not, and when `NODE_ENV=production` and it is an `http://` origin on a non-loopback host
+(session cookies would then be issued without `Secure`).
 
 **The failure mode if you skip the proxy.** The image sets `NODE_ENV=production`, and with
 no explicit origin better-auth falls through to its production defaults: it issues
@@ -73,35 +102,43 @@ login page — a silent login loop with nothing in the app logs to explain it. T
 better-auth failing closed, which is the correct behaviour; the fix is to front the app
 with TLS, not to weaken the cookie.
 
-Two proxy details worth getting right:
+Three proxy details worth getting right:
 
 - Forward `X-Forwarded-For` **and set `VIBERR_TRUST_PROXY=1`** (the number of proxy hops
   to trust). The header is ignored unless that variable is set, so forwarding it alone
   changes nothing. It is the container's only view of the client IP: the sign-in throttle
   keys on `email|ip` and falls back to a literal `local` without it, so the limiter still
   works per account but stops distinguishing attackers from the legitimate owner of that
-  account. *(Corrected 2026-09-01 — `app/server/auth/rate-limit.server.ts`.)*
+  account (`clientIpOf` in `app/server/auth/rate-limit.server.ts`).
 - Forward `Accept` and `Cache-Control` untouched and disable response buffering on
-  `/resources/events`. That is the SSE stream; a buffering proxy stalls live updates.
+  `/resources/events`. That is the SSE endpoint every live page and the run console
+  stream from; a buffering proxy stalls live updates. The response carries
+  `Cache-Control: no-store, no-transform` and `X-Accel-Buffering: no`.
+- Each visible task page holds two SSE streams, and over HTTP/1.1 a browser allows about
+  six connections per origin, so several visible pages of one instance can exhaust the
+  pool and every request then hangs with no error (ruling 301; a hidden tab closes its
+  streams). The app serves HTTP/1.1; a proxy that speaks HTTP/2 to the browser multiplexes
+  the streams over one connection.
 
 HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
 
 ## Agent accounts are per person (ruling 127)
 
 The image ships everything needed to run real agents: the Claude/Codex SDKs' native
-linux binaries (installed by `npm ci` in the linux build stage) plus, in the runtime
-stage, `git` and a CA bundle (a real run clones the task's repo and the coding agent
-shells out to git), Debian `chromium` with `fonts-liberation` for the governed browser
+linux binaries (inside the production `node_modules` from the `prod-deps` stage) plus, in
+the runtime stage, `git` and a CA bundle (a real run clones the task's repo and the coding
+agent shells out to git), `make`, `curl` and a pinned `pnpm` (ruling 196), Debian
+`chromium` with `fonts-liberation` for the governed browser
 (`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`), and `uv`/`uvx` for Python stdio MCP
 servers (their caches live under `runtimes/uv-cache` and `runtimes/uv-python` on the
-volume). *(Inventory corrected 2026-09-01.)*
+volume; uv manages its own CPython, so there is no system `python3`).
 
 What it does **not** ship is a credential. There is no deployment-wide key, no shared
-runtime home, no `/host-codex` mount and no entrypoint that seeds one. **Every person
-connects Claude and Codex for themselves, in the app, on Profile → Agent accounts**, and
-every run bills exactly one person: the **task owner** for a run on a task (operator,
-specialist, resume, scheduled, boot recovery, retry) and the **asker** for a controller
-turn. That principal is persisted on the run row as `agent_runs.credential_user_id`.
+runtime home, no host mount and no entrypoint that seeds one. **Every person connects
+Claude and Codex for themselves, in the app, on Profile → Agent accounts**, and every run
+bills exactly one person: the **task owner** for a run on a task (operator, specialist,
+resume, scheduled, boot recovery, retry) and the **asker** for a controller turn. That
+principal is persisted on the run row as `agent_runs.credential_user_id`.
 
 Two ways to connect, per backend:
 
@@ -131,16 +168,23 @@ A ChatGPT workspace can have device-code authorization switched off; the sign-in
 then reports the vendor's own refusal and points at the workspace admin, or at a pasted
 key. Treat a pasted token as a secret, prefer a finite expiration, and rotate it.
 
+Each Codex run works in a private copy of its principal's home,
+`runtimes/users/<userId>/codex-home/runs/<runId>/` (ruling 181): `auth.json` and
+`config.toml` copied in, `sessions/`, `skills/` and `memories/` linked back to the shared
+home, `CODEX_SQLITE_HOME` pointed at the shared home. When the run settles, a changed
+`auth.json` is copied back and the directory is deleted; boot recovery does the same for a
+run a restart orphaned.
+
 **First run, as the first admin.** After `docker compose up -d`, sign in as the bootstrap
 admin, open **Profile → Agent accounts**, and connect at least one backend for yourself.
 Until somebody does, the instance runs no agents: an agent started on a task whose owner
 has nothing connected is refused before any process starts, with an honest
 `run·unavailable` error run and a blocked recovery packet naming the owner and the
-backend. Because task creation now seats the creator as owner, the person who creates
-work is the person whose accounts pay for it, unless ownership is reassigned.
+backend. Task creation seats the creator as owner, so the person who creates work is the
+person whose accounts pay for it, unless ownership is reassigned.
 
 **What a wiped volume loses.** The hosted sign-in files live only under
-`runtimes/users/<userId>/` on the `/data` volume. Deleting or recreating that volume
+`runtimes/users/<userId>/` on the `/data` volume. Deleting or recreating that directory
 signs everyone out of the vendors: their cards flip to "sign-in file missing (the runtime
 volume was wiped)" and each person signs in again. Sealed API keys survive a volume wipe
 only if the database did, and are readable only with the same
@@ -148,10 +192,10 @@ only if the database did, and are readable only with the same
 the transcripts are unaffected by a re-signin, and no run is retried automatically.
 
 **Backups include the homes only on request.** `npm run backup` excludes `runtimes/` by
-default precisely because it now holds every person's live sign-in; `--include-runtimes`
-carries `runtimes/users/` (and the raw transcripts) and turns the artefact into a secret.
-The sealed keys ride in `projection.sqlite`, which the default backup does take, and are
-unreadable without the encryption key backed up separately.
+default precisely because it holds every person's live sign-in; `--include-runtimes`
+carries `runtimes/` (the homes and the raw transcripts) and turns the artefact into a
+secret. The sealed keys ride in `projection.sqlite`, which the default backup does take,
+and are unreadable without the encryption key backed up separately.
 
 **Security boundary.** A per-person runtime home keeps one person's vendor sign-in out of
 another person's runs, and `filteredSpawnEnv()` strips every credential-shaped variable
@@ -175,29 +219,22 @@ degraded: it means nobody has connected that backend yet. It is not a validity c
 either, and it cannot answer "can this task run", which is a fact about the task's owner
 and is shown on the task page, in the packet and on the Agents page.
 
-*(Rewritten 2026-09-02 for ruling 127. This section used to be titled "Agent backends in
-the container" and told an operator to run `claude setup-token`, paste
-`CLAUDE_CODE_OAUTH_TOKEN` / `CODEX_ACCESS_TOKEN` into `.env`, or copy `~/.codex/auth.json`
-into a shared `runtimes/codex-home` and set `VIBERR_CODEX_USE_CLI_AUTH=1`. All nine
-variables, the shared homes, the `/host-codex` mount and the entrypoint that seeded it are
-deleted; the health example returned `{"claude":"real","codex":"unavailable"}`.)*
-
 ## Codex runs are not OS-confined (ruling 185)
 
 Viberr starts **every** Codex run `danger-full-access`, and the container keeps Docker's
 own seccomp profile — `compose.yml` carries no `security_opt`. Do not add one back without
-a ruling.
+a ruling: it would lift the profile for every process in the container.
 
-The Codex CLI *can* confine a run (bubblewrap on Linux, seatbelt on macOS), and Viberr used
-to ask it to for every run below full access. Two upstream properties made that cost more
-than it bought, and pass 36 measured both:
+The Codex CLI *can* confine a run (bubblewrap on Linux, seatbelt on macOS). Viberr does
+not ask it to, because two upstream properties made confinement cost more than it bought,
+and pass 36 measured both:
 
 - **bubblewrap needs an unprivileged user namespace** (`unshare(CLONE_NEWUSER)`), which
   Docker's builtin seccomp profile refuses to a non-root process — and the app runs as the
-  non-root `node` user. Every confined run therefore died at its first shell command with
-  `bwrap: No permissions to create a new namespace`, and the models reported the
-  environment as a verdict on correct work (F36-1). The remedy was to run the whole
-  container `seccomp=unconfined`, which is a bigger hole than the sandbox was a wall.
+  non-root `node` user. A confined run dies at its first shell command with
+  `bwrap: No permissions to create a new namespace`, and the models reported that
+  environment failure as a verdict on correct work (F36-1). The only remedy is running the
+  whole container `seccomp=unconfined`, which is a bigger hole than the sandbox is a wall.
 - **with the network off the CLI installs a seccomp filter that refuses every socket
   syscall, `AF_UNIX` included.** libuv's *synchronous* spawn needs a socketpair, so inside
   such a sandbox `spawnSync` reports `EPERM` *after the child has already run*,
@@ -207,28 +244,33 @@ than it bought, and pass 36 measured both:
   gate: the reviewer called it "an environment evidence blocker, not a code finding" and
   still requested changes, and the operator sent the deliverer back around.
 
-**What confines an agent now** is Viberr, not the OS: the run's contract omits every step
-it may not take, each supporting engagement works in its own isolated checkout, agents hold
+Chromium still needs `--no-sandbox` for the same user-namespace reason, and the browser
+mount passes it whenever `VIBERR_BROWSER_EXECUTABLE` is set.
+
+**What confines an agent** is Viberr, not the OS: the run's contract omits every step it
+may not take, each supporting engagement works in its own isolated checkout, agents hold
 no credential, delivery is server-owned, and verdicts bind to a revision. The honest cost
 is that on Codex a withheld `execute-code-or-write-repo` is **advisory** — the agent editor,
 the capability matrix and the agent card all say so on the row. Web search still binds on
 both backends (it is the CLI's own tool, not the sandbox), and so do the MCP write-tool
 denials.
 
-The host toolchain is still reported — versions only:
+The host toolchain is still reported — versions only (`app/server/ops/toolchain.server.ts`,
+rulings 182(b), 191 and 196):
 
 ```bash
 curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain
 # {"node":"26.8.2","npm":"11.19.1","git":"2.47.3","python3":null,"go":null,
 #  "make":"4.4.1","docker":null,"pnpm":"12.4.1","yarn":null,"curl":"8.14.1",
-#  "codexCli":"0.153.4","claudeAgentSdk":"0.3.261"}
+#  "codexCli":"0.156.0","claudeAgentSdk":"0.3.280"}
 ```
 
-`make`, `curl` and a pinned `pnpm` ship in the image (ruling 196); `docker` is `null`
-deliberately and is not coming — an agent holding the daemon socket controls every
+`make`, `curl` and a pinned `pnpm` (`12.4.1`) ship in the image (ruling 196); `docker` is
+`null` deliberately and is not coming — an agent holding the daemon socket controls every
 container on the host. The same reading is injected into every specialist, operator and
 controller prompt (ruling 191), so an agent plans around what is present instead of
-discovering each absence as an exit-127.
+discovering each absence as an exit-127. For any other command the controller's
+`instance_health` takes a `probe` list of up to 8 bare names (ruling 377).
 
 ## First run
 
@@ -236,10 +278,10 @@ discovering each absence as an exit-127.
 cp .env.example .env        # fill in the two required secrets
 mkdir -p docker-data && sudo chown 1000:1000 docker-data   # Linux, rootful daemon — see below
 docker compose up -d --build
-docker compose logs -f app  # boot integrity log: dirs, migrations, counts, users, build, disk
+docker compose logs -f app  # boot integrity log: dirs, migrations, counts, users, build, disk, toolchain
 ```
 
-*(Added 2026-09-05.)* **Create `docker-data/` yourself, owned by uid 1000.** The image does
+**Create `docker-data/` yourself, owned by uid 1000.** The image does
 `chown node:node /data`, but compose bind-mounts `./docker-data` over that path and a bind
 mount shadows the image's directory entirely — the HOST directory's ownership is what the
 container sees. On Linux with a rootful daemon, a missing bind-mount source is created by
@@ -249,25 +291,31 @@ lock. `sudo chown 1000:1000 docker-data` fixes it; the image's own `chown` only 
 applies when `/data` is NOT bind-mounted (a named volume, say). Rootless Docker and Docker
 Desktop on macOS/Windows map ownership for you and need none of this.
 
-*(Added 2026-09-20.)* **The image fetches its Debian packages over HTTPS.** The runtime
-stage installs git, make, curl and chromium from `deb.debian.org` in three `apt-get`
-layers, each refreshing a 10 MB package index and then fetching 25 MB, 1 MB and 192 MB of
-archives. The base image names that mirror over plain HTTP, and on a connection that
-shapes port 80 (measured on the owner's Mac: 20–50 KB/s to every Debian mirror over HTTP,
-3.6 MB/s to the same host over HTTPS) the first index alone took over three minutes, and a
-`docker compose up -d --build` looked hung and was cancelled at 2m49s. The `Dockerfile`
-now rewrites the apt sources to HTTPS before its first fetch, trusting the mirror through
-Node's embedded root store for the one layer that installs `ca-certificates`; the system
-store that install creates carries every layer after it. Docker's layer cache hides all of
-this while the layers survive, so it surfaces only on a cold cache — a fresh machine, a
-`docker builder prune`, a base-image bump. A build that still stalls on an `apt-get` line
-is the network, not the image: from the host, `curl -o /dev/null -w '%{speed_download}\n'
-https://deb.debian.org/debian/dists/trixie/InRelease` is the two-second check, and the same
-URL over `http://` shows the throttle.
+**The image fetches its Debian packages over HTTPS.** The runtime stage installs from
+`deb.debian.org` in three `apt-get` layers (`git` + `ca-certificates`, then `make` +
+`curl`, then `chromium` + `fonts-liberation`), each refreshing a package index of about
+10 MB before fetching its archives (roughly 25 MB, 1 MB and 192 MB). The base image names
+that mirror over plain HTTP, and on a connection that shapes port 80 (measured on the
+owner's Mac: 20–50 KB/s to every Debian mirror over HTTP, 3.6 MB/s to the same host over
+HTTPS) the first index alone took over three minutes, and a `docker compose up -d --build`
+looked hung and was cancelled at 2m49s. So the first apt layer rewrites
+`/etc/apt/sources.list.d/debian.sources` to `https://` before it fetches anything,
+trusting the mirror through Node's embedded root store (`tls.rootCertificates`, written to
+a temporary file passed as `Acquire::https::CaInfo`) for that one layer, which installs
+`ca-certificates`; the system store that install creates carries every later apt call.
+Every package is signature-checked over either transport; the change is about throughput.
+Docker's layer cache hides all of this while the layers survive, so it surfaces only on a
+cold cache — a fresh machine, a `docker builder prune`, a base-image bump. A build that
+still stalls on an `apt-get` line is the network, not the image: from the host,
+`curl -o /dev/null -w '%{speed_download}\n' https://deb.debian.org/debian/dists/trixie/InRelease`
+is the two-second check, and the same URL over `http://` shows the throttle.
 
 - Migrations apply automatically at boot; no manual migrate step is needed.
 - On an **empty** users table the bootstrap admin is created from `VIBERR_SEED_ADMIN_EMAIL`
-  / `VIBERR_SEED_ADMIN_PASSWORD` (or a random password logged once).
+  / `VIBERR_SEED_ADMIN_PASSWORD` (or `admin@viberr.dev` with a random password logged once
+  as `VIBERR BOOTSTRAP ADMIN`, which must be changed at first sign-in).
+- Boot writes the shipped agent assets (each built-in agent's definition and expertise
+  skill, the base profile templates) into a store that lacks them.
 - Connect an agent backend for yourself on **Profile → Agent accounts** before expecting
   any agent to run (ruling 127). Nothing in `.env` does it, and an instance with nobody
   connected refuses every agent run honestly rather than starting one. See
@@ -278,15 +326,14 @@ URL over `http://` shows the throttle.
   catalog, knowledge bases, skills — and nothing else: no demo/mock board data. The board
   always starts as a clean sheet.
 - Health: `GET /resources/health` → `{ ok, status, degraded[], projections: { projects,
-  tasks }, watcher, kbWatcher, lock, backends, browser, disk, maintenance, build }` (key
-  order is part of the contract; `backends` is `{ claude: { connectedUsers }, codex: {
-  connectedUsers } }` since ruling 127). The bare URL is a **liveness** probe: `200` even when
-  `status: "degraded"`. For a **readiness** probe call `?probe=readiness`: it returns
-  `503` with the same body while anything is degraded (a dead watcher, no lock, low disk).
-  `503 { ok: false, status: "down" }` means SQLite is unreachable. Compose's own
-  healthcheck is the liveness form. *(Corrected 2026-09-01 — the body grew `status`,
-  `degraded`, `browser`, `disk`, `maintenance` and `build`, and the readiness form was
-  undocumented; earlier correction 2026-08-06, pass 19.)* Field reference:
+  tasks }, projectionStore, watcher, kbWatcher, lock, backends, browser, disk,
+  maintenance, build, quota, toolchain }` (key order is part of the contract; `backends`
+  is `{ claude: { connectedUsers }, codex: { connectedUsers } }`). The bare URL is a
+  **liveness** probe: `200` even when `status: "degraded"`. For a **readiness** probe call
+  `?probe=readiness` (or `?probe=ready`): it returns `503` with the same body while
+  anything is degraded (a dead watcher, no lock, low disk, a projection that cannot be
+  rebuilt). `503 { ok: false, status: "down" }` means SQLite is unreachable. Compose's own
+  healthcheck is the liveness form. Field reference:
   [`runbook.md`](runbook.md#health--liveness).
 
 ## Persistence, backup & restore
@@ -300,9 +347,10 @@ projects/       canonical project.md, task.md, goals/*.md (the source of truth �
                 per project: .repo-mirror/ (bare mirror, a cache)
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
 kb/ skills/     knowledge-base and skill files
-runtimes/       raw NDJSON run logs per backend; users/<userId>/{claude-home,codex-home}/,
-                one person's vendor sign-in file plus their provider sessions (ruling 127);
-                uv-cache/ and uv-python/ in the container
+runtimes/       claude/ and codex/: raw NDJSON run logs per backend;
+                users/<userId>/{claude-home,codex-home}/: one person's vendor sign-in file
+                plus their provider sessions (ruling 127), and codex-home/runs/<runId>/
+                while a Codex run is live (ruling 181); uv-cache/ and uv-python/ in the container
 audit-exports/  audit-events-<date>.jsonl written before each 90-day purge
 state/          projection.sqlite (users, sessions, projections, audit, PATs, notifications,
                 sealed personal backend keys), writer.lock, shipped-assets.json;
@@ -310,48 +358,41 @@ state/          projection.sqlite (users, sessions, projections, audit, PATs, no
 ```
 
 Boot creates the nine `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profiles`,
-`runtimes`, `runtimes/users`, `kb`, `skills`, `audit-exports`, `state`); the rest
-appear when first written, including each person's own
-`runtimes/users/<userId>/{claude-home,codex-home}` (mode 0700, created by
-`ensureUserBackendHome` the first time they connect). *(Corrected 2026-09-02, ruling 127 —
-the list used to hold the shared `runtimes/claude-home` and `runtimes/codex-home`, which
-no longer exist.)* *(Corrected 2026-09-02, pass 32 — A00-6: `audit-exports/`
-joined the list, so the folder the runbook, the backup and `file-formats.md` all name
-exists on every root instead of only on one that has already purged.)* There is no `auth/`, `cache/` or `logs/` directory; application
-logs are structured JSON on stdout. Full layout with retention:
-[`../architecture/data-model.md`](../architecture/data-model.md#2-data-root-layout).
-*(Corrected 2026-09-01.)*
+`runtimes`, `runtimes/users`, `kb`, `skills`, `audit-exports`, `state`;
+`app/server/files/file-store-root.server.ts`); the rest appear when first written,
+including each person's own `runtimes/users/<userId>/{claude-home,codex-home}` (mode 0700,
+created by `ensureUserBackendHome` the first time they connect). There is no `auth/`,
+`cache/` or `logs/` directory; application logs are structured JSON on stdout. Full layout
+with retention: [`../architecture/data-model.md`](../architecture/data-model.md#2-data-root-layout).
 
-- **Backup** = `npm run backup` (add `--out <dir>`). It writes a timestamped artefact
-  containing a genuine point-in-time `projection.sqlite` — taken with `VACUUM INTO`, so it
-  folds in WAL content and lands as ONE file with no sidecars —
-  plus the canonical markdown tree — `projects/`, `agents/`, `kb/`, `skills/` and
-  `audit-exports/` (`BACKED_UP_STORE_DIRS`; a directory that does not exist yet is
-  skipped) — and a `MANIFEST.json` recording byte size, sha256 and the row counts read
-  back out of the artefact. `audit-exports/` is in that list because ruling 102 makes it
-  the durable record that outlives the 90-day `audit_events` window: a backup without it
-  would drop exactly the history the purge was designed to preserve. *(Corrected
-  2026-09-02, pass 32 — C01-A3.)* It does **not** take the writer lock: a
-  backup that refused to run on a live instance would be no backup at all.
+- **Backup** = `npm run backup` (add `--out <dir>`). It writes
+  `viberr-backup-<timestamp>/` containing a genuine point-in-time `projection.sqlite` —
+  taken with `VACUUM INTO`, so it folds in WAL content and lands as ONE file with no
+  sidecars — plus the canonical markdown tree — `projects/`, `agents/`, `kb/`, `skills/`
+  and `audit-exports/` (`BACKED_UP_STORE_DIRS`; a directory that does not exist yet is
+  skipped) — and a `MANIFEST.json` (format `viberr-backup/1`) recording byte size, sha256
+  and the row counts read back out of the artefact, plus a `README.txt`. `audit-exports/`
+  is in that list because ruling 102 makes it the durable record that outlives the 90-day
+  `audit_events` window: a backup without it would drop exactly the history the purge was
+  designed to preserve. It does **not** take the writer lock: a backup that refused to run
+  on a live instance would be no backup at all.
 
   **How it reads a live root.** Never through a second connection: whenever
   `state/writer.lock` is there at all the CLI copies `projection.sqlite` and its
   `-wal` to `state/tmp/reader-<pid>/`, runs the `VACUUM INTO` on the copy and removes it
-  (ruling 158; the manifest's first `contains` line then says "read from a copy of the
-  file and its WAL taken while state/writer.lock named a holder"). Only a root with no
-  lock file is just files it opens in place, read-only: a reader cannot tell a dead
-  holder from a live one in another pid namespace, and a copy it did not need costs
-  nothing but disk. That is the rule for
-  every reader, on either side of the container boundary: copy first, never a second
-  connection to a live database, because the second mapping of the WAL index is what
-  produced the SIGBUS in pass 34 (a host-side reader over the bind mount) and again in
-  pass 35 (an in-container `readOnly: true` reader); the runbook's
+  (ruling 158; the manifest's first `contains` line then says the database was read from a
+  copy taken while `state/writer.lock` named a holder). Only a root with no lock file is
+  just files it opens in place, read-only: a reader cannot tell a dead holder from a live
+  one in another pid namespace, and a copy it did not need costs nothing but disk. That is
+  the rule for every reader, on either side of the container boundary: copy first, never a
+  second connection to a live database, because the second mapping of the WAL index is
+  what produced the SIGBUS in pass 34 (a host-side reader over the bind mount) and again
+  in pass 35 (an in-container `readOnly: true` reader); the runbook's
   [Readers, and where they must run](./runbook.md#readers-and-where-they-must-run) has
-  both. **Where it runs.** Inside the container is still the worked form, because the
-  backup needs an explicit `--out`: the default `./backups` is `/app/backups` inside the
-  container and is lost with it, and `createBackup` refuses a destination under the data
-  root it is backing up, so the artefact goes to a container-local directory and is
-  copied out at once:
+  both. **Where it runs.** Inside the container is the worked form, and it needs an
+  explicit `--out`: the default `./backups` is `/app/backups` inside the container and is
+  lost with it, and `createBackup` refuses a destination under the data root it is backing
+  up, so the artefact goes to a container-local directory and is copied out at once:
 
   ```bash
   docker compose exec -T app npm run backup -- --out /tmp/viberr-backups
@@ -360,39 +401,38 @@ logs are structured JSON on stdout. Full layout with retention:
 
   With the container down the root is plain files, and `npm run backup -- --out ./backups`
   from the repo root is fine (`.env`'s `VIBERR_DATA_ROOT` must name the mounted directory,
-  `./docker-data` as in `.env.example`). *(Corrected 2026-09-04, pass 34 — D34-1;
-  corrected again 2026-09-06, pass 35 — F35-9, ruling 158: this said the in-container
-  read-only form was the safe one, and it died the same way the host-side one had.)*
+  `./docker-data` as in `.env.example`).
 
   Read the artefact's own README for what it excludes. Three exclusions matter most:
-  `runtimes/` (live agent logins, now one set per person under `runtimes/users/` — opt in
+  `runtimes/` (live agent logins, one set per person under `runtimes/users/` — opt in
   with `--include-runtimes`, and then treat the artefact as a secret),
-  **`VIBERR_SECRET_ENCRYPTION_KEY` itself**, which lives in the
-  environment, and the git trees under `projects/` — each task's
-  `tasks/<KEY>/workspace/` checkout and each project's `.repo-mirror/` bare mirror.
-  *(Added 2026-09-05: those two were being copied. They are re-derivable from the remote,
-  a live run can be mid-write so the copy would be torn, and they dwarf what is actually
-  truth — on the tree this was found on, 17M of git against 168K of project and task
-  markdown. Restoring a stale checkout over a fresh one was never wanted; the next run
-  re-clones and re-fetches.)* Without that key every sealed PAT, MCP credential and personal backend API
-  key in the backed-up database is unreadable, so back the key up separately.
+  **`VIBERR_SECRET_ENCRYPTION_KEY` itself**, which lives in the environment, and the git
+  trees under `projects/` — each task's `tasks/<KEY>/workspace/` checkout and each
+  project's `.repo-mirror/` bare mirror. Those two are re-derivable from the remote, a live
+  run can be mid-write so the copy would be torn, and they dwarf what is actually truth (on
+  the tree this was found on, 17M of git against 168K of project and task markdown); the
+  next run re-clones and re-fetches. `state/writer.lock` and `*.tmp` files are never
+  copied. Without the key every sealed PAT, MCP credential and personal backend API key in
+  the backed-up database is unreadable, so back the key up separately.
 
-  The older advice — copy `./docker-data` wholesale, being careful to include the
-  `-wal`/`-shm` sidecars — still works, but it is exactly the trap `VACUUM INTO` removes:
-  a hot copy of `projection.sqlite` alone silently loses every committed row still living
-  in the WAL.
+  Copying `./docker-data` wholesale, `-wal`/`-shm` sidecars included, also works with the
+  app stopped, but a hot copy of `projection.sqlite` alone silently loses every committed
+  row still living in the WAL — the trap `VACUUM INTO` removes.
 
 - **Restore** = `npm run restore -- --from <artefact>`. Whole-root restore takes the writer
-  lock, requires `--force` if the root is occupied, and *moves* displaced data aside rather
-  than deleting it. To recover a single hand-broken canonical file without touching the
-  database: `npm run restore -- --from <artefact> --file projects/<slug>/tasks/<KEY>/task.md`
-  — the broken bytes are kept beside it as `task.md.broken-<ts>`.
+  lock, requires `--force` if the root is occupied, and *moves* displaced data aside to
+  `<dataRoot>.replaced-<ts>/` rather than deleting it; `runtimes/` is displaced and
+  replaced only when the artefact carries it. To recover a single hand-broken canonical
+  file without touching the database: `npm run restore -- --from <artefact> --file
+  projects/<slug>/tasks/<KEY>/task.md` — the broken bytes are kept beside it as
+  `task.md.broken-<ts>`.
 
 **`state/projection.sqlite` is primary storage, not a cache — back it up.** The
 projection tables inside it are derived and rebuild from `projects/`, but the same file is
 the *only* home of every user row and better-auth credential, every session, every
-AES-sealed GitHub PAT, the whole audit trail, and all notifications. None of that exists
-in the canonical Markdown, so none of it is rebuildable.
+AES-sealed GitHub PAT and personal backend key, the whole audit trail, and all
+notifications. None of that exists in the canonical Markdown, so none of it is
+rebuildable.
 
 Restoring `projects/` without the database does not degrade gracefully. On the next boot
 the users table is empty, so the bootstrap admin is minted with a **fresh** user id, while
@@ -405,44 +445,65 @@ memberships and owners must be re-established by hand.
 ## Re-baselining the projection database
 
 Boot's integrity line is followed by a `projection schema drift` **WARN** when this
-database's `task_projections` CHECK constraints no longer admit every value the running
-build produces (F21-1). It names what the CHECK `refuses`. Migrations are squashed into
-`0001_baseline.sql` and forward-only, so widening a CHECK changes what a **fresh**
-`projection.sqlite` gets and nothing else — a root opened by an older build keeps the
-constraint it was created with, and every task whose derived value lands on a refused
-member stops projecting behind a generic `projection rebuild failed`.
+database's rebuilder tables lag the running build (`logBootIntegrity` in
+`app/server/boot.server.ts`). It carries up to two lists, each with an `impact` and a
+`remedy`:
 
-**First, check whether you need a remedy at all.** The WARN covers two shapes, and one
-of them repairs itself: a baseline COLUMN added after this root was created is applied
-at open by `ensureBaselineColumns` (`app/server/db/sqlite.server.ts`), which `ALTER
-TABLE … ADD COLUMN`s each missing entry of `BASELINE_COLUMNS` — on `agent_runs`
+- `refuses`: CHECK values the running build produces that this root's stored CHECK does not
+  admit (`projectionCheckGaps`): `task_projections.validation` (F21-1),
+  `task_projections.waiting` (ruling 225) and `notifications.kind` (ruling 140). A task
+  whose derived value lands on a refused member stops projecting behind a generic
+  `projection rebuild failed`; a notification of a refused kind is dropped by the
+  fail-open insert.
+- `missingColumns`: `task_projections` / `task_events` columns the shipped baseline has and
+  this root lacks (`projectionMissingColumns`), which fail EVERY task's projection with
+  "no such column".
+
+Migrations are squashed into `0001_baseline.sql` and forward-only, so a baseline change
+reaches a **fresh** `projection.sqlite` and nothing else — a root opened by an older build
+keeps the schema it was created with.
+
+**First, check whether you need a remedy at all.** Most additive drift repairs itself: a
+baseline column or table added after this root was created is applied at open by
+`ensureBaselineColumns` (`app/server/db/sqlite.server.ts`), which `ALTER TABLE … ADD
+COLUMN`s each missing entry of `BASELINE_COLUMNS` — on `agent_runs`
 `dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`,
-`interrupted_reason` and `usage_final`, plus the ruling-121 controller columns — and
-logs `added a baseline column this data root predated`. A column whose DEFAULT would be
-WRONG for the rows that predate it carries a one-time backfill run in the same step
-(`usage_final = 1` on the `finished` runs, whose token columns held the provider's own
-figures before the estimate existed); it is logged as a warn when it cannot run.
-Additive drift on those columns needs nothing below. What follows is for the
-shape no ALTER can fix: a CHECK constraint that refuses a value the running build now
-produces. *(Added 2026-09-02, pass 32.)*
+`interrupted_reason`, `usage_final`, `no_checkout`, `verdict_withheld` and the eleven
+prompt-cache columns of ruling 369; `controller_conversations.task_key` and `seen_seq`;
+`controller_messages.surface`; `org_mcp_servers.tool_policy_json` and `tool_names_json`;
+`projects.required_reviewers_json`; `task_projections.recommendation_kinds` — creates the
+`BASELINE_TABLES` (`project_github_health`, `user_backend_credentials`) and indexes it
+lacks, and logs `added a baseline column this data root predated`. A column whose DEFAULT
+would be WRONG for the rows that predate it carries a one-time backfill run in the same
+step (`usage_final = 1` on the `finished` runs, whose token columns held the provider's own
+figures; `seen_seq` set to each conversation's newest message so a deploy does not mark
+every old thread unread); a backfill that cannot run is logged as a warn. A failure to
+ALTER is warned, not fatal, and retried next boot.
+
+A `missingColumns` entry that is NOT in that list (for example
+`task_projections.blocked_by_json` on a root older than ruling 131) is still additive:
+with the app stopped, the WARN's own remedy is `ALTER TABLE <table> ADD COLUMN <column>`
+with the column's definition from `0001_baseline.sql`, which keeps every non-derived row.
+What follows is for the shape no ALTER can fix: a CHECK constraint that refuses a value
+the running build produces.
 
 Two remedies, and the lossy one is not the only one:
 
 **Preferred — preserve-copy.** Recreate the schema and carry the non-rebuildable rows
 across, which is exactly the shape `selfHealProjectionDbIfCorrupt`
-(`app/server/db/self-heal.server.ts`) already performs on a corruption verdict: open a
+(`app/server/db/self-heal.server.ts`) performs on a corruption verdict: open a
 FRESH file, run the migrations into it, then with `PRAGMA foreign_keys = OFF` copy every
 table across on the intersection of the columns both sides have, skipping the ones the
-rescan rebuilds from files (`provenance`, `schema_migrations`, `projects`,
-`project_members`, `task_projections`, `task_events`, `diagnostics` — leaving those
-EMPTY is what makes the boot rescan re-project every file rather than trust a stale
+rescan rebuilds from files (`REBUILT_FROM_FILES`: `provenance`, `schema_migrations`,
+`projects`, `project_members`, `task_projections`, `task_events`, `diagnostics` — leaving
+those EMPTY is what makes the boot rescan re-project every file rather than trust a stale
 content hash). Move the old file aside rather than deleting it, then start the app: the
 rescan refills the projection tables from `projects/`. Users, sessions, sealed PATs,
-audit, notifications, org resources and run history survive. There is no CLI for this
-today — the self-heal path runs it only for a corrupt file — so it is a scripted
-one-off; write it against that module's table list rather than inventing one, and take
-a backup first either way (the in-container form under *Persistence, backup & restore*,
-or from the host once the container is down).
+audit, notifications, org resources and run history survive. There is no CLI for this —
+the self-heal path runs it only for a corrupt file — so it is a scripted one-off; write it
+against that module's table list rather than inventing one, and take a backup first
+either way (the in-container form under *Persistence, backup & restore*, or from the host
+once the container is down).
 
 **Lossy — delete and rebuild.** Simpler, and acceptable on a throwaway or freshly seeded
 root:
@@ -457,21 +518,18 @@ docker compose up -d                 # migrations re-apply, projections rebuild 
 The backup sits below the `down` on purpose: with nothing writing the root the CLI reads
 the file itself, and the artefact is the database exactly as it will be restored. Taken
 while the container ran it would read a copy of a root still changing under it (ruling
-158; before pass 35 it opened the live database across the bind mount, `.env.example`
-pointing `VIBERR_DATA_ROOT` at `./docker-data`, the very directory compose mounts, which
-is the reader-side hazard under the runbook's
-[Readers, and where they must run](./runbook.md#readers-and-where-they-must-run)). To take
-one without stopping first, use the in-container form under *Persistence, backup &
-restore*. *(Corrected 2026-09-04, pass 34 — D34-1; 2026-09-06, pass 35 — ruling 158.)*
+158). To take one without stopping first, use the in-container form under *Persistence,
+backup & restore*.
 
 **Name the cost before you run it.** The projection *tables* are derived and rebuild from
 `projects/` at boot — but they share the file with rows that exist nowhere else: users and
-better-auth credentials, sessions, AES-sealed PATs and MCP credentials, the audit trail,
-notifications, org resources and run history. Deleting the file deletes those too. Expect
-to sign in again as a freshly minted bootstrap admin, and read the ghost-membership warning
-under *Persistence, backup & restore* first: the surviving task and project files still
-carry the OLD user ids. Restoring the backup afterwards puts the drifted schema back, so it
-is a safety net for the data, not a way to undo the re-baseline.
+better-auth credentials, sessions, AES-sealed PATs, MCP credentials and personal backend
+keys, the audit trail, notifications, org resources and run history. Deleting the file
+deletes those too. Expect to sign in again as a freshly minted bootstrap admin, and read
+the ghost-membership warning under *Persistence, backup & restore* first: the surviving
+task and project files still carry the OLD user ids. Restoring the backup afterwards puts
+the drifted schema back, so it is a safety net for the data, not a way to undo the
+re-baseline.
 
 ## Upgrades
 
@@ -480,14 +538,24 @@ the data-root volume carries state across deploys. Roll back by redeploying the 
 image against the same volume (migrations are additive and forward-only — take a data-root
 backup before a major upgrade).
 
-**Use `npm run deploy`.** It stamps the build from git, builds, restarts, and then reads
-`/resources/health` back and refuses to report success unless the running instance names
-the sha it just built:
+**Use `npm run deploy`** (`scripts/deploy.ts`, ruling 345). It stamps the build from git,
+builds, restarts, and then reads `/resources/health` back and refuses to report success
+unless the running instance names the sha it just built:
 
 ```bash
 npm run deploy              # stamp from git, build, up -d, verify
 npm run deploy -- --no-up   # stamp and build only, nothing restarted
 ```
+
+It runs `git` on the host, sets `VIBERR_BUILD_VERSION` (from `package.json`),
+`VIBERR_BUILD_SHA` (`git rev-parse HEAD`) and `VIBERR_BUILD_TIME` (now) for `docker compose
+build`, warns (without refusing) when there is no git revision or the working tree is dirty,
+then `docker compose up -d`, prints the URL it will poll, and polls
+`http://127.0.0.1:<port>/resources/health` every 3 s for up to 180 s. `<port>` is the host
+port `compose.yml` publishes, resolved the way compose resolves `${PORT:-3000}`: `PORT` from
+your shell if it is set there, otherwise `PORT` from `.env`, and `3000` when neither sets
+it or the value is empty. It exits 1, naming that URL, if nothing answers, and exits 1 if
+the reported `build.revision` is not the first 12 characters of the sha it stamped.
 
 Note that `up -d` kills every run in flight, so check the board before deploying.
 
@@ -495,9 +563,9 @@ Verify what is running from `/resources/health` → `build`: `version` comes fro
 `VIBERR_BUILD_VERSION` or `package.json`; `revision` from `VIBERR_BUILD_SHA`, or from the
 checkout's `.git` when there is one (there is not, in the image — `.dockerignore` excludes
 it, so **env is the only source a container can have**). `compose.yml` passes all three
-build args through from the environment, which is what `npm run deploy` fills; a bare
-`docker compose build` leaves them empty and the image honestly reports a `null` revision.
-The manual equivalent, if you are not using the script:
+build args through from the environment with empty defaults, which is what `npm run
+deploy` fills; a bare `docker compose build` leaves them empty and the image honestly
+reports a `null` revision. The manual equivalent, if you are not using the script:
 
 ```bash
 docker compose build \
@@ -508,51 +576,70 @@ docker compose up -d
 
 The `Dockerfile` declares `VIBERR_BUILD_VERSION`, `VIBERR_BUILD_SHA` and
 `VIBERR_BUILD_TIME` as `ARG` and re-exports each as `ENV`; setting them in the container
-environment works too. *(Noted 2026-09-01; corrected 2026-09-02, pass 32 — V11-9: the
-Dockerfile declared no ARG at all, so `revision` could not be anything but `null` in the
-image. Corrected again 2026-09-17, ruling 345 — the ARGs existed and `compose.yml` passed
-none of them, so the DEFAULT deploy could not stamp and the incantation above was a thing
-to remember. Eleven deploys in one day, none stamped, and forty minutes lost to "is this
-the new image?".)*
+environment works too.
 
 ## Scaling note
 
 Single-node by design (SQLite + local file authority + in-process SSE bus). There is no
 horizontal-scale story in V1; run one instance per data root. Vertical sizing is governed
-by projection query volume and concurrent agent runs, both modest for small teams.
+by projection query volume and concurrent agent runs; the run-concurrency cap (Org
+settings) bounds the runs, and compose's `cpus` ceiling bounds what those runs can take
+from the host.
 
 ## Single-writer safety (B-FD1 / F18-5)
 
 **One app process per data root, EVER.** Two processes pointed at one root corrupts the
 SQLite WAL and silently loses transactions — `PRAGMA integrity_check` does NOT detect the
-loss. Boot takes an exclusive `state/writer.lock`; a second process refuses to boot naming
-the holder. As of F18-5 the holder also re-verifies ownership on a 20 s timer and **fails
-closed** (one synchronous stderr `FATAL` line via `writeFatalSync`, then `process.exit(1)`
-— the async logger line was the thing that got truncated) the moment its lock file is deleted or
-replaced out from under it — because the fd stays valid on the now-unlinked inode while a
-second boot can acquire the freed path. `/resources/health` reports the current holder
-(`lock: { pid, hostname, startedAt }`) so you can confirm exactly one writer.
+loss. Boot takes an exclusive `state/writer.lock` (an `O_EXCL` create) before it opens the
+database; a second process refuses to boot naming the holder. The holder re-verifies
+ownership every 20 s (`DATA_ROOT_LOCK_GUARD_INTERVAL_MS`) and **fails closed** (one
+synchronous stderr `FATAL` line via `writeFatalSync`, then `process.exit(1)`) the moment
+its lock file is deleted or replaced out from under it — because the fd stays valid on
+the now-unlinked inode while a second boot can acquire the freed path.
+`/resources/health` reports the current holder (`lock: { pid, hostname, startedAt }`) so
+you can confirm exactly one writer.
 
 Two ways this bites in practice, both to avoid:
 
 - **Do NOT wipe `<dataRoot>/state` while a Viberr process is running.** Deleting the lock
-  file lets a second process acquire the root; the first now writes lock-less until the
-  guard notices and exits. Stop the app first, then reset the store.
+  file lets a second process acquire the root; the first writes lock-less until the guard
+  notices and exits. Stop the app first, then reset the store.
 - **Beware the same-port `::1` vs IPv4 split.** A host dev server on `[::1]:5173` and a
   compose container's docker-proxy on `*:5173` both answer `localhost:5173` (macOS resolves
   `localhost` → `::1` first). Two live servers can look like one app while writing the same
   bind-mounted `docker-data`. Run exactly one; the writer lock + health holder make it
   visible which.
 
-How the lock is judged: same host and a dead pid → stale, reclaimed automatically with a
-WARN; same host and a live pid → refused; a **different hostname is never probed** and is
-always refused (which is why `compose.yml` pins `hostname: viberr`, so a recreated container
-matches its predecessor). If the holder really is dead and the lock was not reclaimed, boot
-once with `VIBERR_FORCE_DATA_ROOT_LOCK=1`. The writing CLIs (`seed`, `seed:demo`, `rescan`,
-`restore`, `keys -- reseal`) take the same lock and refuse against a running app;
-`backup`, `store:check` and `keys -- status` are readers and need none; the two that read
-the database copy it first rather than open it whenever that lock file exists at all
-(they judge its PRESENCE, never its holder's liveness, which cannot be probed from
-another pid namespace), since a second connection to a live root is a hazard of its own
-(ruling 158). *(Added 2026-09-01; see
-[`runbook.md`](runbook.md#the-single-writer-lock-and-cli-refusals).)*
+How the lock is judged (`classifyLock` in `app/server/db/data-root-lock.server.ts`): the
+file records `{ pid, hostname, startedAt, bootId }` plus, on Linux, `procStartedAt` (the
+holder pid's start time from `/proc`). A lock naming this very process's `bootId` is
+reclaimed. A **different hostname is never probed** and is always refused (which is why
+`compose.yml` pins `hostname: viberr`, so a recreated container matches its predecessor).
+Same host and a lock naming this process's own pid (a crashed predecessor that was also
+pid 1) is decided by `procStartedAt`: a different start time means the pid was recycled
+and the lock is reclaimed. Otherwise same host and a dead pid → stale, reclaimed
+automatically with a WARN; same host and a live pid → refused; an unreadable lock file →
+refused. If the holder really is dead and the lock was not reclaimed, boot once with
+`VIBERR_FORCE_DATA_ROOT_LOCK=1`. The writing CLIs (`seed`, `seed:demo`, `rescan`,
+whole-root `restore`, `keys -- reseal`) take the same lock and refuse against a running
+app; `backup`, `store:check`, `restore --file` and `keys -- status` take none. The two that
+read the database (`backup`, `keys -- status`) copy it first rather than open it whenever
+that lock file exists at all (they judge its PRESENCE, never its holder's liveness, which
+cannot be probed from another pid namespace), since a second connection to a live root is
+a hazard of its own (ruling 158). See
+[`runbook.md`](runbook.md#the-single-writer-lock-and-cli-refusals).
+
+## The e2e stack (`compose.e2e.yml`)
+
+`npm run e2e` (`scripts/e2e.ts`) runs Playwright against the PRODUCTION image in a
+separate compose project, `viberr-e2e`, that never touches `compose.yml`, `.env`,
+`./docker-data` or any host credential. It uses synthetic secrets and a project-scoped
+named volume `e2e-data`. A one-shot `seed` service built from the `build` stage (which
+still has `test-support/`; the final image does not) runs `npm run seed:demo` into the
+volume and hands it to uid 1000; the `app` service then boots the final image with
+`hostname: viberr-e2e`, `init: true` and the app port published on a random loopback
+port, which the script reads with `docker compose port app 3000`. The script removes any
+leftover stack, runs `up --build --wait`, waits for `/resources/health`, passes the base
+URL to Playwright as `VIBERR_E2E_BASE_URL`, and tears the stack down with its volume
+afterwards unless `VIBERR_E2E_KEEP=1`. Details:
+[testing.md](../development/testing.md#4-end-to-end-suite-playwright).

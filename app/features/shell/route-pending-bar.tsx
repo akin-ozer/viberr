@@ -4,9 +4,9 @@ import { useNavigation } from "react-router";
 /**
  * P13-D-36 (UX-8 / F13-04) — the app's only route-level pending indicator.
  *
- * `architecture.md:559` makes React Router's navigation/fetcher pending state
+ * `architecture.md` §Process Patterns makes React Router's navigation/fetcher pending state
  * the default loading mechanism, and the UX spec asks for feedback that keeps
- * layout stable (`ux-design-specification.md:849-850`). Before this,
+ * layout stable (`ux-design-specification.md` §Additional Patterns). Before this,
  * `useNavigation` appeared in exactly two lines of the whole tree, both inside
  * `app/routes/login.tsx`: there was no HydrateFallback, no skeleton, and the one
  * global busy affordance (`.ico.spin`) was wired to *fetcher* states only.

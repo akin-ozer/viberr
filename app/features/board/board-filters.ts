@@ -209,9 +209,9 @@ export function shortBranch(branch: string): string {
  * P13-D-34 (UX-4): every column printed the bare string "No tasks" for a
  * filter+search result, so a board hiding 12 tasks behind an active filter
  * read as an empty project. The UX spec asks an empty state to say what is
- * absent, why, and what to do next (ux-design-specification.md:846-847) — the
- * same three-way shape pass 13 shipped on the home grid (UI-21) and the task
- * timeline (UI-40). The clear affordance is the single `Clear` chip in the
+ * absent, why, and what to do next (ux-design-specification.md §Additional
+ * Patterns, "Empty states") — the same three-way shape pass 13 shipped on the
+ * home grid (UI-21) and the task timeline (UI-40). The clear affordance is the single `Clear` chip in the
  * filter bar (one per board, not one per empty column).
  */
 export function boardEmptyCopy({
