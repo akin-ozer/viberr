@@ -1402,3 +1402,20 @@ not lost work.
   commits outside the reviewed revision". Compare AX-29's record from 03:34 (F39-64).
 - **Not yet seen live:** 439's chain arm with no PR, and F39-64, which needs a refresh on a task
   that already has a PR while GitHub lags.
+
+## 50. Deploy 3, and main's flaky test handed to the board (04:21 to 04:30 UTC)
+
+- **Deploy 3** (`b5752899`, built 04:27:27) carries U39-30, U39-31, U39-32 and the U39-28
+  follow-up. Every run in flight was re-invoked by the boot, as after deploys 1 and 2.
+- **O39-c's second instance, found by running main.** AX-31's reviewer requested changes partly
+  for `TestCLILifecycleWaitRecoversExpiredWatchVersion` (`Server.Shutdown()` deadline). Inside the
+  container, on main, `-count=20` failed at least 6 times. The controller turned my report into
+  AX-36 (urgent, the agent that owns `internal/cli`) with an acceptance of 100 consecutive passes,
+  and ruled out raising the limit, retries and sleeps. It told the operators of AX-31, AX-5 and
+  AX-21 that exactly that failure is main's known flake and nothing else is. It also corrected my
+  report: line 80 is the cleanup every CLI test shares, whose 1-second shutdown limit is the "about
+  1 s", so the test's own assertions pass and the server fails to shut down after it.
+- **U39-29 on the new build:** the reply's twelve task keys are links.
+- **U39-30 not yet seen live:** this turn ended below the 100k completion-compaction threshold (the
+  previous turn had compacted to 4k), so no compaction followed it and the reply landed with the
+  run's end.

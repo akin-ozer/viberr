@@ -579,6 +579,13 @@ what they strand, and record an optional reason.
   before merging (ruling 238 already re-reviews at a refreshed head, only earlier); (2) after a
   merge, Viberr runs the project's gate on the default branch and raises one board-level
   decision if it fails. I asked the controller for an urgent core task to fix the fixtures.
+  **Second instance, 04:28:** a test AX-29 merged fails on main about one run in three
+  (`TestCLILifecycleWaitRecoversExpiredWatchVersion`, `Server.Shutdown()` deadline; at least 6
+  failures in 20 runs, counted inside the container). AX-29's own reviewer saw it fail once on
+  the stale pin and moved on when the refreshed head passed. AX-31's reviewer then requested
+  changes partly for it. Design (2) above would have caught it on the first run after the merge.
+  U39-32 now at least tells the accepting person when the merge head is an unreviewed
+  combination.
 - **A resumed controller session keeps the model identity it started with until it compacts.**
   After the switch to Opus 5.5 the controller found "Opus 5 ... claude-opus-5[1m]" in its own
   context: ruling 373 records its prompt on the session's first request and replays it. It trusted
