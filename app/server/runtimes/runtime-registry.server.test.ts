@@ -634,8 +634,8 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     // …while the tool-loading path it needs to reach its mcp__viberr__* tools stays.
     expect(operator.claude.disallowedTools).not.toContain("ToolSearch");
     // Codex (ruling 185): not confined, and its OS network is no longer forced
-    // off — both were settings that read as enforcement for a run that holds
-    // no shell tool at all.
+    // off. The operator still has the CLI's shell, so since the sandbox went
+    // its contract (ruling 207(b)) is what keeps it off the tree.
     expect(operator.codex.thread.sandboxMode).toBe("danger-full-access");
     expect(operator.codex.thread.networkAccessEnabled).toBeUndefined();
     expect(operator.claude.permissionMode).toBe("bypassPermissions");
