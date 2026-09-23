@@ -701,9 +701,10 @@ currently sees no controls, and must redirect conversationally.
 `list_projects` mention and its "a comment mention can start a run" sentence — were fixed
 by ruling 121's doctrine and skill rewrite, shipped through the hash upgrade.)*
 
+*(2026-09-23, pass 39: the notification-kind comments that described a "controller
+conversation reply" notification now say what happens, a `controller.updated`
+revalidation and no row, so that item is gone from this list.)*
+
 - Ruling 108's note that the panel "skips the P13-KM-01 display-name repair" under a
   lock is stale wording: the panel runs the repair for display and posts blank for
   locked sections; the byte-for-byte outcome holds through the server.
-- The notification-kind comment describing a "controller conversation reply"
-  notification describes something never created; replies arrive through
-  `controller.updated` revalidation, not a notification row.

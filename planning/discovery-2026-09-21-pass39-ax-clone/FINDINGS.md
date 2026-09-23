@@ -581,6 +581,15 @@ what they strand, and record an optional reason.
   practice, since `off` and `false` mean the same thing to a reader; recorded so the next pass
   does not re-derive it, and because quoting the enum in the serializer would cost nothing.
   (Found by misreading it myself.)
+- **O39-d (owner question): nothing tells a person who left the page that a long answer landed.**
+  A controller turn runs one to five minutes. Its reply reaches open surfaces by the
+  owner-routed `controller.updated` revalidation and never as a notification row, by design
+  (`docs/domain/controller-and-goals.md` §8, which now says so in the code comments too).
+  The dock's working dot covers only the dock's own scope: on the board it tracks the board
+  thread, so it goes out when the answer lands; on a task page it tracks that task's threads,
+  so a board conversation finishes with no signal anywhere. One option is a `controller`
+  notification per reply, marked read when the conversation is opened on the page. Not built,
+  because it reverses a documented design and adds a bell item to every turn.
 - **The accept dialog hedges a fact it has.** AX-28 03:31: "ax-28 is brought up to date with
   main first. If the base has moved, that merge commit is pushed to the branch and becomes the
   merge head." The branch already contained main (`7022aa5`), which the PR's `mergeable: clean`

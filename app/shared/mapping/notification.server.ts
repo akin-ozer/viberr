@@ -20,8 +20,9 @@ export const NOTIFICATION_KINDS = [
   "mention",
   "quality",
   "policy",
-  // Ruling 99: a controller conversation reply, or chained-goal progress
-  // addressed to the goal's creator.
+  // Ruling 99: chained-goal progress addressed to the goal's creator. A
+  // conversation reply is never a row: it reaches its open surfaces through
+  // the owner-routed `controller.updated` revalidation.
   "controller",
   // Ruling 131 (pass 34): the work a task waited on reached Done and the task
   // was released, or a dependency can never complete (its task was archived).
