@@ -5,7 +5,8 @@ import type { StageDef } from "~/schemas/project-file.schema";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { EditIco } from "./mini-modal";
-import { isStaleCheck, rel, updatedLabel } from "./resource-helpers";
+import { rel, updatedLabel } from "./resource-helpers";
+import { isMcpHealthStale } from "~/shared/freshness";
 import { looksLikeWriteTool } from "~/shared/mcp-tools";
 
 /**
@@ -213,7 +214,7 @@ export function McpPanel({
         {mcps.map((m) => (
           <div className="rsrc-row" key={m.id}>
             {(() => {
-              const stale = m.up === true && isStaleCheck(m.lastCheckedAt);
+              const stale = m.up === true && isMcpHealthStale(m.lastCheckedAt);
               // R19-18: a first-run install is neither up nor broken, and it
               // outranks the stored `up` — that value is the verdict of the
               // probe this install was started BY.
@@ -265,7 +266,7 @@ export function McpPanel({
                         `${m.tools} ${m.tools === 1 ? "tool" : "tools"} · `
                       : "reachable · ") +
                     "checked " + rel(m.lastCheckedAt) +
-                    (isStaleCheck(m.lastCheckedAt) ? " · stale, retest" : "")
+                    (isMcpHealthStale(m.lastCheckedAt) ? " · stale, retest" : "")
                   : m.up === false
                     ? "unreachable · checked " + rel(m.lastCheckedAt)
                     : /* P13-UI-16: defensive — every save/test writes `up`, so a
