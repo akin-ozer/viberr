@@ -300,6 +300,25 @@ export async function setTaskDependencies(
   const previous = [...fm.blockedBy];
   const added = next.filter((r) => !previous.includes(r));
   const removed = previous.filter((r) => !next.includes(r));
+  // F39-63 (pass 39): a wait on a task that is already done holds nothing. It
+  // was written anyway ("Held until every entry is done"), the engine released
+  // it on its next sweep, and the release note told the task "the base branch
+  // has changed since the hold" when nothing had merged. Live on ax-clone AX-29
+  // the operator re-applied a finished directive's first step this way, and
+  // the release it paid for sent the next drive to refresh a current branch
+  // instead of re-running the review it owed. Only an ADDED entry is judged:
+  // one already on the list that finished since is the engine's to release.
+  // A settled goal link stays a valid wait (ruling 398(b)).
+  const alreadyDone = resolveDependencies(db, input.projectSlug, added).filter(
+    (e) => e.state === "done" && e.goalId === null,
+  );
+  if (alreadyDone.length > 0) {
+    const one = alreadyDone.length === 1;
+    throw AppError.validation(
+      `${alreadyDone.map((e) => e.label).join(", ")} ${one ? "is" : "are"} already done, so waiting on ` +
+        `${one ? "it" : "them"} holds nothing. Leave ${one ? "it" : "them"} off the list.`,
+    );
+  }
   if (JSON.stringify(next) === JSON.stringify(previous)) {
     // Ruling 155: the record the link carries is brought back in step even
     // when the task's own list did not move (a stale link heals on the next

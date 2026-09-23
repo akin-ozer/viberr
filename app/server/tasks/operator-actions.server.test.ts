@@ -3443,7 +3443,9 @@ describe("applyRecommendation / dismissRecommendation", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(snapshot().blockedBy).toEqual([]);
     const { setTaskDependencies } = await import("./dependencies.server");
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-77", { stage: "done", waiting: "none" }) });
+    // F39-63: a wait is added while its entry is open; the snapshot then
+    // resolves the entry as it stands.
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-77", { stage: "impl", waiting: "none" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     await setTaskDependencies(
       store.db,
@@ -3457,6 +3459,11 @@ describe("applyRecommendation / dismissRecommendation", () => {
       { userId: "operator", label: "operator" },
       { dataRoot: store.dataRoot, operatorAuthorized: true },
     );
+    expect(snapshot().blockedBy).toEqual([
+      { ref: "VIB-77", label: "VIB-77", state: "open", taskKey: "VIB-77", goalId: null },
+    ]);
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-77", { stage: "done", waiting: "none" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     expect(snapshot().blockedBy).toEqual([
       { ref: "VIB-77", label: "VIB-77", state: "done", taskKey: "VIB-77", goalId: null },
     ]);
