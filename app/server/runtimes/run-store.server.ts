@@ -573,6 +573,23 @@ export function runLineStats(db: DatabaseSync, runId: string): RunLineStats {
 }
 
 /**
+ * Does the run hold a line older than `seq`? The console page's `hasMore`
+ * (ruling 107's page-local cursor) needs exactly this, and it is one index
+ * probe — `runLineStats` answers it too, but counts every line of the run to
+ * do so, which the live tail paid once per streamed line per viewer (ruling
+ * 454, LIVE-9).
+ */
+export function hasRunLinesBefore(db: DatabaseSync, runId: string, seq: number): boolean {
+  // SAFETY: `EXISTS` always yields 0 or 1.
+  const row = db
+    .prepare(
+      `SELECT EXISTS(SELECT 1 FROM run_log_lines WHERE run_id = ? AND seq < ?) AS older`,
+    )
+    .get(runId, seq) as { older: number } | undefined;
+  return row?.older === 1;
+}
+
+/**
  * P13-D-2: the run ids on a task whose stream recorded a `session_missing`
  * failure — i.e. the provider transcript behind that run's session id is
  * PROVEN gone. The classified kind rides the err line's tag as a `·<kind>`

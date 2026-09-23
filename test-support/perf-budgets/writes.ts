@@ -95,4 +95,14 @@ export const WRITES_BUDGETS: PerfBudgetTable = {
     fixture:
       "same fixture; commentToAgent '@elif can you take a look at the schema?' on VIB-142, then rebuildPath(task.md) as the watcher would; 1 when it re-projected",
   },
+  // LIVE-9: the per-line tail fetch read the run row twice and ran an O(n)
+  // COUNT/MIN/MAX over the run's lines for a `hasMore` (4 before); now one run
+  // read, the lines, and one EXISTS index probe.
+  "writes:run-log-tail.run-sql": {
+    ceiling: 3,
+    unit: "count",
+    journey: "live-run",
+    fixture:
+      "setupAppTest + runDemoSeed; a running run on VIB-142 with 11 lines; /resources/run-log?since=9 loader as arda; statements on agent_runs or run_log_lines (auth not included)",
+  },
 };

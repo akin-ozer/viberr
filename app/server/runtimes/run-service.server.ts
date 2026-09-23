@@ -48,12 +48,12 @@ import { createRunSink, runPersistDrained } from "./run-sink.server";
 import {
   appendRawLine,
   getRun,
+  hasRunLinesBefore,
   insertRunLine,
   listRunLines,
   listRunLinesTail,
   nextSeq,
   patchRun,
-  runLineStats,
   upsertRun,
   type AgentRunRow,
   type InsertRunInput,
@@ -2726,7 +2726,16 @@ export function getRunLog(
   query: RunLogQuery = {},
 ): RunLog | null {
   const run = getRun(db, runId);
-  if (!run) return null;
+  return run ? runLogPage(db, run, query) : null;
+}
+
+/**
+ * `getRunLog` for a caller that already read the run row — the run-log route
+ * reads it for its membership gate, and the live tail calls that route once
+ * per streamed line per viewer (ruling 454, LIVE-9).
+ */
+export function runLogPage(db: DatabaseSync, run: AgentRunRow, query: RunLogQuery): RunLog {
+  const runId = run.id;
   const backward = query.before !== undefined || query.limit !== undefined;
   const lines: RunLog["lines"] = backward
     ? listRunLinesTail(db, runId, query.limit ?? RUN_LOG_PAGE_LINES, query.before).map(
@@ -2736,7 +2745,6 @@ export function getRunLog(
   const sinceSeq = query.since ?? -1;
   const head = lines.length ? lines[lines.length - 1]!.seq : sinceSeq;
   const oldestSeq = lines.length ? lines[0]!.seq : -1;
-  const stats = runLineStats(db, runId);
   return {
     runId,
     threadId: run.thread_id,
@@ -2746,8 +2754,9 @@ export function getRunLog(
     oldestSeq,
     // Older lines exist below this page. An EMPTY backward page means we
     // reached the start of this run (the console then steps to the previous
-    // run id in the group's `logWindow.runIds`).
-    hasMore: lines.length > 0 && oldestSeq > stats.minSeq,
+    // run id in the group's `logWindow.runIds`). One index probe, not a count
+    // of the run's lines (ruling 454).
+    hasMore: lines.length > 0 && hasRunLinesBefore(db, runId, oldestSeq),
   };
 }
 
