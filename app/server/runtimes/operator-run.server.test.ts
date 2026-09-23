@@ -5575,11 +5575,12 @@ describe("R19-1 — the operator's read-only repository view", () => {
     expect(spec.backend).toBe("codex");
     expect(spec.disallowedTools).toContain("Write");
     expect(spec.repoWriteWithheld).toBe(true);
-    // B-1 (pass 24, owner ruling): the Codex operator's writable cwd is a
-    // dedicated scratch folder — NOT the task dir (the default) — so `task.md` and
-    // the shared checkout below it are read-only (workspace-write confines writes
-    // to the cwd). Its prompt therefore describes the isolated scratch root and
-    // names the checkout by ABSOLUTE path, not the cwd-relative `./workspace/…/`.
+    // B-1 (pass 24, owner ruling): the Codex operator's cwd is a dedicated
+    // scratch folder — NOT the task dir (the default) — so `task.md` and the
+    // shared checkout below it sit outside it (placement, not a wall: ruling 185
+    // runs the thread `danger-full-access`). Its prompt therefore describes the
+    // isolated scratch root and names the checkout by ABSOLUTE path, not the
+    // cwd-relative `./workspace/…/`.
     expect(spec.workdir ?? "").toContain(".operator-scratch");
     expect(spec.workdir ?? "").not.toContain(path.join("workspace", "widgets"));
     const p = joinedPrompt(spec.systemPrompt ?? "");

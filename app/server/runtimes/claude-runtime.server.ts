@@ -417,10 +417,10 @@ export const OPERATOR_READ_ONLY_DENIED_TOOLS = [
  * profile's grants say — a supporting run pushing or opening a PR is the
  * VIB-30 class (a review agent committed, pushed, and opened a PR with no
  * delivery linkage). Deny wins under bypassPermissions, so these bind. On
- * Codex the same split holds structurally: grants decide the sandbox mode
- * (read-only vs workspace-write, resolveCodexSandboxMode) and the remote is
- * out of reach regardless (agents hold no credential; delivery is
- * server-owned).
+ * Codex neither half has a tool-layer channel: ruling 185 starts every thread
+ * `danger-full-access`, so the grants-derived write posture is advisory there,
+ * and the remote stays out of reach regardless (agents hold no credential;
+ * delivery is server-owned).
  */
 const SUPPORTING_DELIVERY_DENIED_BUILTINS = [
   "Bash(git push:*)",

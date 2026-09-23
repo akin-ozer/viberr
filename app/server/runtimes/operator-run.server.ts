@@ -1507,21 +1507,20 @@ function operatorCheckoutTarget(input: TaskFileRef): {
 }
 
 /**
- * Pass-24 B-1 (owner ruling) — the Codex operator's isolated writable root.
+ * Pass-24 B-1 (owner ruling) — the Codex operator's scratch working directory.
  *
  * The Claude operator physically cannot write: `Bash`/`Edit`/`Write`/`MultiEdit`/
  * `NotebookEdit` are removed from its context. The Codex operator has no such
- * denylist channel; since ruling 101(d) it runs `read-only` again
- * (resolveCodexSandboxMode — coordination machinery, no write assignment), and
- * this scratch CWD is defense in depth for the mode R22 briefly widened it to.
- * Left at the task folder (the default), a writable root would
- * contain `task.md` (the canonical governance record — stage, verdicts, packet)
- * and the shared deliverer checkout below it, so a Codex operator could `sed`
- * the governance file or `git commit` into the delivery clone. Root it instead
- * at a dedicated empty scratch folder that is a SIBLING of `task.md`, never its
- * parent: the governance file and the checkout stay READABLE (workspace-write
- * confines writes, not reads) but are outside the writable area, restoring the
- * Claude operator's read-but-not-write posture.
+ * denylist channel, and since ruling 185 no OS sandbox either: every Codex
+ * thread starts `danger-full-access`, so nothing refuses a write anywhere.
+ * What the folder still buys is where the run STANDS. Left at the task folder
+ * (the default), the cwd would contain `task.md` (the canonical governance
+ * record — stage, verdicts, packet) and the shared deliverer checkout below
+ * it, so a cwd-relative `sed` or `git commit` would land in the governance
+ * file or the delivery clone. Root it instead at a dedicated empty scratch
+ * folder that is a SIBLING of `task.md`, never its parent: the governance file
+ * and the checkout stay readable by absolute path and outside the cwd, and the
+ * prompt states their read-only posture as a rule, not a wall (ruling 207(b)).
  */
 function ensureOperatorScratchDir(input: TaskFileRef): string {
   const dir = path.join(
@@ -2605,10 +2604,9 @@ async function startCodexOperatorRun(
   // too. P13-KM-03 wired them into the Claude toolkit only, so the same grant
   // was real on one backend and decorative on the other — a Codex operator could
   // not call the read tools that would inform its plan. The CLI translation
-  // drops credentials and stamps approve-mode (codex-runtime); the operator's
-  // own sandbox is read-only with the network off (ruling 101(d)), which does
-  // not affect MCP servers — the CLI, not the sandboxed shell, connects to
-  // them.
+  // drops credentials and stamps approve-mode (codex-runtime). The CLI, not
+  // the operator's shell, connects to MCP servers, and since ruling 185 no OS
+  // sandbox sits between either of them and the network.
   // Resolved BEFORE the persona (B8) so the prompt describes what MOUNTS.
   // F21-3: that resolve now pre-flights the stdio mounts, so "what mounts" is
   // what actually starts, not what the registry row remembers.
@@ -2620,9 +2618,9 @@ async function startCodexOperatorRun(
     ? await operatorMcpResolution(db, authority.mcps, "codex")
     : NO_OPERATOR_MCPS;
   // Pass-24 B-1 (owner ruling): the Codex operator's cwd is a dedicated empty
-  // scratch folder, so its one writable root (workspace-write) does NOT contain
-  // `task.md` or the shared deliverer checkout — both stay readable but
-  // unwritable. The prompt is built to describe that isolated posture.
+  // scratch folder, so the directory it works in does NOT contain `task.md` or
+  // the shared deliverer checkout. Nothing refuses a write to either (ruling
+  // 185: `danger-full-access`); the prompt describes that posture as a rule.
   const scratchDir = ensureOperatorScratchDir(taskFileRef(input));
   const promptBuild = buildOperatorSystemPrompt(
     authority,
@@ -2666,15 +2664,16 @@ async function startCodexOperatorRun(
     agentProfileId: "operator",
     prompt,
     systemPrompt: promptBuild.prefix,
-    // Pass-24 B-1: root the writable sandbox at the scratch folder, NOT the task
-    // dir (the default) — that is what keeps `task.md` and the deliverer checkout
-    // read-only to a workspace-write Codex run.
+    // Pass-24 B-1: root the run at the scratch folder, NOT the task dir (the
+    // default) — that keeps `task.md` and the deliverer checkout out of its
+    // cwd. It is placement, not confinement: the thread is `danger-full-access`.
     workdir: scratchDir,
     // R19-1: the same read-only policy the Claude operator carries. Codex has no
-    // denylist channel — its operator binds through the read-only sandbox
-    // (ruling 101(d), resolveCodexSandboxMode) — but the spec must still STATE
-    // the run's confinement rather than leaving it implicit in the runtime's
-    // kind lookup.
+    // denylist channel and, since ruling 185, no OS sandbox, so the read-only
+    // half does not bind there; a withheld web grant still does, because
+    // `startRun` derives `webSearchWithheld` from this list (as it does
+    // `repoWriteWithheld`). The spec STATES the run's policy rather than
+    // leaving it implicit in the runtime's kind lookup.
     disallowedTools: operatorDisallowedTools(authority),
     // P13-RT-03: advertise only the actions this operator's policy permits.
     outputSchema: operatorPlanSchemaFor(authority),
@@ -3871,8 +3870,9 @@ const NO_OPERATOR_MCPS: OperatorMcpResolution = {
  * description of the run's actual denylist, not a request: `Bash`/`Edit`/
  * `Write`/`MultiEdit`/`NotebookEdit` are removed from its context
  * (`operatorDisallowedTools`), so it cannot write there even if a task tells it
- * to. (That binding is Claude's; on Codex the denylist has no channel and the
- * read-only sandbox binds the same statement — ruling 101(d).)
+ * to. (That binding is Claude's alone; on Codex the denylist has no channel
+ * and ruling 185 removed the OS sandbox, so the Codex prompt states the rule
+ * without claiming a wall — see `isolatedWritableRoot` below.)
  *
  * The delivery carve-out is deliberate. "You cannot push" would be the third
  * channel in this run's context to make a claim about the repository, and it

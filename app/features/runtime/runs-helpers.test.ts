@@ -291,6 +291,33 @@ describe("runInputRows (P19-G11)", () => {
     expect(denied.find((r) => r.tag === "tools")?.text).toContain("Edit");
   });
 
+  it("ruling 185: a Codex run's denied-tool list names the web-search toggle as the one binding entry", () => {
+    // The sentence used to credit a sandbox with the repo-write family ("bind
+    // via sandbox and search toggles"); that sandbox is gone, so on Codex a
+    // withheld Edit/Write or `git push` is advisory and only the CLI's web
+    // search is actually switched off. Canary: restore the old sentence in
+    // `runInputRows` and the exact match below fails.
+    const tools = (backend: "claude" | "codex") =>
+      runInputRows(
+        {
+          ...emptyInputs,
+          tools: { denied: ["Edit", "Bash(git push:*)", "WebSearch"], toolkit: [] },
+        },
+        backend,
+      ).find((r) => r.tag === "tools")!.text;
+    expect(tools("codex")).toBe(
+      "viberr tools: none · capability grants deny (on this Codex run only a withheld web " +
+        "search binds, through the CLI's search toggle; the repo-write and command-level " +
+        "entries are advisory, and the server-owned delivery gate is the boundary): " +
+        "Edit, Bash(git push:*), WebSearch",
+    );
+    expect(tools("codex")).not.toContain("sandbox");
+    // Claude's denylist binds every entry, so its row stays a flat "denied".
+    expect(tools("claude")).toBe(
+      "viberr tools: none · denied by its capability grants: Edit, Bash(git push:*), WebSearch",
+    );
+  });
+
   it("ruling 175: states the spending cap, honest that Codex has no budget option, and 'none' when unset", () => {
     const spend = (inputs: RunInputs, backend: "claude" | "codex") =>
       runInputRows(inputs, backend).find((r) => r.tag === "spend")?.text;

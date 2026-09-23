@@ -115,12 +115,11 @@ export interface RunSpec {
    *  `disabled_tools`. */
   mcpToolDenials?: McpToolDenial[];
   /** The task's attachments directory, when this run's profile holds
-   *  `attach-evidence-references` — Codex `workspace-write` sandboxes add it as
-   *  an additional writable directory so the agent can copy files there ("post
-   *  a file on the task thread"). Claude runs at bypassPermissions and need no
-   *  widening. Ruling 101 keeps Codex read-only for a run whose repo-write
-   *  grant is withheld; the attachments dir is the one carve-out (ruling 109)
-   *  and rides `workspace-write`. */
+   *  `attach-evidence-references` — where the agent copies files to "post a
+   *  file on the task thread" (ruling 109). Neither adapter has to widen
+   *  anything for it: Claude runs at bypassPermissions, and since ruling 185
+   *  every Codex thread starts `danger-full-access`, which already writes it
+   *  (the `--add-dir` it once rode went with the `workspace-write` sandbox). */
   attachmentsWritableDir?: string | null;
   /** The GRANTED skills Viberr mounted for this run (`mountGrantedSkills`),
    *  by exact name. Claude only: the adapter turns these into the SDK's native
@@ -138,12 +137,13 @@ export interface RunSpec {
    *  removes the directory when the run settles. Absent whenever `skills` is. */
   skillPlugin?: SkillPlugin;
   /** The run's `execute-code-or-write-repo` grant is WITHHELD (mode `off` or
-   *  `human`). Claude enforces it via the tool denylist; Codex through the
-   *  read-only sandbox `resolveCodexSandboxMode` derives from this flag
-   *  (ruling 101 — the one disclosed exception is an evidence-granted run,
-   *  which keeps workspace-write and is labeled advisory). Deliberately NOT
-   *  folded into `autonomous`, which also drives Claude's `permissionMode`
-   *  (flipping that would hang a server run on an unanswerable approval). */
+   *  `human`). Claude enforces it via the tool denylist. On Codex it is
+   *  ADVISORY since ruling 185 removed the OS sandbox: no adapter reads this
+   *  flag to confine the run, and the prompt plus the server-owned delivery
+   *  gate carry the withholding (`codexRepoWriteAdvisory` renders that).
+   *  Deliberately NOT folded into `autonomous`, which also drives Claude's
+   *  `permissionMode` (flipping that would hang a server run on an
+   *  unanswerable approval). */
   repoWriteWithheld?: boolean;
   /** The run's `use-web-search-fetch` grant is WITHHELD. Claude removes the
    *  WebFetch/WebSearch tools via `disallowedTools`; Codex, which has no

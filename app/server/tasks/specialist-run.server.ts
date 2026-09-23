@@ -4082,10 +4082,10 @@ async function cloneRepo(
     /** Ruling 179 (pass 36): the task's active work revision. A SUPPORTING
      *  checkout is detached at it when it is present after the refresh — a
      *  reviewer judges the revision under review, not the delivering tree's
-     *  head, and a sandboxed Codex run cannot move `.git` itself (the CLI
-     *  keeps it read-only). Live (HLC-18, 19:46Z): the external revision the
-     *  reconciler minted was never in the reviewer's clone of the delivering
-     *  tree, and the reviewer could not check it out. */
+     *  head, and a sandboxed Codex run could not move `.git` itself (the CLI
+     *  kept it read-only until ruling 185). Live (HLC-18, 19:46Z): the
+     *  external revision the reconciler minted was never in the reviewer's
+     *  clone of the delivering tree, and the reviewer could not check it out. */
     pinSubject?: ReviewSubject | null;
     /** Ruling 179: the task branch, for the delivering refresh's fast-forward
      *  to origin's copy (`refreshWorkspaceFromMirror`). */

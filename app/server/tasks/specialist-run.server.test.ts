@@ -2559,7 +2559,8 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("F10-12 / C02-R4: a SUPPORTING run's local write posture follows its grants (ruling 101(b)); it never ships either way", () => {
     // Ruling 101(b): a write-GRANTED supporting agent may edit and commit in
     // its OWN isolated checkout (Claude's supporting denylist narrowed to the
-    // delivery commands; Codex runs it workspace-write). The prompt used to
+    // delivery commands; Codex runs every thread `danger-full-access` since
+    // ruling 185). The prompt used to
     // forbid "edit files / git commit" for EVERY supporting run — stricter
     // than the enforcement, the mirror image of XS-4 — so a granted reviewer
     // asked to try a fix refused work its tools allowed.

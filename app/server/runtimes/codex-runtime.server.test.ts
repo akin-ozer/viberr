@@ -276,7 +276,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
     expect(opOpts.webSearchMode).toBeUndefined();
 
     // …and an operator whose web grant IS withheld disables web search, like a
-    // specialist — the OS-sandbox network stays off either way.
+    // specialist — and its network is not forced off either way (ruling 185).
     const opWithheld = fakeCodex(events);
     createCodexAdapter({ codexFactory: opWithheld.factory }).start(
       { ...SPEC, kind: "operator", webSearchWithheld: true },

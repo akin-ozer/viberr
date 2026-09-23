@@ -37,7 +37,7 @@ describe("healthSnapshot and the quota principal", () => {
 });
 
 describe("healthSnapshot reports the toolchain (ruling 182)", () => {
-  it("appends the toolchain reading LAST — key order is the wire contract — with the sandbox verdict", () => {
+  it("appends the toolchain reading LAST — key order is the wire contract — versions only", () => {
     // G36-4: nothing probed whether a sandboxed Codex run could exec at all,
     // so bubblewrap's refusal surfaced as a reviewer's "missing evidence"
     // verdict. The reading rides the health body and, through the spread,
