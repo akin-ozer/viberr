@@ -9,7 +9,7 @@
 > `app/routes/resources.events.ts`, `app/schemas/sse-event.schema.ts`,
 > `app/features/live-updates/*`, `app/features/runtime/use-run-log-stream.ts`.
 >
-> Verified against `main` @ `7d9fbf72` (2026-09-23).
+> Verified against `main` @ `7d9fbf72` (2026-09-23); §5 and §6 against `8bbe2083` (PR #318).
 
 ## 1. The write path
 
@@ -215,7 +215,14 @@ an empty project slug and no route publishes nothing), and the org resource broa
 `controller.log-appended` is a **stream event** (`SSE_STREAM_EVENTS` in
 `event-types.ts`): one frame per console line on the `user` scope every signed-in
 surface subscribes, so `useLiveUpdates` does not revalidate on it; only the dedicated
-log consumer handles it.
+log consumer handles it. `run.log-appended` is a **run-line event**
+(`SSE_RUN_LINE_EVENTS`): the `project:` scope delivers it for every run of the project
+(to the board, the controller page and every open task page, which subscribes its
+project for the rail), but only the page whose `task:` scope names that task revalidates
+on it, at most once per `RUN_LINE_REVALIDATE_MS` (2 s), because its Live run strip
+(phase, step, turns, tokens) is loader data that moves per line. Nothing else a
+project-scoped page renders changes per line: the board's "agent running" fact moves on
+`run.state-changed`.
 
 **The broker** (`sse-broker.server.ts`, behind the route `resources.events.ts`): one
 connection per stream on `/resources/events` (401 JSON when signed out, since an
@@ -236,22 +243,27 @@ DB and release the writer lock.
 **The client** (`useLiveUpdates`): subscribes the current surface to its scopes (Home:
 `user` + `projects`; a project page: `project:<slug>` + `user`, plus `task:<slug>/<key>`
 when a task is open; the controller page: `user`, plus `project:<slug>` on a project;
-the controller dock, org settings and notifications: `user`), revalidates the active
-React Router loaders on any data event or `stream.resync` (debounced 300 ms), and
-revalidates once on any connect that follows a previous stream. A hidden tab holds no
-stream: the hook closes on `visibilitychange` and reopens on return (ruling 301). A
-failed stream flips `paused` (the topbar's "live updates paused" chip), reopens on a
-2 / 5 / 15 / 30 s backoff, probes the session after two consecutive failures and stops
-on a 401 until the user retries. There is no optimistic UI for governed state:
-revalidation is the update mechanism.
+the controller dock, Instance settings and notifications: `user`), revalidates the active
+React Router loaders on any data event or `stream.resync` (debounced 300 ms; a run line
+only on its own task's page, floored at 2 s, joining a pending revalidation rather than
+pushing it out), and revalidates once on any connect that follows a previous stream. A
+hidden tab holds no stream: the hook closes on `visibilitychange` and reopens on return
+(ruling 301). A failed stream flips `paused` (the topbar's "live updates paused" chip),
+reopens on a 2 / 5 / 15 / 30 s backoff, probes the session after two consecutive
+failures and stops on a 401 until the user retries. There is no optimistic UI for
+governed state: revalidation is the update mechanism. (Measured 2026-09-23 on the
+ax-clone instance, before the run-line floor: each line of any run in the project
+revalidated every open board and task page, and three open pages at 2.5 revalidations a
+second pushed a trivial request's p90 from 8 ms to 157 ms on the server's one event
+loop, the one the agents run on.)
 
-The run-log console has its own `EventSource` (`useRunLogStream`) so a log line never
-refetches the whole task loader: on the task scope it tails `run.log-appended` and
-revalidates once on `run.state-changed`; for a controller conversation it tails
-`controller.log-appended` on the `user` scope. It fetches lines since its cursor from
-`/resources/run-log`, pages older history on demand, revalidates every 20 s while a run
-is shown active (a missed terminal event cannot leave the strip "running"), and also
-closes while the tab is hidden.
+The run-log console has its own `EventSource` (`useRunLogStream`), so a log line reaches
+the console at once while the task loader refetches on run lines at most every 2 s: on
+the task scope it tails `run.log-appended` and revalidates once on `run.state-changed`;
+for a controller conversation it tails `controller.log-appended` on the `user` scope. It
+fetches lines since its cursor from `/resources/run-log`, pages older history on demand,
+revalidates every 20 s while a run is shown active (a missed terminal event cannot leave
+the strip "running"), and also closes while the tab is hidden.
 
 ## 6. Provenance and freshness
 
@@ -266,7 +278,10 @@ derives from `task_events.occurred_at` and follows who is on the hook: one hour 
 silence while the task waits on an agent or on nothing, 72 hours while it waits on a
 human, and for a task resting on a schedule 72 hours past the occurrence's due time. It is
 suppressed for archived, terminal, empty-timeline, held (`blockedBy`) and actively
-running tasks.
+running tasks. A page recomputes it when it revalidates, which is on a domain event (a
+transition, a comment, a run starting or stopping) or a navigation, never on another
+task's console lines, so a task that crosses into quiet shows it at the project's next
+event, not the minute it crosses (`board-query.server.ts`).
 
 ## 7. Where things can bite
 

@@ -70,7 +70,9 @@ export function publishRunLogAppended(input: {
     // firehose. It is one reference per console line, and Home subscribes
     // `projects`, so a single agent run was re-running Home's loaders once per
     // line of output. `run.state-changed` stays on the firehose: that one is a
-    // real project fact and fires a handful of times per run.
+    // real project fact and fires a handful of times per run. Since 2026-09-23 a
+    // project-scoped page receives the frame but revalidates only when it shows
+    // that task (`SSE_RUN_LINE_EVENTS` in the client's `event-types.ts`).
     { projectSlug: input.projectSlug, taskKey: input.taskKey, skipFirehose: true },
   );
 }
