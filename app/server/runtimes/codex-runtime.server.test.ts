@@ -261,9 +261,10 @@ describe("codex adapter (SDK, injected fake client)", () => {
     await drain();
     const opOpts = operator.startOptions()!;
     expect(opOpts).toMatchObject({
-      // Ruling 185: no kind is OS-confined any more, the operator included —
-      // it holds no shell tool at all, so its confinement was never the thing
-      // that bound it. Its OS network is no longer forced off either.
+      // Ruling 185: no kind is OS-confined any more, the operator included.
+      // It does have the CLI's shell (its prompt runs `git show` for
+      // default-branch reads); its contract, not a sandbox, keeps it off the
+      // tree (ruling 207(b)). Its OS network is no longer forced off either.
       sandboxMode: "danger-full-access",
       approvalPolicy: "never",
     });
