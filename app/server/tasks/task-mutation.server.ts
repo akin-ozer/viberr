@@ -3,8 +3,9 @@ import { createActorResolver } from "~/shared/mapping/actor.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { resolveTaskFilePath, readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { getTaskSummary } from "~/server/projections/task-query.server";
 import {
   type CreateNotificationInput,
   createNotification,
@@ -20,6 +21,7 @@ import type {
 import { logger } from "~/server/logging/logger.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
+import type { TaskSummary } from "~/shared/mapping/task.server";
 import type { ProjectRole } from "~/shared/rbac";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
@@ -53,6 +55,10 @@ import {
  * than deferring it. `task-actions.server.ts` re-exports all of them, so the
  * many existing importers are unaffected; modules that would otherwise close
  * the cycle (`agent-toolkit`) import from HERE.
+ *
+ * Beside them sit the small reads the write paths share — a stage's display
+ * name, the post-write summary — on the same leaf-only footing, so any writer
+ * (`specialist-run` included) can import them without reopening the cycle.
  */
 
 export interface TaskActor {
@@ -218,6 +224,34 @@ export function reprojectTask(
   rebuildPath(db, resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), {
     dataRoot: ctx.dataRoot,
   });
+}
+
+/** The task's projected summary right after a write that re-projected it. A
+ *  missing row there is a broken projection, not a user error. */
+export function summaryOrThrow(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+): TaskSummary {
+  const summary = getTaskSummary(db, projectSlug, taskKey);
+  if (!summary) {
+    throw AppError.internal(
+      `Task ${projectSlug}/${taskKey} vanished after write.`,
+    );
+  }
+  return summary;
+}
+
+/** A stage's DISPLAY name, for the sentences that name one (a recommendation
+ *  label, the canonical re-anchor block); the raw id when the project file is
+ *  unreadable. */
+export function stageDisplayName(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  stageId: string,
+): string {
+  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
+  return file ? stageName(file.parsed.frontmatter.stages, stageId) : stageId;
 }
 
 export const OPERATOR_NOTIFY_FROM: ActorRender = { kind: "agent", name: "Operator" };

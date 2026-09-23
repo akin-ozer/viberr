@@ -33,6 +33,8 @@ import {
   OPERATOR_NOTIFY_FROM,
   recordRecommendationWithdrawal,
   reprojectTask,
+  stageDisplayName,
+  summaryOrThrow,
   withdrawAcceptanceOffers,
 } from "./task-mutation.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -734,6 +736,54 @@ describe("reprojectTask", () => {
       stage: "triage",
       title: "The other store's copy",
     });
+  });
+});
+
+describe("summaryOrThrow", () => {
+  it("answers the projected row the write just re-projected", () => {
+    const store = setupTestStore(ctx);
+    withTask(store, store.users.selin.id);
+
+    expect(summaryOrThrow(store.db, store.slug, "VIB-1")).toMatchObject({
+      projectSlug: store.slug,
+      key: "VIB-1",
+      stage: "review",
+    });
+  });
+
+  it("reports a row missing after the write as a server fault, not a 404", () => {
+    // The write path already re-projected the file it wrote, so a missing row
+    // is a broken projection. A 500 with this exact sentence is what the
+    // route's error page and the log line carry.
+    const store = setupTestStore(ctx);
+
+    let thrown: unknown;
+    try {
+      summaryOrThrow(store.db, store.slug, "VIB-404");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AppError);
+    expect(thrown).toMatchObject({
+      status: 500,
+      code: ERROR_CODES.INTERNAL,
+      message: `Task ${store.slug}/VIB-404 vanished after write.`,
+    });
+  });
+});
+
+describe("stageDisplayName", () => {
+  it("names the stage the way the project file does, falling back to the raw id", () => {
+    // The sentences that name a stage (a recommendation label, the canonical
+    // re-anchor block) must read "In Progress", not the id `impl`; an id the
+    // file does not declare, or a project file that cannot be read, still
+    // yields a usable word rather than an empty one.
+    const store = setupTestStore(ctx);
+    const context = { dataRoot: store.dataRoot };
+
+    expect(stageDisplayName(context, store.slug, "impl")).toBe("In Progress");
+    expect(stageDisplayName(context, store.slug, "qa")).toBe("qa");
+    expect(stageDisplayName(context, "no-such-project", "impl")).toBe("impl");
   });
 });
 

@@ -156,6 +156,7 @@ import {
 import {
   taskRef,
   reprojectTask,
+  summaryOrThrow,
   notifyTaskWatchers,
   loadProjectContext,
   OPERATOR_NOTIFY_FROM,
@@ -186,7 +187,6 @@ import {
 } from "~/server/files/file-store-root.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
-import { getTaskSummary } from "~/server/projections/task-query.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import {
@@ -541,22 +541,6 @@ function ownerAssignEvent(
     toAgent: false,
     evidence: null,
   };
-}
-
-
-
-function summaryOrThrow(
-  db: DatabaseSync,
-  projectSlug: string,
-  taskKey: string,
-): TaskSummary {
-  const summary = getTaskSummary(db, projectSlug, taskKey);
-  if (!summary) {
-    throw AppError.internal(
-      `Task ${projectSlug}/${taskKey} vanished after write.`,
-    );
-  }
-  return summary;
 }
 
 // -------------------------------------------------------------- createTask

@@ -31,7 +31,6 @@ import {
   type DependencyRef,
   type DependencyReleasePayload,
 } from "~/shared/dependencies";
-import { getTaskSummary } from "~/server/projections/task-query.server";
 import {
   deadDependencies,
   dependenciesSatisfied,
@@ -42,6 +41,7 @@ import {
   loadProjectContext,
   notifyTaskWatchers,
   reprojectTask,
+  summaryOrThrow,
   taskRef,
   type TaskActor,
 } from "./task-mutation.server";
@@ -226,12 +226,6 @@ function actorRefOf(db: DatabaseSync, actor: TaskActor, ctx: TaskActionContext) 
     userId: actor.userId,
     nameHint: findUserById(db, actor.userId)?.name ?? null,
   };
-}
-
-function summaryOrThrow(db: DatabaseSync, slug: string, key: string): TaskSummary {
-  const summary = getTaskSummary(db, slug, key);
-  if (!summary) throw AppError.internal(`Task ${slug}/${key} vanished after write.`);
-  return summary;
 }
 
 /** Is anything ELSE owed on this task, so `waiting` must not settle to `none`? */

@@ -81,7 +81,6 @@ import {
   type SkillPlugin,
 } from "~/server/runtimes/skill-mount.server";
 import { logger } from "~/server/logging/logger.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   getPatToken,
   getProjectCredential,
@@ -168,6 +167,9 @@ import {
   type WorkspaceCloneInput,
 } from "./repo-mirror.server";
 import type { TaskActor, TaskMutationContext } from "./task-actions.server";
+// Values come from the leaf substrate, never task-actions: task-actions
+// imports THIS module (see task-mutation.server.ts).
+import { reprojectTask, stageDisplayName, taskRef } from "./task-mutation.server";
 import { userDisplayName } from "./user-display-name.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 
@@ -185,18 +187,6 @@ type SkillMountInput = Parameters<typeof mountGrantedSkills>[0];
 const execFileAsync = promisify(execFile);
 
 // ----------------------------------------------------------------- helpers
-
-function taskRef(
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  taskKey: string,
-) {
-  return {
-    projectSlug,
-    taskKey,
-    dataRoot: ctx.dataRoot,
-  };
-}
 
 /** A deployed specialist resolved from project.md `agents:` for a run. */
 export interface ResolvedSpecialist {
@@ -487,16 +477,6 @@ function agentEvent(text: string): TaskFileEvent {
 
 // ------------------------------------------------------- canonical re-anchor
 
-/** The stage's DISPLAY name for the anchor block; the raw id when unreadable. */
-function stageDisplayName(
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  stageId: string,
-): string {
-  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
-  return file ? stageName(file.parsed.frontmatter.stages, stageId) : stageId;
-}
-
 /**
  * P19-G0 — the canonical task-state block for a FRESH run.
  *
@@ -707,7 +687,7 @@ export async function assignSpecialist(
       parsed.timeline.unshift(event);
     },
   );
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   // P14-GV-10: a handoff is its own fact — "assigned" reads as a first
   // assignment and loses the identity of the agent that was replaced.
@@ -863,7 +843,7 @@ export async function assignReviewer(
       parsed.timeline.unshift(event);
     },
   );
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   recordAudit(db, {
     // U36-11 (pass 36): the vocabulary predates supporting engagements — a
@@ -985,7 +965,7 @@ export async function removeReviewer(
       parsed.timeline.unshift(event);
     },
   );
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   recordAudit(db, {
     action: "task.reviewer.removed",
@@ -1976,7 +1956,7 @@ async function dispatchAgentRun(
         });
       },
     );
-    reproject(db, ctx, input.projectSlug, input.taskKey);
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   }
 
   // Collaboration guidance (G3/G4): tell the agent about its channel so the
@@ -2305,7 +2285,7 @@ async function dispatchAgentRun(
       }
     },
   );
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
   const runStartedDetails = {
     runId,
@@ -2590,7 +2570,7 @@ async function holdDispatch(
         evidence: null,
       });
     });
-    reproject(db, ctx, input.projectSlug, input.taskKey);
+    reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   }
   recordAudit(db, {
     action: "task.agent.run_held",
@@ -4330,17 +4310,6 @@ async function cloneRepo(
 }
 
 // --------------------------------------------------------------------- shared
-
-function reproject(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  taskKey: string,
-): void {
-  rebuildPath(db, resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), {
-    dataRoot: ctx.dataRoot,
-  });
-}
 
 /** Audit actor for the current caller: the operator (no user id) when the
  *  context is operator-authorized, else the human — after enforcing the
