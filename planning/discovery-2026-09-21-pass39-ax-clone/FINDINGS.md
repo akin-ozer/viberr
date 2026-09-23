@@ -169,11 +169,14 @@ what they strand, and record an optional reason.
   while AX-22 ran its ninth review round. Neither operator could see the chain. The owner had the
   controller move the lease (00:11, it reported the side effect: AX-22 can now deliver nothing until
   AX-20 merges). **Fixed: ruling 426.**
-- **F39-49 (HIGH) — the snapshot says a rework is on the pull request when it is not, so the
-  reviewer re-reviews the rejected head.** Right after the lease was moved, AX-20's operator
-  dispatched the reviewer to "the current delivered revision". `7ce74b2` (the rework) was only in
-  the workspace, PR #13 carried `c5001a3` (rejected at 23:11), and the snapshot said
-  `unpushedRevision: null`. Cause: the reconciler's never-pushed probe asked the 404 predicate of
+- **F39-49 (MED-HIGH) — the snapshot says a rework is on the pull request when it is not.**
+  Right after the lease was moved, AX-20's operator dispatched the reviewer without delivering.
+  `7ce74b2` (the rework) was only in the workspace, PR #13 carried `c5001a3` (rejected at 23:11),
+  and the snapshot said `unpushedRevision: null`. The reviewer reads the pinned revision from the
+  workspace, so its 00:21 verdict judged `7ce74b2` correctly. (I first logged that it re-reviewed
+  the rejected head; its evidence says "pinned revision matches 7ce74b2".) What was false: GitHub
+  showed the rejected code, the task page showed no unpushed notice, and nothing prompted a delivery
+  before acceptance. Cause: the reconciler's never-pushed probe asked the 404 predicate of
   an endpoint that answers 422 (ruling 223 fixed only the acceptance probe), and its test fixture
   answered 404. **Fixed: ruling 427** (the live AX-20 record needs the deploy to correct itself).
 - **F39-50 (MED) — a base refresh publishes work past a file lease.** At 00:11:38 AX-22's operator
