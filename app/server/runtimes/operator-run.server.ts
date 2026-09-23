@@ -4354,12 +4354,18 @@ type StrandedNudge = boolean | "idle-stage" | "plan-refused" | "refresh-ended";
  * a step of its own, and a plan may safely chain a refresh and the step it
  * prepares because ruling 430 stops the acting steps after one that opens a
  * packet. AX-5's operator planned the refresh alone and stopped.
+ *
+ * Ruling 450: and a walk across `auto` stages. Each of the operator's own
+ * moves ends its drive and the next stage starts another, so AX-1 spent five
+ * operator runs walking Design to Review with nothing to do at Build or
+ * Verify. The moves chain in one plan, each checked from the stage it runs at.
  */
 export const CODEX_PLAN_WHOLE_TURN =
   "The plan is the whole turn: nothing re-invokes you for a step of your own, so plan every step " +
-  "this turn needs, a refresh together with the step it prepares. If a step opens a decision " +
-  "packet (a refresh that meets a conflict does), Viberr carries out none of the acting steps " +
-  "after it (ruling 430). ";
+  "this turn needs. A refresh goes with the step it prepares. A walk across `auto` stages where " +
+  "nothing needs an agent is one `transition_stage` per stage, in order, in this plan (each is " +
+  "checked against the stage it runs from). If a step opens a decision packet (a refresh that meets " +
+  "a conflict does), Viberr carries out none of the acting steps after it (ruling 430). ";
 
 export const REFRESH_ENDED_NUDGE =
   "You are re-invoked ONCE because your previous run brought the branch up to date " +

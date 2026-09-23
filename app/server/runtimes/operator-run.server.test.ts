@@ -1869,6 +1869,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
     // CANARY: drop the sentence and nothing tells a plan that stopping after
     // the refresh leaves the task idle.
     expect(buildCodexOperatorPrompt(snapshot(), "manual")).toContain(CODEX_PLAN_WHOLE_TURN);
+    expect(CODEX_PLAN_WHOLE_TURN).toContain("A walk across `auto` stages where nothing needs an agent is one `transition_stage` per stage");
   });
 
   it("ruling 415: a tool-less operator gets a long report whole, and an honest note when even that is cut", () => {
@@ -2319,6 +2320,44 @@ describe("stranded auto-stage resume", () => {
         stageAtStart: "triage",
       });
       expect(resumed).toBe(false);
+    });
+
+    /**
+     * Ruling 450, live on ax-clone AX-1: walking Design to Review with nothing
+     * to do at Build or Verify took five operator runs, one per stage. A plan
+     * carries the whole walk, each move checked from the stage it runs at.
+     */
+    it("ruling 450: a plan walks two auto stages in one drive", async () => {
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      const walker = operatorRuns()[0]!.id;
+      adapter2.finish(
+        store2,
+        JSON.stringify({
+          reasoning: "",
+          actions: [
+            transitionAction({ toStageId: "ready", reason: "Triage done." }),
+            transitionAction({ toStageId: "impl", reason: "Nothing to do at Ready." }),
+          ],
+        }),
+        "finished",
+      );
+      await eventually(() => {
+        const parsed = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!.parsed;
+        expect(parsed.frontmatter.stage).toBe("impl");
+      });
+      // CANARY: make the executor stop after its first transition and the walk
+      // needs a drive per stage again.
+      const moves = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
+        .parsed.timeline.filter((e) => e.type === "transition" && e.actor.kind === "operator");
+      expect(moves).toHaveLength(2);
+      expect(operatorRuns().find((r) => r.id === walker)?.state).toBe("finished");
     });
 
     it("a drive that ends doing NOTHING at an auto stage is resumed; a pending decision ends the chain", async () => {

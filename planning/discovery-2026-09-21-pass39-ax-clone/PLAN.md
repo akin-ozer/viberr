@@ -105,7 +105,17 @@ per item and each one was applied to the source and observed failing.
 | 92 | A Codex operator is handed every report it cannot fetch, up to 16,000 characters (F39-67) | — | **done**, ruling 440 |
 | 93 | The operator is told a created task starts from the base branch (F39-68) | — | **done**, ruling 441 |
 | 94 | A drive that refreshed the branch and stopped is resumed once; a Codex plan is the whole turn (F39-69) | — | **done**, ruling 442 |
-| 95 | A dispatch carries the refusals its own plan already collected (F39-70) | — | **open**: the run's window closed first |
+| 95 | A dispatch carries the refusals its own plan already collected (F39-70) | — | **done**, ruling 446 |
+| 96 | A step whose outcome is the packet it opened is not a refusal (two nitpicks) | — | **done**, ruling 443 |
+| 97 | The controller's model is named in the turn, not in its recorded prompt | — | **done**, ruling 444 |
+| 98 | A mint the PR cannot be read for re-points the "not on the PR" line | — | **done**, ruling 445 |
+| 99 | An answer naming another actor goes to the operator (O39-a) | — | **done**, ruling 447 (default, owner may revisit) |
+| 100 | A controller reply the owner has not seen marks the dock and the thread lists (O39-d) | — | **done**, ruling 448 (default, owner may revisit) |
+| 101 | The accept dialog offers "update the branch and re-review first" (O39-c, design 1) | — | **done**, ruling 449 (default, owner may revisit); design 2 is the owner's |
+| 102 | A Codex plan walks `auto` stages in one drive (auto-boundary cost) | — | **done**, ruling 450 |
+| 103 | A decision the contract already holds is not appended again (O39-b) | — | **done** (no ruling; default, owner may revisit) |
+| 104 | A chain link released at birth says nothing held it (F39-65, the rest) | — | **done** (no ruling) |
+| 105 | Strings a YAML 1.1 reader takes for booleans are written quoted | — | **done** (no ruling) |
 | — | "A human cannot defer a task" (improvement point) | — | **withdrawn**: the control exists (FINDINGS) |
 | — | F39-2 (the model picker offers no plain `opus`) | — | **observed, not worked** — see below |
 

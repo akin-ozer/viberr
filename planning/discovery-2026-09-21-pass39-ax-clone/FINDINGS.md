@@ -746,12 +746,17 @@ what they strand, and record an optional reason.
 - ~~**Insights "By task" lists controller conversations as `/cnv_…`.**~~ **Fixed, U39-22**
   (2026-09-23): controller turns are one row, "controller conversations". Test:
   `insights-query.server.test.ts` "U39-22".
-- **The model picker's two lists disagree about Opus.** The live `supportedModels()` catalogue
+- **The model picker's two lists disagree about Opus.** *(Re-checked 2026-09-23 under the owner's "fix
+  findings": kept as not a defect. The live list is the account's own answer and the fallback is a guess
+  made without it. Making the fallback offer `opus[1m]` would offer a 1M-context model to accounts
+  whose live list lacks it, which is worse than the difference it removes.)* The live `supportedModels()` catalogue
   for this account offers `opus[1m]` and no plain `opus`; the curated fallback offers plain
   `opus`. Which one you can pick depends on whether the live fetch succeeded. Not a defect:
   `claudeModelRunsVerbatim` already stops a picker rewriting a stored value the runtime would
   run verbatim (pass 34, F34-7), so nothing is silently changed. (F39-2)
-- **An auto-boundary chain costs one operator run per stage.** AX-1 walked
+- ~~**An auto-boundary chain costs one operator run per stage.**~~ **Fixed, ruling 450** (2026-09-23): the
+  Codex prompt says a walk across `auto` stages with nothing to do is one plan, and a test pins that
+  the executor carries it in one drive. AX-1 walked
   Design→Build→Verify→Review with no work at Build or Verify: five operator runs to one
   specialist run. Documented behaviour (a transition re-triggers the operator), and on an
   all-Codex fleet it is nearly free — but on a six-stage board it is the dominant run count,
