@@ -3,7 +3,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from "react";
-import { createContext, useContext, useState } from "react";
+import { createContext, memo, useContext, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link } from "react-router";
 import { TASK_KEY_IN_TEXT_RE, type TaskLinks } from "~/shared/task-key-links";
@@ -398,14 +398,7 @@ function componentsFor(
 
 const DEFAULT_COMPONENTS = componentsFor(undefined, undefined);
 
-export function Markdown({
-  text,
-  mentionNames,
-  attachmentNames,
-  attachmentsBase,
-  onAttachmentOpen,
-  taskLinks,
-}: {
+interface MarkdownProps {
   text: string;
   /** Known mentionable names, so a multi-word "@Arda Kaya" chips as one span. */
   mentionNames?: string[];
@@ -421,11 +414,74 @@ export function Markdown({
   /** Opens an embedded attachment image in the task page's lightbox — pass
    *  `useAttachmentLightbox()`'s factory. Absent ⇒ embeds are plain images. */
   onAttachmentOpen?: AttachmentOpenFactory;
-}): ReactNode {
-  const components =
+}
+
+function sameList(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((item, i) => item === b[i]);
+}
+
+function sameSet(a: ReadonlySet<string> | undefined, b: ReadonlySet<string> | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const item of a) if (!b.has(item)) return false;
+  return true;
+}
+
+function sameLinks(a: TaskLinks | undefined, b: TaskLinks | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => a[key] === b[key]);
+}
+
+/**
+ * Equal by CONTENT, not identity. A live page re-renders on every revalidation
+ * and every console append, and a revalidation hands it brand-new loader
+ * objects carrying the same text — so an identity check would still re-parse
+ * every comment. A task page with a running agent re-renders its whole timeline
+ * per console line (the tail lives in the page), each comment through the full
+ * remark/rehype pipeline; on AX-31's timeline this memo took a page re-render
+ * from ~26 ms to ~16 ms (jsdom, React dev build, 2026-09-23).
+ */
+function sameMarkdownProps(a: MarkdownProps, b: MarkdownProps): boolean {
+  return (
+    a.text === b.text &&
+    a.attachmentsBase === b.attachmentsBase &&
+    a.onAttachmentOpen === b.onAttachmentOpen &&
+    sameList(a.mentionNames, b.mentionNames) &&
+    sameSet(a.attachmentNames, b.attachmentNames) &&
+    sameLinks(a.taskLinks, b.taskLinks)
+  );
+}
+
+export const Markdown = memo(function Markdown({
+  text,
+  mentionNames,
+  attachmentNames,
+  attachmentsBase,
+  onAttachmentOpen,
+  taskLinks,
+}: MarkdownProps): ReactNode {
+  // Stable component TYPES: `componentsFor` returns fresh functions, and React
+  // unmounts and remounts every element rendered through a new type — every
+  // link, image and code block of the comment. Keyed on the names' CONTENT: the
+  // timeline hands over a new Set on every page render, so an identity key
+  // would rebuild them whenever anything else in the comment changed. The names
+  // are directory entries, which cannot contain "/", so the join is exact.
+  const attachmentKey =
     attachmentNames && attachmentNames.size > 0 && attachmentsBase
-      ? componentsFor(attachmentNames, attachmentsBase, onAttachmentOpen)
-      : DEFAULT_COMPONENTS;
+      ? [...attachmentNames].join("/")
+      : "";
+  const components = useMemo(
+    () =>
+      attachmentKey && attachmentsBase
+        ? componentsFor(new Set(attachmentKey.split("/")), attachmentsBase, onAttachmentOpen)
+        : DEFAULT_COMPONENTS,
+    [attachmentKey, attachmentsBase, onAttachmentOpen],
+  );
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -438,4 +494,4 @@ export function Markdown({
       {text}
     </ReactMarkdown>
   );
-}
+}, sameMarkdownProps);

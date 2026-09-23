@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRevalidator } from "react-router";
+import { z } from "zod";
 import {
   buildEventsUrl,
   SSE_CONTROL_EVENTS,
+  SSE_RUN_LINE_EVENTS,
   SSE_STREAM_EVENTS,
   SSE_EVENT_NAMES,
+  sseScopes,
 } from "./event-types";
 
 /**
@@ -15,7 +18,9 @@ import {
  *
  * Revalidations are debounced 300 ms (trailing) so event bursts — a rescan
  * projecting ten tasks, a mutation emitting task + project + notification —
- * coalesce into one loader round-trip.
+ * coalesce into one loader round-trip. Run LINES are the exception: they
+ * revalidate only the surface showing that task, at most once per
+ * `RUN_LINE_REVALIDATE_MS`, and never push a pending revalidation out.
  *
  * Loop safety: revalidation only re-runs loaders (GETs). The one loader-side
  * write — R19-15's task-view read-marking — is MONOTONIC (`read_at IS NULL`
@@ -39,6 +44,41 @@ import {
  */
 
 export const REVALIDATE_DEBOUNCE_MS = 300;
+
+/**
+ * The floor between two revalidations that run LINES cause
+ * (`SSE_RUN_LINE_EVENTS`). A line only moves the Live run strip (phase, step,
+ * turns, tokens); the console itself tails through `useRunLogStream`, which
+ * never waits on this.
+ *
+ * Measured on a live instance (2026-09-23, the ax-clone board): a Claude run
+ * writes ~0.7 lines a second with bursts of 2-3, three quarters of them
+ * thinking-token ticks, and one revalidation of a task page is a 1.4 MB payload,
+ * ~95 ms of the server's event loop (the one the agents run on) and ~30 ms of the
+ * tab's main thread. Debounced only, the lines of a few concurrent runs
+ * revalidated every open board and task page of the project two or three times
+ * a second; three such pages pushed a trivial request's p90 from 8 ms to 157 ms.
+ */
+export const RUN_LINE_REVALIDATE_MS = 2_000;
+
+/** The fields of a run-line frame this hook reads, parsed rather than trusted
+ *  (`app/schemas/sse-event.schema.ts` is the wire contract). */
+const runLineSchema = z.object({
+  data: z.object({ projectSlug: z.string(), taskKey: z.string() }),
+});
+
+/** The `task:` scope a run-line frame belongs to, or null for a frame that does
+ *  not parse (dropped, the way the log consumer drops one). */
+function runLineTaskScope(raw: string): string | null {
+  try {
+    const parsed = runLineSchema.safeParse(JSON.parse(raw));
+    return parsed.success
+      ? sseScopes.task(parsed.data.data.projectSlug, parsed.data.data.taskKey)
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Joins the scope list into one effect-dependency string. Scope ids never
  *  contain whitespace, so a newline is an unambiguous separator. */
@@ -168,23 +208,49 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let reopen: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
+    let lastRevalidateAt = Number.NEGATIVE_INFINITY;
+    const revalidateNow = () => {
+      timer = null;
+      lastRevalidateAt = Date.now();
+      void revalidateRef.current();
+    };
     const scheduleRevalidate = () => {
       if (timer !== null) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        void revalidateRef.current();
-      }, REVALIDATE_DEBOUNCE_MS);
+      timer = setTimeout(revalidateNow, REVALIDATE_DEBOUNCE_MS);
+    };
+    // A run line JOINS a pending revalidation instead of pushing it out: under a
+    // steady stream of lines a trailing debounce would never fire, and each one
+    // resetting the clock is how a few runs turned into a loader round-trip
+    // every few hundred ms.
+    const scheduleRunLineRevalidate = () => {
+      if (timer !== null) return;
+      const wait = Math.max(
+        REVALIDATE_DEBOUNCE_MS,
+        lastRevalidateAt + RUN_LINE_REVALIDATE_MS - Date.now(),
+      );
+      timer = setTimeout(revalidateNow, wait);
     };
 
-    const url = buildEventsUrl(scopeKey.split(SCOPE_SEPARATOR));
+    const scopeList = scopeKey.split(SCOPE_SEPARATOR);
+    const url = buildEventsUrl(scopeList);
     const source = new EventSource(url);
     for (const name of SSE_EVENT_NAMES) {
       // A stream event (one per console line) is the dedicated log consumer's
       // to handle; revalidating every surface of the person on each would turn
       // one controller turn into a loader storm.
-      if (!SSE_CONTROL_EVENTS.includes(name) && !SSE_STREAM_EVENTS.includes(name)) {
-        source.addEventListener(name, scheduleRevalidate);
+      if (SSE_CONTROL_EVENTS.includes(name) || SSE_STREAM_EVENTS.includes(name)) continue;
+      if (SSE_RUN_LINE_EVENTS.includes(name)) {
+        // Only the surface showing THAT task has anything a line changes. The
+        // `project:` scope delivers every run of the project here as well — to
+        // the board and to every other open task page — and each of those used
+        // to refetch its whole loader per line of somebody else's run.
+        source.addEventListener(name, (event: MessageEvent<string>) => {
+          const scope = runLineTaskScope(event.data);
+          if (scope !== null && scopeList.includes(scope)) scheduleRunLineRevalidate();
+        });
+        continue;
       }
+      source.addEventListener(name, scheduleRevalidate);
     }
     source.onopen = () => {
       setPaused(false);

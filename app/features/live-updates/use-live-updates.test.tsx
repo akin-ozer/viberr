@@ -5,6 +5,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import {
   REVALIDATE_DEBOUNCE_MS,
+  RUN_LINE_REVALIDATE_MS,
   SSE_REOPEN_BACKOFF_MS,
   useLiveUpdates,
 } from "./use-live-updates";
@@ -82,10 +83,23 @@ class FakeEventSource {
   close() {
     this.closed = true;
   }
-  emit(name: string, lastEventId = "") {
+  emit(name: string, lastEventId = "", data = "{}") {
     for (const fn of this.listeners.get(name) ?? []) {
-      fn(new MessageEvent<string>(name, { data: "{}", lastEventId }));
+      fn(new MessageEvent<string>(name, { data, lastEventId }));
     }
+  }
+  /** One console line of a task run, as the broker frames it. */
+  emitRunLine(projectSlug: string, taskKey: string, seq: number) {
+    this.emit(
+      "run.log-appended",
+      String(seq),
+      JSON.stringify({
+        type: "run.log-appended",
+        entityId: `${projectSlug}/${taskKey}`,
+        occurredAt: "2026-09-23T12:00:00.000Z",
+        data: { projectSlug, taskKey, runId: "run_1", threadId: "thr_1", seq },
+      }),
+    );
   }
   static last(): FakeEventSource {
     return FakeEventSource.instances.at(-1)!;
@@ -267,6 +281,84 @@ describe("useLiveUpdates", () => {
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
     expect(loaderRuns).toBe(1);
+  });
+
+  /**
+   * A run writes a console line every second or so, in bursts of two or three,
+   * and the `project:` scope delivers every run of the project to the board and
+   * to every open task page. Measured live (ax-clone, 2026-09-23): each line
+   * revalidated those surfaces, a task page's revalidation being a 1.4 MB
+   * payload and ~95 ms of the server's event loop, the one the agents run on.
+   * Nothing on a board or on another task's page changes per line.
+   */
+  it("a run line never revalidates a surface that is not showing that task", () => {
+    // The board: project + user, no task open.
+    render(<Probe scopes={["project:viberr-core", "user"]} />, { wrapper: DataRouter });
+    act(() => {
+      for (let seq = 1; seq <= 20; seq += 1) {
+        FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", seq);
+        vi.advanceTimersByTime(100);
+      }
+      vi.advanceTimersByTime(RUN_LINE_REVALIDATE_MS * 2);
+    });
+    // CANARY: drop the scope check in the run-line listener.
+    expect(loaderRuns, "the board refetched per console line").toBe(0);
+    cleanup();
+
+    // Another task's page: it subscribes the project for its rail, so the
+    // frame of a sibling's run reaches it as well.
+    render(
+      <Probe scopes={["project:viberr-core", "task:viberr-core/VIB-7", "user"]} />,
+      { wrapper: DataRouter },
+    );
+    act(() => {
+      FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", 21);
+      // A frame that does not parse is dropped, not treated as a match.
+      FakeEventSource.last().emit("run.log-appended", "22", "not json");
+      vi.advanceTimersByTime(RUN_LINE_REVALIDATE_MS * 2);
+    });
+    expect(loaderRuns, "a sibling task page refetched per line").toBe(0);
+    // Its own domain events still revalidate, as before.
+    act(() => {
+      FakeEventSource.last().emit("run.state-changed", "23");
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+    });
+    expect(loaderRuns).toBe(1);
+  });
+
+  it("the task's own page revalidates on its run's lines at most once per RUN_LINE_REVALIDATE_MS, and a steady stream cannot starve it", () => {
+    render(
+      <Probe scopes={["project:viberr-core", "task:viberr-core/VIB-42", "user"]} />,
+      { wrapper: DataRouter },
+    );
+    const es = FakeEventSource.last();
+    // The first line after a quiet spell shows on the ordinary debounce.
+    act(() => {
+      es.emitRunLine("viberr-core", "VIB-42", 1);
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+    });
+    expect(loaderRuns).toBe(1);
+
+    // A line every 100 ms for 4.1 s: a trailing debounce would never fire;
+    // this fires once per floor. CANARY: make a line reset the pending timer
+    // (`scheduleRevalidate`) and this stays at 1.
+    act(() => {
+      for (let seq = 2; seq <= 42; seq += 1) {
+        es.emitRunLine("viberr-core", "VIB-42", seq);
+        vi.advanceTimersByTime(100);
+      }
+    });
+    // CANARY: drop the floor (`lastRevalidateAt + RUN_LINE_REVALIDATE_MS`) and
+    // this reads 14.
+    expect(loaderRuns).toBe(3);
+
+    // A domain event does not wait behind the floor.
+    act(() => {
+      es.emitRunLine("viberr-core", "VIB-42", 43);
+      es.emit("task.updated", "44");
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+    });
+    expect(loaderRuns).toBe(4);
   });
 
   it("closes the stream and cancels pending revalidation on unmount", () => {

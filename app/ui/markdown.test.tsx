@@ -320,3 +320,60 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
     expect(container.querySelector("a:not(.task-ref)")!.getAttribute("href")).toBe("https://x.test");
   });
 });
+
+describe("re-rendering a live page", () => {
+  /**
+   * A task page re-renders on every console line of its running agent and on
+   * every revalidation, and a revalidation hands it NEW loader objects with the
+   * same content. Each of those used to re-run the remark/rehype pipeline for
+   * every comment, and — with attachments — to remount every link, image and
+   * code block, because `componentsFor` built fresh component types per render.
+   */
+  it("keeps the rendered elements when the content has not changed", () => {
+    const BASE = "/projects/p/tasks/T-1/attachments";
+    const text = "see [shot](attachments/shot.png) and `code` and TP-2";
+    const view = (names: string[], links: Record<string, string>) => (
+      <MemoryRouter>
+        <Markdown
+          text={text}
+          mentionNames={["Arda Kaya"]}
+          taskLinks={links}
+          attachmentNames={new Set(names)}
+          attachmentsBase={BASE}
+        />
+      </MemoryRouter>
+    );
+    const { container, rerender } = render(view(["shot.png"], { "TP-2": "/projects/p/tasks/TP-2" }));
+    const link = container.querySelector(`a[href="${BASE}/shot.png"]`);
+    const code = container.querySelector("code");
+    expect(link).not.toBeNull();
+
+    // Equal content, every object new — what a revalidation delivers.
+    // CANARY: drop `sameMarkdownProps` from the `memo` call and both nodes are
+    // replaced (new component types remount them).
+    rerender(view(["shot.png"], { "TP-2": "/projects/p/tasks/TP-2" }));
+    expect(container.querySelector(`a[href="${BASE}/shot.png"]`)).toBe(link);
+    expect(container.querySelector("code")).toBe(code);
+
+    // A change elsewhere in the comment re-renders it, but its attachment-aware
+    // elements keep their component types, so the code block is not remounted.
+    // CANARY: key the `components` memo on the Set's identity (the timeline
+    // passes a new one on every page render) and this node is replaced.
+    rerender(view(["shot.png"], { "TP-2": "/projects/p/tasks/TP-2?v2" }));
+    expect(container.querySelector("a.task-ref")!.getAttribute("href")).toBe(
+      "/projects/p/tasks/TP-2?v2",
+    );
+    expect(container.querySelector("code")).toBe(code);
+
+    // A real change still renders: the attachment is gone, so the link is
+    // left as the agent wrote it.
+    rerender(view([], { "TP-2": "/projects/p/tasks/TP-2" }));
+    expect(container.querySelector(`a[href="${BASE}/shot.png"]`)).toBeNull();
+    expect(container.querySelector('a[href="attachments/shot.png"]')).not.toBeNull();
+    // And a changed task link re-renders the key.
+    rerender(view([], { "TP-2": "/projects/p/tasks/TP-2?moved" }));
+    expect(container.querySelector("a.task-ref")!.getAttribute("href")).toBe(
+      "/projects/p/tasks/TP-2?moved",
+    );
+  });
+});
