@@ -28,6 +28,7 @@ import {
   type LoginSessionView,
 } from "~/server/runtimes/backend-login.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   isNotifPrefCategory,
   mergeNotifPrefs,
@@ -210,9 +211,6 @@ export function disconnectGithubIdentity(
  * and resolving it is `backend-login.server.ts`'s job. Routes stay thin, so the
  * route never reaches for a binary itself.
  */
-
-/** Ruling 92: the backends are called "Claude" and "Codex" everywhere. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 /**
  * Start the vendor's own hosted sign-in for this person.

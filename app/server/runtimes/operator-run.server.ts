@@ -148,6 +148,7 @@ import {
   type DescribeRunFailureInput,
 } from "~/server/tasks/run-failure-remedy.server";
 import { PLAN_NOT_CARRIED_OUT_LEAD } from "~/shared/run-failure";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   noteModelAvailabilityFromFailure,
   clearModelMark,
@@ -4150,7 +4151,7 @@ export function buildOperatorSystemPrompt(
   // servers: X" while zero servers mounted, and then reported X as available.
   parts.push(
     "\n\n---\n# Your runtime\n\n" +
-      `You are running on the **${authority.backend === "claude" ? "Claude" : "Codex"}** backend` +
+      `You are running on the **${BACKEND_LABEL[authority.backend]}** backend` +
       (authority.model ? `, model \`${authority.model}\`` : "") +
       (authority.effort ? `, reasoning effort \`${authority.effort}\`` : "") +
       ".\n" +

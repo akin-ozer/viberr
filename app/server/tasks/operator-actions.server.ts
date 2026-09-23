@@ -57,6 +57,7 @@ import {
   type UnpushedRevision,
 } from "~/schemas/task-file.schema";
 import { PLAN_NOT_CARRIED_OUT_RE, RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { readGoalFile } from "~/server/files/goal-writer.server";
 import { acceptanceBoundaryRefusal } from "~/server/github/acceptance-boundary.server";
 import {
@@ -1472,7 +1473,7 @@ export async function operatorOpenPacket(
         if (!backend || !ownerId) continue;
         const hold = backendDispatchHold(db, backend, { credentialUserId: ownerId });
         if (!hold) continue;
-        const label = backend === "codex" ? "Codex" : "Claude";
+        const label = BACKEND_LABEL[backend];
         const until = hold.until
           ? ` until ${new Date(hold.until).toISOString()}`
           : "";
@@ -4197,7 +4198,7 @@ export async function operatorDispatchAgent(
     // the owner's credential, and the failure opens the very packet this
     // sentence forbade. So the alternative is offered only when it exists.
     const otherBackend: RealBackend = error.hold.backend === "codex" ? "claude" : "codex";
-    const other = otherBackend === "claude" ? "Claude" : "Codex";
+    const other = BACKEND_LABEL[otherBackend];
     const ownerId =
       readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter
         .ownerUserId ?? null;
@@ -4291,7 +4292,7 @@ export async function operatorDispatchAgent(
   }
   return {
     outcome: "done",
-    message: `Started a ${result.backend === "claude" ? "Claude" : "Codex"} run for ${agent.name} (${as}).`,
+    message: `Started a ${BACKEND_LABEL[result.backend]} run for ${agent.name} (${as}).`,
   };
 }
 

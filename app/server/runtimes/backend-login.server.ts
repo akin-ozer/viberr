@@ -11,6 +11,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { logger } from "~/server/logging/logger.server";
 import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   recordBackendLogin,
   type BackendBinaries,
@@ -101,9 +102,6 @@ const TERMINAL_STATES: ReadonlySet<LoginState> = new Set<LoginState>([
 export function isTerminalLoginState(state: LoginState): boolean {
   return TERMINAL_STATES.has(state);
 }
-
-/** Ruling 92: the backends are called "Claude" and "Codex" everywhere. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 /**
  * Which sign-in flows each vendor actually offers, and the ONE home of that

@@ -33,7 +33,7 @@ export type AgentRunRow = {
   session_id: string | null;
   sdk: string;
   /** The deployed agent's display name ("dev"/"Operator"/…); null on seed/
-   *  historical rows (the projection falls back to the backend WHO_NAME). */
+   *  historical rows (the projection falls back to the backend label). */
   agent_name: string | null;
   /** The deployed profile id — the stable per-agent grouping key. */
   agent_profile_id: string;

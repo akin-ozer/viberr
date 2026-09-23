@@ -130,6 +130,7 @@ import {
 import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { newId } from "~/shared/ids/new-id.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
 import {
   type DeliveryPermissions,
@@ -627,7 +628,7 @@ export async function assignSpecialist(
     }
   }
 
-  const backendLabel = specialist.backend === "claude" ? "Claude" : "Codex";
+  const backendLabel = BACKEND_LABEL[specialist.backend];
   const ref: AgentRef = {
     profileId: specialist.profileId,
     backend: specialist.backend,
@@ -799,7 +800,7 @@ export async function assignReviewer(
     };
   }
 
-  const backendLabel = reviewer.backend === "claude" ? "Claude" : "Codex";
+  const backendLabel = BACKEND_LABEL[reviewer.backend];
   const ref: AgentRef = {
     profileId: reviewer.profileId,
     backend: reviewer.backend,
@@ -2204,16 +2205,14 @@ async function dispatchAgentRun(
     },
   });
 
-  const backendLabel = backend === "claude" ? "Claude" : "Codex";
+  const backendLabel = BACKEND_LABEL[backend];
   const switched = engagement.backend !== backend;
   // F36-8 (pass 36): the event names the MODEL when the backend switch made
   // run-service substitute it, and says the pin sticks when this run set one.
   // Live, "switched from Codex" was the whole disclosure, and the next
   // operator dispatch ran on Claude/sonnet with nobody having chosen sonnet.
   const substitutedNote = modelSubstitution.foreignBackend
-    ? ` on \`${ranModel}\` — the profile's \`${model}\` is a ${
-        modelSubstitution.foreignBackend === "claude" ? "Claude" : "Codex"
-      } model`
+    ? ` on \`${ranModel}\` — the profile's \`${model}\` is a ${BACKEND_LABEL[modelSubstitution.foreignBackend]} model`
     : "";
   const pinNote = input.backendOverride
     ? `. Later runs on this task stay on ${backendLabel} until another retry moves them`
@@ -2258,11 +2257,7 @@ async function dispatchAgentRun(
             refusal,
             backendLabel,
             role: engagement.role,
-            switchedFrom: switched
-              ? engagement.backend === "claude"
-                ? "Claude"
-                : "Codex"
-              : null,
+            switchedFrom: switched ? BACKEND_LABEL[engagement.backend] : null,
             notes: `${substitutedNote}${pinNote}`,
           }),
         ),
@@ -2479,7 +2474,7 @@ async function holdDispatch(
     actor: AuditActor;
   },
 ): Promise<AppError> {
-  const backendLabel = input.backend === "claude" ? "Claude" : "Codex";
+  const backendLabel = BACKEND_LABEL[input.backend];
   const untilIso = input.hold.until != null ? new Date(input.hold.until).toISOString() : null;
   const untilLabel = formatResetLabel(untilIso);
   const observedMs = Date.parse(input.hold.observedAt);

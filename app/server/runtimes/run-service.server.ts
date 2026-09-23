@@ -98,6 +98,7 @@ import {
 } from "./context-policy.server";
 import type { RunPrompt } from "./prompt-prefix.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 
 import { newId } from "~/shared/ids/new-id.server";
 
@@ -374,13 +375,6 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
 const SDK_LABEL = {
   claude: "Claude Agent SDK",
   codex: "Codex SDK",
-} satisfies Record<RealBackend, string>;
-
-/** The product's name for each backend, as every other human-facing string
- *  spells it ("Claude" / "Codex"). */
-const BACKEND_LABEL = {
-  claude: "Claude",
-  codex: "Codex",
 } satisfies Record<RealBackend, string>;
 
 export interface StartRunInput {
@@ -1375,7 +1369,7 @@ function sessionMissingMessage(
   sessionId: string,
   reason: ContinuityLossReason,
 ): string {
-  const label = backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[backend];
   if (reason === "owner_changed") {
     return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 127). Nothing is wrong with the credential, and the transcript is not gone — it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
   }
@@ -1399,7 +1393,7 @@ function recordSessionMissing(
   stale?: StaleSessionFacts,
 ): void {
   const now = new Date().toISOString();
-  const label = run.backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[run.backend];
   // Ruling 372: a set-aside session is a DECISION, recorded as a meta line
   // under its own tag — the session is intact, nothing failed.
   const text =
@@ -1447,7 +1441,7 @@ function continuityResetPreamble(
   /** Ruling 372: a set-aside session says so, and carries the last report. */
   stale?: { facts: StaleSessionFacts; lastReport: string | null },
 ): string {
-  const label = backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[backend];
   // Ruling 99: a controller turn has no task.md — its anchors are the recent
   // conversation digest its turn prompt carries and the live tool reads.
   if (kind === "controller") {
@@ -1522,7 +1516,7 @@ async function noteContinuityReset(
     taskKey: run.task_key,
   };
   if (dataRoot) ref.dataRoot = dataRoot;
-  const label = run.backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[run.backend];
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({
@@ -2588,7 +2582,7 @@ async function noteInterrupt(
   if (run.kind === "controller") return;
   const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
   if (dataRoot) ref.dataRoot = dataRoot;
-  const backend = run.backend === "claude" ? "Claude" : "Codex";
+  const backend = BACKEND_LABEL[run.backend];
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({
@@ -2644,7 +2638,7 @@ async function noteRunStarted(
   if (run.kind === "controller") return;
   const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
   if (dataRoot) ref.dataRoot = dataRoot;
-  const backend = run.backend === "claude" ? "Claude" : "Codex";
+  const backend = BACKEND_LABEL[run.backend];
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({

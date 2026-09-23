@@ -12,6 +12,7 @@ import {
   sealSecret,
 } from "~/server/secrets/secret-box.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { retireBackendRecordsFor } from "./backend-quota.server";
 import { filteredSpawnEnv, type RealBackend } from "./runtime-registry.server";
 import {
@@ -97,8 +98,6 @@ export interface BackendCredentialRow {
   updatedAt: string;
 }
 
-/** Ruling 92: the backends are called "Claude" and "Codex" everywhere. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 /** Who actually accepts or rejects a pasted key — the company, not the CLI. */
 const VENDOR_LABEL = { claude: "Anthropic", codex: "OpenAI" } as const;
 

@@ -1,11 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
-  agentBackendName,
   agentRoleDisplay,
   decodeActorRef,
   slugToRole,
   systemIdToName,
 } from "~/server/files/actor-ref.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { z } from "zod";
 import {
   createActorRenderOverlay,
@@ -668,7 +668,7 @@ export function displayAuditActorLabel(raw: string): string {
   const ref = decodeActorRef(raw);
   switch (ref.kind) {
     case "agent":
-      return `${slugToRole(ref.profileId)} (${agentRoleDisplay(ref)}) · ${agentBackendName(ref.backend)}`;
+      return `${slugToRole(ref.profileId)} (${agentRoleDisplay(ref)}) · ${BACKEND_LABEL[ref.backend]}`;
     case "system":
       return systemIdToName(ref.systemId);
     case "operator":

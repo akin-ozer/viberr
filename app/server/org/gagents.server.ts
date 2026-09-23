@@ -24,6 +24,7 @@ import {
 import { conservativeGrantsFor } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
 import { displayNameRefusal, normalizeDisplayName } from "~/shared/names";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   assertEffortForBackend,
   assertModelForBackend,
@@ -426,9 +427,6 @@ export interface SaveGagentResult {
    */
   textBehind: TemplateTextDrift[];
 }
-
-/** The product's name for each backend, as the toasts spell it. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 /**
  * The model to store after one save (ruling 153): the caller's, checked by

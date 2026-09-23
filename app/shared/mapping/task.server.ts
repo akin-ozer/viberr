@@ -63,11 +63,11 @@ export function nextScheduleDueAt(schedulesJson: string): string | null {
   return due[0] ?? null;
 }
 import {
-  agentBackendName,
   agentRoleDisplay,
   decodeActorRef,
   systemIdToName,
 } from "~/server/files/actor-ref.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 
 /**
@@ -543,7 +543,7 @@ export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
     kind: "agent",
     profileId: ref.profileId,
     backend: ref.backend,
-    name: agentBackendName(ref.backend),
+    name: BACKEND_LABEL[ref.backend],
     role: ref.role,
     profileName: null,
     pinnedBackend: ref.pinnedBackend ?? null,
@@ -589,7 +589,7 @@ export function withLiveAgentIdentities(
     // follows the deployment.
     const backend = agent.pinnedBackend ? agent.backend : deployed.backend;
     if (backend === agent.backend && (agent.profileName ?? null) === deployed.name) return agent;
-    return { ...agent, backend, name: agentBackendName(backend), profileName: deployed.name };
+    return { ...agent, backend, name: BACKEND_LABEL[backend], profileName: deployed.name };
   };
   const specialist = summary.specialist ? patch(summary.specialist) : null;
   const reviewers = summary.reviewers.map(patch);

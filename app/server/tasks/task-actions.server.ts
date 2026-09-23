@@ -12,6 +12,7 @@ import { closureRefusal, taskClosure } from "./task-closure.server";
 import { requiredReviewerRefusals } from "./required-reviewers.server";
 import { findUserById } from "~/server/auth/user-store.server";
 import { formatUsd, runDidNotCompleteLead } from "~/shared/run-failure";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import type {
   CollisionServerOutcome,
   ResolvedPacketOption,
@@ -5321,7 +5322,7 @@ export async function applyAgentCompletionEffects(
   if (finished.state === "error") {
     const { runFailureReason } = await import("./agent-reply.server");
     const failure = runFailureReason(db, finished.id);
-    const backendLabel = input.backend === "claude" ? "Claude" : "Codex";
+    const backendLabel = BACKEND_LABEL[input.backend];
     const roleLabel = "agent";
     // R20-3: 240 (PROVIDER_TEXT_CHARS), not 180 — the provider's own sentence
     // is now split off onto its own line/observation, and the clamp used to cut
@@ -10302,8 +10303,7 @@ export async function resolvePacket(
       // target backend; startSpecialistRun/startReviewerRun set the engagement's
       // `pinnedBackend` (F27-B1) so the switch STICKS — every later prompt on this
       // task follows the pin over the live profile until another retry re-pins it.
-      const targetLabel =
-        (option.backend ?? "claude") === "claude" ? "Claude" : "Codex";
+      const targetLabel = BACKEND_LABEL[option.backend ?? "claude"];
       event = {
         occurredAt: now,
         type: "transition",

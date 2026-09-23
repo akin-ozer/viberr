@@ -6,6 +6,7 @@ import {
   DATED_CLAUDE_ID_RE,
   splitClaudeVariant,
 } from "~/shared/model-ids";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import type { RunCredential } from "./backend-credentials.server";
 import { unavailableModels } from "./model-availability.server";
 import {
@@ -241,9 +242,6 @@ export function defaultModelFor(backend: RealBackend): string {
 export function defaultEffortFor(backend: RealBackend): string {
   return (backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED).defaultEffort;
 }
-
-/** Display names for the refusal sentences below (and the controller's replies). */
-export const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const satisfies Record<RealBackend, string>;
 
 /** The effort tiers a backend OFFERS (the curated list; Codex's accepted but
  *  unoffered `minimal` is deliberately absent, see `CODEX_EFFORTS`). */

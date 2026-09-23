@@ -7,6 +7,7 @@ import {
   type UserBackendHealth,
 } from "./backend-credentials.server";
 import type { RealBackend } from "./runtime-registry.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 
 /**
  * Whose account a run bills (ruling 127).
@@ -57,9 +58,6 @@ export type RunPrincipalRefusal =
 export type RunPrincipalResolution =
   | { ok: true; principal: RunPrincipal; health: UserBackendHealth }
   | { ok: false; refusal: RunPrincipalRefusal };
-
-/** Ruling 92: the backends are called "Claude" and "Codex" everywhere. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 const NO_PROCESS = "No agent process was started.";
 

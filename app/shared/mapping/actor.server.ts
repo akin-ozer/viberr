@@ -1,10 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import {
-  agentBackendName,
   agentRoleDisplay,
   systemIdToName,
 } from "~/server/files/actor-ref.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { initialsOf } from "~/ui/initials";
 
 /**
@@ -112,7 +112,7 @@ export function createActorResolver(
           // The agent's own name is the identity; the backend is the runtime,
           // not who acted. Fall back to the backend label only when the name is
           // unknown (nameless seed/legacy run, or no project context).
-          name: options.agentNames?.get(ref.profileId) ?? agentBackendName(ref.backend),
+          name: options.agentNames?.get(ref.profileId) ?? BACKEND_LABEL[ref.backend],
           role: agentRoleDisplay(ref),
         };
       case "system":

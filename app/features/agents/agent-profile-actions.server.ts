@@ -35,6 +35,7 @@ import {
   assertModelForBackend,
 } from "~/server/runtimes/model-catalog.server";
 import { displayNameRefusal, normalizeDisplayName } from "~/shared/names";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { existsSync, readFileSync } from "node:fs";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import {
@@ -296,9 +297,6 @@ function reprojectProject(
     dataRoot: ctx.dataRoot,
   });
 }
-
-/** The product's name for each backend, as the picker spells it. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 function parseForm(raw: SubmittedProfileForm): ProfileFormInput {
   const parsed = profileFormSchema.safeParse(raw);

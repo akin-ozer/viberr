@@ -10,8 +10,8 @@ import {
   listTaskAttachments,
   readTaskAttachmentText,
 } from "~/server/files/task-attachments.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
-  BACKEND_LABEL,
   assertEffortForBackend,
   assertModelForBackend,
   defaultEffortFor,
@@ -1309,7 +1309,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           });
           // Ruling 153: the reply states the defaults a deploy will take.
           const defaults =
-            ` Template defaults: ${saved.profile.backend === "codex" ? "Codex" : "Claude"}, ` +
+            ` Template defaults: ${BACKEND_LABEL[saved.profile.backend]}, ` +
             `model ${saved.profile.model || defaultModelFor(saved.profile.backend)}, ` +
             `effort ${saved.profile.effort || defaultEffortFor(saved.profile.backend)}.`;
           // Ruling 156: the reply is built from the RESULT, not the toast. A
@@ -3198,7 +3198,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (args.effort) deployInput.effort = args.effort;
         const result = await deployAgentProfileFromLibrary(db, deployInput, actor, { dataRoot });
         const stored = result.applied
-          ? ` Runs on ${result.applied.backend === "codex" ? "Codex" : "Claude"} with model ${result.applied.model} at effort ${result.applied.effort}.`
+          ? ` Runs on ${BACKEND_LABEL[result.applied.backend]} with model ${result.applied.model} at effort ${result.applied.effort}.`
           : "";
         // Ruling 264 (F37-94): this used to promise "Delivery starts withheld"
         // on every deploy. Ruling 156 made a library deploy COPY the template's

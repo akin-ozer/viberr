@@ -3,6 +3,7 @@ import { listUsers } from "~/server/auth/user-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { listDeployedSpecialists } from "./specialist-run.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 
 /**
  * Mentionable directory for the task-comment composer's @-autocomplete.
@@ -68,11 +69,6 @@ const RESERVED_ROLES: MentionableReserved[] = [
   // `delivers: true`, and `@agent` resolves to exactly that engagement.
   { handle: "agent", label: "Delivering agent" },
 ];
-
-const BACKEND_LABEL = {
-  claude: "Claude",
-  codex: "Codex",
-} satisfies Record<RealBackend, string>;
 
 /**
  * The backend handles this project can still be tagged by, with the profile

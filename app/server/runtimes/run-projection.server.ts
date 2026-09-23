@@ -8,6 +8,7 @@ import {
   type RunView,
 } from "~/features/runtime/runtime-types";
 import { findUserById } from "~/server/auth/user-store.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   listRunLinesTail,
   listRunsForTaskRows,
@@ -30,11 +31,6 @@ import { classifyRunEnd } from "./provider-refusal.server";
 const SDK_LABEL = {
   claude: "Claude Agent SDK",
   codex: "Codex SDK",
-} satisfies Record<RunBackend, string>;
-
-const WHO_NAME = {
-  claude: "Claude",
-  codex: "Codex",
 } satisfies Record<RunBackend, string>;
 
 // ------------------------------------------------- bounded log window (D-11)
@@ -121,13 +117,13 @@ function projectRow(
   const backend = row.backend;
   // The picker/header label is the AGENT's own name ("dev"/"Operator"/a
   // reviewer's name) when the run carries an identity; seed/historical rows
-  // (null agent_name) fall back to the backend WHO_NAME so nothing regresses.
+  // (null agent_name) fall back to the backend label so nothing regresses.
   const who = op
     ? { kind: "agent" as const, name: row.agent_name ?? "Operator" }
     : {
         kind: "agent" as const,
         backend,
-        name: row.agent_name ?? WHO_NAME[backend] ?? "Agent",
+        name: row.agent_name ?? BACKEND_LABEL[backend] ?? "Agent",
         role: row.role,
       };
 
