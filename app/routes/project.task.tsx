@@ -123,7 +123,8 @@ import type {
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
 import {
   clampTimelineLimit,
-  sliceTimeline,
+  timelineSlice,
+  timelineWindowSize,
 } from "~/features/task-detail/timeline-slice";
 import { roleCan } from "~/shared/rbac";
 import { Icon } from "~/ui/icon";
@@ -193,7 +194,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     { userId: user.id, label: user.email },
     "read this project",
   );
-  const detail = getTaskDetail(db, params.slug, params.key);
+  const limit = clampTimelineLimit(
+    new URL(request.url).searchParams.get("events"),
+  );
+  // Ruling 454: the query reads only the window the page ships; the event
+  // count below keeps "Show older" exact.
+  const detail = getTaskDetail(db, params.slug, params.key, {
+    timelineLimit: timelineWindowSize(limit),
+  });
   if (!detail) {
     throw data(`No task ${params.key} in projects/${params.slug}.`, {
       status: 404,
@@ -222,10 +230,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       });
     }
   }
-  const limit = clampTimelineLimit(
-    new URL(request.url).searchParams.get("events"),
-  );
-  const slice = sliceTimeline(detail.timeline, limit);
+  // The total is the projection's event count: the rebuilder writes it from
+  // the same parsed timeline, in the same synchronous rebuild, as the rows.
+  const slice = timelineSlice(detail.timeline, detail.eventCount, limit);
   const rawDefault = getPref(db, user.id, "tlDefault");
   const tlDefault: TimelineFilterId =
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";

@@ -30,8 +30,22 @@ export interface TimelineSlice<T> {
 
 /** Newest-first input (file order) → bounded newest-first slice. */
 export function sliceTimeline<T>(events: T[], limit: number): TimelineSlice<T> {
-  const total = events.length;
-  const shown = Math.min(total, Math.max(1, limit));
+  return timelineSlice(events, events.length, limit);
+}
+
+/** How many events a slice for `limit` shows — the SQL `LIMIT` a reader that
+ *  fetches only the shipped window uses (ruling 454). */
+export function timelineWindowSize(limit: number): number {
+  return Math.max(1, limit);
+}
+
+/**
+ * {@link sliceTimeline} over a window already cut to at least
+ * {@link timelineWindowSize} newest events, given the full `total` — the same
+ * slice, without reading the older events it would drop.
+ */
+export function timelineSlice<T>(events: T[], total: number, limit: number): TimelineSlice<T> {
+  const shown = Math.min(total, timelineWindowSize(limit));
   const hasMore = total > shown;
   return {
     events: events.slice(0, shown),

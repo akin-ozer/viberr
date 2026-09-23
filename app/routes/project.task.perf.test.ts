@@ -70,6 +70,27 @@ async function revalidateTaskPage(cookie: string) {
   return Promise.all([root.loader(args), layout.loader(args), task.loader(args)]);
 }
 
+describe("task-page timeline window (ruling 454)", () => {
+  it("'Show older' still pages through the whole history", async () => {
+    const { loader } = await import("~/routes/project.task");
+    const { cookie } = await app.cookieFor(ardaId);
+    const request = app.request(`/projects/${SLUG}/tasks/${KEY}?events=60`, { cookie });
+    const task = await loader({
+      request,
+      url: new URL(request.url),
+      params: { slug: SLUG, key: KEY },
+      pattern: "/projects/:slug/tasks/:key",
+      context: new RouterContextProvider(),
+    });
+    expect(task.task.timeline).toHaveLength(60);
+    expect(task.timelineRemaining).toBe(9);
+    expect(task.timelineNextLimit).toBe(69);
+    // Newest first, oldest of the window last: the seed's own events follow
+    // the 60 comments.
+    expect(task.task.timeline[59]?.text).toContain("comment 0:");
+  });
+});
+
 describe("task-page revalidation (ruling 454)", () => {
   it("stays within its server-read budgets", async () => {
     const { cookie } = await app.cookieFor(ardaId);

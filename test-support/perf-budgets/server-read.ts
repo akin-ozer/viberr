@@ -53,8 +53,9 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     fixture: TASK_REVALIDATION,
   },
   // TASK-7: task_events rows read to ship the 30-event slice.
+  // 69 before the loader read only the window it ships (SQL LIMIT).
   "server-read:task-loader.timeline-rows": {
-    ceiling: 69,
+    ceiling: 30,
     unit: "count",
     journey: "task-open",
     fixture: TASK_REVALIDATION,
