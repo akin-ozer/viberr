@@ -1,6 +1,9 @@
 import {
   Fragment,
+  memo,
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -63,6 +66,7 @@ import {
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { useStableRows } from "~/ui/use-stable-rows";
 import {
   boardEmptyCopy,
   countArchived,
@@ -274,7 +278,9 @@ const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, plac
  * Deliberately no dependency array: `StageMenu` re-renders its trigger on
  * open/busy/stage change, and React never writes `tabIndex` on that button, so
  * re-applying on every render is both necessary and free of any tug-of-war with
- * React's own attribute reconciliation.
+ * React's own attribute reconciliation. Ruling 454: it writes only a value
+ * that differs, because an unconditional write is a DOM mutation on every
+ * card each time the board renders (40 per revalidation).
  */
 function useRovingStageMenu(active: boolean) {
   const ref = useRef<HTMLDivElement>(null);
@@ -282,7 +288,8 @@ function useRovingStageMenu(active: boolean) {
     const btn = ref.current?.querySelector<HTMLButtonElement>(
       "button.stage-menu-btn",
     );
-    if (btn) btn.tabIndex = active ? 0 : -1;
+    const tabIndex = active ? 0 : -1;
+    if (btn && btn.tabIndex !== tabIndex) btn.tabIndex = tabIndex;
   });
   return ref;
 }
@@ -447,7 +454,28 @@ function OwnerSeat({ task, label }: { task: TaskSummary; label?: boolean }) {
   );
 }
 
-function TaskCard({
+/**
+ * The card's sortable plugins, made once (ruling 454). dnd-kit compares the
+ * option by reference and re-resolves it whenever it changes, so an inline
+ * function rebuilt the card's plugins on every render of every card.
+ */
+const cardPlugins = ((defaults) => [
+  ...defaults.filter((plugin) => plugin !== OptimisticSortingPlugin),
+  Feedback.configure({ feedback: "clone", dropAnimation: boardDropAnimation }),
+]) satisfies NonNullable<Parameters<typeof useSortable>[0]["plugins"]>;
+
+/** Row keys for `useStableRows` (stable, module-level). */
+const taskKeyOf = (task: BoardTask) => task.key;
+const stageIdOf = (stage: BoardStage) => stage.id;
+
+/**
+ * Ruling 454: memoised, so a revalidation or a drag renders only the cards
+ * whose props changed. Its lanes hand it the task object the page already held
+ * when the task is unchanged (`useStableRows`), and the board keeps the stage
+ * list and the move callback stable; before this every live update rendered
+ * all forty cards of the demo board and ran their sixteen effects each.
+ */
+const TaskCard = memo(function TaskCard({
   task,
   index,
   canTransition,
@@ -502,10 +530,7 @@ function TaskCard({
     // the rect it last measured in the OLD lane — a 600px excursion off-screen
     // and back, right after the flight landed it (observed frame by frame).
     transition: null,
-    plugins: (defaults) => [
-      ...defaults.filter((plugin) => plugin !== OptimisticSortingPlugin),
-      Feedback.configure({ feedback: "clone", dropAnimation: boardDropAnimation }),
-    ],
+    plugins: cardPlugins,
   });
   // Pass 30: the wait-human/urgent class pushes are gone — ruling 16 removed
   // the card-level accent layer and no rule has styled either class since
@@ -568,7 +593,7 @@ function TaskCard({
       )}
     </div>
   );
-}
+});
 
 /**
  * The card's face — everything inside the link. Rendered by the card itself
@@ -647,7 +672,7 @@ function DropPreview({ task, landing = false }: { task: BoardTask; landing?: boo
 
 function Column({
   stage,
-  tasks,
+  tasks: laneTasks,
   count,
   isDone,
   isEntry,
@@ -708,6 +733,9 @@ function Column({
     id: `stage:${stage.id}`,
     collisionPriority: 1,
   });
+  // Ruling 454: the task objects this lane already drew, wherever a
+  // revalidation brought the same task back, so the memoised cards skip.
+  const tasks = useStableRows(laneTasks, taskKeyOf);
   const showPreview = dropTarget && previewTask !== null;
   const preview = showPreview ? <DropPreview task={previewTask!} /> : null;
   const landingEl = landing ? <DropPreview task={landing.task} landing /> : null;
@@ -810,8 +838,9 @@ function Column({
 }
 
 /** D19: extracted from `ListView`'s map so the row can hold the roving-tab-stop
- *  hook — a hook cannot be called inside a `.map` callback. */
-function ListRow({
+ *  hook — a hook cannot be called inside a `.map` callback. Ruling 454:
+ *  memoised like the card, for the same reason. */
+const ListRow = memo(function ListRow({
   task,
   stages,
   canTransition,
@@ -882,10 +911,10 @@ function ListRow({
       <CardChips task={task} />
     </div>
   );
-}
+});
 
 function ListView({
-  tasks,
+  tasks: visibleTasks,
   stages,
   canTransition,
   onMoveTask,
@@ -907,6 +936,8 @@ function ListView({
   rovingKey: string | null;
   onCardKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
 }) {
+  // Ruling 454: unchanged tasks keep the objects the rows already drew.
+  const tasks = useStableRows(visibleTasks, taskKeyOf);
   return (
     <div className="board list">
       {/* The lanes give the stage layout its h2s; the list has one lane, so
@@ -1769,8 +1800,12 @@ export function StageBoard({
   /** F10-25: the StageMenu move — the always-available non-drag path. */
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
-  // All stages, for the per-card keyboard "Move to stage" menu (F10-25).
-  const allStages = columns.map((c) => c.stage);
+  // All stages, for the per-card keyboard "Move to stage" menu (F10-25). The
+  // same array while the stages are unchanged (ruling 454): every card takes it.
+  const allStages = useStableRows(
+    columns.map((c) => c.stage),
+    stageIdOf,
+  );
   // The slot a drop would submit RIGHT NOW — the same resolution `onDragEnd`
   // runs, so the preview shows exactly what the drop would ask for, and shows
   // nothing where a drop would change nothing (the card's own slot in its own
@@ -2170,6 +2205,17 @@ export function BoardPage({
     }
     submitReorder(taskKey, toStageId, "");
   };
+  // Ruling 454: every card and list row takes the move callback, so it keeps
+  // one identity and runs the latest render's `onMoveTask` (which reads the
+  // current columns); a fresh closure per render re-rendered every card.
+  const latestMoveTask = useRef(onMoveTask);
+  useLayoutEffect(() => {
+    latestMoveTask.current = onMoveTask;
+  });
+  const moveTask = useCallback(
+    (taskKey: string, toStageId: string) => latestMoveTask.current(taskKey, toStageId),
+    [],
+  );
 
   // Toast on completion (and drop the pulse if the move was rejected).
   useEffect(() => {
@@ -2202,7 +2248,11 @@ export function BoardPage({
     return () => window.clearTimeout(t);
   }, [arrivedKey]);
 
-  const stages = columns.map((c) => c.stage);
+  // One array while the stages are unchanged (ruling 454): every list row takes it.
+  const stages = useStableRows(
+    columns.map((c) => c.stage),
+    stageIdOf,
+  );
   const doneStageId = stages[stages.length - 1]?.id;
   const allTasks = useMemo(
     () => [...columns.flatMap((c) => c.tasks), ...orphanTasks],
@@ -2591,7 +2641,7 @@ export function BoardPage({
             draggedTask={draggedTask}
             inFlight={inFlight}
             inFlightTask={inFlightTask}
-            onMoveTask={onMoveTask}
+            onMoveTask={moveTask}
             rovingKey={rovingKey}
             onCardKeyDown={onCardKeyDown}
           />
@@ -2601,7 +2651,7 @@ export function BoardPage({
           tasks={visibleAllTasks}
           stages={stages}
           canTransition={canTransition}
-          onMoveTask={onMoveTask}
+          onMoveTask={moveTask}
           emptyCopy={emptyCopyFor(allTasks.length, true)}
           rovingKey={rovingKey}
           onCardKeyDown={onCardKeyDown}

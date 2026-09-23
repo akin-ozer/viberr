@@ -1320,7 +1320,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg), transparent 92%);
 }
 .chip .ico { width: 13px; height: 13px; flex: none; }
-.chip .working { width: 7px; height: 7px; border-radius: 50%; background: var(--agent); margin: 0 .125rem; animation: pulse-a 1.6s ease-out infinite; }
+.chip .working { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--agent); margin: 0 .125rem; }
 .chip.st { box-shadow: none; }
 .chip.st.agent, .chip.st.queued { background: var(--agent-soft); color: var(--agent-dark); }
 .chip.st.you { background: var(--blue-soft); color: var(--blue-pressed); }
@@ -1381,11 +1381,21 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .wait-tag.scheduled { color: var(--muted); }
 .by-schedule { color: var(--muted); }
 .wait-tag .ico { width: 13px; height: 13px; }
-.wait-tag .working { width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); animation: pulse-a 1.6s ease-out infinite; }
+.wait-tag .working { position: relative; width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); }
+/* The "agent working" pulse (R21-8, ruling 365(b)): a ring that swells about
+   5px past the dot and fades. Ruling 454: drawn as a copy of the dot that only
+   scales and fades, so the compositor runs it; it animated box-shadow, which
+   repainted every working dot on the main thread every frame and stalled on
+   each revalidation. At rest the copy sits exactly on the dot, in its colour. */
+.chip .working::after, .wait-tag .working::after, .rdot.running::after,
+.home-hero .sub .working::after, .pj-stats .running .working::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--agent);
+  animation: pulse-a 1.6s ease-out infinite;
+}
 @keyframes pulse-a {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--agent), transparent 40%); }
-  70% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--agent), transparent 100%); }
-  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--agent), transparent 100%); }
+  0% { transform: scale(1); opacity: .6; }
+  70% { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(1); opacity: 0; }
 }
 
 /* ============================================================
@@ -3280,6 +3290,11 @@ dialog[data-closing]::backdrop {
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-track { background: transparent; }
+/* Ruling 454 (owner, 2026-09-24): the scrollers whose content changes while
+   someone watches keep the scrollbar's gutter, so a lane, the task page, the
+   run console or a transcript does not narrow and rewrap its content the
+   moment a live update makes it overflow (or stop overflowing). */
+.col-body, .board.list, .detail, .console, .ctl-transcript, .dock-body { scrollbar-gutter: stable; }
 
 /* Design pass 2026-09-08: a queue row is a ROW, not a card. It was a bordered
    `--surface` box on a bordered, shadowed `--surface` panel — a box of boxes,
@@ -3719,7 +3734,7 @@ dialog[data-closing]::backdrop {
 .ri-state.error { color: var(--coral-dark); }
 
 .rdot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--placeholder); }
-.rdot.running { background: var(--agent); animation: pulse-a 1.6s ease-out infinite; }
+.rdot.running { position: relative; background: var(--agent); }
 .rdot.done { background: var(--success); }
 .rdot.error { background: var(--coral-dark); }
 
@@ -4348,7 +4363,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 }
 .home-hero h1 { font-size: 1.75rem; letter-spacing: -.015em; }
 .home-hero .sub { color: var(--muted); font-size: .88rem; margin: .5rem 0 0; line-height: 1.5; }
-.home-hero .sub .working { display: inline-block; width: .46rem; height: .46rem; border-radius: 50%; background: var(--agent); margin: 0 .125rem 1px 0; animation: pulse-a 1.6s ease-out infinite; }
+.home-hero .sub .working { position: relative; display: inline-block; width: .46rem; height: .46rem; border-radius: 50%; background: var(--agent); margin: 0 .125rem 1px 0; }
 .home-hero .sub b { color: var(--fg); font-weight: 700; }
 .hero-actions { display: flex; align-items: center; gap: .5rem; margin-left: auto; flex-wrap: wrap; }
 
@@ -4445,7 +4460,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   min-height: 22px;
 }
 .pj-stats .running { display: inline-flex; align-items: center; gap: .375rem; color: var(--agent-dark); font-weight: 600; }
-.pj-stats .running .working { width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); animation: pulse-a 1.6s ease-out infinite; }
+.pj-stats .running .working { position: relative; width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); }
 .pj-stats .pill { margin-left: auto; }
 /* Fresh-project hint (0-task card) — quiet, inviting, matches the stats row. */
 .pj-empty-hint { color: var(--faint); }
@@ -4919,8 +4934,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   /* the "agent working" dots pulse forever; under the OS preference they hold
      still — the adjacent text keeps carrying the state (same treatment as
      .stat-dot.warming). */
-  .wait-tag .working, .home-hero .sub .working, .pj-stats .running .working,
-  .chip .working, .rdot.running { animation: none; }
+  .wait-tag .working::after, .home-hero .sub .working::after, .pj-stats .running .working::after,
+  .chip .working::after, .rdot.running::after { animation: none; }
   /* keep centered dialogs centered while they fade out */
   dialog[data-closing] { transform: translate(-50%, -50%); transition: opacity .12s ease; }
 }
@@ -5809,12 +5824,14 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    (owner ask 2026-08-20) — the panel's .attach-thumb treatment at timeline
    scale. Capped small: the timeline is a feed, the panel is the gallery. */
 .tl-attach-thumb {
-  display: inline-flex; flex-direction: column; max-width: 240px;
+  display: inline-flex; flex-direction: column; width: 240px; max-width: 100%;
   border: 1px solid var(--hairline); border-radius: var(--radius-button);
   background: var(--surface); overflow: hidden; text-decoration: none; color: var(--fg);
 }
 .tl-attach-thumb:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
-.tl-attach-thumb img { display: block; width: 100%; max-height: 150px; object-fit: cover; object-position: top; }
+/* Ruling 454: the frame has its final size before the lazy picture arrives,
+   as the panel's tile does, so the feed does not jump when it loads. */
+.tl-attach-thumb img { display: block; width: 100%; height: 150px; object-fit: cover; object-position: top; background: var(--tint-hover); }
 .tl-attach-thumb .nm {
   padding: .25rem .5rem; font-family: var(--font-mono); font-size: .69rem; color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

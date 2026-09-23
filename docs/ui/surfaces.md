@@ -310,9 +310,13 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   `{day} · {time}`, relative forms. **The hydration contract** (pass 34, C6): a
   timestamp's first pass depends on the timestamp alone (the `*UTC` formatters take no
   `now` and render the absolute UTC day + UTC clock, `Jul 3 · 23:59`, identical on the
-  server and in any viewer's browser at any clock) and an effect swaps in the
-  viewer-local form after hydration (`LocalDayDotTime`, `LocalRelative`, `useHydrated`
-  in `app/ui/local-time.tsx`; the console's line clocks sit behind the same flag).
+  server and in any viewer's browser at any clock) and the viewer-local form replaces it
+  once hydration commits (`LocalDayDotTime`, `LocalRelative`, `useHydrated` in
+  `app/ui/local-time.tsx`; the console's line clocks sit behind the same flag). The flag
+  is React's own hydration state (`useSyncExternalStore` with a server snapshot), so a
+  stamp that mounts after hydration (a client navigation, a new row, a console opened
+  later) renders local from its first commit instead of drawing the UTC form for a
+  frame (ruling 454).
   Calendar dates (`formatCalendarDate`, host-zone by construction) render through
   `LocalCalendarDate` for the same reason: `YYYY-MM-DD (UTC)` first, the local calendar
   date after hydration. Gated by `app/features/task-detail/hydration-determinism.test.tsx`
