@@ -3477,6 +3477,13 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".ctl-links li")).toMatch(/align-items:\s*baseline/);
   });
 
+  it("U39-17: a long sha in a stream notice may break rather than push the page sideways", () => {
+    // Measured at 375px: a 40-character sha made the overlay 413px wide inside
+    // 323. CANARY: drop the rule.
+    const all = [...CODE.matchAll(/\n\.pev-main \{([^}]*)\}/g)].map((m) => m[1]).join(" ");
+    expect(all).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
   it("U39-16: on a phone a notification's trailing controls take their own line", () => {
     // Measured at 375px: the text column was 90px beside Mark read, the dot
     // and the time. CANARY: drop `flex-wrap: wrap` from the phone rule.

@@ -3121,6 +3121,10 @@ dialog[data-closing]::backdrop {
 .pev-ico.audit { background: var(--tint-hover); color: var(--muted); }
 .pev-main { flex: 1; min-width: 0; font-size: .88rem; color: var(--muted); line-height: 1.5; padding-top: .125rem; }
 .pev-main strong { color: var(--fg); }
+/* U39-17: a 40-character sha or a bare path in a notice ("d44e8749…29a8",
+   `internal/controller/gateway.go:1016`) is one unbreakable run, and on a
+   phone they pushed the notifications overlay 90px sideways (413 of 323). */
+.pev-main { overflow-wrap: anywhere; }
 /* F10-19: collapsed long activity report — one-line preview + Show more. */
 .act-collapsible { display: inline; }
 .act-preview { color: var(--muted); }

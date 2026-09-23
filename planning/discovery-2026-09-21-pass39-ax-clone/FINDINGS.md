@@ -190,6 +190,11 @@ what they strand, and record an optional reason.
   sideways (372px of 241). **Fixed:** in the 560px block the trailing controls take their own line
   under the text. Checked in a production preview with the rule injected: text 201px, controls
   below. Test: `app.css.test.ts` "U39-16".
+- **U39-17 (LOW) — a sha or a path in a notice pushed the phone overlay sideways.** A 40-character
+  sha in `code` and bare paths like `internal/controller/gateway.go:1016` are unbreakable runs.
+  The overlay measured 413px of scroll in a 323px box. **Fixed:** stream text wraps long tokens
+  anywhere (`.pev-main`). Measured with the rule injected: 323 of 323. Test: `app.css.test.ts`
+  "U39-17".
 
 - **F39-48 (HIGH) — an operator's lease parked the board's critical path behind its slowest
   review.** AX-22's operator leased `internal/controller/task.go` and `task_test.go` at 23:47
