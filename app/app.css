@@ -4937,7 +4937,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   /* the "agent working" dots pulse forever; under the OS preference they hold
      still — the adjacent text keeps carrying the state (same treatment as
      .stat-dot.warming). */
-  .wait-tag .working, .home-hero .sub .working, .pj-stats .running .working { animation: none; }
+  .wait-tag .working, .home-hero .sub .working, .pj-stats .running .working,
+  .chip .working, .rdot.running { animation: none; }
   /* keep centered dialogs centered while they fade out */
   dialog[data-closing] { transform: translate(-50%, -50%); transition: opacity .12s ease; }
 }
