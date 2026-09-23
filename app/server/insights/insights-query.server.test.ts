@@ -69,6 +69,20 @@ function insertRun(
 
 const NOW = "2026-08-23T12:00:00.000Z";
 
+describe("U39-22: the task breakdown", () => {
+  it("counts controller turns as one row named for what they are, never as a task called /cnv_…", () => {
+    // CANARY: group on `project_slug || '/' || task_key` alone again.
+    const db = ctx.makeDb();
+    insertRun(db, { kind: "controller", project: "", taskKey: "cnv_a", cost: 1 });
+    insertRun(db, { kind: "controller", project: "", taskKey: "cnv_b", cost: 2 });
+    insertRun(db, { taskKey: "VIB-7", cost: 0.5 });
+    const labels = getInsightsSummary(db, NOW).byTask.rows.map((r) => [r.label, r.runs]);
+    expect(labels).toContainEqual(["controller conversations", 2]);
+    expect(labels).toContainEqual(["viberr-core/VIB-7", 1]);
+    expect(labels.some(([l]) => String(l).includes("cnv_"))).toBe(false);
+  });
+});
+
 describe("getInsightsSummary", () => {
   it("sums totals and counts outcomes with a success rate", () => {
     const db = ctx.makeDb();

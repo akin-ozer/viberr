@@ -1062,8 +1062,13 @@ export function getInsightsSummary(
     // "what did SHOP-27 cost across eleven rework rounds" and "which reviewer
     // earns its runs". A task key is only unique inside its project, so an
     // unscoped read labels each row with the project it belongs to.
+    // U39-22: a controller turn's `task_key` is its CONVERSATION id and its
+    // project is '' (ruling 99), so every turn read as a task named
+    // "/cnv_tjVMn13JkW-0". They are one row, named for what they are.
     byTask: group(
-      filter.projectSlug ? "task_key" : "project_slug || '/' || task_key",
+      `CASE WHEN kind = 'controller' THEN 'controller conversations' ELSE ${
+        filter.projectSlug ? "task_key" : "project_slug || '/' || task_key"
+      } END`,
     ),
     byProfile: group("agent_profile_id"),
     avgDurationMs: duration.avg_ms,

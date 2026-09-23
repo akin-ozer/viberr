@@ -302,9 +302,9 @@ what they strand, and record an optional reason.
   practice, since `off` and `false` mean the same thing to a reader; recorded so the next pass
   does not re-derive it, and because quoting the enum in the serializer would cost nothing.
   (Found by misreading it myself.)
-- **Insights "By task" lists controller conversations as `/cnv_…`.** Every real row reads
-  `ax-clone/AX-9`; a controller turn reads `/cnv_tjVMn13JkW-0` — a leading slash, no project,
-  and not a task at all. Honest about the cost, misleading about the subject. One label.
+- ~~**Insights "By task" lists controller conversations as `/cnv_…`.**~~ **Fixed, U39-22**
+  (2026-09-23): controller turns are one row, "controller conversations". Test:
+  `insights-query.server.test.ts` "U39-22".
 - **The model picker's two lists disagree about Opus.** The live `supportedModels()` catalogue
   for this account offers `opus[1m]` and no plain `opus`; the curated fallback offers plain
   `opus`. Which one you can pick depends on whether the live fetch succeeded. Not a defect:
