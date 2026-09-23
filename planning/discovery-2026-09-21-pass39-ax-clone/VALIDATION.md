@@ -1389,5 +1389,16 @@ not lost work.
   `126c4ba`. Before 439 that delivery's reconcile minted the refreshed head as a new revision,
   which is what staled AX-29's approval. The refresh sentence made no drift claim, because no PR
   existed yet.
-- **Not yet seen live:** 439's review re-pin, which needs a reviewer on AX-27, and F39-64, which
-  needs a refresh on a task that already has a PR.
+- **The rest of AX-27, through acceptance (03:59 to 04:08).** The reviewer was told "the reviewed
+  revision `126c4ba` on its refreshed base, at `6f9bd00` (1 merge commit, 3 base commits, and no
+  authored work since the review)", ran on `6f9bd00` and approved `rev_ed08HCSA0heL`. The PR's
+  drift had been measured at `6f9bd00` by then, so ruling 238's measured arm pinned it; 439's
+  chain arm gives the same answer and was not needed. Because the revision survived the refresh,
+  the approval stood and the accept dialog read "REVISION `126c4ba59857` · MERGE HEAD
+  `6f9bd0059be6` · base refreshed · 1 merge commit · 3 base commits · 0 authored commits since
+  review". I accepted (the branch contained main `51c436f`, so no ceremony refresh), and the
+  permanent completion record names the refresh the merge shipped: "The PR head (`6f9bd0059be6`)
+  carries a base refresh made after the review (1 merge commit, 3 base commits) and no authored
+  commits outside the reviewed revision". Compare AX-29's record from 03:34 (F39-64).
+- **Not yet seen live:** 439's chain arm with no PR, and F39-64, which needs a refresh on a task
+  that already has a PR while GitHub lags.
