@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRevalidator } from "react-router";
 import { z } from "zod";
-import { onLiveFrame } from "~/features/live-updates/use-live-updates";
+import { onLiveFrame, useLiveStreamFailed } from "~/features/live-updates/use-live-updates";
 import {
   createLiveRunLogStore,
   type ConsoleThreadInput,
@@ -100,9 +100,10 @@ export function useRunLogStream(input: {
   /** The page's run projection: one thread per agent group (a `RunView` is one). */
   threads: readonly ConsoleThreadInput[];
   /** True while the loader shows at least one running run. Drives a bounded
-   *  safety revalidation so a `run.state-changed` finalize event MISSED during
-   *  an SSE drop (rapid reaction chains) self-heals instead of leaving a
-   *  phantom "1 agent running" strip until a manual reload (F22). */
+   *  safety revalidation, while the tab's live stream is down, so a
+   *  `run.state-changed` finalize event MISSED during an SSE outage (rapid
+   *  reaction chains) self-heals instead of leaving a phantom "1 agent
+   *  running" strip until a manual reload (F22; ruling 454, RF-6). */
   hasActiveRun?: boolean;
   /**
    * Ruling 454 (CTL-2): instead of the F22 revalidation, read this run's tail
@@ -174,16 +175,25 @@ export function useRunLogStream(input: {
   // covers the case where that terminal event never arrived (dropped stream /
   // reconnect gap), bounding a stale "running" strip to one interval. A page
   // with a status poll running (below) has the cheaper net and skips this one.
+  //
+  // Ruling 454 (RF-6): only while the tab's live stream is DOWN. A connected
+  // stream delivers the event, a transient drop replays it (the browser's
+  // retry sends `Last-Event-ID`), a reopen or a return from hidden asks the
+  // broker for what it missed, and the page's first stream replays from the
+  // server render's position; so the net re-ran root, layout and task three
+  // times a minute for nothing while the stream was healthy. A failed stream
+  // (reconnecting on its backoff, or signed out) still arms it.
   const polls = (input.poll?.runId ?? null) !== null;
+  const streamDown = useLiveStreamFailed();
   useEffect(() => {
     // The `window` probe asks the HOST what it provides, which is the question
     // this guard has: a server render has no timer to schedule on.
-    if (polls || !input.hasActiveRun || !("window" in globalThis)) return;
+    if (polls || !input.hasActiveRun || !streamDown || !("window" in globalThis)) return;
     const id = window.setInterval(() => {
       void revalidateRef.current();
     }, 20_000);
     return () => window.clearInterval(id);
-  }, [input.hasActiveRun, polls]);
+  }, [input.hasActiveRun, polls, streamDown]);
 
   // CTL-2: the status poll. Reads the run's tail (its new lines and facts
   // included) and revalidates once the run has settled.

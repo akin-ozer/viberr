@@ -71,10 +71,10 @@ export const REVALIDATION_BUDGETS: PerfBudgetTable = {
     journey: "live-run",
     fixture: `${TAB}; the task page, ten task.updated of another task a second apart; root loader runs`,
   },
-  // RF-6: 9 (the F22 net re-ran root, layout and task every 20 s); root sits
-  // a `revalidate()` out (RF-7).
+  // RF-6: 9 (the F22 net re-ran root, layout and task every 20 s); 6 once
+  // root sat a `revalidate()` out; it arms only while the stream is down.
   "revalidation:task.loader-runs-per-60s-healthy-stream": {
-    ceiling: 6,
+    ceiling: 0,
     unit: "count",
     journey: "live-run",
     fixture: `${TAB}; the task page showing an active run (the F22 safety net armed), 60 s with no event`,
