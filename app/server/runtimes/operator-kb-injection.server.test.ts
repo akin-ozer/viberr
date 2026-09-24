@@ -1,16 +1,20 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { authoredPacketOptions, buildOperatorSystemPrompt } from "./operator-run.server";
 import { KB_PRECEDENCE_NOTE } from "~/server/files/kb-injection.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-actions.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
+import { createTempDirs } from "../../../test-support/temp-dirs";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
+
+// After the whole file, not each test: three describes below make one data
+// root at collection time and share it across their cases.
+const temp = createTempDirs();
+afterAll(temp.cleanup);
 
 function authorityWith(kb: string[]): OperatorAuthority {
   return {
@@ -31,7 +35,7 @@ function authorityWith(kb: string[]): OperatorAuthority {
 
 describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
   it("indexes declared knowledge bases into the system prompt (ruling 283)", () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-kb-"));
+    const dataRoot = temp.make("viberr-kb-");
     const kbDir = path.join(dataRoot, "kb", "architecture-notes");
     mkdirSync(kbDir, { recursive: true });
     writeFileSync(
@@ -58,7 +62,7 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
   });
 
   it("injects nothing for a KB name with no store folder (no throw)", () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-kb-"));
+    const dataRoot = temp.make("viberr-kb-");
     const prompt = buildOperatorSystemPrompt(authorityWith(["does-not-exist"]), dataRoot).prompt;
     expect(prompt).not.toContain("does-not-exist (knowledge base)");
     // C1: it is not injected AND it is not silent — see the section below.
@@ -73,7 +77,7 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     //
     // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildOperatorSystemPrompt
     // and the first two assertions fail.
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-kb-prec-"));
+    const dataRoot = temp.make("viberr-kb-prec-");
     const kbDir = path.join(dataRoot, "kb", "house-style");
     mkdirSync(kbDir, { recursive: true });
     writeFileSync(path.join(kbDir, "style.md"), "# House\n\nKB-MARKER-HOUSE.", "utf8");
@@ -102,7 +106,7 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     // Canary: move the `KB_PRECEDENCE_NOTE` push inside the
     // `for (const part of kbSet.parts)` loop in buildOperatorSystemPrompt and
     // the count assertion fails.
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-prec2-"));
+    const dataRoot = temp.make("viberr-op-prec2-");
     for (const [name, marker] of [
       ["house-style", "KB-MARKER-HOUSE"],
       ["team-facts", "KB-MARKER-TEAM"],
@@ -150,7 +154,7 @@ describe("buildOperatorSystemPrompt — grants are an allow-list, not a hint", (
     // Canary: read the store's `skills/` listing instead of `declaredSkills` in
     // buildOperatorSystemPrompt (the "load every skill on disk" regression) and
     // every decoy assertion below fails.
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-decoy-"));
+    const dataRoot = temp.make("viberr-op-decoy-");
     for (const [name, sentinel] of ORG_SKILLS) {
       mkdirSync(path.join(dataRoot, "skills", name), { recursive: true });
       writeFileSync(
@@ -181,7 +185,7 @@ describe("buildOperatorSystemPrompt — grants are an allow-list, not a hint", (
   it("an UNGRANTED knowledge base in the same store is not injected either", () => {
     // Canary: pass the store's `kb/` listing instead of `authority.kb` to
     // `readKbIndexes` and the ungranted folder appears in the prompt.
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-kbdecoy-"));
+    const dataRoot = temp.make("viberr-op-kbdecoy-");
     for (const [name, marker] of [
       ["architecture-notes", "KB-MARKER-GRANTED"],
       ["finance-runbook", "KB-MARKER-UNGRANTED"],
@@ -208,7 +212,7 @@ describe("buildOperatorSystemPrompt — grants are an allow-list, not a hint", (
  */
 describe("buildOperatorSystemPrompt — unresolved skill/KB grants (C1)", () => {
   it("names an unresolvable KB and skill, with the reason, and tells it not to claim them", () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-c1-"));
+    const dataRoot = temp.make("viberr-op-c1-");
     const auth = {
       ...authorityWith(["renamed-kb"]),
       skills: ["typod-skill"],
@@ -224,7 +228,7 @@ describe("buildOperatorSystemPrompt — unresolved skill/KB grants (C1)", () => 
   });
 
   it("says nothing when every declared resource resolved", () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-c1ok-"));
+    const dataRoot = temp.make("viberr-op-c1ok-");
     const kbDir = path.join(dataRoot, "kb", "architecture-notes");
     mkdirSync(kbDir, { recursive: true });
     writeFileSync(path.join(kbDir, "overview.md"), "All good.", "utf8");
@@ -252,7 +256,7 @@ describe("buildOperatorSystemPrompt — shared skill budget (C2)", () => {
   };
 
   it("a second skill cannot re-arm the budget the first one spent", () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-c2-"));
+    const dataRoot = temp.make("viberr-op-c2-");
     writeSkill(dataRoot, "big-skill", "B".repeat(30_000));
     writeSkill(dataRoot, "second-skill", `SECOND-MARKER-7 ${"S".repeat(5_000)}`);
     const auth = { ...authorityWith([]), skills: ["big-skill", "second-skill"] };
@@ -295,7 +299,7 @@ describe("buildOperatorSystemPrompt — no KB starves another (ruling 283)", () 
   it("a huge knowledge base costs the one after it nothing", () => {
     // Canary: cap `entries` in `readKbIndexDetailed` on a running character
     // budget across KBs and `KB-MARKER-SECOND.md` stops being named.
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-kbbudget-"));
+    const dataRoot = temp.make("viberr-op-kbbudget-");
     writeKb(dataRoot, "big-kb", "huge.md", `# Huge\n\n${"B".repeat(30_000)}`);
     writeKb(dataRoot, "second-kb", "KB-MARKER-SECOND.md", "# Second");
 
@@ -323,7 +327,7 @@ describe("buildOperatorSystemPrompt — no KB starves another (ruling 283)", () 
 });
 
 describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C)", () => {
-  const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-"));
+  const dataRoot = temp.make("viberr-op-");
 
   it("appends a custom deployment persona additively (does not replace the manual)", () => {
     const auth = { ...authorityWith([]), persona: "Prefer terse packets. MARKER-PERSONA-7." };
@@ -350,9 +354,9 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
  * actually mounted.
  */
 describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
-  const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-a6-"));
+  const dataRoot = temp.make("viberr-op-a6-");
   const withKb = () => {
-    const root = mkdtempSync(path.join(tmpdir(), "viberr-op-res-"));
+    const root = temp.make("viberr-op-res-");
     const kbDir = path.join(root, "kb", "architecture-notes");
     mkdirSync(kbDir, { recursive: true });
     writeFileSync(path.join(kbDir, "KB-MARKER-TRUST-9.md"), "# Trust", "utf8");
@@ -376,7 +380,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
   });
 
   it("omits the banner when nothing resolved (an empty promise is not trusted context)", () => {
-    const empty = mkdtempSync(path.join(tmpdir(), "viberr-op-empty-"));
+    const empty = temp.make("viberr-op-empty-");
     const prompt = buildOperatorSystemPrompt(authorityWith(["does-not-exist"]), empty).prompt;
     expect(prompt).not.toContain("Attached resources (trusted");
   });
@@ -438,7 +442,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
  * grants is the honesty failure P14-LV-09 already fixed for specialists.
  */
 describe("buildOperatorSystemPrompt — RESOLVED MCP servers (B8)", () => {
-  const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-b8-"));
+  const dataRoot = temp.make("viberr-op-b8-");
 
   it("never announces a granted server that resolved to nothing — it names the gap instead", () => {
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot, {
@@ -533,7 +537,7 @@ describe("authoredPacketOptions — recommended index (P11-27)", () => {
  * transition; acceptance is `completion-for-acceptance`.
  */
 describe("buildOperatorSystemPrompt — whose policy is this? (F21-16, F21-14)", () => {
-  const dataRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-op-scope-"));
+  const dataRoot = () => temp.make("viberr-op-scope-");
 
   const withPolicy = (
     rows: Record<string, CapabilityMode>,
@@ -584,7 +588,7 @@ describe("buildOperatorSystemPrompt — whose policy is this? (F21-16, F21-14)",
  */
 describe("buildOperatorSystemPrompt — shell inventory (ruling 191)", () => {
   it("carries what the agents it dispatches can actually run", () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-shell-"));
+    const dataRoot = temp.make("viberr-op-shell-");
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot).prompt;
     // CANARY: drop the section and an environmental verdict reads to the
     // coordinator as a defect in the work.
@@ -603,7 +607,7 @@ describe("buildOperatorSystemPrompt — shell inventory (ruling 191)", () => {
  */
 describe("buildOperatorSystemPrompt — the rulings obligation (ruling 286)", () => {
   const withRulings = (rulingsKb: string | null) => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-r286-"));
+    const dataRoot = temp.make("viberr-op-r286-");
     mkdirSync(path.join(dataRoot, "kb", "team-rules"), { recursive: true });
     writeFileSync(
       path.join(dataRoot, "kb", "team-rules", "conventions.md"),
@@ -644,7 +648,7 @@ describe("buildOperatorSystemPrompt — the rulings obligation (ruling 286)", ()
     // resource block is skipped for having no parts, and the guard under test
     // would pass for a reason that has nothing to do with it — which is how a
     // canary comes out green on a mutation it was written to catch.
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-op-r286-miss-"));
+    const dataRoot = temp.make("viberr-op-r286-miss-");
     mkdirSync(path.join(dataRoot, "kb", "craft"), { recursive: true });
     writeFileSync(path.join(dataRoot, "kb", "craft", "style.md"), "# Style", "utf8");
     const auth = authorityWith(["craft", "renamed-away"]);

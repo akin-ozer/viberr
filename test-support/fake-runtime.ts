@@ -1,3 +1,4 @@
+import { AsyncLocalStorage, createHook } from "node:async_hooks";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type {
   CompactCallbacks,
@@ -8,8 +9,11 @@ import type {
   RunSpec,
   RuntimeAdapter,
 } from "~/server/runtimes/adapter.server";
-import { configureRunServiceForTests } from "~/server/runtimes/run-service.server";
-import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import {
+  configureRunServiceForTests,
+  type RunCompletionCallback,
+} from "~/server/runtimes/run-service.server";
+import type { AdapterSet, RealBackend } from "~/server/runtimes/runtime-registry.server";
 
 export interface FakeRun {
   lines: LogLine[];
@@ -87,6 +91,90 @@ export function queueFakeRun(run: FakeRun, backend = run.backend ?? "claude"): v
   queued[backend].push(run);
 }
 
+/**
+ * The work a run's end sets off, which a test cannot await: the run service
+ * settles the run and fires its completion callbacks, and a callback `void`s
+ * its effects (the reply comment, the verdict, the operator react, a delivery
+ * reconcile that runs git). A test that returns first has its cleanup close
+ * the database under that chain: "database is not open", then the
+ * effects-lost note failing on the same closed handle.
+ *
+ * So a fake run's exit, and every completion callback, runs in this context,
+ * and `unsettled` holds each promise created in it until that promise settles.
+ * `drainRunCompletions` waits for it to empty.
+ */
+const completionWork = new AsyncLocalStorage<true>();
+const unsettled = new Set<number>();
+const promiseTracker = createHook({
+  init(asyncId, type) {
+    if (type === "PROMISE" && completionWork.getStore()) unsettled.add(asyncId);
+  },
+  promiseResolve(asyncId) {
+    if (unsettled.delete(asyncId) && unsettled.size === 0) queueMicrotask(stopWhenIdle);
+  },
+});
+
+/** The hook costs every promise in the process a call, so it runs only while
+ *  there is work to watch. The check waits a microtask, so the rest of the
+ *  synchronous stretch that emptied the set is still watched. */
+function stopWhenIdle(): void {
+  if (unsettled.size === 0) promiseTracker.disable();
+}
+
+function asCompletionWork(work: () => void): void {
+  promiseTracker.enable();
+  completionWork.run(true, work);
+}
+
+/** `configureRunServiceForTests` keeps the run service's state on
+ *  `globalThis` under this key (`SERVICE_KEY` in run-service.server.ts). */
+const RUN_SERVICE_KEY = Symbol.for("viberr.runService");
+
+/** The run service's completion registry, running each callback set on it as
+ *  completion work. */
+class TrackedCompletions extends Map<string, RunCompletionCallback> {
+  override set(runId: string, callback: RunCompletionCallback): this {
+    return super.set(runId, (finished) => asCompletionWork(() => callback(finished)));
+  }
+}
+
+/**
+ * Install `adapters` in the run service the way `installFakeRuntime` installs
+ * the fakes, so every completion callback runs as work `drainRunCompletions`
+ * waits for. For a test that brings its own adapter.
+ */
+export function installRunAdapters(adapters: AdapterSet): void {
+  configureRunServiceForTests(adapters);
+  // Both firing paths read this registry: the settle after a run's exit, and
+  // `registerRunCompletion` itself when the run has already settled, which is
+  // every fake run (it exits a microtask after it starts, before its caller
+  // registers). The registry is the one place a callback can be wrapped from
+  // outside the run service.
+  const slot: Record<symbol, { completions?: unknown } | undefined> = globalThis;
+  const state = slot[RUN_SERVICE_KEY];
+  if (!(state?.completions instanceof Map)) {
+    throw new Error(
+      "the run service's completion registry moved; update installRunAdapters in test-support/fake-runtime.ts",
+    );
+  }
+  state.completions = new TrackedCompletions(state.completions);
+}
+
+/**
+ * Wait for the completion work in flight to finish, so a test's cleanup never
+ * closes the database under it. Call it in `afterEach`, before cleanup. Past
+ * `timeoutMs` it stops waiting rather than fail the test: a chain that never
+ * settles then logs against the closed database, as every chain did before.
+ */
+export async function drainRunCompletions(timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (unsettled.size > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  unsettled.clear();
+  promiseTracker.disable();
+}
+
 export function installFakeRuntime(): void {
   queued.claude.length = 0;
   queued.codex.length = 0;
@@ -94,7 +182,7 @@ export function installFakeRuntime(): void {
   queuedCompactions.claude.length = 0;
   queuedCompactions.codex.length = 0;
   compactedSpecs.length = 0;
-  configureRunServiceForTests({
+  installRunAdapters({
     claude: createFakeAdapter("claude"),
     codex: createFakeAdapter("codex"),
   });
@@ -174,8 +262,8 @@ function playFakeRun(
   };
   const gate = queuedRun?.gate;
   queueMicrotask(() => {
-    if (gate) void gate.then(play);
-    else play();
+    if (gate) void gate.then(() => asCompletionWork(play));
+    else asCompletionWork(play);
   });
 
   return {
@@ -183,11 +271,13 @@ function playFakeRun(
     interrupt() {
       if (stopped) return;
       stopped = true;
-      callbacks.onExit({
-        outcome: "interrupted",
-        effectiveBackend: spec.backend,
-        sessionId,
-      });
+      asCompletionWork(() =>
+        callbacks.onExit({
+          outcome: "interrupted",
+          effectiveBackend: spec.backend,
+          sessionId,
+        }),
+      );
     },
   };
 }

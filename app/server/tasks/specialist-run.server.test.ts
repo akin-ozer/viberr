@@ -58,7 +58,9 @@ import type {
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
+  drainRunCompletions,
   installFakeRuntime,
+  installRunAdapters,
   lastRunSpec,
   queueFakeRun,
   startedRunSpecs,
@@ -170,7 +172,8 @@ beforeEach(async () => {
   await connectFakeBackend(store.db, store.users.arda.id, "codex");
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await drainRunCompletions();
   resetSseBrokerForTests();
   ctx.cleanup();
 });
@@ -1946,10 +1949,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
 
   beforeEach(async () => {
     specs.length = 0;
-    const { configureRunServiceForTests } = await import(
-      "~/server/runtimes/run-service.server"
-    );
-    configureRunServiceForTests({
+    installRunAdapters({
       claude: recordingAdapter("claude"),
       codex: recordingAdapter("codex"),
     });
@@ -1998,16 +1998,13 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { configureRunServiceForTests } = await import(
-      "~/server/runtimes/run-service.server"
-    );
     const throwingAdapter = (backend: RealBackend): RuntimeAdapter => ({
       backend,
       start(): RunHandle {
         throw new Error("dispatch blew up after reserveRun");
       },
     });
-    configureRunServiceForTests({
+    installRunAdapters({
       claude: throwingAdapter("claude"),
       codex: throwingAdapter("codex"),
     });
@@ -2025,7 +2022,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // accepted, NOT refused by single-flight. Canary: drop the wrapper's abandon()
     // in startAgentRun and this second run 409s ("A delivering agent run is
     // already in progress").
-    configureRunServiceForTests({
+    installRunAdapters({
       claude: recordingAdapter("claude"),
       codex: recordingAdapter("codex"),
     });
@@ -2036,10 +2033,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       { dataRoot: store.dataRoot },
     );
     expect(retry.runId).toMatch(/^run_/);
-    // The retry's recordingAdapter fires its onExit on a microtask; let its
-    // completion drain before teardown closes the DB (avoids a caught-but-noisy
-    // "database is not open" from the completion handler racing cleanup).
-    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
   /**
@@ -4087,7 +4080,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     // when GitHub is unreachable) and give it the workspace-clone refspec.
     await exec("git", ["-C", mirror, "config", "remote.origin.url", "https://github.com/acme/widgets.git"]);
     await exec("git", ["-C", mirror, "config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"]);
-    const seed = mkdtempSync(path.join(tmpdir(), "viberr-mirror-seed-"));
+    const seed = ctx.makeTempDir("viberr-mirror-seed-");
     await exec("git", ["clone", "-q", "-b", "main", mirror, seed]);
     await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
     await exec("git", ["-C", seed, "config", "user.name", "T"]);
@@ -5541,7 +5534,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
   let second: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(path.join(tmpdir(), "viberr-pin-"));
+    dir = ctx.makeTempDir("viberr-pin-");
     await execFileAsync("git", ["init", "-q", "-b", "main", dir]);
     await execFileAsync("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
     await execFileAsync("git", ["-C", dir, "config", "user.name", "T"]);

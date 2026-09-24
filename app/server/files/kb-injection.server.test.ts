@@ -1,15 +1,13 @@
 import {
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   KB_DOC_READ_CHARS,
   KB_RULINGS_NOTE,
@@ -19,9 +17,13 @@ import {
   readKbIndexDetailed,
   readKbIndexes,
 } from "./kb-injection.server";
+import { createTempDirs } from "../../../test-support/temp-dirs";
+
+const temp = createTempDirs();
+afterAll(temp.cleanup);
 
 function freshKb(dir = "notes") {
-  const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-kb-"));
+  const dataRoot = temp.make("viberr-kb-");
   const kbDir = path.join(dataRoot, "kb", dir);
   mkdirSync(kbDir, { recursive: true });
   return { dataRoot, kbDir };
@@ -166,7 +168,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
    */
   it("refuses a KB folder that is a symlink out of the store", () => {
     const { dataRoot } = freshKb();
-    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    const outside = temp.make("viberr-outside-");
     writeFileSync(path.join(outside, "secret.md"), "MARKER-OUTSIDE", "utf8");
     symlinkSync(outside, path.join(dataRoot, "kb", "linked"));
     const detailed = readKbIndexDetailed("linked", dataRoot);
@@ -247,7 +249,7 @@ describe("readKbDocForRun — the pull half of ruling 283", () => {
 
   it("refuses a symlinked document pointing out of the store", () => {
     const { dataRoot, kbDir } = freshKb();
-    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    const outside = temp.make("viberr-outside-");
     writeFileSync(path.join(outside, "secret.md"), "MARKER-LINKED", "utf8");
     symlinkSync(path.join(outside, "secret.md"), path.join(kbDir, "linked.md"));
     expect(readKbDocForRun(["notes"], "notes", "linked.md", dataRoot)).not.toContain(

@@ -1,7 +1,6 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   SKILL_INJECTION_BUDGET,
   assertSkillBodyWellFormed,
@@ -9,6 +8,10 @@ import {
   readSkillBodies,
   readSkillBodyDetailed,
 } from "./skill-body.server";
+import { createTempDirs } from "../../../test-support/temp-dirs";
+
+const temp = createTempDirs();
+afterAll(temp.cleanup);
 
 /**
  * P14-KM-03: skill injection was the one unbounded prompt input. KBs have been
@@ -17,7 +20,7 @@ import {
  */
 
 function freshSkill(name = "craft") {
-  const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-skill-"));
+  const dataRoot = temp.make("viberr-skill-");
   const skillDir = path.join(dataRoot, "skills", name);
   mkdirSync(skillDir, { recursive: true });
   return { dataRoot, skillDir };
@@ -81,7 +84,7 @@ describe("readSkillBodyDetailed — the body", () => {
  */
 describe("readSkillBodyDetailed — store containment (A5)", () => {
   function outsideFile(body: string): string {
-    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    const outside = temp.make("viberr-outside-");
     writeFileSync(path.join(outside, "SKILL.md"), body, "utf8");
     return outside;
   }
