@@ -207,7 +207,7 @@ describe("StoreBrowser", () => {
 
   it("delete goes through the nested confirm; Escape closes only the top layer", async () => {
     let closed = 0;
-    const { getByText, getByLabelText, queryByRole } = renderBrowser({
+    const { getByText, getByLabelText, getByRole, queryByRole } = renderBrowser({
       onClose: () => {
         closed += 1;
       },
@@ -217,6 +217,12 @@ describe("StoreBrowser", () => {
     expect(
       getByText("The file is removed from the store. Agents lose it on their next context load."),
     ).toBeTruthy();
+    // Ruling 455(f): the shared ConfirmDialog, named by its title, stacked over
+    // the browser, and no longer described by an id nothing carries.
+    const confirm = getByRole("alertdialog", { name: "Delete “overview.md”?" });
+    expect(confirm.getAttribute("data-screen-label")).toBe("Store deletion dialog");
+    expect(confirm.classList.contains("over-modal")).toBe(true);
+    expect(confirm.hasAttribute("aria-describedby")).toBe(false);
 
     // Escape on the topmost native <dialog> (the nested confirm) fires its
     // `cancel` event, which useDialog turns into onCancel — the confirm
@@ -374,7 +380,7 @@ describe("StoreBrowser document editor", () => {
   });
 
   it("a new document colliding with an existing file confirms before replacing", async () => {
-    const { getByText, getByPlaceholderText, getByLabelText, queryByRole } =
+    const { getByText, getByPlaceholderText, getByLabelText, getByRole, queryByRole } =
       renderBrowser();
     fireEvent.click(getByText("New document"));
     fireEvent.change(getByPlaceholderText("file-name.md"), {
@@ -389,6 +395,11 @@ describe("StoreBrowser document editor", () => {
     // overwrote with the same "saved" toast.
     expect(lastForm).toBeNull();
     expect(getByText("Replace “overview.md”?")).toBeTruthy();
+    // Ruling 455(f): the shared ConfirmDialog, named by its title and stacked
+    // over the browser.
+    const confirm = getByRole("alertdialog", { name: "Replace “overview.md”?" });
+    expect(confirm.getAttribute("data-screen-label")).toBe("Replace document dialog");
+    expect(confirm.classList.contains("over-modal")).toBe(true);
 
     fireEvent(
       document.querySelector("dialog.confirm-card")!,

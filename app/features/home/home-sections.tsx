@@ -4,9 +4,9 @@ import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import type { SessionUser } from "~/server/auth/require-user.server";
 import { countLabel } from "~/shared/text/plural";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
-import { useDialog } from "~/ui/use-dialog";
 import type { NotificationView } from "~/features/notifications/notification-item";
 import { TopBell } from "~/features/shell/top-bell";
 import { UserMenu } from "~/features/shell/user-menu";
@@ -667,7 +667,8 @@ export function StoreStrip({
   );
 }
 
-/** Confirm dialog for the full projection rebuild (admin recovery action). */
+/** Confirm dialog for the full projection rebuild (admin recovery action), on
+ *  the shared `ConfirmDialog` (ruling 455(f)). */
 export function RebuildConfirm({
   onCancel,
   onConfirm,
@@ -675,40 +676,28 @@ export function RebuildConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
   return (
-    // Native <dialog>; role="alertdialog" kept for the stronger semantics.
-    // Escape + backdrop-click close come from showModal() + useDialog.
-    <dialog
-      ref={ref}
-      className="confirm-card"
-      role="alertdialog"
-      aria-labelledby="rebuild-confirm-title"
+    // The trigger is tertiary-destructive; inside the confirmation the commit
+    // IS the primary action, so it carries the danger tone (ConfirmDialog's
+    // default) here — not out on the page (skill: destructive placement).
+    <ConfirmDialog
+      screenLabel="Rebuild projections dialog"
+      title="Rebuild all projections?"
+      body={
+        <>
+          Drops every derived board/task row and re-projects the whole store from
+          the files on disk. Nothing is lost: task files, repositories and pull
+          requests are never touched, and every row here is rebuilt from them.
+        </>
+      }
+      confirmLabel="Rebuild projections"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
     >
-      <div className="confirm-icon">
-        <Icon name="alert" />
-      </div>
-      <h3 id="rebuild-confirm-title">Rebuild all projections?</h3>
-      <p>
-        Drops every derived board/task row and re-projects the whole store from
-        the files on disk. Nothing is lost: task files, repositories and pull
-        requests are never touched, and every row here is rebuilt from them.
-      </p>
       <p>
         This is a recovery action. Day-to-day drift only needs{" "}
         <b>Re-scan store</b>. Use it when the board disagrees with the files.
       </p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        {/* The trigger is tertiary-destructive; inside the confirmation the
-            commit IS the primary action, so it carries the danger tone here —
-            not out on the page (skill: destructive placement). */}
-        <button type="button" className="btn danger" onClick={onConfirm}>
-          Rebuild projections
-        </button>
-      </div>
-    </dialog>
+    </ConfirmDialog>
   );
 }

@@ -334,7 +334,7 @@ describe("UsersPanel", () => {
   });
 
   it("disable confirms then posts user-disable; self-disable is client-guarded", async () => {
-    const { getByText, getByLabelText, queryByRole } = renderPanel(
+    const { getByText, getByLabelText, getByRole, queryByRole } = renderPanel(
       <UsersPanel users={USERS} domains={DOMAINS} meId="u_arda" />,
     );
     // Self-disable is refused client-side — no dialog, no server round-trip.
@@ -348,6 +348,12 @@ describe("UsersPanel", () => {
     // Disabling another user goes through the confirm.
     fireEvent.click(getByLabelText("Disable Selin Aksoy"));
     expect(getByText("Disable Selin Aksoy?")).toBeTruthy();
+    // Ruling 455(f): the shared ConfirmDialog, named by its title.
+    expect(
+      getByRole("alertdialog", { name: "Disable Selin Aksoy?" }).getAttribute(
+        "data-screen-label",
+      ),
+    ).toBe("Disable user dialog");
     fireEvent.click(getByText("Disable", { selector: "button.btn.danger" }));
     await waitFor(() =>
       expect(lastForm).toMatchObject({ intent: "user-disable", userId: "u_selin" }),

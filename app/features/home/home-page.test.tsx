@@ -540,6 +540,14 @@ describe("F13: the home footer says what it is", () => {
     fireEvent.click(getByText("Rebuild projections…").closest("button")!);
     const dialog = container.querySelector("dialog.confirm-card")!;
     expect(dialog.textContent).toContain("Rebuild all projections?");
+    // Ruling 455(f): the shared ConfirmDialog, named by its title.
+    expect(dialog.getAttribute("aria-label")).toBe("Rebuild all projections?");
+    expect(dialog.getAttribute("data-screen-label")).toBe("Rebuild projections dialog");
+    // The second paragraph rides ConfirmDialog's children, under the body.
+    expect(Array.from(dialog.querySelectorAll("p"), (p) => p.textContent)).toEqual([
+      "Drops every derived board/task row and re-projects the whole store from the files on disk. Nothing is lost: task files, repositories and pull requests are never touched, and every row here is rebuilt from them.",
+      "This is a recovery action. Day-to-day drift only needs Re-scan store. Use it when the board disagrees with the files.",
+    ]);
     // Honest about the blast radius in both directions.
     expect(dialog.textContent).toContain("Drops every derived board/task row");
     expect(dialog.textContent).toContain("never touched");

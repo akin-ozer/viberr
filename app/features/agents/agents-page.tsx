@@ -14,6 +14,7 @@ import {
   TRANSITION_TO_DONE_CAPABILITY_ID,
   TRANSITION_TO_DONE_EXCEPTION,
 } from "~/features/policy/policy-data";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName, storeIcon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
@@ -451,49 +452,38 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref: dialogRef, close } = useDialog(onCancel);
-  // Native <dialog>: backdrop click and Escape dismiss are handled by
-  // useDialog; the ::backdrop pseudo-element renders the scrim.
+  // The shared `ConfirmDialog` (ruling 455(f)): a native <dialog> whose
+  // backdrop click and Escape dismiss come from useDialog.
   return (
-    <dialog
-      className="confirm-card"
-      role="alertdialog"
-      aria-label="Delete profile"
-      ref={dialogRef}
-    >
-      <div className="confirm-icon">
-        <Icon name="alert" />
-      </div>
-      <h3>Delete the {a.name} profile?</h3>
-      <p>
-        This removes <strong>{a.name}</strong> from {projectName}'s approved
-        profiles. It can't be assigned to new tasks.
-        {activeCount > 0 ? (
-          <>
-            {" "}
-            It is currently engaged on{" "}
-            <strong>
-              {activeCount} active task{activeCount > 1 ? "s" : ""}
-            </strong>
-            . Those engagements stay on the tasks, and nothing reassigns them
-            for you. Until someone assigns a replacement from each task's
-            Execution profile, runs there can't deliver, comment, ask a question
-            or attach evidence.
-          </>
-        ) : (
-          <> The global base definition is unaffected.</>
-        )}
-      </p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
-          <Icon name="x" />
-          Delete profile
-        </button>
-      </div>
-    </dialog>
+    <ConfirmDialog
+      screenLabel="Profile deletion dialog"
+      title={`Delete the ${a.name} profile?`}
+      body={
+        <>
+          This removes <strong>{a.name}</strong> from {projectName}'s approved
+          profiles. It can't be assigned to new tasks.
+          {activeCount > 0 ? (
+            <>
+              {" "}
+              It is currently engaged on{" "}
+              <strong>
+                {activeCount} active task{activeCount > 1 ? "s" : ""}
+              </strong>
+              . Those engagements stay on the tasks, and nothing reassigns them
+              for you. Until someone assigns a replacement from each task's
+              Execution profile, runs there can't deliver, comment, ask a question
+              or attach evidence.
+            </>
+          ) : (
+            <> The global base definition is unaffected.</>
+          )}
+        </>
+      }
+      confirmLabel="Delete profile"
+      confirmIcon="x"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

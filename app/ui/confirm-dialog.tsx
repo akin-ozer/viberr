@@ -17,7 +17,10 @@ import { useDialog } from "~/ui/use-dialog";
  * one grammar, an outcome-naming `confirmLabel` (never a bare "Remove"), reusing
  * the existing `.confirm-card` chrome and `useDialog` behaviors (Escape,
  * backdrop-click close, focus trap, focus restore). `org-settings`' `ConfirmDelete`
- * delegates here (C6); the D6 sites render it directly.
+ * delegates here (C6); the D6 sites render it directly. Ruling 455(f) moved the
+ * hand-written copies of this card here too: the user disable, the credential
+ * removal, the projection rebuild, the KB browser's delete and replace, and the
+ * agent profile delete.
  */
 export function ConfirmDialog({
   title,
@@ -26,8 +29,10 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   tone = "danger",
   icon = "alert",
+  confirmIcon,
   busy = false,
   screenLabel,
+  className,
   onCancel,
   onConfirm,
   children,
@@ -44,6 +49,9 @@ export function ConfirmDialog({
   cancelLabel?: string;
   tone?: "danger" | "primary";
   icon?: IconName;
+  /** A glyph inside the confirm button, before its label (the agent profile
+   *  delete carries `x`). */
+  confirmIcon?: IconName;
   /** Disables the confirm while its mutation is in flight (double-submit guard). */
   busy?: boolean;
   /** Pass-33 D33-2: the `data-screen-label` every other dialog in the product
@@ -54,6 +62,9 @@ export function ConfirmDialog({
    *  project delete, was the one family with no name. Required, so a new call
    *  site cannot quietly rejoin the gap. */
   screenLabel: string;
+  /** Classes added to `.confirm-card`. The KB browser's confirms pass
+   *  `over-modal`, since they open on top of the browser's own dialog. */
+  className?: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -62,7 +73,7 @@ export function ConfirmDialog({
     // role="alertdialog" on a native <dialog> keeps the stronger semantics.
     <dialog
       ref={ref}
-      className="confirm-card"
+      className={className ? "confirm-card " + className : "confirm-card"}
       role="alertdialog"
       aria-label={title}
       data-screen-label={screenLabel}
@@ -84,6 +95,7 @@ export function ConfirmDialog({
           aria-disabled={busy}
           onClick={onConfirm}
         >
+          {confirmIcon && <Icon name={confirmIcon} />}
           {confirmLabel}
         </button>
       </div>

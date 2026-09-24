@@ -9,6 +9,7 @@ import {
 import { useFetcher } from "react-router";
 import { countLabel } from "~/shared/text/plural";
 import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
@@ -503,9 +504,9 @@ function StoreTree({
   );
 }
 
-/** Nested delete confirm on its OWN native <dialog> — showModal stacking
- * makes it the topmost layer, so its Escape/backdrop land here (useDialog),
- * not on the browser card underneath. */
+/** Nested delete confirm on its OWN native <dialog> (the shared `ConfirmDialog`,
+ * ruling 455(f)) — showModal stacking makes it the topmost layer, so its
+ * Escape/backdrop land there (useDialog), not on the browser card underneath. */
 function DeleteConfirm({
   node,
   onCancel,
@@ -515,42 +516,24 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  const files = node.type === "dir" ? countKbFiles(node.children) : 0;
   return (
-    <dialog
-      ref={ref}
-      className="confirm-card over-modal"
-      role="alertdialog"
-      aria-labelledby="store-confirm-title"
-      aria-describedby="store-confirm-desc"
-    >
-      <div className="confirm-icon">
-        <Icon name="alert" />
-      </div>
-      <h3 id="store-confirm-title">
-        Delete “{node.name}”
-        {node.type === "dir" && countKbFiles(node.children) > 0
-          ? " and its contents"
-          : ""}
-        ?
-      </h3>
-      <p>
-        {node.type === "dir"
-          ? countKbFiles(node.children) > 0
-            ? countLabel(countKbFiles(node.children), "file") +
+    <ConfirmDialog
+      screenLabel="Store deletion dialog"
+      className="over-modal"
+      title={`Delete “${node.name}”${files > 0 ? " and its contents" : ""}?`}
+      body={
+        node.type === "dir"
+          ? files > 0
+            ? countLabel(files, "file") +
               " inside will be removed from the store. Agents lose them on their next context load."
             : "The empty folder is removed from the store."
-          : "The file is removed from the store. Agents lose it on their next context load."}
-      </p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
-          {node.type === "dir" ? "Delete folder" : "Delete file"}
-        </button>
-      </div>
-    </dialog>
+          : "The file is removed from the store. Agents lose it on their next context load."
+      }
+      confirmLabel={node.type === "dir" ? "Delete folder" : "Delete file"}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -851,8 +834,9 @@ function useDocEditor(
   };
 }
 
-/** Nested "this file already exists" confirm — its own native <dialog>, so it
- *  stacks over the browser card exactly like the delete confirm (UI-59). */
+/** Nested "this file already exists" confirm — its own native <dialog> (the
+ *  shared `ConfirmDialog`, ruling 455(f)), so it stacks over the browser card
+ *  exactly like the delete confirm (UI-59). */
 function ReplaceConfirm({
   path,
   onCancel,
@@ -862,33 +846,22 @@ function ReplaceConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
   return (
-    <dialog
-      ref={ref}
-      className="confirm-card over-modal"
-      role="alertdialog"
-      aria-labelledby="store-replace-title"
-      aria-describedby="store-replace-desc"
-    >
-      <div className="confirm-icon">
-        <Icon name="alert" />
-      </div>
-      <h3 id="store-replace-title">Replace “{path}”?</h3>
-      <p id="store-replace-desc">
-        A document with that name is already in the store. Saving overwrites its
-        contents: the old text is gone, and agents load the new text on their
-        next context load.
-      </p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
-          Replace document
-        </button>
-      </div>
-    </dialog>
+    <ConfirmDialog
+      screenLabel="Replace document dialog"
+      className="over-modal"
+      title={`Replace “${path}”?`}
+      body={
+        <>
+          A document with that name is already in the store. Saving overwrites its
+          contents: the old text is gone, and agents load the new text on their
+          next context load.
+        </>
+      }
+      confirmLabel="Replace document"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

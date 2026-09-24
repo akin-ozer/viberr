@@ -703,9 +703,14 @@ describe("ProfileDetail", () => {
       />,
     );
     fireEvent.click(getByText("Delete"));
-    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    // Ruling 455(f): the shared ConfirmDialog, named by its title, with the
+    // confirm button's glyph kept.
+    const dialog = container.querySelector('[role="alertdialog"]')!;
+    expect(dialog.getAttribute("aria-label")).toBe("Delete the Developer profile?");
+    expect(dialog.getAttribute("data-screen-label")).toBe("Profile deletion dialog");
     expect(getByText("Delete the Developer profile?")).toBeTruthy();
     expect(getByText("1 active task")).toBeTruthy();
+    expect(getByText("Delete profile").closest("button")!.querySelector("svg")).not.toBeNull();
     fireEvent.click(getByText("Delete profile"));
     expect(onDelete).toHaveBeenCalledWith("developer");
   });
