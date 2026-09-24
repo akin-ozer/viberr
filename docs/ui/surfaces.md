@@ -311,8 +311,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   console fills the thread it shows with one request, reading "loading this console…"
   meanwhile; another agent's console loads when the picker opens it. A line appends
   one row, keyed by its run and seq, and leaves every drawn row alone; the Live run
-  strip's phase, step, turns and tokens move with each line (the console's tail reads
-  carry them), and its Elapsed clock ticks alone. The console's rows skip layout and
+  strip's phase, step, turns and tokens move with each line of whichever running agent
+  it shows (the console's tail reads carry them, and a line of an agent whose console is
+  not loaded reads that run's facts alone), and its Elapsed clock ticks alone. The console's rows skip layout and
   paint while off screen (`content-visibility: auto`). While the tab's live stream is
   down the console's footer says "Live tail disconnected: reconnecting…".
 - **A live run's console is disclosed on its own card** (ruling 380): while a run streams,

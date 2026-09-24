@@ -169,6 +169,9 @@ interface ThreadState {
   /** Highest seq a frame announced for `runId`. */
   announced: number;
   tailing: boolean;
+  /** A facts-only read is in flight (CON-1), and a frame landed during it. */
+  readingFacts: boolean;
+  factsAgain: boolean;
   paging: boolean;
   fillingRaw: boolean;
   shown: boolean;
@@ -306,6 +309,8 @@ export function createLiveRunLogStore(
       cursor: window.headSeq,
       announced: window.headSeq,
       tailing: false,
+      readingFacts: false,
+      factsAgain: false,
       paging: false,
       fillingRaw: false,
       shown: false,
@@ -376,6 +381,8 @@ export function createLiveRunLogStore(
 
   const tailUrl = (runId: string, since: number) =>
     `/resources/run-log?runId=${encodeURIComponent(runId)}&since=${since}${rawView ? "" : "&raw=0"}`;
+  /** A run's facts and no lines: a `since` past every line answers none. */
+  const factsUrl = (runId: string) => tailUrl(runId, Number.MAX_SAFE_INTEGER);
 
   /** Appends a tail page's fresh lines; true when any arrived. */
   const appendTail = (t: ThreadState, page: TailPage): boolean => {
@@ -428,6 +435,36 @@ export function createLiveRunLogStore(
       // brings, asks again from the same cursor.
     } finally {
       t.tailing = false;
+    }
+  };
+
+  /**
+   * Ruling 454 (CON-1): the Live run strip reads a run's facts from this
+   * store, and only a `ready` thread tails, so a running agent whose console
+   * was never shown (the strip's picker is its own, and a hard load carries
+   * one group's lines) kept the loader's phase, step, turns and tokens for
+   * its whole run. A frame for such a thread reads that run's facts alone:
+   * one small request, at most one in flight per thread, and one more for
+   * the frames that landed while it was.
+   */
+  const readFacts = async (t: ThreadState): Promise<void> => {
+    if (!enabled) return;
+    if (t.readingFacts) {
+      t.factsAgain = true;
+      return;
+    }
+    t.readingFacts = true;
+    try {
+      do {
+        t.factsAgain = false;
+        const { data } = await getData<TailPage>(factsUrl(t.runId));
+        if (data === null) return;
+        setFacts(data.runId, data.facts);
+      } while (t.factsAgain && current(t));
+    } catch {
+      // The next frame asks again.
+    } finally {
+      t.readingFacts = false;
     }
   };
 
@@ -683,18 +720,21 @@ export function createLiveRunLogStore(
       const t = threadOfRun(runId);
       if (!t) return;
       if (seq > t.announced) t.announced = seq;
-      if (seq > t.cursor) void tail(t);
+      if (t.view.status === "ready") {
+        if (seq > t.cursor) void tail(t);
+      } else if (t.view.status !== "loading") {
+        // CON-1: no lines in hand, but the strip may show this run. A thread
+        // that is loading gets its facts with the window.
+        void readFacts(t);
+      }
     },
     async poll(runId) {
       if (!enabled) return null;
       const t = threadOfRun(runId);
       try {
-        // A thread whose lines are not in hand reads the facts only: a `since`
-        // past every line answers none.
+        // A thread whose lines are not in hand reads the facts only.
         const ready = t !== undefined && t.view.status === "ready";
-        const { data } = await getData<TailPage>(
-          tailUrl(runId, ready ? t.cursor : Number.MAX_SAFE_INTEGER),
-        );
+        const { data } = await getData<TailPage>(ready ? tailUrl(runId, t.cursor) : factsUrl(runId));
         if (data === null) return null;
         setFacts(data.runId, data.facts);
         if (ready && current(t)) appendTail(t, data);
