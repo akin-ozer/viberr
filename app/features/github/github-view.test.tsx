@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ProjectCredentialHealth } from "~/server/secrets/pat-store.server";
 import { CredentialCard, CredentialManageActions } from "./credential-card";
 import { createRoutesStub } from "react-router";
@@ -55,6 +55,15 @@ const healthyCredential: ProjectCredentialHealth = {
     ok: true,
     source: "header" as const,
   })),
+};
+
+/** A `workflow` violation GitHub already raised: the advisory the delivery
+ *  refusal's remedy points at. */
+const workflowAdvisory: ProjectCredentialHealth["advisories"][number] = {
+  id: "workflow_scope",
+  scope: "workflow",
+  source: "violation",
+  text: "GitHub refused a push under .github/workflows/ with this token (VIB-142): it lacks the workflow scope. Grant it on GitHub, then Re-check the credential.",
 };
 
 const noneCredential: ProjectCredentialHealth = {
@@ -333,6 +342,35 @@ describe("CredentialCard states", () => {
     expect(container.querySelector(".cred-warn .btn")!.textContent).toBe(
       "Grant scope",
     );
+  });
+
+  it("an advisory-only credential keeps the green footer, and the re-check slot with it", () => {
+    // `workflow` and `checks:read` are never required scopes, so a card whose
+    // only problem is an advisory renders `.cred-ok`, which had no action slot
+    // while the advisory said "Re-check the credential". CANARY: drop the slot
+    // from the `.cred-ok` branch.
+    const slot = <button className="btn sm">Grant scope</button>;
+    const advised = render(
+      <CredentialCard
+        credential={{ ...healthyCredential, advisories: [workflowAdvisory] }}
+        onOpenTask={() => {}}
+        warnActions={slot}
+      />,
+    );
+    expect(advised.container.querySelector(".cred-warn")).toBeNull();
+    expect(advised.container.querySelector(".cred-ok .btn")!.textContent).toBe(
+      "Grant scope",
+    );
+    // No advisory, nothing to re-check: the all-good footer stays bare.
+    const clean = render(
+      <CredentialCard
+        credential={healthyCredential}
+        onOpenTask={() => {}}
+        warnActions={slot}
+      />,
+    );
+    expect(clean.container.querySelector(".cred-ok")).not.toBeNull();
+    expect(clean.container.querySelector(".cred-ok .btn")).toBeNull();
   });
 
   it("renders the manageActions slot in every state, including 'none'", () => {
@@ -981,6 +1019,49 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     const { container } = renderPage(null);
     expect(container.querySelector(".cred-card")).toBeNull();
     expect(container.textContent).not.toContain("github_pat_••••42af");
+  });
+});
+
+/**
+ * The delivery refusal's remedy says "Grant the `workflow` scope on GitHub,
+ * then use Re-check on the project's GitHub view", and the pre-push check reads
+ * the cached header scopes. The card that remedy lands on is the green one (no
+ * required scope is missing), so the re-check has to be there or the only way
+ * out is rotating the credential.
+ */
+describe("an advisory's re-check is reachable from the green footer", () => {
+  it("a maintainer re-checks the credential from the card whose only problem is an advisory", async () => {
+    const intents: string[] = [];
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        action: async ({ request }) => {
+          intents.push(String((await request.formData()).get("intent")));
+          return { ok: true as const, toast: "Re-checked." };
+        },
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage
+              data={viewData({
+                credential: { ...healthyCredential, advisories: [workflowAdvisory] },
+              })}
+              reconcileCheck={NO_CHECK_ON_RECORD}
+              myRole="maintainer"
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/viberr-core/github"]} />,
+    );
+    expect(container.querySelector(".cred-warn")).toBeNull();
+    const recheck = container.querySelector<HTMLButtonElement>(
+      `.cred-ok button[title="Re-check the credential's scopes against GitHub"]`,
+    );
+    expect(recheck, "the re-check must sit in the green footer").not.toBeNull();
+    fireEvent.click(recheck!);
+    await waitFor(() => expect(intents).toEqual(["grant-scope"]));
   });
 });
 

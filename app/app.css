@@ -3128,7 +3128,12 @@ dialog[data-closing]::backdrop {
    baseline; the flex basis below lets the SENTENCE take the row and only the
    button wrap. */
 .cred-warn .ico { width: 14px; height: 14px; flex: none; margin-top: .125rem; }
-.cred-warn > span:not(.warn-acts) { flex: 1 1 12rem; min-width: 0; }
+/* 12rem, or what the row leaves beside the 14px glyph and its .5rem gap when
+   that is less. A bare 12rem dropped the sentence under its glyph after all on
+   a phone: at 320px the credential card's footer row is 202px and the profile
+   dialog's is 160px. `.cred-ok` shares the rule. */
+.cred-warn > span:not(.warn-acts),
+.cred-ok > span:not(.warn-acts) { flex: 1 1 min(12rem, 100% - 14px - .5rem); min-width: 0; }
 
 /* Archived-project read-only banner (R6-3): pinned under the topbar across
    every workspace view of an archived project. */
@@ -3141,8 +3146,14 @@ dialog[data-closing]::backdrop {
 }
 .archived-banner .ico { width: 15px; height: 15px; flex: none; }
 .archived-banner strong { color: var(--fg); }
+/* The green footer wraps like `.cred-warn` for the same reason: the credential
+   card puts the Grant scope slot in it while an advisory is open, and at phone
+   width the button has to take its own line rather than squeeze the sentence.
+   The sentence is a span with the warn box's flex basis (above) so it keeps
+   the icon's row; a bare text node would drop under the glyph once the row can
+   wrap. */
 .cred-ok {
-  display: flex; align-items: center; gap: .5rem;
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
   margin-top: .75rem; padding: .5rem .75rem;
   border-radius: var(--radius-box);
   border: 1px solid color-mix(in srgb, var(--teal-dark), transparent 78%);
@@ -5594,7 +5605,13 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .kv-row .k.strong { color: var(--fg); }
 .live-branch { display: inline-flex; align-items: center; gap: .5rem; min-width: 0; }
 .live-branch .trace { font-size: .75rem; }
-.warn-acts { margin-left: auto; display: inline-flex; gap: .375rem; flex: none; }
+/* The credential card's action pair is 236px and the card's footer row is 202px
+   at a 320px viewport: with `flex: none` "Fix in Settings" ran past the card's
+   edge. It may shrink to its own line and wrap its buttons, still flush right. */
+.warn-acts {
+  margin-left: auto; display: inline-flex; flex-wrap: wrap; justify-content: flex-end;
+  gap: .375rem; flex: 0 1 auto;
+}
 .field-row.name-key { grid-template-columns: 1fr 120px; }
 .kv.after-fields { margin-top: .375rem; }
 .stg-add.spaced { margin-top: .75rem; }
@@ -7013,6 +7030,10 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   margin: -.125rem -.125rem -.125rem auto;
 }
 .cred-ok .modal-close .ico { width: 14px; height: 14px; }
+/* `.cred-ok` wraps now (the credential card's re-check slot), but a dismiss
+   belongs beside the sentence it dismisses: at 320px the ✕ otherwise dropped
+   to a line of its own under the temp password. */
+.cred-ok:has(> .modal-close) { flex-wrap: nowrap; }
 
 /* ---------- appended: ruling 147, the agent run starter's empty pick ---------- */
 /* The run/schedule start no longer disables because nothing is picked: it

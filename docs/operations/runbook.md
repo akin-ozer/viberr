@@ -240,7 +240,9 @@ recommendation is open. Nothing is owed by anyone while it waits.
   the `workflow` scope, refused before the push; or GitHub's own refusal on any token). A
   `workflow` scope violation is open on the task and the credential card carries the
   advisory. Grant `workflow` to the token on GitHub, then use **Re-check** (Grant scope) on
-  the project's GitHub view: the header listing `workflow` resolves the violation, as
+  the project's GitHub view. It sits in the card's footer whenever an advisory is open,
+  including when every required scope is proven and the footer is green. The header
+  listing `workflow` resolves the violation, as
   does the next successful push of workflow files. Then deliver again. Nothing here asks a
   person to push.
 - Accept-completion merges the review PR; a missing `pull_request:write` scope surfaces
