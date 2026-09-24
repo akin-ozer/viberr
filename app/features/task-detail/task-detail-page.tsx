@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import { AttachmentLightboxProvider } from "./attachment-lightbox";
 import type { TaskDetail } from "~/server/projections/task-query.server";
@@ -33,6 +33,7 @@ import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
+import { useStableRows } from "~/ui/use-stable-rows";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import {
   acceptanceDisclosureFields,
@@ -105,6 +106,11 @@ function recReachesAcceptance(
   );
 }
 
+/** A run group's identity in the projection (`useStableRows`' key). */
+function runThreadKey(run: RunView): string {
+  return run.id;
+}
+
 export function TaskDetailPage({
   task,
   labelSuggestions = [],
@@ -112,7 +118,7 @@ export function TaskDetailPage({
   attachmentsTotal,
   attachmentProducers = {},
   attachmentsBase = null,
-  runtime,
+  runtime: loadedRuntime,
   deployedSpecialists,
   operatorBackend,
   operatorAutonomy,
@@ -237,6 +243,10 @@ export function TaskDetailPage({
   /** R15-2 safety net (b): the viewer may deliver by hand (maintainer+ or owner). */
   canDeliver?: boolean;
 }) {
+  // Ruling 454 (TASK-4): the run projection keeps its objects while their
+  // content is unchanged, so a revalidation that moved nothing in it leaves
+  // the memoised run card and console alone.
+  const runtime = useStableRows(loadedRuntime, runThreadKey);
   const stage = task.stages.find((s) => s.id === task.stage);
   const [releasing, setReleasing] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -402,24 +412,19 @@ export function TaskDetailPage({
     deliverFetcher.submit(fd, { method: "post" });
   };
 
-  // Dedicated run-log SSE consumer (own EventSource; NOT useLiveUpdates —
-  // phase-6 report). Seeds from the loader's runtime[].lines + raw; tails
-  // live lines via run.log-appended; revalidates on run.state-changed.
-  const { linesByThread, streamError, olderByThread, loadOlder } = useRunLogStream({
+  // The run-log console's store (ruling 454): it follows the task's runs
+  // line by line on the layout's live stream, fills a thread the payload did
+  // not carry, and keeps its lines OUTSIDE this page's state, so a console
+  // line re-renders the console and not the page.
+  const runLog = useRunLogStream({
     source: { kind: "task", projectSlug: task.projectSlug, taskKey: task.key },
-    threads: runtime.map((r) => ({
-      threadId: r.id,
-      runId: r.serverRunId,
-      lines: r.lines.map((display, i) => ({ display, raw: r.raw[i] ?? "" })),
-      // P13-D-11: the loader ships a BOUNDED window of each agent group's
-      // console (NFR5). The window carries the live-tail seed (`headSeq`) and
-      // the backward cursor the console pages the rest of the history with.
-      window: r.logWindow,
-    })),
+    // P13-D-11: each thread carries its BOUNDED window's facts (NFR5): the
+    // live-tail seed (`headSeq`) and the backward cursor.
+    threads: runtime,
     // F22: bounds a stale "running" strip if a finalize event is missed.
     hasActiveRun: runtime.some((r) => r.state === "running"),
-    // UI-30: a non-member's tail requests 403 — don't open a stream that can
-    // only fail (it used to 403 silently on every appended line).
+    // UI-30: a non-member's tail requests 403 — don't ask for what can only
+    // be refused (it used to 403 silently on every appended line).
     enabled: runsVisible,
   });
 
@@ -450,19 +455,19 @@ export function TaskDetailPage({
    *  disclosed on the run card; otherwise the settled-runs panel holds it. */
   const liveRun = runtime.some((r) => r.state === "running");
   /** ONE console element for both positions, so the props cannot drift. */
-  const agentLogs = (
-    <AgentLogsPanel
-      runtime={runtime}
-      sel={shownLogSel}
-      onSel={selectLog}
-      linesByThread={linesByThread}
-      {...(onRetryBackend ? { onRetryBackend } : {})}
-      retryBackends={retryBackends}
-      retrying={runBusy}
-      streamError={streamError}
-      olderByThread={olderByThread}
-      onLoadOlder={loadOlder}
-    />
+  const agentLogs = useMemo(
+    () => (
+      <AgentLogsPanel
+        runtime={runtime}
+        sel={shownLogSel}
+        onSel={selectLog}
+        store={runLog}
+        {...(onRetryBackend ? { onRetryBackend } : {})}
+        retryBackends={retryBackends}
+        retrying={runBusy}
+      />
+    ),
+    [runtime, shownLogSel, selectLog, runLog, onRetryBackend, retryBackends, runBusy],
   );
 
   const onOwner = (action: OwnerAction, member?: TaskMemberView) => {
@@ -885,11 +890,12 @@ export function TaskDetailPage({
             runtime={runtime}
             onViewLogs={onViewLogs}
             // D6: the button opens a confirm instead of interrupting on the click.
-            onInterrupt={(id) => setConfirmInterrupt(id)}
+            onInterrupt={setConfirmInterrupt}
             canInterrupt={canInterrupt}
             interrupting={runBusy}
             consoleOpen={consoleOpen}
             console={runsVisible ? agentLogs : null}
+            store={runLog}
           />
         ) : null}
 

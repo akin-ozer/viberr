@@ -102,6 +102,34 @@ export function classifyRunEnd(
  *  is last, and the prose fallback reads only the last twelve envelopes. */
 const RUN_END_TAIL = 40;
 
+/** A run that did not end in error: nothing to classify. */
+const NOT_FAILED: RunEnd = {
+  failureKind: undefined,
+  failureOrigin: undefined,
+  failedBackendUnavailable: false,
+};
+
+/**
+ * `classifyRunEnd` over the run's OWN newest lines, read only when it errored
+ * (every field is empty otherwise). The one reading the run card and the
+ * review-round counter share (ruling 416). The card used to classify the whole
+ * console window the loader shipped, every earlier run of the agent included,
+ * and that was one of the two reasons the window had to ship (ruling 454,
+ * TASK-1).
+ */
+export function classifyRunEndOf(
+  db: DatabaseSync,
+  run: { id: string; state: RunState },
+): RunEnd {
+  if (run.state !== "error") return NOT_FAILED;
+  const tail = listRunLinesTail(db, run.id, RUN_END_TAIL);
+  return classifyRunEnd(
+    run.state,
+    tail.map((l) => l.display),
+    tail.map((l) => l.raw),
+  );
+}
+
 /**
  * Ruling 416 (F39-42): did the task's deliverer fight a ROUND of rework since
  * `since`?
@@ -125,13 +153,7 @@ export function deliveredRoundSince(
 ): boolean {
   for (const run of profileRunsSince(db, projectSlug, taskKey, profileId, since)) {
     if (run.state !== "error") return true;
-    const tail = listRunLinesTail(db, run.id, RUN_END_TAIL);
-    const end = classifyRunEnd(
-      run.state,
-      tail.map((l) => l.display),
-      tail.map((l) => l.raw),
-    );
-    if (!end.failedBackendUnavailable) return true;
+    if (!classifyRunEndOf(db, run).failedBackendUnavailable) return true;
   }
   return false;
 }

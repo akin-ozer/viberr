@@ -18,6 +18,7 @@ import {
   NEW_CONVERSATION_PARAM,
 } from "~/features/controller/controller-page";
 import { getControllerSurface } from "~/features/controller/controller-query.server";
+import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
  * /controller — the instance controller surface (ruling 99). Every signed-in
@@ -72,6 +73,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       projectSlug: null,
       conversationId: selectedConversationId(db, url, user.id),
       all: url.searchParams.get("all") === "1",
+      // Ruling 454 (owner decision 2): console lines on a document load only.
+      console: isDocumentNavigation(request) ? "shown" : "none",
     },
   );
   return { view };

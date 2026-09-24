@@ -7,9 +7,11 @@
 > `app/server/interpretation/*`, `app/server/events/*`,
 > `app/server/runtimes/run-events.server.ts`, `app/server/org/resource-events.server.ts`,
 > `app/routes/resources.events.ts`, `app/schemas/sse-event.schema.ts`,
-> `app/features/live-updates/*`, `app/features/runtime/use-run-log-stream.ts`.
+> `app/features/live-updates/*`, `app/features/runtime/use-run-log-stream.ts`,
+> `app/features/runtime/run-log-store.ts`.
 >
-> Verified against `main` @ `7d9fbf72` (2026-09-23); §5 and §6 against `8bbe2083` (PR #318).
+> Verified against `main` @ `7d9fbf72` (2026-09-23); §5 and §6 against `8bbe2083` (PR #318);
+> §5's stream events and run-log console against ruling 454's console pass (2026-09-24).
 
 ## 1. The write path
 
@@ -232,16 +234,17 @@ an empty project slug and no route publishes nothing), and the org resource broa
 | `stream.open` | `headId` | control: the connection's first message |
 | `stream.resync` | `{}` | control: sent when replay cannot catch a reconnect up |
 
-`controller.log-appended` is a **stream event** (`SSE_STREAM_EVENTS` in
-`event-types.ts`): one frame per console line on the `user` scope every signed-in
-surface subscribes, so `useLiveUpdates` does not revalidate on it; only the dedicated
-log consumer handles it. `run.log-appended` is a **run-line event**
-(`SSE_RUN_LINE_EVENTS`): only a connection holding its task's `task:` scope receives it
-(ruling 454: every board of the project used to receive and drop every line), and that
-page revalidates on it, at most once per `RUN_LINE_REVALIDATE_MS` (2 s), because its Live run strip
-(phase, step, turns, tokens) is loader data that moves per line. Nothing else a
-project-scoped page renders changes per line: the board's "agent running" fact moves on
-`run.state-changed`.
+`controller.log-appended` and `run.log-appended` are **stream events**
+(`SSE_STREAM_EVENTS` in `event-types.ts`): one frame per console line, which revalidates
+nothing. `useLiveUpdates` hands each one to the tab's run-log consoles (`onLiveFrame`)
+and to nothing else. `controller.log-appended` rides the `user` scope every signed-in
+surface subscribes; `run.log-appended` reaches only a connection holding its task's scope
+(the workspace layout of the page showing that task), because nothing on a board, the
+controller page or another task's page changes per line of someone else's run: the
+board's "agent running" fact moves on `run.state-changed`. Until ruling 454 a board
+received and dropped every line, and the task's own page revalidated root, layout and
+task on its run's lines at most once per 2 s (`RUN_LINE_REVALIDATE_MS`) to move the Live
+run strip; the strip now reads the facts every console tail read returns (below).
 
 **The broker** (`sse-broker.server.ts`, behind the route `resources.events.ts`): one
 connection per stream on `/resources/events` (401 JSON when signed out, since an
@@ -263,9 +266,8 @@ DB and release the writer lock.
 `user` + `projects`; a project page: `project:<slug>` + `user`, plus `task:<slug>/<key>`
 when a task is open; the controller page: `user`, plus `project:<slug>` on a project;
 the controller dock, Instance settings and notifications: `user`), revalidates the active
-React Router loaders on any data event or `stream.resync` (debounced 300 ms; a run line
-only on its own task's page, floored at 2 s, joining a pending revalidation rather than
-pushing it out; `controller.updated`, a **conversation event**
+React Router loaders on any data event or `stream.resync` (debounced 300 ms; never on a
+stream event; `controller.updated`, a **conversation event**
 (`SSE_CONVERSATION_EVENTS`), only on the two controller pages, which render the
 conversation and pass `{ conversations: true }`: every other surface hands it, debounced
 the same way, to the controller dock as the window event `CONTROLLER_UPDATED_EVENT`, and
@@ -274,20 +276,36 @@ follows a previous stream (handing the dock the same catch-up). A
 hidden tab holds no stream: the hook closes on `visibilitychange` and reopens on return
 (ruling 301). A failed stream flips `paused` (the topbar's "live updates paused" chip),
 reopens on a 2 / 5 / 15 / 30 s backoff, probes the session after two consecutive
-failures and stops on a 401 until the user retries. There is no optimistic UI for
+failures and stops on a 401 until the user retries; while it is down the tab's consoles
+say so in their footer (`useLiveStreamFailed`). There is no optimistic UI for
 governed state: revalidation is the update mechanism. (Measured 2026-09-23 on the
 ax-clone instance, before the run-line floor: each line of any run in the project
 revalidated every open board and task page, and three open pages at 2.5 revalidations a
 second pushed a trivial request's p90 from 8 ms to 157 ms on the server's one event
 loop, the one the agents run on.)
 
-The run-log console has its own `EventSource` (`useRunLogStream`), so a log line reaches
-the console at once while the task loader refetches on run lines at most every 2 s: on
-the task scope it tails `run.log-appended` and revalidates once on `run.state-changed`;
-for a controller conversation it tails `controller.log-appended` on the `user` scope. It
-fetches lines since its cursor from `/resources/run-log`, pages older history on demand,
-revalidates every 20 s while a run is shown active (a missed terminal event cannot leave
-the strip "running"), and also closes while the tab is hidden.
+**The run-log console** (`useRunLogStream` over `run-log-store.ts`, ruling 454) opens no
+connection of its own: it takes its frames from the tab's one live stream through
+`onLiveFrame`, so a task tab holds ONE `EventSource` (ruling 301 had named merging the
+console's second stream "the next cut"), and the layout's hidden-tab close and reconnect
+catch-up cover it. On the task scope it tails `run.log-appended`; for a controller
+conversation, `controller.log-appended` on the `user` scope. Its lines live in an external
+store the console reads with `useSyncExternalStore`, so a line re-renders the console and
+not the page. Per frame it fetches the lines since its cursor from `/resources/run-log`
+(one read in flight per thread, read again when a frame announced a line the read did not
+bring), and every answer carries the run row's live facts (`RunLiveFacts`: phase, step,
+turns, tokens, cache), which the Live run strip and the controller's working row read, so
+nothing revalidates per line. Owner decision 2 (2026-09-24): a page's payload carries
+console lines only on a document load, and only the shown agent's display lines; a
+revalidation or a client navigation carries each thread's window facts
+(`logWindow.loaded: false`), the console fills the thread it shows with ONE
+`/resources/run-log?window=1` request, and the stored envelopes load when the raw view
+opens. A revalidation keeps what a thread holds unless its representative run changed; a
+head the loader saw past the cursor (a missed frame, a tab back from hidden) is read as a
+gap. The console pages older history on demand and revalidates every 20 s while a run is
+shown active (a missed terminal event cannot leave the strip "running"); the controller
+page reads the working turn's tail every 5 s instead and revalidates once the tail says
+the run ended (CTL-2). `run.state-changed` revalidates through the layout's stream, once.
 
 ## 6. Provenance and freshness
 

@@ -10,9 +10,12 @@ import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 
 /**
  * Ruling 454, journey `controller` (CTL-2, the page half): what a working turn
- * costs the project controller page while nothing but its step moves. Every
- * revalidation re-runs root, the workspace layout and the page loader, whose
- * payload carries the transcript, the goals and the console window.
+ * costs the project controller page while nothing but its step moves. The page
+ * used to revalidate every 5 s of a turn (plus the F22 20 s safety tick), and
+ * every revalidation re-ran root, the workspace layout and the page loader,
+ * whose payload carries the transcript, the goals and the console window. It
+ * now reads the turn's tail every 5 s, which also moves the working row's
+ * step (ruling 250), and revalidates once the tail says the run ended.
  *
  * Fixture: ControllerPage on a routes stub under a root with a loader (both
  * loaders count their runs), a conversation whose controller turn is running
@@ -102,10 +105,13 @@ const VIEW: ControllerSurfaceView = {
 
 let loaderRuns = 0;
 const fetches: string[] = [];
+/** The step the turn's tail reports (the run row's `step`). */
+let tailStep = "viberr_controller · list_tasks";
 
 beforeEach(() => {
   loaderRuns = 0;
   fetches.length = 0;
+  tailStep = "viberr_controller · list_tasks";
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal("fetch", (input: string | URL | Request) => {
     fetches.push(input instanceof Request ? input.url : String(input));
@@ -120,7 +126,7 @@ beforeEach(() => {
         hasMore: false,
         facts: {
           phase: "Working",
-          step: "viberr_controller · list_tasks",
+          step: tailStep,
           turns: 3,
           tokens: 1200,
           tokensEstimated: false,
@@ -146,31 +152,7 @@ async function settle(): Promise<void> {
 
 describe("the controller page during a working turn (ruling 454, CTL-2)", () => {
   it("re-runs no loader while only the turn's step moves", async () => {
-    const Stub = createRoutesStub([
-      {
-        id: "root",
-        path: "/",
-        loader: () => {
-          loaderRuns += 1;
-          return { csrf: "tok", theme: "system" };
-        },
-        children: [
-          {
-            path: "projects/:slug/controller",
-            loader: () => {
-              loaderRuns += 1;
-              return null;
-            },
-            Component: () => (
-              <ToastProvider>
-                <ControllerPage view={VIEW} projectSlug="viberr-core" canRedirectGoals={false} />
-              </ToastProvider>
-            ),
-          },
-        ],
-      },
-    ]);
-    const { container } = render(<Stub initialEntries={["/projects/viberr-core/controller?c=cnv_b"]} />);
+    const { container } = mount();
     await act(async () => {
       await settle();
     });
@@ -183,6 +165,54 @@ describe("the controller page during a working turn (ruling 454, CTL-2)", () => 
         await settle();
       });
     }
+    // The fallback read the turn's tail every 5 s instead.
+    expect(fetches.filter((url) => url.startsWith("/resources/run-log?runId=run_ctl&since="))).toHaveLength(6);
     expectWithinBudget("console:controller-page.loader-runs-per-30s-turn", loaderRuns);
   });
+
+  it("moves the working row's step from the turn's tail (ruling 250 kept)", async () => {
+    const { container } = mount();
+    await act(async () => {
+      await settle();
+    });
+    const step = () => container.querySelector(".ctl-working-step")?.getAttribute("title");
+    expect(step()).toBe("viberr_controller · list_tasks");
+    loaderRuns = 0;
+    tailStep = "viberr_controller · get_task";
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      await settle();
+    });
+    // CANARY: render `view.turn` alone in the working row and this stays put.
+    expect(step()).toBe("viberr_controller · get_task");
+    expect(loaderRuns).toBe(0);
+  });
 });
+
+function mount() {
+  const Stub = createRoutesStub([
+    {
+      id: "root",
+      path: "/",
+      loader: () => {
+        loaderRuns += 1;
+        return { csrf: "tok", theme: "system" };
+      },
+      children: [
+        {
+          path: "projects/:slug/controller",
+          loader: () => {
+            loaderRuns += 1;
+            return null;
+          },
+          Component: () => (
+            <ToastProvider>
+              <ControllerPage view={VIEW} projectSlug="viberr-core" canRedirectGoals={false} />
+            </ToastProvider>
+          ),
+        },
+      ],
+    },
+  ]);
+  return render(<Stub initialEntries={["/projects/viberr-core/controller?c=cnv_b"]} />);
+}

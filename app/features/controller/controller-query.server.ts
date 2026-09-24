@@ -21,6 +21,7 @@ import {
   type ConversationTurnState,
 } from "~/server/controller/controller-run.server";
 import { listRunsForTask } from "~/server/runtimes/run-service.server";
+import type { ConsoleShipping } from "~/server/runtimes/run-projection.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-actions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
@@ -93,6 +94,10 @@ export function getControllerSurface(
     conversationId?: string | null;
     all?: boolean;
     dataRoot?: string;
+    /** Ruling 454 (owner decision 2): how much of the open thread's console
+     *  window to carry. The routes pass `shown` for a document load and
+     *  `none` for a `.data` request; omitted, every window is carried. */
+    console?: ConsoleShipping;
   },
 ): ControllerSurfaceView {
   const admin = isOrgAdmin(db, viewer.id);
@@ -189,7 +194,9 @@ export function getControllerSurface(
     // Ruling 99: a controller run is stored at `project_slug = ''` with the
     // conversation id for its task key, which is the scope the grouping
     // projection is asked for here.
-    runtime: conversation ? listRunsForTask(db, "", conversation.id) : [],
+    runtime: conversation
+      ? listRunsForTask(db, "", conversation.id, input.console ? { console: input.console } : {})
+      : [],
     canInterruptTurn: conversation
       ? conversation.userId === viewer.id || admin
       : false,

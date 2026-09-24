@@ -320,6 +320,81 @@ export interface RunLogWindow {
    * -1 when the representative run has no lines yet.
    */
   headSeq: number;
+  /**
+   * Ruling 454 (owner decision 2, 2026-09-24): false when this payload does
+   * NOT carry the group's window — every group on a revalidation or a client
+   * navigation, every group but the shown one on a document load. The console
+   * fills such a thread with one `/resources/run-log?window=1` request when it
+   * shows it. Absent means carried.
+   */
+  loaded?: boolean;
+}
+
+/**
+ * Ruling 454: a console line's identity within its agent group, stable across
+ * appends, backward pages and revalidations — the React key of its row and the
+ * key of its open disclosures. `run` is the line's index in
+ * `logWindow.runIds`; a UI-53 boundary is keyed by the run it opens.
+ */
+export function consoleLineKey(run: number, seq: number): string {
+  return `${run}:${seq}`;
+}
+
+/** The key of the `── resumed ──` boundary above run `run`'s block. */
+export function consoleBoundaryKey(run: number): string {
+  return `${run}:resumed`;
+}
+
+/**
+ * Every writer of a dead-session marker ends its console tag with this suffix:
+ * `run·session_missing` from `run-service.server.ts` plus the two adapters' own
+ * `run·error·session_missing` / `error·session_missing` (P13-D-2).
+ */
+export const SESSION_MISSING_SUFFIX = "session_missing";
+
+/**
+ * The phase vocabulary both adapters emit, so the strip reads the same on
+ * Claude and Codex. Deliberately tiny and literal — these are the four things
+ * the server actually KNOWS about a run, not a narration of what the model is
+ * "thinking".
+ *
+ * `preparing` is emitted by the RUN PIPELINE (before any adapter exists): a
+ * cold task-repo clone can take minutes (OBS-8: 3+ min on a 113 MB repo) and
+ * until it finished the task page showed no live row at all, which reads as a
+ * dead app.
+ */
+export const RUN_PHASE = {
+  preparing: "Preparing workspace",
+  starting: "Starting",
+  working: "Working",
+  /** Ruling 371: the CLI is summarizing the context — a full-history model
+   *  call that took 131 s on the one stored compaction — so the strip says
+   *  what the wait is instead of showing the last tool as still running. */
+  compacting: "Compacting context",
+  finishing: "Finishing",
+} as const;
+
+/**
+ * Ruling 250: the phase a controller's working row names. Null while it is
+ * the generic "Working", which the row's own sentence already says.
+ */
+export function namedTurnPhase(phase: string | null): string | null {
+  return phase === RUN_PHASE.working ? null : phase;
+}
+
+/**
+ * Ruling 454 (LIVE-1): what the Live run strip and the console's facts row
+ * read off a run row that moves while it streams. Every `/resources/run-log`
+ * answer carries the run's current set, so the strip follows the console's
+ * own tail instead of a loader revalidation every two seconds.
+ */
+export interface RunLiveFacts {
+  phase: string | null;
+  step: string | null;
+  turns: number;
+  tokens: number | null;
+  tokensEstimated: boolean;
+  cache: RunCacheView;
 }
 
 /**
@@ -451,8 +526,19 @@ export interface RunView {
   lines: LogLine[];
   /** The exact stored wire envelope per line (index-aligned with `lines`) —
    * what the `{ } raw` toggle renders verbatim (runs.md §5.4). Boundary rows
-   * carry an empty envelope. */
+   * carry an empty envelope. Ruling 454: the task and controller pages ship
+   * none (`[]`); the console loads the envelopes when the raw view opens. */
   raw: string[];
+  /** Ruling 454: each line's `consoleLineKey` (index-aligned with `lines`),
+   *  so a row keeps its identity when lines are appended or paged in. */
+  lineKeys?: string[];
+  /**
+   * Ruling 454 (TASK-1): the group's console holds a dead-session marker
+   * (P13-D-2) inside its window, with the session the marker names. The
+   * Continuity Recovery Panel reads this; it used to scan `lines` and `raw`
+   * for it, which only worked while the loader shipped every window.
+   */
+  sessionMissing?: { sessionId: string | null } | null;
   /** P13-D-11: total lines that EXIST across the group (== the window's
    * `totalLines`), not the number this payload shipped — so the console's
    * "N events" footer keeps its pre-window meaning. */

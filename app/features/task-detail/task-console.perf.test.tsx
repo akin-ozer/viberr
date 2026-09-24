@@ -135,6 +135,8 @@ function runView(patch: Partial<RunView>, seqs: number[], runId: string): RunVie
     cache: NO_RUN_CACHE,
     lines: lines.map((l) => l.display),
     raw: lines.map((l) => l.raw),
+    // Each line's `consoleLineKey`, as the loader ships them (ruling 454).
+    lineKeys: seqs.map((seq) => `0:${seq}`),
     lineCount: seqs.length,
     logWindow: {
       totalLines: seqs.length,
@@ -392,6 +394,35 @@ function consoleRows(container: HTMLElement): number {
 }
 
 describe("the task page per console line (ruling 454)", () => {
+  it("mounts once: the console's seed is the store's, not a second commit of the page", async () => {
+    // TASK-3: the console's hook seeded its lines in state initialisers and
+    // then again in a mount effect, with fresh objects, so every task open
+    // rendered the whole page twice. The store is seeded once, from the
+    // payload it is created with.
+    const counter = createRenderCounter();
+    let show: () => void = () => {};
+    const Host = () => {
+      const [on, setOn] = useState(false);
+      show = () => setOn(true);
+      return (
+        <Profiler id="task-page" onRender={counter.onRender}>
+          <ToastProvider>{on ? <TaskDetailPage {...pageProps(400)} /> : null}</ToastProvider>
+        </Profiler>
+      );
+    };
+    const Stub = createRoutesStub([{ path: "/t", Component: Host }]);
+    const { container } = render(<Stub initialEntries={["/t"]} />);
+    counter.attach(container);
+    await act(async () => {
+      show();
+      await settle();
+    });
+    expect(consoleRows(container)).toBeGreaterThan(300);
+    // Nothing was asked for: the payload carried the shown thread.
+    expect(fetches).toEqual([]);
+    expectWithinBudget("console:task-page.page-renders-on-mount", counter.renders("TaskDetailPage"));
+  });
+
   it("holds one live connection, the layout's", async () => {
     await mountPage(40);
     expectWithinBudget("console:task-page.event-sources", FakeEventSource.open().length);

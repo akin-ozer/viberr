@@ -77,9 +77,10 @@ export function compareBoardOrder(a: TaskSummary, b: TaskSummary): number {
  * identical in the SSR pass and in hydration; a client-side `Date.now()` would
  * make it differ between the two renders. The board revalidates on every project
  * domain event (a transition, a comment, a run starting or stopping) and on
- * navigation, but not on runs' console lines (`SSE_RUN_LINE_EVENTS`), and the
- * shortest threshold is an hour. A task that crosses into quiet therefore shows it
- * at the project's next event or the next navigation, not the minute it crosses.
+ * navigation, but not on runs' console lines (a board never receives them,
+ * ruling 454), and the shortest threshold is an hour. A task that crosses into
+ * quiet therefore shows it at the project's next event or the next navigation,
+ * not the minute it crosses.
  * The RELATIVE TEXT beside it is a different problem and is solved the way this
  * app already solves it — `LocalRelative` (app/ui/local-time.tsx).
  */

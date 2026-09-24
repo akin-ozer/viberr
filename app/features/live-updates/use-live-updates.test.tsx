@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import {
+  onLiveFrame,
   REVALIDATE_DEBOUNCE_MS,
-  RUN_LINE_REVALIDATE_MS,
   SSE_REOPEN_BACKOFF_MS,
+  useLiveStreamFailed,
   useLiveUpdates,
 } from "./use-live-updates";
 import { CONTROLLER_UPDATED_EVENT } from "./event-types";
@@ -337,9 +338,9 @@ describe("useLiveUpdates", () => {
         FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", seq);
         vi.advanceTimersByTime(100);
       }
-      vi.advanceTimersByTime(RUN_LINE_REVALIDATE_MS * 2);
+      vi.advanceTimersByTime(4_000);
     });
-    // CANARY: drop the scope check in the run-line listener.
+    // CANARY: route `run.log-appended` to `scheduleRevalidate`.
     expect(loaderRuns, "the board refetched per console line").toBe(0);
     cleanup();
 
@@ -353,7 +354,7 @@ describe("useLiveUpdates", () => {
       FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", 21);
       // A frame that does not parse is dropped, not treated as a match.
       FakeEventSource.last().emit("run.log-appended", "22", "not json");
-      vi.advanceTimersByTime(RUN_LINE_REVALIDATE_MS * 2);
+      vi.advanceTimersByTime(4_000);
     });
     expect(loaderRuns, "a sibling task page refetched per line").toBe(0);
     // Its own domain events still revalidate, as before.
@@ -364,39 +365,92 @@ describe("useLiveUpdates", () => {
     expect(loaderRuns).toBe(1);
   });
 
-  it("the task's own page revalidates on its run's lines at most once per RUN_LINE_REVALIDATE_MS, and a steady stream cannot starve it", () => {
+  /**
+   * Ruling 454 (LIVE-1 / RF-2): the task's OWN page does not revalidate on its
+   * run's lines either. It used to, floored at one revalidation per 2 s, only
+   * to move the Live run strip's phase, step, turns and tokens: root, the
+   * layout and the task loader every 2 s of a run (30 loader runs per 20 s in
+   * `task-console.perf.test.tsx`). The strip now reads the facts each console
+   * tail read returns, and the lines go to the tab's console (below).
+   */
+  it("the task's own page does not revalidate on its run's lines; a domain event still does", () => {
     render(
       <Probe scopes={["project:viberr-core", "task:viberr-core/VIB-42", "user"]} />,
       { wrapper: DataRouter },
     );
     const es = FakeEventSource.last();
-    // The first line after a quiet spell shows on the ordinary debounce.
+    // CANARY: route `run.log-appended` to `scheduleRevalidate` again.
     act(() => {
-      es.emitRunLine("viberr-core", "VIB-42", 1);
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
-    });
-    expect(loaderRuns).toBe(1);
-
-    // A line every 100 ms for 4.1 s: a trailing debounce would never fire;
-    // this fires once per floor. CANARY: make a line reset the pending timer
-    // (`scheduleRevalidate`) and this stays at 1.
-    act(() => {
-      for (let seq = 2; seq <= 42; seq += 1) {
+      for (let seq = 1; seq <= 42; seq += 1) {
         es.emitRunLine("viberr-core", "VIB-42", seq);
         vi.advanceTimersByTime(100);
       }
+      vi.advanceTimersByTime(4_000);
     });
-    // CANARY: drop the floor (`lastRevalidateAt + RUN_LINE_REVALIDATE_MS`) and
-    // this reads 14.
-    expect(loaderRuns).toBe(3);
-
-    // A domain event does not wait behind the floor.
+    expect(loaderRuns).toBe(0);
     act(() => {
-      es.emitRunLine("viberr-core", "VIB-42", 43);
       es.emit("task.updated", "44");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
-    expect(loaderRuns).toBe(4);
+    expect(loaderRuns).toBe(1);
+  });
+
+  /**
+   * Ruling 454 (TASK-6 / LIVE-5): ONE live connection per tab. The console
+   * used to open a second EventSource on the task scope the layout's stream
+   * already held (ruling 301 called merging them "the next cut"); it now takes
+   * its frames from this hook's stream.
+   */
+  it("hands the tab's consoles every stream frame, once, whichever stream carried it", () => {
+    const seen: string[] = [];
+    const off = onLiveFrame("run.log-appended", (event) => seen.push(event.lastEventId));
+    try {
+      // Two surfaces of one tab whose scopes both carry the frame (the project
+      // controller page holds the layout's stream and its own).
+      render(
+        <>
+          <Probe scopes={["project:viberr-core", "task:viberr-core/VIB-42", "user"]} />
+          <Probe scopes={["task:viberr-core/VIB-42"]} />
+        </>,
+        { wrapper: DataRouter },
+      );
+      const [a, b] = FakeEventSource.instances;
+      act(() => {
+        a!.emitRunLine("viberr-core", "VIB-42", 1);
+        b!.emitRunLine("viberr-core", "VIB-42", 1);
+        b!.emitRunLine("viberr-core", "VIB-42", 2);
+      });
+      // CANARY: drop the id-and-body check in `dispatchFrame`.
+      expect(seen).toEqual(["1", "2"]);
+    } finally {
+      off();
+    }
+    // Unsubscribed: nothing more reaches the handler.
+    act(() => FakeEventSource.last().emitRunLine("viberr-core", "VIB-42", 3));
+    expect(seen).toEqual(["1", "2"]);
+  });
+
+  it("says when the tab's stream failed, for the console's footer, until it reopens", () => {
+    let failed = false;
+    function Status() {
+      failed = useLiveStreamFailed();
+      return null;
+    }
+    render(
+      <>
+        <Probe scopes={["project:viberr-core", "user"]} />
+        <Status />
+      </>,
+      { wrapper: DataRouter },
+    );
+    expect(failed).toBe(false);
+    act(() => FakeEventSource.last().fail());
+    expect(failed).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(SSE_REOPEN_BACKOFF_MS[0]);
+    });
+    act(() => FakeEventSource.last().onopen?.());
+    expect(failed).toBe(false);
   });
 
   it("closes the stream and cancels pending revalidation on unmount", () => {

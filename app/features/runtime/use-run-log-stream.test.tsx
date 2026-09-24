@@ -3,20 +3,32 @@ import { createContext, useContext, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
+import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
+import { sseScopes } from "~/features/live-updates/event-types";
 import {
   useRunLogStream,
-  type OlderLogState,
   type RunLogSource,
-  type StreamedLine,
+  type RunLogStore,
 } from "./use-run-log-stream";
-import { runBoundaryLine, type LogLine, type RunLogWindow } from "./runtime-types";
+import type { ConsoleThreadInput } from "./run-log-store";
+import {
+  NO_RUN_CACHE,
+  runBoundaryLine,
+  type LogLine,
+  type RunLiveFacts,
+  type RunLogWindow,
+} from "./runtime-types";
 
 /**
- * The hook calls `useRevalidator` on `run.state-changed`, so it runs under a
- * REAL data router here. The route carries no loader, which is what makes a
- * revalidation a no-op: what these tests own is the log stream, not the task
- * loader the pills come from. The subject renders through a context slot rather
+ * The hook calls `useRevalidator`, so it runs under a REAL data router here,
+ * whose one route counts its loader runs (a revalidation is observable the way
+ * the product sees one). The subject renders through a context slot rather
  * than as the route's own element, so `rerender` with new props reaches it.
+ *
+ * Ruling 454: the console opens no connection of its own. Its frames come from
+ * the tab's one live stream (`useLiveUpdates`, the layout's on a task page),
+ * so every probe here mounts that stream beside the hook, on the scope the
+ * page's layout holds.
  */
 const SubjectContext = createContext<ReactNode>(null);
 
@@ -24,7 +36,25 @@ function Subject() {
   return <>{useContext(SubjectContext)}</>;
 }
 
-const router = createMemoryRouter([{ path: "*", Component: Subject }]);
+let loaderRuns = 0;
+let router = makeRouter();
+
+function makeRouter() {
+  loaderRuns = 0;
+  return createMemoryRouter(
+    [
+      {
+        path: "*",
+        Component: Subject,
+        loader: () => {
+          loaderRuns += 1;
+          return null;
+        },
+      },
+    ],
+    { hydrationData: { loaderData: { "0": null } } },
+  );
+}
 
 function DataRouter({ children }: { children: ReactNode }) {
   return (
@@ -52,20 +82,29 @@ interface ControllerLogAppended {
   seq: number;
 }
 
-/** The tail window `/resources/run-log` answers with. */
-interface TailWindow {
+/** What `/resources/run-log` answers, as far as a test spells it out. */
+interface TailBody {
   data: {
-    threadId: string;
-    headSeq: number;
-    lines: { seq: number; display: LogLine; raw: string }[];
+    runId?: string;
+    state?: string;
+    headSeq?: number;
+    oldestSeq?: number;
+    hasMore?: boolean;
+    lines: { seq: number; display: LogLine; raw?: string }[];
+    facts?: RunLiveFacts;
+    lineKeys?: string[];
+    logWindow?: RunLogWindow;
   };
 }
 
-/** The two members the hook reads off a `fetch` response. */
+/** The members the store reads off a `fetch` response. */
 interface FakeResponse {
   ok: boolean;
-  json: () => Promise<TailWindow>;
+  status?: number;
+  json: () => Promise<TailBody | { data: unknown }>;
 }
+
+let nextId = 1;
 
 class FakeEventSource {
   static CONNECTING = 0;
@@ -89,8 +128,9 @@ class FakeEventSource {
     this.closed = true;
   }
   emit(name: string, data: RunLogAppended | ControllerLogAppended) {
+    const lastEventId = String(nextId++);
     for (const fn of this.listeners.get(name) ?? []) {
-      fn(new MessageEvent(name, { data: JSON.stringify({ data }) }));
+      fn(new MessageEvent(name, { data: JSON.stringify({ data }), lastEventId }));
     }
   }
   static last() {
@@ -114,40 +154,102 @@ const win = (patch: Partial<RunLogWindow> = {}): RunLogWindow => ({
   ...patch,
 });
 
-type Thread = {
-  threadId: string;
-  runId: string | null;
-  lines: StreamedLine[];
-  window: RunLogWindow;
+const FACTS: RunLiveFacts = {
+  phase: "Working",
+  step: null,
+  turns: 1,
+  tokens: 100,
+  tokensEstimated: true,
+  cache: NO_RUN_CACHE,
 };
 
-let state: {
-  linesByThread: Record<string, StreamedLine[]>;
-  streamError: string | null;
-  olderByThread: Record<string, OlderLogState>;
-  loadOlder: (threadId: string) => void;
-};
+/** One thread of a page's projection, as much of a `RunView` as the store reads. */
+function thread(patch: Partial<ConsoleThreadInput> = {}): ConsoleThreadInput {
+  return {
+    id: "primary",
+    serverRunId: "run_1",
+    lines: [],
+    raw: [],
+    logWindow: win(),
+    ...FACTS,
+    ...patch,
+  };
+}
+
+const TASK: RunLogSource = { kind: "task", projectSlug: "viberr-core", taskKey: "VIB-142" };
+
+let store: RunLogStore;
 
 function Probe({
   enabled = true,
   threads,
-  source = { kind: "task", projectSlug: "viberr-core", taskKey: "VIB-142" },
+  source = TASK,
+  poll,
 }: {
   enabled?: boolean;
-  threads?: Thread[];
+  threads?: ConsoleThreadInput[];
   source?: RunLogSource;
+  poll?: { runId: string | null; everyMs: number };
 }) {
-  state = useRunLogStream({
+  const input: Parameters<typeof useRunLogStream>[0] = {
     source,
-    threads: threads ?? [
-      { threadId: "primary", runId: "run_1", lines: [], window: win() },
-    ],
+    threads: threads ?? [thread()],
     enabled,
-  });
+  };
+  if (poll) input.poll = poll;
+  store = useRunLogStream(input);
   return null;
 }
 
-const texts = () => state.linesByThread.primary!.map((l) => l.display.text);
+/** The layout's live stream, on the scope the page's layout holds. */
+function LayoutStream({ source = TASK }: { source?: RunLogSource }) {
+  useLiveUpdates(
+    source.kind === "task"
+      ? [sseScopes.project(source.projectSlug), sseScopes.task(source.projectSlug, source.taskKey)]
+      : [sseScopes.user()],
+  );
+  return null;
+}
+
+function Page(props: Parameters<typeof Probe>[0]) {
+  return (
+    <>
+      <LayoutStream {...(props.source ? { source: props.source } : {})} />
+      <Probe {...props} />
+    </>
+  );
+}
+
+const texts = (threadId = "primary") =>
+  (store.thread(threadId)?.lines ?? []).map((l) => l.display.text);
+
+const frame = (seq: number, runId = "run_1"): RunLogAppended => ({
+  projectSlug: "viberr-core",
+  taskKey: "VIB-142",
+  runId,
+  threadId: "primary",
+  seq,
+});
+
+const tailOf = (lines: { seq: number; text: string }[], extra: Partial<TailBody["data"]> = {}): FakeResponse => ({
+  ok: true,
+  status: 200,
+  json: async () => ({
+    data: {
+      runId: "run_1",
+      state: "running",
+      headSeq: lines.at(-1)?.seq ?? -1,
+      oldestSeq: lines[0]?.seq ?? -1,
+      hasMore: false,
+      lines: lines.map((l) => ({ seq: l.seq, display: line(l.text), raw: "{}" })),
+      ...extra,
+    },
+  }),
+});
+
+async function flush(times = 6) {
+  for (let i = 0; i < times; i++) await Promise.resolve();
+}
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -156,11 +258,27 @@ beforeEach(() => {
   vi.stubGlobal("EventSource", FakeEventSource);
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
+  router = makeRouter();
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+describe("one live connection per tab (ruling 454, TASK-6 / LIVE-5)", () => {
+  it("opens no EventSource of its own: the layout's stream carries the console's frames", async () => {
+    // CANARY: open an EventSource in the hook again and this reads 2.
+    fetchMock.mockResolvedValue(tailOf([{ seq: 0, text: "a" }]));
+    render(<Page />, { wrapper: DataRouter });
+    expect(FakeEventSource.instances).toHaveLength(1);
+    await act(async () => {
+      FakeEventSource.last().emit("run.log-appended", frame(0));
+      await flush();
+    });
+    expect(texts()).toEqual(["a"]);
+  });
 });
 
 /**
@@ -173,16 +291,6 @@ afterEach(() => {
 describe("UI-35: run-log tail deduplication", () => {
   it("runs at most one tail fetch per run and drops already-held seqs", async () => {
     let resolveFirst: (response: FakeResponse) => void = () => {};
-    const body = {
-      data: {
-        threadId: "primary",
-        headSeq: 1,
-        lines: [
-          { seq: 0, display: line("a"), raw: "{}" },
-          { seq: 1, display: line("b"), raw: "{}" },
-        ],
-      },
-    };
     fetchMock.mockImplementation(
       () =>
         new Promise<FakeResponse>((resolve) => {
@@ -190,136 +298,93 @@ describe("UI-35: run-log tail deduplication", () => {
         }),
     );
 
-    render(<Probe />, { wrapper: DataRouter });
+    render(<Page />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
 
     // Two appended lines arrive back-to-back, as the sink really emits them.
     act(() => {
-      es.emit("run.log-appended", {
-        projectSlug: "viberr-core",
-        taskKey: "VIB-142",
-        runId: "run_1",
-        threadId: "primary",
-        seq: 0,
-      });
-      es.emit("run.log-appended", {
-        projectSlug: "viberr-core",
-        taskKey: "VIB-142",
-        runId: "run_1",
-        threadId: "primary",
-        seq: 1,
-      });
+      es.emit("run.log-appended", frame(0));
+      es.emit("run.log-appended", frame(1));
     });
-    // Exactly ONE request — the second event is skipped while the first is in
-    // flight (it used to fire a second overlapping fetch).
+    // Exactly ONE request — the second event waits for the first read.
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolveFirst({ ok: true, json: async () => body });
-      await Promise.resolve();
+      resolveFirst(tailOf([{ seq: 0, text: "a" }, { seq: 1, text: "b" }]));
+      await flush();
     });
-    expect(state.linesByThread.primary!.map((l) => l.display.text)).toEqual([
-      "a",
-      "b",
-    ]);
+    expect(texts()).toEqual(["a", "b"]);
+    // The read brought both lines, so the second frame asks for nothing more.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // A later window that re-sends seq 0..1 plus a new line appends ONLY the
     // new one.
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: {
-          threadId: "primary",
-          headSeq: 2,
-          lines: [
-            { seq: 0, display: line("a"), raw: "{}" },
-            { seq: 1, display: line("b"), raw: "{}" },
-            { seq: 2, display: line("c"), raw: "{}" },
-          ],
-        },
-      }),
+    fetchMock.mockResolvedValue(
+      tailOf([
+        { seq: 0, text: "a" },
+        { seq: 1, text: "b" },
+        { seq: 2, text: "c" },
+      ]),
+    );
+    await act(async () => {
+      es.emit("run.log-appended", frame(2));
+      await flush();
+    });
+    expect(texts()).toEqual(["a", "b", "c"]);
+  });
+
+  /**
+   * LIVE-3: a frame that landed while a read was in flight used to be dropped
+   * (`if (inFlight.has(runId)) return`), and only the next frame, or the
+   * revalidation that re-seeded the console, brought its line in. The last
+   * line of a burst waited up to 2 s for a revalidation.
+   */
+  it("reads again when a frame announced a line the in-flight read did not bring", async () => {
+    let resolveFirst: (response: FakeResponse) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<FakeResponse>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    fetchMock.mockResolvedValueOnce(tailOf([{ seq: 1, text: "b" }]));
+    render(<Page />, { wrapper: DataRouter });
+    const es = FakeEventSource.last();
+    act(() => {
+      es.emit("run.log-appended", frame(0));
+      es.emit("run.log-appended", frame(1));
     });
     await act(async () => {
-      es.emit("run.log-appended", {
-        projectSlug: "viberr-core",
-        taskKey: "VIB-142",
-        runId: "run_1",
-        threadId: "primary",
-        seq: 2,
-      });
-      await Promise.resolve();
-      await Promise.resolve();
+      // The first read was answered before line 1 was written.
+      resolveFirst(tailOf([{ seq: 0, text: "a" }]));
+      await flush(12);
     });
-    expect(state.linesByThread.primary!.map((l) => l.display.text)).toEqual([
-      "a",
-      "b",
-      "c",
-    ]);
+    // CANARY: drop the `announced` loop in `tail` and this is 1 fetch, ["a"].
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("since=0");
+    expect(texts()).toEqual(["a", "b"]);
+    expect(loaderRuns).toBe(0);
   });
 });
 
 describe("UI-30 / UI-03: the tail says when it stopped", () => {
-  it("does not open a stream at all when the viewer cannot read logs", () => {
-    render(<Probe enabled={false} />, { wrapper: DataRouter });
-    expect(FakeEventSource.instances).toHaveLength(0);
-  });
-
-  /**
-   * Ruling 301 (pass 37, F37-136): this is the SECOND permanent SSE connection
-   * a task page holds. With HTTP/1.1's six-per-origin budget, two per page
-   * means four open tabs deadlock every tab at once, with no error anywhere.
-   */
-  it("ruling 301: a hidden tab holds no tail connection, and reopens on return", () => {
-    const visibility = { current: "visible" };
-    Object.defineProperty(document, "visibilityState", {
-      configurable: true,
-      get: () => visibility.current,
+  it("asks for nothing when the viewer cannot read logs", async () => {
+    render(<Page enabled={false} />, { wrapper: DataRouter });
+    await act(async () => {
+      FakeEventSource.last().emit("run.log-appended", frame(0));
+      await flush();
     });
-    render(<Probe />, { wrapper: DataRouter });
-    const first = FakeEventSource.last();
-    expect(first.closed).toBe(false);
-
-    // CANARY: drop the `hiddenTab` guard.
-    act(() => {
-      visibility.current = "hidden";
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    expect(first.closed, "a background console kept its connection").toBe(true);
-
-    // CANARY: leave `hiddenTab` out of the effect's deps.
-    act(() => {
-      visibility.current = "visible";
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    expect(FakeEventSource.instances).toHaveLength(2);
-    expect(FakeEventSource.last().closed).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("reports a 403 instead of swallowing it", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
-    render(<Probe />, { wrapper: DataRouter });
-    const es = FakeEventSource.last();
+    render(<Page />, { wrapper: DataRouter });
     await act(async () => {
-      es.emit("run.log-appended", {
-        projectSlug: "viberr-core",
-        taskKey: "VIB-142",
-        runId: "run_1",
-        threadId: "primary",
-        seq: 0,
-      });
-      await Promise.resolve();
+      FakeEventSource.last().emit("run.log-appended", frame(0));
+      await flush();
     });
-    expect(state.streamError).toMatch(/project-member only/);
-  });
-
-  it("reports a permanently closed EventSource", () => {
-    render(<Probe />, { wrapper: DataRouter });
-    const es = FakeEventSource.last();
-    act(() => {
-      es.readyState = FakeEventSource.CLOSED;
-      es.onerror?.();
-    });
-    expect(state.streamError).toMatch(/disconnected/);
+    expect(store.streamError()).toMatch(/project-member only/);
   });
 });
 
@@ -336,52 +401,28 @@ describe("P13-D-11: the live tail seeds from logWindow.headSeq", () => {
     // while the representative run's newest line is seq 9. The old cursor was
     // 31, so the append guard (`seq <= since`) dropped every real event and the
     // console silently stopped following.
-    const rows: StreamedLine[] = [];
+    const rows: LogLine[] = [];
     for (let i = 0; i < 32; i++) {
-      rows.push(
-        i === 10 || i === 21
-          ? { display: runBoundaryLine(2, 3), raw: "" }
-          : { display: line(`row ${i}`), raw: "{}" },
-      );
+      rows.push(i === 10 || i === 21 ? runBoundaryLine(2, 3) : line(`row ${i}`));
     }
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: {
-          threadId: "primary",
-          headSeq: 10,
-          lines: [{ seq: 10, display: line("fresh"), raw: "{}" }],
-        },
-      }),
-    });
+    fetchMock.mockResolvedValue(tailOf([{ seq: 10, text: "fresh" }], { runId: "run_3" }));
 
     render(
-      <Probe
+      <Page
         threads={[
-          {
-            threadId: "primary",
-            runId: "run_3",
+          thread({
+            serverRunId: "run_3",
             lines: rows,
-            window: win({
-              totalLines: 30,
-              runIds: ["run_1", "run_2", "run_3"],
-              headSeq: 9,
-            }),
-          },
+            raw: rows.map(() => "{}"),
+            logWindow: win({ totalLines: 30, runIds: ["run_1", "run_2", "run_3"], headSeq: 9 }),
+          }),
         ]}
       />,
       { wrapper: DataRouter },
     );
-    const es = FakeEventSource.last();
     await act(async () => {
-      es.emit("run.log-appended", {
-        projectSlug: "viberr-core",
-        taskKey: "VIB-142",
-        runId: "run_3",
-        threadId: "primary",
-        seq: 10,
-      });
-      await Promise.resolve();
+      FakeEventSource.last().emit("run.log-appended", frame(10, "run_3"));
+      await flush();
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -390,12 +431,203 @@ describe("P13-D-11: the live tail seeds from logWindow.headSeq", () => {
   });
 });
 
+/**
+ * Ruling 454 (TASK-3 / LIVE-3): a revalidation used to re-seed the console
+ * from the loader's copy of the window: a second full commit of the page on
+ * every open, and, once the window was full, every row rewritten as the
+ * index keys shifted. The store keeps what a thread holds unless the thread's
+ * representative run changed.
+ */
+describe("a revalidation keeps what the console holds", () => {
+  it("mounting and an identical projection change nothing the console reads", async () => {
+    const seeded = thread({ lines: [line("a")], raw: ["{}"], lineKeys: ["0:0"], logWindow: win({ headSeq: 0, totalLines: 1 }) });
+    const { rerender } = render(<Page threads={[seeded]} />, { wrapper: DataRouter });
+    const before = store.thread("primary");
+    let notified = 0;
+    const off = store.subscribe(() => (notified += 1));
+    // CANARY: re-seed in `reconcile` whatever the thread's run and this is 1.
+    rerender(<Page threads={[structuredClone(seeded)]} />);
+    await act(async () => flush());
+    off();
+    expect(notified).toBe(0);
+    expect(store.thread("primary")).toBe(before);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fills a gap past the cursor with one tail read (a missed frame, a tab back from hidden)", async () => {
+    const seeded = thread({ lines: [line("a")], raw: ["{}"], lineKeys: ["0:0"], logWindow: win({ headSeq: 0, totalLines: 1 }) });
+    const { rerender } = render(<Page threads={[seeded]} />, { wrapper: DataRouter });
+    fetchMock.mockResolvedValue(
+      tailOf([
+        { seq: 1, text: "b" },
+        { seq: 2, text: "c" },
+      ]),
+    );
+    // Ruling 301: the reconnect revalidates, and the revalidation says the
+    // run's head moved while the tab was away.
+    await act(async () => {
+      rerender(<Page threads={[thread({ logWindow: win({ headSeq: 2, totalLines: 3, loaded: false }) })]} />);
+      await flush();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("since=0");
+    expect(texts()).toEqual(["a", "b", "c"]);
+  });
+
+  it("re-seeds a thread whose representative run changed (a resume)", async () => {
+    const seeded = thread({ lines: [line("a")], raw: ["{}"], lineKeys: ["0:0"], logWindow: win({ headSeq: 0, totalLines: 1 }) });
+    const { rerender } = render(<Page threads={[seeded]} />, { wrapper: DataRouter });
+    await act(async () => {
+      rerender(
+        <Page
+          threads={[
+            thread({
+              serverRunId: "run_2",
+              lines: [line("a"), runBoundaryLine(2, 2), line("fresh")],
+              raw: ["{}", "", "{}"],
+              lineKeys: ["0:0", "1:resumed", "1:0"],
+              logWindow: win({ runIds: ["run_1", "run_2"], headSeq: 0, totalLines: 2 }),
+            }),
+          ]}
+        />,
+      );
+      await flush();
+    });
+    expect(texts()).toEqual(["a", "── resumed · run 2 of 2 ──", "fresh"]);
+  });
+});
+
+/**
+ * Ruling 454 (TASK-1, owner decision 2): a revalidation or a client navigation
+ * carries no console lines, only each thread's window facts; the console fills
+ * the thread it shows with ONE request, the window a hard refresh would have
+ * shipped.
+ */
+describe("a thread the page did not carry", () => {
+  const unloaded = thread({ logWindow: win({ headSeq: 4, totalLines: 5, loaded: false }) });
+
+  it("loads its window with one request when the console shows it, then follows the tail", async () => {
+    render(<Page threads={[unloaded]} />, { wrapper: DataRouter });
+    expect(store.thread("primary")?.status).toBe("unloaded");
+    // Nothing is asked for a thread nobody looks at.
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          runId: "run_1",
+          threadId: "primary",
+          lines: [0, 1, 2, 3, 4].map((seq) => line(`l${seq}`)),
+          lineKeys: [0, 1, 2, 3, 4].map((seq) => `0:${seq}`),
+          logWindow: win({ headSeq: 4, totalLines: 5 }),
+          facts: { ...FACTS, step: "Bash · npm test" },
+        },
+      }),
+    });
+    await act(async () => {
+      store.show("primary");
+      await flush();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("/resources/run-log?runId=run_1&window=1");
+    expect(texts()).toEqual(["l0", "l1", "l2", "l3", "l4"]);
+    expect(store.thread("primary")?.lines.map((l) => l.key)).toEqual(["0:0", "0:1", "0:2", "0:3", "0:4"]);
+    expect(store.facts("run_1")?.step).toBe("Bash · npm test");
+
+    // The tail follows from the window's head, without the envelopes.
+    fetchMock.mockResolvedValueOnce(tailOf([{ seq: 5, text: "l5" }]));
+    await act(async () => {
+      FakeEventSource.last().emit("run.log-appended", frame(5));
+      await flush();
+    });
+    expect(String(fetchMock.mock.calls[1]![0])).toBe("/resources/run-log?runId=run_1&since=4&raw=0");
+    expect(texts().at(-1)).toBe("l5");
+  });
+
+  it("says why when the window cannot load", async () => {
+    render(<Page threads={[unloaded]} />, { wrapper: DataRouter });
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+    await act(async () => {
+      store.show("primary");
+      await flush();
+    });
+    expect(store.thread("primary")).toMatchObject({
+      status: "failed",
+      loadError: "This console is project-member only.",
+    });
+  });
+});
+
+describe("the raw view (ruling 454: envelopes load when it opens)", () => {
+  it("fills the shown thread's envelopes with backward pages, and tails with them", async () => {
+    render(
+      <Page
+        threads={[
+          thread({
+            lines: [line("a"), line("b")],
+            raw: [],
+            lineKeys: ["0:3", "0:4"],
+            logWindow: win({ headSeq: 4, totalLines: 5 }),
+          }),
+        ]}
+      />,
+      { wrapper: DataRouter },
+    );
+    expect(store.thread("primary")?.lines.map((l) => l.raw)).toEqual([null, null]);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          runId: "run_1",
+          lines: [
+            { seq: 3, display: line("a"), raw: '{"n":3}' },
+            { seq: 4, display: line("b"), raw: '{"n":4}' },
+          ],
+          oldestSeq: 3,
+          hasMore: true,
+          headSeq: 4,
+        },
+      }),
+    });
+    await act(async () => {
+      store.show("primary");
+      store.setRawView(true);
+      await flush();
+    });
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("/resources/run-log?runId=run_1&before=5&limit=2");
+    expect(store.thread("primary")?.lines.map((l) => l.raw)).toEqual(['{"n":3}', '{"n":4}']);
+
+    fetchMock.mockResolvedValueOnce(tailOf([{ seq: 5, text: "c" }]));
+    await act(async () => {
+      FakeEventSource.last().emit("run.log-appended", frame(5));
+      await flush();
+    });
+    // With the raw view open the tail asks for the envelopes too.
+    expect(String(fetchMock.mock.calls[1]![0])).toBe("/resources/run-log?runId=run_1&since=4");
+    expect(store.thread("primary")?.lines.at(-1)?.raw).toBe("{}");
+  });
+});
+
+describe("the Live run strip's facts (ruling 454, LIVE-1)", () => {
+  it("each tail read carries the run row's facts, and the page does not revalidate", async () => {
+    render(<Page />, { wrapper: DataRouter });
+    expect(store.facts("run_1")).toEqual(FACTS);
+    fetchMock.mockResolvedValue(
+      tailOf([{ seq: 0, text: "a" }], { facts: { ...FACTS, step: "Edit · app.ts", turns: 2 } }),
+    );
+    await act(async () => {
+      FakeEventSource.last().emit("run.log-appended", frame(0));
+      await flush();
+    });
+    expect(store.facts("run_1")).toMatchObject({ step: "Edit · app.ts", turns: 2 });
+    expect(loaderRuns).toBe(0);
+  });
+});
+
 // ------------------------------------------------- P13-D-11 backward paging
 
-const page = (
-  lines: { seq: number; text: string }[],
-  hasMore: boolean,
-) => ({
+const page = (lines: { seq: number; text: string }[], hasMore: boolean): FakeResponse => ({
   ok: true,
   json: async () => ({
     data: {
@@ -407,27 +639,28 @@ const page = (
 });
 
 /** run_a (4 lines) then run_b (6 lines); the window shipped run_b seq 3..5. */
-function resumedThread(): Thread[] {
+function resumedThread(): ConsoleThreadInput[] {
   return [
-    {
-      threadId: "primary",
-      runId: "run_b",
-      lines: [3, 4, 5].map((seq) => ({ display: line(`b${seq}`), raw: "{}" })),
-      window: {
+    thread({
+      serverRunId: "run_b",
+      lines: [3, 4, 5].map((seq) => line(`b${seq}`)),
+      raw: ["{}", "{}", "{}"],
+      lineKeys: [3, 4, 5].map((seq) => `1:${seq}`),
+      logWindow: {
         totalLines: 10,
         hasMore: true,
         runIds: ["run_a", "run_b"],
         oldest: { runId: "run_b", seq: 3 },
         headSeq: 5,
       },
-    },
+    }),
   ];
 }
 
 describe("P13-D-11: paging backwards through the withheld history", () => {
   it("reports what the window withheld", () => {
-    render(<Probe threads={resumedThread()} />, { wrapper: DataRouter });
-    expect(state.olderByThread.primary).toEqual({
+    render(<Page threads={resumedThread()} />, { wrapper: DataRouter });
+    expect(store.thread("primary")?.older).toEqual({
       hasMore: true,
       withheld: 7,
       loading: false,
@@ -436,22 +669,21 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
   });
 
   it("pages within a run, then steps to the previous run and re-creates the boundary", async () => {
-    render(<Probe threads={resumedThread()} />, { wrapper: DataRouter });
+    render(<Page threads={resumedThread()} />, { wrapper: DataRouter });
 
     // Page 1 — `before` the window's oldest line, still inside run_b.
     fetchMock.mockResolvedValue(
       page([{ seq: 0, text: "b0" }, { seq: 1, text: "b1" }, { seq: 2, text: "b2" }], false),
     );
     await act(async () => {
-      state.loadOlder("primary");
-      await Promise.resolve();
-      await Promise.resolve();
+      store.loadOlder("primary");
+      await flush();
     });
     const first = String(fetchMock.mock.calls[0]![0]);
     expect(first).toContain("runId=run_b");
     expect(first).toContain("before=3");
     expect(texts()).toEqual(["b0", "b1", "b2", "b3", "b4", "b5"]);
-    expect(state.olderByThread.primary).toMatchObject({ hasMore: true, withheld: 4 });
+    expect(store.thread("primary")?.older).toMatchObject({ hasMore: true, withheld: 4 });
 
     // Page 2 — run_b reported `hasMore: false`, so the walk enters run_a with a
     // bare `limit` (its NEWEST page) and marks the boundary above run_b.
@@ -467,9 +699,8 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
       ),
     );
     await act(async () => {
-      state.loadOlder("primary");
-      await Promise.resolve();
-      await Promise.resolve();
+      store.loadOlder("primary");
+      await flush();
     });
     const second = String(fetchMock.mock.calls[1]![0]);
     expect(second).toContain("runId=run_a");
@@ -487,24 +718,29 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
       "b4",
       "b5",
     ]);
+    // Every row keeps an identity of its own (ruling 454, LIVE-4).
+    const keys = store.thread("primary")!.lines.map((l) => l.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys[4]).toBe("1:resumed");
     // Ran off the front of the group — the affordance retires.
-    expect(state.olderByThread.primary).toMatchObject({ hasMore: false, withheld: 0 });
+    expect(store.thread("primary")?.older).toMatchObject({ hasMore: false, withheld: 0 });
 
     // A further call is a no-op, not another fetch.
     await act(async () => {
-      state.loadOlder("primary");
-      await Promise.resolve();
+      store.loadOlder("primary");
+      await flush();
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("keeps walking past a run that has no lines", async () => {
     render(
-      <Probe
+      <Page
         threads={[
           {
             ...resumedThread()[0]!,
-            window: {
+            lineKeys: [3, 4, 5].map((seq) => `2:${seq}`),
+            logWindow: {
               totalLines: 10,
               hasMore: true,
               runIds: ["run_a", "run_empty", "run_b"],
@@ -521,11 +757,8 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
       .mockResolvedValueOnce(page([], false)) // run_empty: never logged
       .mockResolvedValueOnce(page([{ seq: 0, text: "a0" }], false));
     await act(async () => {
-      state.loadOlder("primary");
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      store.loadOlder("primary");
+      await flush(12);
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     // The empty run contributes NO boundary — same rule the projection uses.
@@ -533,14 +766,13 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
   });
 
   it("surfaces a failed page instead of silently dropping the click", async () => {
-    render(<Probe threads={resumedThread()} />, { wrapper: DataRouter });
+    render(<Page threads={resumedThread()} />, { wrapper: DataRouter });
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
     await act(async () => {
-      state.loadOlder("primary");
-      await Promise.resolve();
-      await Promise.resolve();
+      store.loadOlder("primary");
+      await flush();
     });
-    expect(state.olderByThread.primary).toMatchObject({
+    expect(store.thread("primary")?.older).toMatchObject({
       hasMore: true,
       loading: false,
       error: "Older lines are project-member only.",
@@ -549,41 +781,44 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
   });
 
   it("a loader revalidation does not throw away the pages the reader loaded", async () => {
-    const { rerender } = render(<Probe threads={resumedThread()} />, { wrapper: DataRouter });
+    const { rerender } = render(<Page threads={resumedThread()} />, { wrapper: DataRouter });
     fetchMock.mockResolvedValue(
       page([{ seq: 0, text: "b0" }, { seq: 1, text: "b1" }, { seq: 2, text: "b2" }], false),
     );
     await act(async () => {
-      state.loadOlder("primary");
-      await Promise.resolve();
-      await Promise.resolve();
+      store.loadOlder("primary");
+      await flush();
     });
     expect(texts()).toEqual(["b0", "b1", "b2", "b3", "b4", "b5"]);
 
     // The task loader revalidates (any `run.state-changed` does) and its window
     // has slid forward — it now starts at seq 4. Re-seeding from it would drop
     // b0..b2 AND open a silent gap at b3.
+    fetchMock.mockResolvedValue(tailOf([{ seq: 6, text: "b6" }], { runId: "run_b" }));
     await act(async () => {
       rerender(
-        <Probe
+        <Page
           threads={[
-            {
-              threadId: "primary",
-              runId: "run_b",
-              lines: [4, 5, 6].map((seq) => ({ display: line(`b${seq}`), raw: "{}" })),
-              window: {
+            thread({
+              serverRunId: "run_b",
+              lines: [4, 5, 6].map((seq) => line(`b${seq}`)),
+              raw: ["{}", "{}", "{}"],
+              lineKeys: [4, 5, 6].map((seq) => `1:${seq}`),
+              logWindow: {
                 totalLines: 11,
                 hasMore: true,
                 runIds: ["run_a", "run_b"],
                 oldest: { runId: "run_b", seq: 4 },
                 headSeq: 6,
               },
-            },
+            }),
           ]}
         />,
       );
+      await flush();
     });
-    expect(texts()).toEqual(["b0", "b1", "b2", "b3", "b4", "b5"]);
+    // The head the loader saw is fetched as a gap; nothing is re-seeded.
+    expect(texts()).toEqual(["b0", "b1", "b2", "b3", "b4", "b5", "b6"]);
   });
 });
 
@@ -594,7 +829,7 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
  */
 describe("the controller channel", () => {
   const conversation: RunLogSource = { kind: "controller", conversationId: "cnv_1" };
-  const frame = (over: Partial<ControllerLogAppended> = {}): ControllerLogAppended => ({
+  const controllerFrame = (over: Partial<ControllerLogAppended> = {}): ControllerLogAppended => ({
     conversationId: "cnv_1",
     userId: "u_owner",
     runId: "run_1",
@@ -602,61 +837,81 @@ describe("the controller channel", () => {
     seq: 0,
     ...over,
   });
-  const tail = (text: string, seq = 0): FakeResponse => ({
-    ok: true,
-    json: () =>
-      Promise.resolve({
-        data: { threadId: "controller", headSeq: seq, lines: [{ seq, display: line(text), raw: "{}" }] },
-      }),
-  });
-  const thread: Thread = { threadId: "controller", runId: "run_1", lines: [], window: win() };
+  const ctlThread = thread({ id: "controller" });
 
-  it("subscribes the user scope and tails the open conversation's frames", async () => {
-    // Canary: subscribe the task scope for both kinds, or drop the
-    // `controller.log-appended` listener, and no line ever arrives.
-    fetchMock.mockResolvedValue(tail("Reading the board."));
-    render(<Probe source={conversation} threads={[thread]} />, { wrapper: DataRouter });
-    const es = FakeEventSource.last();
-    expect(es.url).toBe("/resources/events?scope=user");
+  it("tails the open conversation's frames off the user stream", async () => {
+    // Canary: drop the `controller.log-appended` subscription and no line
+    // ever arrives.
+    fetchMock.mockResolvedValue(tailOf([{ seq: 0, text: "Reading the board." }]));
+    render(<Page source={conversation} threads={[ctlThread]} />, { wrapper: DataRouter });
+    expect(FakeEventSource.last().url).toBe("/resources/events?scope=user");
 
     await act(async () => {
-      es.emit("controller.log-appended", frame());
-      await Promise.resolve();
+      FakeEventSource.last().emit("controller.log-appended", controllerFrame());
+      await flush();
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]![0])).toBe("/resources/run-log?runId=run_1&since=-1");
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(state.linesByThread.controller!.map((l) => l.display.text)).toEqual(["Reading the board."]);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("/resources/run-log?runId=run_1&since=-1&raw=0");
+    expect(texts("controller")).toEqual(["Reading the board."]);
   });
 
   it("ignores another conversation's frames on the same user stream", async () => {
     // Canary: drop the conversationId comparison and a frame from any thread
     // of this person fetches into the open console.
-    fetchMock.mockResolvedValue(tail("elsewhere"));
-    render(<Probe source={conversation} threads={[thread]} />, { wrapper: DataRouter });
+    fetchMock.mockResolvedValue(tailOf([{ seq: 0, text: "elsewhere" }]));
+    render(<Page source={conversation} threads={[ctlThread]} />, { wrapper: DataRouter });
     await act(async () => {
       FakeEventSource.last().emit(
         "controller.log-appended",
-        frame({ conversationId: "cnv_other", runId: "run_9" }),
+        controllerFrame({ conversationId: "cnv_other", runId: "run_9" }),
       );
-      await Promise.resolve();
+      await flush();
     });
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(state.linesByThread.controller).toEqual([]);
+    expect(texts("controller")).toEqual([]);
   });
 
   it("names the conversation's owner in the refusal, not project membership", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
-    render(<Probe source={conversation} threads={[thread]} />, { wrapper: DataRouter });
+    render(<Page source={conversation} threads={[ctlThread]} />, { wrapper: DataRouter });
     await act(async () => {
-      FakeEventSource.last().emit("controller.log-appended", frame());
-      await Promise.resolve();
-      await Promise.resolve();
+      FakeEventSource.last().emit("controller.log-appended", controllerFrame());
+      await flush();
     });
-    expect(state.streamError).toBe(
+    expect(store.streamError()).toBe(
       "Live tail stopped: raw run logs are for the conversation's owner and org admins only.",
     );
+  });
+
+  /**
+   * CTL-2: the controller page's fallback for a settle the stream missed used
+   * to revalidate root, the layout and the page every 5 s of a turn. It reads
+   * the turn's tail instead and revalidates once, when the run has ended.
+   */
+  it("polls the turn's tail while it works, and revalidates once it ended", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    fetchMock.mockResolvedValue(tailOf([], { state: "running", headSeq: -1 }));
+    render(
+      <Page source={conversation} threads={[ctlThread]} poll={{ runId: "run_1", everyMs: 5_000 }} />,
+      { wrapper: DataRouter },
+    );
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        await flush();
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(loaderRuns).toBe(0);
+
+    fetchMock.mockResolvedValue(tailOf([], { state: "finished", headSeq: -1 }));
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        await flush(12);
+      });
+    }
+    // CANARY: revalidate on every poll and this reads 2.
+    expect(loaderRuns).toBe(1);
   });
 });

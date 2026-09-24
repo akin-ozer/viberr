@@ -1,15 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRevalidator } from "react-router";
-import { z } from "zod";
 import {
   buildEventsUrl,
   CONTROLLER_UPDATED_EVENT,
   SSE_CONTROL_EVENTS,
   SSE_CONVERSATION_EVENTS,
-  SSE_RUN_LINE_EVENTS,
   SSE_STREAM_EVENTS,
   SSE_EVENT_NAMES,
-  sseScopes,
+  type SseEventName,
 } from "./event-types";
 
 /**
@@ -20,12 +18,12 @@ import {
  *
  * Revalidations are debounced 300 ms (trailing) so event bursts — a rescan
  * projecting ten tasks, a mutation emitting task + project + notification —
- * coalesce into one loader round-trip. Run LINES are the exception: they
- * revalidate only the surface showing that task, at most once per
- * `RUN_LINE_REVALIDATE_MS`, and never push a pending revalidation out.
- * Conversation events are the other (ruling 454): only a surface that renders
- * a conversation revalidates on them; elsewhere they go, debounced the same
- * way, to the controller dock as `CONTROLLER_UPDATED_EVENT`.
+ * coalesce into one loader round-trip. Stream events (one per console line)
+ * revalidate nothing: they go to the tab's run-log consoles through
+ * `onLiveFrame` (ruling 454). Conversation events are the other exception
+ * (ruling 454): only a surface that renders a conversation revalidates on
+ * them; elsewhere they go, debounced the same way, to the controller dock as
+ * `CONTROLLER_UPDATED_EVENT`.
  *
  * Loop safety: revalidation only re-runs loaders (GETs). The one loader-side
  * write — R19-15's task-view read-marking — is MONOTONIC (`read_at IS NULL`
@@ -51,38 +49,89 @@ import {
 export const REVALIDATE_DEBOUNCE_MS = 300;
 
 /**
- * The floor between two revalidations that run LINES cause
- * (`SSE_RUN_LINE_EVENTS`). A line only moves the Live run strip (phase, step,
- * turns, tokens); the console itself tails through `useRunLogStream`, which
- * never waits on this.
+ * Ruling 454 (TASK-6 / LIVE-5): ONE live connection per tab. The run-log
+ * console used to open an EventSource of its own on the task scope the
+ * layout's stream already held, so a task tab took two of HTTP/1.1's six
+ * connections per origin (ruling 301 named merging them "the next cut") and
+ * received every console line twice. The console now takes its frames from
+ * whichever stream this hook holds, through this registry.
  *
- * Measured on a live instance (2026-09-23, the ax-clone board): a Claude run
- * writes ~0.7 lines a second with bursts of 2-3, three quarters of them
- * thinking-token ticks, and one revalidation of a task page is a 1.4 MB payload,
- * ~95 ms of the server's event loop (the one the agents run on) and ~30 ms of the
- * tab's main thread. Debounced only, the lines of a few concurrent runs
- * revalidated every open board and task page of the project two or three times
- * a second; three such pages pushed a trivial request's p90 from 8 ms to 157 ms.
+ * A tab holding two streams whose scopes both carry an event (the project
+ * controller page: the layout's and the page's own) would hand it over twice,
+ * so a frame is handed out once per id and body.
  */
-export const RUN_LINE_REVALIDATE_MS = 2_000;
+type FrameHandler = (event: MessageEvent<string>) => void;
+const frameHandlers = new Map<SseEventName, Set<FrameHandler>>();
+const RECENT_FRAMES = 256;
+const recentFrames = new Set<string>();
 
-/** The fields of a run-line frame this hook reads, parsed rather than trusted
- *  (`app/schemas/sse-event.schema.ts` is the wire contract). */
-const runLineSchema = z.object({
-  data: z.object({ projectSlug: z.string(), taskKey: z.string() }),
-});
-
-/** The `task:` scope a run-line frame belongs to, or null for a frame that does
- *  not parse (dropped, the way the log consumer drops one). */
-function runLineTaskScope(raw: string): string | null {
-  try {
-    const parsed = runLineSchema.safeParse(JSON.parse(raw));
-    return parsed.success
-      ? sseScopes.task(parsed.data.data.projectSlug, parsed.data.data.taskKey)
-      : null;
-  } catch {
-    return null;
+/**
+ * Hands `handler` every `name` frame this tab's live stream receives (a stream
+ * event: `run.log-appended`, `controller.log-appended`). Returns the
+ * unsubscribe. The stream itself belongs to the surface's `useLiveUpdates`,
+ * with everything that implies: closed while the tab is hidden (ruling 301),
+ * reopened on a backoff, a revalidation on every reconnect.
+ */
+export function onLiveFrame(name: SseEventName, handler: FrameHandler): () => void {
+  let handlers = frameHandlers.get(name);
+  if (!handlers) {
+    handlers = new Set();
+    frameHandlers.set(name, handlers);
   }
+  handlers.add(handler);
+  return () => {
+    handlers.delete(handler);
+  };
+}
+
+function dispatchFrame(name: SseEventName, event: MessageEvent<string>): void {
+  const handlers = frameHandlers.get(name);
+  if (!handlers || handlers.size === 0) return;
+  // The broker's ids restart with the process, so an id alone could match a
+  // frame from before a restart; the id with the body cannot.
+  if (event.lastEventId) {
+    const seen = `${event.lastEventId}|${event.data}`;
+    if (recentFrames.has(seen)) return;
+    recentFrames.add(seen);
+    if (recentFrames.size > RECENT_FRAMES) {
+      const oldest = recentFrames.values().next().value;
+      if (oldest !== undefined) recentFrames.delete(oldest);
+    }
+  }
+  for (const handler of handlers) handler(event);
+}
+
+/**
+ * UI-03 for the frames above: a stream of this tab has FAILED (it is
+ * reconnecting on its backoff), so a console fed through `onLiveFrame` is not
+ * following. The topbar's chip says so for the workspace; the console says it
+ * in its own footer, which is where a reader of a frozen console looks.
+ */
+const failedStreams = new Set<symbol>();
+const statusListeners = new Set<() => void>();
+
+function setStreamFailed(stream: symbol, failed: boolean): void {
+  const had = failedStreams.has(stream);
+  if (failed === had) return;
+  if (failed) failedStreams.add(stream);
+  else failedStreams.delete(stream);
+  for (const listener of statusListeners) listener();
+}
+
+function subscribeStatus(listener: () => void): () => void {
+  statusListeners.add(listener);
+  return () => {
+    statusListeners.delete(listener);
+  };
+}
+
+/** True while a live stream of this tab is down and reconnecting. */
+export function useLiveStreamFailed(): boolean {
+  return useSyncExternalStore(
+    subscribeStatus,
+    () => failedStreams.size > 0,
+    () => false,
+  );
 }
 
 /** Joins the scope list into one effect-dependency string. Scope ids never
@@ -189,6 +238,12 @@ export function useLiveUpdates(
   // state: a successful open must reset the backoff without re-running the
   // effect (whose deps would tear down the stream that just opened).
   const failuresRef = useRef(0);
+  // Ruling 454: this surface's marker in the tab's failed-stream set.
+  const streamTokenRef = useRef(Symbol("live-stream"));
+  useEffect(() => {
+    const token = streamTokenRef.current;
+    return () => setStreamFailed(token, false);
+  }, []);
 
   // Latest revalidate without resubscribing per render.
   const revalidateRef = useRef(revalidator.revalidate);
@@ -232,10 +287,11 @@ export function useLiveUpdates(
     let dockTimer: ReturnType<typeof setTimeout> | null = null;
     let reopen: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
-    let lastRevalidateAt = Number.NEGATIVE_INFINITY;
+    // This surface's entry in the tab's failed-stream set (`useLiveStreamFailed`),
+    // held across the reopens of one outage the way `paused` is.
+    const token = streamTokenRef.current;
     const revalidateNow = () => {
       timer = null;
-      lastRevalidateAt = Date.now();
       void revalidateRef.current();
     };
     const scheduleRevalidate = () => {
@@ -259,27 +315,20 @@ export function useLiveUpdates(
       scheduleRevalidate();
       if (!conversations) scheduleDockNotice();
     };
-    // A run line JOINS a pending revalidation instead of pushing it out: under a
-    // steady stream of lines a trailing debounce would never fire, and each one
-    // resetting the clock is how a few runs turned into a loader round-trip
-    // every few hundred ms.
-    const scheduleRunLineRevalidate = () => {
-      if (timer !== null) return;
-      const wait = Math.max(
-        REVALIDATE_DEBOUNCE_MS,
-        lastRevalidateAt + RUN_LINE_REVALIDATE_MS - Date.now(),
-      );
-      timer = setTimeout(revalidateNow, wait);
-    };
-
     const scopeList = scopeKey.split(SCOPE_SEPARATOR);
     const url = buildEventsUrl(scopeList);
     const source = new EventSource(url);
     for (const name of SSE_EVENT_NAMES) {
-      // A stream event (one per console line) is the dedicated log consumer's
-      // to handle; revalidating every surface of the person on each would turn
-      // one controller turn into a loader storm.
-      if (SSE_CONTROL_EVENTS.includes(name) || SSE_STREAM_EVENTS.includes(name)) continue;
+      if (SSE_CONTROL_EVENTS.includes(name)) continue;
+      // A stream event (one per console line) revalidates nothing: revalidating
+      // on each would turn one run into a loader storm. The tab's consoles take
+      // it from here (`onLiveFrame`, ruling 454). A task page used to
+      // revalidate root, layout and task every 2 s during a run only to move
+      // the Live run strip; the strip now reads the console's own tail.
+      if (SSE_STREAM_EVENTS.includes(name)) {
+        source.addEventListener(name, (event: MessageEvent<string>) => dispatchFrame(name, event));
+        continue;
+      }
       if (SSE_CONVERSATION_EVENTS.includes(name)) {
         source.addEventListener(name, scheduleConversationEvent);
         continue;
@@ -288,21 +337,11 @@ export function useLiveUpdates(
         source.addEventListener(name, scheduleCatchUp);
         continue;
       }
-      if (SSE_RUN_LINE_EVENTS.includes(name)) {
-        // Only the surface showing THAT task has anything a line changes. The
-        // `project:` scope delivers every run of the project here as well — to
-        // the board and to every other open task page — and each of those used
-        // to refetch its whole loader per line of somebody else's run.
-        source.addEventListener(name, (event: MessageEvent<string>) => {
-          const scope = runLineTaskScope(event.data);
-          if (scope !== null && scopeList.includes(scope)) scheduleRunLineRevalidate();
-        });
-        continue;
-      }
       source.addEventListener(name, scheduleRevalidate);
     }
     source.onopen = () => {
       setPaused(false);
+      setStreamFailed(token, false);
       // OBS-6: a real recovery — the next outage starts its backoff from the
       // top, and the session probe is no longer owed.
       failuresRef.current = 0;
@@ -323,6 +362,7 @@ export function useLiveUpdates(
       // network drop); CLOSED = the connection FAILED and will never retry.
       if (source.readyState !== EventSource.CLOSED || closed) return;
       setPaused(true);
+      setStreamFailed(token, true);
       // OBS-6: the schedule steps on CONSECUTIVE failures, not on the lifetime
       // attempt count — a stream that recovered and later dropped is a new
       // outage and starts at 2s again, and one that never recovers walks the

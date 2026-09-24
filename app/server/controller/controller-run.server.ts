@@ -42,7 +42,8 @@ import {
   type RunPrincipalRefusal,
 } from "~/server/runtimes/run-principal.server";
 import type { UserBackendHealth } from "~/server/runtimes/backend-credentials.server";
-import { RUN_PHASE, type RunMcpServers } from "~/server/runtimes/adapter.server";
+import type { RunMcpServers } from "~/server/runtimes/adapter.server";
+import { namedTurnPhase } from "~/features/runtime/runtime-types";
 import {
   interruptRun,
   registerRunCompletion,
@@ -909,7 +910,7 @@ export function conversationTurnState(
   return {
     working: true,
     runId: entry.runId,
-    phase: run.phase === RUN_PHASE.working ? null : run.phase,
+    phase: namedTurnPhase(run.phase),
     step: run.step,
   };
 }

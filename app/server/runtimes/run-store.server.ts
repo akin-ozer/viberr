@@ -574,6 +574,134 @@ export function runLineStats(db: DatabaseSync, runId: string): RunLineStats {
 }
 
 /**
+ * Ruling 454 (TASK-1): `runLineStats` for every run of a task in ONE query,
+ * keyed by run id. A run with no lines has no entry. The task loader used to
+ * ask once per run, on every load.
+ */
+export function runLineStatsForTask(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+): Map<string, RunLineStats> {
+  // SAFETY: `run_id` is NOT NULL TEXT; `COUNT()` is an integer and `MIN`/`MAX`
+  // over the INTEGER `seq` of a non-empty group are integers (0001_baseline.sql).
+  const rows = db
+    .prepare(
+      `SELECT run_id AS id, COUNT(*) AS c, MIN(seq) AS lo, MAX(seq) AS hi
+         FROM run_log_lines
+        WHERE run_id IN (SELECT id FROM agent_runs WHERE project_slug = ? AND task_key = ?)
+        GROUP BY run_id`,
+    )
+    .all(projectSlug, taskKey) as { id: string; c: number; lo: number; hi: number }[];
+  return new Map(rows.map((r) => [r.id, { count: r.c, minSeq: r.lo, maxSeq: r.hi }]));
+}
+
+/** What a window needs to know about a line without shipping it (ruling 454). */
+export interface RunLineSize {
+  seq: number;
+  /** `raw_json` + `display_json` length: what the line costs a payload. */
+  bytes: number;
+  /** The display line's wire tag (the continuity marker is read off it). */
+  tag: string;
+}
+
+/**
+ * The newest `limit` lines of a run that fit `budget` bytes counted from the
+ * newest (always at least the newest `keep`), as `w` (seq, bytes) — the P13-D-11
+ * window rule, applied inside the query so a line outside the window is
+ * neither returned nor parsed. Bind order: run id, limit, budget, keep; the
+ * outer query joins back to `run_log_lines l` (bind the run id again).
+ */
+const BUDGETED_TAIL = `(
+  SELECT seq, bytes FROM (
+    SELECT seq, bytes,
+           SUM(bytes) OVER (ORDER BY seq DESC ROWS UNBOUNDED PRECEDING) AS cum,
+           ROW_NUMBER() OVER (ORDER BY seq DESC) AS n
+      FROM (SELECT seq, length(raw_json) + length(display_json) AS bytes
+              FROM run_log_lines WHERE run_id = ? ORDER BY seq DESC LIMIT ?)
+  ) WHERE cum <= ? OR n <= ?
+) w`;
+
+/** What a window read is bounded by (ruling 454): the lines and bytes left in
+ *  the window, and how many of the newest lines to keep regardless. */
+export interface TailBudget {
+  lines: number;
+  bytes: number;
+  keep: number;
+}
+
+/**
+ * Ruling 454 (TASK-1): the newest lines of a run that fit `budget`, as sizes
+ * and tags only, oldest-first. The loader bounds a console window it does not
+ * ship with this, so a revalidation parses no line and carries none.
+ */
+export function listRunLineSizes(db: DatabaseSync, runId: string, budget: TailBudget): RunLineSize[] {
+  if (budget.lines <= 0) return [];
+  // SAFETY: `length()` over two NOT NULL TEXT columns is an integer, and every
+  // `display_json` is a `LogLine` whose `tag` is a string (`insertRunLine`).
+  return db
+    .prepare(
+      `SELECT w.seq AS seq, w.bytes AS bytes, json_extract(l.display_json, '$.tag') AS tag
+         FROM ${BUDGETED_TAIL}
+         JOIN run_log_lines l ON l.run_id = ? AND l.seq = w.seq
+        ORDER BY w.seq ASC`,
+    )
+    .all(runId, budget.lines, budget.bytes, budget.keep, runId) as {
+    seq: number;
+    bytes: number;
+    tag: string;
+  }[];
+}
+
+/** One windowed line's display projection, without its envelope. */
+export interface RunLineDisplay {
+  seq: number;
+  display: LogLine;
+  bytes: number;
+}
+
+/**
+ * Ruling 454 (TASK-1): the newest lines of a run that fit `budget`, display
+ * only — a console the reader has not asked to see raw needs no stored
+ * envelope, and the envelope is most of a line's bytes. `bytes` still counts
+ * both, so the window it bounds is the same window.
+ */
+export function listRunLineDisplays(db: DatabaseSync, runId: string, budget: TailBudget): RunLineDisplay[] {
+  if (budget.lines <= 0) return [];
+  // SAFETY: as `listRunLinesTail`: NOT NULL columns, and `display_json` holds
+  // exactly what `insertRunLine` stringified.
+  const rows = db
+    .prepare(
+      `SELECT w.seq AS seq, w.bytes AS bytes, l.display_json AS display_json
+         FROM ${BUDGETED_TAIL}
+         JOIN run_log_lines l ON l.run_id = ? AND l.seq = w.seq
+        ORDER BY w.seq ASC`,
+    )
+    .all(runId, budget.lines, budget.bytes, budget.keep, runId) as {
+    seq: number;
+    display_json: string;
+    bytes: number;
+  }[];
+  return rows.map((r) => ({
+    seq: r.seq,
+    // SAFETY: `display_json` holds exactly the `LogLine` `insertRunLine`
+    // stringified (see above).
+    display: JSON.parse(r.display_json) as LogLine,
+    bytes: r.bytes,
+  }));
+}
+
+/** The stored envelope of one line, or null (ruling 454: the continuity
+ *  marker's dead session id is read out of it). */
+export function runLineRaw(db: DatabaseSync, runId: string, seq: number): string | null {
+  // SAFETY: `raw_json` is NOT NULL TEXT.
+  const row = db
+    .prepare(`SELECT raw_json FROM run_log_lines WHERE run_id = ? AND seq = ?`)
+    .get(runId, seq) as { raw_json: string } | undefined;
+  return row?.raw_json ?? null;
+}
+
+/**
  * Does the run hold a line older than `seq`? The console page's `hasMore`
  * (ruling 107's page-local cursor) needs exactly this, and it is one index
  * probe — `runLineStats` answers it too, but counts every line of the run to

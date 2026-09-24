@@ -14,110 +14,144 @@ const TABS =
 
 /** Ruling 454 ratchet ceilings: live run console, task page render and its SSE streams. */
 export const CONSOLE_BUDGETS: PerfBudgetTable = {
-  // TASK-1: every group's window, display and raw, on every revalidation.
+  // TASK-1: 1,048,869 while every group's window (display and raw) rode every
+  // revalidation; now window facts only (owner decision 2).
   "console:task-data.json-bytes": {
-    ceiling: 1048869,
+    ceiling: 13001,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a .data request`,
   },
-  // TASK-1: the three windows' rows and six per-run COUNT/MIN/MAX scans.
+  // TASK-1: 876 (three windows' rows plus six per-run COUNT/MIN/MAX); now one
+  // task-wide COUNT/MAX and each window's own rows as sizes and tags, the
+  // byte budget applied inside the query.
   "console:task-data.run-log-rows": {
-    ceiling: 876,
+    ceiling: 524,
     unit: "count",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a .data request; run_log_lines rows read`,
   },
-  // TASK-1: the same payload as a revalidation.
+  // TASK-1: 1,048,869 (the same payload as a revalidation); now the shown
+  // agent's window, display lines only.
   "console:task-document.json-bytes": {
-    ceiling: 1048869,
+    ceiling: 136574,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a document request`,
   },
-  // TASK-6 / LIVE-5: the layout's stream and the console's own.
+  // TASK-1: the one request that fills a thread a .data payload left empty.
+  "console:run-log-window.json-bytes": {
+    ceiling: 124054,
+    unit: "bytes",
+    journey: "task-open",
+    fixture: `${TASK_CONSOLE}; /resources/run-log?runId=run_dev_3&window=1, the response body`,
+  },
+  // TASK-6 / LIVE-5: 2 while the console opened an EventSource of its own on
+  // the task scope the layout's stream already held; it takes the layout's.
   "console:task-page.event-sources": {
-    ceiling: 2,
+    ceiling: 1,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; open EventSources after mount`,
   },
-  // LIVE-2 / LIVE-4: the whole page re-rendered per line.
+  // TASK-3: 2 (discovery, 2026-09-24) while the console's mount effect
+  // re-seeded identical lines; the store is seeded once.
+  "console:task-page.page-renders-on-mount": {
+    ceiling: 1,
+    unit: "count",
+    journey: "task-open",
+    fixture: `${TASK_PAGE}; 400 rows; TaskDetailPage renders from mounting the page until it settles`,
+  },
+  // LIVE-2 / LIVE-4: 106 while the line buffer was TaskDetailPage state and
+  // the whole page re-rendered per line; now the console view, the one row it
+  // adds and the footer's count.
   "console:task-page.renders-per-line-40": {
-    ceiling: 106,
+    ceiling: 4,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 40 console rows; component renders for one appended line`,
   },
-  // LIVE-2 / LIVE-4: ...and the console's part grew with history.
+  // LIVE-2 / LIVE-4: 250 (the console's part grew with history: index keys,
+  // the fold re-run over the buffer); now the same 4 as at 40 rows.
   "console:task-page.renders-per-line-400": {
-    ceiling: 250,
+    ceiling: 4,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 400 console rows; component renders for one appended line`,
   },
+  // LIVE-4: 10; now the row and the footer's count.
   "console:task-page.dom-writes-per-line-40": {
-    ceiling: 10,
+    ceiling: 2,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 40 console rows; MutationObserver records for one appended line`,
   },
+  // LIVE-4: 9 (the count stuck at the loader's snapshot); now the row and the
+  // count, the same 2 as at 40 rows.
   "console:task-page.dom-writes-per-line-400": {
-    ceiling: 9,
+    ceiling: 2,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 400 console rows; MutationObserver records for one appended line`,
   },
-  // LIVE-2: the line buffer was TaskDetailPage state.
+  // LIVE-2: 1 while the line buffer was TaskDetailPage state.
   "console:task-page.page-renders-per-line": {
-    ceiling: 1,
+    ceiling: 0,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; TaskDetailPage renders for one appended line`,
   },
-  // TASK-4 (console half): the console re-reconciled on identical data.
+  // TASK-4 (console half): 254 while the console and the run card
+  // re-reconciled on identical data; neither renders now (the stable run
+  // projection, memoised panels). The 54 left are the page's other panels.
   "console:task-page.renders-per-noop-revalidation": {
-    ceiling: 254,
+    ceiling: 54,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 400 rows; component renders for a structuredClone of the same props`,
   },
+  // TASK-4: 8.
   "console:task-page.dom-writes-per-noop-revalidation": {
-    ceiling: 8,
+    ceiling: 3,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 400 rows; MutationObserver records for a structuredClone of the same props`,
   },
-  // LIVE-3: a same-run revalidation re-seeded the console from the loader.
+  // LIVE-3: 2 while a same-run revalidation re-seeded the console from the
+  // loader; the store keeps what it holds.
   "console:task-page.commits-per-sliding-revalidation-400": {
-    ceiling: 2,
+    ceiling: 1,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 400 rows, five lines tailed, then props whose window slid by those five; React commits`,
   },
+  // LIVE-3: 423.
   "console:task-page.dom-writes-per-sliding-revalidation-400": {
-    ceiling: 423,
+    ceiling: 3,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 400 rows, five lines tailed, then props whose window slid by those five; MutationObserver records`,
   },
-  // LIVE-4: index keys rewrote every existing row on a prepend.
+  // LIVE-4: 621 while index keys rewrote every existing row on a prepend; now
+  // the 200 rows inserted and the affordance's note.
   "console:task-page.dom-writes-per-load-older-400": {
-    ceiling: 621,
+    ceiling: 205,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 400 rows; MutationObserver records for "load older lines" (a 200-line page)`,
   },
-  // LIVE-11: the elapsed clock re-rendered the whole Live run card.
+  // LIVE-11: 23 while the elapsed clock re-rendered the whole Live run card;
+  // now its leaf, and only the digit field that moved.
   "console:task-page.renders-per-clock-tick": {
-    ceiling: 23,
+    ceiling: 6,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 40 rows; component renders for one 1 s tick`,
   },
-  // LIVE-1 / RF-2: root + layout + task every 2 s, only to move the strip.
+  // LIVE-1 / RF-2: 30 (root + layout + task every 2 s, only to move the
+  // strip); the strip reads the facts each console tail read returns.
   "console:task-page.loader-runs-per-20s-of-lines": {
-    ceiling: 30,
+    ceiling: 0,
     unit: "count",
     journey: "live-run",
     fixture:
@@ -138,9 +172,10 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
     journey: "live-run",
     fixture: `${TABS}; frames per line on the board tab`,
   },
-  // CTL-2 (page half): a 5 s revalidation poll plus the F22 20 s one.
+  // CTL-2 (page half): 14 (a 5 s revalidation poll plus the F22 20 s one);
+  // the page reads the turn's tail every 5 s and revalidates when it ended.
   "console:controller-page.loader-runs-per-30s-turn": {
-    ceiling: 14,
+    ceiling: 0,
     unit: "count",
     journey: "controller",
     fixture:

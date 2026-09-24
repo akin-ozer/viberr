@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { z } from "zod";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
-import type { LogLine, RunView } from "~/features/runtime/runtime-types";
+import type { RunView } from "~/features/runtime/runtime-types";
 import { Icon } from "~/ui/icon";
 import { LocalRelative } from "~/ui/local-time";
 import { Pill, type PillKind } from "~/ui/pill";
@@ -48,11 +47,15 @@ import { Pill, type PillKind } from "~/ui/pill";
  *  - `runtime` — the affected agent's run group. Runs group per agent
  *    (`<kind>:<profileId>`, stable across resumes — `run-projection.server.ts`),
  *    so the dead run and the fresh re-anchored run land in ONE group: the
- *    group carrying a `…session_missing`-tagged line is the thread that lost
- *    its history, and its representative run's lifecycle says where recovery
- *    stands. The dead session id is read out of that line's stored WIRE
- *    envelope (`{reason:"session_missing", session_id}`), never parsed out of
- *    display text.
+ *    group whose console window holds a `…session_missing`-tagged line is the
+ *    thread that lost its history, and its representative run's lifecycle
+ *    says where recovery stands. The projection reports that marker as the
+ *    group's `sessionMissing`, with the dead session id read out of the line's
+ *    stored WIRE envelope (`{reason:"session_missing", session_id}`), never
+ *    parsed out of display text (`run-projection.server.ts`). This panel used
+ *    to scan `lines` and `raw` for it, which only worked while the page
+ *    carried every group's window; ruling 454 ships console lines on a hard
+ *    load only, so the server finds the marker for it.
  *
  * Bounded by construction, and that is the retirement rule rather than a bug:
  * the loader ships a 30-event timeline slice (`timeline-slice.ts`) and a bounded
@@ -72,15 +75,6 @@ import { Pill, type PillKind } from "~/ui/pill";
 
 /** The typed timeline event pass 18 landed (`TIMELINE_EVENT_TYPES`). */
 export const CONTINUITY_EVENT_TYPE = "continuity";
-
-/**
- * Every writer of a dead-session marker ends its console tag with this suffix —
- * `run·session_missing` from `run-service.server.ts` plus the two adapters'
- * own `run·error·session_missing` / `error·session_missing`. `run-store.server.ts`
- * matches the same suffix (`LIKE '%session_missing'`), so this is the shared
- * contract and not a guess about one writer.
- */
-const SESSION_MISSING_SUFFIX = "session_missing";
 
 /**
  * The heading of the panel this one points a human at for a new run. Exported
@@ -129,37 +123,6 @@ function roleLabelOf(run: RunView): string {
   return run.kind === "reviewer" ? "Reviewer" : "Delivering agent";
 }
 
-function isSessionMissingLine(line: LogLine): boolean {
-  return line.tag.endsWith(SESSION_MISSING_SUFFIX);
-}
-
-/**
- * The one field this panel reads out of a marker line's wire envelope. Every
- * other key an adapter writes is irrelevant here, and a blank id is the same as
- * none — the panel must not print `session <empty>`.
- */
-const deadSessionEnvelope = z.object({
-  session_id: z.string().trim().min(1),
-});
-
-/**
- * The dead session id from the marker line's STORED wire envelope. Structured,
- * not scraped: `recordSessionMissing` writes `{type:"error", source:"viberr",
- * reason:"session_missing", session_id, message}` and `raw[]` is index-aligned
- * with `lines[]`. An adapter envelope that carries no id simply yields null and
- * the panel says nothing about a session it cannot name.
- */
-function deadSessionId(run: RunView, index: number): string | null {
-  const raw = run.raw[index];
-  if (!raw) return null;
-  try {
-    const envelope = deadSessionEnvelope.safeParse(JSON.parse(raw));
-    return envelope.success ? envelope.data.session_id : null;
-  } catch {
-    return null;
-  }
-}
-
 function progressOf(run: RunView): ContinuityProgress {
   if (run.lifecycle === "running" || run.lifecycle === "queued") return "running";
   if (run.lifecycle === "finished") return "recovered";
@@ -180,14 +143,13 @@ export function deriveContinuityLoss(input: {
 
   const agents: ContinuityAgent[] = [];
   for (const run of input.runtime) {
-    const index = run.lines.findIndex(isSessionMissingLine);
-    if (index === -1) continue;
+    if (!run.sessionMissing) continue;
     agents.push({
       threadId: run.id,
       name: run.who.name,
       roleLabel: roleLabelOf(run),
       backendLabel: backendLabel(run.backend),
-      sessionId: deadSessionId(run, index),
+      sessionId: run.sessionMissing.sessionId,
       progress: progressOf(run),
     });
   }

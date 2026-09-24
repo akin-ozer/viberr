@@ -682,13 +682,26 @@ window is written when it closes, never onto a settled row.
 
 Consumers: `GET /resources/run-log?runId=&since=|before=&limit=` (1..500, member-gated;
 controller runs by conversation ownership) returns `{ runId, threadId, state, lines,
-headSeq, oldestSeq, hasMore }`. The client `useRunLogStream` keeps its own `EventSource`
-on the task scope, fetches since `headSeq` on each reference, revalidates once on
-`run.state-changed`, pages backwards 200 lines at a time, revalidates every 20 s while a
-run is active, and closes its stream while the tab is hidden (ruling 301). Its controller
-channel (`source: { kind: "controller", conversationId }`) subscribes the `user` scope instead
-and tails `controller.log-appended` frames for the open conversation only: a controller
-run has no task scope, so the sink resolves the conversation owner once per run
+headSeq, oldestSeq, hasMore, facts }`, `facts` being the run row's `RunLiveFacts` (phase,
+step, turns, tokens, the cache record; ruling 454, one mapping with the task loader's
+`RunView`, `runLiveFacts`); `raw=0` leaves each line's stored envelope out, and
+`window=1` answers the run's agent group's console window instead (`RunLogWindowPage`:
+display lines, their `consoleLineKey`s, the window facts and the representative's facts),
+the window a hard refresh ships for the shown agent. The task loader carries console lines
+on a document load only (owner decision 2, 2026-09-24): the shown agent's display lines,
+the envelopes when the raw view opens; a `.data` request carries each group's window
+facts and none of its lines (`ConsoleShipping` in `run-projection.server.ts`), plus
+`sessionMissing` for a continuity marker inside the window (the Continuity Recovery
+Panel's input) and the failure class, read from the representative's own newest lines
+(`classifyRunEndOf`, shared with the review-round counter, ruling 416). The client
+`useRunLogStream` holds the console's lines in an external store (`run-log-store.ts`),
+takes its frames from the layout's live stream (`onLiveFrame`, no `EventSource` of its
+own), fetches since the thread's cursor on each reference, fills a thread the payload did
+not carry with one `window=1` request when the console shows it, pages backwards 200
+lines at a time, and revalidates every 20 s while a run is active. Its controller channel
+(`source: { kind: "controller", conversationId }`) tails `controller.log-appended` frames
+for the open conversation only, off the `user` stream the page holds: a controller run
+has no task scope, so the sink resolves the conversation owner once per run
 (`controllerRunRoute`) and both publishers route there (lines as
 `controller.log-appended`, state changes as the `controller.updated` reference).
 

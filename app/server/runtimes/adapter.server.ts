@@ -236,27 +236,9 @@ export interface RunCallbacks {
   onPhase?: (phase: string | null, step: string | null) => void;
 }
 
-/**
- * The phase vocabulary both adapters emit, so the strip reads the same on
- * Claude and Codex. Deliberately tiny and literal — these are the four things
- * the server actually KNOWS about a run, not a narration of what the model is
- * "thinking".
- *
- * `preparing` is emitted by the RUN PIPELINE (before any adapter exists): a
- * cold task-repo clone can take minutes (OBS-8: 3+ min on a 113 MB repo) and
- * until it finished the task page showed no live row at all, which reads as a
- * dead app.
- */
-export const RUN_PHASE = {
-  preparing: "Preparing workspace",
-  starting: "Starting",
-  working: "Working",
-  /** Ruling 371: the CLI is summarizing the context — a full-history model
-   *  call that took 131 s on the one stored compaction — so the strip says
-   *  what the wait is instead of showing the last tool as still running. */
-  compacting: "Compacting context",
-  finishing: "Finishing",
-} as const;
+/** The phase vocabulary both adapters emit; declared with the client-safe run
+ *  types, because the controller page names the phase too (ruling 454). */
+export { RUN_PHASE } from "~/features/runtime/runtime-types";
 
 /** Longest `step` we persist — the strip truncates at ~44ch and the column is
  *  a live hint, not a transcript. */

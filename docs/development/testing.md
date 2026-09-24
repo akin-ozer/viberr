@@ -362,7 +362,7 @@ with `hydrateRoot` in the viewer's (Pacific/Auckland, 00:00:01Z) with React's
 `onRecoverableError` collected, over a live run with a streaming console and an
 `accept_completion` card, plus the interrupted case that mirrors `entry.client.tsx`
 (hydration inside `startTransition`, a discrete event before the flush, then a
-`run.log-appended` update through the page's own EventSource and `/resources/run-log`
-tail fetch). The zones are applied per environment with `vi.resetModules()` and a dynamic
+`run.log-appended` update through the workspace layout's EventSource, the tab's one
+stream, and the console's `/resources/run-log` tail fetch). The zones are applied per environment with `vi.resetModules()` and a dynamic
 import, because `shared/dates/format.ts` builds its `Intl.DateTimeFormat` instances at
 import time.

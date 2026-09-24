@@ -12,6 +12,7 @@ import {
   type NotificationRow,
 } from "~/shared/mapping/notification.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 
 /**
@@ -405,14 +406,7 @@ export function markTaskPacketApprovalRead(
  * full load / "Mark all read" clears the rest.
  */
 export function isTaskViewNavigation(request: Request): boolean {
-  // Single-fetch data requests carry the `.data` suffix; a genuine SSR document
-  // load lands on the clean route path. This alone excludes every revalidation.
-  if (new URL(request.url).pathname.endsWith(".data")) return false;
-  // When the browser sends it, a top-level navigation is `Sec-Fetch-Mode:
-  // navigate` (any other same-origin fetch that reached a clean path is not);
-  // absent (tests / non-browser SSR) we rely on the `.data` signal above.
-  const mode = request.headers.get("Sec-Fetch-Mode");
-  return mode === null || mode === "navigate";
+  return isDocumentNavigation(request);
 }
 
 /**

@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { rowsMatching, tallyServerReads } from "../../test-support/perf-counters";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
-import { seedConsoleFixture } from "../../test-support/console-fixture";
+import { DEAD_SESSION_ID, seedConsoleFixture } from "../../test-support/console-fixture";
+import type { RunLogWindowPage } from "~/server/runtimes/run-projection.server";
 
 /**
  * Ruling 454, journey `task-open`: what the task loader ships of the agent
@@ -66,6 +67,16 @@ describe("the task loader's console payload (ruling 454, owner decision 2)", () 
     expect(dev.logWindow.headSeq).toBe(149);
     expect(dev.logWindow.totalLines).toBe(450);
     expect(dev.lineCount).toBe(450);
+    // No group carries a line, and each says so.
+    for (const group of result.runtime) {
+      expect(group.lines).toEqual([]);
+      expect(group.raw).toEqual([]);
+      expect(group.logWindow.loaded).toBe(false);
+    }
+    // The continuity marker inside the developer's window is still reported,
+    // with the session it names (the panel no longer scans lines for it).
+    expect(dev.sessionMissing).toEqual({ sessionId: DEAD_SESSION_ID });
+    expect(result.runtime[0]!.sessionMissing).toBeNull();
 
     expectWithinBudget("console:task-data.json-bytes", bytes(result));
     expectWithinBudget(
@@ -74,14 +85,46 @@ describe("the task loader's console payload (ruling 454, owner decision 2)", () 
     );
   });
 
-  it("a hard refresh ships the shown agent's window", async () => {
+  it("a hard refresh ships the shown agent's window, display lines only", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     await loadTask(cookie, "");
     const result = await loadTask(cookie, "");
-    const dev = result.runtime[1]!;
+    const [operator, dev, reviewer] = result.runtime;
     // The running agent is the one the console opens on.
-    expect(dev.lines.length).toBeGreaterThan(0);
-    expect(dev.lines.at(-1)!.text).toContain("run_dev_3 line 149");
+    expect(dev!.lines.length).toBeGreaterThan(0);
+    expect(dev!.lines.at(-1)!.text).toContain("run_dev_3 line 149");
+    expect(dev!.logWindow.loaded).toBe(true);
+    expect(dev!.lineKeys).toHaveLength(dev!.lines.length);
+    expect(dev!.lineKeys!.at(-1)).toBe("2:149");
+    // The envelopes wait for the raw view; the other agents for their turn.
+    expect(dev!.raw).toEqual([]);
+    expect(operator!.lines).toEqual([]);
+    expect(reviewer!.lines).toEqual([]);
+    expect(dev!.sessionMissing).toEqual({ sessionId: DEAD_SESSION_ID });
     expectWithinBudget("console:task-document.json-bytes", bytes(result));
+  });
+});
+
+describe("the console's own window request (ruling 454, owner decision 2)", () => {
+  it("fills a thread with the window a hard refresh would have shipped", async () => {
+    const { loader } = await import("~/routes/resources.run-log");
+    const { cookie } = await app.cookieFor(ardaId);
+    const document = await loadTask(cookie, "");
+    const request = app.request("/resources/run-log?runId=run_dev_3&window=1", { cookie });
+    const response = await loader({
+      request,
+      url: new URL(request.url),
+      params: {},
+      pattern: "/resources/run-log",
+      context: new RouterContextProvider(),
+    });
+    const text = await response.text();
+    // SAFETY: the route answers `Response.json({ data: runLogWindowFor(...) })`.
+    const page = JSON.parse(text) as { data: RunLogWindowPage };
+    const dev = document.runtime[1]!;
+    expect(page.data.runId).toBe("run_dev_3");
+    expect(page.data.lines).toEqual(dev.lines);
+    expect(page.data.lineKeys).toEqual(dev.lineKeys);
+    expectWithinBudget("console:run-log-window.json-bytes", Buffer.byteLength(text));
   });
 });

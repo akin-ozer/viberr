@@ -44,7 +44,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/notifications/read` | `notifications.read.tsx` | user (CSRF as a result) | fetcher target; GET redirects to `/notifications` | `read` (the default; repeatable `id`), `read-all` |
 | `/prefs/theme` | `prefs.theme.tsx` | user (CSRF as a result) | writes `theme` to the user row and the `viberr_theme` cookie; GET redirects to `/` | |
 | `/resources/events` | `resources.events.ts` | user (401 JSON) | SSE stream, scopes `project:<slug>`, `task:<slug>/<key>`, `projects`, `user` | |
-| `/resources/run-log` | `resources.run-log.ts` | member / conversation owner | run log lines for `runId` by `since` or `before`, `limit` clamped to 500 | |
+| `/resources/run-log` | `resources.run-log.ts` | member / conversation owner | run log lines for `runId` by `since` or `before`, `limit` clamped to 500, each answer with the run row's live facts (phase, step, turns, tokens, cache; the Live run strip reads them); `raw=0` leaves the stored envelopes out; `window=1` answers the run's agent group's console window as a hard refresh ships it (display lines, their keys, the window facts; ruling 454) | |
 | `/resources/health` | `resources.health.ts` | public | liveness; `?probe=readiness` → 503 when degraded | |
 | `/resources/search` | `resources.search.ts` | user | ⌘K palette query (`q`) over visible projects | |
 | `/resources/model-catalog` | `resources.model-catalog.ts` | user | models and efforts per backend (Claude enhanced with the VIEWER's own account) | |
@@ -100,9 +100,11 @@ Intents behind `project.task.tsx` are explained in
   scrolls inside itself.
 - **Live updates** are mounted by the workspace layout, Home, Notifications, Org
   settings and the controller page; every governed change arrives by loader
-  revalidation. A hidden tab holds no stream: both the layout's `useLiveUpdates` and the
-  console's `use-run-log-stream` close on `visibilitychange` and reopen, revalidating,
-  on return (ruling 301). While the stream is down, the workspace header and Home both
+  revalidation. A task tab holds ONE stream, the layout's: the run-log console takes its
+  frames from it (`onLiveFrame`) instead of opening a second one, and a console line
+  revalidates nothing (ruling 454). A hidden tab holds no stream: `useLiveUpdates`
+  closes on `visibilitychange` and reopens, revalidating, on return, and the console
+  reads whatever it missed as one gap (ruling 301). While the stream is down, the workspace header and Home both
   show a "live updates paused" chip (a plain span: a pill has no cursor and no hover, so
   it is the sentence, not a control) beside a `Retry` button, rendered only when the
   surface really has a reconnect to offer. The sentence is also announced through a
@@ -290,6 +292,17 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   after the completion-time prune, 413 over the 50 MB cap, an auth redirect) reports the
   failure and drops Download rather than saving an error body under the real filename.
   The `Attachment lightbox` screen label covers all three.
+- **The console fills itself** (ruling 454, owner decision 2): a hard refresh arrives
+  with the shown agent's console drawn (its display lines; the stored envelopes load
+  when `{ } raw` opens, each row saying "loading the stored envelope…" until they
+  land); a client navigation or a revalidation carries no console lines, and the
+  console fills the thread it shows with one request, reading "loading this console…"
+  meanwhile; another agent's console loads when the picker opens it. A line appends
+  one row, keyed by its run and seq, and leaves every drawn row alone; the Live run
+  strip's phase, step, turns and tokens move with each line (the console's tail reads
+  carry them), and its Elapsed clock ticks alone. The console's rows skip layout and
+  paint while off screen (`content-visibility: auto`). While the tab's live stream is
+  down the console's footer says "Live tail disconnected: reconnecting…".
 - **A live run's console is disclosed on its own card** (ruling 380): while a run streams,
   the Agent-logs console renders INSIDE the Live-run strip, open by default, and the strip's
   trigger reads "Hide console"/"Show console" with `aria-expanded`; the panel below is the
@@ -309,7 +322,8 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   bucket ("cache 1h"), the run's writes and reads, the peak prompt (the last prompt, what a
   resume would replay, in its tooltip) and the compaction count; each figure rides a `data-`
   attribute, and a run with no first call says "no first call yet". The Live-run strip's
-  Tokens cell says on hover what the cache wrote and read.
+  Tokens cell says on hover what the cache wrote and read. Both follow the console's tail
+  reads while a run streams (ruling 454).
 - Timestamps render through `app/shared/dates/format.ts` only: zero-padded `HH:MM`,
   `{day} · {time}`, relative forms. **The hydration contract** (pass 34, C6): a
   timestamp's first pass depends on the timestamp alone (the `*UTC` formatters take no

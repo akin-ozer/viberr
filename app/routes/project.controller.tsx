@@ -27,6 +27,7 @@ import {
   NEW_CONVERSATION_PARAM,
 } from "~/features/controller/controller-page";
 import { getControllerSurface } from "~/features/controller/controller-query.server";
+import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
  * /projects/:slug/controller — the controller addressed INSIDE one project
@@ -90,6 +91,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         projectSlug: params.slug,
       }),
       all: url.searchParams.get("all") === "1",
+      // Ruling 454 (owner decision 2): console lines on a document load only.
+      console: isDocumentNavigation(request) ? "shown" : "none",
     },
   );
   // The goal redirect controls follow the goal-actions gate (creator OR

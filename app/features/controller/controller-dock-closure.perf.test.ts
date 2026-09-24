@@ -95,6 +95,8 @@ describe("the closed controller dock's static import closure (ruling 454, FL-1)"
       "features/controller/controller-dock-panel.tsx",
       "features/runtime/runs-panels.tsx",
       "features/runtime/use-run-log-stream.ts",
+      "features/runtime/run-log-store.ts",
+      "features/runtime/console-fold.ts",
     ];
     expect(heavy.filter((id) => root.has(id))).toEqual([]);
   });

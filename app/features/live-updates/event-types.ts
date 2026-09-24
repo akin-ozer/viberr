@@ -16,25 +16,18 @@ export const SSE_CONTROL_EVENTS: readonly SseEventName[] = ["stream.open"];
 
 /**
  * Stream events: one reference per console line of a run, consumed by the
- * dedicated log consumer (`useRunLogStream`) and by nothing else. They ride the
- * `user` scope, which every signed-in surface subscribes for its bell, so a
- * surface-wide revalidation per line would refetch Home, a board and the
- * settings page for every tool call of somebody's controller turn.
- * `run.log-appended` is not here: it is a {@link SSE_RUN_LINE_EVENTS} event.
+ * run-log console (`useRunLogStream`, through `onLiveFrame`) and by nothing
+ * else, so no surface revalidates on them. `controller.log-appended` rides the
+ * `user` scope every signed-in surface subscribes for its bell;
+ * `run.log-appended` reaches only a connection holding its task's scope (ruling
+ * 454, LIVE-5). The task page used to revalidate root, layout and task on its
+ * own run's lines every 2 s to move the Live run strip; the strip now reads the
+ * facts each tail fetch returns (ruling 454, LIVE-1).
  */
-export const SSE_STREAM_EVENTS: readonly SseEventName[] = ["controller.log-appended"];
-
-/**
- * Run-line events: one reference per console line of a TASK run. The task
- * page's Live run strip (phase, step, turns, tokens) is loader data that moves
- * with every line, so the page showing that task still revalidates on them —
- * but ONLY that page, and at most once per `RUN_LINE_REVALIDATE_MS`
- * (`use-live-updates.ts`). Every surface holding the `project:` scope receives
- * the frame too (the board, the controller page, and every OTHER open task page,
- * which subscribes its project for the rail), and nothing any of them renders
- * changes per line: the board's "agent running" fact moves on `run.state-changed`.
- */
-export const SSE_RUN_LINE_EVENTS: readonly SseEventName[] = ["run.log-appended"];
+export const SSE_STREAM_EVENTS: readonly SseEventName[] = [
+  "controller.log-appended",
+  "run.log-appended",
+];
 
 /**
  * Conversation events (ruling 454, CTL-4): a controller conversation changed —

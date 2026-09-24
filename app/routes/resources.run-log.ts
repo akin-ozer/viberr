@@ -8,6 +8,7 @@ import {
   type RunLogQuery,
 } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
+import { runLogWindowFor } from "~/server/runtimes/run-projection.server";
 
 /**
  * GET /resources/run-log?runId=<id> — a page of a run's log lines. Two modes:
@@ -18,6 +19,13 @@ import { getRun } from "~/server/runtimes/run-store.server";
  *                           stays a compact reference on the wire and content
  *                           is fetched on demand (docs/architecture/decisions.md forbids fat SSE
  *                           objects).
+ *   ?window=1               the console window of the run's agent group
+ *                           (ruling 454): display lines with their keys,
+ *                           the window facts and the representative's live
+ *                           facts, as a hard refresh ships the shown group.
+ *                           No envelopes.
+ *   ?raw=0                  (with `since` or `before`) leaves each line's
+ *                           stored envelope out (ruling 454).
  *   ?before=<seq>&limit=<n> backward page (P13-D-11): the newest `n` lines
  *                           OLDER than `seq`. The task loader now ships a
  *                           bounded window of each agent group's console
@@ -92,6 +100,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     await requireProjectMember(request, run.project_slug, "view raw run logs");
   }
 
+  // Ruling 454 (owner decision 2): the whole console window of the run's
+  // agent group, exactly as a hard refresh would ship it. Pages carry no
+  // console lines on a revalidation or a client navigation, so the console
+  // fills the thread it shows with this one request.
+  if (url.searchParams.get("window") === "1") {
+    return Response.json({ data: runLogWindowFor(db, run) });
+  }
+
   // Backward mode is selected by the PRESENCE of `before`/`limit`, so an
   // absent param must leave its key off entirely rather than carry undefined.
   let query: RunLogQuery;
@@ -104,5 +120,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
   // The row read above, not a second read: the live tail calls this once per
   // streamed line per viewer (ruling 454).
-  return Response.json({ data: runLogPage(db, run, query) });
+  const page = runLogPage(db, run, query);
+  // Ruling 454: `raw=0` leaves the stored envelopes out; the console asks for
+  // them only while its raw view is open, and they are most of a line's bytes.
+  if (url.searchParams.get("raw") === "0") {
+    return Response.json({
+      data: { ...page, lines: page.lines.map(({ raw: _raw, ...line }) => line) },
+    });
+  }
+  return Response.json({ data: page });
 }

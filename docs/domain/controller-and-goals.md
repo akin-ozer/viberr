@@ -73,7 +73,10 @@ Entry points: the dock (everywhere), the workspace rail item, the Home hero link
 project exists), the org-settings tab's "Open the controller", and the goal chip on a
 task page (it lands on the chain's own card, `#goal-N`). There is no command-palette entry.
 The page subscribes to the user SSE scope (and the project scope on the project surface)
-and polls every 5 seconds while a turn is working. New conversation sits in the page head;
+and, while a turn is working, reads the turn's console tail every 5 seconds: the fallback
+for a settle the stream missed, which revalidates the page once the tail says the run
+ended (ruling 454, CTL-2; it used to revalidate root, the workspace layout and the page
+every 5 s to move one step line). New conversation sits in the page head;
 the rail lists conversations first and goal chains after, is `position: sticky` and scrolls
 itself, and below the two-column breakpoint the head carries a native thread picker
 (`ConversationPicker`); the transcript is a capped scroller that never moves the page
@@ -201,9 +204,11 @@ M` boundaries between turns.
 - **Live run** (above the transcript, only while a turn is `running`): the run's phase
   and last tool step, elapsed from the run's own `started_at`, turns and tokens off the
   run row, the model, **View logs** (scrolls to the console and selects the thread) and
-  **Interrupt**. Turns and tokens refresh with the loader: the 5-second poll, and the
-  `controller.updated` reference a lifecycle flip publishes (the sink routes a
-  controller run's state changes there instead of the task-scoped `run.state-changed`).
+  **Interrupt**. The phase, step, turns and tokens follow the console's tail reads (each
+  line, and the 5-second status read), and the loader on the `controller.updated`
+  reference a lifecycle flip publishes (the sink routes a controller run's state
+  changes there instead of the task-scoped `run.state-changed`). The transcript's working
+  row reads the same step (ruling 250).
 - **Interrupt** is offered to the conversation's owner and to org admins
   (`canInterruptTurn`); it confirms first (D6, "Interrupt this turn?" / "Interrupt
   turn") and posts `intent=interrupt` with the conversation and the run id. The engine's
@@ -220,10 +225,11 @@ M` boundaries between turns.
   of `useRunLogStream`: the sink publishes `controller.log-appended {conversationId,
   userId, runId, threadId, seq}` to the OWNER's `user` stream for every stored line
   (`controllerRunRoute` resolves the owner once per run), the console fetches the lines
-  since its cursor, and the frame is a stream event `useLiveUpdates` ignores
-  (`SSE_STREAM_EVENTS`), so one turn's tool calls never revalidate every surface the
-  person has open. A supervising org admin reading someone else's thread sees the same
-  console off the loader's poll; the frames are the owner's. The streaming footer says
+  since its cursor, and the frame is a stream event that revalidates nothing
+  (`SSE_STREAM_EVENTS`; `useLiveUpdates` hands it to the console, ruling 454), so one
+  turn's tool calls never revalidate every surface the person has open. A supervising org
+  admin reading someone else's thread sees the same console off the 5-second tail read;
+  the frames are the owner's. The streaming footer says
   "never in the transcript" here, where the task record does not exist; the console
   speaks no engagement vocabulary for a controller run (no "supporting" role, and a
   finished turn's footer says to send a message).

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type {
   LogLine,
   RunKind,
+  RunLiveFacts,
   RunState,
   RunView,
 } from "~/features/runtime/runtime-types";
@@ -42,6 +43,8 @@ import {
 import { publishRunStateChanged } from "./run-events.server";
 import {
   projectRunsForTask,
+  runLiveFacts,
+  type ConsoleShipping,
   type ProjectedRunView,
 } from "./run-projection.server";
 import { createRunSink, runPersistDrained } from "./run-sink.server";
@@ -2669,13 +2672,15 @@ async function noteRunStarted(
 
 // ---------------------------------------------- reads
 
-/** All runs for a task as RunView[] + their D-11 log windows (task loader). */
+/** All runs for a task as RunView[] + their D-11 log windows (task loader).
+ *  `console` says how much of each window to carry (ruling 454). */
 export function listRunsForTask(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
+  options: { console?: ConsoleShipping } = {},
 ): ProjectedRunView[] {
-  return projectRunsForTask(db, projectSlug, taskKey);
+  return projectRunsForTask(db, projectSlug, taskKey, options);
 }
 
 export interface RunLog {
@@ -2688,6 +2693,9 @@ export interface RunLog {
   oldestSeq: number;
   /** P13-D-11: lines older than `oldestSeq` exist for this run. */
   hasMore: boolean;
+  /** Ruling 454 (LIVE-1): the run row's moving facts as of this read, so the
+   *  Live run strip follows the console's tail instead of a revalidation. */
+  facts: RunLiveFacts;
 }
 
 /** Backward page size when the caller names none (P13-D-11). */
@@ -2757,6 +2765,7 @@ export function runLogPage(db: DatabaseSync, run: AgentRunRow, query: RunLogQuer
     // run id in the group's `logWindow.runIds`). One index probe, not a count
     // of the run's lines (ruling 454).
     hasMore: lines.length > 0 && hasRunLinesBefore(db, runId, oldestSeq),
+    facts: runLiveFacts(run),
   };
 }
 
