@@ -75,8 +75,9 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     // agents that write the files, so it must not be told a different story
     // than they are — one exported constant, injected by both runtimes.
     //
-    // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildOperatorSystemPrompt
-    // and the first two assertions fail.
+    // Canary: drop the `KB_PRECEDENCE_NOTE` push in `attachedResourcesBlock`
+    // (the block buildOperatorSystemPrompt shares with the specialists) and
+    // the first two assertions fail.
     const dataRoot = temp.make("viberr-kb-prec-");
     const kbDir = path.join(dataRoot, "kb", "house-style");
     mkdirSync(kbDir, { recursive: true });
@@ -103,9 +104,8 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     // restated between every pair of bodies reads as if it ranked just the one
     // that follows it.
     //
-    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the
-    // `for (const part of kbSet.parts)` loop in buildOperatorSystemPrompt and
-    // the count assertion fails.
+    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the per-index loop in
+    // `attachedResourcesBlock` and the count assertion fails.
     const dataRoot = temp.make("viberr-op-prec2-");
     for (const [name, marker] of [
       ["house-style", "KB-MARKER-HOUSE"],

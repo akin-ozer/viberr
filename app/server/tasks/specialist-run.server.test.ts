@@ -3103,9 +3103,9 @@ describe("buildSpecialistPersona — attached resources", () => {
    * that follows it).
    */
   it("R19-2: with MANY KBs the precedence note is still pushed once, before them all", () => {
-    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the `for (const part of
-    // kbSet.parts)` loop and the count assertion fails; fork its text into a
-    // local string literal and the exported-constant assertion fails.
+    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the per-index loop in
+    // `attachedResourcesBlock` and the count assertion fails; fork its text into
+    // a local string literal and the exported-constant assertion fails.
     const dataRoot = tempRoot();
     for (const [name, sentinel] of [
       ["house-style", "SENTINEL-KB-HOUSE"],
@@ -3545,7 +3545,8 @@ describe("R19-2 — the repository wins; a knowledge base is context", () => {
 
   it("states the precedence rule whenever a KB is attached", () => {
     const persona = personaWithKb();
-    // Canary: delete the `kbSet.parts.length > 0` block and this fails.
+    // Canary: drop the `kbAddendum` buildSpecialistPromptPrefix passes to
+    // `attachedResourcesBlock` and this fails.
     expect(persona).toContain(
       "When a knowledge base and the repository disagree",
     );
@@ -3706,8 +3707,8 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     // The owner ruled the repo wins and the KB supplements — and that the rule
     // ships with every KB injection.
     //
-    // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildSpecialistPersona and
-    // the first two assertions fail.
+    // Canary: drop the `KB_PRECEDENCE_NOTE` push in `attachedResourcesBlock`
+    // and the first two assertions fail.
     deployKbPair(["house"], []);
     writeKb("house", "# House style SENTINEL-DELIVERER-KB\n\nbody text");
     const sys = await engageAndRunCritic();

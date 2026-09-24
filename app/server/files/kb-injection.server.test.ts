@@ -10,8 +10,11 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   KB_DOC_READ_CHARS,
+  KB_INDEX_NOTE,
+  KB_PRECEDENCE_NOTE,
   KB_RULINGS_NOTE,
   STORE_TEXT_EXTENSIONS,
+  attachedResourcesBlock,
   isInjectableKbDoc,
   readKbDocForRun,
   readKbIndexDetailed,
@@ -392,5 +395,66 @@ describe("readKbIndexes — a rulings KB says it binds (ruling 286)", () => {
     // "it works today and rots, and it taxes every run that legitimately did not
     // need it."
     expect(KB_RULINGS_NOTE).not.toMatch(/refus|blocked until|cannot deliver until/i);
+  });
+});
+
+/**
+ * The attached-resources block every runtime pushes (specialist, operator,
+ * controller). The runtimes' own bytes are pinned in
+ * `kb-prompt-block.server.test.ts`; these are the assembly's rules on their
+ * own, with stand-in bodies.
+ */
+describe("attachedResourcesBlock — one assembly for every runtime", () => {
+  const skill = { name: "craft", body: "SKILL-BODY" };
+  const house = { name: "house", body: "HOUSE-INDEX" };
+  const rules = { name: "rules", body: "RULES-INDEX" };
+  const none = { banner: "BANNER", skills: [], indexes: [], rulingsKb: null };
+  const SKILL = "\n\n---\n# craft (skill)\n\nSKILL-BODY";
+  const HOUSE = "\n\n---\n# house (knowledge base)\n\nHOUSE-INDEX";
+  const RULES = "\n\n---\n# rules (knowledge base)\n\nRULES-INDEX";
+
+  it("is empty when nothing resolved: no banner vouches for nothing (F7-RES4)", () => {
+    expect(attachedResourcesBlock({ ...none, kbAddendum: "ADDENDUM" })).toEqual([]);
+  });
+
+  it("heads skills with the banner and says nothing about knowledge bases without one", () => {
+    // Canary: push the notes or the addendum without the index gate and a run
+    // with no knowledge base is told how to read and rank one.
+    expect(
+      attachedResourcesBlock({ ...none, kbAddendum: "ADDENDUM", skills: [skill] }),
+    ).toEqual(["BANNER", SKILL]);
+  });
+
+  it("states the precedence and index notes ONCE, after the skills and before every index (R19-2)", () => {
+    // Canary: move the notes inside the per-index loop and they repeat.
+    expect(
+      attachedResourcesBlock({
+        ...none,
+        kbAddendum: "ADDENDUM",
+        skills: [skill],
+        indexes: [house, rules],
+      }),
+    ).toEqual(["BANNER", "ADDENDUM", SKILL, KB_PRECEDENCE_NOTE, KB_INDEX_NOTE, HOUSE, RULES]);
+    // The addendum is optional: the operator and the controller carry none.
+    expect(attachedResourcesBlock({ ...none, indexes: [house] })).toEqual([
+      "BANNER",
+      KB_PRECEDENCE_NOTE,
+      KB_INDEX_NOTE,
+      HOUSE,
+    ]);
+  });
+
+  it("adds the rulings note only when the rulings knowledge base is among the indexes (ruling 286)", () => {
+    expect(
+      attachedResourcesBlock({ ...none, indexes: [house, rules], rulingsKb: "rules" }),
+    ).toEqual(["BANNER", KB_PRECEDENCE_NOTE, KB_INDEX_NOTE, KB_RULINGS_NOTE, HOUSE, RULES]);
+    // Named but not resolved: an obligation the run could not discharge.
+    expect(
+      attachedResourcesBlock({ ...none, indexes: [house], rulingsKb: "rules" }),
+    ).not.toContain(KB_RULINGS_NOTE);
+    // Resolved, but not named as the rulings: an ordinary knowledge base.
+    expect(attachedResourcesBlock({ ...none, indexes: [house, rules] })).not.toContain(
+      KB_RULINGS_NOTE,
+    );
   });
 });
