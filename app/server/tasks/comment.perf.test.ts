@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, describe, it } from "vitest";
+import { afterAll, beforeAll, describe, it, vi } from "vitest";
 import type { TaskActor } from "./task-mutation.server";
+import { pinPerfClock } from "../../../test-support/perf-clock";
 import { countFileReads, countSql } from "../../../test-support/perf-counters";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
@@ -8,13 +9,15 @@ import { setupAppTest, type AppTestContext } from "../../../test-support/test-ap
  * Ruling 454: what one comment costs the shared server (findings CS-4, CS-5),
  * measured on `commentToAgent` — the function the task page's comment action
  * calls — on the demo seed's VIB-142. Authentication is the route's and is not
- * counted here.
+ * counted here. The clock is pinned (`pinPerfClock`): VIB-142's newest demo
+ * entry is "today 09:58", and a comment stamped before it is out of order.
  */
 
 let app: AppTestContext;
 let actor: TaskActor;
 
 beforeAll(async () => {
+  pinPerfClock();
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
@@ -22,7 +25,10 @@ beforeAll(async () => {
   const arda = findUserByEmail(app.db, "arda@viberr.dev")!;
   actor = { userId: arda.id, label: arda.email };
 });
-afterAll(() => app.cleanup());
+afterAll(() => {
+  vi.useRealTimers();
+  app.cleanup();
+});
 
 describe("comment write cost (ruling 454)", () => {
   it("CS-5: a comment with no @ skips the mention machinery", async () => {

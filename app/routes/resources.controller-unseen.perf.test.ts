@@ -1,6 +1,7 @@
 import { RouterContextProvider } from "react-router";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { DOCK_STATUS_URL } from "~/features/controller/controller-dock-context";
 
@@ -19,6 +20,7 @@ let runId: string;
 const SLUG = "viberr-core";
 
 beforeAll(async () => {
+  pinPerfClock();
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
@@ -71,6 +73,7 @@ afterAll(async () => {
     { conversationId, runId, dataRoot: app.dataRoot },
     { userId: arda, label: "arda@viberr.dev" },
   );
+  vi.useRealTimers();
   app.cleanup();
 });
 

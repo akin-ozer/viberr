@@ -107,6 +107,13 @@ export interface RebuildFileResult {
    * `nextTaskNumber`, a file lease or the description.
    */
   taskFacingChanged?: boolean;
+  /**
+   * Projects only: the keys of the tasks the cascade could not re-project.
+   * The project row landed; they did not, and the row keeps the F28-D3
+   * sentinel so the next rebuild of project.md runs the cascade again (ruling
+   * 218's retry re-arms on this as on `error`).
+   */
+  failedTasks?: string[];
 }
 
 export interface RescanSummary {
@@ -379,12 +386,6 @@ function rebuildProjectFileNow(
     action: "projected",
     details: { diagnostics: diagnostics.length, members: fm.members.length },
   });
-  // F28-D3: commit marker — the true content_hash lands only after the projects
-  // row, project_members and diagnostics have all been written.
-  db.prepare(`UPDATE projects SET content_hash = ? WHERE slug = ?`).run(
-    contentHash,
-    fm.slug,
-  );
   emitProjectionEvent({
     type: "project.updated",
     projectSlug: fm.slug,
@@ -408,13 +409,72 @@ function rebuildProjectFileNow(
   const taskFacingChanged =
     tasksBuiltFrom === null ||
     tasksBuiltFrom !== (projectContextForTasks(db, slug)?.digest ?? null);
+  const failedTasks: string[] = [];
   if (taskFacingChanged && !options.skipTaskCascade) {
     for (const key of listTaskDirs(slug, options.dataRoot)) {
-      rebuildTaskFile(db, slug, key, { ...options, force: true });
+      if (!reprojectCascadedTask(db, slug, key, options)) failedTasks.push(key);
     }
   }
 
-  return { action: "projected", kind: "project", projectSlug: slug, taskFacingChanged };
+  // F28-D3: commit marker — the true content_hash lands only after the projects
+  // row, project_members, diagnostics and every cascaded task have been
+  // written. A task the cascade could not re-project leaves the sentinel, and
+  // SRV-3 reads a sentinel as "tasks built from an unknown project", so the
+  // next rebuild of this file runs the cascade again.
+  if (failedTasks.length === 0) {
+    db.prepare(`UPDATE projects SET content_hash = ? WHERE slug = ?`).run(
+      contentHash,
+      fm.slug,
+    );
+  }
+
+  return {
+    action: "projected",
+    kind: "project",
+    projectSlug: slug,
+    taskFacingChanged,
+    ...(failedTasks.length > 0 && { failedTasks }),
+  };
+}
+
+/**
+ * Ruling 454: one task of the project cascade, in a SAVEPOINT of the project's
+ * transaction. Since the project row became one transaction (SRV-4), a task
+ * that threw here rolled back the project row and its members too: an admin's
+ * member add never landed, and every later write of project.md (a task-key
+ * allocation included) failed the same way while the fault was reported
+ * against project.md. The task's own writes roll back to the savepoint, its
+ * failure is reported against ITS file (ruling 218: a fault belongs to the file
+ * that has it), the events it raised are dropped, and the cascade goes on.
+ * Returns whether the task projected.
+ */
+function reprojectCascadedTask(
+  db: DatabaseSync,
+  slug: string,
+  key: string,
+  options: RebuildOptions,
+): boolean {
+  const rel = storeRelativePath(taskFilePath(slug, key, options.dataRoot), options.dataRoot);
+  db.exec("SAVEPOINT cascade_task");
+  try {
+    const { result, events } = collectProjectionEvents(() =>
+      rebuildTaskFile(db, slug, key, { ...options, force: true }),
+    );
+    db.exec("RELEASE cascade_task");
+    // Into the project's own collection: they reach subscribers after COMMIT.
+    for (const event of events) emitProjectionEvent(event);
+    succeeded(rel, result);
+    return true;
+  } catch (error) {
+    // Some errors (a full disk, an I/O error) make SQLite end the whole
+    // transaction: nothing of the project's can land then, and `rebuildPath`
+    // reports the original error against project.md.
+    if (!db.isTransaction) throw error;
+    db.exec("ROLLBACK TO cascade_task");
+    db.exec("RELEASE cascade_task");
+    reportRebuildFailure(db, rel, error instanceof Error ? error : new Error(String(error)));
+    return false;
+  }
 }
 
 // ----------------------------------------------------------------- tasks
@@ -1398,42 +1458,47 @@ export function rebuildPath(
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error("projection rebuild failed", {
-      sourcePath: rel,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-    // Ruling 217 (F37-37): this catch is deliberately quiet so one bad file
-    // cannot take the process down — and for the twelve minutes the store was
-    // `SQLITE_CORRUPT`, quiet is exactly what it was, while health reported
-    // `degraded: []`. The log line stays; the FACT now has somewhere to live.
-    recordProjectionFault(rel, message);
-    // Ruling 219 (F37-39): the provenance row is a NOTE ABOUT the failure, and
-    // it is written to the same store that just failed — so when the store
-    // itself is the fault, this threw out of the catch and `rebuildPath` raised
-    // after all. Live: `resolvePacket` wrote SHOP-4's file (packet resolved,
-    // `waiting: agent`), called `reprojectTask`, and died here — so the operator
-    // re-invoke that the resolution owes never ran, and the task sat at
-    // "agent working" with nothing running for eleven minutes. The canonical
-    // write had already succeeded; only the MIRROR failed, and a mirror must
-    // never take down the action that already told the truth.
-    try {
-      recordProvenance(db, {
-        sourcePath: rel,
-        contentHash: null,
-        action: "error",
-        details: { message },
-      });
-    } catch (provenanceError) {
-      logger.warn("could not record the rebuild failure's provenance row either", {
-        sourcePath: rel,
-        err:
-          provenanceError instanceof Error
-            ? provenanceError
-            : new Error(String(provenanceError)),
-      });
-    }
+    reportRebuildFailure(db, rel, error instanceof Error ? error : new Error(String(error)));
     return { action: "error", kind: "other" };
+  }
+}
+
+/**
+ * A rebuild of `rel` threw: say so without raising. Shared by `rebuildPath`
+ * and the project cascade's per-task isolation.
+ */
+function reportRebuildFailure(db: DatabaseSync, rel: string, error: Error): void {
+  const message = error.message;
+  logger.error("projection rebuild failed", { sourcePath: rel, err: error });
+  // Ruling 217 (F37-37): this catch is deliberately quiet so one bad file
+  // cannot take the process down — and for the twelve minutes the store was
+  // `SQLITE_CORRUPT`, quiet is exactly what it was, while health reported
+  // `degraded: []`. The log line stays; the FACT now has somewhere to live.
+  recordProjectionFault(rel, message);
+  // Ruling 219 (F37-39): the provenance row is a NOTE ABOUT the failure, and
+  // it is written to the same store that just failed — so when the store
+  // itself is the fault, this threw out of the catch and `rebuildPath` raised
+  // after all. Live: `resolvePacket` wrote SHOP-4's file (packet resolved,
+  // `waiting: agent`), called `reprojectTask`, and died here — so the operator
+  // re-invoke that the resolution owes never ran, and the task sat at
+  // "agent working" with nothing running for eleven minutes. The canonical
+  // write had already succeeded; only the MIRROR failed, and a mirror must
+  // never take down the action that already told the truth.
+  try {
+    recordProvenance(db, {
+      sourcePath: rel,
+      contentHash: null,
+      action: "error",
+      details: { message },
+    });
+  } catch (provenanceError) {
+    logger.warn("could not record the rebuild failure's provenance row either", {
+      sourcePath: rel,
+      err:
+        provenanceError instanceof Error
+          ? provenanceError
+          : new Error(String(provenanceError)),
+    });
   }
 }
 

@@ -1,5 +1,6 @@
 import { RouterContextProvider } from "react-router";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import {
   rowsMatching,
@@ -27,6 +28,7 @@ const KEY = "VIB-142";
 const EXTRA_EVENTS = 60;
 
 beforeAll(async () => {
+  pinPerfClock();
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
@@ -49,7 +51,10 @@ beforeAll(async () => {
   const { rebuildAll } = await import("~/server/projections/rebuilder.server");
   rebuildAll(app.db, { dataRoot: app.dataRoot });
 });
-afterAll(() => app.cleanup());
+afterAll(() => {
+  vi.useRealTimers();
+  app.cleanup();
+});
 
 async function revalidateTaskPage(cookie: string) {
   const [root, layout, task] = await Promise.all([

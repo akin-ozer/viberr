@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -1909,5 +1909,61 @@ describe("ruling 454: projection write cost, behaviour kept", () => {
     const after = eventRows(store, "VIB-1");
     expect(after[0]!.id).toBe(before[0]!.id);
     expect(JSON.parse(after[0]!.actor_json)).toMatchObject({ name: "Arda Renamed" });
+  });
+
+  /**
+   * SRV-4 made a project's re-projection one transaction, cascade included, so
+   * a task that could not re-project rolled back the project row with it: an
+   * admin's member change never landed, the fault was pinned on project.md,
+   * and every later write of project.md failed the same way.
+   */
+  it("SRV-4: a cascaded task that cannot re-project keeps the project row and the other tasks", async () => {
+    const store = setupTestStore(ctx);
+    twoTasks(store);
+    resetProjectionFaultsForTests();
+    // VIB-2's file cannot be read (EISDIR here; EACCES or EIO live).
+    const brokenTask = taskFilePath(store.slug, "VIB-2", store.dataRoot);
+    rmSync(brokenTask);
+    mkdirSync(brokenTask);
+    const tasks = taskUpdates();
+    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.members = parsed.frontmatter.members.filter(
+        (m) => m.userId !== store.users.selin.id,
+      );
+    });
+    const projectPath = projectFilePath(store.slug, store.dataRoot);
+    // CANARY: call `rebuildTaskFile` straight from the cascade loop again and
+    // this is `error`, with selin still a member.
+    const result = rebuildPath(store.db, projectPath, { dataRoot: store.dataRoot });
+    tasks.off();
+    expect(result).toMatchObject({ action: "projected", failedTasks: ["VIB-2"] });
+    const members = z
+      .array(z.object({ user_id: z.string() }))
+      .parse(
+        store.db
+          .prepare(`SELECT user_id FROM project_members WHERE project_slug = ?`)
+          .all(store.slug),
+      )
+      .map((m) => m.user_id);
+    expect(members).not.toContain(store.users.selin.id);
+    expect(tasks.keys).toEqual(["VIB-1"]);
+    expect(JSON.parse(eventRows(store, "VIB-1")[0]!.actor_json)).toMatchObject({ guest: true });
+    expect(projectionFaultCount()).toBe(1);
+    expect(projectionFault()!.sourcePath).toBe(`projects/${store.slug}/tasks/VIB-2/task.md`);
+
+    // The file is readable again: rebuilding project.md, unchanged, runs the
+    // cascade again (the row kept the F28-D3 sentinel), and only then settles.
+    rmSync(brokenTask, { recursive: true });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review" }),
+    });
+    expect(rebuildPath(store.db, projectPath, { dataRoot: store.dataRoot })).toMatchObject({
+      action: "projected",
+      taskFacingChanged: true,
+    });
+    expect(projectionFaultCount()).toBe(0);
+    expect(rebuildPath(store.db, projectPath, { dataRoot: store.dataRoot }).action).toBe(
+      "unchanged",
+    );
   });
 });

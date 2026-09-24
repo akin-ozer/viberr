@@ -66,13 +66,17 @@ export const WRITES_BUDGETS: PerfBudgetTable = {
   // CS-5: a plain comment (no "@") ran the whole mention machinery (both
   // agent resolvers, the member ladder twice, the author's name and tone for a
   // fan-out that reaches no one) and built a task summary no caller read
-  // (29 before, already net of the CS-6 change above).
+  // (29 before, already net of the CS-6 change above). 16 was first recorded
+  // on the wall clock before 09:58 local, while VIB-142's newest demo entry
+  // was still in the future: the comment went above it, the re-projection
+  // flagged timeline.out_of_order and ran one more INSERT. On the pinned
+  // clock (test-support/perf-clock.ts) the comment is newest and costs 15.
   "writes:comment.sql": {
-    ceiling: 16,
+    ceiling: 15,
     unit: "count",
     journey: "compose-send",
     fixture:
-      "setupAppTest + runDemoSeed; commentToAgent on viberr-core/VIB-142 as arda, text with no '@'; SQL statement executions (auth not included)",
+      "setupAppTest + runDemoSeed on the pinned clock; commentToAgent on viberr-core/VIB-142 as arda, text with no '@'; SQL statement executions (auth not included)",
   },
   // CS-5: the same comment's data-root file reads: project.md and the three
   // agent profiles three times over, and task.md parsed once more just to

@@ -137,7 +137,9 @@ transient errors (`EMFILE`, `ENFILE`, `ENOSPC`, `EPERM`, `EACCES`) re-arm the wa
 after 2 s. A rebuild that FAILS is retried on its own (ruling 218): the watcher re-queues
 that path after 2 s, 5 s, 15 s, 45 s and 120 s (`RETRY_BACKOFF_MS`), resets on the first
 success, and after the last step leaves the file in `projectionStore` on health, which
-marks the instance degraded until the file projects again.
+marks the instance degraded until the file projects again. A `project.md` whose cascade
+could not re-project one of its tasks counts as failed (ruling 454): its own row and
+members land, and the fault names the task's file.
 
 ## Diagnostics (a task looks wrong / stuck)
 
@@ -433,12 +435,13 @@ recommendation is open. Nothing is owed by anyone while it waits.
 - Sign-in throttling keys on `email|ip`; behind a proxy set `VIBERR_TRUST_PROXY` or every
   client is `local`.
 - **Every request hangs, in every tab, with no error** (ruling 301): the browser's
-  per-origin connection pool is exhausted. Each visible task page holds two SSE streams
-  and HTTP/1.1 allows about six connections per origin, so a few visible Viberr pages
+  per-origin connection pool is exhausted. Each visible Viberr page holds at most one SSE
+  stream, except the project controller page, which holds two (the layout's and its own);
+  `/insights` has none, and the controller dock opens one there while its panel is open.
+  HTTP/1.1 allows about six connections per origin, so a handful of visible Viberr pages
   (side-by-side windows, say) are enough. Close or hide some; a hidden tab closes its
   streams and catches up when it comes back (the broker replays what it missed). The
-  server is not the problem: the same
-  endpoint answers `curl` at once.
+  server is not the problem: the same endpoint answers `curl` at once.
 
 ## Retention & growth
 

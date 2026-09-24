@@ -1,6 +1,7 @@
 import { RouterContextProvider } from "react-router";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { countSql } from "../../test-support/perf-counters";
+import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
@@ -17,6 +18,7 @@ let ardaId: string;
 const RUN_ID = "run_tailfixture";
 
 beforeAll(async () => {
+  pinPerfClock();
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
@@ -46,7 +48,10 @@ beforeAll(async () => {
     });
   }
 });
-afterAll(() => app.cleanup());
+afterAll(() => {
+  vi.useRealTimers();
+  app.cleanup();
+});
 
 describe("run-log tail cost (ruling 454)", () => {
   it("LIVE-9: a one-line tail reads the run once and scans no line count", async () => {

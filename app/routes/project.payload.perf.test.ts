@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { RouterContextProvider } from "react-router";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { rowsMatching, tallyServerReads } from "../../test-support/perf-counters";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
@@ -24,6 +25,7 @@ let cookie: string;
 const SLUG = "viberr-core";
 
 beforeAll(async () => {
+  pinPerfClock();
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
@@ -31,7 +33,10 @@ beforeAll(async () => {
   ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
   ({ cookie } = await app.cookieFor(ardaId));
 });
-afterAll(() => app.cleanup());
+afterAll(() => {
+  vi.useRealTimers();
+  app.cleanup();
+});
 
 /** One Request's loader arguments: single fetch hands every loader of a
  *  request the same ones. */
