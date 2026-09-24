@@ -62,6 +62,37 @@ describe("checkRepoAccess", () => {
     expect(sized.callsTo(`GET ${REPO_PATH}/commits`)).toHaveLength(0);
   });
 
+  /**
+   * R-repo-2 (ruling 468's dated note): the page and `get_github_state` said
+   * Viberr would make an empty repository's first commit whatever the token
+   * could do. GitHub's permissions block is the proof a token cannot push.
+   */
+  it("R-repo-2: a token GitHub says cannot push is recorded read-only; one that can, or no block, is not", async () => {
+    const store = setupWithCredential();
+    const readOnly = fakeGithubFetch({
+      [`GET ${REPO_PATH}`]: {
+        body: { default_branch: "main", size: 0, permissions: { pull: true, push: false } },
+      },
+      [`GET ${REPO_PATH}/commits`]: { status: 409, body: { message: "Git Repository is empty." } },
+    });
+    // CANARY: drop the permissions read and `readOnly` is never set.
+    expect(await checkRepoAccess(store.db, store.slug, { fetchImpl: readOnly.fetchImpl })).toMatchObject({
+      status: "connected",
+      empty: true,
+      readOnly: true,
+    });
+    const writable = fakeGithubFetch({
+      [`GET ${REPO_PATH}`]: { body: { default_branch: "main", permissions: { push: true } } },
+    });
+    expect(await checkRepoAccess(store.db, store.slug, { fetchImpl: writable.fetchImpl })).not.toHaveProperty(
+      "readOnly",
+    );
+    const unknown = fakeGithubFetch({ [`GET ${REPO_PATH}`]: { body: { default_branch: "main" } } });
+    expect(await checkRepoAccess(store.db, store.slug, { fetchImpl: unknown.fetchImpl })).not.toHaveProperty(
+      "readOnly",
+    );
+  });
+
   it("connected: a 200 repo body maps to the remote default branch and privacy", async () => {
     const store = setupWithCredential();
     const gh = fakeGithubFetch({

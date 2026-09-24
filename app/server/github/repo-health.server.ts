@@ -47,6 +47,8 @@ const storedResultSchema = z.discriminatedUnion("status", [
     private: z.boolean(),
     // Ruling 468: optional, so a row recorded before it still parses.
     empty: z.boolean().optional(),
+    // R-repo-2 (ruling 468's dated note): the same, for a token that can only read.
+    readOnly: z.boolean().optional(),
   }),
   z.object({ status: z.literal("no_repo_configured") }),
   z.object({ status: z.literal("no_pat_configured"), repo: z.string().nullable() }),

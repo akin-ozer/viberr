@@ -145,7 +145,10 @@ characters; last 8 lines, 600 characters.
   (`repositoryIsEmpty`), and record `empty: true` on the connected repo access; creation's
   reply and toast say "<repo> is empty: Viberr will create its first commit on <branch>
   before the first task branch", the GitHub page's Repository panel carries a Contents
-  row, and `get_github_state` a `contents` line. The operator's checkout
+  row, and `get_github_state` a `contents` line. When GitHub's permissions block says the
+  token cannot push, the connected access also records `readOnly: true` and all three say
+  instead that Viberr cannot make that commit until the token can push: the Contents PUT
+  would be refused, so the fix is the token, never a pushed commit. The operator's checkout
   (`ensureOperatorRepoCheckout`) is the other path that needs the base: a checkout whose
   HEAD has no commit runs the same bootstrap (actor `system:delivery`, the timeline naming
   the operator's first checkout) and is moved onto the new commit by ruling 129's

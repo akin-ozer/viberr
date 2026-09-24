@@ -610,6 +610,22 @@ describe("viberr_controller.get_github_state", () => {
       // SAFETY: as above.
       const full = JSON.parse(await callTool(ids.owner, "get_github_state")) as { contents: string | null };
       expect(full.contents).toBeNull();
+      // R-repo-2 (ruling 468's dated note): a token that can only read gets
+      // the first commit refused, so the model is told the token is the fix.
+      primeRepoAccessForTests(app.db, SLUG, {
+        status: "connected",
+        repo: REPO,
+        remoteDefaultBranch: "main",
+        private: false,
+        empty: true,
+        readOnly: true,
+      });
+      // SAFETY: as above.
+      const readOnly = JSON.parse(await callTool(ids.owner, "get_github_state")) as { contents: string | null };
+      // CANARY: drop the read-only arm and the model hears a promise.
+      expect(readOnly.contents).toBe(
+        "empty, and this token can only read it: viberr cannot create the first commit on main until the token is granted write access (the fix is the token, not a pushed commit)",
+      );
     } finally {
       invalidateRepoAccess(app.db, SLUG);
     }

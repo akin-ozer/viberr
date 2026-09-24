@@ -658,6 +658,7 @@ async function createProjectImpl(
           repo,
           remoteDefaultBranch: probe.defaultBranch ?? null,
           private: false,
+          readOnly: true,
         };
         if (probe.empty) repoAccess.empty = true;
         repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
@@ -679,8 +680,12 @@ async function createProjectImpl(
 
   // Ruling 468: an empty repository is stated, not warned about: Viberr makes
   // its first commit (ruling 128's bootstrap) before the first task branch.
+  // Its dated note (R-repo-2): not with a token that can only read, which
+  // GitHub refuses that commit; the fix is the token, and the note says so.
   if (repoAccess?.status === "connected" && repoAccess.empty) {
-    const empty = `${repo} is empty: Viberr will create its first commit on ${defaultBranch} before the first task branch, so nobody needs to push one.`;
+    const empty = repoAccess.readOnly
+      ? `${repo} is empty, and this connection's token can only read it, so Viberr cannot create its first commit on ${defaultBranch} yet. Once the token can push, Viberr makes that commit before the first task branch.`
+      : `${repo} is empty: Viberr will create its first commit on ${defaultBranch} before the first task branch, so nobody needs to push one.`;
     repoNote = repoNote ? `${repoNote} ${empty}` : empty;
   }
 

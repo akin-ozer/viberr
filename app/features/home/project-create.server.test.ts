@@ -1079,4 +1079,33 @@ describe("ruling 468: an empty repository is recognised at creation", () => {
     expect(readRepoHealth(store.db, result.slug)?.result).not.toHaveProperty("empty");
     expect(result.repoNote).toBeNull();
   });
+
+  it("an empty repository behind a token that can only read names the token, not a commit Viberr cannot make (R-repo-2)", async () => {
+    // CANARY: drop the read-only arm from the note and it promises a first
+    // commit GitHub will refuse, beside the warning that says it cannot push.
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": {
+        body: { default_branch: "main", permissions: { pull: true, push: false }, size: 0 },
+      },
+      "GET /repos/akin-ozer/website/commits": { status: 409, body: { message: "Git Repository is empty." } },
+    });
+    const result = await createProject(
+      store.db,
+      { name: "Website", key: "WEB", owner: "akin-ozer", repoName: "website", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const { readRepoHealth } = await import("~/server/github/repo-health.server");
+    expect(readRepoHealth(store.db, result.slug)?.result).toMatchObject({
+      status: "connected",
+      empty: true,
+      readOnly: true,
+    });
+    expect(result.repoWarning).toContain("can read akin-ozer/website but cannot push to it");
+    expect(result.repoNote).toBe(
+      "akin-ozer/website is empty, and this connection's token can only read it, so Viberr cannot create its first commit on main yet. Once the token can push, Viberr makes that commit before the first task branch.",
+    );
+  });
 });
