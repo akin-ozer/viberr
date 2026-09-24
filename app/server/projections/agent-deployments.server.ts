@@ -108,10 +108,11 @@ function engagementStatus(
 
 /** Reviewer thread ids index into the task's supporting engagements
  *  (`reviewers_json`, written from `supportingEngagements(fm)`; ruling 98
- *  retired the `reviewers[]` slot) — "r0", "r1", … for app-started runs, "c0",
- *  "c1", … for legacy/seed rows (both accepted). */
+ *  retired the `reviewers[]` slot) — "r0", "r1", …. Ruling 455(a): only the
+ *  `r` prefix is read. `c` was the consultant prefix until consultants became
+ *  reviewers (5c13978d), and nothing has written it since. */
 function reviewerIndex(threadId: string): number {
-  const match = /^[rc](\d+)/.exec(threadId);
+  const match = /^r(\d+)/.exec(threadId);
   return match ? Number(match[1]) : 0;
 }
 

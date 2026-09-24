@@ -203,7 +203,7 @@ describe("listAgentDeployments", () => {
       ...base,
       id: "run_c",
       taskKey: "VIB-2",
-      threadId: "c0",
+      threadId: "r0",
       kind: "reviewer",
       agentProfileId: "reviewer",
       backend: "codex",
@@ -313,6 +313,43 @@ describe("F34-5: an engagement's status is read from its own run row", () => {
     expect(reviewer.running).toBe(true);
     // The idle deliverer beside it reads the task's state, not the reviewer's.
     expect(rows.find((d) => d.engagement === "primary")!.status).toBe("waiting on human");
+  });
+
+  it("a supporting run's r<n> thread id picks the n-th supporting engagement (ruling 455(a))", () => {
+    // Canary: read index 0 for every reviewer thread and the live run lands on
+    // the first supporting engagement instead of the second.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-23", {
+        stage: "review",
+        waiting: "human",
+        operator: { assignedAtStageId: "ready" },
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "Developer", delivers: true, verdictCapable: false },
+          { profileId: "reviewer", backend: "codex", role: "Reviewer", delivers: false, verdictCapable: true },
+          { profileId: "critic", backend: "claude", role: "Critic", delivers: false, verdictCapable: false },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    upsertRun(store.db, {
+      ...base,
+      id: "run_r1",
+      projectSlug: store.slug,
+      taskKey: "VIB-23",
+      threadId: "r1-abcd1234",
+      kind: "reviewer",
+      agentProfileId: "critic",
+      backend: "claude",
+      state: "running",
+    });
+    const supporting = listAgentDeployments(store.db, store.slug, { dataRoot: store.dataRoot })
+      .filter((d) => d.taskKey === "VIB-23" && d.engagement === "reviewer")
+      .map((d) => [d.profileId, d.status]);
+    expect(supporting).toEqual([
+      ["reviewer", "waiting on human"],
+      ["critic", "working"],
+    ]);
   });
 
   it("a queued run reads 'queued' with running: false", () => {
