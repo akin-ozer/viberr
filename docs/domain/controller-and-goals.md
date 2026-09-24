@@ -123,6 +123,13 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   returns focus to the trigger **while focus is inside the panel**; an Escape elsewhere
   (the palette, a confirm dialog, a stage menu) leaves the dock alone, and an outside press
   never closes it. An empty thread offers the scope's three examples, which send on click.
+- **Phone sheet** (≤ 720 px, rulings 121(e) and 454): the panel is a bottom sheet a finger
+  pulls down to dismiss. The grabber and the header are its handles, and their buttons keep
+  their taps. After a 10px slop it follows 1:1, and it rubber-bands above its resting place.
+  Momentum projection decides between dismissing and coming back, and the settle is a spring
+  that keeps the finger's speed (`useSheetDrag`, `ui/use-sheet-drag.ts`). A sheet grabbed
+  while it moves is caught where it is. The perched trigger rides the pull, and Close stays
+  the named way out.
 - **Availability is the VIEWER's** (ruling 127): the dock's `available` is
   `isBackendAvailableFor(db, viewer, "claude")`, in the normal view and in the
   `unavailable` refusal view alike, so a person with no Claude connected reads the

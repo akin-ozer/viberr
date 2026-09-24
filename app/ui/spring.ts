@@ -1,6 +1,6 @@
 /**
- * Gesture physics for the one surface a person throws things across: the
- * board's drag and drop.
+ * Gesture physics for the surfaces a person throws things across: the board's
+ * drag and drop, and the controller dock's bottom sheet.
  *
  * A spring in Apple's two designer parameters ("Designing Fluid Interfaces",
  * WWDC 2018): `dampingRatio` — 1 is critically damped and settles without
@@ -109,6 +109,38 @@ export function springProgress(spring: Spring, count: number): number[] {
     out.push(i === count - 1 ? 1 : 1 - springAt(spring, 1, 0, i / FPS));
   }
   return out;
+}
+
+/**
+ * Where a throw comes to rest: Apple's momentum projection, the exponential
+ * decay a scroll view decelerates by ("Designing Fluid Interfaces" sample
+ * code; `decelerationRate` 0.998 is UIScrollView's normal rate). Not the
+ * textbook v²/2a: this is the curve people already know from scrolling. A
+ * release decides where it is going by adding this to where it is.
+ */
+export function project(velocity: number, decelerationRate = 0.998): number {
+  return ((velocity / 1000) * decelerationRate) / (1 - decelerationRate);
+}
+
+/**
+ * Rubber-banding past a bound: how far an element follows a pointer that is
+ * `overshoot` px past the edge, with `dimension` the size of the thing being
+ * pulled. The further past, the less it follows, so an edge reads as "there is
+ * nothing more here" instead of as frozen. Signed like `overshoot`, and never
+ * as far as it.
+ */
+export function rubberband(overshoot: number, dimension: number, constant = 0.55): number {
+  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
+}
+
+/**
+ * The inverse of `rubberband`: the pull past the edge that draws an element
+ * `visible` px past it. A drag that catches a rubber-banded element works
+ * from here, so the element stays where it was caught. `visible` is always
+ * short of `dimension` (the band never gets there), so this is defined.
+ */
+export function unrubberband(visible: number, dimension: number, constant = 0.55): number {
+  return (visible * dimension) / (constant * (dimension - Math.abs(visible)));
 }
 
 /** How far back a release looks for the pointer's velocity, and how long a pause kills it. */

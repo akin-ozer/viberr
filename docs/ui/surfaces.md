@@ -113,7 +113,8 @@ Intents behind `project.task.tsx` are explained in
   pages, and `/profile` and `/notifications` (both render their whole page inside a
   `showModal()` overlay, which would leave the dock inert behind it). It is a floating
   bottom-right button named `Controller · <scope>` opening a non-modal panel bound to
-  the current instance, board or task (a bottom sheet at ≤ 720 px). Its composer is
+  the current instance, board or task (a bottom sheet at ≤ 720 px, which a finger pulls down
+  to dismiss, ruling 454). Its composer is
   disabled, with the same sentence the full page uses, when the VIEWER has not connected
   Claude (ruling 127). The button carries a pulsing dot while a turn works and a still
   blue dot when a reply its owner has not seen waits in any scope
