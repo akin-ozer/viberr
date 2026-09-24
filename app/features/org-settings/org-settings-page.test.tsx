@@ -84,14 +84,25 @@ function renderPanel(ui: ReactNode) {
 const CONNECTIONS: ConnectionRecord[] = [
   {
     id: "akin-ozer", owner: "akin-ozer", method: "PAT", patId: "pat_1",
-    masked: "····0000", def: true, repos: null, expiresAt: null, daysLeft: null,
-    validationState: "unvalidated", scopes: [], lastValidatedAt: null,
+    masked: "····0000", def: true, expiresAt: null, daysLeft: null,
+    validationState: "unvalidated", tokenKind: null, validationDetail: null,
+    missingScopes: [], reach: null, scopes: [], lastValidatedAt: null,
     createdAt: "2026-07-01T09:00:00.000Z", boundProjects: 0, advisories: [],
   },
   {
     id: "hepapi", owner: "hepapi", method: "PAT", patId: "pat_2",
-    masked: "····42af", def: false, repos: 12, expiresAt: "2026-07-20T00:00:00.000Z",
-    daysLeft: 15, validationState: "valid",
+    masked: "····42af", def: false, expiresAt: "2026-07-20T00:00:00.000Z",
+    daysLeft: 15, validationState: "valid", tokenKind: "fine_grained",
+    validationDetail: null, missingScopes: [],
+    reach: {
+      status: "read", readAt: "2026-07-01T09:00:00.000Z", capped: false,
+      total: 3, privateCount: 1,
+      repos: [
+        { fullName: "hepapi/api", private: false, canPush: true },
+        { fullName: "hepapi/docs", private: false, canPush: false },
+        { fullName: "hepapi/website", private: true, canPush: true },
+      ],
+    },
     scopes: [
       { id: "repo", ok: true, source: "header" },
       { id: "workflow", ok: true, source: "header" },
@@ -159,6 +170,61 @@ describe("ConnectionsPanel", () => {
     await waitFor(() =>
       expect(lastForm).toMatchObject({
         intent: "connection-remove",
+        connectionId: "hepapi",
+      }),
+    );
+  });
+
+  /**
+   * Ruling 463 (F40-6): the row says what the TOKEN reaches. It read "3
+   * public repos", the account's public count, while the fine-grained token
+   * behind it had been granted a private repository that count cannot show.
+   */
+  it("ruling 463: a row says which repositories the token reaches, private ones marked, one disclosure away", () => {
+    // CANARY: drop <ReachLine> from the row, or render the list outside the
+    // <details>, and the matching assertion fails.
+    const { container } = renderPanel(<ConnectionsPanel connections={CONNECTIONS} />);
+    expect(container.textContent).not.toMatch(/public repo/);
+    const reach = container.querySelector("details.conn-reach[data-reach='read']");
+    expect(reach).toBeTruthy();
+    expect(reach!.querySelector("summary")!.textContent).toBe(
+      "Reaches 3 repositories · 1 private",
+    );
+    const items = [...reach!.querySelectorAll(".conn-reach-list li")].map(
+      (li) => li.textContent,
+    );
+    expect(items).toEqual(["hepapi/api", "hepapi/docsread only", "hepapi/websiteprivate"]);
+    // The unvalidated row has no reach yet and says how it gets one.
+    expect(container.querySelector("[data-reach='unread']")!.textContent).toContain(
+      "has not been read yet. Re-check reads it.",
+    );
+  });
+
+  it("ruling 463: a reach GitHub would not give says why instead of a count", () => {
+    const unknown: ConnectionRecord[] = [
+      {
+        ...CONNECTIONS[1]!,
+        reach: {
+          status: "unknown",
+          readAt: "2026-07-01T09:00:00.000Z",
+          reason: "GitHub answered 403 on /user/repos (Forbidden)",
+        },
+      },
+    ];
+    const { container } = renderPanel(<ConnectionsPanel connections={unknown} />);
+    expect(container.querySelector("details.conn-reach")).toBeNull();
+    expect(container.querySelector("[data-reach='unknown']")!.textContent).toBe(
+      "Which repositories this token reaches could not be read: GitHub answered 403 on /user/repos (Forbidden)",
+    );
+  });
+
+  it("ruling 463: Re-check posts connection-recheck for its own row", async () => {
+    // CANARY: post another intent, or the default connection's id.
+    const { getAllByText } = renderPanel(<ConnectionsPanel connections={CONNECTIONS} />);
+    fireEvent.click(getAllByText("Re-check")[1]!);
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "connection-recheck",
         connectionId: "hepapi",
       }),
     );

@@ -1,14 +1,21 @@
 import { useState } from "react";
 import type { ConnectionRecord } from "~/server/org/connections.server";
+import {
+  REACH_CAP,
+  reachSummary,
+  type ConnectionReach,
+} from "~/shared/connection-reach";
 import { slugify } from "~/shared/ids/slugify";
 import { utcDayKey } from "~/shared/dates/format";
 import { countLabel } from "~/shared/text/plural";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalCalendarDate } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { ConfirmDelete } from "./confirm-delete";
 import { MiniModal } from "./mini-modal";
+import { useBusyRow } from "./resource-helpers";
 import { useOrgAction, type OrgActionData } from "./use-org-action";
 
 /**
@@ -204,6 +211,65 @@ function ConnectionModal({
   );
 }
 
+/**
+ * Ruling 463 (F40-6): what the TOKEN reaches, from `GET /user/repos`. The row
+ * used to say "3 public repos", the account's public count, which says
+ * nothing about a fine-grained token granted a private repository. The list
+ * is one disclosure away; a read that failed says why, and a connection saved
+ * before the read existed says Re-check reads it.
+ */
+function ReachLine({ reach }: { reach: ConnectionReach | null }) {
+  if (!reach) {
+    return (
+      <span className="sub" data-reach="unread">
+        Which repositories this token reaches has not been read yet. Re-check
+        reads it.
+      </span>
+    );
+  }
+  if (reach.status === "unknown") {
+    return (
+      <span className="sub" data-reach="unknown">
+        Which repositories this token reaches could not be read: {reach.reason}
+      </span>
+    );
+  }
+  if (reach.total === 0) {
+    return (
+      <span className="sub" data-reach="read">
+        GitHub lists no repository this token reaches.
+      </span>
+    );
+  }
+  return (
+    <details className="conn-reach" data-reach="read">
+      <summary>
+        <span>Reaches {reachSummary(reach)}</span>
+        <Icon name="chevron" className="disc-chev" />
+      </summary>
+      <ul className="conn-reach-list">
+        {reach.repos.map((r) => (
+          <li key={r.fullName}>
+            <span className="mono">{r.fullName}</span>
+            {r.private && (
+              <Pill sm quiet>
+                private
+              </Pill>
+            )}
+            {r.canPush === false && <span className="conn-reach-ro">read only</span>}
+          </li>
+        ))}
+      </ul>
+      {reach.capped && (
+        <p className="conn-reach-note">
+          The read stops at {REACH_CAP} repositories, so this token may reach
+          more.
+        </p>
+      )}
+    </details>
+  );
+}
+
 export function ConnectionsPanel({
   connections,
 }: {
@@ -215,6 +281,10 @@ export function ConnectionsPanel({
   const [confirm, setConfirm] = useState<ConnectionRecord | null>(null);
   const push = useToast();
   const rowAction = useOrgAction();
+  // Ruling 463: Re-check validates the stored token again and re-reads what
+  // it reaches; its own fetcher so the row that asked shows it in flight.
+  const recheckAction = useOrgAction();
+  const [rechecking, setRechecking] = useBusyRow(recheckAction);
 
   const setDefault = (id: string) =>
     rowAction.submit({ intent: "connection-default", connectionId: id });
@@ -273,15 +343,7 @@ export function ConnectionsPanel({
                   <span className="mono pre">/</span>
                 </b>
                 <span className="sub mono">
-                  PAT {c.masked}
-                  {/* A-3 (pass 24): `c.repos` is the account's GitHub public-repo
-                      count (`/user` → public_repos), not a count of repos bound in
-                      Viberr — say so, and pluralize (the old `${c.repos} repos`
-                      rendered "1 repos"). */}
-                  {c.repos !== null
-                    ? ` · ${countLabel(c.repos, "public repo")}`
-                    : ""}{" "}
-                  ·{" "}
+                  PAT {c.masked} ·{" "}
                   {expiresAt ? (
                     <>
                       expires <LocalCalendarDate iso={expiresAt} />
@@ -290,6 +352,7 @@ export function ConnectionsPanel({
                     "no expiry date"
                   )}
                 </span>
+                <ReachLine reach={c.reach} />
                 <span className="scope-chips">
                   {/* P13-UI-01 + owner ruling 2026-07-25: chips are PROVEN
                       verdicts only — a scope header (classic) or a real probe
@@ -360,6 +423,19 @@ export function ConnectionsPanel({
               )}
               <button type="button" className="btn ghost sm" onClick={() => setModal({ item: c })}>
                 Update token
+              </button>
+              <button
+                type="button"
+                className="btn ghost sm"
+                disabled={rechecking === c.id}
+                aria-busy={rechecking === c.id || undefined}
+                onClick={() => {
+                  setRechecking(c.id);
+                  recheckAction.submit({ intent: "connection-recheck", connectionId: c.id });
+                }}
+              >
+                <GlyphSwap rest="refresh" alt="loader" on={rechecking === c.id} spinAlt />
+                {rechecking === c.id ? "Checking…" : "Re-check"}
               </button>
               {!c.def && (
                 <button type="button" className="btn ghost sm" onClick={() => setDefault(c.id)}>

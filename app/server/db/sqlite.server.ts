@@ -472,6 +472,16 @@ const BASELINE_COLUMNS: readonly {
     table: "controller_messages",
     columns: [{ name: "surface", ddl: "surface TEXT" }],
   },
+  // Ruling 463: which repositories a connection's token reaches. Every
+  // connection reader names it (the Instance settings card, the New project
+  // modal's connection list, the controller's `list_github_connections`), so a
+  // root that predates it would fail all three. No backfill: NULL says "not
+  // read yet", which is exactly true of every connection saved before the
+  // read existed, and the card offers Re-check to read it.
+  {
+    table: "github_connections",
+    columns: [{ name: "reach_json", ddl: "reach_json TEXT" }],
+  },
   // Ruling 178: the project's resolved required-reviewer rules. The rebuilder
   // names the column on every project write and every task walk reads it, so
   // a root that predates it would stop projecting entirely; its DEFAULT is the

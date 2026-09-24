@@ -384,8 +384,10 @@ CREATE TABLE github_connections (
   owner TEXT NOT NULL UNIQUE,
   pat_id TEXT NOT NULL REFERENCES github_pats (id) ON DELETE CASCADE,
   is_default INTEGER NOT NULL DEFAULT 0,
-  repos_count INTEGER,                -- from GitHub at validation time
   expires_at TEXT,                    -- token expiry (ISO) when advertised
+  -- Ruling 463: which repositories the token reaches (GET /user/repos), as
+  -- the JSON `readTokenReach` stores; NULL until a validation has read it.
+  reach_json TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

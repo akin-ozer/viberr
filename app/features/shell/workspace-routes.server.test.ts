@@ -661,8 +661,8 @@ describe("create-project action (home)", () => {
     const now = new Date().toISOString();
     app.db
       .prepare(
-        `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
-         VALUES (?, ?, ?, 1, 1, ?, ?)`,
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 1, ?, ?)`,
       )
       .run("akin-ozer", "akin-ozer", pat.id, now, now);
   });

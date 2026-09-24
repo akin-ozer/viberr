@@ -318,7 +318,7 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   to 2 and 7-10 s to 4 s, $0.03-0.04 to $0.02 warm, for a turn-1 prompt of 12.9k tokens
   instead of 5.3k (cached after the first run; a cold first run pays the cache write
   once); a reviewer went from 4 turns to 3 at the same cost. The controller's
-  `viberr_controller` (51 tools, 52 when the conversation has a knowledge base and so
+  `viberr_controller` (52 tools, 53 when the conversation has a knowledge base and so
   `read_knowledge_doc`) and `viberr_ops` stay deferred: loading them (at 41 tools)
   saved a turn but tripled turn 1 (6.0k to 18.0k tokens) and quadrupled a cold turn's cost
   ($0.05 to $0.21). The controller's prompt carries a tool manifest instead (ruling 297),

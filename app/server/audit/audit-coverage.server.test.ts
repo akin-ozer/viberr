@@ -804,8 +804,8 @@ describe("governed actions record audit rows (table-driven)", () => {
           const now = new Date().toISOString();
           store.db
             .prepare(
-              `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
-               VALUES (?, ?, ?, 0, 0, ?, ?)`,
+              `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+               VALUES (?, ?, ?, 0, ?, ?)`,
             )
             .run("audit-org", "audit-org", pat.id, now, now);
           let created = false;
@@ -832,6 +832,33 @@ describe("governed actions record audit rows (table-driven)", () => {
             actorArda(),
             { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
           );
+        },
+      },
+      {
+        // Ruling 463: Re-check on a GitHub connection's card re-validates the
+        // stored token and re-reads what it reaches. Instance-wide.
+        name: "recheckConnection",
+        action: "org.connection.rechecked",
+        instanceWide: true,
+        run: async () => {
+          const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+          const { createConnection, recheckConnection } = await import(
+            "~/server/org/connections.server"
+          );
+          const gh = fakeGithubFetch({
+            "GET /user": { body: { login: "audit-reach" }, headers: { "x-oauth-scopes": "repo" } },
+            "GET /users/audit-reach": { body: {} },
+            "GET /user/repos": { body: [] },
+          });
+          await createConnection(
+            store.db,
+            { owner: "audit-reach", token: "ghp_auditreach00000000000000000463", userId: store.users.arda.id },
+            actorArda(),
+            { fetchImpl: gh.fetchImpl },
+          );
+          await recheckConnection(store.db, "audit-reach", actorArda(), {
+            fetchImpl: gh.fetchImpl,
+          });
         },
       },
       {
@@ -900,6 +927,8 @@ describe("governed actions record audit rows (table-driven)", () => {
         "project.agent_profile.resources_synced",
         // Ruling 462: the repository a new project is created with.
         "project.repository.created",
+        // Ruling 463: a GitHub connection belongs to the instance.
+        "org.connection.rechecked",
       ].includes(row.action);
       if (!taskless) {
         expect(

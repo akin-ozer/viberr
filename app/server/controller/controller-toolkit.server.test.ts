@@ -1134,8 +1134,8 @@ describe("instance scope: org-role gate on every management tool", () => {
     const now = new Date().toISOString();
     app.db
       .prepare(
-        `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
-         VALUES (?, ?, ?, 0, 0, ?, ?)`,
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 0, ?, ?)`,
       )
       .run("site-owner", "site-owner", pat.id, now, now);
     let created = false;
@@ -1185,6 +1185,97 @@ describe("instance scope: org-role gate on every management tool", () => {
     expect(row.actorUserId).toBe(ids.projectAdmin);
     expect(row.actorLabel).toBe(`${user.email} · via controller`);
     expect(row.details).toEqual({ repo: "site-owner/website", private: true });
+  });
+});
+
+/**
+ * Ruling 463 (F40-6): `create_project` refuses without a GitHub connection for
+ * the repo owner, and none of the controller's tools listed connections. Live,
+ * it wrote "Creating it also needs a GitHub connection for `akin-ozer` in
+ * Instance settings, and I can't see whether that exists from here."
+ */
+describe("ruling 463: list_github_connections", () => {
+  const TOKEN = "github_pat_ctl_reach_0000000000000000000000k3ui";
+
+  it("names every connection's owner and what its token reaches, to a non-admin, with no token material", async () => {
+    // CANARY: drop the `add(` registration and the call answers "no such
+    // tool"; spread the whole record into the reply and the masked suffix and
+    // the PAT id appear; drop `reach` and the reach assertions fail.
+    const { createConnection } = await import("~/server/org/connections.server");
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { getPatValidationRateLimiter } = await import("~/server/auth/rate-limit.server");
+    getPatValidationRateLimiter().reset(ids.orgAdmin);
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "reach-owner" } },
+      "GET /users/reach-owner": { body: {} },
+      "GET /user/repos": {
+        body: [
+          { full_name: "reach-owner/website", private: true, permissions: { push: true } },
+          { full_name: "reach-owner/blog", private: false, permissions: { push: false } },
+        ],
+      },
+    });
+    const saved = await createConnection(
+      app.db,
+      { owner: "reach-owner", token: TOKEN, userId: ids.orgAdmin },
+      { userId: ids.orgAdmin, label: "arda" },
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(saved.status).toBe("saved");
+
+    // deniz: an org MEMBER with no project at all, the same person the New
+    // project dialog shows these connections to.
+    const reply = await call(ids.nonMember, "list_github_connections", {}, null);
+    expect(reply).not.toContain("[denied]");
+    expect(reply).not.toContain(TOKEN);
+    expect(reply).not.toContain("k3ui");
+    expect(reply).not.toContain("pat_");
+    const listed = z
+      .object({
+        connections: z.array(
+          z.object({
+            owner: z.string(),
+            default: z.boolean(),
+            tokenKind: z.string(),
+            validation: z.string(),
+            reach: z.object({ status: z.string() }).loose(),
+          }).loose(),
+        ),
+      })
+      .parse(JSON.parse(reply));
+    const mine = listed.connections.find((c) => c.owner === "reach-owner")!;
+    expect(mine).toMatchObject({
+      tokenKind: "fine_grained",
+      validation: "valid",
+      missingScopes: [],
+      reach: {
+        status: "read",
+        summary: "2 repositories · 1 private",
+        total: 2,
+        private: 1,
+        capped: false,
+        repos: [
+          { fullName: "reach-owner/website", private: true, canPush: true },
+          { fullName: "reach-owner/blog", private: false, canPush: false },
+        ],
+      },
+    });
+    // A connection saved before the read existed says how it gets one.
+    const unread = listed.connections.find((c) => c.owner !== "reach-owner");
+    if (unread) expect(unread.reach.status).toBe("not_read");
+  });
+
+  it("create_project's description sends the controller to list_github_connections first", async () => {
+    // CANARY: drop the sentence from the description.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.nonMember, email: "deniz@viberr.dev", name: "Deniz" },
+      projectSlug: null,
+    });
+    const create = toolkit.tools.find((t) => t.name === "create_project")!;
+    expect(create.description).toContain("call list_github_connections FIRST");
   });
 });
 

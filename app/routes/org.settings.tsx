@@ -16,6 +16,7 @@ import { disableUser, enableUser } from "~/server/auth/user-admin.server";
 import { getDb } from "~/server/db/sqlite.server";
 import {
   createConnection,
+  recheckConnection,
   removeConnection,
   replaceConnectionToken,
   setDefaultConnection,
@@ -280,6 +281,13 @@ export async function action({ request }: Route.ActionArgs) {
         if (result.status !== "saved") {
           return fail(result.message, result.status === "not_found" ? 404 : 400);
         }
+        return ok(result.toast);
+      }
+      case "connection-recheck": {
+        // Ruling 463: validate the stored token again and re-read its reach.
+        const result = await recheckConnection(db, field("connectionId"), actor);
+        if (result.status === "not_found") return fail(result.message, 404);
+        if (result.status === "refused") return fail(result.message);
         return ok(result.toast);
       }
       case "connection-default": {

@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
+import {
+  fakeGithubFetch,
+  unreachableFetch,
+  type FakeResponder,
+} from "../../../test-support/fake-github";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   getPatValidationRateLimiter,
@@ -15,6 +20,7 @@ import {
   getDefaultConnectionToken,
   getDefaultConnectionTokenFresh,
   listConnections,
+  recheckConnection,
   removeConnection,
   replaceConnectionToken,
   setDefaultConnection,
@@ -59,6 +65,13 @@ function validTransport(owner = "akin-ozer") {
       },
     },
     [`GET /users/${owner}`]: { body: { public_repos: 7 } },
+    // Ruling 463: what the token reaches, one of them private.
+    "GET /user/repos": {
+      body: [
+        { full_name: `${owner}/site`, private: false, permissions: { push: true } },
+        { full_name: `${owner}/website`, private: true, permissions: { push: true } },
+      ],
+    },
   });
 }
 
@@ -104,7 +117,7 @@ describe("createConnection", () => {
     expect(listConnections(db)).toHaveLength(0);
   });
 
-  it("persists on success: masked suffix, repos, expiry, first = default", async () => {
+  it("persists on success: masked suffix, reach, expiry, first = default", async () => {
     const db = makeDbWithUser();
     const gh = validTransport();
     const result = await createConnection(
@@ -121,9 +134,12 @@ describe("createConnection", () => {
       method: "PAT",
       masked: "····42af",
       def: true,
-      repos: 7,
       validationState: "valid",
+      tokenKind: "classic",
+      reach: { status: "read", total: 2, privateCount: 1, capped: false },
     });
+    // Ruling 463: the account's public count is no longer a field anyone reads.
+    expect(conn).not.toHaveProperty("repos");
     expect(conn!.expiresAt).toBeTruthy();
     if (result.status === "saved") {
       expect(result.toast).toContain("akin-ozer connected — scopes verified");
@@ -463,5 +479,296 @@ describe("stale connection revalidation", () => {
       now: () => Date.now() + 2 * DAY,
     });
     expect(after!.validationState).toBe("valid");
+  });
+});
+
+/**
+ * Ruling 463 (pass 40, F40-6): a connection records which repositories its
+ * TOKEN reaches. The card read "PAT ····k3ui · 3 public repos", the ACCOUNT's
+ * public count, while the fine-grained token behind it was granted a private
+ * repository that count could never show; and the controller could not tell
+ * whether a token reached the repository it was asked to build on.
+ */
+describe("ruling 463: what the token reaches", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const TOKEN = "github_pat_reach_test_token_0000000000";
+
+  /** A fine-grained token (no scope header) and a scripted `/user/repos`. */
+  function reachTransport(repos: FakeResponder) {
+    return fakeGithubFetch({
+      "GET /user": { body: { login: "akin-ozer" } },
+      "GET /users/akin-ozer": { body: {} },
+      "GET /user/repos": repos,
+    });
+  }
+
+  /** `n` repositories named r-<offset+i>. */
+  function page(n: number, offset = 0) {
+    return Array.from({ length: n }, (_, i) => ({
+      full_name: `akin-ozer/r-${offset + i}`,
+      private: false,
+      permissions: { push: true },
+    }));
+  }
+
+  // CANARY: skip the reach read in `validateConnectionToken` (store NULL) and
+  // `reach` reads null; drop `private` or `permissions.push` from the mapping
+  // and the rows below differ.
+  it("a save reads GET /user/repos for the token and records each repository with private and push", async () => {
+    const db = makeDbWithUser();
+    const gh = reachTransport({
+      body: [
+        { full_name: "akin-ozer/website", private: true, permissions: { admin: false, push: true, pull: true } },
+        { full_name: "akin-ozer/docs", private: false, permissions: { push: false, pull: true } },
+        { full_name: "someone/shared", private: false },
+      ],
+    });
+    const saved = await createConnection(
+      db,
+      { owner: "akin-ozer", token: TOKEN, userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(saved.status).toBe("saved");
+    if (saved.status === "saved") {
+      expect(saved.toast).toContain("It reaches 3 repositories · 1 private");
+    }
+    const calls = gh.callsTo("GET /user/repos");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.searchParams.get("per_page")).toBe("100");
+    expect(calls[0]!.url.searchParams.get("affiliation")).toBe(
+      "owner,collaborator,organization_member",
+    );
+    const [conn] = listConnections(db);
+    expect(conn!.tokenKind).toBe("fine_grained");
+    expect(conn!.reach).toMatchObject({
+      status: "read",
+      total: 3,
+      privateCount: 1,
+      capped: false,
+      repos: [
+        { fullName: "akin-ozer/website", private: true, canPush: true },
+        { fullName: "akin-ozer/docs", private: false, canPush: false },
+        // No permission block is "unknown", never "cannot push".
+        { fullName: "someone/shared", private: false, canPush: null },
+      ],
+    });
+    expect(JSON.stringify(conn)).not.toContain(TOKEN);
+  });
+
+  // CANARY: store `{status: "read", repos: []}` on a failed read and the
+  // reach reads as zero repositories instead of unknown.
+  it("a failed read is recorded as unknown with GitHub's reason, never as zero, and never refuses the save", async () => {
+    const db = makeDbWithUser();
+    const gh = reachTransport({
+      status: 403,
+      body: { message: "Resource not accessible by personal access token" },
+    });
+    const saved = await createConnection(
+      db,
+      { owner: "akin-ozer", token: TOKEN, userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(saved.status).toBe("saved");
+    const [conn] = listConnections(db);
+    expect(conn!.reach).toEqual({
+      status: "unknown",
+      readAt: expect.any(String),
+      reason:
+        "GitHub answered 403 on /user/repos (Resource not accessible by personal access token)",
+    });
+
+    // The validation answers; the reach read then finds GitHub gone.
+    const down = makeDbWithUser();
+    getPatValidationRateLimiter().reset(ACTOR.userId);
+    const upstream = reachTransport({ body: [] });
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/user/repos")) throw new TypeError("fetch failed");
+      return upstream.fetchImpl(input, init);
+    };
+    await createConnection(
+      down,
+      { owner: "akin-ozer", token: TOKEN, userId: "u_admin" },
+      ACTOR,
+      { fetchImpl },
+    );
+    expect(listConnections(down)[0]!.reach).toMatchObject({
+      status: "unknown",
+      reason: "GitHub was unreachable (fetch failed)",
+    });
+  });
+
+  // CANARY: stop after the first page and the second is never asked for;
+  // drop the page limit and a fourth page is requested.
+  it("pages 100 at a time and stops at 300 with the cap stated", async () => {
+    const db = makeDbWithUser();
+    const gh = reachTransport((call) => {
+      const n = Number(call.url.searchParams.get("page"));
+      return { body: page(100, (n - 1) * 100) };
+    });
+    await createConnection(
+      db,
+      { owner: "akin-ozer", token: TOKEN, userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(gh.callsTo("GET /user/repos").map((c) => c.url.searchParams.get("page"))).toEqual([
+      "1",
+      "2",
+      "3",
+    ]);
+    expect(listConnections(db)[0]!.reach).toMatchObject({
+      status: "read",
+      total: 300,
+      capped: true,
+    });
+
+    const short = makeDbWithUser();
+    getPatValidationRateLimiter().reset(ACTOR.userId);
+    const two = reachTransport((call) =>
+      call.url.searchParams.get("page") === "1" ? { body: page(100) } : { body: page(7, 100) },
+    );
+    await createConnection(
+      short,
+      { owner: "akin-ozer", token: TOKEN, userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: two.fetchImpl },
+    );
+    expect(two.callsTo("GET /user/repos")).toHaveLength(2);
+    expect(listConnections(short)[0]!.reach).toMatchObject({
+      status: "read",
+      total: 107,
+      capped: false,
+    });
+  });
+
+  // CANARY: leave `reach_json` out of the replace UPDATE and the old reach
+  // survives the new token.
+  it("a replaced token's reach replaces the old one", async () => {
+    const db = makeDbWithUser();
+    await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    const narrower = reachTransport({
+      body: [{ full_name: "akin-ozer/website", private: true, permissions: { push: true } }],
+    });
+    await replaceConnectionToken(
+      db,
+      { connectionId: "akin-ozer", token: TOKEN },
+      ACTOR,
+      { fetchImpl: narrower.fetchImpl },
+    );
+    expect(listConnections(db)[0]!.reach).toMatchObject({
+      status: "read",
+      total: 1,
+      privateCount: 1,
+    });
+  });
+
+  // CANARY: drop the reach from `ensureConnectionFresh`'s UPDATE and the
+  // stale re-proof keeps the old list; read the reach of a refused token and
+  // the second arm asks /user/repos.
+  it("the 24-hour re-proof re-reads the reach; a token GitHub refuses has an unknown reach and no read is spent", async () => {
+    const db = makeDbWithUser();
+    await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    const grown = fakeGithubFetch({
+      "GET /user": { body: { login: "akin-ozer" }, headers: { "x-oauth-scopes": "repo" } },
+      "GET /user/repos": { body: page(5) },
+    });
+    await ensureConnectionFresh(db, "akin-ozer", {
+      fetchImpl: grown.fetchImpl,
+      now: () => Date.now() + 2 * DAY,
+    });
+    expect(listConnections(db)[0]!.reach).toMatchObject({ status: "read", total: 5 });
+
+    const revoked = fakeGithubFetch({
+      "GET /user": { status: 401, body: { message: "Bad credentials" } },
+      "GET /user/repos": { body: page(5) },
+    });
+    await ensureConnectionFresh(db, "akin-ozer", {
+      fetchImpl: revoked.fetchImpl,
+      now: () => Date.now() + 4 * DAY,
+    });
+    const after = listConnections(db)[0]!;
+    expect(after.validationState).toBe("failed");
+    expect(after.reach).toMatchObject({
+      status: "unknown",
+      reason: "The token failed validation (revoked), so which repositories it reaches was not read.",
+    });
+    expect(revoked.callsTo("GET /user/repos")).toHaveLength(0);
+  });
+
+  // CANARY: make `recheckConnection` return before its UPDATE and the reach
+  // stays unread; drop its audit and the row is missing.
+  it("Re-check reads the reach of a connection saved before the read existed, and audits it", async () => {
+    const db = makeDbWithUser();
+    await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    // A root that predates ruling 463: the column is NULL.
+    db.prepare(`UPDATE github_connections SET reach_json = NULL`).run();
+    expect(listConnections(db)[0]!.reach).toBeNull();
+
+    const result = await recheckConnection(db, "akin-ozer", ACTOR, {
+      fetchImpl: validTransport().fetchImpl,
+    });
+    expect(result.status).toBe("rechecked");
+    if (result.status === "rechecked") {
+      expect(result.toast).toBe(
+        "akin-ozer re-checked: scopes verified. It reaches 2 repositories · 1 private",
+      );
+    }
+    expect(listConnections(db)[0]!.reach).toMatchObject({ status: "read", total: 2 });
+    const rows = listAuditEvents(db, { action: "org.connection.rechecked" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details).toEqual({
+      owner: "akin-ozer",
+      status: "valid",
+      reach: "2 repositories · 1 private",
+    });
+  });
+
+  it("Re-check: an unreachable GitHub changes nothing, a refused token is refused out loud, a missing connection says so", async () => {
+    const db = makeDbWithUser();
+    await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    const down = await recheckConnection(db, "akin-ozer", ACTOR, {
+      fetchImpl: unreachableFetch(),
+    });
+    expect(down.status).toBe("refused");
+    if (down.status === "refused") expect(down.message).toContain("Nothing changed.");
+    expect(listConnections(db)[0]!.reach).toMatchObject({ status: "read", total: 2 });
+
+    const revoked = await recheckConnection(db, "akin-ozer", ACTOR, {
+      fetchImpl: fakeGithubFetch({
+        "GET /user": { status: 401, body: { message: "Bad credentials" } },
+      }).fetchImpl,
+    });
+    expect(revoked.status).toBe("refused");
+    if (revoked.status === "refused") {
+      expect(revoked.message).toContain("Re-checked akin-ozer: GitHub rejected the token");
+    }
+    const after = listConnections(db)[0]!;
+    expect(after.validationState).toBe("failed");
+    expect(after.reach?.status).toBe("unknown");
+
+    expect((await recheckConnection(db, "nobody", ACTOR)).status).toBe("not_found");
   });
 });

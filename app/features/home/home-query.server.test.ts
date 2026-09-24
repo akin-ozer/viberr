@@ -32,8 +32,8 @@ describe("getHomeOrgSummary — connection picker", () => {
     const now = new Date().toISOString();
     store.db
       .prepare(
-        `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
-         VALUES (?, ?, ?, 1, 2, ?, ?)`,
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 1, ?, ?)`,
       )
       .run("acme", "acme", pat.id, now, now);
 

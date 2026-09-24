@@ -111,6 +111,8 @@ import {
 import { getInsightsSummary } from "~/server/insights/insights-query.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
+import { listConnections } from "~/server/org/connections.server";
+import { reachSummary } from "~/shared/connection-reach";
 import {
   createProject,
   type CreateProjectInput,
@@ -1477,8 +1479,56 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
 
   add(
     tool(
+      "list_github_connections",
+      "The instance's GitHub connections, the ones create_project needs (ruling 463). Per connection: `owner` (what create_project's `owner` takes), whether it is the `default`, the token's kind (classic or fine_grained), its validation (`valid`, `failed` with GitHub's reason, or `unvalidated`) and when it was last checked, its expiry, the required scopes it lacks, and `reach`: which repositories the TOKEN can reach, read from GitHub when the token was last validated, each with whether it is private and whether the token can push to it. `reach.status` is `read`, `unknown` (the read failed, with the reason; never read it as zero) or `not_read` (the connection predates the read; an org admin presses Re-check on it in Instance settings). A fine-grained token reaches exactly the repositories it was granted, so a repository missing from a `read` reach is one this token cannot see. Never carries token material. Open to any signed-in person, the same people the New project dialog shows these connections to.",
+      {},
+      run(() => {
+        const connections = listConnections(db).map((c) => ({
+          owner: c.owner,
+          default: c.def,
+          tokenKind: c.tokenKind ?? "unknown",
+          validation: c.validationState,
+          // The validator's own secret-free reason when the verdict failed.
+          validationDetail: c.validationDetail,
+          lastValidatedAt: c.lastValidatedAt,
+          expiresAt: c.expiresAt,
+          daysLeft: c.daysLeft,
+          missingScopes: c.missingScopes,
+          boundProjects: c.boundProjects,
+          reach:
+            c.reach === null
+              ? {
+                  status: "not_read" as const,
+                  note: "Read when the token is next validated: an org admin presses Re-check on this connection in Instance settings → GitHub connections.",
+                }
+              : c.reach.status === "unknown"
+                ? c.reach
+                : {
+                    status: c.reach.status,
+                    readAt: c.reach.readAt,
+                    summary: reachSummary(c.reach),
+                    total: c.reach.total,
+                    private: c.reach.privateCount,
+                    capped: c.reach.capped,
+                    repos: c.reach.repos,
+                  },
+        }));
+        if (connections.length === 0) {
+          return json({
+            connections,
+            note: "No GitHub connection exists, so create_project cannot run yet. An org admin adds one in Instance settings → GitHub connections.",
+          });
+        }
+        return json({ connections });
+      }),
+    ),
+    "list_github_connections",
+  );
+
+  add(
+    tool(
       "create_project",
-      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Requires a GitHub connection for the repo owner. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). The move into the final stage stays a human decision whatever is asked. Deploy extra agents afterward with deploy_agent.",
+      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Requires a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 463), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). The move into the final stage stays a human decision whatever is asked. Deploy extra agents afterward with deploy_agent.",
       {
         name: z.string(),
         key: z.string().describe("Task key prefix, 2 to 4 letters."),

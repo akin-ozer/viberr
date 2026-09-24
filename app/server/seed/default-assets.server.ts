@@ -202,6 +202,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 463 (pass 40, F40-6): before "Bringing up a new project" said to
+    // read `list_github_connections` first. The controller could not see the
+    // connection its own `create_project` needs and wrote that it could not.
+    "26672ee429c9089c9c676bc178b5afaf401927f90596c6cb2f36660da185c762",
     // Ruling 462 (pass 40, F40-5): before "Bringing up a new project" said the
     // repository need not exist first and named `createRepository`. The
     // controller had no way to make one, so the owner made it by hand.

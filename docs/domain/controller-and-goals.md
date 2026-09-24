@@ -425,7 +425,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 - Every tool refuses an argument it does not declare (`strictTool`, ruling 296).
 
-**52 tools**: 51 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
+**53 tools**: 52 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
 counts them) plus `read_knowledge_doc`, registered (indented, inside a condition) only when
 the turn holds at least one knowledge base, which is every turn while the controller keeps
 its `controller-handbook` grant. `projectSlug` defaults to the bound project and, on a
@@ -468,7 +468,8 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 
 | Tool | What it does | Gate |
 |---|---|---|
-| `create_project` | A project with any shape in one request (stages, boundaries, members, description); needs a GitHub connection for the repo owner; the asker is seeded project admin (FR5). `createRepository` (`{ private, description? }`, ruling 462) creates the repository on GitHub with the connection's token when the probe finds none, before the project is written: a refusal names what the token lacks and writes nothing, an existing repository is used as it is, and the reply says which happened. Audit `project.repository.created` | signed-in |
+| `list_github_connections` | Every GitHub connection: `owner`, `default`, token kind, validation (`valid` / `failed` with the validator's reason / `unvalidated`) and `lastValidatedAt`, expiry, `missingScopes`, bound project count, and `reach`: the repositories the TOKEN reaches, each with `private` and `canPush`, read when the token was last validated (`read` with a summary and counts, `unknown` with GitHub's reason, or `not_read` for a connection saved before the read existed). No token material, not even the masked suffix (ruling 463) | signed-in |
+| `create_project` | A project with any shape in one request (stages, boundaries, members, description); needs a GitHub connection for the repo owner, and its description sends the model to `list_github_connections` first (ruling 463); the asker is seeded project admin (FR5). `createRepository` (`{ private, description? }`, ruling 462) creates the repository on GitHub with the connection's token when the probe finds none, before the project is written: a refusal names what the token lacks and writes nothing, an existing repository is used as it is, and the reply says which happened. Audit `project.repository.created` | signed-in |
 
 **Board reads** (all `requireVisible`, archived projects included)
 

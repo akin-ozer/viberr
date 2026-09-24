@@ -2996,8 +2996,8 @@ dialog[data-closing]::backdrop {
 .cap-advisory > summary:hover { color: var(--fg); }
 .cap-advisory > summary > .ico:not(.disc-chev) { width: 13px; height: 13px; flex: none; color: var(--placeholder); }
 /* Every <details> caret is the set's chevron (ruling 459), one rule for the
-   four disclosures (this one, the controller's chain head, "About this chain"
-   and "waits on"). They drew a 1.5px mitred V in CSS borders beside the set's
+   disclosures (this one, the controller's chain head, "About this chain",
+   "waits on", and since ruling 463 a GitHub connection's reach). They drew a 1.5px mitred V in CSS borders beside the set's
    round-capped 1.7 glyphs, two at 7px that turned and two at 6px that flipped
    in one frame. Down when folded, up when open, as .own-btn. `.ico` in the
    selector outranks svg.ico's 16px default; `details[open] > summary` turns
@@ -7989,3 +7989,23 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
   transition: none;
 }
 .dock[data-sheet-drag] .dock-fab { transition: none; }
+
+/* ---------- appended: ruling 463, what a connection's token reaches ---------- */
+/* A GitHub connection row says which repositories its TOKEN reaches (read from
+   `GET /user/repos`), where it used to say the account's public-repo count.
+   The count sentence is the summary of a native <details>, set like the row's
+   other sub lines (`.conn-main .sub`) until hovered; the caret is the set's
+   chevron (`.ico.disc-chev`). The body lists every repository, private ones
+   marked, and a repository the token can only read says so. */
+.conn-reach > summary {
+  display: inline-flex; align-items: center; gap: .375rem;
+  font-size: .75rem; color: var(--faint); cursor: pointer;
+  list-style: none; border-radius: var(--radius-chip);
+}
+.conn-reach > summary::-webkit-details-marker { display: none; }
+.conn-reach > summary:hover { color: var(--fg); }
+.conn-reach-list { margin: .125rem 0 0; padding: 0; list-style: none; }
+.conn-reach-list li { display: flex; align-items: center; gap: .5rem; margin-top: .25rem; }
+.conn-reach-list .mono { color: var(--muted); overflow-wrap: anywhere; }
+.conn-reach-ro, .conn-reach-note { font-size: .75rem; color: var(--faint); }
+.conn-reach-note { margin: .375rem 0 0; }

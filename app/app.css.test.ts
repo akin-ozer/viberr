@@ -5645,7 +5645,8 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
         if ((m[1]!.match(/<Icon name="chevron" className="disc-chev" \/>/g) ?? []).length !== 1) bare.push(where);
       }
     }
-    expect(summaries).toHaveLength(4);
+    // Four, and since ruling 463 a GitHub connection's reach.
+    expect(summaries).toHaveLength(5);
     expect(bare).toEqual([]);
   });
 
@@ -5950,6 +5951,8 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
         "features/task-detail/decision-packet.tsx: message → loader (spins)",
         "features/policy/policy-page.tsx: x → loader (spins)",
+        // Ruling 463: a GitHub connection's Re-check.
+        "features/org-settings/connections-panel.tsx: refresh → loader (spins)",
       ].sort(),
     );
     // The cell centres both marks, whatever their box.

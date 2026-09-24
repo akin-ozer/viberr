@@ -16,11 +16,28 @@ Three tables, one secret store:
 | Table | Role |
 |---|---|
 | `github_pats` | The only place a token lives, AES-256-GCM sealed (`v1$iv$ct$tag`, `secret-box.server.ts`), with `token_suffix` for display and a cached `validation_json`. |
-| `github_connections` | Org-level "owner → PAT" record (`id = slugify(owner)`, `is_default`, `repos_count`, `expires_at`). Used by the Connections panel, project creation and credential attach, and the store browser's GitHub import. |
+| `github_connections` | Org-level "owner → PAT" record (`id = slugify(owner)`, `is_default`, `expires_at`, `reach_json`). Used by the Connections panel, project creation and credential attach, the store browser's GitHub import, and the controller's `list_github_connections`. |
 | `project_github_credentials` | One PAT bound per project. **Every project-scoped GitHub call** resolves through `getProjectGithubContext` (`projects.repo` + `default_branch` + this binding); it never consults connections. |
 
 Removing a connection deletes its PAT and cascades every project binding; the
 default connection cannot be removed.
+
+**A connection records which repositories its token reaches** (ruling 463). Every
+validation of the token (a save, a replaced token, the card's **Re-check**, the 24-hour
+re-proof) also reads `GET /user/repos?per_page=100&affiliation=owner,collaborator,organization_member`
+(`connection-reach.server.ts`), paged up to 300 repositories with the cap stated, and
+stores each one's `fullName`, `private` and `canPush` (the `permissions` block read
+through `repoWritable`) as `reach_json`. A fine-grained token lists exactly the
+repositories it was granted. A failed read is stored as `unknown` with GitHub's reason,
+never as zero; a token whose validation just failed gets an `unknown` reach without a
+read; NULL means the connection has not been validated since the read existed, and
+Re-check reads it. The card says "Reaches 3 repositories · 1 private" with the list one
+disclosure away. The account's public-repo count (`GET /users/{owner}` →
+`public_repos`) is no longer read or stored: it said nothing about the token.
+`GET /users/{owner}` is still the owner-existence check. Re-check (`connection-recheck`,
+`recheckConnection`) validates the stored token again, metered like a save; GitHub's
+verdict replaces the cache either way, an unreachable GitHub changes nothing, and it
+audits `org.connection.rechecked {owner, status, reach}`.
 
 **Required scopes are exactly `repo` and `pull_request:write`**
 (`DEFAULT_REQUIRED_SCOPES`; `workflow` and `read:org` are not required or probed). A

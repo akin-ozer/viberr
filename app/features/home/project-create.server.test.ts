@@ -61,8 +61,8 @@ function seedConnection(db: import("node:sqlite").DatabaseSync, userId: string) 
   );
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
-     VALUES (?, ?, ?, 1, 3, ?, ?)`,
+    `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+     VALUES (?, ?, ?, 1, ?, ?)`,
   ).run("akin-ozer", "akin-ozer", pat.id, now, now);
   return pat.id;
 }
@@ -161,8 +161,8 @@ describe("createProject — GitHub connection wiring", () => {
     const now = new Date().toISOString();
     store.db
       .prepare(
-        `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
-         VALUES (?, ?, ?, 1, 3, ?, ?)`,
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 1, ?, ?)`,
       )
       .run("akin-ozer", "akin-ozer", patId, now, now);
 
@@ -566,8 +566,8 @@ describe("ruling 462: createRepository creates the repository before the project
     });
     const now = new Date().toISOString();
     db.prepare(
-      `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
-       VALUES (?, ?, ?, 1, 3, ?, ?)`,
+      `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?)`,
     ).run(owner, owner, pat.id, now, now);
   }
 
