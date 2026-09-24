@@ -12,6 +12,7 @@ import { fakeGithubFetch, type FakeResponder } from "../../../test-support/fake-
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
   noteReconcileFailure,
@@ -316,9 +317,8 @@ describe("C7: a persistent reconcile failure alerts the people who can fix it", 
       .all(store.slug) as { userId: string; title: string }[];
 
   it("stays silent below the threshold, then notifies admins + maintainers once", () => {
-    const store = setupTestStore(ctx);
     // Project the members into `project_members` (what listProjectMembers reads).
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     noteReconcileSuccess(store.slug); // clear any global streak from a prior test
 
     for (let i = 1; i < RECONCILE_FAILURE_ALERT_THRESHOLD; i += 1) {

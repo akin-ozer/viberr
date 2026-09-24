@@ -14,6 +14,7 @@ import {
   openScopeViolation,
 } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { createPat, getPatMetadata, setProjectCredential } from "./pat-store.server";
 import {
@@ -806,10 +807,9 @@ describe("PAT revalidation cooldown (P13-D-33)", () => {
     // suppress the attach-time revalidation, pinning a fine-grained token at
     // all-"assumed" chips a repo probe would have upgraded — on the org card
     // too, since both surfaces render the same per-PAT cache.
-    const store = setupTestStore(ctx);
     // The projects TABLE row (repo column) is what revalidation resolves the
     // target repo from — project the file into it.
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const { actor, pat } = bindCredential(store, FINE);
 
     // Same routes as the project-scoped fake MINUS the repo — so the cache is

@@ -2,9 +2,8 @@ import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore } from "../../../test-support/test-store";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
-import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   createConnection,
   getConnection,
@@ -33,8 +32,7 @@ const FINE = "github_pat_11ATTACH0123456789_attachattach";
  */
 describe("runSetCredential refreshes the PAT cache with project context", () => {
   it("upgrades a fine-grained token's repo scope from 'assumed' to 'probe' on attach", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot }); // projects table (repo column)
+    const store = setupProjectedStore(ctx); // projects table (repo column)
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
 
     // 1. Org-level connection add — no repo context exists here.
@@ -79,8 +77,7 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
   });
 
   it("an unreachable GitHub degrades the refresh but never fails the attach", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
 
     const addTime = fakeGithubFetch({
@@ -115,8 +112,7 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
  */
 describe("runReconcile on a project with no branched tasks", () => {
   it("names the nothing-to-sync case and records a freshness heartbeat", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
 
     const addTime = fakeGithubFetch({
@@ -160,8 +156,7 @@ describe("runReconcile on a project with no branched tasks", () => {
   });
 
   it("F21-9: an UNEXPECTED failure answers with a toast instead of 500ing the button", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
     // Fault injection: a handle whose every read throws — the class of failure
     // no reader anticipates, which used to escape as a raw 500 and leave the
@@ -206,8 +201,7 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
     });
 
   it("picks the connection that owns the project's repo", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
 
     // "hepapi" is created FIRST, so it is the org default…
@@ -249,8 +243,7 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
   });
 
   it("borrows another owner's connection when GitHub says that token reaches the repo", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
     // The one PAT in the org is labelled "hepapi" — but it is a collaborator on
     // akin-ozer/viberr, which is the whole point of this shape.
@@ -288,8 +281,7 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
   });
 
   it("refuses — naming the probe result — when the fallback token cannot reach the repo", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
     await createConnection(
       store.db,

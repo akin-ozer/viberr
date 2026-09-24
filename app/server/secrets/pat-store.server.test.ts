@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import {
   openScopeViolation,
   type OpenScopeViolationInput,
@@ -225,8 +225,7 @@ describe("pat-store", () => {
   });
 
   it("a credentialPolicy with NO bound PAT stays source 'none' — never fabricates a card (honest empty slate)", () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot }); // project the store
+    const store = setupProjectedStore(ctx);
     // A project may declare what scopes it REQUIRES without a credential bound.
     store.db
       .prepare(`UPDATE projects SET credential_policy_json = ? WHERE slug = ?`)

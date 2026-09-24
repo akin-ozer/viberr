@@ -15,6 +15,7 @@ import {
   updateProjectFile,
 } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { WorkflowBoundary } from "~/schemas/project-file.schema";
 import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
@@ -97,15 +98,9 @@ function expectChainCoversStages(store: TestStore): void {
   }
 }
 
-function setup(): TestStore {
-  const store = setupTestStore(ctx);
-  rebuildAll(store.db, { dataRoot: store.dataRoot });
-  return store;
-}
-
 describe("addStage", () => {
   it("splices the new stage into the transition chain instead of stranding the column", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const { stageId } = await addStage(store.db, { projectSlug: store.slug, name: "QA" }, admin(store), {
       dataRoot: store.dataRoot,
     });
@@ -137,7 +132,7 @@ describe("addStage", () => {
   });
 
   it("two adds in a row keep extending the same chain (the second is not stranded)", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const first = await addStage(store.db, { projectSlug: store.slug, name: "QA" }, admin(store), {
       dataRoot: store.dataRoot,
     });
@@ -157,7 +152,7 @@ describe("addStage", () => {
 // in the transition chain; a nameless request must not mint one.
 describe("addStage names the stage (name-first)", () => {
   it("stores the caller's name instead of the old default 'New stage'", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const { stageId, toast } = await addStage(
       store.db,
       { projectSlug: store.slug, name: "  QA sweep  " },
@@ -173,7 +168,7 @@ describe("addStage names the stage (name-first)", () => {
   });
 
   it("refuses an empty name and writes nothing", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const before = stageIdsOf(store);
     await expect(
       addStage(store.db, { projectSlug: store.slug, name: "   " }, admin(store), {
@@ -186,7 +181,7 @@ describe("addStage names the stage (name-first)", () => {
 
 describe("removeStage", () => {
   it("re-joins the neighbours and leaves no orphan rule", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     await removeStage(
       store.db,
       { projectSlug: store.slug, stageId: "impl" },
@@ -209,7 +204,7 @@ describe("removeStage", () => {
   });
 
   it("removing the review stage keeps Done reachable and human-locked", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     await removeStage(
       store.db,
       { projectSlug: store.slug, stageId: "review" },
@@ -227,7 +222,7 @@ describe("removeStage", () => {
   });
 
   it("add then remove round-trips back to the preset's 4 rules", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const before = workflowOf(store);
     const { stageId } = await addStage(store.db, { projectSlug: store.slug, name: "QA" }, admin(store), {
       dataRoot: store.dataRoot,
@@ -245,7 +240,7 @@ describe("removeStage", () => {
 // F20-27 / F20-13 / N20-10 — the stage-write audit + disclosure + persisted color.
 describe("stage writes: audit names, boundary disclosure, hex color", () => {
   it("F20-27: added records { id, name }; removed records { id, name } (renderer reads d.name)", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const { stageId } = await addStage(
       store.db,
       { projectSlug: store.slug, name: "QA" },
@@ -268,7 +263,7 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
   });
 
   it("F20-13: removing a stage that collapses two edges to a stricter hop discloses it (toast + audit)", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     // Default chain: ready→impl (auto) + impl→review (approval). Removing In
     // Progress merges them to the STRICTER `approval` — a tightening the toast
     // and audit must name, not swallow.
@@ -292,7 +287,7 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
   });
 
   it("F20-13: a removal that keeps the same boundary is NOT reported as a tightening", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     // Add a stage before Done then remove it: both new edges inherit review→done's
     // `human`, so the merge is `human`→`human` — no tightening.
     const { stageId } = await addStage(
@@ -313,7 +308,7 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
   });
 
   it("ruling 364: a new stage takes the first preset NAME no sibling wears — project.md holds the name", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const { stageId } = await addStage(
       store.db,
       { projectSlug: store.slug, name: "QA" },
@@ -334,7 +329,7 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
 
 describe("recolorStage (ruling 364)", () => {
   it("writes the preset name into project.md, reprojects and audits it", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const result = await recolorStage(
       store.db,
       { projectSlug: store.slug, stageId: "impl", color: "rose" },
@@ -361,7 +356,7 @@ describe("recolorStage (ruling 364)", () => {
   });
 
   it("refuses a hex, a token and an unknown name, naming the presets", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     for (const wrong of ["#7b61ff", "var(--muted)", "goldenrod"]) {
       await expect(
         recolorStage(
@@ -380,7 +375,7 @@ describe("recolorStage (ruling 364)", () => {
 
 describe("reorderStages", () => {
   it("re-points the chain at the new column order, each stage keeping its entry gate", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     await reorderStages(
       store.db,
       {
@@ -416,7 +411,7 @@ describe("reorderStages", () => {
    * column the project no longer defines.
    */
   it("refuses an order that repeats a stage id (and so drops another)", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const before = stageIdsOf(store);
 
     await expect(
@@ -436,7 +431,7 @@ describe("reorderStages", () => {
   });
 
   it("a stage added after a reorder is still spliced in (the chain never desynced)", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     await reorderStages(
       store.db,
       {
@@ -459,7 +454,7 @@ describe("reorderStages", () => {
 
 describe("renameStage", () => {
   it("leaves the chain alone — stage ids are immutable, so nothing can dangle", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const before = workflowOf(store);
     await renameStage(
       store.db,
@@ -699,16 +694,14 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
  */
 describe("setBranchCleanup (R15-6)", () => {
   it("defaults ON for a project that has never touched the setting", () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     // Fails on main: `branchCleanupOnMerge` did not exist — nothing deleted a
     // merged task's branch, on any project.
     expect(branchCleanupOnMerge(store.db, store.slug)).toBe(true);
   });
 
   it("persists the opt-out into project.md and the projection", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const result = await setBranchCleanup(
       store.db,
       { projectSlug: store.slug, enabled: false },
@@ -732,8 +725,7 @@ describe("setBranchCleanup (R15-6)", () => {
   });
 
   it("turning it back on rewrites the single row, never a duplicate", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const actor = admin(store);
     const ref = { projectSlug: store.slug, dataRoot: store.dataRoot };
     await setBranchCleanup(store.db, { projectSlug: store.slug, enabled: false }, actor, ref);
@@ -747,8 +739,7 @@ describe("setBranchCleanup (R15-6)", () => {
   });
 
   it("refuses a non-admin — this is policy, not credential hygiene", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     await expect(
       setBranchCleanup(
         store.db,
@@ -764,7 +755,7 @@ describe("setBranchCleanup (R15-6)", () => {
 // toast must not claim an email was sent (there is no mailer, ruling 13).
 describe("inviteMember", () => {
   it("F20-12: an unknown email mints a temp-password account (usable + setup-pending), not a passwordless one", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const result = await inviteMember(
       store.db,
       { projectSlug: store.slug, name: "New Person", email: "probe.nobody@viberr.dev" },
@@ -785,7 +776,7 @@ describe("inviteMember", () => {
   });
 
   it("N20-6: the toast says what happened, never 'Invite sent' (no mailer)", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const result = await inviteMember(
       store.db,
       { projectSlug: store.slug, name: "New Person", email: "someone@viberr.dev" },
@@ -799,7 +790,7 @@ describe("inviteMember", () => {
 
   it("C4: the role reaches the member row, the audit row and the toast", async () => {
     // Canary: hardcode `viewer` again — all three go back to Viewer.
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const result = await inviteMember(
       store.db,
       { projectSlug: store.slug, name: "Deniz", email: store.users.deniz.email, role: "maintainer" },
@@ -817,7 +808,7 @@ describe("inviteMember", () => {
   });
 
   it("C4: an unknown role is refused by name and nothing is written", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     await expect(
       inviteMember(
         store.db,
@@ -834,7 +825,7 @@ describe("inviteMember", () => {
   });
 
   it("an already-registered email is added without minting a second account", async () => {
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const result = await inviteMember(
       store.db,
       { projectSlug: store.slug, name: "Deniz", email: store.users.deniz.email },
@@ -857,7 +848,7 @@ describe("the reserved task prefix", () => {
   it("refuses GOAL, in any casing, and leaves the stored prefix alone", async () => {
     // Canary: drop the isReservedTaskPrefix guard in updateProjectIdentity —
     // the project takes the prefix and its tasks become unwaitable.
-    const store = setup();
+    const store = setupProjectedStore(ctx);
     const fileCtx = { dataRoot: store.dataRoot };
     for (const typed of ["GOAL", "goal", "Goal"]) {
       await expect(

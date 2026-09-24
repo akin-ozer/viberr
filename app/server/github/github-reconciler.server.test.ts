@@ -30,6 +30,7 @@ import {
 import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
 import type { RevisionDrift } from "~/shared/revision-drift";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import {
   createPat,
@@ -2109,8 +2110,7 @@ describe("reconcileProject", () => {
     expect(listAuditEvents(store.db, { action: "github.reconcile.project" })).toHaveLength(1);
 
     // No PAT → typed short-circuit without network.
-    const bare = setupTestStore(ctx);
-    rebuildAll(bare.db, { dataRoot: bare.dataRoot });
+    const bare = setupProjectedStore(ctx);
     const degraded = await reconcileProject(bare.db, bare.slug, actor, {
       dataRoot: bare.dataRoot,
       fetchImpl: fakeGithubFetch({}).fetchImpl,

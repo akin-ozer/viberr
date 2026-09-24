@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
@@ -22,10 +23,6 @@ import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
-
-function actor(u: { id: string; email: string }) {
-  return { userId: u.id, label: u.email };
-}
 
 function prepared(): TestStore {
   const store = setupTestStore(ctx);
@@ -50,7 +47,7 @@ describe("setTaskMetadata", () => {
     await setTaskMetadata(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", priority: "high" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     let fm = readFm(store);
@@ -61,7 +58,7 @@ describe("setTaskMetadata", () => {
     await setTaskMetadata(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", priority: "urgent" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     fm = readFm(store);
@@ -73,7 +70,7 @@ describe("setTaskMetadata", () => {
     await setTaskMetadata(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", priority: "low" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(readFm(store).urgent).toBe(false);
@@ -95,7 +92,7 @@ describe("setTaskMetadata", () => {
       setTaskMetadata(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", priority: "urgent" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/archived/i);
@@ -112,7 +109,7 @@ describe("setTaskMetadata", () => {
         taskKey: "VIB-1",
         labels: ["  Runtime ", "runtime", "", "GitHub", "github "],
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // "Runtime"/"runtime" collapse to one (first-seen casing kept); empties gone.
@@ -126,7 +123,7 @@ describe("setTaskMetadata", () => {
         taskKey: "VIB-1",
         labels: Array.from({ length: 20 }, (_, i) => `l${i}`),
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(readFm(store).labels).toHaveLength(12);
@@ -137,7 +134,7 @@ describe("setTaskMetadata", () => {
     await setTaskMetadata(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", dueDate: "2026-09-01" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(readFm(store).dueDate).toBe("2026-09-01");
@@ -147,7 +144,7 @@ describe("setTaskMetadata", () => {
         setTaskMetadata(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", dueDate: bad },
-          actor(store.users.arda),
+          actorOf(store.users.arda),
           { dataRoot: store.dataRoot },
         ),
       ).rejects.toMatchObject({ status: 400 });
@@ -159,7 +156,7 @@ describe("setTaskMetadata", () => {
     await setTaskMetadata(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", dueDate: "" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(readFm(store).dueDate).toBeNull();
@@ -172,7 +169,7 @@ describe("setTaskMetadata", () => {
         store.db,
         // @ts-expect-error — deliberately off-enum, the runtime guard must catch it
         { projectSlug: store.slug, taskKey: "VIB-1", priority: "critical" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -184,7 +181,7 @@ describe("setTaskMetadata", () => {
     await setTaskMetadata(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", priority: "high" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const before = listAuditEvents(store.db, {
@@ -200,7 +197,7 @@ describe("setTaskMetadata", () => {
     await setTaskMetadata(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", priority: "high" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const after = listAuditEvents(store.db, {
@@ -226,7 +223,7 @@ describe("setTaskMetadata", () => {
         labels: ["security"],
         dueDate: "2026-09-05",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const audit = listAuditEvents(store.db, {
@@ -255,7 +252,7 @@ describe("setTaskMetadata", () => {
         labels: ["runtime"],
         dueDate: "2026-09-10",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
@@ -271,7 +268,7 @@ describe("setTaskMetadata", () => {
       setTaskMetadata(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", priority: "high" },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).resolves.toBeTruthy();
@@ -280,7 +277,7 @@ describe("setTaskMetadata", () => {
       setTaskMetadata(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", priority: "low" },
-        actor(store.users.elif),
+        actorOf(store.users.elif),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
@@ -293,7 +290,7 @@ describe("createTask metadata", () => {
     const { key } = await createTask(
       store.db,
       { projectSlug: store.slug, title: "Urgent new task", priority: "urgent" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const fm = readFm(store, key);
@@ -309,7 +306,7 @@ describe("createTask metadata", () => {
       const { key } = await createTask(
         store.db,
         { projectSlug: store.slug, title: `A ${priority} task`, priority },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       const fm = readFm(store, key);
@@ -328,7 +325,7 @@ describe("createTask metadata", () => {
         labels: ["  a ", "a", "b"],
         dueDate: "2026-10-01",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const fm = readFm(store, key);
@@ -343,7 +340,7 @@ describe("createTask metadata", () => {
           title: "Bad due date",
           dueDate: "2026-02-31",
         },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -356,7 +353,7 @@ describe("createTask metadata", () => {
         store.db,
         // @ts-expect-error — off-enum priority
         { projectSlug: store.slug, title: "Bad priority", priority: "nope" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });

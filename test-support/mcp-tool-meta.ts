@@ -60,7 +60,8 @@ export async function callToolText(
   const tool = tools.find((t) => t.name === toolName);
   expect(tool, `tool ${toolName} must exist`).toBeTruthy();
   // SAFETY: every controller handler is wrapped by `controllerToolGuards`'
-  // `run`/`runWith`, which always answers the `controllerToolText` shape:
+  // `run`/`runWith`, which always answers through `textResult`
+  // (app/server/runtimes/strict-tool.server.ts):
   // { content: [{ type: "text", text }] }.
   const result = (await tool!.handler(args, {})) as {
     content: { text: string }[];

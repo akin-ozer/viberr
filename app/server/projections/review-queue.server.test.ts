@@ -11,6 +11,7 @@ import {
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "./rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getReviewQueue } from "./review-queue.server";
 import { reviewRowSub } from "~/features/review/review-helpers";
 
@@ -207,8 +208,7 @@ describe("getReviewQueue", () => {
   });
 
   it("returns empty panels for a project with no review-stage tasks", () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const queue = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,

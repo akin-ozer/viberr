@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { runDemoSeed, SEED_DEFAULT_PASSWORD } from "../../../test-support/demo-seed";
+import { runDemoSeed } from "../../../test-support/demo-seed";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import { credentialPasswordHash } from "~/server/auth/identity.server";
 import { verifyPassword } from "~/server/auth/password.server";
@@ -18,6 +18,7 @@ import { getBoard, listProjects } from "~/server/projections/board-query.server"
 import { listNotifications } from "~/server/projections/notifications.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { createTask } from "~/server/tasks/task-actions.server";
+import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
 
 /**
  * Shape-pin for the TEST-ONLY demo fixture (test-support/demo-seed.ts) — the

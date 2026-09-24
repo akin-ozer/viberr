@@ -55,8 +55,6 @@ import {
  * `--reset` wipes via the product seed's resetStore first.
  */
 
-export { SEED_DEFAULT_PASSWORD };
-
 export interface DemoSeedOptions {
   dataRoot: string;
   reset?: boolean;
