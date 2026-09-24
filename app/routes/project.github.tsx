@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.github";
 import { pageTitle } from "~/shared/page-title";
@@ -110,7 +111,8 @@ function reconcileCheckView(
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, actor, intent } = await requireFormAction(request);
+  const { refused, db, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
 
   // E2 (pass 16): the layout loader does not run for an action, so the
   // members-only gate is repeated here — otherwise a signed-in non-member got a
@@ -163,3 +165,6 @@ export default function GithubView({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.github");

@@ -13,8 +13,12 @@ import { setupAppTest, type AppTestContext } from "../../../test-support/test-ap
  * expired at login+30d. An active user would be logged out mid-work.
  *
  * The fix is two halves, and BOTH are load-bearing, so both are pinned here:
- * `authenticateWithHeaders` captures the header (returnHeaders: true), and the
- * root loader forwards it onto the response.
+ * `authenticateWithHeaders` captures the header (returnHeaders: true), and
+ * root's `sessionRenewalMiddleware` forwards it onto the response. Ruling 457
+ * moved the forwarding from the root loader to the middleware: root no longer
+ * re-runs on live events and navigations (RF-7), and the day's one renewal
+ * lands on whichever GET first asks once it is due, often a layout's `.data`
+ * that root sits out.
  */
 
 let app: AppTestContext;
@@ -44,16 +48,30 @@ function ageSession(sessionId: string, daysAgo: number): void {
     .run(expiresAt.toISOString(), updatedAt.toISOString(), sessionId);
 }
 
-async function rootLoader(cookie: string) {
-  const { loader } = await import("~/root");
-  const request = app.request("/", { cookie });
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/",
-    context: new RouterContextProvider(),
-  });
+/**
+ * Runs root's renewal middleware around `inner` the way React Router does: the
+ * loaders `inner` stands for get the middleware's own Request.
+ */
+async function throughMiddleware(
+  request: Request,
+  inner: (request: Request) => Promise<object>,
+): Promise<Response> {
+  const { sessionRenewalMiddleware } = await import("~/server/auth/require-user.server");
+  const result = await sessionRenewalMiddleware(
+    {
+      request,
+      url: new URL(request.url),
+      params: {},
+      pattern: "/",
+      context: new RouterContextProvider(),
+    },
+    async () => {
+      await inner(request);
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    },
+  );
+  if (!(result instanceof Response)) throw new Error("the middleware answered no Response");
+  return result;
 }
 
 describe("F10-17: rolling-session renewal reaches the browser", () => {
@@ -88,49 +106,85 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
     expect(setCookies.join("\n")).toContain("session_token");
   });
 
-  it("the root loader FORWARDS that renewal cookie onto the response", async () => {
+  it("root's middleware FORWARDS that renewal cookie onto the response", async () => {
+    const { requireUser } = await import("~/server/auth/require-user.server");
     const { cookie, sessionId } = await app.cookieFor(ardaId);
     ageSession(sessionId, 3);
 
-    const result = await rootLoader(cookie);
-    // The loader answers in one of two shapes; `init` is what tells them apart.
-    const wrapped = "init" in result ? result : null;
+    const response = await throughMiddleware(app.request("/", { cookie }), requireUser);
 
-    // A renewal is due, so the loader must return data() WITH headers rather
-    // than a bare payload — otherwise the slide never reaches the browser.
-    const headers = wrapped?.init?.headers;
-    expect(headers).toBeDefined();
-    const forwarded = new Headers(headers).getSetCookie();
-    expect(forwarded.length).toBeGreaterThan(0);
+    const forwarded = response.headers.getSetCookie();
     expect(forwarded.join("\n")).toContain("session_token");
-    // The payload itself is still present (P11-46 removed the unread `user`
-    // field; theme remains).
-    expect(wrapped?.data.theme).toBeDefined();
+    // The response is otherwise the one the loaders produced.
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/json");
   });
 
-  it("a fresh session adds no headers (the common path stays a bare payload)", async () => {
+  it("forwards it when root's loader sits the request out (ruling 457, RF-7)", async () => {
+    // A layout `.data` without root: `_routes` names the layout alone, as a
+    // live revalidation now does. The workspace loader resolves the session.
+    const { loader } = await import("~/routes/project");
+    const { cookie, sessionId } = await app.cookieFor(ardaId);
+    ageSession(sessionId, 3);
+    const request = app.request("/projects/viberr-core.data?_routes=routes%2Fproject", {
+      cookie,
+    });
+
+    const response = await throughMiddleware(request, (r) =>
+      loader({
+        request: r,
+        url: new URL(r.url),
+        params: { slug: "viberr-core" },
+        pattern: "/projects/:slug",
+        context: new RouterContextProvider(),
+      }),
+    );
+
+    expect(response.headers.getSetCookie().join("\n")).toContain("session_token");
+  });
+
+  it("a fresh session adds no headers (the common path stays untouched)", async () => {
+    const { requireUser } = await import("~/server/auth/require-user.server");
     const { cookie, sessionId } = await app.cookieFor(ardaId);
     // Well inside the updateAge window — no roll is due.
     ageSession(sessionId, 0);
 
-    const result = await rootLoader(cookie);
+    const response = await throughMiddleware(app.request("/", { cookie }), requireUser);
 
-    // Bare payload: no data() wrapper, so no stray Set-Cookie is written.
-    expect("init" in result ? result.init : undefined).toBeUndefined();
-    expect("theme" in result ? result.theme : undefined).toBeDefined();
+    expect(response.headers.getSetCookie()).toEqual([]);
   });
 
-  it("the headers export surfaces loader headers for routes without their own", async () => {
-    const { headers } = await import("~/root");
-    const loaderHeaders = new Headers();
-    loaderHeaders.append("Set-Cookie", "session_token=abc; Path=/");
-    expect(
-      headers({
-        loaderHeaders,
-        parentHeaders: new Headers(),
-        actionHeaders: new Headers(),
-        errorHeaders: undefined,
-      }),
-    ).toBe(loaderHeaders);
+  it("a POST forwards nothing: its own action answers for the cookies it sets", async () => {
+    const { requireUser } = await import("~/server/auth/require-user.server");
+    const { cookie, sessionId } = await app.cookieFor(ardaId);
+    ageSession(sessionId, 3);
+
+    const response = await throughMiddleware(
+      app.request("/prefs/theme", { cookie, method: "POST" }),
+      requireUser,
+    );
+
+    expect(response.headers.getSetCookie()).toEqual([]);
+  });
+
+  it("the root loader still reads the session for csrf, and a document gets the live head", async () => {
+    const { loader } = await import("~/root");
+    const { liveHeadContext } = await import("~/server/events/sse-broker.server");
+    const { cookie } = await app.cookieFor(ardaId);
+    const call = (url: string) => {
+      const request = app.request(url, { cookie });
+      const context = new RouterContextProvider();
+      context.set(liveHeadContext, 41);
+      return loader({ request, url: new URL(request.url), params: {}, pattern: "/", context });
+    };
+
+    const document = await call("/");
+    expect(document.csrf).toEqual(expect.any(String));
+    expect(document.theme).toBeDefined();
+    expect("liveHead" in document ? document.liveHead : undefined).toBe(41);
+
+    // A `.data` answer seeds nothing: the tab's streams are already under way.
+    const revalidation = await call("/_root.data");
+    expect("liveHead" in revalidation).toBe(false);
   });
 });

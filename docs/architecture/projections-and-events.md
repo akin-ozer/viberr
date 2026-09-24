@@ -7,9 +7,11 @@
 > `app/server/interpretation/*`, `app/server/events/*`,
 > `app/server/runtimes/run-events.server.ts`, `app/server/org/resource-events.server.ts`,
 > `app/routes/resources.events.ts`, `app/schemas/sse-event.schema.ts`,
-> `app/features/live-updates/*`, `app/features/runtime/use-run-log-stream.ts`.
+> `app/features/live-updates/*`, `app/features/runtime/use-run-log-stream.ts`,
+> `app/features/runtime/run-log-store.ts`.
 >
-> Verified against `main` @ `7d9fbf72` (2026-09-23); §5 and §6 against `8bbe2083` (PR #318).
+> Verified against `main` @ `7d9fbf72` (2026-09-23); §5 and §6 against `8bbe2083` (PR #318);
+> §5's stream events and run-log console against ruling 457's console pass (2026-09-24).
 
 ## 1. The write path
 
@@ -31,6 +33,12 @@ Writers (`app/server/files/`):
   writers, remembers the last content this process wrote per path and prefers it when a
   locked read disagrees and the mtime has not advanced past the write by more than
   100 ms (bind mounts over VirtioFS serve stale reads).
+- **Parse memo** (ruling 457): `readProjectFile`, `readTaskFile` and
+  `readAgentProfileFile` still read the file on every call, but skip the YAML + Zod
+  parse when the bytes equal the bytes they last parsed for that path
+  (`parse-memo.server.ts`; 256 entries, 4 M characters). The key is the content, not
+  the file's stat, so any change on disk is seen by the next read and a stale
+  bind-mount read is never pinned; each caller gets its own `structuredClone`.
 - **Trust guard**: `updateTaskFile` and `updateProjectFile` refuse to write a file whose
   parse produced a hard-stop diagnostic (`file_not_trusted`, 409): a write would replace
   the human's content with defaults. `updateGoalFile` refuses a goal file that does not
@@ -52,8 +60,9 @@ never traversed. It reacts to `project.md`, `task.md` and `goals/*.md` with
 directory re-checks every projected task of the project, a removed task directory
 projects the task's removal, and a removed `goals/` directory prunes its goal rows.
 
-A rebuild that fails (a throw, or `rebuildPath` answering `error`) is retried per file
-at 2, 5, 15, 45 and 120 seconds, reset on the first success (ruling 218); past the last
+A rebuild that fails (a throw, `rebuildPath` answering `error`, or a `project.md` whose
+cascade left `failedTasks`) is retried per file at 2, 5, 15, 45 and 120 seconds, reset
+on the first success (ruling 218); past the last
 step the watcher gives up and the fault stays on the health report (§4). A watcher
 `ENOENT` is ignored; any other error clears the handle (health reports `watcher: false`
 and `degraded: ["watcher"]`) and, for the transient codes `EMFILE`, `ENFILE`, `ENOSPC`,
@@ -108,10 +117,20 @@ an unparseable goal file counts as one.
 - `rebuildProjectFile` upserts `projects` (JSON copies of stages, workflow, agent
   policy, credential policy, guardrails, and the project's required-reviewer rules
   resolved to stage and agent names, ruling 178), rewrites `project_members`, replaces
-  the file's `diagnostics`, records provenance, writes the content hash **last**, emits
-  `project.updated`, and forces every task of the project to re-project when the
-  project row is new or changed. A vanished `project.md` deletes its diagnostics first
-  and the `projects` row last (members cascade), and emits `project.removed`.
+  the file's `diagnostics`, records provenance, emits `project.updated`, forces every
+  task of the project to re-project when the project row is new or a field tasks derive
+  from changed: the repo, stages, workflow, resolved required reviewers or member ids
+  (`projectContextForTasks`, the one reader both sides share; ruling 457), and writes
+  the content hash **last**. Each cascaded task runs in its own `SAVEPOINT`: one that
+  throws rolls back alone, its fault and provenance `error` row name ITS file, and the
+  project row, its members and the other tasks still land. The project then keeps the
+  `""` hash and the result lists `failedTasks`, so the next rebuild of `project.md`
+  (the watcher's retry included) runs the cascade again. A write that only moves
+  `nextTaskNumber` (every task creation), a file lease or the description costs the
+  project row and one `project.updated`. The rescans read the same answer
+  (`taskFacingChanged`) before they force a project's tasks and goals. A vanished
+  `project.md` deletes its diagnostics first and the `projects` row last (members
+  cascade), and emits `project.removed`.
 - `rebuildTaskFile` computes the derived `readiness` (`deriveReadiness`: the
   diagnostics floor and the dependency floor, while `stored_readiness` keeps the file's
   value), stores `blocked_by_json` verbatim, `validation` (`deriveValidation`, never the
@@ -125,10 +144,14 @@ an unparseable goal file counts as one.
   ruling 225; a stored `schedule` projects as `human`), `repo` always the project's,
   counts and `recommendation_kinds`, `schedules_json`, `goal_id` / `goal_link_index`,
   `work_revision_sha` (the active work revision; a discarded one projects as null,
-  ruling 161), `board_rank`; rewrites `task_events` wholesale (position 0 = newest, actor
+  ruling 161), `board_rank`; writes `task_events` (position 0 = newest, actor
   snapshot denormalized into `actor_json` so events survive member removal, agent
-  `actor_ref` keyed `agent/<profileId>`); stores `""` as the hash until events and
-  diagnostics landed; emits `task.updated`. A vanished `task.md` deletes events and
+  `actor_ref` keyed `agent/<profileId>`) keeping the rows of unchanged events: stored
+  and fresh rows are aligned from the oldest end while time, type and actor match, kept
+  rows shift position in one UPDATE and take changed content in place, and the rest are
+  deleted and inserted, so a row's `id` survives an append and the timeline keyed on it
+  does not remount (ruling 457); stores `""` as the hash until events and diagnostics
+  landed; emits `task.updated`. A vanished `task.md` deletes events and
   diagnostics first and the projection row last, and emits `task.removed`.
 - `rebuildGoalFile` reconciles link statuses against live task rows (a terminal-stage
   task makes its link `done`, an archived one `failed` unless already `done`, `skipped`
@@ -142,6 +165,10 @@ an unparseable goal file counts as one.
   state once created, else its own status, `skipped` counting as done). The board
   query resolves every row through ONE resolver; the task query resolves on read;
   nothing caches a resolved state. `listHeldTasks` feeds the release engine.
+- Each file's re-projection (project, task, goal) runs as ONE transaction, its
+  projection events held until COMMIT; a caller already inside a transaction (the full
+  rebuild, a project's cascade) runs it inline (ruling 457). A rebuild that throws rolls
+  back and announces nothing; a cascaded task rolls back only to its savepoint (above).
 - `rebuildPath` routes a path to the right rebuilder with a content-hash
   short-circuit unless forced. It swallows every throw: the log line `projection rebuild
   failed`, a per-file projection fault (`store-health.server.ts`, rulings 217 and 218),
@@ -177,8 +204,9 @@ the work runs and a throttled call answers `{ status: "throttled", retryAfterMs 
 `project.updated`, `project.removed`, `projection.rebuilt {scope, changed}`,
 `notification.created {userId}`, `notification.read {userId}`, `violation.updated
 {projectSlug, taskKey}`, `goal.updated {projectSlug, goalId}`. Inside
-`collectProjectionEvents` (the rebuild's transaction) they are buffered and re-emitted
-only after commit; a throw discards them. The publisher (`event-publisher.server.ts`)
+`collectProjectionEvents` (the rebuild's transaction, and each single file's
+re-projection, ruling 457) they are buffered and re-emitted only after commit; a throw
+discards them. The publisher (`event-publisher.server.ts`)
 translates each into the wire shape `{ type, entityId, occurredAt, data }`, reading back
 the task's stage and readiness for `task.updated`, and zod-parses every event against
 `sseEventSchema` before publishing.
@@ -204,7 +232,7 @@ an empty project slug and no route publishes nothing), and the org resource broa
 | `notification.created`, `notification.read` | `userId` | that user's `user` scope |
 | `violation.updated` | `projectSlug, taskKey` (nullable) | project, plus task when named |
 | `resource.updated` | `kind` (`kb`, `skill`, `mcp`), `id` | broadcast |
-| `run.log-appended` | `projectSlug, taskKey, runId, threadId, seq` | project + task, kept off the `projects` firehose (`skipFirehose`) |
+| `run.log-appended` | `projectSlug, taskKey, runId, threadId, seq` | the task's own scope only (`taskOnly`, ruling 457): no `project:` connection and no `projects` firehose |
 | `run.state-changed` | `projectSlug, taskKey, runId, threadId, state` | project + task |
 | `controller.updated` | `conversationId, userId` | the owner's `user` scope |
 | `controller.log-appended` | `conversationId, userId, runId, threadId, seq` | the owner's `user` scope |
@@ -212,17 +240,17 @@ an empty project slug and no route publishes nothing), and the org resource broa
 | `stream.open` | `headId` | control: the connection's first message |
 | `stream.resync` | `{}` | control: sent when replay cannot catch a reconnect up |
 
-`controller.log-appended` is a **stream event** (`SSE_STREAM_EVENTS` in
-`event-types.ts`): one frame per console line on the `user` scope every signed-in
-surface subscribes, so `useLiveUpdates` does not revalidate on it; only the dedicated
-log consumer handles it. `run.log-appended` is a **run-line event**
-(`SSE_RUN_LINE_EVENTS`): the `project:` scope delivers it for every run of the project
-(to the board, the controller page and every open task page, which subscribes its
-project for the rail), but only the page whose `task:` scope names that task revalidates
-on it, at most once per `RUN_LINE_REVALIDATE_MS` (2 s), because its Live run strip
-(phase, step, turns, tokens) is loader data that moves per line. Nothing else a
-project-scoped page renders changes per line: the board's "agent running" fact moves on
-`run.state-changed`.
+`controller.log-appended` and `run.log-appended` are **stream events**
+(`SSE_STREAM_EVENTS` in `event-types.ts`): one frame per console line, which revalidates
+nothing. `useLiveUpdates` hands each one to the tab's run-log consoles (`onLiveFrame`)
+and to nothing else. `controller.log-appended` rides the `user` scope every signed-in
+surface subscribes; `run.log-appended` reaches only a connection holding its task's scope
+(the workspace layout of the page showing that task), because nothing on a board, the
+controller page or another task's page changes per line of someone else's run: the
+board's "agent running" fact moves on `run.state-changed`. Until ruling 457 a board
+received and dropped every line, and the task's own page revalidated root, layout and
+task on its run's lines at most once per 2 s (`RUN_LINE_REVALIDATE_MS`) to move the Live
+run strip; the strip now reads the facts every console tail read returns (below).
 
 **The broker** (`sse-broker.server.ts`, behind the route `resources.events.ts`): one
 connection per stream on `/resources/events` (401 JSON when signed out, since an
@@ -233,37 +261,142 @@ dropped and `projects` is expanded to their memberships; an empty result is a 40
 first message sets `retry: 5000` and sends `stream.open`. A 25-second heartbeat
 (`: hb`) also **re-authorizes** every connection, dropping ones whose scopes vanished (a
 throw keeps the existing scopes: a check that could not run must neither widen access
-nor tear down a healthy stream). A 256-event ring buffer replays after a reconnect with
-`Last-Event-ID`; an id older than the buffer, or a restart, sends `stream.resync` and
-the client revalidates once. Queue backpressure caps at 1024 chunks per connection; a
-failed write drops the connection. The broker also owns the process shutdown hook
+nor tear down a healthy stream). Two 256-event rings replay, on the new connection's
+scopes and in id order, every event after the position a connection names: the browser's
+own `Last-Event-ID` header when it retries a source, or the `lastEventId` query param a
+new `EventSource` carries (ruling 457; the header wins). One ring holds data events, the
+other stream events (console lines, `SSE_STREAM_EVENTS`), so a busy run cannot push a
+data event out of reach. A position below a data event the ring has let go of, or from
+an earlier process (ids are unique across processes: each starts at a thousand per
+millisecond of its boot clock), gets `stream.resync` and the client revalidates once;
+console lines the stream ring has let go of never resync, since the console reads past
+its own cursor. Root's
+`liveHeadMiddleware` reads the head before any loader of a request runs, and a document
+load hands it to the page as root's `liveHead`, so the page's first stream replays what
+was published between the server render and hydration. Queue backpressure caps at 1024
+chunks per connection; a failed write drops the connection. The broker also owns the
+process shutdown hook
 (`runProcessShutdown`): close streams, stop both watchers and the lock guard, close the
 DB and release the writer lock.
 
 **The client** (`useLiveUpdates`): subscribes the current surface to its scopes (Home:
 `user` + `projects`; a project page: `project:<slug>` + `user`, plus `task:<slug>/<key>`
 when a task is open; the controller page: `user`, plus `project:<slug>` on a project;
-the controller dock, Instance settings and notifications: `user`), revalidates the active
-React Router loaders on any data event or `stream.resync` (debounced 300 ms; a run line
-only on its own task's page, floored at 2 s, joining a pending revalidation rather than
-pushing it out), and revalidates once on any connect that follows a previous stream. A
-hidden tab holds no stream: the hook closes on `visibilitychange` and reopens on return
-(ruling 301). A failed stream flips `paused` (the "live updates paused" strip under the header, ruling 455(f)),
+the controller dock, Instance settings and notifications: `user`), and revalidates on
+data events and `stream.resync` (debounced 300 ms; never on a stream event;
+`controller.updated`, a **conversation event** (`SSE_CONVERSATION_EVENTS`), only on the
+two controller pages, which render the conversation and pass `{ conversations: true }`:
+every other surface hands it, debounced the same way, to the controller dock as the
+window event `CONTROLLER_UPDATED_EVENT`, and the dock reloads its own resources, ruling
+457).
+
+**Which loaders re-run** (`revalidation-policy.ts`, ruling 457). Single fetch asks every
+route on screen to re-run after every navigation, action and `revalidate()`; every route
+with a loader answers through `shouldRevalidate = revalidateWhen("<route id>")`, from one
+rule table that says what each loader reads: its path params, its search params, and the
+facts its data depends on (`domain`, `run`, `bell`, `conversation`, `theme`,
+`session`). Each tab keeps a **ledger** of what its loaders owe: every live event as it
+arrives (a run's state is a `run` fact, a notification a `bell` fact, a conversation a
+`conversation` fact, anything else `domain`), every action as it is submitted (by the
+path it posts to: `/notifications/read` changes the bell, `/prefs/theme` the theme, sign-in,
+sign-out and `/profile` everything, a page's own action `domain` and `run`) and again as
+it answers, since a load that started while it ran cannot hold its write (ruling 457,
+RV-4), and every
+`revalidate()` that is not the live hook's own (the F22 net, a settle, a panel's poll:
+everything but root). When a route's data lands, it covers what was recorded before the
+load that brought it started. That is the watermark: the server publishes an event after
+its write commits, so a load the browser sent after receiving the event was answered from
+data that holds it. A route re-runs when it owes something it reads, when a navigation
+changed a param or search param its loader reads, or on a navigation to the URL already
+on screen. The flush revalidates once, and only if a route on screen still owes a live
+event, and it waits for a load in flight to land first, but not for a submission: another
+member's change reaches the page while the person's own slow action (an upload, a GitHub
+sync) still runs (ruling 457, RV-6). So:
+
+| Trigger | Re-runs |
+|---|---|
+| A keystroke, chip or view toggle in the board filter | nothing (no loader reads `q`, `filter`, `label`, `view`) |
+| `?events` on a task page (show older) | the task loader |
+| `?c=` / `?all=` on a controller page | that controller page |
+| Any search param on Activity | Activity |
+| A navigation inside a project | the new page; the workspace layout only when the slug changed; never root |
+| A page's own action (comment, drop, transition) | the workspace layout and that page; the action's own SSE echo, received before that load was sent, then re-runs nothing (when the action answered inside the flush's 300 ms) |
+| The bell's mark-read | what draws the bell's counts or list: the shells, Home and the notifications page |
+| A theme change | root and the profile page |
+| Sign-in, sign-out, a profile change | everything |
+| `task.updated`, `project.updated`, `violation.updated`, … | the shell and every page on screen |
+| `run.state-changed` (any task) | the pages, not the shells (the task page renders instance run facts another task's run can change: model availability, the owner's backend health) |
+| `notification.created` / `.read` | the shells, Home and the notifications page |
+| `controller.updated` | the controller pages (elsewhere it goes to the dock) |
+| `stream.resync`, or a `revalidate()` | every page and shell, not root |
+
+An action React Router does not revalidate after (a 4xx or 5xx answer, or a caller that
+opts out, like the dock's send) re-runs nothing; an event its write published still does.
+A 403 re-runs root alone: it is how a stale CSRF token answers (a sign-in in another tab
+gave the session a new id), and root no longer re-reads the session on every live event.
+Every action answers it as a result, never a throw (`requireFormAction`'s `refused`, or
+`csrfError`), because React Router sends a thrown fetcher error to the route's error
+boundary without revalidating anything (ruling 457, RV-1).
+A trigger that interrupts a load in flight finds that load's obligations still in the
+ledger and loads them itself, so nothing a person has not seen is skipped.
+
+**Reconnects replay** (ruling 457, RF-1). Every stream records the id it stands at: the
+hello's head, then each event. A reopen names that position (`lastEventId`), and the
+broker replays what the tab missed on the new scopes, which revalidates like any event;
+only a reconnect that could not say where it stood pulls every loader once. So a
+deliberate re-scope (opening, switching or closing a task) and a quiet return from a
+hidden tab reload nothing, and a return after events, or a failure recovered on the
+backoff, reloads what those events concern. A stream's position moves only on its own
+scopes' events, so a reopen after more than 256 data events elsewhere on the instance
+falls off the ring and resyncs. A stream that takes on a project, the `projects`
+firehose or the `user` scope (a slug change, a surface's first stream) opens from the
+tab's position when the navigation's loads were sent, not the newest id the old stream
+saw, since the old scopes say nothing about the new one's events (ruling 457, RV-2);
+it can replay an event its load already held, one redundant reload at most (entering a
+project from a `user`-only surface such as notifications, after that project changed). An event the closing stream had delivered
+but not yet flushed (a hide or a re-scope inside the 300 ms window) is still in the
+ledger, and the reopened stream flushes it. A hidden tab holds no stream: the hook
+closes on `visibilitychange` and reopens on return (ruling 301), and the replay is its
+catch-up. A failed stream flips `paused` (the "live updates paused" strip under the header, ruling 455(f)),
 reopens on a 2 / 5 / 15 / 30 s backoff, probes the session after two consecutive
-failures and stops on a 401 until the user retries. There is no optimistic UI for
+failures and stops on a 401 until the user retries; while it is down the tab's consoles
+say so in their footer (`useLiveStreamFailed`). There is no optimistic UI for
 governed state: revalidation is the update mechanism. (Measured 2026-09-23 on the
 ax-clone instance, before the run-line floor: each line of any run in the project
 revalidated every open board and task page, and three open pages at 2.5 revalidations a
 second pushed a trivial request's p90 from 8 ms to 157 ms on the server's one event
 loop, the one the agents run on.)
 
-The run-log console has its own `EventSource` (`useRunLogStream`), so a log line reaches
-the console at once while the task loader refetches on run lines at most every 2 s: on
-the task scope it tails `run.log-appended` and revalidates once on `run.state-changed`;
-for a controller conversation it tails `controller.log-appended` on the `user` scope. It
-fetches lines since its cursor from `/resources/run-log`, pages older history on demand,
-revalidates every 20 s while a run is shown active (a missed terminal event cannot leave
-the strip "running"), and also closes while the tab is hidden.
+**The run-log console** (`useRunLogStream` over `run-log-store.ts`, ruling 457) opens no
+connection of its own: it takes its frames from the tab's one live stream through
+`onLiveFrame`, so a task tab holds ONE `EventSource` (ruling 301 had named merging the
+console's second stream "the next cut"), and the layout's hidden-tab close and reconnect
+replay cover it. On the task scope it tails `run.log-appended`; for a controller
+conversation, `controller.log-appended` on the `user` scope. Its lines live in an external
+store the console reads with `useSyncExternalStore`, so a line re-renders the console and
+not the page. Per frame it fetches the lines since its cursor from `/resources/run-log`
+(one read in flight per thread, read again when a frame announced a line the read did not
+bring; a thread whose lines are not loaded reads the run's facts alone, so the strip moves
+for an agent whose console was never opened), and every answer carries the run row's live
+facts (`RunLiveFacts`: phase, step, turns, tokens, cache), which the Live run strip and
+the controller's working row read, so nothing revalidates per line. Each read of the
+facts, a tail's or a revalidation's, is stamped with the row's `updated_at` (`factsAt`),
+and the console keeps the newer one whichever lands last. Owner decision 2 (2026-09-24): a
+page's payload carries console lines only on a document load, and only the shown agent's
+display lines; a revalidation or a client navigation carries each thread's window facts
+(`logWindow.loaded: false`), the console fills the thread it shows with ONE
+`/resources/run-log?window=1` request, and the stored envelopes load when the raw view
+opens. A revalidation keeps what a thread holds unless its representative run changed, and
+a console on screen whose run did change keeps its lines until the new run's window
+replaces them; a head the loader saw past the cursor (a missed frame, a tab back from
+hidden) is read as a gap, and a gap wider than one window (`RUN_LOG_WINDOW_LINES`, 400)
+loads the window instead, so a catch-up never outgrows what a fresh load ships. The
+console pages older history on demand and, while a run is shown active and the tab's
+stream is DOWN, revalidates every 20 s (F22: a missed terminal event cannot leave the
+strip "running"; with the stream up the event arrives or is replayed, ruling 457, RF-6);
+the controller page reads the working turn's tail every 5 s instead and revalidates once
+the tail says the run ended (CTL-2). `run.state-changed` revalidates through the layout's
+stream, once.
 
 ## 6. Provenance and freshness
 

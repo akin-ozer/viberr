@@ -4,7 +4,7 @@ import { taskKeyLinks } from "~/server/projections/task-key-links.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { isBackendAvailableFor } from "~/server/runtimes/backend-credentials.server";
 import { getProject } from "~/server/projections/board-query.server";
-import { getTaskSummary } from "~/server/projections/task-query.server";
+import { taskExists } from "~/server/projections/task-query.server";
 import {
   canAccessConversation,
   conversationScopeOf,
@@ -17,7 +17,7 @@ import {
   type ControllerMessage,
   type ConversationScope,
 } from "~/server/controller/controller-conversations.server";
-import { resolveControllerConfig } from "~/server/controller/controller-profile.server";
+import { resolveControllerName } from "~/server/controller/controller-profile.server";
 import {
   conversationTurnState,
   type ConversationTurnState,
@@ -154,9 +154,10 @@ export function getControllerDock(
     conversationId: string | null;
     /**
      * O39-d: the panel is OPEN and shows this transcript, so its owner has
-     * seen it. The dock also loads this view while it is closed (the working
-     * poll keeps the button's dot honest), and a load nobody looked at must
-     * not mark the reply it fetched as read.
+     * seen it. A load without it reads nothing: a load nobody looked at must
+     * not mark the reply it fetched as read. (Since ruling 457 the dock loads
+     * this view only while the panel is open; the closed button reads the
+     * dock's status instead.)
      */
     markSeen?: boolean;
     dataRoot?: string;
@@ -201,7 +202,6 @@ export function getControllerDock(
     markConversationSeen(db, conversation.id, viewer.id);
   }
   const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
-  const config = resolveControllerConfig(input.dataRoot);
   const messages = conversation ? listMessages(db, conversation.id) : [];
   return {
     // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
@@ -210,7 +210,7 @@ export function getControllerDock(
     available: isBackendAvailableFor(db, viewer.id, "claude", {
       dataRoot: input.dataRoot,
     }),
-    controllerName: config.name,
+    controllerName: resolveControllerName(input.dataRoot),
     unavailable: false,
     staleSelection,
     scope,
@@ -241,7 +241,7 @@ export function dockTaskExists(
   projectSlug: string,
   taskKey: string,
 ): boolean {
-  return getTaskSummary(db, projectSlug, taskKey) !== null;
+  return taskExists(db, projectSlug, taskKey);
 }
 
 /** The view for a scope this person cannot talk in here: the panel explains
@@ -262,7 +262,7 @@ export function unavailableDockView(
 ): ControllerDockView {
   return {
     available: isBackendAvailableFor(db, viewer.id, "claude", { dataRoot }),
-    controllerName: resolveControllerConfig(dataRoot).name,
+    controllerName: resolveControllerName(dataRoot),
     unavailable: true,
     staleSelection: false,
     scope: {

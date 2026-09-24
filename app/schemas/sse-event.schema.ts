@@ -15,8 +15,9 @@ import { READINESS_VALUES } from "./task-file.schema";
  *   event id so a client that never receives a data event still resumes
  *   from the right position after a reconnect.
  * - stream.resync: sent when a reconnect's Last-Event-ID predates the
- *   ring buffer window (or a server restart reset the ids) — the client
- *   cannot be caught up by replay and should revalidate once.
+ *   ring buffer window (or an earlier server process: ids are unique across
+ *   processes, ruling 457) — the client cannot be caught up by replay and
+ *   should revalidate once.
  */
 
 export const SSE_EVENT_NAMES = [

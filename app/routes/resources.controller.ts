@@ -22,6 +22,11 @@ import {
   unavailableDockView,
 } from "~/features/controller/controller-dock-query.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
+import { dockResourceShouldRevalidate } from "~/features/controller/controller-dock-context";
+
+/** Ruling 457: the dock loads its view itself; a page revalidation never
+ *  reloads it (see `dockResourceShouldRevalidate`). */
+export const shouldRevalidate = dockResourceShouldRevalidate;
 
 /**
  * /resources/controller — the controller DOCK's data route (ruling 121), a

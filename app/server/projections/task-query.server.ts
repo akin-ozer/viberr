@@ -125,20 +125,33 @@ export function getTaskSummary(
   );
 }
 
+/** Whether the task has a projection row — exactly when {@link getTaskSummary}
+ *  answers non-null, without building the summary (ruling 457: the dock asks
+ *  this yes/no question on every load). */
+export function taskExists(db: DatabaseSync, slug: string, key: string): boolean {
+  return (
+    db
+      .prepare(`SELECT 1 FROM task_projections WHERE project_slug = ? AND task_key = ?`)
+      .get(slug, key) !== undefined
+  );
+}
+
 export function listTaskEvents(
   db: DatabaseSync,
   slug: string,
   key: string,
+  /** Ruling 457: only the newest `limit` events (the task page's window). */
+  opts: { limit?: number } = {},
 ): TimelineEventRender[] {
+  const sql = `SELECT * FROM task_events WHERE project_slug = ? AND task_key = ?
+       ORDER BY position ASC`;
+  const stmt = db.prepare(opts.limit === undefined ? sql : `${sql} LIMIT ?`);
   // SAFETY: every TaskEventRow field is a `task_events` column with the same
   // nullability, `actor_kind` is pinned by that table's CHECK constraint, and
   // `to_agent` is written as 0/1 by the only writer (rebuilder.server.ts).
-  const rows = db
-    .prepare(
-      `SELECT * FROM task_events WHERE project_slug = ? AND task_key = ?
-       ORDER BY position ASC`,
-    )
-    .all(slug, key) as TaskEventRow[];
+  const rows = (
+    opts.limit === undefined ? stmt.all(slug, key) : stmt.all(slug, key, opts.limit)
+  ) as TaskEventRow[];
   // E1: baked actor snapshots go stale on user rename — overlay the CURRENT
   // users-table identity at read time (deleted users keep the snapshot).
   const overlay = createActorRenderOverlay(db);
@@ -233,8 +246,10 @@ export function getTaskDetail(
   key: string,
   /** Gap-10: the instant "has this gone quiet?" is asked against (tests only).
    *  `dataRoot` feeds the live-backend overlay (tests only — production
-   *  defaults to the env root). */
-  opts: { now?: Date; dataRoot?: string } = {},
+   *  defaults to the env root). `timelineLimit` (ruling 457): read only the
+   *  newest N events, the window the task page ships; the summary's
+   *  `eventCount` is the total. */
+  opts: { now?: Date; dataRoot?: string; timelineLimit?: number } = {},
 ): TaskDetail | null {
   const summary = getTaskSummary(
     db,
@@ -261,7 +276,12 @@ export function getTaskDetail(
   if (opts.now) quietCheck.now = opts.now;
   return {
     ...summary,
-    timeline: listTaskEvents(db, slug, key),
+    timeline: listTaskEvents(
+      db,
+      slug,
+      key,
+      opts.timelineLimit === undefined ? {} : { limit: opts.timelineLimit },
+    ),
     diagnostics: listTaskDiagnostics(db, slug, key),
     stages: project ? project.stages.map((s) => ({ id: s.id, name: s.name, color: s.color })) : [],
     workflow: project ? project.workflow.map((w) => ({ from: w.from, to: w.to })) : [],

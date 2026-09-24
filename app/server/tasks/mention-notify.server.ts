@@ -4,8 +4,9 @@ import {
   type CreateNotificationInput,
   createNotification,
 } from "~/server/projections/notifications.server";
-import { updateTaskFile } from "~/server/files/task-writer.server";
+import { resolveTaskFilePath, updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
+import { rebuildPath } from "~/server/projections/rebuilder.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
 import { extractMentions, findMentionSpans } from "~/ui/mention-spans";
 
@@ -319,6 +320,12 @@ function resolveIn(
   text: string,
   projectSlug: string | undefined,
 ): MentionResolution {
+  // Ruling 457 (CS-5): every mention starts at an `@` (findMentionSpans), so a
+  // text without one resolves to nobody — answered here, before the user and
+  // member reads the ladder needs. The same answer the ladder gives, sooner.
+  if (!text.includes("@")) {
+    return { userIds: [], matchedBy: new Map(), ambiguous: [], nonMembers: [] };
+  }
   const users = enabledUsers(db);
   if (projectSlug === undefined) return resolveMentionTargets(users, text);
   const members = projectMemberIds(db, projectSlug);
@@ -489,7 +496,8 @@ export function fanOutMentions(
   // handles that reached nobody are still reported, because they are facts
   // about the text and the author's disclosure is written from them.
   if (input.audience === "agent") return { mentioned: [], ambiguous, nonMembers };
-  const knownNames = enabledUsers(db).map((u) => u.name);
+  // Only needed to quote a recipient, so only read when there is one.
+  const knownNames = userIds.length > 0 ? enabledUsers(db).map((u) => u.name) : [];
   const mentioned: string[] = [];
   for (const userId of userIds) {
     if (input.excludeUserId && userId === input.excludeUserId) continue;
@@ -548,8 +556,15 @@ export function mentionedUserIdsOf(
  * A no-op when the fan-out reached nobody, which is the overwhelming majority
  * of comments. Never throws: the notification and the comment are both already
  * real, and failing to annotate one is not worth losing either.
+ *
+ * Ruling 457 (CS-4): the stamp is re-projected right here, like every other
+ * task write. It used to be the one write nothing re-projected, so the file
+ * watcher did it ~250 ms later: a second `task.updated` to every open board and
+ * task page of the project, outside the page's own revalidation window, for a
+ * field (`notified`) no projection column stores.
  */
 export async function stampNotifiedRecipients(
+  db: DatabaseSync,
   ref: { projectSlug: string; taskKey: string; dataRoot?: string },
   occurredAt: string,
   reached: string[],
@@ -560,6 +575,7 @@ export async function stampNotifiedRecipients(
       const event = parsed.timeline.find((e) => e.occurredAt === occurredAt);
       if (event) event.notified = reached;
     });
+    rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ref.dataRoot });
   } catch (error) {
     logger.warn("could not record an event's notification recipients", {
       taskKey: ref.taskKey,

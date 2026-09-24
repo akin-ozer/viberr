@@ -19,10 +19,10 @@ import { findUserById } from "~/server/auth/user-store.server";
 import { controllerRunRoute } from "~/server/controller/controller-conversations.server";
 import { publishRunLogAppended, publishRunStateChanged } from "./run-events.server";
 import { CREDENTIAL_ENV_RE } from "./runtime-registry.server";
+import { withTransaction } from "~/server/db/transaction.server";
 import {
   appendRawLine,
-  insertRunLine,
-  nextSeq,
+  appendRunLine,
   patchRun,
   type RunPatch,
   getRun,
@@ -275,6 +275,9 @@ export function createRunSink(
   // off the provider's split of each write; compactions count the boundary
   // facts. Everything lands on the row with the token counters below.
   let cacheWriteTokens = 0;
+  /** The folded facts as last written to the run row (ruling 457: a line
+   *  that moves none of them writes no UPDATE). Null until the first write. */
+  let persistedFold: string | null = null;
   let firstCall: RunPatch | null = null;
   let peakPromptTokens = 0;
   let lastPromptTokens = 0;
@@ -412,10 +415,8 @@ export function createRunSink(
       // is then the only surface left.
     }
     try {
-      const seq = nextSeq(db, spec.runId);
-      insertRunLine(db, {
+      const seq = appendRunLine(db, {
         runId: spec.runId,
-        seq,
         occurredAt: now,
         raw,
         display: { t: now.slice(11, 19), ev: "err", tag: LINE_LOST_TAG, text },
@@ -635,20 +636,14 @@ export function createRunSink(
         // 1. Raw truth (append-only .jsonl).
         appendRawLine(effectiveBackend, spec.runId, raw);
 
-        // 2. DB projection row.
-        const seq = nextSeq(db, spec.runId);
-        if (display) {
-          insertRunLine(db, {
-            runId: spec.runId,
-            seq,
-            occurredAt: line.occurredAt,
-            raw,
-            display,
-          });
-        }
-
-        // 3. Fold facts into the run row.
-        patchRun(db, spec.runId, {
+        // 2. DB projection row, and 3. the facts folded into the run row.
+        //
+        // Ruling 457 (LIVE-10, SRV-8): the fold is written only when a folded
+        // value moved since the last write — most streamed lines carry no fact
+        // at all, and each used to rewrite ~20 unchanged columns (and bump
+        // `updated_at`, which nothing reads as liveness). When a line has both
+        // a row and a fold, they commit together: one WAL sync, not two.
+        const fold: RunPatch = {
           sessionId,
           turns,
           inputTokens,
@@ -657,10 +652,22 @@ export function createRunSink(
           usageFinal: usageFinal ? 1 : 0,
           totalCostUsd,
           ...cachePatch(),
-        });
+        };
+        const foldKey = JSON.stringify(fold);
+        const writeFold = foldKey !== persistedFold;
+        const persist = (): number | null => {
+          const appended = display
+            ? appendRunLine(db, { runId: spec.runId, occurredAt: line.occurredAt, raw, display })
+            : null;
+          if (writeFold) patchRun(db, spec.runId, fold);
+          return appended;
+        };
+        const seq =
+          display && writeFold && !db.isTransaction ? withTransaction(db, persist) : persist();
+        if (writeFold) persistedFold = foldKey;
 
         // 4. Publish the reference (only when a console line was produced).
-        if (display) {
+        if (seq !== null) {
           publishRunLogAppended({
             projectSlug: spec.projectSlug,
             taskKey: spec.taskKey,

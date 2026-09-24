@@ -4,7 +4,15 @@ import {
   parseDependencyRef,
   type DependencyRender,
 } from "~/shared/dependencies";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { TurnStep, WorkingSentence } from "./turn-step";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import {
@@ -12,7 +20,6 @@ import {
   useFetcher,
   useLocation,
   useNavigate,
-  useRevalidator,
   useSearchParams,
 } from "react-router";
 import type {
@@ -30,10 +37,17 @@ import { LocalDayDotTime } from "~/ui/local-time";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
-import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
+import {
+  useRunFacts,
+  useRunLogStream,
+  type RunLogStore,
+} from "~/features/runtime/use-run-log-stream";
+import { namedTurnPhase, type RunView } from "~/features/runtime/runtime-types";
+import type { ConversationTurnState } from "~/server/controller/controller-run.server";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { controllerExamples } from "./controller-examples";
+import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 
 /**
@@ -45,8 +59,10 @@ import { viewerTimeZone } from "~/shared/dates/time-zone";
  * (board scope). The active conversation rides `?c=<id>`; a bare URL opens
  * this scope's newest thread and `?c=new` the blank composer (U33-8, below),
  * and sending with no active conversation starts one. Live: the loader
- * revalidates on the owner-routed `controller.updated` SSE reference, with a
- * slow fallback poll while a turn is working.
+ * revalidates on the owner-routed `controller.updated` SSE reference; while a
+ * turn is working the console reads the turn's tail every 5 s as the fallback
+ * for a missed settle, and revalidates once the tail says it ended (ruling
+ * 457, CTL-2).
  */
 
 interface ActionResult {
@@ -54,53 +70,6 @@ interface ActionResult {
   error?: string;
   toast?: string;
   conversationId?: string;
-}
-
-/**
- * Ruling 127: what a viewer whose Claude is not connected reads here.
- *
- * The controller bills the ASKER, so this is never "the deployment has no
- * credential" — it is one person's account, and the remedy is theirs. The
- * words are the server's own (`controllerRefusalNote` in
- * controller-run.server.ts), so the disabled composer and the refusal the
- * transcript would record say the same thing. Exported because the DOCK
- * (ruling 121) is a second composer for the same turn and must not tell a
- * second story about one refusal.
- */
-export const CLAUDE_NOT_CONNECTED =
-  "The controller runs on your own Claude account, and Claude isn't connected " +
-  "for you yet. Connect it on your Profile → Agent accounts, then send your " +
-  "message again.";
-
-/** Where the sentence above sends a person, linked where it is printed. */
-const AGENT_ACCOUNTS_PLACE = "Profile → Agent accounts";
-
-/** What a composer that cannot send yet says in its own box. */
-export const CONNECT_TO_SEND = "Connect Claude to send a message.";
-
-/**
- * U39-10 (pass 39): ruling 127's sentence where a person can read it and act
- * on it. Both composers carried it as the PLACEHOLDER of a disabled textarea:
- * placeholder grey on a disabled field, cut after two lines on a phone (the
- * dock's box is two rows), and never a link. The product's own rule for a
- * disabled control is a visible note beside it (`.deny-note`), and this is
- * that note, with the place it names linked. Shared by the page and the dock
- * (ruling 121), so the two still tell one story.
- */
-export function NotConnectedNote() {
-  const [before, after] = CLAUDE_NOT_CONNECTED.split(AGENT_ACCOUNTS_PLACE);
-  return (
-    <p className="deny-note ctl-unavailable" data-not-connected>
-      <Icon name="alert" />
-      <span>
-        {before}
-        <Link className="linkish" to="/profile">
-          {AGENT_ACCOUNTS_PLACE}
-        </Link>
-        {after}
-      </span>
-    </p>
-  );
 }
 
 /**
@@ -168,7 +137,6 @@ export function ControllerPage({
   const csrf = useCsrfToken();
   const [params, setParams] = useSearchParams();
   const location = useLocation();
-  const revalidator = useRevalidator();
   useLiveUpdates(
     useMemo(
       () =>
@@ -177,17 +145,10 @@ export function ControllerPage({
           : [sseScopes.user()],
       [projectSlug],
     ),
+    // Ruling 457: this page renders the conversation, so `controller.updated`
+    // revalidates it; every other surface hands that event to the dock.
+    { conversations: true },
   );
-
-  // Fallback poll while a turn is working: the settle SSE can be missed by a
-  // paused stream, and a transcript that never shows its reply reads as a hang.
-  useEffect(() => {
-    if (!view.turn.working) return;
-    const timer = setInterval(() => {
-      if (revalidator.state === "idle") revalidator.revalidate();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [view.turn.working, revalidator]);
 
   const send = useFetcher<ActionResult>();
   const push = useToast();
@@ -313,6 +274,32 @@ export function ControllerPage({
   );
 }
 
+/** Ruling 457 (CTL-2): how often a working turn's tail is read when no line
+ *  arrives, the cadence the page's revalidation poll had (ruling 250). */
+const TURN_POLL_MS = 5_000;
+
+/** The open conversation's run-log store, for the transcript's working row. */
+const TurnStoreContext = createContext<RunLogStore | null>(null);
+
+/**
+ * Ruling 250's step on the working row, from the console's tail reads (ruling
+ * 457, CTL-2): each line and each 5 s status read carries the run row's phase
+ * and step, so the row moves without the page revalidating. Until a read moves
+ * them past what the page loaded, the loader's own turn state stands (it and
+ * the run projection were read together).
+ */
+function LiveTurnStep({ turn, runtime }: { turn: ConversationTurnState; runtime: RunView[] }) {
+  const facts = useRunFacts(useContext(TurnStoreContext), turn.runId);
+  const loaded = runtime.find((r) => r.serverRunId === turn.runId);
+  const moved =
+    facts !== null && (!loaded || facts.phase !== loaded.phase || facts.step !== loaded.step);
+  return (
+    <TurnStep
+      turn={moved ? { ...turn, phase: namedTurnPhase(facts.phase), step: facts.step } : turn}
+    />
+  );
+}
+
 /**
  * The open conversation's EXECUTION, on this surface: the task page's two
  * runtime panels, fed by the same projection (`view.runtime`, asked for the
@@ -320,8 +307,9 @@ export function ControllerPage({
  *
  * - The **Live run** strip while a turn is working: what the controller is
  *   doing (its phase and last tool step), elapsed from the run's own start,
- *   turns and tokens off the run row (refreshed by the page's poll and by the
- *   `controller.updated` reference a lifecycle flip publishes), the model,
+ *   turns and tokens off the run row (refreshed by each tail read of the
+ *   console, a line or the 5 s status read, and by the `controller.updated`
+ *   reference a lifecycle flip publishes; ruling 457), the model,
  *   View logs, and Interrupt for the conversation's owner or an org admin
  *   (`canInterruptTurn`; the engine re-checks). Interrupt confirms first (D6):
  *   a stopped turn settles with "This turn was stopped before I could answer."
@@ -360,15 +348,17 @@ function ConversationRuntime({
     else if (!stop.data.ok && stop.data.error) push(stop.data.error, "error");
   }, [stop.state, stop.data, push]);
 
-  const { linesByThread, streamError, olderByThread, loadOlder } = useRunLogStream({
+  const runLog = useRunLogStream({
     source: { kind: "controller", conversationId },
-    threads: runtime.map((r) => ({
-      threadId: r.id,
-      runId: r.serverRunId,
-      lines: r.lines.map((display, i) => ({ display, raw: r.raw[i] ?? "" })),
-      window: r.logWindow,
-    })),
+    threads: runtime,
     hasActiveRun: runtime.some((r) => r.state === "running"),
+    // Ruling 457 (CTL-2): the fallback for a settle the stream missed (a
+    // paused stream drops the `controller.updated` that shows the reply). It
+    // used to revalidate root, the layout and this page every 5 s of a turn,
+    // transcript, goals and console included, to move one step line; now it
+    // reads the turn's tail (its new lines and the row's facts) and
+    // revalidates once, when the tail says the run ended.
+    poll: { runId: view.turn.working ? view.turn.runId : null, everyMs: TURN_POLL_MS },
   });
 
   const stopping = stop.state !== "idle";
@@ -395,24 +385,17 @@ function ConversationRuntime({
   const live = runtime.some((r) => r.state === "running");
   /** One console, wherever it renders — the props cannot drift between the two
    *  positions because there is only one object. */
-  const logProps = {
-    runtime,
-    sel,
-    onSel: setSel,
-    linesByThread,
-    streamError,
-    olderByThread,
-    onLoadOlder: loadOlder,
-  };
+  const logProps = { runtime, sel, onSel: setSel, store: runLog };
   const onViewLogs = (threadId: string) => {
     setSel(threadId);
     setConsoleOpen((open) => !open);
   };
 
   return (
-    <>
+    <TurnStoreContext.Provider value={runLog}>
       {runtime.length > 0 && (
         <LiveRunPanel
+          store={runLog}
           runtime={runtime}
           onViewLogs={onViewLogs}
           onInterrupt={(id) => setConfirmInterrupt(id)}
@@ -444,7 +427,7 @@ function ConversationRuntime({
           }}
         />
       )}
-    </>
+    </TurnStoreContext.Provider>
   );
 }
 
@@ -666,7 +649,7 @@ function Transcript({
                 the conversation showed one static line for turns measured in
                 minutes. `phase` is null while it is the generic "Working" —
                 the sentence above already says that. */}
-            <TurnStep turn={view.turn} />
+            <LiveTurnStep turn={view.turn} runtime={view.runtime} />
           </div>
         )}
       </div>

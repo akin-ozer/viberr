@@ -1,5 +1,5 @@
 import type { IconName } from "~/ui/icon";
-import type { TaskSummary } from "~/shared/mapping/task.server";
+import type { BoardCard } from "./board-card";
 import { readinessLabel, validationLabel, validationQuiet } from "~/ui/pill";
 import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
 
@@ -53,7 +53,7 @@ export interface CardStatus {
   resumesAt?: string | null;
 }
 
-export function cardStatus(task: TaskSummary): CardStatus | null {
+export function cardStatus(task: BoardCard): CardStatus | null {
   if (task.archived) return { kind: "archived", label: "archived", icon: "lock" };
   if (task.waiting === "agent") {
     // Ruling 349: parked behind the concurrent-run cap — no pulse, nothing streams.
@@ -104,7 +104,7 @@ export interface CardProblem {
 /** How many problem chips a card draws before folding the rest into "+N". */
 export const PROBLEM_CAP = 2;
 
-export function cardProblems(task: TaskSummary): CardProblem[] {
+export function cardProblems(task: BoardCard): CardProblem[] {
   // F19-8: abandoned work owes nobody anything — no problem is live on it.
   if (task.archived) return [];
   const terminal = task.displayReadiness === "accepted" || task.displayReadiness === "merged";

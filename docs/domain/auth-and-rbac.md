@@ -23,7 +23,7 @@ only in `users.role`.
 |---|---|
 | Mount | `/api/auth/*` (`AUTH_BASE_PATH`), GET and POST forwarded to `getAuth().handler`. Only six endpoints are allowed (`ALLOWED_AUTH_PATHS`: `/sign-in/email`, `/sign-in/social`, `/callback/:id`, `/error`, `/get-session`, `/sign-out`); every other better-auth endpoint answers 404. |
 | Cookie | `viberr.session_token` (`cookiePrefix: "viberr"`), signed with `BETTER_AUTH_SECRET ?? VIBERR_SESSION_SECRET`. With an `https://` `BETTER_AUTH_URL` in production better-auth issues `__Secure-` cookies; an `http://` non-loopback origin in production only produces a boot warning. |
-| Session | 30-day rolling, slid at most once a day. The renewal `Set-Cookie` is captured by `authenticateWithHeaders` and forwarded by the root loader, so active users are not signed out at login + 30 days. Expired rows are never honoured and are not pruned on a timer. |
+| Session | 30-day rolling, slid at most once a day. The renewal `Set-Cookie` is captured by `authenticateWithHeaders` and forwarded by root's `sessionRenewalMiddleware` on whichever GET resolved the session (ruling 457: root's loader no longer runs on every request), so active users are not signed out at login + 30 days. Expired rows are never honoured and are not pruned on a timer. A GET or HEAD resolves its session once however many loaders and guards ask (the router hands them one Request; ruling 457); a POST resolves on every call. |
 | Passwords | better-auth's own scrypt, stored as `<saltHex>:<keyHex>` in the `account` row with `providerId = 'credential'`. Minimum 8 characters (`MIN_PASSWORD_LENGTH`). A legacy `scrypt$…` hash is not verifiable; only the seed CLI re-hashes such a row. `users` has no password column. |
 | Sign-up | Disabled. Accounts exist only because an admin created or whitelisted them (§2). |
 | Login | `POST /login` `intent=login`: origin check (no session yet), pre-checks on `users` (unknown, disabled, no password) that each consume a throttle token, then better-auth `/sign-in/email`. Success records `users.last_login_at` and audits `auth.login.success`; failures audit `auth.login.failure` / `auth.login.rate_limited`. Unknown email and OAuth-only accounts share one error string. |
@@ -45,10 +45,13 @@ Two independent layers, both required (`app/server/auth/csrf.server.ts`):
    `_csrf` (or the `X-Csrf-Token` header), compared with `timingSafeEqual`.
 
 `requireFormAction(request)` is the preamble most route actions use: auth → db →
-formData → CSRF → `{ auth, db, formData, actor, intent }`. Document-form routes let
-the 403 hit the error boundary; fetcher routes (`/controller`, `/projects/:slug/controller`,
+formData → CSRF → `{ refused, auth, db, formData, actor, intent }`. A failed check is
+answered, not thrown: `refused` is the 403 `{ ok: false, error }` result the action
+returns first (`if (refused) return refused;`), so the page stays up with what the
+person typed, and the 403 re-runs root, which re-reads the token (ruling 457, RV-1).
+The routes that do not use the preamble (`/controller`, `/projects/:slug/controller`,
 `/profile`, `/notifications/read`, `/prefs/theme`, `/resources/controller`) call
-`csrfError` instead and return `{ ok: false, error }` so the UI stays up. `/api/auth/*`
+`csrfError`, which `refused` is built from, and return it the same way. `/api/auth/*`
 is exempt (better-auth's own `trustedOrigins` check); `/login`'s `login` intent runs the
 origin check only (`assertTrustedOrigin`, there is no session yet), and its
 `set-password` intent the full check.
@@ -150,9 +153,9 @@ else.
 (no audit); the actor is an **org admin** and gets `role: admin` as the audited
 emergency override (`project.org_admin.override`, repeats collapsed per minute);
 or a denial audited as `project.authority.denied` (silent only on the `@mention`
-run-agents probe). Reads go through the workspace layout loader and
-`requireProjectMember`, which return the **same 404 bytes** for a non-member and for
-an unknown slug (ruling 25); actions go through `requireVisibleProject`
+run-agents probe). Reads go through the workspace layout loader (and the board
+loader, through the same `readWorkspace` read, ruling 457) and `requireProjectMember`,
+which return the **same 404 bytes** for a non-member and for an unknown slug (ruling 25); actions go through `requireVisibleProject`
 (`app/routes/project-visibility.server.ts`) before any try block. Config surfaces use
 `assertProjectAction`, which re-reads `project.md` and refuses an archived project
 with 409 unless `allowArchived`.

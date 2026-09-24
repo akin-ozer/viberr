@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.policy";
 import { pageTitle } from "~/shared/page-title";
@@ -50,7 +51,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
   // R15-4: this action runs WITHOUT the layout loader's membership gate
   // (React Router does not run parent loaders for a child action), so refuse a
   // non-member here with the same unknown-slug 404 the loader gives.
@@ -110,8 +112,11 @@ export default function PolicyView({ loaderData }: Route.ComponentProps) {
   return (
     <PolicyPage
       data={loaderData.view}
-      projectSlug={layout?.board.project.slug ?? ""}
+      projectSlug={layout?.project.slug ?? ""}
       myRole={layout?.myRole ?? null}
     />
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.policy");

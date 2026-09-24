@@ -1,8 +1,18 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.board";
 import { pageTitle } from "~/shared/page-title";
 import type { loader as projectLoader } from "./project";
 import { requireVisibleProject } from "./project-visibility.server";
+import { readWorkspace } from "./project-workspace.server";
+import { requireUser } from "~/server/auth/require-user.server";
+import { getDb } from "~/server/db/sqlite.server";
+import { readRepoHealth } from "~/server/github/repo-health.server";
+import { decisionsRequiring } from "~/server/projections/decisions.server";
+import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
+import { withLiveRun } from "~/shared/mapping/task.server";
+import type { TaskActivitySummary } from "~/server/projections/board-query.server";
+import { toBoardCard } from "~/features/board/board-card";
 import {
   appErrorResponse,
   requireFormAction,
@@ -20,11 +30,14 @@ import { roleCan } from "~/shared/rbac";
 import { BoardPage } from "~/features/board/board-page";
 
 /**
- * Board view (board spec). Data comes from the workspace layout loader
- * (routes/project) — one query feeds the rail counts AND the columns, and
- * every action here revalidates both. Actions: create-task (phase-3
- * createTask, RBAC inside), rescan (reconcile file store ↔ projections).
- * No optimistic UI for governed state — revalidation shows the new card.
+ * Board view (board spec). The columns are this route's own loader (ruling
+ * 457, BOARD-6: they used to ride the workspace layout, so every project page
+ * shipped them); the rail counts stay in the layout, and both read the project
+ * through `readWorkspace`, so one query per request still feeds the rail counts
+ * AND the columns, and every action here revalidates both. Actions:
+ * create-task (phase-3 createTask, RBAC inside), rescan (reconcile file store
+ * ↔ projections). No optimistic UI for governed state — revalidation shows the
+ * new card.
  */
 
 /**
@@ -49,8 +62,62 @@ export function meta({ params }: Route.MetaArgs) {
   return [{ title: pageTitle("Board", params.slug) }];
 }
 
+export async function loader({ request, params }: Route.LoaderArgs) {
+  const user = await requireUser(request);
+  const db = getDb();
+  // R15-4 on THIS loader too (F19-28): single fetch honors a client-supplied
+  // `?_routes=` filter, so this loader can run without the layout's. The
+  // refusal is the layout's own (`readWorkspace`), byte-identical 404, before
+  // any viewer-scoped read below.
+  const { board, reviewQueue } = readWorkspace(request, db, params.slug, user);
+  // R8-3: annotate each task with whether an open decision here needs THIS
+  // viewer's action (the single member-scoped source), so the board's
+  // "Waiting on me" chip + per-card badge stop reading the project-wide
+  // `waiting === "human"` enum. `waitingOnMe` is viewer-specific, so derive
+  // fresh task objects instead of mutating the ones getBoard returned — a
+  // future read-model cache in board-query.server must never let one viewer's
+  // annotation leak into another's board (RU #11).
+  // UI-48: the board's "waiting on me" and the review queue's "Waiting on your
+  // acceptance" answered the same question differently — `decisionsRequiring`
+  // only scans tasks that carry a packet or a recommendation, while the review
+  // queue deliberately does NOT require a decision object (a review-stage task
+  // waiting on a human can have no packet). A maintainer therefore saw VIB-142
+  // under "Waiting on your acceptance" while the board's chip excluded it.
+  // Union the two predicates here so both surfaces read one answer; the review
+  // queue's `ready` list is already viewer-scoped by acceptance authority.
+  // U35-5: the queue is read ONCE per request, with the layout's rail badge.
+  const myDecisions = new Set([
+    ...decisionsRequiring(db, user.id, { projectSlug: params.slug }).mine.map(
+      (d) => d.taskKey,
+    ),
+    ...reviewQueue.ready.map((r) => r.key),
+  ]);
+  // Ruling 349: a card says "agent queued" for a run the cap parked; the fact
+  // is on the run row, read once for the project.
+  const liveRuns = liveRunStateByTask(db, params.slug);
+  // Ruling 457 (BOARD-3): each card ships the fields the board reads
+  // (`toBoardCard`), not the whole summary. Gap-10's `quiet` rides along.
+  const card = (t: TaskActivitySummary) =>
+    toBoardCard(
+      withLiveRun({ ...t, waitingOnMe: myDecisions.has(t.key) }, liveRuns.get(t.key) ?? null),
+    );
+  return {
+    columns: board.columns.map((c) => ({ stage: c.stage, tasks: c.tasks.map(card) })),
+    orphanTasks: board.orphanTasks.map(card),
+    // D3: the merge target the shared acceptance ceremony names when a board
+    // move into the terminal stage is confirmed.
+    defaultBranch: board.project.defaultBranch,
+    // U33-2: the LAST recorded repository probe, never a fresh one — the board
+    // is the surface people live on and it must not call GitHub to render. The
+    // row is written where the answer was already known (project creation and
+    // the GitHub page's cached probe); null means nothing has ever looked.
+    repoAccess: readRepoHealth(db, params.slug)?.result ?? null,
+  };
+}
+
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
   // R15-4 / E2: React Router runs this action WITHOUT the layout loader, so the
   // membership gate has to be repeated here. Without it `create-task` answered a
   // signed-in non-member with the inner guard's 403 ("Only project members can
@@ -150,7 +217,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 }
 
-export default function Board() {
+export default function Board({ loaderData }: Route.ComponentProps) {
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   if (!layout) return null;
   // UI-58 again (E3): this was the one control left gated on a role LITERAL
@@ -167,19 +234,22 @@ export default function Board() {
   const canRescan = roleCan(layout.myRole, "rescan-project");
   return (
     <BoardPage
-      columns={layout.board.columns}
-      orphanTasks={layout.board.orphanTasks}
+      columns={loaderData.columns}
+      orphanTasks={loaderData.orphanTasks}
       canCreate={canCreate}
       canTransition={canTransition}
       canRescan={canRescan}
       // D3: the merge target the shared acceptance ceremony names when a board
       // move into the terminal stage is confirmed (task-detail already reads the
       // same fact from the project record).
-      defaultBranch={layout.board.project.defaultBranch}
+      defaultBranch={loaderData.defaultBranch}
       // U33-2: the remembered repository probe, so a project pointed at a
       // repository GitHub will not serve says so where the work happens instead
       // of only on its GitHub page.
-      repoAccess={layout.repoAccess ?? undefined}
+      repoAccess={loaderData.repoAccess ?? undefined}
     />
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.board");

@@ -73,6 +73,23 @@ export function storeIcon(name: string): IconName {
   return name in ICON_PATHS ? (name as IconName) : "dot";
 }
 
+/**
+ * Ruling 457: one `{__html}` object per glyph, made once. React 19 compares
+ * `dangerouslySetInnerHTML` by the object's identity, so a fresh object on each
+ * render re-parsed the markup and replaced the SVG's children every time an
+ * icon re-rendered (60 per task-page render, 133 per board revalidation).
+ */
+const ICON_HTML = new Map<IconName, { __html: string }>();
+
+function iconHtml(name: IconName): { __html: string } {
+  let html = ICON_HTML.get(name);
+  if (!html) {
+    html = { __html: ICON_PATHS[name] || ICON_PATHS.dot };
+    ICON_HTML.set(name, html);
+  }
+  return html;
+}
+
 export function Icon({
   name,
   className,
@@ -80,7 +97,6 @@ export function Icon({
   name: IconName;
   className?: string;
 }) {
-  const inner = ICON_PATHS[name] || ICON_PATHS.dot;
   return (
     <svg
       className={"ico " + (className || "")}
@@ -90,7 +106,7 @@ export function Icon({
       strokeWidth="1.7"
       strokeLinecap="round"
       strokeLinejoin="round"
-      dangerouslySetInnerHTML={{ __html: inner }}
+      dangerouslySetInnerHTML={iconHtml(name)}
       aria-hidden="true"
     />
   );

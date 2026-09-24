@@ -1,0 +1,89 @@
+import { RouterContextProvider } from "react-router";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { pinPerfClock } from "../../test-support/perf-clock";
+import { expectWithinBudget } from "../../test-support/perf-ratchet";
+import {
+  rowsMatching,
+  statementsMatching,
+  tallyServerReads,
+} from "../../test-support/perf-counters";
+import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+
+/**
+ * Ruling 457, journey `board-live` / `server`: what one board revalidation
+ * costs the shared event loop. React Router re-runs root + the workspace
+ * layout + the board's own loader (ruling 457, BOARD-6) on every live event
+ * the board hears, all handed ONE Request.
+ *
+ * Fixture: the demo seed's viberr-core board, viewed by arda (org admin,
+ * project admin). Measured on the SECOND revalidation (the steady state).
+ */
+
+let app: AppTestContext;
+let ardaId: string;
+const SLUG = "viberr-core";
+
+beforeAll(async () => {
+  pinPerfClock();
+  app = await setupAppTest();
+  const { runDemoSeed } = await import("../../test-support/demo-seed");
+  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { findUserByEmail } = await import("~/server/auth/user-store.server");
+  ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
+});
+afterAll(() => {
+  vi.useRealTimers();
+  app.cleanup();
+});
+
+async function revalidateBoard(cookie: string) {
+  const [root, layout, board] = await Promise.all([
+    import("~/root"),
+    import("~/routes/project"),
+    import("~/routes/project.board"),
+  ]);
+  const request = app.request(`/projects/${SLUG}/board.data`, { cookie });
+  const args = {
+    request,
+    url: new URL(request.url),
+    params: { slug: SLUG },
+    pattern: "/projects/:slug/board",
+    context: new RouterContextProvider(),
+  };
+  // Ruling 457 (BOARD-6): the columns are the board route's own loader, run
+  // beside the layout's on the same Request.
+  return Promise.all([root.loader(args), layout.loader(args), board.loader(args)]);
+}
+
+describe("board revalidation (ruling 457)", () => {
+  it("stays within its server-read budgets", async () => {
+    const { cookie } = await app.cookieFor(ardaId);
+    const [, cold] = await revalidateBoard(cookie);
+    const { storeFileParseCounts } = await import("~/server/files/parse-memo.server");
+    const totalParses = () => Object.values(storeFileParseCounts()).reduce((a, b) => a + b, 0);
+    const parsesBefore = totalParses();
+    const { result, tally } = await tallyServerReads(app.dataRoot, () => revalidateBoard(cookie));
+    const parses = totalParses() - parsesBefore;
+
+    // Correctness first: the rail counts and the board read the same as before.
+    const layout = result[1];
+    expect(layout.taskCount).toBe(cold.taskCount);
+    expect(layout.reviewCount).toBe(cold.reviewCount);
+    expect(layout.reviewCount).toBeGreaterThan(0);
+
+    expectWithinBudget(
+      "server-read:board-revalidation.yaml-parses",
+      parses,
+    );
+    expectWithinBudget("server-read:board-revalidation.store-reads", tally.storeReads.length);
+    expectWithinBudget("server-read:board-revalidation.sql", tally.statements.length);
+    expectWithinBudget(
+      "server-read:board-revalidation.session-lookups",
+      statementsMatching(tally, /from "session"/i).length,
+    );
+    expectWithinBudget(
+      "server-read:board-revalidation.task-rows",
+      rowsMatching(tally, /SELECT \* FROM task_projections/),
+    );
+  });
+});

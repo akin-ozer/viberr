@@ -12,6 +12,7 @@ import { freshestContent, rememberWrite } from "./write-cache.server";
 import { writeFileAtomic } from "./atomic-file.server";
 import { withFileLock } from "./file-mutex.server";
 import { taskFilePath } from "./file-store-root.server";
+import { parseStoreFile } from "./parse-memo.server";
 import {
   parseTaskFileContent,
   serializeTaskFile,
@@ -48,9 +49,13 @@ export function readTaskFile(ref: TaskFileRef): TaskFileReadResult | null {
   const absPath = resolveTaskFilePath(ref);
   if (!existsSync(absPath)) return null;
   const content = readFileSync(absPath, "utf8");
-  const { parsed, diagnostics } = parseTaskFileContent(content, {
-    fallbackKey: ref.taskKey,
-  });
+  const { parsed, diagnostics } = parseStoreFile(
+    "task-file",
+    absPath,
+    ref.taskKey,
+    content,
+    (c) => parseTaskFileContent(c, { fallbackKey: ref.taskKey }),
+  );
   return { parsed, diagnostics, content, absPath };
 }
 

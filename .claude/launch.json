@@ -20,6 +20,16 @@
       ],
       "port": 5174,
       "autoPort": true
+    },
+    {
+      "name": "viberr-prod-hermetic",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm use >/dev/null 2>&1; export VIBERR_DATA_ROOT=\"$PWD/data\"; export PORT=5175; npm run build >/dev/null && exec npm start"
+      ],
+      "port": 5175,
+      "autoPort": false
     }
   ]
 }

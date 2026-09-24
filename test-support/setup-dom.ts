@@ -74,3 +74,16 @@ if ("window" in globalThis && !Object.hasOwn(window, "AnimationEvent")) {
   }
   Object.defineProperty(window, "AnimationEvent", { value: AnimationEventShim, configurable: true, writable: true });
 }
+
+/**
+ * jsdom's Range has no `getBoundingClientRect` (it lays nothing out). Lexical
+ * calls it on the DOM selection's range whenever it commits an update while the
+ * editor holds the focus with a collapsed caret in text, to scroll the caret
+ * into view, so a composer test whose editor had just taken the focus (an
+ * @mention inserted, a prefill) could end in an uncaught TypeError from a
+ * commit that landed before its cleanup. An empty rect is the honest answer
+ * from a host with no layout; `Element.prototype` already answers the same.
+ */
+if ("window" in globalThis && !Object.hasOwn(window.Range.prototype, "getBoundingClientRect")) {
+  window.Range.prototype.getBoundingClientRect = () => new window.DOMRect(0, 0, 0, 0);
+}

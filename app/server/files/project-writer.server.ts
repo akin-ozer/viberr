@@ -10,6 +10,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { writeFileAtomic } from "./atomic-file.server";
 import { withFileLock } from "./file-mutex.server";
 import { projectDir, projectFilePath } from "./file-store-root.server";
+import { parseStoreFile } from "./parse-memo.server";
 import {
   parseProjectFileContent,
   serializeProjectFile,
@@ -42,9 +43,13 @@ export function readProjectFile(
   const absPath = resolveProjectFilePath(ref);
   if (!existsSync(absPath)) return null;
   const content = readFileSync(absPath, "utf8");
-  const { parsed, diagnostics } = parseProjectFileContent(content, {
-    fallbackSlug: ref.projectSlug,
-  });
+  const { parsed, diagnostics } = parseStoreFile(
+    "project-file",
+    absPath,
+    ref.projectSlug,
+    content,
+    (c) => parseProjectFileContent(c, { fallbackSlug: ref.projectSlug }),
+  );
   return { parsed, diagnostics, content, absPath };
 }
 

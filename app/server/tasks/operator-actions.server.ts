@@ -866,6 +866,7 @@ async function writeOperatorComment(
   // notify (the record lost the line; the ping must not be lost with it).
   // Ruling 382: and the event records who it reached, so compaction keeps it.
   await stampNotifiedRecipients(
+    db,
     taskRef(ctx, projectSlug, taskKey),
     event.occurredAt,
     notifyMentionedUsers(db, {
@@ -1041,6 +1042,7 @@ async function addRecommendation(
   // NEW-4: recommendation reasoning that tags a person pings them too.
   // Ruling 382: and the event records who it reached, so compaction keeps it.
   await stampNotifiedRecipients(
+    db,
     taskRef(ctx, projectSlug, taskKey),
     reasoningAt,
     notifyMentionedUsers(db, {

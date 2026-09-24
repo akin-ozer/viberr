@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -21,6 +21,10 @@ import type {
 } from "~/schemas/task-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
+import {
+  allocateTaskKey,
+  updateProjectFile,
+} from "~/server/files/project-writer.server";
 import {
   rebuildAll,
   rebuildPath,
@@ -1680,5 +1684,286 @@ describe("ruling 225: a task resting on a clock", () => {
     } finally {
       ctx.cleanup();
     }
+  });
+});
+
+describe("ruling 457: projection write cost, behaviour kept", () => {
+  const comment = (userId: string, at: string, text: string) => ({
+    occurredAt: at,
+    type: "comment" as const,
+    actor: { kind: "human" as const, userId, nameHint: null },
+    title: null,
+    toAgent: false,
+    evidence: null,
+    text,
+  });
+  const rowsSchema = z.array(
+    z.object({
+      id: z.number(),
+      position: z.number(),
+      occurred_at: z.string(),
+      type: z.string(),
+      actor_ref: z.string(),
+      actor_json: z.string(),
+      title: z.string().nullable(),
+      text: z.string(),
+    }),
+  );
+  const eventRows = (store: ReturnType<typeof setupTestStore>, key: string) =>
+    rowsSchema.parse(
+      store.db
+        .prepare(
+          `SELECT id, position, occurred_at, type, actor_ref, actor_json, title, text
+             FROM task_events WHERE project_slug = ? AND task_key = ? ORDER BY position`,
+        )
+        .all(store.slug, key),
+    );
+  /** The rows a from-scratch projection of the same file produces, ids aside. */
+  const scratchRows = (store: ReturnType<typeof setupTestStore>, key: string) => {
+    store.db
+      .prepare(`DELETE FROM task_events WHERE project_slug = ? AND task_key = ?`)
+      .run(store.slug, key);
+    rebuildTaskFile(store.db, store.slug, key, { dataRoot: store.dataRoot, force: true });
+    return eventRows(store, key).map(({ id: _id, ...rest }) => rest);
+  };
+  const taskUpdates = () => {
+    const keys: string[] = [];
+    const off = onProjectionEvent((e) => {
+      if (e.type === "task.updated") keys.push(e.taskKey);
+    });
+    return { keys, off };
+  };
+
+  function twoTasks(store: ReturnType<typeof setupTestStore>) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [comment(store.users.selin.id, "2026-07-01T10:00:00.000Z", "hi")],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("SRV-3: a nextTaskNumber bump updates the project row and re-projects no task", async () => {
+    const store = setupTestStore(ctx);
+    twoTasks(store);
+    const projectEvents: string[] = [];
+    const offProject = onProjectionEvent((e) => {
+      if (e.type === "project.updated") projectEvents.push(e.projectSlug);
+    });
+    const tasks = taskUpdates();
+    await allocateTaskKey({ projectSlug: store.slug, dataRoot: store.dataRoot });
+    const result = rebuildPath(store.db, projectFilePath(store.slug, store.dataRoot), {
+      dataRoot: store.dataRoot,
+    });
+    offProject();
+    tasks.off();
+    expect(result).toMatchObject({ action: "projected", taskFacingChanged: false });
+    expect(projectEvents).toEqual([store.slug]);
+    expect(tasks.keys).toEqual([]);
+  });
+
+  it("SRV-3: a stage change still re-projects every task", async () => {
+    const store = setupTestStore(ctx);
+    twoTasks(store);
+    const tasks = taskUpdates();
+    // Drop the `impl` stage: VIB-1 now sits on a stage the project does not have.
+    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.stages = parsed.frontmatter.stages.filter((s) => s.id !== "impl");
+      parsed.frontmatter.workflow = parsed.frontmatter.workflow.filter(
+        (w) => w.from !== "impl" && w.to !== "impl",
+      );
+    });
+    rebuildPath(store.db, projectFilePath(store.slug, store.dataRoot), {
+      dataRoot: store.dataRoot,
+    });
+    tasks.off();
+    expect([...tasks.keys].sort()).toEqual(["VIB-1", "VIB-2"]);
+    const codes = z
+      .array(z.object({ code: z.string() }))
+      .parse(store.db.prepare(`SELECT code FROM diagnostics WHERE task_key = ?`).all("VIB-1"))
+      .map((d) => d.code);
+    expect(codes).toContain("reference.unknown_stage");
+  });
+
+  it("SRV-3: a membership change still re-projects every task (guest flags)", async () => {
+    const store = setupTestStore(ctx);
+    twoTasks(store);
+    const tasks = taskUpdates();
+    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.members = parsed.frontmatter.members.filter(
+        (m) => m.userId !== store.users.selin.id,
+      );
+    });
+    rebuildPath(store.db, projectFilePath(store.slug, store.dataRoot), {
+      dataRoot: store.dataRoot,
+    });
+    tasks.off();
+    expect([...tasks.keys].sort()).toEqual(["VIB-1", "VIB-2"]);
+    expect(JSON.parse(eventRows(store, "VIB-1")[0]!.actor_json)).toMatchObject({ guest: true });
+  });
+
+  it("SRV-3: a rescan after a counter-only change forces no task", async () => {
+    const store = setupTestStore(ctx);
+    twoTasks(store);
+    await allocateTaskKey({ projectSlug: store.slug, dataRoot: store.dataRoot });
+    const summary = rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(summary).toMatchObject({ projects: 1, tasks: 2, changed: 1, unchanged: 2 });
+  });
+
+  it("SRV-4: projection events arrive after the rows commit", () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1"),
+      timeline: [comment(store.users.arda.id, "2026-07-01T10:00:00.000Z", "hi")],
+    });
+    const seen: { inTransaction: boolean; events: number }[] = [];
+    const off = onProjectionEvent((e) => {
+      if (e.type !== "task.updated") return;
+      seen.push({
+        inTransaction: store.db.isTransaction,
+        events: eventRows(store, "VIB-1").length,
+      });
+    });
+    rebuildPath(store.db, taskFilePath(store.slug, "VIB-1", store.dataRoot), {
+      dataRoot: store.dataRoot,
+    });
+    off();
+    expect(seen).toEqual([{ inTransaction: false, events: 1 }]);
+  });
+
+  it("CS-6: an append keeps every existing row, and the rows match a from-scratch projection", () => {
+    const store = setupTestStore(ctx);
+    const uid = store.users.arda.id;
+    const older = [
+      comment(uid, "2026-07-01T10:02:00.000Z", "third"),
+      comment(uid, "2026-07-01T10:01:00.000Z", "second"),
+      comment(uid, "2026-07-01T10:00:00.000Z", "first"),
+    ];
+    const frontmatter = baseTaskFrontmatter("VIB-1");
+    writeTask(store.dataRoot, store.slug, { frontmatter, timeline: older });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const before = eventRows(store, "VIB-1");
+
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter,
+      timeline: [comment(store.users.murat.id, "2026-07-01T10:03:00.000Z", "fourth"), ...older],
+    });
+    rebuildTaskFile(store.db, store.slug, "VIB-1", { dataRoot: store.dataRoot });
+    const after = eventRows(store, "VIB-1");
+    expect(after.map((r) => r.text)).toEqual(["fourth", "third", "second", "first"]);
+    expect(after.map((r) => r.position)).toEqual([0, 1, 2, 3]);
+    expect(after.slice(1).map((r) => r.id)).toEqual(before.map((r) => r.id));
+    expect(after.map(({ id: _id, ...rest }) => rest)).toEqual(scratchRows(store, "VIB-1"));
+  });
+
+  it("CS-6: an edit in the middle keeps the rows before it and rewrites the rest", () => {
+    const store = setupTestStore(ctx);
+    const uid = store.users.arda.id;
+    const frontmatter = baseTaskFrontmatter("VIB-1");
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter,
+      timeline: [
+        comment(uid, "2026-07-01T10:03:00.000Z", "fourth"),
+        comment(uid, "2026-07-01T10:02:00.000Z", "third"),
+        comment(uid, "2026-07-01T10:01:00.000Z", "second"),
+        comment(uid, "2026-07-01T10:00:00.000Z", "first"),
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const before = eventRows(store, "VIB-1");
+
+    // "third" is folded away (a compaction or a hand edit) and "second" is
+    // reworded in place.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter,
+      timeline: [
+        comment(uid, "2026-07-01T10:04:00.000Z", "fifth"),
+        comment(uid, "2026-07-01T10:03:00.000Z", "fourth"),
+        comment(uid, "2026-07-01T10:01:00.000Z", "second, reworded"),
+        comment(uid, "2026-07-01T10:00:00.000Z", "first"),
+      ],
+    });
+    rebuildTaskFile(store.db, store.slug, "VIB-1", { dataRoot: store.dataRoot });
+    const after = eventRows(store, "VIB-1");
+    expect(after.map((r) => r.text)).toEqual(["fifth", "fourth", "second, reworded", "first"]);
+    // The two oldest events kept their rows (one of them updated in place).
+    expect(after.slice(2).map((r) => r.id)).toEqual(before.slice(2).map((r) => r.id));
+    expect(after.map(({ id: _id, ...rest }) => rest)).toEqual(scratchRows(store, "VIB-1"));
+  });
+
+  it("CS-6: a renamed author's snapshot is refreshed on the kept rows", () => {
+    const store = setupTestStore(ctx);
+    const uid = store.users.arda.id;
+    const frontmatter = baseTaskFrontmatter("VIB-1");
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter,
+      timeline: [comment(uid, "2026-07-01T10:00:00.000Z", "first")],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const before = eventRows(store, "VIB-1");
+
+    store.db.prepare(`UPDATE users SET name = ? WHERE id = ?`).run("Arda Renamed", uid);
+    rebuildTaskFile(store.db, store.slug, "VIB-1", { dataRoot: store.dataRoot, force: true });
+    const after = eventRows(store, "VIB-1");
+    expect(after[0]!.id).toBe(before[0]!.id);
+    expect(JSON.parse(after[0]!.actor_json)).toMatchObject({ name: "Arda Renamed" });
+  });
+
+  /**
+   * SRV-4 made a project's re-projection one transaction, cascade included, so
+   * a task that could not re-project rolled back the project row with it: an
+   * admin's member change never landed, the fault was pinned on project.md,
+   * and every later write of project.md failed the same way.
+   */
+  it("SRV-4: a cascaded task that cannot re-project keeps the project row and the other tasks", async () => {
+    const store = setupTestStore(ctx);
+    twoTasks(store);
+    resetProjectionFaultsForTests();
+    // VIB-2's file cannot be read (EISDIR here; EACCES or EIO live).
+    const brokenTask = taskFilePath(store.slug, "VIB-2", store.dataRoot);
+    rmSync(brokenTask);
+    mkdirSync(brokenTask);
+    const tasks = taskUpdates();
+    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.members = parsed.frontmatter.members.filter(
+        (m) => m.userId !== store.users.selin.id,
+      );
+    });
+    const projectPath = projectFilePath(store.slug, store.dataRoot);
+    // CANARY: call `rebuildTaskFile` straight from the cascade loop again and
+    // this is `error`, with selin still a member.
+    const result = rebuildPath(store.db, projectPath, { dataRoot: store.dataRoot });
+    tasks.off();
+    expect(result).toMatchObject({ action: "projected", failedTasks: ["VIB-2"] });
+    const members = z
+      .array(z.object({ user_id: z.string() }))
+      .parse(
+        store.db
+          .prepare(`SELECT user_id FROM project_members WHERE project_slug = ?`)
+          .all(store.slug),
+      )
+      .map((m) => m.user_id);
+    expect(members).not.toContain(store.users.selin.id);
+    expect(tasks.keys).toEqual(["VIB-1"]);
+    expect(JSON.parse(eventRows(store, "VIB-1")[0]!.actor_json)).toMatchObject({ guest: true });
+    expect(projectionFaultCount()).toBe(1);
+    expect(projectionFault()!.sourcePath).toBe(`projects/${store.slug}/tasks/VIB-2/task.md`);
+
+    // The file is readable again: rebuilding project.md, unchanged, runs the
+    // cascade again (the row kept the F28-D3 sentinel), and only then settles.
+    rmSync(brokenTask, { recursive: true });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review" }),
+    });
+    expect(rebuildPath(store.db, projectPath, { dataRoot: store.dataRoot })).toMatchObject({
+      action: "projected",
+      taskFacingChanged: true,
+    });
+    expect(projectionFaultCount()).toBe(0);
+    expect(rebuildPath(store.db, projectPath, { dataRoot: store.dataRoot }).action).toBe(
+      "unchanged",
+    );
   });
 });

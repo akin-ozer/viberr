@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   diagWarning,
@@ -9,6 +10,7 @@ import {
   splitFrontmatter,
   yamlMappingSchema,
 } from "./frontmatter.server";
+import { parseStoreFile } from "./parse-memo.server";
 
 /**
  * Org-level agent profile TEMPLATE files:
@@ -163,6 +165,28 @@ export function parseAgentProfileContent(
     parsed: { frontmatter: result.data, description: body.trim() },
     diagnostics,
   };
+}
+
+export interface AgentProfileReadResult extends AgentProfileParseResult {
+  content: string;
+}
+
+/** Reads + parses one profile file; null when it is absent. The parse goes
+ *  through the store readers' parse memo (ruling 457). */
+export function readAgentProfileFile(
+  absPath: string,
+  fallbackId: string,
+): AgentProfileReadResult | null {
+  if (!existsSync(absPath)) return null;
+  const content = readFileSync(absPath, "utf8");
+  const { parsed, diagnostics } = parseStoreFile(
+    "agent-profile",
+    absPath,
+    fallbackId,
+    content,
+    (c) => parseAgentProfileContent(c, { fallbackId }),
+  );
+  return { parsed, diagnostics, content };
 }
 
 export function serializeAgentProfile(parsed: ParsedAgentProfile): string {

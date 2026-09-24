@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data } from "react-router";
 import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/controller";
@@ -18,6 +19,7 @@ import {
   NEW_CONVERSATION_PARAM,
 } from "~/features/controller/controller-page";
 import { getControllerSurface } from "~/features/controller/controller-query.server";
+import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
  * /controller — the instance controller surface (ruling 99). Every signed-in
@@ -72,6 +74,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       projectSlug: null,
       conversationId: selectedConversationId(db, url, user.id),
       all: url.searchParams.get("all") === "1",
+      // Ruling 457 (owner decision 2): console lines on a document load only.
+      console: isDocumentNavigation(request) ? "shown" : "none",
     },
   );
   return { view };
@@ -159,3 +163,6 @@ export default function ControllerRoute({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/controller");

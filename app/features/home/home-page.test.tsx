@@ -75,8 +75,8 @@ function baseData(projects: HomeProjectCard[]): HomePageData {
       mcpServers: 1,
       skills: 4,
     },
-    notifications: [],
     unread: 0,
+    orphanUnread: 0,
     storeRoot: "/data",
   };
 }

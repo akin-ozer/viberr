@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data, redirect, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.settings";
 import { pageTitle } from "~/shared/page-title";
@@ -92,7 +93,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
   const field = (name: string) => String(formData.get(name) ?? "");
   const slug = params.slug;
 
@@ -282,3 +284,6 @@ export default function SettingsView({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.settings");

@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { deliveryToast } from "~/features/task-detail/delivery-toast";
 import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import {
@@ -33,6 +34,7 @@ import {
   isTaskViewNavigation,
   markTaskNotificationsSeen,
 } from "~/server/projections/notifications.server";
+import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   applyRecommendation,
@@ -123,7 +125,8 @@ import type {
 import type { TimelineFilterId } from "~/features/task-detail/timeline";
 import {
   clampTimelineLimit,
-  sliceTimeline,
+  timelineSlice,
+  timelineWindowSize,
 } from "~/features/task-detail/timeline-slice";
 import { roleCan } from "~/shared/rbac";
 import { Icon } from "~/ui/icon";
@@ -193,7 +196,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     { userId: user.id, label: user.email },
     "read this project",
   );
-  const detail = getTaskDetail(db, params.slug, params.key);
+  const limit = clampTimelineLimit(
+    new URL(request.url).searchParams.get("events"),
+  );
+  // Ruling 457: the query reads only the window the page ships; the event
+  // count below keeps "Show older" exact.
+  const detail = getTaskDetail(db, params.slug, params.key, {
+    timelineLimit: timelineWindowSize(limit),
+  });
   if (!detail) {
     throw data(`No task ${params.key} in projects/${params.slug}.`, {
       status: 404,
@@ -222,10 +232,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       });
     }
   }
-  const limit = clampTimelineLimit(
-    new URL(request.url).searchParams.get("events"),
-  );
-  const slice = sliceTimeline(detail.timeline, limit);
+  // The total is the projection's event count: the rebuilder writes it from
+  // the same parsed timeline, in the same synchronous rebuild, as the rows.
+  const slice = timelineSlice(detail.timeline, detail.eventCount, limit);
   const rawDefault = getPref(db, user.id, "tlDefault");
   const tlDefault: TimelineFilterId =
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
@@ -250,27 +259,28 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   );
   const runsVisible = runsMembership.has(user.id) || user.role === "admin";
   //
-  // P13-D-11: the member projection ships a BOUNDED window of each agent
+  // P13-D-11: the member projection carries a BOUNDED window of each agent
   // group's console (newest lines within `RUN_LOG_WINDOW_*`), not the whole
   // raw execution history — NFR5. `logWindow` carries the cursor the console
-  // pages backwards with via `/resources/run-log?before=`. A non-member's
-  // withheld projection reports an empty window so nothing tries to page it.
+  // pages backwards with via `/resources/run-log?before=`.
+  //
+  // Ruling 457 (owner decision 2, 2026-09-24): and only where a person is
+  // arriving. A hard refresh ships the shown agent's window (display lines;
+  // the envelopes load when the raw view opens); a revalidation or a client
+  // navigation (`.data`) ships no console line at all, and the console fills
+  // the thread it shows with one small request. This payload used to carry
+  // every agent's window, lines and envelopes, on every revalidation.
+  //
+  // A non-member's withheld projection bounds no window at all and reports an
+  // empty one, so nothing tries to page it.
   const runtime = runsVisible
-    ? listRunsForTask(db, params.slug, params.key)
-    : listRunsForTask(db, params.slug, params.key).map((r) => ({
+    ? listRunsForTask(db, params.slug, params.key, {
+        console: isDocumentNavigation(request) ? "shown" : "none",
+      })
+    : listRunsForTask(db, params.slug, params.key, { console: "withheld" }).map((r) => ({
         ...r,
         sid: null,
         exportable: false,
-        lines: [],
-        raw: [],
-        lineCount: 0,
-        logWindow: {
-          totalLines: 0,
-          hasMore: false,
-          runIds: [],
-          oldest: null,
-          headSeq: -1,
-        },
       }));
 
   // Deployed specialists the "Assign specialist" menu offers. Model-availability
@@ -586,12 +596,14 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
   const {
+    refused,
     auth: ctx,
     db,
     formData,
     actor,
     intent,
   } = await requireFormAction(request);
+  if (refused) return refused;
   const projectSlug = params.slug;
   const taskKey = params.key;
   // R15-4: the layout loader's membership refusal does NOT cover this action —
@@ -1437,7 +1449,7 @@ export default function TaskDetailRoute({
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   if (!layout) return null;
 
-  const members: TaskMemberView[] = layout.board.members.map((m) => ({
+  const members: TaskMemberView[] = layout.members.map((m) => ({
     userId: m.userId,
     role: m.role,
     user: {
@@ -1533,3 +1545,6 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
     </div>
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.task");
