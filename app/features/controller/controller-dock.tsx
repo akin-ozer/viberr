@@ -27,6 +27,8 @@ import { useToast } from "~/ui/toast";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { pinLivePose } from "~/ui/live-pose";
+import { useSheetDrag } from "~/ui/use-sheet-drag";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
@@ -165,6 +167,8 @@ function DockShell({ context }: { context: DockContext }) {
   const push = useToast();
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
+  const releasePose = useRef<(() => void) | null>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   const [threadsOpen, setThreadsOpen] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [text, setText] = useState("");
@@ -312,12 +316,17 @@ function DockShell({ context }: { context: DockContext }) {
         setOpen(false);
         return;
       }
+      // Closed mid-entrance (a double click on the button), the exit starts
+      // from where the entrance got to; released once `data-closing` lands.
+      releasePose.current ??= pinLivePose(panelRef.current);
       setClosing(true);
     },
     [],
   );
   useEffect(() => {
     if (!closing) return;
+    releasePose.current?.();
+    releasePose.current = null;
     const panel = panelRef.current;
     if (!panel) {
       setClosing(false);
@@ -351,6 +360,15 @@ function DockShell({ context }: { context: DockContext }) {
       if (fallback !== null) clearTimeout(fallback);
     };
   }, [closing]);
+  // Ruling 454: at sheet width a finger pulls the dock down to dismiss it.
+  // The gesture has already carried the sheet out of sight when it calls
+  // back, so the unmount is the instant one.
+  useSheetDrag({
+    sheetRef: panelRef,
+    hostRef: dockRef,
+    open,
+    onDismiss: () => closeDock(true),
+  });
   // Escape is handled ON THE PANEL (its onKeyDown below), not on the document.
   // `useDismiss` closes on any Escape anywhere, so dismissing the palette, a
   // confirm dialog or a stage menu took the helper with it (review finding 8).
@@ -514,7 +532,7 @@ function DockShell({ context }: { context: DockContext }) {
       : "?c=new");
 
   return (
-    <div className="dock" data-open={open ? "true" : "false"}>
+    <div className="dock" ref={dockRef} data-open={open ? "true" : "false"}>
       {open && context.needsOwnStream && <DockLive />}
       {open && (
         <section
@@ -536,7 +554,11 @@ function DockShell({ context }: { context: DockContext }) {
             closeDock(true);
           }}
         >
-          <header className="dock-head">
+          {/* Ruling 454: at sheet width the grabber and the header are the
+              sheet's drag handles (useSheetDrag); the grabber only says so.
+              Close stays the named way out. */}
+          <div className="dock-grabber" data-sheet-handle aria-hidden="true" />
+          <header className="dock-head" data-sheet-handle>
             <span className="dock-head-icon">
               <Icon name="cpu" />
             </span>

@@ -2646,8 +2646,8 @@ describe("app/ gates no rendering on the viewport (R19-12)", () => {
 
   it("uses matchMedia for user PREFERENCES only, never for width", () => {
     // A width-driven matchMedia is how "no control is hidden at any width"
-    // gets broken in a place `app.css` cannot be read to find out. Both live
-    // uses ask the OS for a colour-scheme preference.
+    // gets broken in a place `app.css` cannot be read to find out. Every live
+    // use asks the OS for a preference: colour scheme or reduced motion.
     const queries: string[] = [];
     for (const file of sources) {
       const src = readFileSync(file, "utf8");
@@ -2656,11 +2656,14 @@ describe("app/ gates no rendering on the viewport (R19-12)", () => {
         queries.push(`${rel} — ${m[1]}`);
       }
     }
-    // Four sites: the SSR-safe first-paint script inlined in root.tsx, the
-    // listener that keeps `system` live, `theme-preference.ts`, and the board's
+    // Five sites: the SSR-safe first-paint script inlined in root.tsx, the
+    // listener that keeps `system` live, `theme-preference.ts`, the board's
     // drop animation asking for reduced motion before it flies a card
-    // (board-page.tsx, 2026-09-08).
-    expect(queries.length, "the scan must find the four preference reads").toBe(4);
+    // (board-page.tsx, 2026-09-08), and the dock sheet's release asking the
+    // same before it springs (use-sheet-drag.ts, ruling 454). The sheet knows
+    // it IS a sheet from the `--sheet-draggable` flag the 720px block sets,
+    // never from a width query.
+    expect(queries.length, "the scan must find the five preference reads").toBe(5);
     for (const q of queries) {
       expect(q, "matchMedia may only ask about a preference").toMatch(/\(prefers-[\w-]+:/);
       expect(q, "a width query here is the banned form").not.toMatch(/width/);
@@ -3522,8 +3525,10 @@ describe("app.css controller layout (ruling 419)", () => {
     // half-height. CANARY: restore `- 56px`.
     const collapse720 = CODE.match(/\.dock\[data-open="true"\] \.dock-fab \{([^}]*)\}/);
     expect(collapse720, "the perch rule must exist").toBeTruthy();
+    // Ruling 454 adds the sheet's drag to the travel, so the button rides a
+    // pulled sheet; at rest the term is 0px.
     expect(collapse720![1]).toContain(
-      "calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px))",
+      "calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px) + var(--sheet-drag, 0px))",
     );
   });
 
@@ -3832,6 +3837,219 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
       expect(decls.get("filter"), selector).toBe("none");
       expect(decls.get("transition"), selector).toBe("opacity .12s ease");
     }
+  });
+});
+
+describe("app.css ruling 453: the Apple design pass", () => {
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decls = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+
+  it("(a) every transform transition answers a press on the sheet's ease-out, never plain `ease`", () => {
+    // CANARY: put `.btn` back on `transform .15s ease`. Plain `ease` starts
+    // at under half its average speed, so a press visibly lagged the finger —
+    // on 25 controls whose neighbours already used --ease-out.
+    const layers = RULES.flatMap((r) =>
+      splitArgs(r.decls.get("transition") ?? "")
+        .filter((layer) => /^transform\b/.test(layer))
+        .map((layer) => `${r.selector} → ${layer}`),
+    );
+    expect(layers.length).toBeGreaterThan(40);
+    const offCurve = layers.filter((l) => !/ var\(--ease-out\)/.test(l.split(" → ")[1]!));
+    expect(offCurve).toEqual([]);
+  });
+
+  it("(b) tracking tightens with size, at Inter's own curve, one token per display step", () => {
+    // CANARY: set --track-page back to -.015em, or drop the tracking from
+    // `.task-hero h1` (the page title that had none of its own).
+    const curve = (px: number) => -0.0223 + 0.185 * Math.exp(-0.1745 * px);
+    const root = decls(plain, ":root");
+    for (const [token, px] of [["--track-title", 16], ["--track-section", 20], ["--track-page", 28]] as const) {
+      const em = Number(/^(-?[\d.]+)em$/.exec(root.get(token) ?? "")?.[1]);
+      expect(em, token).toBeCloseTo(curve(px), 3);
+    }
+    expect(decls(plain, "h1").get("letter-spacing")).toBe("var(--track-title)");
+    // Every rule that sets text at a display step tracks at that step — but
+    // for a glyph that is not running text, each saying why.
+    const NOT_RUNNING_TEXT = {
+      ".avatar.xl": "two initials centred in a 56px disc; tracking would push them off centre.",
+      ".login-brand .mark": "the one-letter product mark in its tile.",
+      ".login-aside-mark": "the product mark again, in the mono face, whose metrics are its own.",
+    } satisfies Record<string, string>;
+    const TRACK = new Map([
+      ["1.25rem", "var(--track-section)"],
+      ["1.75rem", "var(--track-page)"],
+    ]);
+    const hits = new Set<string>();
+    const wrong: string[] = [];
+    let checked = 0;
+    for (const r of RULES) {
+      const size = r.decls.get("font-size");
+      const track = size === undefined ? undefined : TRACK.get(size);
+      if (track === undefined) continue;
+      if (r.selector in NOT_RUNNING_TEXT) {
+        hits.add(r.selector);
+        continue;
+      }
+      checked++;
+      if (r.decls.get("letter-spacing") !== track) wrong.push(`${r.selector} (${size})`);
+    }
+    expect(checked).toBeGreaterThanOrEqual(12);
+    expect(wrong).toEqual([]);
+    expect([...hits].sort()).toEqual(Object.keys(NOT_RUNNING_TEXT).sort());
+  });
+
+  it("(c) the translucent bars draw their bottom edge only once content scrolls under them", () => {
+    // CANARY: drop `border-bottom-color: transparent` (the edge stands on an
+    // unscrolled page), or move `animation-timeline` above the `animation`
+    // shorthand, which resets it to the document clock.
+    expect(CODE).toMatch(
+      /@keyframes scroll-edge \{ from \{ border-bottom-color: transparent; \} to \{ border-bottom-color: var\(--hairline\); \} \}/,
+    );
+    for (const [selector, timeline] of [
+      [".home-top", "scroll(root block)"],
+      [".page-overlay .board-head", "scroll(nearest block)"],
+    ] as const) {
+      const d = decls(plain, selector);
+      expect(d.get("border-bottom-color"), selector).toBe("transparent");
+      const own = plain.filter((r) => r.selector === selector && r.decls.has("animation"));
+      expect(own, selector).toHaveLength(1);
+      const order = [...own[0]!.decls.keys()];
+      expect(order, selector).toEqual(["animation", "animation-timeline", "animation-range"]);
+      expect(own[0]!.decls.get("animation")).toBe("scroll-edge linear both");
+      expect(own[0]!.decls.get("animation-timeline")).toBe(timeline);
+      expect(own[0]!.decls.get("animation-range")).toBe("0 1.5rem");
+    }
+  });
+
+  it("(b) under reduced motion a pinned close never replays the dock's fade-in", () => {
+    // CANARY: drop `animation: none` from the reduced-motion
+    // `.dock .dock-panel[data-closing]`. pinLivePose switches the entrance off
+    // inline and releases it once data-closing lands; the reduced-motion
+    // `.dock .dock-panel { animation: fade-in }` (same weight, later) then
+    // restarted on the closing panel, which faded IN, never transitioned out,
+    // and vanished at the fallback timer (measured in headless Chromium).
+    const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+    expect(decls(reduced, ".dock .dock-panel").get("animation")).toMatch(/^fade-in\b/);
+    expect(decls(reduced, ".dock .dock-panel[data-closing]").get("animation")).toBe("none");
+    // Dialogs outrank their own reduced-motion fade-in by weight already.
+    expect(decls(plain, "dialog[data-closing]").get("animation")).toBe("none");
+  });
+
+  it("(d) the OS increased-contrast setting gets defined edges and solid chrome, in both themes", () => {
+    // CANARY: delete the `prefers-contrast: more` block — the app had no
+    // answer to it before this pass.
+    const more = RULES.filter((r) => r.at.some((a) => /prefers-contrast:\s*more/.test(a)));
+    const tokens = decls(more, ":root[data-theme]");
+    for (const token of ["--border", "--hairline", "--ring"]) {
+      expect(tokens.get(token), token).toBe("var(--border-control)");
+    }
+    for (const token of ["--faint", "--placeholder"]) expect(tokens.get(token), token).toBe("var(--muted)");
+    // Later than the dark block, so the equal-specificity override wins there.
+    expect(CODE.indexOf("@media (prefers-contrast: more)")).toBeGreaterThan(
+      CODE.indexOf(':root[data-theme="dark"] {'),
+    );
+    // What the swap buys, measured: every edge at 3:1 and the text rungs at
+    // --muted's ratio, on the surface of each theme.
+    for (const block of [LIGHT_ROOT, DARK_ROOT]) {
+      const surface = tokenIn(block, "--surface");
+      expect(contrastRatio(tokenIn(block, "--border-control"), surface)).toBeGreaterThanOrEqual(3);
+      expect(contrastRatio(tokenIn(block, "--muted"), surface)).toBeGreaterThan(
+        contrastRatio(tokenIn(block, "--faint"), surface),
+      );
+    }
+    // Translucent chrome goes solid, as it does for reduced transparency.
+    const lessGlass = RULES.filter((r) => r.at.some((a) => /prefers-reduced-transparency:\s*reduce/.test(a)));
+    for (const rules of [more, lessGlass]) {
+      expect(decls(rules, ".home-top").get("background")).toBe("var(--bg)");
+      expect(decls(rules, ".home-top").get("backdrop-filter")).toBe("none");
+      expect(decls(rules, ".topbar").get("background")).toBe("var(--surface)");
+    }
+  });
+});
+
+describe("app.css ruling 454: the dock sheet under a finger", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decls = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const sheetWidth = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
+
+  it("marks the panel a sheet only at sheet width — the flag the script reads instead of the viewport", () => {
+    // CANARY: move `--sheet-draggable: 1` to the base `.dock-panel` rule and
+    // the floating desktop panel drags too.
+    expect(decls(sheetWidth, ".dock .dock-panel").get("--sheet-draggable")).toBe("1");
+    expect(RULES.filter((r) => r.decls.has("--sheet-draggable") && !sheetWidth.includes(r))).toEqual([]);
+  });
+
+  it("runs the sheet's surface on below its edge, so the spring's give never shows a gap", () => {
+    // CANARY: drop the extension layer — a return that overshoots, or a
+    // rubber-banded pull, lifts the sheet off the bottom edge. Or list it
+    // second: the first shadow paints on top, and the pop shadow's blur then
+    // draws a dark seam across the extension (seen live).
+    expect(decls(sheetWidth, ".dock .dock-panel").get("box-shadow")).toBe(
+      "0 calc(min(80dvh, 640px) - var(--radius-panel)) 0 var(--surface), var(--shadow-pop)",
+    );
+  });
+
+  it("shows the grabber only on the sheet, and gives the handles every one-finger touch", () => {
+    // CANARY: drop the touch-action — a pull on the header then scrolls the
+    // page behind the non-modal sheet instead of moving it. `pinch-zoom`, not
+    // `none`: a pinch that starts on the header still zooms (review), and
+    // `none` stands first for an engine that lacks the value.
+    expect(decls(plain, ".dock-grabber").get("display")).toBe("none");
+    expect(decls(sheetWidth, ".dock .dock-grabber").get("display")).toBe("block");
+    const handles = sheetWidth.find((r) => parts(r).includes(".dock .dock-head") && r.decls.has("touch-action"));
+    expect(handles, "the handles' touch rule").toBeTruthy();
+    expect(CODE).toMatch(
+      /\.dock \.dock-grabber, \.dock \.dock-head \{ touch-action: none; touch-action: pinch-zoom;/,
+    );
+    for (const handle of [".dock .dock-grabber", ".dock .dock-head"]) {
+      const d = decls(sheetWidth, handle);
+      expect(d.get("touch-action"), handle).toBe("pinch-zoom");
+      expect(d.get("user-select"), handle).toBe("none");
+    }
+  });
+
+  it("moves the sheet and its perched button on one value, with no transition behind the script's clock", () => {
+    // CANARY: drop `:not([data-closing])` — the Close button pressed while
+    // the sheet settles then has its exit overridden and never transitions.
+    expect(decls(plain, ".dock").get("--sheet-drag")).toBe("0px");
+    const held = decls(plain, ".dock[data-sheet-drag] .dock-panel:not([data-closing])");
+    expect(held.get("transform")).toBe("translateY(var(--sheet-drag, 0px))");
+    expect(held.get("transition")).toBe("none");
+    expect(decls(plain, ".dock[data-sheet-drag] .dock-fab").get("transition")).toBe("none");
+    for (const perch of ['.dock[data-open="true"] .dock-fab', '.dock[data-open="true"] .dock-fab:active']) {
+      const transform = decls(sheetWidth, perch).get("transform") ?? "";
+      expect(transform, perch).toContain("+ var(--sheet-drag, 0px))");
+      // CANARY: drop the `min(0px, …)` — a sheet pulled all the way out then
+      // carries the button 17px below its home, and it springs back up.
+      expect(transform, perch).toMatch(/^translate\(-8px, min\(0px, calc\(/);
+    }
+  });
+
+  it("under reduced motion the perched button never slides home", () => {
+    // CANARY: drop the reduced-motion `.dock .dock-fab` transition list — the
+    // button left hundreds of pixels up by a dismissed pull slides down on
+    // the base rule's transform transition.
+    const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+    expect(decls(reduced, ".dock .dock-fab").get("transition")).not.toMatch(/transform/);
+    expect(decls(reduced, ".dock:has(.dock-panel[data-closing]) .dock-fab").get("transition")).toBe("none");
+    // Later than the 720px block's equal-weight `:has()` return, so it wins.
+    const reducedAt = CODE.lastIndexOf(".dock:has(.dock-panel[data-closing]) .dock-fab { transition: none; }");
+    const sheetAt = CODE.indexOf(".dock:has(.dock-panel[data-closing]) .dock-fab {");
+    expect(reducedAt).toBeGreaterThan(sheetAt);
   });
 });
 

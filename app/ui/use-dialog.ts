@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { pinLivePose } from "./live-pose";
 
 /**
  * Dialog behavior required on EVERY dialog by orchestrator ruling 16, now on
@@ -44,7 +45,23 @@ export function useDialog(
   const close = useCallback(() => {
     const dialog = dialogRef.current;
     if (!dialog || dialog.dataset.closing !== undefined) return;
+    // Closed mid-entrance, the exit starts from where the entrance got to
+    // instead of not starting at all (live-pose.ts).
+    const release = pinLivePose(dialog);
     dialog.dataset.closing = "";
+    release();
+    // The scrim is a ::backdrop, which takes no inline style: a fade-in still
+    // running plays back from where it is instead.
+    for (const animation of dialog.getAnimations?.({ subtree: true }) ?? []) {
+      const effect = animation.effect;
+      if (
+        effect instanceof KeyframeEffect &&
+        effect.pseudoElement === "::backdrop" &&
+        animation.playState === "running"
+      ) {
+        animation.reverse();
+      }
+    }
     // dialog[data-closing]'s transition-duration, read after the attribute
     // lands: 0/NaN in jsdom (no stylesheet), or ~0 where the sheet's
     // reduced-motion rules apply — both mean close synchronously.
