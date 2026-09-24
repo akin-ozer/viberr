@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useFetcher, useLocation, useNavigate } from "react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFetcher, useLocation, useMatches, useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
@@ -9,7 +9,11 @@ import {
   NotificationItem,
   type NotificationView,
 } from "~/features/notifications/notification-item";
-import type { loader as bellListLoader } from "~/routes/resources.notifications";
+import {
+  REVALIDATION_RULES,
+  type Fact,
+} from "~/features/live-updates/revalidation-policy";
+import type { clientLoader as bellListLoader } from "~/routes/resources.notifications";
 
 /**
  * Bell button + notifications popover — ONE implementation for both the
@@ -25,10 +29,14 @@ import type { loader as bellListLoader } from "~/routes/resources.notifications"
  * bell's counts. The list is this component's own fetch
  * (`/resources/notifications`): it starts when the pointer or the focus
  * reaches the bell, or on open, so a first open without either may show one
- * brief loading row. While the popover is open the list follows the counts: a
- * notification created or read revalidates the page (its `user` scope), and a
- * count that moved reloads the list. A later intent reloads it only when the
- * counts moved since it was fetched.
+ * brief loading row. The list is stale once the page has re-read the counts
+ * since it was fetched, whatever values they came back with: counts are not a
+ * version (a packet resolved and another raised leaves them where they were,
+ * with different rows). A notification created or read revalidates the page
+ * (its `user` scope), so the route that reads the counts hands over a new
+ * loader-data object; an intent or an open then reloads the list, and an open
+ * popover reloads it at once. A failed load shows a failure row in the
+ * popover, never the page's error boundary, and the next intent retries.
  */
 
 /**
@@ -40,6 +48,11 @@ export const BELL_LIST_CAP = 100;
 
 /** The list's resource route (`routes/resources.notifications.ts`). */
 export const BELL_LIST_URL = "/resources/notifications";
+
+/** The routes whose loaders read the bell's counts (`REVALIDATION_RULES`):
+ *  the workspace layout, Home, the standalone header and /notifications. */
+const rules: [string, { reads: readonly Fact[] }][] = Object.entries(REVALIDATION_RULES);
+const BELL_ROUTES = new Set(rules.filter(([, rule]) => rule.reads.includes("bell")).map(([id]) => id));
 
 export function TopBell({
   unread,
@@ -59,26 +72,42 @@ export function TopBell({
   const shownUnread = unread + orphanUnread;
 
   const list = useFetcher<typeof bellListLoader>();
-  // The counts the list was last fetched for: the list is stale exactly when
-  // they moved.
-  const counts = `${unread}:${orphanUnread}`;
-  const fetchedFor = useRef<string | null>(null);
+  // Review finding bell-stale-list-count-key: the list's version is the READ
+  // of the counts, not their values. The outermost route on screen that reads
+  // the bell supplies the counts, and its loader data is a new object every
+  // time its loader re-runs (single fetch decodes a fresh one), so this object
+  // changes exactly when the page re-read them (or, where no such route is on
+  // screen, when the counts themselves change).
+  const countsRead = useMatches().find((match) => BELL_ROUTES.has(match.id))?.loaderData;
+  const version = useMemo(
+    () => ({ unread, orphanUnread, countsRead }),
+    [unread, orphanUnread, countsRead],
+  );
+  // The version the list was last fetched for; null after a failed load, so
+  // the next intent retries.
+  const fetchedFor = useRef<typeof version | null>(null);
   const loadList = list.load;
-  const want = () => {
-    if (fetchedFor.current === counts) return;
-    fetchedFor.current = counts;
+  const load = useCallback(() => {
+    fetchedFor.current = version;
     void loadList(BELL_LIST_URL);
+  }, [version, loadList]);
+  const want = () => {
+    if (fetchedFor.current !== version) load();
   };
   const notifications: NotificationView[] = list.data?.notifications ?? [];
   const loading = list.data === undefined;
+  // Ruling 454: the list route's `clientLoader` answers a failed load (an
+  // outage, a 5xx, a signed-out 401) with `notifications: null`.
+  const failed = list.data !== undefined && list.data.notifications === null;
+  useEffect(() => {
+    if (failed) fetchedFor.current = null;
+  }, [failed, list.data]);
 
   const [open, setOpen] = useState(false);
-  // On open, and while open whenever the counts move.
+  // On open, and while open whenever the page re-reads the counts.
   useEffect(() => {
-    if (!open || fetchedFor.current === counts) return;
-    fetchedFor.current = counts;
-    void loadList(BELL_LIST_URL);
-  }, [open, counts, loadList]);
+    if (open && fetchedFor.current !== version) load();
+  }, [open, version, load]);
   const navigate = useNavigate();
   const location = useLocation();
   const readFetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -183,6 +212,13 @@ export function TopBell({
             <div className="ntf-pop-list" aria-busy={list.state !== "idle"}>
               {loading ? (
                 <div className="empty">Loading notifications…</div>
+              ) : failed ? (
+                <div className="empty">
+                  Couldn't load notifications.
+                  <button type="button" className="btn ghost sm empty-cta" onClick={load}>
+                    Try again
+                  </button>
+                </div>
               ) : notifications.length === 0 ? (
                 <div className="empty">Nothing yet. You're caught up.</div>
               ) : null}

@@ -26,8 +26,9 @@ import type { TaskRunPrincipalView } from "./run-principal-view";
  *
  * The editor loads when the browser is idle after mount, and at once when
  * the stand-in is focused or pressed. Whatever was typed into the stand-in
- * is carried into the editor, with the focus and the caret at the end.
- * The stand-in already sends: its text reaches the parent through `onChange`
+ * is carried into the editor, with the focus and the caret at the end; an
+ * editor that arrives during an IME or dead-key composition waits for its
+ * end. The stand-in already sends: its text reaches the parent through `onChange`
  * and ⌘/Ctrl+Enter submits, so only the @-mention menu and the live mention
  * highlighting wait for the editor.
  */
@@ -108,8 +109,10 @@ const StandIn = forwardRef<
   Pick<CommentComposerProps, "onChange" | "onSubmit"> & {
     carry: RefObject<ComposerCarry | null>;
     onWant: () => void;
+    /** An IME or dead-key composition started (true) or ended (false). */
+    onComposing: (active: boolean) => void;
   }
->(function StandIn({ onChange, onSubmit, carry, onWant }, ref) {
+>(function StandIn({ onChange, onSubmit, carry, onWant, onComposing }, ref) {
   const elRef = useRef<HTMLDivElement | null>(null);
   const [empty, setEmpty] = useState(true);
 
@@ -177,6 +180,8 @@ const StandIn = forwardRef<
         }}
         onFocus={onWant}
         onPointerDown={onWant}
+        onCompositionStart={() => onComposing(true)}
+        onCompositionEnd={() => onComposing(false)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
@@ -203,15 +208,36 @@ export const CommentComposer = memo(
     const editorRef = useRef<CommentComposerHandle>(null);
     const standInRef = useRef<CommentComposerHandle>(null);
 
+    // A transition keeps the stand-in on screen (and typeable) until the
+    // editor can render in its place in one commit.
+    const swap = useCallback(() => startTransition(() => setWanted(true)), []);
+    // Review finding COMPOSER-IME-SWAP (ruling 454): while an IME or a dead
+    // key composes, the stand-in's node holds the uncommitted text, and
+    // removing it ends the composition: the conversion in progress is lost
+    // and the marked text is carried as if typed. A swap that comes due then
+    // waits for the composition's end.
+    const composing = useRef(false);
+    const swapOwed = useRef(false);
+    const onComposing = useCallback(
+      (active: boolean) => {
+        composing.current = active;
+        if (active || !swapOwed.current) return;
+        swapOwed.current = false;
+        swap();
+      },
+      [swap],
+    );
+
     const want = useCallback(() => {
       loadEditor().then(
-        // A transition keeps the stand-in on screen (and typeable) until the
-        // editor can render in its place in one commit.
-        () => startTransition(() => setWanted(true)),
+        () => {
+          if (composing.current) swapOwed.current = true;
+          else swap();
+        },
         // Offline or a stale deploy: the stand-in stays and still sends.
         () => {},
       );
-    }, []);
+    }, [swap]);
 
     useEffect(() => {
       if (wanted) return;
@@ -251,6 +277,7 @@ export const CommentComposer = memo(
         onChange={props.onChange}
         onSubmit={props.onSubmit}
         onWant={want}
+        onComposing={onComposing}
       />
     );
     // The boundary stays mounted and its child changes inside a transition, so

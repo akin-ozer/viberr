@@ -10,6 +10,7 @@ import {
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Avatar } from "~/ui/avatar";
 import { initialsOf } from "~/ui/initials";
+import { useDismiss } from "~/ui/use-dismiss";
 
 /**
  * The account menu as pages ship it. Ruling 454: the menu itself
@@ -24,7 +25,10 @@ import { initialsOf } from "~/ui/initials";
  * A press that beats the fetch is not lost: pointerdown (left button, no
  * Ctrl) or Enter / Space / ArrowDown, the keys Radix's trigger opens on,
  * opens the menu as soon as it arrives, and a keyboard open puts the focus
- * on the first item as Radix does for a keyboard open.
+ * on the first item as Radix does for a keyboard open. Until then the press
+ * can be taken back as an open menu can be closed: Escape, a second press
+ * (pointerdown, Enter or Space toggle, as on Radix's trigger), or a press or
+ * the focus anywhere outside the trigger.
  */
 
 export interface MenuUser {
@@ -111,6 +115,18 @@ export function UserMenu({
     setMenu(true);
     want();
   };
+  const takeBack = () => {
+    handOver.current.keyboard = false;
+    setMenu(false);
+  };
+
+  // Review finding UM-PENDING-OPEN (ruling 454): a press that beat the fetch
+  // opens the menu when it lands, and the menu then takes the focus. So the
+  // pending press is dismissed the way Radix dismisses the open menu: Escape,
+  // or a press or the focus outside the trigger. Otherwise the menu opened
+  // late on its own, pulling the focus (and the keystrokes typed there) away
+  // from wherever the person had gone. Once the menu is here, it is Radix's.
+  const wrapRef = useDismiss<HTMLDivElement>(menu && !wanted, takeBack, { focus: true });
 
   // Runs when the menu replaces this trigger, in the same commit and before
   // the menu's layout effect reads it.
@@ -133,6 +149,11 @@ export function UserMenu({
       onFocus={want}
       onPointerDown={(e) => {
         if (e.button !== 0 || e.ctrlKey) return;
+        // A second press takes the first back, as Radix's trigger toggles.
+        if (menu) {
+          takeBack();
+          return;
+        }
         // As Radix does: the menu, not the trigger, takes the focus.
         e.preventDefault();
         openFrom(false);
@@ -140,7 +161,9 @@ export function UserMenu({
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " " && e.key !== "ArrowDown") return;
         e.preventDefault();
-        openFrom(true);
+        // Enter and Space toggle, ArrowDown only opens (Radix's trigger).
+        if (menu && e.key !== "ArrowDown") takeBack();
+        else openFrom(true);
       }}
     >
       <Avatar person={{ initials: initialsOf(user.name), tone: user.avatarTone }} size="lg" />
@@ -148,7 +171,7 @@ export function UserMenu({
   );
 
   return (
-    <div className="home-user-wrap">
+    <div className="home-user-wrap" ref={wrapRef}>
       {/* The boundary stays mounted and its child changes inside a
           transition, so React keeps this trigger instead of the fallback
           while the lazy module settles. The fallback is only a guard. */}

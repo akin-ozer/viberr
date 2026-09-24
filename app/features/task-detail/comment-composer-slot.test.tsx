@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { $getRoot, $getSelection, $isRangeSelection, type LexicalEditor } from "lexical";
 import { ToastProvider } from "~/ui/toast";
@@ -142,6 +142,53 @@ describe("the comment composer's stand-in (ruling 454)", () => {
     typeInto(standIn, "  quick note ");
     fireEvent.keyDown(standIn, { key: "Enter", ctrlKey: true });
     await waitFor(() => expect(posted).toEqual(["quick note"]));
+  });
+});
+
+/**
+ * Review finding COMPOSER-IME-SWAP: the stand-in's node holds an IME's (or a
+ * dead key's) uncommitted text while a composition runs. Swapping the node
+ * out then ends the composition, loses the conversion in progress and carries
+ * the marked text as if typed. The swap waits for `compositionend`.
+ *
+ * A fresh copy of the module (`vi.resetModules`) has its chunk still on the
+ * way. Two composers ask for it in the same tick, one of them mid-composition:
+ * their swaps come due in the same moment, so the idle one's arrival is the
+ * sign the composing one would have been swapped too.
+ */
+describe("a composition is never cut by the editor's arrival (ruling 454)", () => {
+  it("waits for compositionend, then carries the committed text", async () => {
+    vi.resetModules();
+    const { CommentComposer } = await import("./comment-composer-slot");
+    const props = { mentionables: MENTIONABLES, onChange: () => {}, onSubmit: () => {} };
+    const view = render(
+      <>
+        <div data-testid="composing">
+          <CommentComposer {...props} />
+        </div>
+        <div data-testid="idle">
+          <CommentComposer {...props} />
+        </div>
+      </>,
+    );
+    const composing = view.getByTestId("composing");
+    const idle = view.getByTestId("idle");
+    const standIn = composing.querySelector<HTMLElement>(".composer-ce")!;
+    act(() => standIn.focus());
+    fireEvent.compositionStart(standIn);
+    typeInto(standIn, "にほ");
+    fireEvent.pointerDown(idle.querySelector<HTMLElement>(".composer-ce")!);
+    await editorIn(idle);
+    expect(standIn.isConnected, "the composing stand-in is still there").toBe(true);
+    expect(composing.querySelector("[data-lexical-editor]")).toBeNull();
+    expect(document.activeElement).toBe(standIn);
+    // The IME commits its conversion; the editor takes over only now.
+    typeInto(standIn, "日本");
+    fireEvent.compositionEnd(standIn);
+    const host = await editorIn(composing);
+    await waitFor(() => expect(host.textContent).toBe("日本"));
+    // The caret moved with it (Lexical focuses through the DOM selection).
+    expect(host.contains(document.getSelection()!.anchorNode)).toBe(true);
   });
 });
 
