@@ -168,10 +168,15 @@ import {
   mirrorIsCold,
   type WorkspaceCloneInput,
 } from "./repo-mirror.server";
-import type { TaskActor, TaskMutationContext } from "./task-actions.server";
 // Values come from the leaf substrate, never task-actions: task-actions
 // imports THIS module (see task-mutation.server.ts).
-import { reprojectTask, stageDisplayName, taskRef } from "./task-mutation.server";
+import {
+  reprojectTask,
+  stageDisplayName,
+  taskRef,
+  type TaskActor,
+  type TaskMutationContext,
+} from "./task-mutation.server";
 import { userDisplayName } from "./user-display-name.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 

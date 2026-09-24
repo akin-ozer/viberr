@@ -18,8 +18,7 @@ import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { cloneTimeoutMs } from "~/server/tasks/git-clone-auth.server";
 import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
-import type { TaskMutationContext } from "./task-actions.server";
-import { reprojectTask, taskRef } from "./task-mutation.server";
+import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 import {
   scheduleSchema,
   type ScheduleAction,

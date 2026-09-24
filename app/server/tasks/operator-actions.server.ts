@@ -18,7 +18,6 @@ import {
   moveStageTarget,
 } from "~/shared/workflow/packet-options";
 import { setTaskDependencies } from "./dependencies.server";
-import type { TaskActor } from "./task-mutation.server";
 import {
   recordRecommendationWithdrawal,
   reprojectTask,
@@ -3727,10 +3726,6 @@ export async function operatorFlagContextConflict(
   };
 }
 
-/** The in-process actor the operator's writes are attributed to when a task
- *  writer wants one; RBAC is skipped under `operatorAuthorized`. */
-const OPERATOR_WRITE_ACTOR: TaskActor = { userId: "operator", label: "operator" };
-
 /**
  * Ruling 131(b) (pass 34): the operator records what a task WAITS ON with a
  * tool of its own instead of a hold packet (JC-9's "standing token"). Gated
@@ -3756,7 +3751,7 @@ export async function operatorSetDependencies(
     const result = await setTaskDependencies(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, blockedBy: input.blockedBy },
-      OPERATOR_WRITE_ACTOR,
+      OPERATOR_TASK_ACTOR,
       { ...ctx, operatorAuthorized: true },
     );
     const list = result.blockedBy.join(", ");
@@ -4509,7 +4504,7 @@ export async function operatorTransitionStage(
   // + failing before honoring the off-graph move.
   const isRework = isReworkMove(ctx, input.projectSlug, input.taskKey, input.toStageId);
   const boundary = operatorBoundaryFor(ctx, input.projectSlug, input.taskKey, input.toStageId);
-  const terminalId = resolveTerminalStageId(ctx, input.projectSlug);
+  const terminalId = terminalStageIdFor(ctx, input.projectSlug);
   // F19-26: a transition whose TARGET is the terminal stage is an ACCEPTANCE,
   // whatever the tool it arrived through. A supervised operator calling
   // transition_stage(<terminal>) used to file a plain "Move the task to Done"
@@ -4648,7 +4643,7 @@ function nextBoundarySentence(
   ctx: TaskMutationContext,
   projectSlug: string,
   stageId: string,
-  stageDisplayName: string,
+  fromName: string,
   authority: OperatorAuthority,
 ): string {
   const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
@@ -4656,9 +4651,9 @@ function nextBoundarySentence(
   const edge = project.parsed.frontmatter.workflow.find((w) => w.from === stageId);
   if (!edge) return "";
   const toName = stageName(project.parsed.frontmatter.stages, edge.to);
-  const label = `The next boundary, ${stageDisplayName} to ${toName},`;
+  const label = `The next boundary, ${fromName} to ${toName},`;
   if (edge.boundary === "auto") {
-    return `${label} is auto: continue in this turn when nothing at ${stageDisplayName} needs an agent.`;
+    return `${label} is auto: continue in this turn when nothing at ${fromName} needs an agent.`;
   }
   if (edge.boundary === "approval") {
     return `${label} is approved by a human: recommend it when the work is ready.`;
@@ -4720,22 +4715,6 @@ export async function foldAcceptanceRecommendation(
     recommended: false,
     message: `Acceptance is not recommended yet: ${result.message}`,
   };
-}
-
-/** The project's terminal (Done-equivalent) stage id (B-WF4). `resolveStageRoles`
- *  already does the positional-last fallback internally, so there is nothing to
- *  add here. Named apart from task-actions' `terminalStageIdOf(project)` — this
- *  one reads the file, that one takes a loaded `ProjectContext`. */
-function resolveTerminalStageId(
-  ctx: TaskMutationContext,
-  projectSlug: string,
-): string | null {
-  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
-  if (!file) return null;
-  return resolveStageRoles(
-    file.parsed.frontmatter.stages,
-    file.parsed.frontmatter.workflow,
-  ).terminalId;
 }
 
 /** True when moving `taskKey` to `toStageId` is an operator rework move (R7-4):

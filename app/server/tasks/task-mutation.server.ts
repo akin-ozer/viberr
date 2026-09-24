@@ -470,11 +470,14 @@ export interface OfferWithdrawal {
 }
 
 /**
- * Ruling 137: the terminal stage id of a project, read from its file, for the
- * writers that withdraw acceptance offers without a loaded project context
- * (the packet writers, the delivery reconcile). Resolved from the workflow
- * graph like every other role lookup. Null when the project file is
- * unreadable: the withdrawal then removes `accept_completion` cards alone.
+ * Ruling 137: the terminal (Done-equivalent) stage id of a project, read from
+ * its file, for the writers without a loaded project context: the packet
+ * writers that withdraw acceptance offers, and the operator's transition
+ * routing. Resolved from the workflow graph like every other role lookup
+ * (B-WF4); `resolveStageRoles` already does the positional-last fallback.
+ * Named apart from task-actions' `terminalStageIdOf(project)`, which takes a
+ * loaded `ProjectContext`. Null when the project file is unreadable: the
+ * withdrawal then removes `accept_completion` cards alone.
  */
 export function terminalStageIdFor(ctx: TaskMutationContext, projectSlug: string): string | null {
   const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });

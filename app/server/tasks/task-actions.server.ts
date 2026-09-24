@@ -6060,7 +6060,7 @@ export async function liftStageHoldForPerson(
     const held = existing?.parsed.frontmatter.heldAtStage ?? null;
     if (!held) return false;
     const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
-    const stageName = project
+    const heldName = project
       ? resolveStageName(project.parsed.frontmatter.stages, held)
       : held;
     let lifted = false;
@@ -6076,7 +6076,7 @@ export async function liftStageHoldForPerson(
         title: "Hold lifted",
         text:
           `**Hold lifted:** ${cause.byName ?? "A person"} started an operator run, so the ` +
-          `hold recorded at ${stageName} no longer stands. Coordination resumes here. If the ` +
+          `hold recorded at ${heldName} no longer stands. Coordination resumes here. If the ` +
           `operator holds this stage twice in a row again, Viberr records a new hold.`,
         toAgent: false,
         evidence: null,
