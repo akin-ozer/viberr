@@ -696,10 +696,15 @@ describe("ruling 460: a run executes as its principal's own OS user", () => {
   it("launches nothing on a host with no launcher: the spec carries no agent", async () => {
     resetAgentIsolationForTests(null, { launcher: path.join(ctx.makeTempDir(), "absent") });
     queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
-    await startTestRun(store.db, input());
+    const { runId, outcome } = await startTestRun(store.db, input());
     await settle();
-    expect(lastRunSpec()?.agent).toBeUndefined();
-    expect(lastRunSpec()?.env?.HOME).toBeUndefined();
+    // It ran — as before, as the server's own user.
+    expect(outcome).toBe("started");
+    expect(getRun(store.db, runId)!.state).toBe("finished");
+    const spec = lastRunSpec();
+    expect(spec).toBeDefined();
+    expect(spec?.agent).toBeUndefined();
+    expect(spec?.env?.HOME).toBeUndefined();
   });
 });
 
