@@ -10,6 +10,7 @@ import {
   compactionMarkerEnv,
   compactionRunId,
 } from "./run-processes.server";
+import { alive, gone } from "../../../test-support/process-liveness";
 
 /**
  * Ruling 174: the settle sweep finds a run's processes by the marker in their
@@ -90,25 +91,6 @@ function background(runId: string | null, opts: { keepShell: boolean }) {
     });
   });
   return { shell, heldPid };
-}
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Polls until `pid` is gone (an orphan is reaped by init, not by us). */
-async function gone(pid: number, withinMs = 3000): Promise<boolean> {
-  const deadline = Date.now() + withinMs;
-  while (Date.now() < deadline) {
-    if (!alive(pid)) return true;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  return !alive(pid);
 }
 
 /** Polls until the scan sees `pid` (a fresh process's env is readable at once

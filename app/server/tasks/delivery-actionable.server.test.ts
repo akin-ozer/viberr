@@ -12,6 +12,8 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
+import { flush, waitFor } from "../../../test-support/polling";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -86,30 +88,6 @@ import { performDelivery, OPERATOR_TASK_ACTOR } from "./task-actions.server";
 let ctx: TestDbContext;
 let store: TestStore;
 
-/** Deploy the operator with a parameterized autonomy (as delivery-requeue does). */
-function deployOperator(autonomy: "full" | "supervised"): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
-    repo: "akin-ozer/viberr",
-    agents: [
-      {
-        profileId: "operator",
-        capabilities: [{ capabilityId: "deliver-review-pr", mode: "direct" }],
-        extras: [],
-        definition: {
-          kind: "operator",
-          name: "Operator",
-          backends: ["claude"],
-          model: "sonnet",
-          autonomy,
-        },
-      },
-    ],
-  });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-}
-
 /** VC-1's task: mid-flow at `impl`, owned, nothing pending. */
 function seedTask(
   patch: {
@@ -170,27 +148,6 @@ function recs(): Recommendation[] {
     taskKey: "VIB-1",
     dataRoot: store.dataRoot,
   })!.parsed.frontmatter.recommendations;
-}
-
-async function flush(): Promise<void> {
-  for (let i = 0; i < 5; i++) await Promise.resolve();
-  await new Promise((r) => setTimeout(r, 5));
-}
-
-/** Poll a fire-and-forget effect to completion. `autoInvokeOperator` awaits a
- *  dynamic import before it reaches `runOperator`; on a cold module graph that
- *  resolves past a fixed 5ms flush, so a fixed wait reports module-load timing,
- *  not behaviour. Poll instead, with a ceiling that still fails loudly. */
-async function waitFor(
-  cond: () => boolean,
-  what: string,
-  timeoutMs = 2_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!cond()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 5));
-  }
 }
 
 beforeEach(() => {
@@ -295,7 +252,7 @@ describe("F32-7 — a collision resolution's redelivery leaves a next step", () 
   }
 
   it("supervised: the server records the Move-to-Review card after the redelivery", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     await resolveCollision();
     const pending = recs();
     expect(pending).toHaveLength(1);
@@ -308,7 +265,7 @@ describe("F32-7 — a collision resolution's redelivery leaves a next step", () 
   });
 
   it("full autonomy: the operator is re-queued with the delivered trigger — exactly once, no card", async () => {
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     await resolveCollision();
     await waitFor(() => runOp.mock.calls.length > 0, "the delivered re-queue");
     expect(runOp.mock.calls[0]![1]).toMatchObject({
@@ -460,7 +417,7 @@ describe("F33-3 — a delivery that links a PR on the branch clears the collisio
 
 describe("F19-1 — a successful delivery leaves an actionable next step", () => {
   it("A. the VC-1 strand: a supervised delivery records exactly one transition recommendation to Review", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask();
     expect(await deliver()).toBe("delivered");
 
@@ -508,7 +465,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
   });
 
   it("B. an operator that ALREADY recommended the move gets no duplicate", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask({
       recommendations: [
         {
@@ -591,7 +548,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
     // and Viberr's own card offered "Move the task to Merge Approval" — and
     // the move landed. Canary: delete the `withheld` block in
     // `recordDeliveredNextStep`.
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     deployReviewerToo();
     seedReviewed("request_changes");
     pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: REVIEWED });
@@ -606,7 +563,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
   it("F36-6 (pass 36): a delivery whose review is still PENDING records no card either", async () => {
     // Live: HLC-3 17:34Z and HLC-14 17:36Z — the reviewer had just been
     // engaged, the verdict was pending, and the card was written anyway.
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     deployReviewerToo();
     seedReviewed(null);
     pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: REVIEWED });
@@ -617,7 +574,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
   });
 
   it("F36-6 (pass 36): an APPROVED revision still gets the card", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     deployReviewerToo();
     seedReviewed("approve");
     pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: REVIEWED });
@@ -627,7 +584,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
   });
 
   it("C. a FAILED delivery records nothing", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask();
     pushMock.mockResolvedValue({
       status: "push_failed",
@@ -638,7 +595,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
   });
 
   it("C2. a no-commits delivery keeps the R19-8 no-change path, not a move card", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask();
     // A's DefaultBranchEvidence gate: `no_commits` is a verified zero-diff only
     // when push-workspace confirmed a clean tree on the default branch — without
@@ -661,7 +618,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
    * file to record, says the work is there.
    */
   it("ruling 391: a task whose deliverable is FILES is not told its work went missing", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask({ deliveredAt: "2026-09-22T06:23:28.646Z" });
     pushMock.mockResolvedValue({
       status: "no_commits",
@@ -677,7 +634,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
   });
 
   it("D. a SECOND delivery does not add a second card (NFR16)", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask();
     expect(await deliver()).toBe("delivered");
     const first = recs();
@@ -697,7 +654,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
   });
 
   it("E. an OPEN decision packet is already the actionable surface", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask({
       packet: {
         type: "input",
@@ -714,14 +671,14 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
   });
 
   it("F. a task already AT the review stage gets no move card", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask({ stage: "review" });
     expect(await deliver()).toBe("delivered");
     expect(recs()).toHaveLength(0);
   });
 
   it("G. R18-2 is untouched: full autonomy re-queues the operator and records NO card", async () => {
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     seedTask();
     expect(await deliver()).toBe("delivered");
     await waitFor(() => runOp.mock.calls.length > 0, "the re-queued operator run");
@@ -731,7 +688,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
   });
 
   it("H. full autonomy that REUSES a PR re-queues nothing and records NO card", async () => {
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     seedTask();
     openTaskPrMock.mockResolvedValue({
       status: "ok",
@@ -824,7 +781,7 @@ describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
   }
 
   it("under FULL autonomy a cleared, re-delivered collision runs the operator exactly once, with the `delivered` trigger", async () => {
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     const github = await seedCollision(clearedRoutes());
     await resolve(github);
     await waitFor(() => runOp.mock.calls.length >= 1, "the operator run");
@@ -834,7 +791,7 @@ describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
   });
 
   it("a refusal hands the operator the typed reason once, as Viberr's own record beside the human's decision", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     const github = await seedCollision({
       "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 500, body: { message: "Server Error" } },
     });
@@ -853,7 +810,7 @@ describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
   });
 
   it("on a board with no `impl → review` edge the cleared, re-delivered task still hands off (no card, one run)", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,

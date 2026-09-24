@@ -101,6 +101,11 @@ seeds synthetic ones and `compose.e2e.yml` carries its own.
 | `strict-schema.ts` | `assertStrictSchema(node)` — the OpenAI strict structured-output rule (every object `additionalProperties: false`, every key `required`) walked recursively over the Codex agent envelope and operator plan |
 | `toolchain.ts` | `HERMETIC_TOOLCHAIN`, `primeToolchain(reading \| null)`, `primeHermeticToolchain()` |
 | `audit-log.ts` | `listAuditEvents(db, { limit, action })` — raw `audit_events` rows, newest first |
+| `fake-claude-query.ts` | `fakeClaudeQuery(...messages)` → a Claude SDK query (the `ClaudeQuery` the real adapter reads, one layer below `fake-runtime.ts`) that yields `messages`, then completes; `interrupt()` resolves. Type-only import, so it loads nothing at module scope |
+| `process-liveness.ts` | for tests on real processes: `alive(pid)` (signal-0 probe; any throw = not alive, unlike the product's `isProcessAlive`, where `EPERM` counts as alive) and `gone(pid, withinMs = 3000)` (polls every 25 ms) |
+| `polling.ts` | the delivery tests' fire-and-forget settling: `flush()` (5 microtask turns, then a 5 ms timer) and `waitFor(cond, what, timeoutMs = 2_000)` (polls every 5 ms, throws `timed out waiting for <what>`). Suites that poll at other cadences keep their own loops |
+| `delivery-operator.ts` | `deployDeliveryOperator(store, "full" \| "supervised")` → the store's project deploys ONLY an operator with a direct `deliver-review-pr` grant and that autonomy (repo `akin-ozer/viberr`), then re-projects |
+| `data-root-lock.ts` | `lockPath(dataRoot)` → `<dataRoot>/state/writer.lock`, the single-writer lock file (B-FD1) |
 
 Import route modules **after** `setupAppTest()` so they see the test env. A route action
 takes the React Router 8 argument shape, including `url`, `pattern` and a
