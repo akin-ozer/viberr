@@ -1344,9 +1344,37 @@ const ConsoleView = memo(function ConsoleView({
     anchorRef.current = null;
   }, [lines.length, threadId, boxRef]);
 
+  /** The scroll offset this view last saw or set, so `onScroll` can tell a
+   *  reader scrolling up from the view being pushed down. */
+  const topRef = useRef(0);
+
   useEffect(() => {
     const el = boxRef.current;
-    if (el && follow) el.scrollTop = el.scrollHeight;
+    if (!el || !follow) return;
+    const pin = () => {
+      el.scrollTop = el.scrollHeight;
+      topRef.current = el.scrollTop;
+    };
+    pin();
+    // Ruling 454 (CON-4): the rows skip layout until they are near the view
+    // (`content-visibility: auto`, CSS-6), so the rows this jump brings into
+    // view still count at their 21px placeholder here and reach their real
+    // height in the frames after it; a row's first relevance check runs after
+    // the frame's animation callbacks, so the first frame still reads the
+    // estimate. Pin again each frame, at least twice, until the height stops
+    // moving (bounded, in case something below keeps growing).
+    let frames = 0;
+    let height = el.scrollHeight;
+    let id = requestAnimationFrame(function again() {
+      frames += 1;
+      const now = el.scrollHeight;
+      pin();
+      if ((frames < 2 || now !== height) && frames < 12) {
+        height = now;
+        id = requestAnimationFrame(again);
+      }
+    });
+    return () => cancelAnimationFrame(id);
   }, [lines.length, raw, threadId, follow, boxRef]);
 
   const older = thread?.older;
@@ -1367,7 +1395,15 @@ const ConsoleView = memo(function ConsoleView({
         aria-label={label}
         onScroll={(e) => {
           const el = e.currentTarget;
-          onFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 48);
+          const top = el.scrollTop;
+          // Ruling 454 (CON-4): only a scroll UP stops following. Rows growing
+          // as they come into view (and scroll anchoring making room for
+          // rows that grew above it) send scroll events too, with the view
+          // short of the end until the next pin; those used to turn `follow`
+          // off by themselves.
+          if (el.scrollHeight - top - el.clientHeight < 48) onFollow(true);
+          else if (top < topRef.current) onFollow(false);
+          topRef.current = top;
         }}
       >
         {/* Ruling 454 (owner decision 2): a thread the page did not carry

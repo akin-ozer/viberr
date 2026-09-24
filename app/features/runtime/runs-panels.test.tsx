@@ -1770,6 +1770,84 @@ describe("the console on a live store (ruling 454)", () => {
     expect(box.scrollTop).toBe(200);
   });
 
+  /**
+   * CON-4: the console's rows skip layout until they are near the view
+   * (`content-visibility: auto`, ruling 454 CSS-6), so a row the follow jump
+   * brings into view counts at its 21px placeholder when `scrollHeight` is read
+   * and reaches its real height in a later frame. Nothing re-pinned, so the
+   * newest line sat below the fold with `follow` still on; and the scroll
+   * event the browser then sent, with the view short of the end, turned
+   * `follow` off. jsdom lays nothing out, so the geometry is stubbed: a
+   * scroller that clamps like a browser's, a height that grows after the jump,
+   * and frames the test runs one at a time.
+   */
+  it("re-pins to the real bottom as rows grow after the jump, and the growth never turns follow off (CON-4)", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 1;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      frames.set(nextFrame, cb);
+      return nextFrame++;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const runFrame = () => {
+      const due = [...frames.values()];
+      frames.clear();
+      for (const cb of due) cb(0);
+    };
+
+    const run = running();
+    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const { container, getByRole } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />,
+    );
+    const box = container.querySelector<HTMLElement>(".console")!;
+    let height = 1000;
+    let top = 0;
+    Object.defineProperty(box, "scrollHeight", { get: () => height, configurable: true });
+    Object.defineProperty(box, "clientHeight", { get: () => 320, configurable: true });
+    Object.defineProperty(box, "scrollTop", {
+      get: () => top,
+      set: (v: number) => (top = Math.max(0, Math.min(v, height - 320))),
+      configurable: true,
+    });
+    const following = () => getByRole("button", { name: "follow" }).getAttribute("aria-pressed");
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tail(3)));
+    height = 1021; // the new row, at its placeholder height
+    await act(async () => {
+      store.onFrame("run_1", 3);
+      await flush();
+    });
+    expect(top).toBe(701);
+
+    // The first frame still reads the placeholder; the rows laid out at the
+    // end of it are 200px taller than their estimates.
+    act(runFrame);
+    height = 1221;
+    act(runFrame);
+    // CANARY: drop the re-pin and the view stays at 701, 200px short.
+    expect(top).toBe(901);
+
+    // More rows came near the view before the browser sent the scroll event
+    // for that pin: it arrives 79px short of the end.
+    height = 1300;
+    fireEvent.scroll(box);
+    // CANARY: derive follow from the distance alone and this reads "false".
+    expect(following()).toBe("true");
+    act(runFrame);
+    expect(top).toBe(980);
+    act(runFrame);
+    // Settled: the height stopped moving, so the pinning stopped with it.
+    height = 1400;
+    act(runFrame);
+    expect(top).toBe(980);
+
+    // A reader who scrolls up still stops following.
+    top = 500;
+    fireEvent.scroll(box);
+    expect(following()).toBe("false");
+  });
+
   it("keeps every drawn row's node when older lines are loaded above it", async () => {
     const run = mkRun({
       lines: [3, 4].map(text),

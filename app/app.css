@@ -3763,7 +3763,10 @@ dialog[data-closing]::backdrop {
    for the rest until they scroll near. `auto` keeps a row's real height once it
    has been laid out, so the scrollbar settles rather than guessing again; 21px
    is a one-line row (.75rem at 1.45, plus .25rem of padding). A row's content
-   never draws outside it, which the paint containment this implies requires. */
+   never draws outside it, which the paint containment this implies requires.
+   The rows a follow jump brings into view reach their real height after it,
+   so the console pins to the end again until its height settles, and only a
+   scroll up stops following (CON-4, `ConsoleView` in runs-panels.tsx). */
 .console > .log-line { content-visibility: auto; contain-intrinsic-size: auto 21px; }
 /* Dim ladder lifted to AA on the fixed #0e1117/#0b0d12 console fills while
    keeping the terminal look and the brightness ordering (lx > out > think >
