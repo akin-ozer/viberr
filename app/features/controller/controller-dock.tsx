@@ -22,7 +22,6 @@ import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
-import { pinLivePose } from "~/ui/live-pose";
 import { useSheetDrag } from "~/ui/use-sheet-drag";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
@@ -174,7 +173,16 @@ function DockShell({ context }: { context: DockContext }) {
   const push = useToast();
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
-  const releasePose = useRef<(() => void) | null>(null);
+  // Ruling 459 (F24), "skip animation on page load": a panel the per-tab
+  // restore reopens (a reload, or a return from a page the dock is hidden on)
+  // was already open, so it appears in place and a phone's trigger lands on
+  // its perch instead of flying there (`data-restored`, app.css). Only the
+  // trigger clears it. A close never does: the attribute is gated on `open`,
+  // so it leaves with the panel, and a leaving panel is out of its rule.
+  const [restoredOpen, setRestoredOpen] = useState(false);
+  // Whether the person opened the panel themselves (the focus rules below).
+  // Declared up here because the restore reads it too.
+  const openedByUser = useRef(false);
   const dockRef = useRef<HTMLDivElement>(null);
   const [threadsOpen, setThreadsOpen] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
@@ -203,6 +211,15 @@ function DockShell({ context }: { context: DockContext }) {
     // so it wins. (`selected` needs no such guard: every writer of it is
     // inside the panel, which cannot have been open yet.)
     setOpen((clicked) => clicked || stored);
+    // A click that beat this read is the person's own open, and keeps its
+    // entrance. The ref is read here, not in the updater, so render stays
+    // pure. The updater keeps a `true` an earlier run set: under StrictMode
+    // (the dev server) React runs this effect twice, and between the runs the
+    // `[open]` write below has already stored "0" from the pre-restore render,
+    // so the second run reads a closed dock and would clear the mark the
+    // first run set, and a restored panel would replay its entrance.
+    const fromStore = stored && !openedByUser.current;
+    setRestoredOpen((was) => was || fromStore);
     setSelected(readSelected());
     restored.current = true;
   }, []);
@@ -370,6 +387,11 @@ function DockShell({ context }: { context: DockContext }) {
   // Close: a pointer close plays the exit transition and unmounts on
   // transitionend (the useDialog recipe); Escape closes instantly, because a
   // keyboard-initiated action never animates.
+  //
+  // Ruling 459 (F20): the entrance is a transition too (from @starting-style),
+  // so `data-closing` retargets the panel from wherever it is, mid-entrance
+  // included. Nothing is pinned: ruling 453(b)'s live pose is for surfaces
+  // that still enter on a keyframe, which Chrome will not transition out of.
   const closeDock = useCallback(
     (instant: boolean) => {
       // Read it here, before the panel unmounts and the answer is always no.
@@ -380,18 +402,16 @@ function DockShell({ context }: { context: DockContext }) {
         setOpen(false);
         return;
       }
-      // Closed mid-entrance (a double click on the button), the exit starts
-      // from where the entrance got to; released once `data-closing` lands.
-      releasePose.current ??= pinLivePose(panelRef.current);
       setClosing(true);
     },
     [],
   );
   const leaveDock = useCallback(() => closeDock(true), [closeDock]);
+  // A pointer close waits for its exit. Turned around before it ends (the
+  // trigger's click below), `closing` goes false and the cleanup drops the
+  // listener and the fallback, so nothing unmounts.
   useEffect(() => {
     if (!closing) return;
-    releasePose.current?.();
-    releasePose.current = null;
     const panel = panelRef.current;
     if (!panel) {
       setClosing(false);
@@ -428,10 +448,20 @@ function DockShell({ context }: { context: DockContext }) {
   // Ruling 454: at sheet width a finger pulls the dock down to dismiss it.
   // The gesture has already carried the sheet out of sight when it calls
   // back, so the unmount is the instant one.
+  //
+  // A pointer close ends the gesture too, not only the unmount: the hook's
+  // closed layout effect stops a return spring, a dismiss spring or a
+  // reduced-motion fade and clears the host in the close's own commit (the
+  // closing rules never read `--sheet-drag`, so the exit looks the same).
+  // Left running, a trigger click that takes the close back (ruling 459,
+  // F20) would drop [data-closing] under a live `data-sheet-drag`, whose
+  // `transition: none` snaps the sheet and its perched trigger onto the
+  // spring's offset instead of retargeting, and a dismiss spring would then
+  // finish and close the dock the person had just kept open.
   useSheetDrag({
     sheetRef: panelRef,
     hostRef: dockRef,
-    open,
+    open: open && !closing,
     onDismiss: () => closeDock(true),
   });
   // Escape is handled ON THE PANEL (its onKeyDown below), not on the document.
@@ -476,8 +506,8 @@ function DockShell({ context }: { context: DockContext }) {
   //
   // The per-tab restore also flips `open`, and a restore is not a user action:
   // focusing there put every full page load inside the textarea, past the skip
-  // link and the page heading. So both arms ask whether the person opened it.
-  const openedByUser = useRef(false);
+  // link and the page heading. So both arms ask whether the person opened it
+  // (`openedByUser`, declared with the dock's state above).
   const focusInside = useCallback(() => {
     const composer = composerRef.current;
     if (composer && !composer.disabled) composer.focus();
@@ -594,7 +624,12 @@ function DockShell({ context }: { context: DockContext }) {
       : "?c=new");
 
   return (
-    <div className="dock" ref={dockRef} data-open={open ? "true" : "false"}>
+    <div
+      className="dock"
+      ref={dockRef}
+      data-open={open ? "true" : "false"}
+      data-restored={open && restoredOpen ? "" : undefined}
+    >
       {open && context.needsOwnStream && <DockLive />}
       {open && (
         <section
@@ -705,11 +740,37 @@ function DockShell({ context }: { context: DockContext }) {
         onPointerEnter={preloadPanelBody}
         onFocus={preloadPanelBody}
         onClick={() => {
+          // Ruling 459 (F20): a click while the panel leaves takes the close
+          // back. Dropping `data-closing` retargets the exit transition to
+          // the open pose from wherever it has got to, and the closing
+          // effect's cleanup drops its listener and timer. It is an open the
+          // person asked for, so focus goes in as on any other; `open` is
+          // re-asserted, never changed, so the focus effect will not do it.
+          // A restored panel stops being one here: under `data-restored` the
+          // way back would snap instead of retargeting. One branch per click:
+          // this one never falls through to the close below.
+          if (closing) {
+            openedByUser.current = true;
+            setRestoredOpen(false);
+            setClosing(false);
+            // The exit can have ended already: its transitionend (or the
+            // fallback timer, or a pull's dismiss) queues `setOpen(false)` at
+            // default priority, which React renders a task later, and Chrome
+            // can run a queued click before that task. This handler still
+            // sees `closing`, so without this the pending close would land
+            // after it and unmount the composer focus is about to enter.
+            // Queued after it, this open wins. While the exit still runs,
+            // `open` is already true and this changes nothing.
+            setOpen(true);
+            focusInside();
+            return;
+          }
           if (open) {
             closeDock(false);
             return;
           }
           openedByUser.current = true;
+          setRestoredOpen(false);
           setOpen(true);
         }}
       >

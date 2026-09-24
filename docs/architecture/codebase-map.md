@@ -149,7 +149,7 @@ filename grammar, loaded on first use), `mention-spans`, `toast` (bottom-center;
 restore; `commit` runs a primary action and then the same exit, ruling 459), `copy-glyph`
 (`GlyphSwap`: a glyph that trades with its control's state cross-fades in place; `CopyGlyph` is
 its copy case, ruling 459), `use-fresh-line` (a line animates only once it replaces the one first
-painted, ruling 459), `live-pose` (a surface closed mid-entrance leaves from where it is, ruling
+painted, ruling 459), `live-pose` (a dialog closed mid-entrance leaves from where it is, ruling
 453(b)), `spring` (the board drop's spring and pointer velocity, ruling 453(a); momentum projection
 and rubber-banding, ruling 454), `use-sheet-drag` (the dock's pull-to-dismiss sheet, ruling
 454), `use-dismiss`, `page-overlay`, `stage-menu`, `task-meta` (priority, labels, due

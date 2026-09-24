@@ -13,8 +13,11 @@ export const CONTROLLER_BUDGETS: PerfBudgetTable = {
   // lives in the dock's frame, which root ships, and brings
   // ui/use-sheet-drag.ts, ui/spring.ts and ui/live-pose.ts with it. The
   // panel's body, the markdown and the console stay lazy.
+  // Lowered 22 -> 21 by ruling 459's deferred dock half (2026-09-24): the
+  // dock's entrance is a transition a close retargets, so it no longer pins
+  // its live pose and ui/live-pose.ts left its closure (dialogs keep it).
   "controller:closed-dock.static-modules": {
-    ceiling: 22,
+    ceiling: 21,
     unit: "count",
     journey: "fresh-load",
     fixture:

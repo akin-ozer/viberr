@@ -30,7 +30,17 @@ import { createVelocityTracker, project, rubberband, springAt, unrubberband, typ
  * and anything riding it (the dock's perched button) read the same value, so
  * they move on one clock. `onDismiss` runs once the sheet has left; the
  * caller unmounts it without an exit of its own, and the hook clears `host`
- * when `open` turns false.
+ * when `open` turns false. A caller whose own close has an exit passes
+ * `open` false as that exit starts, not once it unmounts (the dock passes
+ * `open && !closing`): a settle left running under an exit the person then
+ * takes back would snap the sheet onto the spring, or dismiss it anyway
+ * (ruling 459).
+ *
+ * The sheet's entrance must be a TRANSITION that the caller's
+ * `[data-sheet-drag]` rule switches off (`transition: none`), as the dock's
+ * is (ruling 459). That is what holds a sheet caught mid-entrance at the
+ * offset read here. A keyframe entrance would outrank the drag's transform
+ * in the cascade and carry on under the finger.
  *
  * Reduced motion: the drag still follows the finger — that motion is the
  * person's own — but nothing slides after the release. A dismiss fades the
@@ -240,8 +250,10 @@ export function useSheetDrag({
       // caught sheet jump ~60px toward rest on the first move (review).
       const pull = base < 0 ? unrubberband(base, height, BAND) : base;
       stop();
-      // The entrance ends where the finger caught it and never replays.
-      sheet.style.animation = "none";
+      // A sheet still rising is held where the finger caught it by the
+      // host's drag rule: its `transition: none` cancels the entrance (a
+      // transition, ruling 459) at the offset written here, and nothing
+      // replays after the release. Nothing is written on the sheet itself.
       if (base !== 0) apply(base);
       tracker.reset();
       tracker.push(0, event.clientY, performance.now());
