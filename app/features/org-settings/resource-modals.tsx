@@ -4,6 +4,7 @@ import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { slugify } from "~/shared/ids/slugify";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE } from "~/shared/mcp-tools";
 import { Icon } from "~/ui/icon";
+import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
 import { EditIco, MiniModal } from "./mini-modal";
 import { useModalAction } from "./resource-helpers";
 
@@ -85,32 +86,32 @@ export function KBModal({
       {!initial && (
         <div className="field">
           <span className="flabel">Content</span>
-          <div
-            role="radiogroup"
-            aria-label="How the knowledge base gets its content"
+          {/* Ruling 455(f), UI-58: a `role="radiogroup"` of plain buttons
+              promises arrow keys it never wires and makes each radio its own
+              tab stop. `RadioSeg` carries the same roles with the roving keys
+              (one tab stop, ←/→, Home/End), and a choice commits on
+              activation, not on focus — see its note. */}
+          <RadioSeg
             className="mode-radios"
+            label="How the knowledge base gets its content"
+            value={mode}
+            onChange={(next) => setMode(next === "files" ? "files" : "empty")}
           >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={mode === "empty"}
+            <RadioSegOption
+              value="empty"
               className={"btn sm" + (mode === "empty" ? "" : " ghost")}
-              onClick={() => setMode("empty")}
             >
               <Icon name="memory" />
               Empty for now
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={mode === "files"}
+            </RadioSegOption>
+            <RadioSegOption
+              value="files"
               className={"btn sm" + (mode === "files" ? "" : " ghost")}
-              onClick={() => setMode("files")}
             >
               <FolderIco />
               Start from files
-            </button>
-          </div>
+            </RadioSegOption>
+          </RadioSeg>
           {filesMode && (
             <div className="def-note">
               <Icon name="file" />
@@ -535,32 +536,28 @@ export function SkillModal({
       {!initial && (
         <div className="field">
           <span className="flabel">Content</span>
-          <div
-            role="radiogroup"
-            aria-label="How the skill gets its content"
+          {/* Ruling 455(f): on `RadioSeg` for the same reason as KBModal's. */}
+          <RadioSeg
             className="mode-radios"
+            label="How the skill gets its content"
+            value={mode}
+            onChange={(next) => setMode(next === "files" ? "files" : "write")}
           >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={mode === "write"}
+            <RadioSegOption
+              value="write"
               className={"btn sm" + (mode === "write" ? "" : " ghost")}
-              onClick={() => setMode("write")}
             >
               <EditIco />
               Write SKILL.md
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={mode === "files"}
+            </RadioSegOption>
+            <RadioSegOption
+              value="files"
               className={"btn sm" + (mode === "files" ? "" : " ghost")}
-              onClick={() => setMode("files")}
             >
               <FolderIco />
               Start from files
-            </button>
-          </div>
+            </RadioSegOption>
+          </RadioSeg>
           {filesMode && (
             <div className="def-note">
               <Icon name="shield" />

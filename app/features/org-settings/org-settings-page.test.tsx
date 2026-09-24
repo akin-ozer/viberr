@@ -2118,6 +2118,46 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
     );
   });
 
+  /**
+   * Ruling 455(f), UI-58: the content group was a `role="radiogroup"` of plain
+   * buttons, so it promised arrow keys it never wired and each radio was its
+   * own tab stop. On `RadioSeg` it is one tab stop that ←/→ traverse, and a
+   * choice commits on activation, never on focus (RadioSeg's note).
+   */
+  it("the content radiogroup moves with arrow keys and commits on activation", async () => {
+    const { nameInput, getByText } = openNewKb();
+    fireEvent.change(nameInput, { target: { value: "Design notes" } });
+    const group = document.querySelector<HTMLElement>('.mode-radios[role="radiogroup"]')!;
+    expect(group.getAttribute("aria-label")).toBe("How the knowledge base gets its content");
+    const radios = [...group.querySelectorAll<HTMLElement>('[role="radio"]')];
+    expect(radios.map((r) => r.textContent)).toEqual(["Empty for now", "Start from files"]);
+    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
+    expect(radios.map((r) => r.className)).toEqual(["btn sm", "btn sm ghost"]);
+    // One tab stop: the group holds it and hands entry focus to the checked
+    // option.
+    expect(group.getAttribute("tabindex")).toBe("0");
+    expect(radios.map((r) => r.getAttribute("tabindex"))).toEqual(["-1", "-1"]);
+    // Radix moves focus in a `setTimeout`, so each move is awaited.
+    radios[0]!.focus();
+    fireEvent.keyDown(radios[0]!, { key: "ArrowRight" });
+    await waitFor(() => expect(document.activeElement).toBe(radios[1]));
+    // Focus alone chose nothing.
+    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
+    expect(getByText("Create & index")).not.toBeNull();
+    // Activation (what Enter / Space do on a focused button) chooses.
+    fireEvent.click(radios[1]!);
+    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "true"]);
+    expect(radios.map((r) => r.className)).toEqual(["btn sm ghost", "btn sm"]);
+    expect(getByText("Create & add files")).not.toBeNull();
+    // The ends wrap.
+    fireEvent.keyDown(radios[1]!, { key: "ArrowRight" });
+    await waitFor(() => expect(document.activeElement).toBe(radios[0]));
+    // Activating the chosen option again keeps it chosen: a radio group always
+    // holds one value.
+    fireEvent.click(radios[1]!);
+    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "true"]);
+  });
+
   it("edit mode never offers the mode radios (content already exists)", () => {
     const utils = renderPanel(
       <ResourcesPanel kbs={KBS} mcps={MCPS} skills={SKILLS} gagents={GAGENTS} stages={STAGES} />,
