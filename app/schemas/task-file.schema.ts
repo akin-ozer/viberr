@@ -1,10 +1,13 @@
 import { z } from "zod";
 import {
   diagError,
-  diagInfo,
   diagWarning,
+  tolerantField,
+  tolerantListField,
   tolerantRowsOf,
   type FileDiagnostic,
+  type TolerantField,
+  type TolerantListField,
 } from "./file-diagnostics";
 import { canonicalDependencyRef } from "~/shared/dependencies";
 import { headCarriesRevision, type RefreshLink } from "~/shared/revision-drift";
@@ -1804,53 +1807,12 @@ export interface TolerantTaskFrontmatterResult {
  *  ruling. A file still carrying those keys keeps them as unknown keys.) */
 type ReadableFrontmatterKey = keyof TaskFrontmatter;
 
-/** Runs `schema` over `data[path]`; on failure records a diagnostic and returns
- * `fallback`. Absent (undefined) values only diagnose when `required`. */
-function tolerant<T>(
-  diagnostics: FileDiagnostic[],
-  data: RawFrontmatter,
-  path: ReadableFrontmatterKey,
-  schema: z.ZodType<T>,
-  fallback: T,
-  options: { required?: boolean; severity?: "info" | "warning" } = {},
-): T {
-  const value = data[path];
-  if (value === undefined) {
-    if (options.required) {
-      const make = options.severity === "info" ? diagInfo : diagWarning;
-      diagnostics.push(
-        make(
-          "frontmatter.missing_field",
-          `Frontmatter field \`${path}\` is missing; using ${JSON.stringify(fallback)}.`,
-          path,
-        ),
-      );
-    }
-    return fallback;
-  }
-  const result = schema.safeParse(value);
-  if (result.success) return result.data;
-  const make = options.severity === "info" ? diagInfo : diagWarning;
-  diagnostics.push(
-    make(
-      "frontmatter.invalid_field",
-      `Frontmatter field \`${path}\` is invalid (${result.error.issues[0]?.message ?? "unparseable"}); using ${JSON.stringify(fallback)}.`,
-      path,
-    ),
-  );
-  return fallback;
-}
+/** The shared tolerant readers (`file-diagnostics.ts`), held to this file's
+ *  keys: `tolerant` falls a whole field back, `tolerantRows` keeps a list's
+ *  good rows (the F18 contract). */
+const tolerant: TolerantField<ReadableFrontmatterKey> = tolerantField;
+const tolerantRows: TolerantListField<ReadableFrontmatterKey> = tolerantListField;
 
-/**
- * Validate a list field ONE ROW AT A TIME, keeping the good rows and dropping
- * only the bad ones with a per-index diagnostic — the F18 contract.
- *
- * The whole-array {@link tolerant} above empties the ENTIRE list on one bad
- * row, and because the diagnostic is only a warning (not a hardStop) the file
- * stays writable, so the next `updateTaskFile` serializes the emptied list back
- * over the rows that had been fine — a durable, silent loss. Any list whose
- * loss would persist (verdicts, schedules, engagements, …) parses through here.
- */
 /**
  * C01-A8 (pass 32): `github.commits` gets the per-row tolerance every other
  * list has. The cache is reconciler-written, but ONE odd row (`sha: 1234` as a
@@ -1881,37 +1843,6 @@ function githubWithCleanCommits(
     }),
   );
   return { ...data, github: { ...probe.data, commits } };
-}
-
-function tolerantRows<T>(
-  diagnostics: FileDiagnostic[],
-  data: RawFrontmatter,
-  path: ReadableFrontmatterKey,
-  element: z.ZodType<T>,
-): T[] {
-  const value = data[path];
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) {
-    diagnostics.push(
-      diagWarning(
-        "frontmatter.invalid_field",
-        `Frontmatter field \`${path}\` is not a list — using an empty list.`,
-        path,
-      ),
-    );
-    return [];
-  }
-  return tolerantRowsOf(
-    diagnostics,
-    value,
-    element,
-    "frontmatter.invalid_field",
-    (i) => ({
-      subject: `Frontmatter \`${path}[${i}]\``,
-      noun: "entry",
-      path: `${path}[${i}]`,
-    }),
-  );
 }
 
 /**

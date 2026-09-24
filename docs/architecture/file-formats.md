@@ -65,7 +65,10 @@ General rules for the canonical files:
   would take for a boolean (`mode: "off"`, `"yes"`), so other tools read the same value.
 - **Tolerant parsing** (`app/schemas/*.schema.ts`): missing/invalid fields produce structured
   diagnostics + safe fallbacks, and list fields parse one row at a time (a bad row drops only
-  itself, with an indexed diagnostic). Parsing never throws and never drops a task or project.
+  itself, with an indexed diagnostic). `project.md` and `task.md` share one set of these readers
+  (`app/schemas/file-diagnostics.ts`), and a field that falls back names the value it used:
+  ``Frontmatter field `readiness` is missing; using "ready".`` (ruling 458(h)). Parsing never
+  throws and never drops a task or project.
   Diagnostics floor readiness (warning → `input_required`, error →
   `inconsistency_risk_detected`, hard stop → `blocked`) — see
   `app/server/interpretation/diagnostics-policy.server.ts`. Goal files and agent profiles are

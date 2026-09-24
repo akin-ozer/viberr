@@ -3,8 +3,11 @@ import { stageColorSchema } from "~/shared/workflow/stage-colors";
 import {
   diagError,
   diagWarning,
-  tolerantRowsOf,
+  tolerantField,
+  tolerantListField,
   type FileDiagnostic,
+  type TolerantField,
+  type TolerantListField,
 } from "./file-diagnostics";
 
 /**
@@ -370,89 +373,11 @@ export interface ParsedProjectFile {
   description: string;
 }
 
-function tolerant<T>(
-  diagnostics: FileDiagnostic[],
-  data: RawFrontmatter,
-  path: keyof ProjectFrontmatter,
-  schema: z.ZodType<T>,
-  fallback: T,
-  required = false,
-): T {
-  const value = data[path];
-  if (value === undefined) {
-    if (required) {
-      diagnostics.push(
-        diagWarning(
-          "frontmatter.missing_field",
-          `Frontmatter field \`${path}\` is missing — using a default.`,
-          path,
-        ),
-      );
-    }
-    return fallback;
-  }
-  const result = schema.safeParse(value);
-  if (result.success) return result.data;
-  diagnostics.push(
-    diagWarning(
-      "frontmatter.invalid_field",
-      `Frontmatter field \`${path}\` is invalid (${result.error.issues[0]?.message ?? "unparseable"}) — using a default.`,
-      path,
-    ),
-  );
-  return fallback;
-}
-
-/**
- * Per-ENTRY tolerant parse for a list field (F18). The whole-array `tolerant`
- * above dropped an ENTIRE list on one bad row — a single malformed `members[]`
- * entry silently wiped every member's role (ACL integrity), and the same shape
- * applied to stages / workflow / agents. Here we keep every valid entry and drop
- * only the unparseable ones, each with its own indexed diagnostic. Mirrors the
- * per-entry contract the task-file `parseEngagements` already used.
- */
-function tolerantArray<T>(
-  diagnostics: FileDiagnostic[],
-  data: RawFrontmatter,
-  path: keyof ProjectFrontmatter,
-  arraySchema: z.ZodArray<z.ZodType<T>>,
-  required = false,
-): T[] {
-  const value = data[path];
-  if (value === undefined) {
-    if (required) {
-      diagnostics.push(
-        diagWarning(
-          "frontmatter.missing_field",
-          `Frontmatter field \`${path}\` is missing — using a default.`,
-          path,
-        ),
-      );
-    }
-    return [];
-  }
-  if (!Array.isArray(value)) {
-    diagnostics.push(
-      diagWarning(
-        "frontmatter.invalid_field",
-        `Frontmatter field \`${path}\` is not a list — using an empty list.`,
-        path,
-      ),
-    );
-    return [];
-  }
-  return tolerantRowsOf(
-    diagnostics,
-    value,
-    arraySchema.element,
-    "frontmatter.invalid_field",
-    (i) => ({
-      subject: `Frontmatter \`${path}[${i}]\``,
-      noun: "entry",
-      path: `${path}[${i}]`,
-    }),
-  );
-}
+/** The shared tolerant readers (`file-diagnostics.ts`), held to this file's
+ *  keys: `tolerant` falls a whole field back, `tolerantRows` keeps a list's
+ *  good rows (the F18 contract). */
+const tolerant: TolerantField<keyof ProjectFrontmatter> = tolerantField;
+const tolerantRows: TolerantListField<keyof ProjectFrontmatter> = tolerantListField;
 
 function derivePrefix(slug: string): string {
   const letters = slug.replace(/[^a-z]/gi, "");
@@ -507,7 +432,9 @@ export function parseProjectFrontmatter(
   }
 
   const frontmatter: ProjectFrontmatter = {
-    name: tolerant(diagnostics, data, "name", projectNameSchema, slug, true),
+    name: tolerant(diagnostics, data, "name", projectNameSchema, slug, {
+      required: true,
+    }),
     slug,
     archived: tolerant(diagnostics, data, "archived", archivedSchema, false),
     repo: tolerant(diagnostics, data, "repo", repoSchema, null),
@@ -533,14 +460,16 @@ export function parseProjectFrontmatter(
       null,
     ),
     // F18: per-entry — one bad row drops only itself, never the whole list.
-    stages: tolerantArray(diagnostics, data, "stages", stagesSchema, true),
-    workflow: tolerantArray(diagnostics, data, "workflow", workflowSchema),
-    members: tolerantArray(diagnostics, data, "members", membersSchema),
-    agents: tolerantArray(
+    stages: tolerantRows(diagnostics, data, "stages", stagesSchema.element, {
+      required: true,
+    }),
+    workflow: tolerantRows(diagnostics, data, "workflow", workflowSchema.element),
+    members: tolerantRows(diagnostics, data, "members", membersSchema.element),
+    agents: tolerantRows(
       diagnostics,
       { ...data, agents: cleanAgentGrants(diagnostics, data, "agents") },
       "agents",
-      agentsSchema,
+      agentsSchema.element,
     ),
     credentialPolicy: tolerant(
       diagnostics,
@@ -554,14 +483,14 @@ export function parseProjectFrontmatter(
     // every consumer as "nothing configured" — every anti-noise guardrail off,
     // and an explicitly disabled `delete-branch-after-merge` flipped back to
     // its ON default. The next project write then persisted the empty list.
-    guardrails: tolerantArray(diagnostics, data, "guardrails", guardrailsSchema),
+    guardrails: tolerantRows(diagnostics, data, "guardrails", guardrailsSchema.element),
     // Ruling 178: per row for the same reason — an emptied list reads as "no
     // required reviewer", which silently reopens the acceptance gate.
-    requiredReviewers: tolerantArray(
+    requiredReviewers: tolerantRows(
       diagnostics,
       data,
       "requiredReviewers",
-      requiredReviewersSchema,
+      requiredReviewersSchema.element,
     ),
     // Ruling 239: the project's rulings KB. `tolerant` with a null fallback,
     // like `credentialPolicy` — a garbled value must read as "no rulings KB"
@@ -573,7 +502,7 @@ export function parseProjectFrontmatter(
     // that a person deliberately fenced off. The field-by-field build is why
     // this line has to exist at all — `rulingsKb` shipped without it earlier in
     // this same pass and wrote fine while reading back undefined.
-    fileLeases: tolerantArray(diagnostics, data, "fileLeases", fileLeasesSchema),
+    fileLeases: tolerantRows(diagnostics, data, "fileLeases", fileLeasesSchema.element),
   };
 
   if (frontmatter.stages.length === 0) {

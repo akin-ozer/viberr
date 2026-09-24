@@ -20,9 +20,8 @@ import {
 import { decodeActorRef, encodeActorRef } from "./actor-ref.server";
 import {
   serializeFrontmatterFile,
-  splitFrontmatter,
+  splitFrontmatterMapping,
   toYaml,
-  yamlMappingSchema,
 } from "./frontmatter.server";
 
 /**
@@ -495,28 +494,8 @@ export function parseTaskFileContent(
   content: string,
   context: { fallbackKey?: string } = {},
 ): TaskFileParseResult {
-  const diagnostics: FileDiagnostic[] = [];
-  const { data, body, diagnostics: fmDiags } = splitFrontmatter(content);
-  diagnostics.push(...fmDiags);
-
-  // Frontmatter that is not a mapping (a scalar, a sequence) contributes no
-  // fields at all; the schema below then falls every field back to its default.
-  const mapping = yamlMappingSchema.safeParse(data);
-  if (!mapping.success) {
-    diagnostics.push(
-      diagError(
-        "frontmatter.not_a_map",
-        "Frontmatter is not a YAML mapping — all fields fall back to defaults.",
-        undefined,
-        true,
-      ),
-    );
-  }
-
-  const fm = parseTaskFrontmatter(
-    mapping.success ? mapping.data : {},
-    context,
-  );
+  const { data, body, diagnostics } = splitFrontmatterMapping(content);
+  const fm = parseTaskFrontmatter(data, context);
   diagnostics.push(...fm.diagnostics);
 
   const sections = splitSections(body);
