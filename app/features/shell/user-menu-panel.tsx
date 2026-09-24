@@ -91,18 +91,33 @@ export function UserMenuPanel({
   const csrf = useCsrfToken();
   const push = useToast();
 
+  // The theme on screen: the one the save is carrying, else `theme`. The page
+  // flips at the press, but `theme` (the root loader's) catches up only when
+  // the save revalidates it. Read alone, it left the label a step behind the
+  // page, and a second quick press cycled from the stale value (light, press,
+  // press landed on Dark, not System). A refused save clears the form data,
+  // so this falls back to `theme`, where the rollback below puts the page.
+  // Inline, not a shared helper: a module shared with /profile becomes a chunk
+  // of its own, and every page preloads it with this menu (ruling 457).
+  const inFlight = fetcher.formData?.get("theme");
+  const current: ThemePreference =
+    inFlight === "light" || inFlight === "dark" || inFlight === "system" ? inFlight : theme;
+
   // Toast only once the server confirms the theme write — a failed POST
-  // (expired session/CSRF) reports the failure, not a false success (P11-40).
+  // (expired session/CSRF) reports the failure, not a false success (P11-40),
+  // and puts the page back on the confirmed theme the label has returned to.
   useFetcherResult(fetcher, (data) => {
     if (data.ok && data.theme) push(themeToast(data.theme));
-    else if (!data.ok)
+    else if (!data.ok) {
+      applyThemePreference(theme);
       push(data.error ?? "Theme change failed. Try again", "error");
+    }
   });
 
   const person = { initials: initialsOf(user.name), tone: user.avatarTone };
 
   const cycleTheme = () => {
-    const next = NEXT_THEME[theme] ?? "light";
+    const next = NEXT_THEME[current] ?? "light";
     applyThemePreference(next);
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -208,7 +223,7 @@ export function UserMenuPanel({
         >
           <Icon name="sparkle" />
           Switch theme ·{" "}
-          <span className="faint">{themeLabel(theme)}</span>
+          <span className="faint">{themeLabel(current)}</span>
         </DropdownMenu.Item>
         {user.role === "admin" && (
           <DropdownMenu.Item asChild>

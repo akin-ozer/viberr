@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import { DEFAULT_NOTIF_PREFS } from "./notification-prefs";
+import { PROFILE_DATA as BASE } from "../../../test-support/profile-data";
 import {
   ProfilePage,
   type ProfileActionData,
@@ -12,64 +12,6 @@ import {
 } from "./profile-page";
 
 afterEach(cleanup);
-
-const BASE: ProfileData = {
-  user: {
-    id: "u_arda",
-    name: "Arda Kaya",
-    title: "Senior engineer",
-    email: "arda@viberr.dev",
-    idp: "local",
-    createdAt: "2026-02-18T09:00:00.000Z",
-    avatarTone: "",
-    hasPassword: true,
-    githubConnected: false,
-    githubHandle: null,
-  },
-  memberships: [{ slug: "viberr-core", name: "Viberr Core", role: "maintainer" }],
-  accessRole: "maintainer",
-  githubConfigured: true,
-  // Ruling 127: the viewer's own agent accounts, neither connected.
-  backends: [
-    {
-      backend: "claude",
-      health: {
-        backend: "claude",
-        userId: "u_arda",
-        available: false,
-        kind: null,
-        method: null,
-        verification: "none",
-        secretSuffix: null,
-        verifiedAt: null,
-        connectedAt: null,
-        detail:
-          "Claude isn't connected. Connect it on your Profile → Agent accounts.",
-      },
-      login: null,
-      methods: { signIn: ["claudeai", "console"], paste: ["api_key"] },
-    },
-    {
-      backend: "codex",
-      health: {
-        backend: "codex",
-        userId: "u_arda",
-        available: false,
-        kind: null,
-        method: null,
-        verification: "none",
-        secretSuffix: null,
-        verifiedAt: null,
-        connectedAt: null,
-        detail:
-          "Codex isn't connected. Connect it on your Profile → Agent accounts.",
-      },
-      login: null,
-      methods: { signIn: ["device"], paste: ["api_key", "access_token"] },
-    },
-  ],
-  prefs: { notifs: DEFAULT_NOTIF_PREFS, tlDefault: "all" },
-};
 
 let lastSubmit: Record<string, string> | null = null;
 let lastTheme: string | null = null;

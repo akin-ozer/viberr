@@ -153,7 +153,12 @@ Intents behind `project.task.tsx` are explained in
   page stays clickable throughout (ruling 453(c); a view transition would swallow the
   clicks of someone cycling the account menu's theme item). The menu, the profile page
   and the root effect's OS-follow listener all go through it; the boot script paints
-  once and registers no listener of its own.
+  once and registers no listener of its own. The page flips at the press, before the
+  root loader confirms the save, so the controls read the theme on screen, not the
+  loader's: while a save is out, the menu item's label, the step its next press cycles
+  from and the profile page's selected segment all follow the choice the save carries
+  (the fetcher's form data). Two quick presses from Light land on System, not on Dark
+  twice. A refused save puts the controls and the page back on the confirmed theme.
 - **Motion, materials and type** (ruling 453). The board's drop flight is a critically
   damped spring (`ui/spring.ts`) that leaves at the pointer's release velocity. A
   dialog, page overlay or the dock closed while its entrance is still playing leaves
