@@ -687,12 +687,16 @@ function Composer({
   // the only account of it was a toast that unmounts itself after 2.6 seconds.
   const pending = useRef<string | null>(null);
   useFetcherResult(send, (data) => {
-    // Cleared only on success, and only if the box still holds exactly what
-    // went out — somebody who started typing the next message while this one
-    // was in flight keeps it. On a failure the text and the Send button both
-    // stay, so the person can retry or copy it out.
-    if (data.ok) setText((cur) => (cur === pending.current ? "" : cur));
+    // Cleared only on success, and only if the box still holds what went out —
+    // somebody who started typing the next message while this one was in
+    // flight keeps it. What went out is the TRIMMED text, so the box is
+    // compared trimmed too: a message sent with a trailing space or newline
+    // clears like any other. `sent` is read before the ref is nulled, because
+    // React may run the updater later than this line. On a failure the text
+    // and the Send button both stay, so the person can retry or copy it out.
+    const sent = pending.current;
     pending.current = null;
+    if (data.ok) setText((cur) => (cur.trim() === sent ? "" : cur));
   });
   const disabled =
     !view.available || (view.conversation !== null && !view.viewerOwnsActive);

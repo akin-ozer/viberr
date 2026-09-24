@@ -589,6 +589,76 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
 });
 
 /**
+ * Ruling 259's clear, for a message that ends in whitespace. The composer
+ * sends the TRIMMED text, and the success handler used to compare that against
+ * the raw box, so "hello " or a message ending in a newline stayed in the box
+ * after the controller had taken it.
+ */
+describe("ruling 259: the box is compared with what went out, trimmed", () => {
+  const typed = "hello \n";
+
+  /** An action the test settles by hand, so the send stays in flight. */
+  function held(result: { ok: boolean; error?: string }) {
+    const posted: string[] = [];
+    let settle!: () => void;
+    const gate = new Promise<void>((r) => (settle = r));
+    const action: ActionFunction = async ({ request }) => {
+      posted.push(String((await request.formData()).get("text")));
+      await gate;
+      return result;
+    };
+    return { action, posted, settle };
+  }
+
+  async function sendTyped(action: ActionFunction) {
+    const { container } = renderInstancePage(
+      view({ available: true, projectName: null, conversations: [], goals: null }),
+      action,
+    );
+    await screen.findByText("Managing this instance with your own permissions.");
+    const box = composer(container);
+    fireEvent.change(box, { target: { value: typed } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByRole("button", { name: "Sending…" });
+    return box;
+  }
+
+  /** Lets the held action return and waits for the fetcher to settle. */
+  async function land(settle: () => void) {
+    await act(async () => settle());
+    await screen.findByRole("button", { name: "Send" });
+    // The result handler runs in the settle commit's passive effects.
+    await act(async () => {});
+  }
+
+  it("clears a message sent with a trailing space and newline", async () => {
+    const { action, posted, settle } = held({ ok: true });
+    const box = await sendTyped(action);
+    await land(settle);
+    expect(posted).toEqual(["hello"]);
+    // CANARY: compare the raw box (`cur === sent`) and this stays "hello \n".
+    expect(box.value).toBe("");
+  });
+
+  it("keeps what was typed while the send was in flight", async () => {
+    const { action, settle } = held({ ok: true });
+    const box = await sendTyped(action);
+    fireEvent.change(box, { target: { value: `${typed}and the next thing` } });
+    await land(settle);
+    // CANARY: clear on every success and the next message is lost.
+    expect(box.value).toBe(`${typed}and the next thing`);
+  });
+
+  it("keeps the message when the send fails", async () => {
+    const { action, settle } = held({ ok: false, error: "That request expired. Reload the page and try again." });
+    const box = await sendTyped(action);
+    await land(settle);
+    // CANARY: drop the `data.ok` guard and the failed message is gone.
+    expect(box.value).toBe(typed);
+  });
+});
+
+/**
  * Ruling 99, the execution half of the page: a controller turn is a run like
  * any other, so the page shows the run the way the task page does — the
  * Live-run strip (what it is doing, for how long, how many turns and tokens,
