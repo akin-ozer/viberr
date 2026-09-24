@@ -137,7 +137,9 @@ transient errors (`EMFILE`, `ENFILE`, `ENOSPC`, `EPERM`, `EACCES`) re-arm the wa
 after 2 s. A rebuild that FAILS is retried on its own (ruling 218): the watcher re-queues
 that path after 2 s, 5 s, 15 s, 45 s and 120 s (`RETRY_BACKOFF_MS`), resets on the first
 success, and after the last step leaves the file in `projectionStore` on health, which
-marks the instance degraded until the file projects again.
+marks the instance degraded until the file projects again. A `project.md` whose cascade
+could not re-project one of its tasks counts as failed (ruling 454): its own row and
+members land, and the fault names the task's file.
 
 ## Diagnostics (a task looks wrong / stuck)
 

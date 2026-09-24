@@ -60,8 +60,9 @@ never traversed. It reacts to `project.md`, `task.md` and `goals/*.md` with
 directory re-checks every projected task of the project, a removed task directory
 projects the task's removal, and a removed `goals/` directory prunes its goal rows.
 
-A rebuild that fails (a throw, or `rebuildPath` answering `error`) is retried per file
-at 2, 5, 15, 45 and 120 seconds, reset on the first success (ruling 218); past the last
+A rebuild that fails (a throw, `rebuildPath` answering `error`, or a `project.md` whose
+cascade left `failedTasks`) is retried per file at 2, 5, 15, 45 and 120 seconds, reset
+on the first success (ruling 218); past the last
 step the watcher gives up and the fault stays on the health report (§4). A watcher
 `ENOENT` is ignored; any other error clears the handle (health reports `watcher: false`
 and `degraded: ["watcher"]`) and, for the transient codes `EMFILE`, `ENFILE`, `ENOSPC`,
@@ -116,15 +117,20 @@ an unparseable goal file counts as one.
 - `rebuildProjectFile` upserts `projects` (JSON copies of stages, workflow, agent
   policy, credential policy, guardrails, and the project's required-reviewer rules
   resolved to stage and agent names, ruling 178), rewrites `project_members`, replaces
-  the file's `diagnostics`, records provenance, writes the content hash **last**, emits
-  `project.updated`, and forces every task of the project to re-project when the
-  project row is new or a field tasks derive from changed: the repo, stages, workflow,
-  resolved required reviewers or member ids (`projectContextForTasks`, the one reader
-  both sides share; ruling 454). A write that only moves `nextTaskNumber` (every task
-  creation), a file lease or the description costs the project row and one
-  `project.updated`. The rescans read the same answer (`taskFacingChanged`) before they
-  force a project's tasks and goals. A vanished `project.md` deletes its diagnostics
-  first and the `projects` row last (members cascade), and emits `project.removed`.
+  the file's `diagnostics`, records provenance, emits `project.updated`, forces every
+  task of the project to re-project when the project row is new or a field tasks derive
+  from changed: the repo, stages, workflow, resolved required reviewers or member ids
+  (`projectContextForTasks`, the one reader both sides share; ruling 454), and writes
+  the content hash **last**. Each cascaded task runs in its own `SAVEPOINT`: one that
+  throws rolls back alone, its fault and provenance `error` row name ITS file, and the
+  project row, its members and the other tasks still land. The project then keeps the
+  `""` hash and the result lists `failedTasks`, so the next rebuild of `project.md`
+  (the watcher's retry included) runs the cascade again. A write that only moves
+  `nextTaskNumber` (every task creation), a file lease or the description costs the
+  project row and one `project.updated`. The rescans read the same answer
+  (`taskFacingChanged`) before they force a project's tasks and goals. A vanished
+  `project.md` deletes its diagnostics first and the `projects` row last (members
+  cascade), and emits `project.removed`.
 - `rebuildTaskFile` computes the derived `readiness` (`deriveReadiness`: the
   diagnostics floor and the dependency floor, while `stored_readiness` keeps the file's
   value), stores `blocked_by_json` verbatim, `validation` (`deriveValidation`, never the
@@ -162,7 +168,7 @@ an unparseable goal file counts as one.
 - Each file's re-projection (project, task, goal) runs as ONE transaction, its
   projection events held until COMMIT; a caller already inside a transaction (the full
   rebuild, a project's cascade) runs it inline (ruling 454). A rebuild that throws rolls
-  back and announces nothing.
+  back and announces nothing; a cascaded task rolls back only to its savepoint (above).
 - `rebuildPath` routes a path to the right rebuilder with a content-hash
   short-circuit unless forced. It swallows every throw: the log line `projection rebuild
   failed`, a per-file projection fault (`store-health.server.ts`, rulings 217 and 218),
