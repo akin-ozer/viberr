@@ -35,6 +35,7 @@ import {
   reprojectTask,
   stageDisplayName,
   summaryOrThrow,
+  terminalStageIdFor,
   withdrawAcceptanceOffers,
 } from "./task-mutation.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -784,6 +785,36 @@ describe("stageDisplayName", () => {
     expect(stageDisplayName(context, store.slug, "impl")).toBe("In Progress");
     expect(stageDisplayName(context, store.slug, "qa")).toBe("qa");
     expect(stageDisplayName(context, "no-such-project", "impl")).toBe("impl");
+  });
+});
+
+describe("terminalStageIdFor", () => {
+  it("reads the terminal stage id from the project file, and answers null for a project it cannot read", () => {
+    // Ruling 137: the packet writers withdraw a `transition` card into THIS
+    // stage along with the accept card, and the operator's transition routing
+    // keys off it. A stage id that did not come from the file (a hard-coded
+    // "done") would miss a board whose last stage is named otherwise; a throw
+    // on an unreadable project would turn the withdrawal's accept-only
+    // fallback into a failed write.
+    const store = setupTestStore(ctx);
+    const context = { dataRoot: store.dataRoot };
+    expect(terminalStageIdFor(context, store.slug)).toBe("done");
+
+    const project = readProjectFile({
+      projectSlug: store.slug,
+      dataRoot: store.dataRoot,
+    })!.parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...project,
+      stages: [...project.stages, { id: "shipped", name: "Shipped", color: "green" }],
+      workflow: [
+        ...project.workflow,
+        { from: "done", to: "shipped", boundary: "auto", by: "", locked: false },
+      ],
+    });
+    expect(terminalStageIdFor(context, store.slug)).toBe("shipped");
+
+    expect(terminalStageIdFor(context, "no-such-project")).toBeNull();
   });
 });
 

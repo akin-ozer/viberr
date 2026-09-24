@@ -54,7 +54,7 @@ export const CONSOLE_FIXTURE: ConsoleFixtureGroup[] = [
     profileId: "reviewer",
     kind: "reviewer",
     role: "Reviewer",
-    runs: [{ id: "run_rev_1", threadId: "c0", lines: 120, state: "finished" }],
+    runs: [{ id: "run_rev_1", threadId: "r0", lines: 120, state: "finished" }],
   },
 ];
 

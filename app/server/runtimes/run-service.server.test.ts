@@ -2466,7 +2466,7 @@ describe("ruling 372: the resume policy, and the window and credential kind a ru
     await settle();
     expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
     await startTestRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", threadId: "c1", role: "Reviewer", kind: "reviewer",
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "r1", role: "Reviewer", kind: "reviewer",
       backend: "codex", model: "m", prompt: "go", dataRoot: store.dataRoot,
     });
     await settle();

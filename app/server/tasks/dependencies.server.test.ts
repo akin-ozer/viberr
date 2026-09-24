@@ -725,7 +725,7 @@ describe("F37-63: a pending link on a cancelled goal is a dead wait", () => {
     await updateGoal(
       store.db,
       { projectSlug: store.slug, goalId: "goal-1", action: { op: "cancel" } },
-      { userId: store.users.arda.id, label: store.users.arda.email },
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     writeTask(store.dataRoot, store.slug, {
