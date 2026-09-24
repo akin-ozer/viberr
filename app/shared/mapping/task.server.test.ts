@@ -264,6 +264,53 @@ describe("displayReadiness derivation (F7-UI3)", () => {
     expect(summarize(row({ packet_json: inputPacket }), false).packet?.goalDraft).toBeUndefined();
   });
 
+  it("ruling 471: the render names the option each direct acceptance answers, so the dialog never guesses", () => {
+    // Canary: drop the two `acceptanceAnswerOf` lines in `mapPacket` and the
+    // first asserts read undefined (the dialog would say "Withdraws").
+    const packet = (options: unknown[], extra: { awaiting?: "goal_edit" } = {}) =>
+      JSON.stringify({
+        id: "pkt_4",
+        type: "input",
+        kind: "Completion report",
+        from: "operator",
+        title: "Ready to accept?",
+        body: "",
+        options,
+        ...extra,
+      });
+    const both = packet([
+      { kind: "accept_completion", t: "Accept it", d: "", rec: false },
+      { kind: "accept_completion", t: "Accept and merge", d: "", rec: true },
+      { kind: "force_accept", t: "Force-accept it", d: "", rec: false },
+    ]);
+    const rendered = summarize(row({ packet_json: both }), false).packet;
+    // The recommended option of the kind wins over the first one.
+    expect(rendered?.acceptAnswersWith).toBe("Accept and merge");
+    expect(rendered?.forceAnswersWith).toBe("Force-accept it");
+    // Force falls back to accept_completion; the plain door never takes the
+    // override.
+    const acceptOnly = summarize(
+      row({ packet_json: packet([{ kind: "accept_completion", t: "Accept it", d: "", rec: true }]) }),
+      false,
+    ).packet;
+    expect(acceptOnly?.forceAnswersWith).toBe("Accept it");
+    const forceOnly = summarize(
+      row({ packet_json: packet([{ kind: "force_accept", t: "Force-accept it", d: "", rec: true }]) }),
+      false,
+    ).packet;
+    expect(forceOnly?.acceptAnswersWith).toBeUndefined();
+    expect(forceOnly?.forceAnswersWith).toBe("Force-accept it");
+    // A decision no acceptance answers, and one already decided, carry neither.
+    const plain = summarize(row({ packet_json: inputPacket }), false).packet;
+    expect(plain?.acceptAnswersWith).toBeUndefined();
+    expect(plain?.forceAnswersWith).toBeUndefined();
+    const decided = summarize(
+      row({ packet_json: packet(JSON.parse(both).options, { awaiting: "goal_edit" }) }),
+      false,
+    ).packet;
+    expect(decided?.acceptAnswersWith).toBeUndefined();
+  });
+
   it("an input packet on the agent's turn does not raise 'input required'", () => {
     // The packet lift is for a HUMAN who owes an answer. On the agent's turn
     // the agent-working lift below owns the slot instead — what this must never

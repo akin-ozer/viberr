@@ -2200,6 +2200,19 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(text).not.toContain("No delivered revision recorded.");
   });
 
+  it("ruling 471: a decision the move answers reads Answers, from the card the loader built", () => {
+    // CANARY: stop passing `answersWith` from AcceptOnBoardConfirm and this
+    // reads "Withdraws … closes unanswered".
+    const answered = openConfirm({
+      packet: { type: "input", title: "Ready to accept?", acceptAnswersWith: "Accept VIB-1" },
+    })
+      .container.querySelector("dialog")!
+      .textContent!.replace(/\s+/g, " ");
+    expect(answered).toContain("Answers");
+    expect(answered).toContain('the open decision "Ready to accept?" with "Accept VIB-1"');
+    expect(answered).not.toContain("Withdraws");
+  });
+
   it("names the acceptance and the move it performs, in the shared vocabulary", () => {
     const text = openConfirm({})
       .container.querySelector("dialog")!

@@ -67,7 +67,7 @@ function open(props: {
  * close. (Same copy class as F19-23, one dialog over.)
  */
 describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", () => {
-  function withPacket(title: string | null, force = false): string {
+  function withPacket(title: string | null, force = false, answersWith: string | null = null): string {
     const { container } = render(
       <AcceptConfirm
         task={detail({ stage: force ? "triage" : "review" })}
@@ -78,6 +78,7 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
         atBoundary={!force}
         blockedReason={force ? "An open blocked decision is holding this task." : null}
         openPacketTitle={title}
+        answersWith={answersWith}
         busy={false}
         onCancel={() => {}}
         onConfirm={() => {}}
@@ -168,6 +169,31 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
 
   it("shows NO Withdraws row when there is no open decision", () => {
     expect(withPacket(null)).not.toContain("Withdraws");
+  });
+
+  /**
+   * Ruling 471, live on WEB-1: the operator's decision recommended the very
+   * acceptance the owner then pressed, and this row told them it "closes
+   * unanswered". When the loader says the acceptance answers the decision
+   * (`answersWith`, the option it answers with), the row says that instead.
+   */
+  it("ruling 471: an acceptance the loader says answers the decision reads Answers, naming the option", () => {
+    // Canary: drop the `answersWith` arm of the open-decision row and both
+    // doors read "Withdraws … closes unanswered" again.
+    const title = "WEB-1 ready to accept: both reviewers approved PR #1";
+    const accept = withPacket(title, false, "Accept WEB-1 and merge PR #1");
+    expect(accept).toContain("Answers");
+    expect(accept).toContain(`the open decision "${title}" with "Accept WEB-1 and merge PR #1"`);
+    expect(accept).not.toContain("Withdraws");
+    expect(accept).not.toContain("closes unanswered");
+    const force = withPacket(title, true, "Force-accept as admin");
+    expect(force).toContain("Answers");
+    expect(force).toContain('with "Force-accept as admin"');
+    expect(force).not.toContain("Withdraws");
+    // Without the loader's answer the same decision is still withdrawn.
+    const withdrawn = withPacket(title, false, null);
+    expect(withdrawn).toContain("Withdraws");
+    expect(withdrawn).not.toContain("Answers");
   });
 });
 

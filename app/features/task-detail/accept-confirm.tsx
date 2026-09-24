@@ -171,11 +171,16 @@ export function AcceptConfirm({
    */
   blockedGates = [],
   blockedReasonAuthoritative = true,
-  /** F32-11 (pass 32): the OPEN decision packet this acceptance withdraws
-   *  (its title), or null. Accepting a task with an open packet used to clear
+  /** F32-11 (pass 32): the OPEN decision packet this acceptance closes (its
+   *  title), or null. Accepting a task with an open packet used to clear
    *  it silently — no row here, no timeline note, no audit — so the human
    *  never learned a question died with the acceptance. */
   openPacketTitle = null,
+  /** Ruling 471: the title of the option this acceptance ANSWERS that
+   *  decision with, or null when it withdraws it. The loader decides
+   *  (`acceptAnswersWith` / `forceAnswersWith` on the packet render, from the
+   *  predicate the server's write uses); this component only says which. */
+  answersWith = null,
   baseBehindBy = null,
   onRefreshFirst,
   busy,
@@ -191,6 +196,7 @@ export function AcceptConfirm({
    *  direct Accept) and only while the branch is behind its base. */
   onRefreshFirst?: () => void;
   openPacketTitle?: string | null;
+  answersWith?: string | null;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
   /** R17-2: a verified no-change completion. TWO shapes reach this, and the
@@ -607,18 +613,31 @@ export function AcceptConfirm({
               )}
             </div>
           )}
-          {openPacketTitle && (
-            <div className="obs warn">
-              {/* F32-11: the acceptance closes the task, so the open decision is
-                  withdrawn unanswered — said here, and recorded on the timeline
-                  and in the audit trail when it happens. */}
-              <span className="k">Withdraws</span>
-              <span>
-                the open decision "{openPacketTitle}". It closes unanswered with the
-                task; a timeline note and an audit row record the withdrawal.
-              </span>
-            </div>
-          )}
+          {openPacketTitle &&
+            (answersWith ? (
+              <div className="obs">
+                {/* Ruling 471: the decision offers the option this acceptance
+                    performs, so the acceptance IS its answer, recorded the way
+                    the packet's own confirm records it. */}
+                <span className="k">Answers</span>
+                <span>
+                  the open decision "{openPacketTitle}" with "{answersWith}". The
+                  answer is recorded on the timeline and in the audit trail.
+                </span>
+              </div>
+            ) : (
+              <div className="obs warn">
+                {/* F32-11: a decision that offers neither acceptance option is
+                    withdrawn unanswered when the acceptance closes the task.
+                    Said here, and recorded on the timeline and in the audit
+                    trail when it happens. */}
+                <span className="k">Withdraws</span>
+                <span>
+                  the open decision "{openPacketTitle}". It closes unanswered with the
+                  task; a timeline note and an audit row record the withdrawal.
+                </span>
+              </div>
+            ))}
         </div>
       </div>
       <div className="modal-foot">

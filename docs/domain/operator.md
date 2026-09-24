@@ -562,6 +562,16 @@ replaced packet answers "This decision was replaced by a newer one." Confirming 
 recovery option resolves the packet (no repeat confirms) and a repeat failure opens a
 **new** packet (ruling 76).
 
+The task page's own acceptances answer these two kinds too (ruling 471). A person's
+plain acceptance (Accept, a board or stage-menu move into the terminal stage, an applied
+acceptance card) answers an open decision that offers `accept_completion`; a Force accept
+answers `force_accept`, or `accept_completion` when no `force_accept` is offered. The
+record is the packet door's: the packet cleared, a `task.packet.resolved` row under the
+person with `optionKind`, `optionTitle`, `packetKind` and `via` (`accept` or
+`force-accept`), the packet notifications marked read, and no operator hand-off. A
+decision offering neither kind is withdrawn by the acceptance (F32-11). The operator's own
+full-autonomy acceptance answers nothing and withdraws as before.
+
 ## 7. Guardrails on what the operator writes
 
 `writeOperatorComment` enforces the project's guardrail rows for real:

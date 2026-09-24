@@ -70,6 +70,13 @@ const PACKET: TaskPacket = {
   ],
 };
 
+/** PACKET with its `accept_completion` option removed: a decision no
+ *  acceptance answers (ruling 471), which an acceptance still withdraws. */
+const PACKET_WITHOUT_ACCEPTANCE: TaskPacket = {
+  ...PACKET,
+  options: PACKET.options.filter((o) => o.kind !== "accept_completion"),
+};
+
 /** The delivering developer engagement (workspace owner; never a required
  *  reviewer). */
 const DEV_ENGAGEMENT: Engagement = {
@@ -324,7 +331,10 @@ describe("P3.7 governance & lifecycle fixes", () => {
         verdicts: [rejectionVerdict("rev_1")], // required reviewer requested changes
         validation: "failing",
       },
-      PACKET,
+      // Ruling 471: a decision offering `accept_completion` (or
+      // `force_accept`) is ANSWERED by this override, so the F32-11
+      // withdrawal below needs one that offers neither.
+      PACKET_WITHOUT_ACCEPTANCE,
     );
     const res = await forceAcceptCompletion(
       store.db,

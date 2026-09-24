@@ -1135,6 +1135,8 @@ function AcceptOnBoardConfirm({
       noPullRequest={false}
       // F32-11: the board summary carries the open packet too.
       openPacketTitle={task.packet?.title ?? null}
+      // Ruling 471: and, from the loader, the option this move answers it with.
+      answersWith={task.packet?.acceptAnswersWith ?? null}
       defaultBranch={defaultBranch}
       // The STAGE gate the summary CAN answer (F19-27). The board never
       // force-accepts, so this jumps no stage on its own — the off-boundary

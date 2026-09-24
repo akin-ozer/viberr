@@ -20,6 +20,7 @@ import type {
 import type { ActorRender } from "./actor.server";
 import type { DependencyRender } from "~/shared/dependencies";
 import { goalDraftForOption } from "~/shared/packet-goal-draft";
+import { acceptanceAnswerOf } from "~/shared/packet-acceptance-answer";
 
 /** Pass-25: the stored `labels_json` is a JSON string-array (the write path
  *  normalizes it so). Parse it at this read boundary through the schema — a
@@ -204,6 +205,14 @@ export interface PacketRender {
    *  packet waits. Present exactly when `awaiting` is `goal_edit` and a
    *  decision is recorded; absent otherwise. */
   goalDraft?: string;
+  /** Ruling 471: the title of the option a plain acceptance (Accept, a stage
+   *  move into the terminal stage, an applied acceptance card) ANSWERS this
+   *  decision with. Absent when that acceptance withdraws it (F32-11). Derived
+   *  here by `acceptanceAnswerOf`, the predicate the server's write uses, so
+   *  the accept dialog reads the loader's answer and never guesses. */
+  acceptAnswersWith?: string;
+  /** Ruling 471: the same for a forced acceptance (the Force accept button). */
+  forceAnswersWith?: string;
 }
 
 /** What a surface renders for readiness: the canonical stored enum plus the
@@ -715,6 +724,12 @@ function mapPacket(packet: TaskPacket | null): PacketRender | null {
       ? packet.options[packet.decided.optionIndex]
       : undefined;
   if (chosen) render.goalDraft = goalDraftForOption(chosen);
+  // Ruling 471: which option each direct acceptance answers, set only when it
+  // answers one, so a packet no acceptance answers ships no extra bytes.
+  const accept = acceptanceAnswerOf(packet, "accept");
+  if (accept) render.acceptAnswersWith = accept.option.t;
+  const force = acceptanceAnswerOf(packet, "force");
+  if (force) render.forceAnswersWith = force.option.t;
   return render;
 }
 

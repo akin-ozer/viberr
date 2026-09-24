@@ -270,6 +270,73 @@ describe("P14-LV-06: the acceptance affordance", () => {
     expect(dialog?.textContent).not.toContain("Merging is one-way");
   });
 
+  /**
+   * Ruling 471: the page hands the dialog the loader's answer for the door
+   * that was pressed: `acceptAnswersWith` for Accept, `forceAnswersWith` for
+   * Force accept. Live on WEB-1 the Accept dialog said the recommended
+   * "Accept WEB-1 and merge PR #1" decision "closes unanswered".
+   */
+  describe("ruling 471: the open-decision row follows the loader's answer for the pressed door", () => {
+    const decision = (answers: Partial<Pick<PacketRender, "acceptAnswersWith" | "forceAnswersWith">>): PacketRender => ({
+      type: "input",
+      kind: "Completion report",
+      from: "Operator",
+      title: "VIB-151 ready to accept",
+      body: "",
+      observations: [],
+      options: [
+        { kind: "accept_completion", t: "Accept VIB-151", d: "", rec: true },
+        { kind: "force_accept", t: "Force-accept VIB-151", d: "", rec: false },
+      ],
+      ...answers,
+    });
+    const dialogText = (container: HTMLElement) =>
+      container.ownerDocument.querySelector('dialog[data-screen-label="Accept completion dialog"]')
+        ?.textContent ?? "";
+
+    it("Accept reads Answers with the plain door's option", () => {
+      // CANARY: stop passing `answersWith` from the page and this reads
+      // "Withdraws … closes unanswered".
+      const { container } = renderPage({
+        task: { packet: decision({ acceptAnswersWith: "Accept VIB-151", forceAnswersWith: "Force-accept VIB-151" }) },
+      });
+      fireEvent.click(findButton(container, "Accept completion → Done")!);
+      const text = dialogText(container);
+      expect(text).toContain('the open decision "VIB-151 ready to accept" with "Accept VIB-151"');
+      expect(text).not.toContain("Withdraws");
+    });
+
+    it("Force accept reads Answers with the forced door's option, not the plain one", () => {
+      // CANARY: read `acceptAnswersWith` on the force door and this names the
+      // plain option.
+      const { container } = renderPage({
+        myRole: "admin",
+        task: {
+          blockReason: "A required reviewer can no longer record a verdict",
+          packet: decision({ acceptAnswersWith: "Accept VIB-151", forceAnswersWith: "Force-accept VIB-151" }),
+        },
+        acceptance: {
+          canAccept: false,
+          blockedReason: "VIB-151's delivered revision has no approving verdict yet",
+        },
+      });
+      fireEvent.click(findButton(container, "Force accept")!);
+      const text = dialogText(container);
+      expect(text).toContain('with "Force-accept VIB-151"');
+      expect(text).not.toContain("Withdraws");
+    });
+
+    it("a door the loader gives no answer for keeps the Withdraws row", () => {
+      const { container } = renderPage({
+        task: { packet: decision({ forceAnswersWith: "Force-accept VIB-151" }) },
+      });
+      fireEvent.click(findButton(container, "Accept completion → Done")!);
+      const text = dialogText(container);
+      expect(text).toContain("Withdraws");
+      expect(text).not.toContain("Answers");
+    });
+  });
+
   it("a contributor who OWNS the task gets it — R6-2/R14-2, not just maintainers", () => {
     // The live case: the queue counted this viewer, the page offered nothing.
     const { container } = renderPage({

@@ -18,9 +18,13 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // revalidation; now window facts only (owner decision 2). Raised 13001 to
   // 13073 by CON-7: each of the three groups carries its facts' version
   // (`"factsAt":<ms>,`, 24 bytes), so the strip keeps the newer of a
-  // revalidation's read and a tail read instead of stepping back.
+  // revalidation's read and a tail read instead of stepping back. Raised
+  // 13073 to 13152 by ruling 471: VIB-142's packet render names the option
+  // each acceptance door answers its decision with (`acceptAnswersWith` and
+  // `forceAnswersWith`, "Accept completion", 79 bytes), so the accept dialog
+  // reads the loader's answer instead of guessing.
   "console:task-data.json-bytes": {
-    ceiling: 13073,
+    ceiling: 13152,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a .data request`,
@@ -36,9 +40,10 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   },
   // TASK-1: 1,048,869 (the same payload as a revalidation); now the shown
   // agent's window, display lines only. Raised 136574 to 136646 by CON-7:
-  // the three groups' `factsAt` (24 bytes each).
+  // the three groups' `factsAt` (24 bytes each). Raised 136646 to 136725 by
+  // ruling 471: the packet render's two answer fields (79 bytes, as above).
   "console:task-document.json-bytes": {
-    ceiling: 136646,
+    ceiling: 136725,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a document request`,
