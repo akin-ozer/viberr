@@ -1497,7 +1497,10 @@ runtime's answer for a missing grant.
   `Authorization: Bearer <credential>`, falling back to the legacy SSE transport on a
   4xx other than 401/403; a stdio server is a command the SERVER spawns (its own uid, the
   secret-filtered env plus `MCP_CREDENTIAL`, a process group of its own), one upstream
-  per (run, server), killed at revoke. An HTTP server an org admin **signed in with
+  per (run, server), killed at revoke — and at shutdown, even mid-handshake. An HTTP
+  upstream that ends the session the gateway holds (a 404, or the 400 of servers built
+  from the SDK's examples, to a request that carried it) gets a new session and the
+  request is sent again, once; the run's own session never notices. An HTTP server an org admin **signed in with
   OAuth** (ruling 469) takes the same road: its tokens are sealed beside the registry row
   (`oauth_ref`), and the gateway (and the health probe) ask
   `mcpOAuthTokenSource` for the access token on every request — renewed with the refresh

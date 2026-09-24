@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -113,12 +114,79 @@ export async function startHttpUpstream(token: string): Promise<UpstreamHandle> 
   };
 }
 
+/** A server that keeps sessions and can lose them, the way a restart, a
+ *  redeploy or an idle expiry loses them. */
+export interface SessionfulUpstreamHandle extends UpstreamHandle {
+  /** How many `initialize` requests opened a session. */
+  initializes(): number;
+  /** Forget every session: the next request on one is refused. */
+  forgetSessions(): void;
+}
+
+/**
+ * A stateful Streamable HTTP MCP server that answers only `Bearer <token>`.
+ * A request on a session it does not hold is refused with `lostStatus`: 404 is
+ * what the MCP spec (and the SDK's server transport) answers, 400 what servers
+ * built from the SDK's examples answer.
+ */
+export async function startSessionfulHttpUpstream(
+  token: string,
+  lostStatus: 404 | 400 = 404,
+): Promise<SessionfulUpstreamHandle> {
+  const calls: string[] = [];
+  const authorizations: (string | null)[] = [];
+  const sessions = new Map<string, StreamableHTTPServerTransport>();
+  let initializes = 0;
+  const server = await listen(async (req, res) => {
+    authorizations.push(req.headers.authorization ?? null);
+    if (req.headers.authorization !== `Bearer ${token}`) {
+      refuse(res);
+      return;
+    }
+    const header = req.headers["mcp-session-id"];
+    const sessionId = Array.isArray(header) ? header[0] : header;
+    if (sessionId !== undefined) {
+      const transport = sessions.get(sessionId);
+      if (!transport) {
+        res.writeHead(lostStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Session not found" }, id: null }));
+        return;
+      }
+      await transport.handleRequest(req, res);
+      return;
+    }
+    initializes += 1;
+    const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (id) => {
+        sessions.set(id, transport);
+      },
+    });
+    await fixtureServer(calls).connect(transport);
+    await transport.handleRequest(req, res);
+  });
+  return {
+    url: `http://127.0.0.1:${server.port}/mcp`,
+    calls,
+    authorizations,
+    initializes: () => initializes,
+    forgetSessions: () => {
+      for (const transport of sessions.values()) void transport.close();
+      sessions.clear();
+    },
+    close: server.close,
+  };
+}
+
 /** A legacy HTTP+SSE MCP server: GET /sse streams, POST /messages sends, and a
- *  POST to /sse is refused the way an SSE-only server refuses it. */
-export async function startSseUpstream(token: string): Promise<UpstreamHandle> {
+ *  POST to /sse is refused the way an SSE-only server refuses it. Forgetting
+ *  its sessions leaves the event streams open, so a client does not
+ *  reconnect on its own and only a POST finds out. */
+export async function startSseUpstream(token: string): Promise<SessionfulUpstreamHandle> {
   const calls: string[] = [];
   const authorizations: (string | null)[] = [];
   const sessions = new Map<string, SSEServerTransport>();
+  let initializes = 0;
   const server = await listen(async (req, res) => {
     authorizations.push(req.headers.authorization ?? null);
     if (req.headers.authorization !== `Bearer ${token}`) {
@@ -127,6 +195,7 @@ export async function startSseUpstream(token: string): Promise<UpstreamHandle> {
     }
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (url.pathname === "/sse" && req.method === "GET") {
+      initializes += 1;
       const transport = new SSEServerTransport("/messages", res);
       sessions.set(transport.sessionId, transport);
       res.on("close", () => sessions.delete(transport.sessionId));
@@ -150,6 +219,8 @@ export async function startSseUpstream(token: string): Promise<UpstreamHandle> {
     url: `http://127.0.0.1:${server.port}/sse`,
     calls,
     authorizations,
+    initializes: () => initializes,
+    forgetSessions: () => sessions.clear(),
     close: server.close,
   };
 }

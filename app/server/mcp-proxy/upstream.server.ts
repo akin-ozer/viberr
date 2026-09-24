@@ -135,6 +135,22 @@ export class UpstreamSignInNeeded extends UpstreamConnectError {
   }
 }
 
+/**
+ * R-gateway-3 (2026-09-25): the server answered a request on a session it no
+ * longer has (a restart, a redeploy, an idle expiry). The MCP spec's signal is
+ * a 404 to a request carrying `Mcp-Session-Id`; servers built from the SDK's
+ * examples answer 400, and a legacy SSE server refuses a POST to its forgotten
+ * session URL the same way. The request was not processed, so the gateway
+ * opens a new session and sends it again. Thrown from the transport's `fetch`,
+ * so it reaches the caller as itself rather than as an SDK error string.
+ */
+export class UpstreamSessionLost extends UpstreamConnectError {
+  constructor(status: number) {
+    super(`the server ended its MCP session (HTTP ${status})`);
+    this.name = "UpstreamSessionLost";
+  }
+}
+
 class UpstreamTimeoutError extends Error {
   constructor(ms: number) {
     super(`no answer in ${Math.round(ms / 1000)}s`);
@@ -273,6 +289,26 @@ function bearerFetch(source: UpstreamTokenSource, base: McpFetch): McpFetch {
 }
 
 /**
+ * R-gateway-3: a POST the server refuses because the session it rode on is
+ * gone throws `UpstreamSessionLost`, instead of handing the SDK a response it
+ * only turns into "Error POSTing to endpoint". `onSession` says whether a POST
+ * rode on a session: one carrying `Mcp-Session-Id` on Streamable HTTP (a 4xx
+ * to the session-less `initialize` is the SSE fallback's cue, not a lost
+ * session), every POST on the legacy transport (its message URL IS the
+ * session).
+ */
+function watchSession(base: McpFetch, onSession: (init: RequestInit | undefined) => boolean): McpFetch {
+  return async (url, init) => {
+    const res = await base(url, init);
+    if ((res.status === 404 || res.status === 400) && init?.method === "POST" && onSession(init)) {
+      await res.body?.cancel().catch(() => undefined);
+      throw new UpstreamSessionLost(res.status);
+    }
+    return res;
+  };
+}
+
+/**
  * Connect to a remote MCP server: Streamable HTTP first, the legacy SSE
  * transport when the server answers the way an SSE-only server does. The
  * credential rides both as `Authorization: Bearer <token>` — attached here,
@@ -293,26 +329,26 @@ export async function connectHttpUpstream(
     throw new UpstreamConnectError("endpoint is not an http(s) URL");
   }
   const timeoutMs = options.timeoutMs ?? UPSTREAM_CONNECT_TIMEOUT_MS;
-  const transportOptions: HttpTransportOptions = {};
-  const base: McpFetch = options.fetchImpl ?? fetch;
   // Ruling 469: with no credential at all, a 401 may be the MCP authorization
   // challenge; its `resource_metadata` is kept to report "needs sign-in". A
   // static credential's 401 stays "authentication rejected", as before.
   let challenge: string | null = null;
-  if (options.auth) {
-    transportOptions.fetch = bearerFetch(options.auth, base);
-  } else if (options.token) {
-    transportOptions.requestInit = { headers: { Authorization: `Bearer ${options.token}` } };
-    if (options.fetchImpl) transportOptions.fetch = options.fetchImpl;
-  } else {
-    transportOptions.fetch = async (input, init) => {
-      const res = await base(input, init);
-      if (res.status === 401) {
-        challenge = extractWWWAuthenticateParams(res).resourceMetadataUrl?.toString() ?? challenge;
-      }
-      return res;
+  const transportOptions = (onSession: (init: RequestInit | undefined) => boolean): HttpTransportOptions => {
+    const base = watchSession(options.fetchImpl ?? fetch, onSession);
+    if (options.auth) return { fetch: bearerFetch(options.auth, base) };
+    if (options.token) {
+      return { requestInit: { headers: { Authorization: `Bearer ${options.token}` } }, fetch: base };
+    }
+    return {
+      fetch: async (input, init) => {
+        const res = await base(input, init);
+        if (res.status === 401) {
+          challenge = extractWWWAuthenticateParams(res).resourceMetadataUrl?.toString() ?? challenge;
+        }
+        return res;
+      },
     };
-  }
+  };
   const failure = (cause: unknown): UpstreamConnectError =>
     challenge !== null && httpStatusOf(cause) === 401
       ? new UpstreamSignInNeeded(challenge, { cause })
@@ -322,7 +358,10 @@ export async function connectHttpUpstream(
   try {
     await connectWithin(
       streamable,
-      new StreamableHTTPClientTransport(url, transportOptions),
+      new StreamableHTTPClientTransport(
+        url,
+        transportOptions((init) => new Headers(init?.headers).has("mcp-session-id")),
+      ),
       timeoutMs,
       options.signal,
     );
@@ -331,7 +370,12 @@ export async function connectHttpUpstream(
     if (!fallsBackToSse(primary) || options.signal?.aborted) throw failure(primary);
     const sse = newUpstreamClient();
     try {
-      await connectWithin(sse, new SSEClientTransport(url, transportOptions), timeoutMs, options.signal);
+      await connectWithin(
+        sse,
+        new SSEClientTransport(url, transportOptions(() => true)),
+        timeoutMs,
+        options.signal,
+      );
       return { client: sse, transport: "sse" };
     } catch {
       // The Streamable HTTP answer is the one worth reporting: the SSE attempt

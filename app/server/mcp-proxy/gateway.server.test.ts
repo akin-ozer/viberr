@@ -10,6 +10,7 @@ import { gone } from "../../../test-support/process-liveness";
 import { waitFor } from "../../../test-support/polling";
 import {
   startHttpUpstream,
+  startSessionfulHttpUpstream,
   startSseUpstream,
   writeSilentStdioUpstream,
   writeStdioUpstream,
@@ -299,6 +300,46 @@ describe("the gateway against an HTTP upstream that requires its bearer", () => 
     const response = await rawInitialize(mount.url, mount.headers.Authorization);
     expect(response.status).toBe(502);
     expect(jsonRpcError.parse(await response.json()).error.message).toContain("authentication rejected");
+  });
+
+  for (const lostStatus of [404, 400] as const) {
+    it(`R-gateway-3: an upstream that loses its session (${lostStatus}) gets a new one and the call goes through`, async () => {
+      // CANARY: let the lost session's refusal reach the run as an error and
+      // every later call fails for the rest of the run.
+      const upstream = await startSessionfulHttpUpstream(SECRET, lostStatus);
+      upstreams.push(upstream);
+      addMcp("cloudflare", "HTTP", upstream.url, SECRET);
+      const client = await connect(mountRun(["cloudflare"]).servers.cloudflare);
+      textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+      expect(upstream.initializes()).toBe(1);
+
+      upstream.forgetSessions();
+      const called = textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+      expect(called.content[0]?.text).toBe("whoami: ok");
+      expect(upstream.initializes()).toBe(2);
+      // The refused request was never processed; the one sent again was.
+      expect(upstream.calls).toEqual(["whoami", "whoami"]);
+
+      // Two calls that meet the next loss at once open ONE new session.
+      upstream.forgetSessions();
+      const [a, b] = await Promise.all([client.listTools(), client.listTools()]);
+      expect(a.tools.map((tool) => tool.name)).toEqual(b.tools.map((tool) => tool.name));
+      expect(upstream.initializes()).toBe(3);
+      expect(new Set(upstream.authorizations)).toEqual(new Set([`Bearer ${SECRET}`]));
+    });
+  }
+
+  it("R-gateway-3: a legacy SSE upstream that forgot the session gets a new one too", async () => {
+    const upstream = await startSseUpstream(SECRET);
+    upstreams.push(upstream);
+    addMcp("legacy", "HTTP", upstream.url, SECRET);
+    const client = await connect(mountRun(["legacy"]).servers.legacy);
+    textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+    upstream.forgetSessions();
+    const called = textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+    expect(called.content[0]?.text).toBe("whoami: ok");
+    expect(upstream.initializes()).toBe(2);
+    expect(upstream.calls).toEqual(["whoami", "whoami"]);
   });
 
   it("falls back to the legacy SSE transport when the upstream answers that way", async () => {
