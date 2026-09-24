@@ -182,6 +182,8 @@ interface ThreadState {
   replacing: boolean;
   paging: boolean;
   fillingRaw: boolean;
+  /** Lines without their envelope arrived while a fill was in flight (CON-8). */
+  fillAgain: boolean;
   shown: boolean;
   page: PageCursor | null;
   view: ThreadView;
@@ -323,6 +325,7 @@ export function createLiveRunLogStore(
       replacing: false,
       paging: false,
       fillingRaw: false,
+      fillAgain: false,
       shown: false,
       page: loaded ? seedPageCursor(window) : null,
       view: {
@@ -425,6 +428,8 @@ export function createLiveRunLogStore(
       ],
       total: t.view.total + fresh.length,
     });
+    // CON-8: a read made before the raw view opened brought no envelopes.
+    if (rawView && fresh.some((l) => l.raw === undefined)) void fillRaw(t);
     return true;
   };
 
@@ -580,9 +585,20 @@ export function createLiveRunLogStore(
    * The raw view opened: load the stored envelopes of the lines the thread
    * holds without one, a backward page per run (`before` its newest missing
    * seq, as many as it misses, at most 500 at a time).
+   *
+   * Ruling 454 (CON-8): lines can arrive without their envelope after the
+   * view opened (a `raw=0` tail read or an older page already in flight at
+   * the toggle). Those appends ask for a fill too, and one asked for while a
+   * fill is in flight runs once it ends, so no row reads "loading the stored
+   * envelope…" for good.
    */
   const fillRaw = async (t: ThreadState): Promise<void> => {
-    if (t.fillingRaw || t.view.status !== "ready" || !enabled) return;
+    if (t.fillingRaw) {
+      t.fillAgain = true;
+      return;
+    }
+    t.fillAgain = false;
+    if (t.view.status !== "ready" || !enabled) return;
     const missing = new Map<number, number[]>();
     for (const line of t.view.lines) {
       if (line.raw !== null) continue;
@@ -618,14 +634,17 @@ export function createLiveRunLogStore(
     } finally {
       t.fillingRaw = false;
     }
-    if (!current(t) || found.size === 0) return;
-    update(t, {
-      lines: t.view.lines.map((line) => {
-        const raw = line.raw === null ? found.get(line.key) : undefined;
-        return raw === undefined ? line : { ...line, raw };
-      }),
-      epoch: t.view.epoch + 1,
-    });
+    if (!current(t)) return;
+    if (found.size > 0) {
+      update(t, {
+        lines: t.view.lines.map((line) => {
+          const raw = line.raw === null ? found.get(line.key) : undefined;
+          return raw === undefined ? line : { ...line, raw };
+        }),
+        epoch: t.view.epoch + 1,
+      });
+    }
+    if (t.fillAgain && rawView) void fillRaw(t);
   };
 
   /**
@@ -698,6 +717,8 @@ export function createLiveRunLogStore(
             error: null,
           },
         });
+        // CON-8: a page asked for before the raw view opened.
+        if (rawView && block.some((l) => l.raw === null)) void fillRaw(t);
         return;
       }
       // Walked off the front of the group — everything is loaded.

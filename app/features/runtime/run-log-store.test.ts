@@ -307,3 +307,64 @@ describe("CON-7: the newest read of a run's facts wins, whichever arrives last",
     expect(store.facts("run_1")).toMatchObject({ tokens: 5_000, tokensEstimated: false });
   });
 });
+
+describe("CON-8: lines that land after the raw view opened get their envelopes too", () => {
+  it("a raw=0 tail read in flight at the toggle is filled when it lands", async () => {
+    const store = createLiveRunLogStore(TASK, [loaded(1)]);
+    store.show("primary");
+    const release = held("since=0&raw=0");
+    store.onFrame("run_1", 1);
+    await flush();
+    route("before=1&limit=1", tailPage("run_1", [0], { raw: true }));
+    route("before=2&limit=1", tailPage("run_1", [1], { raw: true }));
+    store.setRawView(true);
+    await flush();
+    release(tailPage("run_1", [1]));
+    await flush();
+    // CANARY: fill only from `setRawView` and 0:1 reads "loading the stored
+    // envelope…" for good.
+    expect(store.thread("primary")?.lines.map((l) => [l.key, l.raw])).toEqual([
+      ["0:0", '{"n":0}'],
+      ["0:1", '{"n":1}'],
+    ]);
+  });
+
+  it("lines that land while a fill is in flight are filled when it ends", async () => {
+    const store = createLiveRunLogStore(TASK, [loaded(1)]);
+    store.show("primary");
+    const releaseTail = held("since=0&raw=0");
+    store.onFrame("run_1", 1);
+    await flush();
+    const releaseFill = held("before=1&limit=1");
+    store.setRawView(true);
+    await flush();
+    route("before=2&limit=1", tailPage("run_1", [1], { raw: true }));
+    releaseTail(tailPage("run_1", [1]));
+    await flush();
+    releaseFill(tailPage("run_1", [0], { raw: true }));
+    await flush();
+    // CANARY: drop the re-run after a fill and 0:1 keeps `null`.
+    expect(store.thread("primary")?.lines.map((l) => l.raw)).toEqual(['{"n":0}', '{"n":1}']);
+  });
+
+  it("an older page in flight at the toggle is filled when it lands", async () => {
+    const store = createLiveRunLogStore(TASK, [
+      thread({
+        lines: [line("l3")],
+        lineKeys: ["0:3"],
+        logWindow: win({ headSeq: 3, totalLines: 4, hasMore: true, oldest: { runId: "run_1", seq: 3 } }),
+      }),
+    ]);
+    store.show("primary");
+    const release = held("before=3&raw=0");
+    store.loadOlder("primary");
+    await flush();
+    route("before=4&limit=1", tailPage("run_1", [3], { raw: true }));
+    route("before=3&limit=3", tailPage("run_1", [0, 1, 2], { raw: true }));
+    store.setRawView(true);
+    await flush();
+    release(ok({ runId: "run_1", lines: [0, 1, 2].map((seq) => ({ seq, display: line(`l${seq}`) })), oldestSeq: 0, hasMore: false }));
+    await flush();
+    expect(store.thread("primary")?.lines.map((l) => l.raw)).toEqual(['{"n":0}', '{"n":1}', '{"n":2}', '{"n":3}']);
+  });
+});
