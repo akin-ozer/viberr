@@ -3908,6 +3908,20 @@ describe("app.css ruling 453: the Apple design pass", () => {
     }
   });
 
+  it("(b) under reduced motion a pinned close never replays the dock's fade-in", () => {
+    // CANARY: drop `animation: none` from the reduced-motion
+    // `.dock .dock-panel[data-closing]`. pinLivePose switches the entrance off
+    // inline and releases it once data-closing lands; the reduced-motion
+    // `.dock .dock-panel { animation: fade-in }` (same weight, later) then
+    // restarted on the closing panel, which faded IN, never transitioned out,
+    // and vanished at the fallback timer (measured in headless Chromium).
+    const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+    expect(decls(reduced, ".dock .dock-panel").get("animation")).toMatch(/^fade-in\b/);
+    expect(decls(reduced, ".dock .dock-panel[data-closing]").get("animation")).toBe("none");
+    // Dialogs outrank their own reduced-motion fade-in by weight already.
+    expect(decls(plain, "dialog[data-closing]").get("animation")).toBe("none");
+  });
+
   it("(d) the OS increased-contrast setting gets defined edges and solid chrome, in both themes", () => {
     // CANARY: delete the `prefers-contrast: more` block — the app had no
     // answer to it before this pass.

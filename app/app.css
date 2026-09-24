@@ -6495,7 +6495,12 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
     animation: fade-in .12s ease;
     transition: opacity .12s ease;
   }
-  .dock .dock-panel[data-closing] { opacity: 0; transform: none; }
+  /* `animation: none` because the close pins the live pose (ruling 453(b),
+     live-pose.ts): it switches the entrance off inline and releases it once
+     `data-closing` lands, and a fade-in still named here then REPLAYED on the
+     closing panel — up to full opacity, then gone at the fallback timer, with
+     no exit transition at all (review, 2026-09-24). */
+  .dock .dock-panel[data-closing] { opacity: 0; transform: none; animation: none; }
   .ctl-msg[data-fresh] { animation: fade-in .12s ease; }
   /* Both dots: the one on the trigger and the one in the panel's working row,
      which kept pulsing forever inside the sheet. */

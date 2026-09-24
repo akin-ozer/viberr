@@ -126,6 +126,16 @@ describe("createVelocityTracker", () => {
     expect(tracker.velocity(16)).toEqual({ x: 0, y: 0 });
   });
 
+  it("measures nothing, rather than dividing by zero, when the samples share one tick", () => {
+    // CANARY: drop the `last.t <= first.t` guard — 0/0 is NaN, and the
+    // board's drop flight then asked WAAPI for `NaNpx` keyframes.
+    const tracker = createVelocityTracker();
+    tracker.push(0, 100, 5);
+    tracker.push(0, 100, 5);
+    tracker.push(0, 140, 5);
+    expect(tracker.velocity(5)).toEqual({ x: 0, y: 0 });
+  });
+
   it("clamps a coalesced-event spike", () => {
     const tracker = createVelocityTracker();
     tracker.push(0, 0, 0);

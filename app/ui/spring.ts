@@ -135,7 +135,9 @@ export function createVelocityTracker() {
     velocity(now: number): Point {
       const last = samples[samples.length - 1];
       const first = samples.find((s) => last !== undefined && last.t - s.t <= VELOCITY_WINDOW_MS);
-      if (!last || !first || last === first || now - last.t > STILL_AFTER_MS) {
+      // No span of time (two samples in one clock tick) is no measurement:
+      // 0/0 would hand the spring NaN.
+      if (!last || !first || last.t <= first.t || now - last.t > STILL_AFTER_MS) {
         return { x: 0, y: 0 };
       }
       const seconds = (last.t - first.t) / 1000;
