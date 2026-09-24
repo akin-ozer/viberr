@@ -208,7 +208,10 @@ export function ContinuityRecoveryPanel({
   /** Whether the viewer may start runs — decides whether the continuation note
    *  names the Execution profile panel, which only shows Run to that tier. */
   canRunAgents?: boolean;
-  /** Select + scroll to an agent group's console (`useLogSelection.onViewLogs`). */
+  /** Select an agent group's thread, open the console and scroll it into view
+   *  (`useLogSelection.onAgentLog`). Never the run card's `onViewLogs`: that
+   *  is a Show/Hide toggle (ruling 380), so on a running thread, whose console
+   *  is open by default, this door would close the console it names. */
   onOpenConsole?: (threadId: string) => void;
   /** The page's "Ask operator" signal — prefills and focuses the composer. */
   onAsk?: () => void;

@@ -914,7 +914,9 @@ export function TaskDetailPage({
           runtime={runtime}
           runsVisible={runsVisible}
           canRunAgents={canRunAgents}
-          {...(runsVisible ? { onOpenConsole: onViewLogs } : {})}
+          // Ruling 380: the run card's `onViewLogs` is a Show/Hide toggle; from
+          // this panel the console is elsewhere, so its door travels instead.
+          {...(runsVisible ? { onOpenConsole: onAgentLog } : {})}
           onAsk={() => setAsk((a) => a + 1)}
         />
 

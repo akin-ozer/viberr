@@ -270,9 +270,10 @@ export function useLogSelection(runtime: RunView[]) {
   const onAgentLog = (threadId: string) => {
     setPendingLogSel(threadId);
     setLogSel(threadId);
-    // From the TIMELINE the console is genuinely elsewhere, so this one still
-    // travels — it just has to open the disclosure first, or there would be
-    // nothing at the anchor to travel to.
+    // From the TIMELINE, and from the continuity panel's console door, the
+    // console is genuinely elsewhere, so this one still travels — it just has
+    // to open the disclosure first, or there would be nothing at the anchor to
+    // travel to. Never a toggle: the console may already be open.
     setConsoleOpen(true);
     requestAnimationFrame(() => {
       document
