@@ -3877,6 +3877,32 @@ describe("operatorProposeRuling", () => {
     ).toBe(true);
   });
 
+  it("ruling 466: the proposal's audit row counts the entry in UTF-8 bytes", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const root = await seedRulingsKb("# Kurallar\n\n- Her kapı çalışır.\n");
+    const r = await operatorProposeRuling(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        doc: "environment-and-gates.md",
+        text: "Yarış kapısını kaldır: bu makine çalıştıramaz.",
+        evidence: "`go test -race` çıkış kodu 127 döndü.",
+      },
+      authority("full"),
+    );
+    expect(r.outcome).toBe("done");
+    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
+    // The first proposal is the document's tail, exactly as filed.
+    const entry = body.slice(body.indexOf("- **[VIB-1,"));
+    const row = listAuditEvents(store.db, { action: "task.operator.ruling_proposed" })[0];
+    // CANARY: record `entry.length` again and this falls short.
+    expect(row?.details).toMatchObject({ bytes: Buffer.byteLength(entry, "utf8") });
+    expect(Buffer.byteLength(entry, "utf8")).toBeGreaterThan(entry.length);
+  });
+
   it("a second proposal stacks under the same heading instead of duplicating it", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");

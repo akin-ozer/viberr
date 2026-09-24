@@ -689,7 +689,8 @@ export function restoreStoreFile(options: {
     "  the database was NOT touched — users, sessions, PATs, audit and notifications are unchanged",
     "  the watcher re-projects it within ~1s while the app runs; otherwise `npm run rescan`",
   ].join("\n");
-  return { path: rel, absPath: target, displacedTo, bytes: content.length, text };
+  // Ruling 466: a size in bytes is a UTF-8 byte count, never a string length.
+  return { path: rel, absPath: target, displacedTo, bytes: Buffer.byteLength(content, "utf8"), text };
 }
 
 function normalizeStoreRelPath(relPath: string): string {

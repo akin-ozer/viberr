@@ -1472,7 +1472,10 @@ runtime's answer for a missing grant.
   live. A template edit therefore changes nothing a run mounts until the copy is
   rewritten (the template writer's `propagate`, the org modal's box, or an org admin's
   "Use the template's grants" on the Agents page), and the roster marks a copy whose
-  grants differ with the exact difference (`templateDrift`).
+  grants differ with the exact difference (`templateDrift`). The copy's persona is a
+  snapshot too: it changes through the Agents page editor, `update_agent_deployment`'s
+  `persona`, or a template save that changes the persona with `propagate` (the org
+  modal's box), which rewrites every copy still running the older text (ruling 467).
 - **MCP servers**: an org registry row with no credential resolves to stdio
   `{command, args}` or http `{type: "http", url}` and the CLI connects to it directly. A
   row WITH a stored credential (a pasted one, or an OAuth sign-in's tokens, ruling 469)

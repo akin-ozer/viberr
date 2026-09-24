@@ -52,7 +52,7 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     conversation: null,
     messages: [],
     taskLinks: {},
-    turn: { working: false, runId: null, phase: null, step: null },
+    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
     threads: [],
     viewerOwnsActive: false,
     ...over,
@@ -596,8 +596,8 @@ describe("the controller dock (ruling 121)", () => {
           conversation: conversationFixture(),
           viewerOwnsActive: true,
           turn: working
-            ? { working: true, runId: "run_1", phase: null, step }
-            : { working: false, runId: null, phase: null, step: null },
+            ? { working: true, runId: "run_1", phase: null, step, answering: null, queued: [] }
+            : { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
         }),
       working: () =>
         working ? [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step }] : [],
@@ -666,7 +666,7 @@ describe("the controller dock (ruling 121)", () => {
     let started = false;
     const { loads, unseenLoads } = mount({
       path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView({ turn: { working: started, runId: "run_1", phase: null, step: null } }),
+      view: () => taskView({ turn: { working: started, runId: "run_1", phase: null, step: null, answering: null, queued: [] } }),
       working: () =>
         started ? [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }] : [],
     });
@@ -708,6 +708,7 @@ describe("the controller dock (ruling 121)", () => {
       text: "first",
       runId: null,
       surface: null,
+      replyTo: null,
       createdAt: "2026-09-01T10:00:00.000Z",
     };
     const second: ControllerDockView["messages"][number] = {
@@ -755,7 +756,7 @@ describe("the controller dock (ruling 121)", () => {
         taskView({
           conversation: conversationFixture(),
           messages: [
-            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "VIB-2 waits on VIB-1.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "VIB-2 waits on VIB-1.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
           taskLinks: { "VIB-2": "/projects/viberr/tasks/VIB-2", "VIB-1": "/projects/viberr/tasks/VIB-1" },
           viewerOwnsActive: true,
@@ -883,10 +884,10 @@ describe("the controller dock (ruling 121)", () => {
             lastMessageAt: "2026-09-01T10:00:00.000Z",
           },
           messages: [
-            { id: "m1", conversationId: "cnv_a", seq: 1, author: "user", userId: "u1", text: "What is this?", runId: null, surface: "/projects/viberr/tasks/VIB-1", createdAt: "2026-09-01T10:00:00.000Z" },
-            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+            { id: "m1", conversationId: "cnv_a", seq: 1, author: "user", userId: "u1", text: "What is this?", runId: null, surface: "/projects/viberr/tasks/VIB-1", replyTo: null, createdAt: "2026-09-01T10:00:00.000Z" },
+            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
-          turn: { working: true, runId: "run_2", phase: null, step: null },
+          turn: { working: true, runId: "run_2", phase: null, step: null, answering: null, queued: [] },
           threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
           viewerOwnsActive: true,
         }),
@@ -905,6 +906,73 @@ describe("the controller dock (ruling 121)", () => {
     await waitFor(() => expect(trigger.querySelector(".live-dot")).not.toBeNull());
     // History never wears the entry animation marker.
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
+  });
+
+  /**
+   * Ruling 465 (F40-8): the dock reads a transcript the way the page does —
+   * each reply under the message it answers, "answering now" and the working
+   * row on the answered message, "queued · N ahead" on the ones behind it.
+   */
+  it("ruling 465: renders reply order and the queue from the server's view", async () => {
+    const at = "2026-09-24T20:00:00.000Z";
+    const msg = (id: string, seq: number, author: "user" | "controller", text: string, replyTo: string | null = null) => ({
+      id,
+      conversationId: "cnv_a",
+      seq,
+      author,
+      userId: author === "user" ? "u1" : null,
+      text,
+      runId: author === "user" ? null : `run_${id}`,
+      surface: null,
+      replyTo,
+      createdAt: at,
+    });
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          conversation: {
+            id: "cnv_a",
+            userId: "u1",
+            userLabel: "arda@viberr.dev",
+            projectSlug: "viberr",
+            taskKey: "VIB-1",
+            title: "Dossier",
+            createdAt: at,
+            updatedAt: at,
+            lastMessageAt: at,
+          },
+          messages: [
+            msg("p1", 1, "user", "Part one."),
+            msg("p2", 2, "user", "Part two."),
+            msg("p3", 3, "user", "Part three."),
+            msg("r1", 4, "controller", "Filed part one.", "p1"),
+          ],
+          turn: {
+            working: true,
+            runId: "run_live",
+            phase: null,
+            step: null,
+            answering: "p2",
+            queued: [{ messageId: "p3", ahead: 1 }],
+          },
+          threads: [{ id: "cnv_a", title: "Dossier", lastMessageAt: at, unread: false }],
+          viewerOwnsActive: true,
+        }),
+      working: () => [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    await screen.findByText("Part three.");
+    const order = [...document.querySelectorAll(".dock-msgs > .ctl-msg, .dock-msgs > .ctl-working")].map((el) =>
+      el.classList.contains("ctl-working") ? "WORKING" : (el.querySelector(".md-body")?.textContent ?? "").trim(),
+    );
+    // CANARY: map the dock's `messages` in seq order again.
+    expect(order).toEqual(["Part one.", "Filed part one.", "Part two.", "WORKING", "Part three."]);
+    const states = [...document.querySelectorAll(".dock-msgs > .ctl-msg")].map(
+      (el) => el.querySelector("[data-msg-state]")?.textContent ?? null,
+    );
+    // CANARY: drop <MessageState> from the dock's header.
+    expect(states).toEqual([null, null, "answering now", "queued · 1 ahead"]);
   });
 });
 

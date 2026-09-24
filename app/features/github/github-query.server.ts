@@ -156,6 +156,24 @@ export function invalidateRepoAccess(
   repoAccessCache.get(db)?.delete(projectSlug);
 }
 
+/**
+ * Test seam: what the 30 s memo holds for a project, so a caller that reads
+ * GitHub through the global fetch (the controller's `get_github_state`) can be
+ * driven without the network. Production never calls it.
+ */
+export function primeRepoAccessForTests(
+  db: DatabaseSync,
+  projectSlug: string,
+  result: RepoAccessResult,
+): void {
+  let byDb = repoAccessCache.get(db);
+  if (!byDb) {
+    byDb = new Map();
+    repoAccessCache.set(db, byDb);
+  }
+  byDb.set(projectSlug, { result, at: Date.now() });
+}
+
 async function checkRepoAccessCached(
   db: DatabaseSync,
   projectSlug: string,

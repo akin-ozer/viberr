@@ -263,8 +263,10 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   save, ruling 156). The store browser (upload, folders, doc editing, GitHub import).
   Renames rewrite every template and deployment reference. Audit `org.kb.*`,
   `org.mcp.*`, `org.skill.*`, `org.store.*`, `org.agent_profile.*` (the `updated`
-  row's details carry `diverged` and `propagated` project slugs), and one
-  `project.agent_profile.resources_synced` row per project a propagation rewrote.
+  row's details carry `diverged`, `propagated` and `personaPropagated` project slugs),
+  one `project.agent_profile.resources_synced` row per project a propagation rewrote,
+  and one `project.agent_profile.updated` row with `personaChanged` per copy whose
+  persona it rewrote (ruling 467).
 - **Controller**: model and effort are always editable; the grant lists and the
   doctrine body are deployment-locked (ruling 108); a note lists the grants the
   controller asked for and cannot make (`request_resource_grant`, ruling 390), each

@@ -74,6 +74,9 @@ export type EnsureDefaultBranchResult =
 
 export interface EnsureDefaultBranchContext {
   dataRoot?: string;
+  /** Ruling 468: what waited on the base, for the timeline line. Omitted,
+   *  the task's branch (ruling 128's first caller). */
+  before?: "task-branch" | "operator-checkout";
 }
 
 const ghRefSchema = z.object({ object: z.object({ sha: z.string() }) });
@@ -218,6 +221,13 @@ export async function ensureDefaultBranch(
           `Creating the initial commit on \`${base}\` was refused.`,
         );
       }
+      // Ruling 468: idempotent under a race. Two paths now bootstrap (the
+      // branch preparation and the operator's first checkout), and a second
+      // PUT that lost to the first is refused by GitHub (the file exists, or
+      // the branch moved). The branch existing is the outcome both wanted,
+      // so a refused create that finds it answers `exists` and writes nothing.
+      const raced = await gh.client.request("GET", refPath, ghRefSchema);
+      if (raced.ok) return { status: "exists", defaultBranch: base };
       return failureOf(put, base, `creating the initial commit on \`${base}\``, "create");
     }
     // Re-probe: the ref must exist now, or the bootstrap did not take.
@@ -305,7 +315,11 @@ export async function ensureDefaultBranch(
         title: null,
         text:
           outcome.how === "initial_commit"
-            ? `Bootstrapped the repository: \`${gh.repo}\` had no branches, so Viberr created **${base}** with an initial commit \`${outcome.sha.slice(0, 7)}\` (a README naming the project) before cutting this task's branch.`
+            ? `Bootstrapped the repository: \`${gh.repo}\` had no branches, so Viberr created **${base}** with an initial commit \`${outcome.sha.slice(0, 7)}\` (a README naming the project) ${
+                ctx.before === "operator-checkout"
+                  ? "before the operator's first checkout of it, so nobody has to push one"
+                  : "before cutting this task's branch"
+              }.`
             : `Bootstrapped the repository: \`${gh.repo}\` had no **${base}** (GitHub had made \`${outcome.from}\` the default), so Viberr created **${base}** at that branch's first commit \`${outcome.sha.slice(0, 7)}\`${
                 outcome.defaultRestored
                   ? ` and restored it as the repository default.`

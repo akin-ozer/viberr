@@ -267,3 +267,64 @@ describe("saveGlobalAgentProfile reports and propagates (ruling 156)", () => {
     expect(updated.details).toMatchObject({ propagated: ["viberr-core"], diverged: [] });
   });
 });
+
+/**
+ * Ruling 467 (pass 40, F40-11): the org door's `propagate` also carries a
+ * persona the save CHANGED, and the toast names the copies it rewrote; the
+ * summary is never propagated, and a save that leaves the persona alone
+ * rewrites none.
+ */
+describe("saveGlobalAgentProfile propagates a changed persona (ruling 467)", () => {
+  async function savePersona(store: TestStore, persona: string, propagate: boolean) {
+    return saveGlobalAgentProfile(
+      store.db,
+      {
+        id: "developer",
+        name: "Developer",
+        backend: "claude",
+        summary: "Implements the change.",
+        persona,
+        stages: DEVELOPER_STAGES,
+        propagate,
+      },
+      arda(store),
+      { dataRoot: store.dataRoot },
+    );
+  }
+
+  it("rewrites the older copy's persona, audits it as a persona edit, and says so", async () => {
+    const store = await storeWithDeployedDeveloper();
+    const before = copyOf(store).definition?.persona;
+    expect(before).toBeTruthy();
+    const saved = await savePersona(store, "You build what the rulings say, in Go.", true);
+    // CANARY: skip `propagateTemplatePersona` and the copy keeps its old text.
+    expect(copyOf(store).definition?.persona).toBe("You build what the rulings say, in Go.");
+    expect(saved.personaPropagated.map((p) => p.projectSlug)).toEqual(["viberr-core"]);
+    expect(saved.toast).toContain("persona rewritten on 1 project copy: viberr-core");
+    // The summary still differs and is still named: it is never propagated.
+    expect(saved.toast).toContain("still runs the older summary");
+    const row = listAuditEvents(store.db, { action: "project.agent_profile.updated" })[0]!;
+    expect(row).toMatchObject({ projectSlug: "viberr-core", subjectId: "developer" });
+    expect(row.details).toMatchObject({
+      personaChanged: true,
+      personaChars: "You build what the rulings say, in Go.".length,
+      source: "org-template",
+    });
+    expect(
+      listAuditEvents(store.db, { action: "org.agent_profile.updated" })[0]!.details,
+    ).toMatchObject({ personaPropagated: ["viberr-core"] });
+  });
+
+  it("without propagate, or on a save that leaves the persona alone, no copy is rewritten", async () => {
+    const store = await storeWithDeployedDeveloper();
+    const before = copyOf(store).definition?.persona;
+    const quiet = await savePersona(store, "A new persona nobody propagated.", false);
+    expect(quiet.personaPropagated).toEqual([]);
+    expect(copyOf(store).definition?.persona).toBe(before);
+    // The same persona again, now with propagate: this save changed nothing.
+    const again = await savePersona(store, "A new persona nobody propagated.", true);
+    expect(again.personaPropagated).toEqual([]);
+    expect(copyOf(store).definition?.persona).toBe(before);
+    expect(again.toast).toContain("propagate rewrites a persona only on a save that changes it");
+  });
+});

@@ -628,6 +628,54 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
+   * Ruling 466 (F40-9, F40-13): an append adds EXACTLY the text sent, and every
+   * size the reply names is UTF-8 bytes. Live, the controller built a KB
+   * document in parts; the tool trimmed each part and forced a blank line
+   * between them, so a table whose rows straddled a part boundary split in
+   * two, and a non-ASCII document was reported 50 bytes short.
+   */
+  it("ruling 466: two appends that split a table are one table, and the reply counts bytes", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", { name: "append-exact" });
+    const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kb, created).toBeTruthy();
+    const first = "| Karar | Yıl |\n|---|---|\n| Açık ";
+    const second = "kaynak | 2026 |\n| Şeffaflık | 2025 |\n";
+    const one = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb!,
+      name: "append-exact",
+      doc: { path: "rulings.md", content: first, append: true },
+    });
+    const two = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb!,
+      name: "append-exact",
+      doc: { path: "rulings.md", content: second, append: true },
+    });
+    // CANARY: count `content.length` and both replies fall short in bytes.
+    expect(one).toContain(`Appended ${Buffer.byteLength(first)} bytes to rulings.md (created)`);
+    expect(two).toContain(
+      `Appended ${Buffer.byteLength(second)} bytes to rulings.md; it is now ${Buffer.byteLength(first + second)} bytes`,
+    );
+    // SAFETY: `read_knowledge_base_doc` answers the JSON it built, whose
+    // `text`, `bytes` and `version` are its own fields.
+    const read = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "rulings.md" }),
+    ) as { text: string; bytes: number; version: string };
+    // CANARY: trim the part or put the "\n\n" separator back and the table
+    // splits (the bytes differ).
+    expect(read.text).toBe(first + second);
+    expect(read.bytes).toBe(Buffer.byteLength(first + second));
+    // A replace names the bytes it destroyed, in bytes (ruling 257).
+    const replaced = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb!,
+      name: "append-exact",
+      doc: { path: "rulings.md", content: "ş", replace: true, replaces: read.version },
+    });
+    expect(replaced).toContain(
+      `REPLACED: its previous ${Buffer.byteLength(first + second)} bytes are gone, 2 written.`,
+    );
+  });
+
+  /**
    * F39-4 (pass 39): `get_project` never shapes ADVISORY persona guidance like
    * an authority.
    *
@@ -3371,6 +3419,147 @@ describe("update_agent_deployment carries the record it read (B5)", () => {
         { dataRoot: app.dataRoot },
       ),
     ).rejects.toThrow("This profile changed while the editor was open.");
+  });
+});
+
+/**
+ * Ruling 467 (pass 40, F40-11): the controller can bring a deployed agent's
+ * persona in line. `update_agent_deployment` took no persona and propagation
+ * rewrote only grants, so live the controller had to ask the owner to edit two
+ * deployed copies by hand while the rulings KB contradicted the persona every
+ * run of them read.
+ */
+describe("update_agent_deployment sets a deployment's persona (ruling 467)", () => {
+  async function listJson<T>(toolName: string): Promise<T[]> {
+    // SAFETY: every list tool answers through the toolkit's `json()` over an
+    // array of the object literal its `.map` builds.
+    return JSON.parse(await call(ids.orgAdmin, toolName)) as T[];
+  }
+  async function personaOf(profileId: string): Promise<string | undefined> {
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    return readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.agents.find(
+      (a) => a.profileId === profileId,
+    )?.definition?.persona;
+  }
+
+  it("writes the whole persona under manage-agents, names the change, audits it, and refuses an empty one", async () => {
+    const first = "You are the Developer.\nNo email until the rulings name one.\nKeep the build green.";
+    const second = "You are the Developer.\nThe site's email is hello@akin.dev.\nKeep the build green.";
+    expect(
+      await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", persona: first }),
+    ).toContain("[done]");
+    // SAFETY: the fingerprint the Agents page editor would have read before
+    // the next write, for the B5 half below.
+    const { deploymentFingerprint, updateAgentProfile } = await import(
+      "~/features/agents/agent-profile-actions.server"
+    );
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const staleFingerprint = deploymentFingerprint(
+      readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.agents.find(
+        (a) => a.profileId === "developer",
+      )!,
+    );
+
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      persona: second,
+    });
+    // CANARY: drop `persona` from the form the tool builds and the copy keeps
+    // the first text (and the reply says no field changed).
+    expect(await personaOf("developer")).toBe(second);
+    expect(reply).toContain(
+      `persona ${first.length} → ${second.length} characters; line 2 of 3 changed: first "No email until the rulings name one." → "The site's email is hello@akin.dev."`,
+    );
+    // Audited as the Agents page audits a persona edit, with the instrument.
+    const row = listAuditEvents(app.db, { action: "project.agent_profile.updated" })[0]!;
+    expect(row.details).toMatchObject({ personaChanged: true, personaChars: second.length });
+    expect(row.actorLabel).toContain("via controller");
+
+    // The same B5 fingerprint check: a save composed before this write is refused.
+    await expect(
+      updateAgentProfile(
+        app.db,
+        {
+          projectSlug: SLUG,
+          profileId: "developer",
+          form: {
+            name: "Developer",
+            role: "Implementation",
+            backend: "claude",
+            stages: ["impl"],
+            persona: "A stale editor's text.",
+            fingerprint: staleFingerprint,
+          },
+        },
+        { userId: ids.projectAdmin, label: "elif@viberr.dev" },
+        { dataRoot: app.dataRoot },
+      ),
+    ).rejects.toThrow("This profile changed while the editor was open.");
+    expect(await personaOf("developer")).toBe(second);
+
+    // manage-agents: a contributor is refused and nothing moves.
+    const contributor = await call(ids.contributor, "update_agent_deployment", {
+      profileId: "developer",
+      persona: "A contributor's persona.",
+    });
+    expect(contributor.startsWith("[error]") || contributor.startsWith("[denied]")).toBe(true);
+    expect(await personaOf("developer")).toBe(second);
+
+    // CANARY: drop the empty check and "   " reads as "keep", answering [done].
+    const empty = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      persona: "   ",
+    });
+    expect(empty).toContain("An empty persona is refused");
+    expect(empty).toContain("Nothing was written");
+    expect(await personaOf("developer")).toBe(second);
+  });
+
+  it("save_global_agent with propagate rewrites the older copies' persona when the call changed it, and names each", async () => {
+    const ID = "persona-propagate-probe";
+    const base = {
+      name: "Persona Propagate Probe",
+      backend: "claude",
+      summary: "Probes whether propagate carries a persona.",
+      stages: ["impl"],
+    };
+    expect(
+      await call(ids.orgAdmin, "save_global_agent", { ...base, persona: "The colophon waits for Akin's wording." }),
+    ).toContain("[done]");
+    expect(await call(ids.projectAdmin, "deploy_agent", { profileId: ID })).toContain("[done]");
+    expect(await personaOf(ID)).toBe("The colophon waits for Akin's wording.");
+
+    const overturned = "The colophon reads: built with AI, reviewed by Akin.";
+    const saved = await call(ids.orgAdmin, "save_global_agent", {
+      ...base,
+      id: ID,
+      persona: overturned,
+      propagate: true,
+    });
+    // CANARY: skip `propagateTemplatePersona` and the copy keeps the old text
+    // while the reply says it still runs the older persona.
+    expect(await personaOf(ID)).toBe(overturned);
+    expect(saved).toContain(`Persona rewritten on 1 project copy: ${SLUG} (`);
+    expect(saved).not.toContain("still runs the older persona");
+    const listed = await listJson<{ id: string; copiesWithOlderText: string[] }>("list_global_agents");
+    expect(listed.find((r) => r.id === ID)?.copiesWithOlderText).toEqual([]);
+    const row = listAuditEvents(app.db, { action: "project.agent_profile.updated" })[0]!;
+    expect(row).toMatchObject({ projectSlug: SLUG, subjectId: ID });
+    expect(row.details).toMatchObject({ personaChanged: true, source: "org-template", templateId: ID });
+
+    // A save that does NOT change the persona rewrites no copy, so a project's
+    // own edit survives a grants propagation.
+    await call(ids.projectAdmin, "update_agent_deployment", { profileId: ID, persona: "This project's own text." });
+    const unchanged = await call(ids.orgAdmin, "save_global_agent", {
+      ...base,
+      id: ID,
+      persona: overturned,
+      propagate: true,
+    });
+    // CANARY: propagate on every save and the project's own text is gone.
+    expect(await personaOf(ID)).toBe("This project's own text.");
+    expect(unchanged).toContain("still runs the older persona");
+    expect(unchanged).toContain("update_agent_deployment with persona");
   });
 });
 

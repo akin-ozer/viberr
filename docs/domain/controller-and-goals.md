@@ -82,7 +82,15 @@ itself, and below the two-column breakpoint the head carries a native thread pic
 (`ConversationPicker`); the transcript is a capped scroller that never moves the page
 (ruling 419). A blank transcript offers three example asks per scope that send on click
 (`controller-examples.ts`, shared with the dock; ruling 314). A working turn shows the run's
-`phase` and last tool `step` on the row that says it is working (ruling 250). The composer is
+`phase` and last tool `step` on the row that says it is working (ruling 250). The transcript
+is in REPLY order (ruling 465, `inReplyOrder` in `app/shared/controller-thread.ts`): each
+controller row that names the message it answers sits directly under it, and user messages
+and unlinked notes keep their `seq` order. A user message with no reply yet says where it
+stands, from the lease the server holds (`turn.answering`, `turn.queued`): "answering now"
+on the message the live turn took, "queued · N ahead" on one waiting behind it (N counts the
+turns before its own, the answering one included); after a restart its reply is the restart
+note. "… is working" sits under the answered message and any reply already posted to it,
+never under a later message. The composer is
 disabled when the VIEWER has no Claude connected (ruling 127) or when they do not own the
 active conversation; the two states render different sentences, because only the first one
 is theirs to fix. People are named by display name at render time (`userDisplayName`); the
@@ -128,7 +136,8 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   shows the same "Reading where you are…" and "Loading…" the body shows before its view
   arrives. The shared not-connected note lives in `not-connected.tsx` for the same
   reason. The transcript reuses the
-  page's message vocabulary and the composer takes focus on open (the send hint names the
+  page's message vocabulary, reply order and queue states (ruling 465; `MessageState` in
+  `turn-step.tsx`) and the composer takes focus on open (the send hint names the
   viewer's own modifier and drops on a coarse pointer) — on a user-initiated open only, so
   a remembered-open reload never starts focus inside the textarea. Escape closes and
   returns focus to the trigger **while focus is inside the panel**. An Escape pressed on a
@@ -259,8 +268,15 @@ Storage is app-owned SQLite, the same family as notifications and sessions:
 `controller_conversations(id, user_id, user_label, project_slug, task_key, title,
 created_at, updated_at, last_message_at, seen_seq)` with `CHECK (task_key IS NULL OR
 project_slug IS NOT NULL)` and `controller_messages(id, conversation_id, seq, author
-user|controller, user_id, text, run_id, surface, created_at)` with `UNIQUE
-(conversation_id, seq)` and `ON DELETE CASCADE` to the conversation.
+user|controller, user_id, text, run_id, surface, created_at, reply_to)` with `UNIQUE
+(conversation_id, seq)` and `ON DELETE CASCADE` to the conversation. `reply_to` (ruling 465)
+is, on a controller row, the user message it answers: a turn's reply (posted early or by
+the settle), every refusal (no Claude, a full queue, a turn that could not start), the
+queued-start failure and each message it dropped, and the restart notes all set it; only a
+released project's note answers nothing. A user message takes its `seq` when it is
+recorded, which for a message sent mid-turn is when it is QUEUED, so `seq` alone cannot pair
+a reply with its message. An older data root gains the column with a backfill that replays
+the writers' order (`backfillControllerReplyLinks`).
 
 A conversation's **scope** (ruling 121) is fixed at creation: instance (`project_slug`
 and `task_key` null), board (slug alone) or task (slug + key). `listConversations`
@@ -292,7 +308,11 @@ a notification row: replies stay out of the bell (§8).
    returns `{ state: "refused", reason }`; every send door answers that as a 409, and
    the dock's door refuses before creating a new thread.
 3. Single-flight per conversation with a FIFO capped at 8 queued messages
-   (`MAX_QUEUED_MESSAGES`); overflow is refused in-transcript.
+   (`MAX_QUEUED_MESSAGES`); overflow is refused in-transcript. The lease records the
+   message the current turn answers, and `conversationTurnState` exposes it and the queued
+   ids with their positions (`answering`, `queued: [{ messageId, ahead }]`) on both views,
+   so the transcript names the queue from the server's side (ruling 465); joining the queue
+   publishes `controller.updated`.
 4. The run row is `agent_runs.kind = 'controller'`, `project_slug = ''`,
    `task_key = <conversation id>`, so no task-scoped query ever matches it. Model is
    the profile's through `resolveRunModel("claude", …)`, re-read every turn (a resume
@@ -306,8 +326,14 @@ a notification row: replies stay out of the bell (§8).
 
    The turn prompt is, in order: the **context read**, a line naming the model this turn
    runs on (ruling 444: the model is named here, never in the recorded system prompt), a
-   digest of the last 30 messages (`CONTEXT_MESSAGES`, 24 000 chars, each message cut at
-   600), then `<user label> says:` and the message.
+   digest of the conversation UP TO the message this turn answers (`messagesUpTo`, in reply
+   order: every user message up to and including it, every reply to one of those, every
+   unlinked note written before it; the newest 30 of those, `CONTEXT_MESSAGES`, 24 000
+   chars, each message cut at 600), then, when messages wait behind it, one line: "N more
+   messages from <person> are queued behind this one; each is answered in its own turn, in
+   order — do not treat them as lost" (ruling 465, F40-10: a queued message used to reach
+   the running turn as a 600-character stub, which the model reported lost), then
+   `<user label> says:` and the message.
 
    The **context read** (ruling 121, `gatherControllerContext` in
    `controller-context.server.ts`) is a block labelled as a server read taken when the
@@ -396,17 +422,21 @@ a notification row: replies stay out of the bell (§8).
    `viberr_ops` is still attached, and to ask rather than guess when the last request
    depends on lost context). The controller's tools stay deferred behind ToolSearch
    (deferred tools only append and keep the cache).
-6. `settleTurn` records the reply (or a failure note naming quota/auth/other),
-   releases the lease and starts the next queued message.
+6. `settleTurn` records the reply (or a failure note naming quota/auth/other) under the
+   message it answers, releases the lease and starts the next queued message. When that
+   start fails, the note goes under the message it tried and every message dropped behind
+   it gets its own note (ruling 465).
 
 Everything the run machinery gives every other run applies: raw NDJSON transcript,
 line redaction, token accounting, the run's input disclosure (`recordRunInputs`, on the
 fresh path and every resume; ruling 344), the run-log console (owner or org admin, via
 `canReadControllerRunLog`, the same gate `/resources/run-log` and the session export
 apply; rendered on the controller pages, §2.2), the interrupt (`canInterruptControllerRun`,
-§2.2) and boot orphan finalization. Boot also gives any conversation whose turn a
-restart orphaned an honest "interrupted by a server restart" note
-(`recoverControllerConversations`). The task-scoped run stream cannot carry a controller
+§2.2) and boot orphan finalization. Boot also writes an honest "interrupted by a server
+restart" note under every user message no reply answers in a conversation no live turn
+holds (`recoverControllerConversations`, ruling 465): the turn whose run died (its note
+carries the run id, which settles that run, and answers the oldest waiting message), a
+message whose run never started, and the messages the lost in-memory queue still held. The task-scoped run stream cannot carry a controller
 run (the wire schema's non-empty-slug rule, and an empty slug would match every `projects`
 firehose), so `run-events.server.ts` routes a controller run's frames to the conversation
 owner instead: `controller.log-appended` per stored line, and the `controller.updated`
@@ -468,7 +498,7 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `save_skill` | Create or update a skill (name, summary, SKILL.md body) (§4.1) | org admin |
 | `save_mcp_server` | Create or update a connection; takes no credential; reserved names refused; `writeTools` marks the tools withheld from runs without repo-write and from every operator run (ruling 176), and a save with none set names the tools that look like writes. Its description says an HTTP server that asks for an OAuth sign-in is signed in by an org admin in Instance settings, which the controller cannot do, and a save that meets the sign-in challenge says so instead of "add a secret" (ruling 469) | org admin |
 | `test_mcp_server` | Probe one connection now and report its health in the command's words; an OAuth server reads "needs sign-in", "healthy … signed in (expires in …, renews itself)" or "sign-in expired: an admin must sign in again" (ruling 469) | org admin |
-| `save_global_agent` | Create or update a specialist template: backend, summary, persona, stages, default model and effort, grants (§4.1, §4.2); `propagate: true` rewrites differing project copies' grants (ruling 156) | org admin |
+| `save_global_agent` | Create or update a specialist template: backend, summary, persona, stages, default model and effort, grants (§4.1, §4.2); `propagate: true` rewrites differing project copies' grants (ruling 156) and, on a call that changes the persona, the persona of every copy still running older text (ruling 467) | org admin |
 
 **Project creation**
 
@@ -516,7 +546,7 @@ matrix the human surfaces use; the tier in brackets is the floor)
 | `set_member_role` | Change a member's role; the last project admin cannot be demoted [`manage-members`] |
 | `deploy_agent` | Deploy a global template; `model` / `effort` overrides checked before the write; the reply says whether the copy can write the repo; its description names `remove_agent_deployment` as the way back [`manage-agents`] |
 | `remove_agent_deployment` | Take a specialist's deployment off the project (ruling 464): `deleteAgentProfile`, the Agents page's Delete, under its gate and its audit row `project.agent_profile.deleted`, with the required `reason` in the details. Refuses the Operator by name and a profile that is the delivering or an engaged agent on an open task (not archived, not in the final stage), naming the tasks; the global template is untouched; a project left with no specialist is told the base Developer and Reviewer come back at the next restart [`manage-agents`] |
-| `update_agent_deployment` | A deployment's capability modes, backend, model, effort, stages, operator autonomy and its own `skills` / `mcps` / `kbs` for every kind, the operator included (G36-1); merge semantics; checked before the write (§4.2) [`manage-agents`] |
+| `update_agent_deployment` | A deployment's capability modes, backend, model, effort, stages, operator autonomy, its own `skills` / `mcps` / `kbs` for every kind, the operator included (G36-1), and its `persona` (ruling 467: the whole text, an empty one refused, the reply naming the length before and after and the first and last changed lines); merge semantics; checked before the write (§4.2) [`manage-agents`] |
 
 **Goals** (`requireVisible`, then the goal gate, §7)
 
@@ -560,8 +590,14 @@ as intended).
   two doors: `propagate: true` on the next call, or an org admin's "Use the template's
   grants" on that project's Agents page (org admins only; a project admin sees the marker
   and asks). Propagation REPLACES the copy's three lists (a project-local extra is dropped
-  and the reply says so) and nothing else, and records
-  `project.agent_profile.resources_synced` per project. Names are entity-decoded once and
+  and the reply says so), and records `project.agent_profile.resources_synced` per
+  project. On a call that CHANGED the template's persona, `propagate` also rewrites the
+  persona of every copy ruling 277's `copiesWithOlderText` names, audits each as the
+  Agents page audits a persona edit (`project.agent_profile.updated` with
+  `personaChanged`, `personaChars` and `source: "org-template"`) and says per project
+  what it rewrote; a call that leaves the persona alone rewrites none, so a project's
+  own persona survives a grants propagation, and a summary is never propagated
+  (ruling 467). `update_agent_deployment`'s `persona` sets one copy. Names are entity-decoded once and
   angle brackets are refused (U35-1): `Test &amp; CI Engineer` is stored as `Test & CI
   Engineer` with the id `test-ci-engineer`.
 - **The controller edits a deployment's copy for every kind** (G36-1).
@@ -591,7 +627,12 @@ as intended).
   write is refused whole with both versions named, and the reply says how many bytes a
   replace destroyed. `doc.append: true` adds to the end (creating the file when absent)
   and needs no version, so a long document is built a section at a time; append and
-  replace together are refused.
+  replace together are refused. An append concatenates EXACTLY the text sent, nothing
+  trimmed and no separator inserted, so the caller owns the newlines and a part may end
+  mid-table or inside a fenced block (ruling 466, F40-13). Every size a store, KB or
+  skill write reports or audits (`org.store.doc_written`'s `bytes`, the reply's
+  "Appended N bytes", "its previous N bytes are gone", `read_knowledge_base_doc`'s
+  `bytes`) is a UTF-8 byte count (ruling 466).
 - **A SKILL.md body is judged before it is written** (ruling 183). `save_skill` is one of
   the writers `assertSkillBodyWellFormed` guards (`skill-body.server.ts`; the others are
   the org-settings editor, an upload and the store browser's document editor). A body that

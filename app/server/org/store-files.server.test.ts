@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
 import { isAppError } from "~/server/errors/app-error.server";
@@ -852,6 +853,66 @@ describe("writeStoreDoc", () => {
     });
     expect(replaced.replaced).toBe(true);
     expect(readFileSync(abs, "utf8")).toBe("REPLACED");
+  });
+
+  /**
+   * Ruling 466 (F40-9): a store write reports and audits UTF-8 BYTES. It
+   * recorded `body.length`, UTF-16 code units: live, an 8,220-byte document
+   * was reported and audited as "8,170 bytes".
+   */
+  it("ruling 466: a non-ASCII body reports its UTF-8 length in the result and the audit row", async () => {
+    const { db, ctx, kb, target } = await setupKb();
+    const body = "# Kimlik\n\nAkın Özer — İstanbul’da çalışır. ✓\n";
+    expect(body.length).not.toBe(Buffer.byteLength(body, "utf8"));
+    const result = writeStoreDoc(db, target, [], "kimlik.md", body, ACTOR);
+    const onDisk = readFileSync(path.join(kbDirPath(kb.dir, ctx.dataRoot), "kimlik.md")).length;
+    // CANARY: report `body.length` again and both figures fall short of disk.
+    expect(result.bytes).toBe(onDisk);
+    expect(result.previousBytes).toBeNull();
+    const row = listAuditEvents(db, { action: "org.store.doc_written" })[0];
+    expect(row?.details).toMatchObject({ path: "kimlik.md", bytes: onDisk, replaced: false });
+
+    // A replace names how many bytes it destroyed, measured on disk (ruling 257).
+    const replaced = writeStoreDoc(db, target, [], "kimlik.md", "ş", ACTOR, { overwrite: true });
+    expect(replaced).toMatchObject({ replaced: true, previousBytes: onDisk, bytes: 2 });
+  });
+
+  /**
+   * Ruling 466 (F40-13): an append adds EXACTLY the text sent. The controller's
+   * door trimmed each part and forced a blank line between parts, so a part
+   * boundary inside a markdown table split the table in two.
+   */
+  it("ruling 466: two appends that split a table concatenate byte for byte", async () => {
+    const { db, ctx, kb, target } = await setupKb();
+    const first = "| Rule | Year |\n|---|---|\n| Kör ";
+    const second = "nokta | 2026 |\n| Şeffaflık | 2025 |\n";
+    const a = writeStoreDoc(db, target, [], "table.md", first, ACTOR, { append: true });
+    expect(a).toMatchObject({ previousBytes: null, appendedBytes: Buffer.byteLength(first) });
+    const b = writeStoreDoc(db, target, [], "table.md", second, ACTOR, { append: true });
+    const abs = path.join(kbDirPath(kb.dir, ctx.dataRoot), "table.md");
+    // CANARY: trim the part or insert a separator and the bytes differ.
+    expect(readFileSync(abs).equals(Buffer.from(first + second, "utf8"))).toBe(true);
+    expect(b).toMatchObject({
+      replaced: false,
+      previousBytes: Buffer.byteLength(first),
+      appendedBytes: Buffer.byteLength(second),
+      bytes: Buffer.byteLength(first + second),
+    });
+    expect(listAuditEvents(db, { action: "org.store.doc_written" })[0]?.details).toMatchObject({
+      bytes: Buffer.byteLength(first + second),
+      appended: Buffer.byteLength(second),
+      replaced: false,
+    });
+  });
+
+  it("ruling 466: the editor's read cap is in bytes, so `truncated` and the text agree", async () => {
+    const { db, target } = await setupKb();
+    // 10 two-byte characters = 20 bytes.
+    writeStoreDoc(db, target, [], "cap.md", "ç".repeat(10), ACTOR);
+    // CANARY: slice characters again and the whole text comes back while
+    // `truncated` says it was cut.
+    expect(readStoreDoc(target, ["cap.md"], 11)).toEqual({ text: "ç".repeat(5), truncated: true });
+    expect(readStoreDoc(target, ["cap.md"], 20)).toEqual({ text: "ç".repeat(10), truncated: false });
   });
 
   it("ruling 183: a SKILL.md written through the document editor is judged like every other SKILL.md write", async () => {

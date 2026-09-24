@@ -923,3 +923,60 @@ describe("ruling 464: a designed roster replaces the base specialists", () => {
     expect(listAuditEvents(store.db, { action: "project.created" })).toHaveLength(0);
   });
 });
+
+/**
+ * Ruling 468 (F40-12): project creation tells an EMPTY repository from one
+ * with commits, records it on the project's repo access, and says Viberr will
+ * make the first commit. Live, `akin-ozer/website` was accepted as `ok` and the
+ * first operator run asked the owner to push a README.
+ */
+describe("ruling 468: an empty repository is recognised at creation", () => {
+  it("records `empty` on the repo access and says the first commit is Viberr's", async () => {
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": {
+        body: { default_branch: "main", permissions: { push: true }, size: 0 },
+      },
+      "GET /repos/akin-ozer/website/commits": { status: 409, body: { message: "Git Repository is empty." } },
+    });
+    const result = await createProject(
+      store.db,
+      { name: "Website", key: "WEB", owner: "akin-ozer", repoName: "website", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const { readRepoHealth } = await import("~/server/github/repo-health.server");
+    // CANARY: drop `empty` from the probe and the record reads as any
+    // connected repository, the state the live packet grew from.
+    expect(readRepoHealth(store.db, result.slug)?.result).toMatchObject({
+      status: "connected",
+      repo: "akin-ozer/website",
+      empty: true,
+    });
+    expect(result.repoWarning).toBeNull();
+    expect(result.repoNote).toBe(
+      "akin-ozer/website is empty: Viberr will create its first commit on main before the first task branch, so nobody needs to push one.",
+    );
+  });
+
+  it("a repository with commits (size 0 is only the cue) says nothing of the kind", async () => {
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": {
+        body: { default_branch: "main", permissions: { push: true }, size: 0 },
+      },
+      "GET /repos/akin-ozer/website/commits": { body: [{ sha: "abc" }] },
+    });
+    const result = await createProject(
+      store.db,
+      { name: "Website", key: "WEB", owner: "akin-ozer", repoName: "website", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const { readRepoHealth } = await import("~/server/github/repo-health.server");
+    expect(readRepoHealth(store.db, result.slug)?.result).not.toHaveProperty("empty");
+    expect(result.repoNote).toBeNull();
+  });
+});

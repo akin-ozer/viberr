@@ -466,7 +466,9 @@ export function AgentModal({
           <span className="fhint">
             Replaces each copy&apos;s skills, MCP servers and knowledge bases with
             the lists above; a grant a project added on its own is dropped and the
-            reply says so. Capability policy, model and stages stay the project&apos;s.
+            reply says so. When this save changes the persona, each copy&apos;s
+            persona is replaced with it too. Capability policy, model and stages
+            stay the project&apos;s.
           </span>
         </div>
       )}

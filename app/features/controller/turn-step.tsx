@@ -47,6 +47,42 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
 }
 
 /**
+ * Ruling 465 (F40-8): where an unanswered user message stands, on the page and
+ * the dock alike. A message sent while a turn works is queued on the server;
+ * the transcript rendered it as the newest message with "is working…" under
+ * it, as if the running turn were answering it, and a person could not tell
+ * whether it was being worked on, waiting, or lost. The words come from the
+ * server's view of the lease (`turn.answering`, `turn.queued`), never from
+ * what the page last sent, and a message that already has a reply says
+ * nothing (the caller renders this only for one that has none). The words
+ * carry it, in the header's own small type (`.fine`, the surface chip's
+ * look), so no rule joins the stylesheet every page loads.
+ */
+export function MessageState({
+  turn,
+  messageId,
+}: {
+  turn: Pick<ConversationTurnState, "answering" | "queued"> | null;
+  messageId: string;
+}): React.ReactNode {
+  if (!turn) return null;
+  if (turn.answering === messageId) {
+    return (
+      <span className="fine" data-msg-state="answering">
+        answering now
+      </span>
+    );
+  }
+  const queued = turn.queued.find((q) => q.messageId === messageId);
+  if (!queued) return null;
+  return (
+    <span className="fine" data-msg-state="queued">
+      {`queued · ${queued.ahead} ahead`}
+    </span>
+  );
+}
+
+/**
  * Ruling 451(a): the sentence that says a controller turn is working, on the
  * dock and the page. A highlight band crosses it while the turn holds (the
  * sheet's `.ctl-working-text`, transitions.dev's "Shimmer text"): the band is

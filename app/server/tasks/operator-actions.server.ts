@@ -2198,7 +2198,8 @@ export async function operatorProposeRuling(
     subjectId: input.taskKey,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    details: { rulingsKb: rulingsDir, doc: name, bytes: entry.length },
+    // Ruling 466: UTF-8 bytes, never a string length.
+    details: { rulingsKb: rulingsDir, doc: name, bytes: Buffer.byteLength(entry, "utf8") },
   });
   // A settled ruling is a human's to change; the proposal is worth nothing if
   // it only exists in a document nobody re-reads.

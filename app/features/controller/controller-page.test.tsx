@@ -44,7 +44,7 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     conversation: null,
     messages: [],
     taskLinks: {},
-    turn: { working: false, runId: null, phase: null, step: null },
+    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
     runtime: [],
     canInterruptTurn: false,
     goals: [],
@@ -396,8 +396,8 @@ describe("the project controller page (ruling 121)", () => {
           lastMessageAt: "2026-09-01T10:00:00.000Z",
         },
         messages: [
-          { id: "m1", conversationId: "cnv_t", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: "/projects/viberr-core/board?filter=waiting", createdAt: "2026-09-01T10:00:00.000Z" },
-          { id: "m2", conversationId: "cnv_t", seq: 2, author: "controller", userId: null, text: "In review.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+          { id: "m1", conversationId: "cnv_t", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: "/projects/viberr-core/board?filter=waiting", replyTo: null, createdAt: "2026-09-01T10:00:00.000Z" },
+          { id: "m2", conversationId: "cnv_t", seq: 2, author: "controller", userId: null, text: "In review.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
         ],
         viewerOwnsActive: true,
       }),
@@ -713,7 +713,7 @@ describe("the open conversation's execution", () => {
     view({
       conversation,
       viewerOwnsActive: true,
-      turn: { working: true, runId: "run_ctl", phase: null, step: null },
+      turn: { working: true, runId: "run_ctl", phase: null, step: null, answering: null, queued: [] },
       // The elapsed cell below is asserted to the second, and `run.startedAt`
       // is stamped once when this describe body evaluates — so every test that
       // runs BEFORE it spent part of that assertion's budget, and under a full
@@ -741,6 +741,8 @@ describe("the open conversation's execution", () => {
           runId: "run_ctl",
           phase: null,
           step: 'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
+          answering: null,
+          queued: [],
         },
       }),
       "?c=cnv_b",
@@ -806,7 +808,7 @@ describe("the open conversation's execution", () => {
           lastMessageAt: "2026-09-01T10:00:05.000Z",
         },
         messages: [
-          { id: "m2", conversationId: "cnv_b", seq: 2, author: "controller", userId: null, text: "I created VIB-142. VIB-7 is not on this board.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+          { id: "m2", conversationId: "cnv_b", seq: 2, author: "controller", userId: null, text: "I created VIB-142. VIB-7 is not on this board.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
         ],
         taskLinks: { "VIB-142": "/projects/viberr-core/tasks/VIB-142" },
         viewerOwnsActive: true,
@@ -825,7 +827,7 @@ describe("the open conversation's execution", () => {
     // and the row reads "Controller is working… Working · npm test".
     renderPage(
       working({
-        turn: { working: true, runId: "run_ctl", phase: null, step: "Bash · npm test" },
+        turn: { working: true, runId: "run_ctl", phase: null, step: "Bash · npm test", answering: null, queued: [] },
       }),
       "?c=cnv_b",
     );
@@ -842,6 +844,8 @@ describe("the open conversation's execution", () => {
           runId: "run_ctl",
           phase: "Preparing workspace",
           step: "Cloning acme/widgets",
+          answering: null,
+          queued: [],
         },
       }),
       "?c=cnv_b",
@@ -1106,7 +1110,7 @@ describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
             lastMessageAt: "2026-09-01T10:00:00.000Z",
           },
           messages: [
-            { id: "m1", conversationId: "cnv_b", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: null, createdAt: "2026-09-01T10:00:00.000Z" },
+            { id: "m1", conversationId: "cnv_b", seq: 1, author: "user", userId: "u1", text: "Status?", runId: null, surface: null, replyTo: null, createdAt: "2026-09-01T10:00:00.000Z" },
           ],
           viewerOwnsActive: true,
         }),
@@ -1398,6 +1402,7 @@ describe("ruling 451: the page's conversation motion", () => {
     text,
     runId: null,
     surface: null,
+    replyTo: null,
     createdAt: "2026-09-01T10:00:00.000Z",
   });
 
@@ -1441,7 +1446,7 @@ describe("ruling 451: the page's conversation motion", () => {
   });
 
   it("(a) the working sentence carries its own words, and a new step is a new line", async () => {
-    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step });
+    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step, answering: null, queued: [] });
     const { update } = renderLive(
       view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn("Bash · npm test") }),
     );
@@ -1463,7 +1468,7 @@ describe("ruling 451: the page's conversation motion", () => {
   it("ruling 459: the step on screen when the page opens stands still; the next one is marked to rise", async () => {
     // CANARY: set TurnStep's `data-fresh` unconditionally and the step a
     // person finds on opening the page mid-turn rises as if it had just changed.
-    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step });
+    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step, answering: null, queued: [] });
     const at = (step: string) =>
       view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn(step) });
     const { update } = renderLive(at("Bash · npm test"));
@@ -1546,5 +1551,97 @@ describe("ruling 368: the controller's requests in flight", () => {
     const skip = screen.getByRole("button", { name: "Skip" });
     expect(skip.hasAttribute("disabled")).toBe(true);
     expect(skip.hasAttribute("aria-busy")).toBe(false);
+  });
+});
+
+/**
+ * Ruling 465 (F40-8): each reply sits under the message it answers, and an
+ * unanswered message says where it stands. Live, three dossier parts were
+ * queued while a turn worked; the transcript put "Controller is working…"
+ * under part 2 while the turn was still on part 1, and once the replies landed
+ * it read part 1, part 2, part 3, reply, correction, reply, reply.
+ */
+describe("ruling 465: the transcript is in reply order and names the queue", () => {
+  const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
+    id: "cnv_b",
+    userId: "u1",
+    userLabel: "Akin",
+    projectSlug: "viberr-core",
+    taskKey: null,
+    title: "Dossier",
+    createdAt: "2026-09-24T20:00:00.000Z",
+    updatedAt: "2026-09-24T20:00:00.000Z",
+    lastMessageAt: "2026-09-24T20:00:00.000Z",
+  };
+  const msg = (
+    id: string,
+    seq: number,
+    author: "user" | "controller",
+    text: string,
+    replyTo: string | null = null,
+  ): ControllerSurfaceView["messages"][number] => ({
+    id,
+    conversationId: "cnv_b",
+    seq,
+    author,
+    userId: author === "user" ? "u1" : null,
+    text,
+    runId: author === "user" ? null : `run_${id}`,
+    surface: null,
+    replyTo,
+    createdAt: "2026-09-24T20:00:00.000Z",
+  });
+
+  it("puts each reply under its message, 'answering now' and the working row on the answered one, and 'queued · N ahead' on the rest", async () => {
+    renderPage(
+      view({
+        conversation,
+        viewerOwnsActive: true,
+        // seq order: three parts queued, then part 1's reply.
+        messages: [
+          msg("p1", 1, "user", "Part one."),
+          msg("p2", 2, "user", "Part two."),
+          msg("p3", 3, "user", "Part three."),
+          msg("r1", 4, "controller", "Filed part one.", "p1"),
+        ],
+        turn: {
+          working: true,
+          runId: "run_live",
+          phase: null,
+          step: null,
+          answering: "p2",
+          queued: [{ messageId: "p3", ahead: 1 }],
+        },
+      }),
+      "?c=cnv_b",
+    );
+    await screen.findByText("Part three.");
+    const order = [...document.querySelectorAll(".ctl-msgs > .ctl-msg, .ctl-msgs > .ctl-working")].map((el) =>
+      el.classList.contains("ctl-working") ? "WORKING" : (el.querySelector(".md-body")?.textContent ?? "").trim(),
+    );
+    // CANARY: render `view.messages` in seq order again and the reply sits
+    // under part three with the working row under it.
+    expect(order).toEqual(["Part one.", "Filed part one.", "Part two.", "WORKING", "Part three."]);
+    const articles = [...document.querySelectorAll(".ctl-msgs > .ctl-msg")];
+    // CANARY: drop <MessageState> from the page's header and neither label shows.
+    expect(articles[2]!.querySelector("[data-msg-state]")?.textContent).toBe("answering now");
+    expect(articles[3]!.querySelector("[data-msg-state]")?.textContent).toBe("queued · 1 ahead");
+    // A message with a reply says nothing about the queue.
+    expect(articles[0]!.querySelector("[data-msg-state]")).toBeNull();
+  });
+
+  it("an unlinked older transcript keeps its seq order and says nothing it does not know", async () => {
+    renderPage(
+      view({
+        conversation,
+        viewerOwnsActive: true,
+        messages: [msg("u1", 1, "user", "Old question."), msg("c1", 2, "controller", "Old answer.")],
+      }),
+      "?c=cnv_b",
+    );
+    await screen.findByText("Old answer.");
+    const texts = [...document.querySelectorAll(".ctl-msgs > .ctl-msg .md-body")].map((el) => el.textContent?.trim());
+    expect(texts).toEqual(["Old question.", "Old answer."]);
+    expect(document.querySelector("[data-msg-state]")).toBeNull();
   });
 });

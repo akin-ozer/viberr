@@ -34,7 +34,9 @@ import {
 import {
   listTemplateResourceDrift,
   listTemplateTextDrift,
+  propagateTemplatePersona,
   propagateTemplateResources,
+  type PersonaPropagatedCopy,
   type PropagatedCopy,
   type TemplateCopyDrift,
   type TemplateTextDrift,
@@ -418,6 +420,9 @@ export interface SaveGagentResult {
   diverged: TemplateCopyDrift[];
   /** The copies this save rewrote (only with `propagate: true`). */
   propagated: PropagatedCopy[];
+  /** Ruling 467: the copies whose PERSONA this save rewrote (only with
+   *  `propagate: true` on a save that changed the template's persona). */
+  personaPropagated: PersonaPropagatedCopy[];
   /**
    * Ruling 277: the non-archived projects whose copy still runs an OLDER
    * persona or summary than the template. A deployment snapshots both
@@ -514,6 +519,9 @@ export async function saveGlobalAgentProfile(
     // flattens a profile's system prompt, and a blank persona keeps the one
     // that is already there.
     const persona = input.persona.trim();
+    // Ruling 467: whether THIS save changed the persona, read before the
+    // write replaces the body it compares against.
+    const personaChanged = persona !== "" && persona !== existing.description;
     const merged: ParsedTemplate = {
       frontmatter: {
         ...existing.frontmatter,
@@ -548,6 +556,24 @@ export async function saveGlobalAgentProfile(
       );
       diverged = listTemplateResourceDrift(db, input.id, ctx);
     }
+    // Ruling 467 (F40-11): `propagate` on a save that CHANGED the persona also
+    // rewrites the persona of every copy still running older text (ruling
+    // 277's set). A save that left the persona alone rewrites none, so a
+    // grants propagation never overwrites a project's own persona edit.
+    let personaPropagated: PersonaPropagatedCopy[] = [];
+    if (input.propagate && personaChanged) {
+      const behind = listTemplateTextDrift(db, input.id, ctx).filter((d) =>
+        d.fields.includes("persona"),
+      );
+      if (behind.length > 0) {
+        personaPropagated = await propagateTemplatePersona(
+          db,
+          { profileId: input.id, projectSlugs: behind.map((d) => d.projectSlug) },
+          actor,
+          ctx,
+        );
+      }
+    }
     recordAudit(db, {
       action: "org.agent_profile.updated",
       actor,
@@ -560,6 +586,7 @@ export async function saveGlobalAgentProfile(
         effort: effort ?? "",
         diverged: diverged.map((d) => d.projectSlug),
         propagated: propagated.map((p) => p.projectSlug),
+        personaPropagated: personaPropagated.map((p) => p.projectSlug),
       },
     });
     const used = usedByProject(db)[input.id] ?? 0;
@@ -572,6 +599,11 @@ export async function saveGlobalAgentProfile(
     }
     const copies = copiesClause(diverged, propagated);
     if (copies) clauses.push(copies);
+    if (personaPropagated.length > 0) {
+      clauses.push(
+        `persona rewritten on ${countLabel(personaPropagated.length, "project copy", "project copies")}: ${personaPropagated.map((p) => p.projectSlug).join(", ")}`,
+      );
+    }
     // Ruling 277 (F37-110): the PERSONA and the summary are snapshotted onto
     // every deployment too (P13-AP-07), and `propagate` rewrites only the
     // grants — so a template edit that corrects a persona reaches no running
@@ -582,12 +614,18 @@ export async function saveGlobalAgentProfile(
     const textBehind = listTemplateTextDrift(db, input.id, ctx);
     if (textBehind.length > 0) {
       const fields = [...new Set(textBehind.flatMap((d) => d.fields))].join(" and ");
+      // Ruling 467: propagate rewrites a persona, but only on a save that
+      // changed it, and never a summary; each copy stays editable by hand.
+      const personaBehind = textBehind.some((d) => d.fields.includes("persona"));
+      const summaryBehind = textBehind.some((d) => d.fields.includes("summary"));
+      const why = personaBehind
+        ? `propagate rewrites a persona only on a save that changes it${summaryBehind ? ", and never a summary" : ""}`
+        : `propagate does not rewrite ${textBehind.length === 1 ? "it" : "them"}`;
       clauses.push(
         `${textBehind.length} project cop${textBehind.length === 1 ? "y" : "ies"} still ` +
           `run${textBehind.length === 1 ? "s" : ""} the older ${fields}: ` +
           `${textBehind.map((d) => d.projectSlug).join(", ")}. A deployment snapshots the ` +
-          `${fields}, and propagate does not rewrite ${textBehind.length === 1 ? "it" : "them"} ` +
-          `— fix each copy on that project's Agents page`,
+          `${fields}, and ${why} — fix each copy on that project's Agents page`,
       );
     }
     return {
@@ -595,6 +633,7 @@ export async function saveGlobalAgentProfile(
       toast: clauses.join(" · "),
       diverged,
       propagated,
+      personaPropagated,
       textBehind,
     };
   }
@@ -668,6 +707,7 @@ export async function saveGlobalAgentProfile(
     diverged: [],
     textBehind: [],
     propagated: [],
+    personaPropagated: [],
   };
 }
 

@@ -45,6 +45,8 @@ const storedResultSchema = z.discriminatedUnion("status", [
     repo: z.string(),
     remoteDefaultBranch: z.string().nullable(),
     private: z.boolean(),
+    // Ruling 468: optional, so a row recorded before it still parses.
+    empty: z.boolean().optional(),
   }),
   z.object({ status: z.literal("no_repo_configured") }),
   z.object({ status: z.literal("no_pat_configured"), repo: z.string().nullable() }),

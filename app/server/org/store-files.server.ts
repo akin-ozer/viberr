@@ -17,6 +17,7 @@ import { countKbFiles } from "~/features/kb-browser/tree";
 import {
   recordAudit,
   type AuditActor,
+  type AuditDetails,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
@@ -424,9 +425,23 @@ export function createStoreFolder(
 
 export interface StoreDocResult {
   path: string[];
+  /** Ruling 466: the document's size as written, in UTF-8 BYTES. It was
+   *  `body.length`, UTF-16 code units: live, an 8,220-byte document was
+   *  reported and audited as "8,170 bytes". */
   bytes: number;
   /** An existing document was replaced rather than created (P14-UI-59). */
   replaced: boolean;
+  /** Ruling 466: the size in bytes of the document this write replaced or
+   *  appended to, measured on disk before the write; null when it created one.
+   *  "How many bytes a replace destroyed" (ruling 257) is this figure. */
+  previousBytes: number | null;
+  /** Ruling 466 (F40-13): with `append`, the bytes this call added. */
+  appendedBytes?: number;
+}
+
+/** Ruling 466: a size in bytes is a UTF-8 byte count, never a string length. */
+export function utf8Bytes(text: string): number {
+  return Buffer.byteLength(text, "utf8");
 }
 
 /** Read one store text doc for the editor (`null` when absent). A doc the
@@ -473,7 +488,16 @@ export function readStoreDoc(
     );
   }
   const size = statSync(abs).size;
-  const text = readFileSync(abs, "utf8").slice(0, maxBytes);
+  // Ruling 466: the cap is in BYTES, as its name and `truncated` say. It used
+  // to slice characters, so a non-ASCII document could read back whole while
+  // `truncated` (measured in bytes) said it was cut. A cut that lands inside a
+  // multi-byte character drops the partial character rather than decoding it
+  // as U+FFFD.
+  const raw = readFileSync(abs);
+  const text =
+    raw.length > maxBytes
+      ? raw.subarray(0, maxBytes).toString("utf8").replace(/�$/, "")
+      : raw.toString("utf8");
   return { text, truncated: size > maxBytes };
 }
 
@@ -500,7 +524,19 @@ export function writeStoreDoc(
   name: string,
   body: string,
   actor: AuditActor,
-  opts: { overwrite?: boolean } = {},
+  opts: {
+    overwrite?: boolean;
+    /**
+     * Ruling 466 (F40-13): add `body` to the END of the document, creating it
+     * when absent. The bytes sent are concatenated EXACTLY: nothing is trimmed
+     * and no separator is inserted, so a part boundary may fall inside a
+     * table, a list or a fenced block and the result is the text the caller
+     * built. The existing file is read whole from disk, never through the
+     * editor's capped reader, so nothing past a cap can be lost. An append
+     * destroys nothing, so it needs no `overwrite`.
+     */
+    append?: boolean;
+  } = {},
 ): StoreDocResult {
   const base = sanitizeDirPath(dirPath);
   const cleaned = name.trim().replace(/[\\/]/g, "-");
@@ -531,28 +567,43 @@ export function writeStoreDoc(
       `A folder named “${withExt}” already exists there. Pick another name.`,
     );
   }
-  if (existed && !opts.overwrite) {
+  if (existed && !opts.overwrite && !opts.append) {
     throw AppError.conflict(
       `${[...base, withExt].join("/")} already exists. Open it to edit, or pick another name.`,
     );
   }
+  const previous = existed ? readFileSync(abs) : null;
+  const sent = Buffer.from(body, "utf8");
+  const written = opts.append && previous ? Buffer.concat([previous, sent]) : sent;
   // Ruling 183: the document editor is a SKILL.md writer too.
-  if (isTheSkillMd(target, base, [withExt])) assertSkillBodyWellFormed(body);
+  if (isTheSkillMd(target, base, [withExt])) assertSkillBodyWellFormed(written.toString("utf8"));
   mkdirSync(dirAbs, { recursive: true });
-  writeFileSync(abs, body);
+  writeFileSync(abs, written);
   touchResource(db, target);
+  const replaced = existed && !opts.append;
+  const appendedBytes = opts.append ? sent.length : undefined;
+  const details: AuditDetails = {
+    path: [...base, withExt].join("/"),
+    // Ruling 466: UTF-8 bytes, the figure `ls -l` and the result agree on.
+    bytes: written.length,
+    replaced,
+  };
+  if (appendedBytes !== undefined) details.appended = appendedBytes;
   recordAudit(db, {
     action: "org.store.doc_written",
     actor,
     subjectKind: `org_${target.kind}`,
     subjectId: target.id,
-    details: {
-      path: [...base, withExt].join("/"),
-      bytes: body.length,
-      replaced: existed,
-    },
+    details,
   });
-  return { path: [...base, withExt], bytes: body.length, replaced: existed };
+  const result: StoreDocResult = {
+    path: [...base, withExt],
+    bytes: written.length,
+    replaced,
+    previousBytes: previous ? previous.length : null,
+  };
+  if (appendedBytes !== undefined) result.appendedBytes = appendedBytes;
+  return result;
 }
 
 // ---------------------------------------------------------------- delete

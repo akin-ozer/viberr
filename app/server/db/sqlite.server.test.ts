@@ -377,6 +377,80 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  /**
+   * Ruling 465: `reply_to` says which user message a controller row answers.
+   * An older root holds replies already, and boot recovery notes every user
+   * message no reply names, so a NULL would write a restart note under every
+   * old message. The backfill replays the writers' order: a turn's reply
+   * (it carries a run) answers the OLDEST waiting message, a run-less note the
+   * NEWEST (it was written right after the message it refused), the queued-
+   * start failure its head (the rest were dropped, and said so), and a
+   * released project's note nothing.
+   */
+  it("adds reply_to to an older root, linking each old reply the way its writer wrote it", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlreply-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE controller_conversations (
+           id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_label TEXT NOT NULL,
+           project_slug TEXT, task_key TEXT, title TEXT NOT NULL DEFAULT '',
+           created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_message_at TEXT,
+           seen_seq INTEGER NOT NULL DEFAULT 0);
+         CREATE TABLE controller_messages (
+           id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL,
+           author TEXT NOT NULL, user_id TEXT, text TEXT NOT NULL, run_id TEXT,
+           surface TEXT, created_at TEXT NOT NULL, UNIQUE (conversation_id, seq));
+         INSERT INTO controller_conversations (id, user_id, user_label, created_at, updated_at)
+           VALUES ('c1', 'u1', 'a@b.dev', '2026-09-24', '2026-09-24'),
+                  ('c2', 'u1', 'a@b.dev', '2026-09-24', '2026-09-24');
+         INSERT INTO controller_messages (id, conversation_id, seq, author, user_id, text, run_id, created_at) VALUES
+           ('p1', 'c1', 1, 'user', 'u1', 'part 1', NULL, 'x'),
+           ('p2', 'c1', 2, 'user', 'u1', 'part 2', NULL, 'x'),
+           ('p3', 'c1', 3, 'user', 'u1', 'part 3', NULL, 'x'),
+           ('full', 'c1', 4, 'user', 'u1', 'one too many', NULL, 'x'),
+           ('rfull', 'c1', 5, 'controller', NULL, 'I could not take that on: the queue is full.', NULL, 'x'),
+           ('r1', 'c1', 6, 'controller', NULL, 'reply to part 1', 'run_1', 'x'),
+           ('fix', 'c1', 7, 'user', 'u1', 'correction', NULL, 'x'),
+           ('r2', 'c1', 8, 'controller', NULL, 'reply to part 2', 'run_2', 'x'),
+           ('r3', 'c1', 9, 'controller', NULL, 'reply to part 3', 'run_3', 'x'),
+           ('rfix', 'c1', 10, 'controller', NULL, 'reply to the correction', 'run_4', 'x'),
+           ('q1', 'c2', 1, 'user', 'u1', 'a', NULL, 'x'),
+           ('q2', 'c2', 2, 'user', 'u1', 'b', NULL, 'x'),
+           ('q3', 'c2', 3, 'user', 'u1', 'c', NULL, 'x'),
+           ('ra', 'c2', 4, 'controller', NULL, 'answer a', 'run_a', 'x'),
+           ('fail', 'c2', 5, 'controller', NULL, 'I could not start the queued turn, and I dropped the 1 message you sent after it. Say them again to retry.', NULL, 'x'),
+           ('rel', 'c2', 6, 'controller', NULL, 'The project "Web" was deleted, so this conversation is no longer bound to it. Everything above stays on the record.', NULL, 'x');`,
+      );
+      ensureBaselineColumns(db);
+      // SAFETY: both columns are selected by name; `id` is NOT NULL TEXT.
+      const links = Object.fromEntries(
+        (
+          db
+            .prepare(`SELECT id, reply_to FROM controller_messages WHERE author = 'controller'`)
+            .all() as { id: string; reply_to: string | null }[]
+        ).map((r) => [r.id, r.reply_to]),
+      );
+      // CANARY: drop the backfill and every link is null; take the newest for
+      // a run-carrying reply and part 1's reply lands under the correction.
+      expect(links).toEqual({
+        rfull: "full",
+        r1: "p1",
+        r2: "p2",
+        r3: "p3",
+        rfix: "fix",
+        // The failure note answers the head it tried (q2); q3 was dropped and
+        // stays unanswered, as the note itself said.
+        ra: "q1",
+        fail: "q2",
+        rel: null,
+      });
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 /**
