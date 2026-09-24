@@ -311,7 +311,7 @@ describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => 
     // Both run controls carry an `.op-steer` input now (PromptInput is shared
     // with the agent prompt) — the aria-label is the operator one's identity.
     const input = utils.container.querySelector<HTMLInputElement>(
-      'input[aria-label="Steer this operator run (optional)"]',
+      'input[aria-label="Steer this run (optional)"]',
     )!;
     return { calls, input };
   }
@@ -335,6 +335,22 @@ describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => 
     // A real Enter after composition ends still submits.
     fireEvent.keyDown(input, { key: "Enter" });
     expect(calls).toEqual(["日本語"]);
+  });
+
+  /** Interface review 2026-09-24 (acce-38): the placeholder is the only
+   *  visible hint in a 180px box, so it is short enough to show whole, and the
+   *  accessible name starts with the same words. */
+  it("both run prompts show a short hint that opens their accessible name", () => {
+    const { container } = renderExec({ task: ownedTask(), runPrincipal: connectedPrincipal() });
+    const prompts = [...container.querySelectorAll<HTMLInputElement>(
+      'input.op-steer:not([role="combobox"])',
+    )];
+    expect(prompts.map((i) => [i.placeholder, i.getAttribute("aria-label")])).toEqual([
+      // The operator prompt's name IS its visible hint (label in name); the
+      // "Operator" cell kicker says whose run it steers.
+      ["Steer this run (optional)", "Steer this run (optional)"],
+      ["Prompt (optional)", "Prompt for this agent run (optional)"],
+    ]);
   });
 });
 

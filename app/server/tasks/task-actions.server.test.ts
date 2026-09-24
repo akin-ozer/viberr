@@ -3993,7 +3993,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     });
     const outcome = await performDelivery(store.db, deliveryCtx(store), store.slug, "VIB-1", actor(store.users.arda));
     expect(outcome).toMatchObject({ status: "scope_violation", scope: "workflow" });
-    expect(outcome.status === "scope_violation" ? outcome.message : "").toContain("Re-check on the project's GitHub view");
+    expect(outcome.status === "scope_violation" ? outcome.message : "").toContain("Re-check scopes on the project's GitHub page");
     expect(github.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
     const open = listScopeViolations(store.db, store.slug, { status: "open" });
     expect(open.map((v) => [v.scope, v.taskKey])).toEqual([["workflow", "VIB-1"]]);

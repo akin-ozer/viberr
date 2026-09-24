@@ -63,7 +63,7 @@ const workflowAdvisory: ProjectCredentialHealth["advisories"][number] = {
   id: "workflow_scope",
   scope: "workflow",
   source: "violation",
-  text: "GitHub refused a push under .github/workflows/ with this token (VIB-142): it lacks the workflow scope. Grant it on GitHub, then Re-check the credential.",
+  text: "GitHub refused a push under .github/workflows/ with this token (VIB-142): it lacks the workflow scope. Grant it on GitHub, then use Re-check scopes on the project's GitHub page.",
 };
 
 const noneCredential: ProjectCredentialHealth = {
@@ -284,6 +284,10 @@ describe("CredentialCard states", () => {
     expect(container.querySelector(".cred-warn")!.textContent).toContain(
       "Scopes not yet verified",
     );
+    // writ-6: the sentence names the button by its label.
+    expect(container.querySelector(".cred-warn")!.textContent).toContain(
+      "Use Re-check scopes to verify them.",
+    );
   });
 
   /**
@@ -336,20 +340,20 @@ describe("CredentialCard states", () => {
       <CredentialCard
         credential={violationCredential}
         onOpenTask={() => {}}
-        warnActions={<button className="btn sm">Grant scope</button>}
+        warnActions={<button className="btn sm">Re-check scopes</button>}
       />,
     );
     expect(container.querySelector(".cred-warn .btn")!.textContent).toBe(
-      "Grant scope",
+      "Re-check scopes",
     );
   });
 
   it("an advisory-only credential keeps the green footer, and the re-check slot with it", () => {
     // `workflow` and `checks:read` are never required scopes, so a card whose
     // only problem is an advisory renders `.cred-ok`, which had no action slot
-    // while the advisory said "Re-check the credential". CANARY: drop the slot
+    // while the advisory said to use Re-check scopes. CANARY: drop the slot
     // from the `.cred-ok` branch.
-    const slot = <button className="btn sm">Grant scope</button>;
+    const slot = <button className="btn sm">Re-check scopes</button>;
     const advised = render(
       <CredentialCard
         credential={{ ...healthyCredential, advisories: [workflowAdvisory] }}
@@ -359,7 +363,7 @@ describe("CredentialCard states", () => {
     );
     expect(advised.container.querySelector(".cred-warn")).toBeNull();
     expect(advised.container.querySelector(".cred-ok .btn")!.textContent).toBe(
-      "Grant scope",
+      "Re-check scopes",
     );
     // No advisory, nothing to re-check: the all-good footer stays bare.
     const clean = render(
@@ -599,7 +603,7 @@ describe("RepositoryPanel", () => {
     // …and says why the rest is missing, naming the grant that carries it.
     const note = container.querySelector(".pol-note")!;
     expect(note.textContent).toContain(
-      "Credential details need the Grant GitHub scope grant (project admin or maintainer).",
+      "Credential details need the Manage the GitHub credential grant (project admin or maintainer).",
     );
     expect(note.textContent).toContain(
       "The Connection row above still shows whether this repository is reachable.",
@@ -758,9 +762,11 @@ describe("BranchesPanel", () => {
     expect(rows[0]!.querySelector(".live-task .key")!.textContent).toBe(
       "VIB-142",
     );
-    expect(rows[0]!.querySelector(".trace.ok")!.textContent).toBe(
-      "vib-142-attach-workspace",
-    );
+    // colo-12: the branch name is a plain `.trace` (secondary ink); the Sync
+    // pill carries the state.
+    const trace = rows[0]!.querySelector(".live-branch .trace")!;
+    expect(trace.textContent).toBe("vib-142-attach-workspace");
+    expect(trace.classList.contains("ok")).toBe(false);
     expect(rows[0]!.textContent).toContain("3 commits");
     expect(rows[0]!.textContent).toContain("#318");
     expect(rows[0]!.querySelector(".pill.ready")!.textContent).toContain(
@@ -972,7 +978,7 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     expect(container.textContent).not.toContain("pull_request:write");
     // The viewer is told why, and still learns the repository is connected.
     expect(container.textContent).toContain(
-      "Credential details need the Grant GitHub scope grant",
+      "Credential details need the Manage the GitHub credential grant",
     );
     expect(container.querySelector(".kv-row .pill.ready")!.textContent).toContain(
       "connected",
@@ -984,7 +990,7 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     expect(container.querySelector(".cred-card")).toBeNull();
     expect(container.textContent).not.toContain("github_pat_••••42af");
     expect(container.textContent).toContain(
-      "Credential details need the Grant GitHub scope grant",
+      "Credential details need the Manage the GitHub credential grant",
     );
   });
 
@@ -996,13 +1002,15 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     );
     expect(container.textContent).toContain("github_pat_••••42af");
     expect(container.querySelectorAll(".scope-chip").length).toBe(4);
-    // Same grant, so the card's own actions come with it.
-    expect(container.textContent).toContain("Grant scope");
+    // Same grant, so the card's own actions come with it. writ-6: the button
+    // re-checks scopes (Viberr cannot grant one), and its label says so.
+    expect(container.textContent).toContain("Re-check scopes");
+    expect(container.textContent).not.toContain("Grant scope");
     expect(container.querySelector(".cred-manage")).not.toBeNull();
     expect(container.textContent).toContain("Rotate credential");
     // The withheld-note is the viewer's line, not a second permanent fixture.
     expect(container.textContent).not.toContain(
-      "Credential details need the Grant GitHub scope grant",
+      "Credential details need the Manage the GitHub credential grant",
     );
   });
 
@@ -1060,6 +1068,7 @@ describe("an advisory's re-check is reachable from the green footer", () => {
       `.cred-ok button[title="Re-check the credential's scopes against GitHub"]`,
     );
     expect(recheck, "the re-check must sit in the green footer").not.toBeNull();
+    expect(recheck!.textContent).toBe("Re-check scopes");
     fireEvent.click(recheck!);
     await waitFor(() => expect(intents).toEqual(["grant-scope"]));
   });
@@ -1125,6 +1134,17 @@ describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
     });
     expect(chip.classList.contains("stale")).toBe(true);
     expect(chip.textContent).toContain("Last change 2h ago");
+  });
+
+  it("carries its title's explanation as text for assistive tech (interface review 2026-09-24, acce-5)", () => {
+    // The stale warning's "the branch and PR state below may be out of date"
+    // lived only in a hover title, which touch and screen-reader users never get.
+    const chip = renderChip({
+      at: "2026-08-04T00:00:00.000Z",
+      label: "2h ago",
+      stale: true,
+    });
+    expect(chip.querySelector(".vh")!.textContent).toBe(` · ${chip.getAttribute("title")}`);
   });
 
   it("renders a fresh cache neutral", () => {

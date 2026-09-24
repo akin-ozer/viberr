@@ -15,18 +15,21 @@ import type { PrOverlap } from "~/server/projections/review-queue.server";
  * resolution lives, Phase 5), the policy chip navigates to Policy. The split is
  * member-scoped by acceptance authority (R8-3): "your acceptance" lists only the
  * human-waiting tasks THIS viewer can accept; a human-waiting task someone else
- * must accept lands in "Still in review" labeled "waiting on a human" (never the
- * false "agent working"). Rows leave the queue live via the shell's SSE
- * revalidation (Phase 6).
+ * must accept lands in "Still in review" (never the false "agent working").
+ * Rows leave the queue live via the shell's SSE revalidation (Phase 6).
  *
  * C4: the row WAIT-TAG uses the two canonical phrases the whole app shares —
- * "waiting on you" (viewer-scoped: this viewer can accept) and "waiting on a
- * human" (project-scoped: someone else must). The queue used to spell the
- * viewer case "your acceptance", a fifth variant of "a human owes something";
- * the panel heading below still names the acceptance action ("Waiting on your
- * acceptance"), which is the queue's PURPOSE, not a per-row status tag. The
- * subline builder lives in review-helpers.ts (Fast Refresh: components-only
- * module).
+ * "waiting on you" (viewer-scoped: this viewer can accept it, or owns an open
+ * decision on it) and "waiting on a human" (project-scoped: someone else owes
+ * the move). "Waiting on you" is the board's own flag (`waitingOnMe`, read by
+ * card-status.ts), handed in by the route rather than re-derived here: the
+ * queue used to test acceptance alone, so it told a viewer "waiting on a human"
+ * about a task the board, one click away, said was waiting on them (interface
+ * review 2026-09-24, writ-3). The queue used to spell the viewer case "your
+ * acceptance", a fifth variant of "a human owes something"; the panel heading
+ * below still names the acceptance action ("Waiting on your acceptance"),
+ * which is the queue's PURPOSE, not a per-row status tag. The subline builder
+ * lives in review-helpers.ts (Fast Refresh: components-only module).
  *
  * P13-D-9: the "human only" chip and the acceptance footer are conditional on
  * the project's operator authority (see review-acceptance-authority.server.ts).
@@ -74,12 +77,17 @@ function OverlapChip({ overlaps }: { overlaps: PrOverlap[] }) {
     (partial
       ? " One of the file lists was capped, so the real overlap may be larger."
       : "");
+  // Interface review 2026-09-24 (acce-5): `title` never opens for keyboard,
+  // touch or most screen readers, and it was the only copy of the shared files
+  // and the folded keys. The `.vh` copy is what reaches them; title stays a
+  // mouse extra.
   return (
     <span title={title}>
       <Pill kind="neutral" sm>
         <Icon name="branch" />
         collides with {label}
       </Pill>
+      <span className="vh"> {title}</span>
     </span>
   );
 }
@@ -88,10 +96,14 @@ function RQRow({
   t,
   onOpen,
   ready,
+  waitingOnMe,
 }: {
   t: ReviewRowView;
   onOpen: (key: string) => void;
   ready?: boolean;
+  /** writ-3: the board's `waitingOnMe` for this task (an open decision this
+   *  viewer owns, or acceptance this viewer can give). */
+  waitingOnMe?: boolean;
 }) {
   const sub = reviewRowSub(t);
   return (
@@ -102,11 +114,14 @@ function RQRow({
       // R15-11: the queue's whole job is deciding, yet the row was an unlabeled
       // clickable region — the surface read as actionless. It stays a triage
       // list (a decision belongs with its evidence: the diff, the verdict, the
-      // packet), but the row now NAMES where it goes. Deliberately "Review",
-      // not "Accept": acceptance is verdict-gated (R15-1) and may refuse, and a
-      // control must not name an outcome this surface cannot promise — the same
-      // rule F15-22 was filed under.
-      aria-label={`Review ${t.key}: ${t.title}`}
+      // packet), but the row now NAMES where it goes (the `.rq-go` "Review").
+      // Deliberately "Review", not "Accept": acceptance is verdict-gated
+      // (R15-1) and may refuse, and a control must not name an outcome this
+      // surface cannot promise — the same rule F15-22 was filed under.
+      // Interface review 2026-09-24 (acce-8): no aria-label. It replaced the
+      // content, so a screen reader heard key and title and never the row's
+      // PR, validation, priority, due date or wait tag; the name now comes from
+      // the content and still carries the visible "Review".
     >
       <span className="rq-key">{t.key}</span>
       <span className="rq-main">
@@ -188,14 +203,16 @@ function RQRow({
             </Pill>
           </span>
         )}
-        {ready ? (
+        {/* writ-3: the board's test (card-status.ts): human-waiting AND
+            `waitingOnMe`. `ready` already implies both. */}
+        {ready || (t.waiting === "human" && waitingOnMe) ? (
           <span className="wait-tag you">
             <Icon name="hand" />
             waiting on you
           </span>
         ) : t.waiting === "human" ? (
-          // Human-waiting, but not THIS viewer's to accept (R8-3) — a human still
-          // needs to act, so never the false "agent working".
+          // Human-waiting, but nothing here is THIS viewer's move (R8-3) — a
+          // human still needs to act, so never the false "agent working".
           <span className="wait-tag human">
             <Icon name="hand" />
             waiting on a human
@@ -228,8 +245,9 @@ function RQRow({
             the subline carries the fact in words (review-helpers.ts). */}
       </span>
       {/* Design pass 2026-09-08: the action holds one right edge on every
-          row; the chips wrap behind it instead of pushing it around. */}
-      <span className="rq-go" aria-hidden="true">
+          row; the chips wrap behind it instead of pushing it around. Not
+          aria-hidden: this word is the action in the row's name (acce-8). */}
+      <span className="rq-go">
         Review
         <Icon name="chevron" />
       </span>
@@ -244,11 +262,16 @@ export function ReviewQueuePage({
   total,
   stageNames = { review: "Review", terminal: "Done" },
   acceptance = { operatorCanAccept: false, operatorName: "the operator" },
+  waitingOnMe,
 }: {
   projectSlug: string;
   ready: ReviewRowView[];
   working: ReviewRowView[];
   total: number;
+  /** writ-3: keys of the tasks the board marks `waitingOnMe` for this viewer
+   *  (the workspace layout's flag). Absent means none, the conservative
+   *  reading: a row then says "waiting on a human", never a false "you". */
+  waitingOnMe?: ReadonlySet<string>;
   /** UI-49: the project's RESOLVED review + terminal stage names — stages are
    *  per-project and renameable, so this page must not name them itself. */
   stageNames?: { review: string; terminal: string };
@@ -326,9 +349,11 @@ export function ReviewQueuePage({
               ))}
             </div>
           ) : (
+            // writ-3: scoped to what this panel counts. A task below can still
+            // be waiting on this viewer for a decision.
             <div className="empty sm">
-              Nothing waits on you. Completion reports land here when a task
-              reaches the boundary.
+              Nothing waits on your acceptance. Completion reports land here
+              when a task reaches the boundary.
             </div>
           )}
           <div className="pol-note after last">
@@ -371,7 +396,12 @@ export function ReviewQueuePage({
           {working.length ? (
             <div className="rq-list">
               {working.map((t) => (
-                <RQRow key={t.key} t={t} onOpen={onOpen} />
+                <RQRow
+                  key={t.key}
+                  t={t}
+                  onOpen={onOpen}
+                  waitingOnMe={waitingOnMe?.has(t.key)}
+                />
               ))}
             </div>
           ) : (

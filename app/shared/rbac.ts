@@ -95,7 +95,10 @@ export const RBAC_DEFINITIONS = [
   { id: "run-agents", label: "Run agents", roles: [A, M] },
   { id: "reorder-board", label: "Reorder the board", roles: [A, M] },
   { id: "reconcile-github", label: "Reconcile GitHub state", roles: [A, M] },
-  { id: "grant-github-scope", label: "Grant GitHub scope", roles: [A, M] },
+  // Interface review 2026-09-24 (writ-6): the label was "Grant GitHub scope",
+  // which Viberr cannot do — this gates re-checking the credential's scopes and
+  // setting or clearing it. The id stays: guards and routes name it.
+  { id: "grant-github-scope", label: "Manage the GitHub credential", roles: [A, M] },
   { id: "rescan-project", label: "Re-scan project files & projections", roles: [A, M] },
   { id: "release-any-ownership", label: "Release any task owner", roles: [A] },
   { id: "manage-members", label: "Manage members & roles", roles: [A] },

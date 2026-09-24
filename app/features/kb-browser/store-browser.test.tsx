@@ -154,12 +154,46 @@ describe("StoreBrowser", () => {
     // input is rendered inside one; the bound query cannot state that.
     const row = getByLabelText("New folder name").closest(".fm-row") as HTMLElement;
     // A real directory row earns its hand cursor and hover fill by carrying
-    // role="button", tabIndex and an activate handler. This one is a text
-    // field in a row shell: clicking it only blurs the input, which DISMISSES
-    // the half-typed name.
+    // a `.fm-open` button. This one is a text field in a row shell: clicking
+    // it only blurs the input, which DISMISSES the half-typed name.
     expect(row.className).toContain("editing");
     expect(row.getAttribute("role")).toBeNull();
     expect(row.getAttribute("tabindex")).toBeNull();
+    expect(row.querySelector(".fm-open")).toBeNull();
+  });
+
+  /**
+   * Interface review 2026-09-24 (acce-32): the row was a `role="button"` div
+   * with the Upload / New folder / Delete buttons nested inside it, so the
+   * folder's accessible name ran on into "… Delete decisions" while activating
+   * it only expanded the folder. The row is a plain element now; a native
+   * button carries the activation and the row actions sit beside it.
+   */
+  it("a tree row's activation is a native button beside its actions, never around them", () => {
+    const { container, getByRole, getByLabelText } = renderBrowser({
+      tree: [
+        ...TREE,
+        { type: "file", name: "contract.pdf", sizeBytes: 900, mtime: new Date().toISOString() },
+      ],
+    });
+    for (const row of container.querySelectorAll(".fm-row")) {
+      expect(row.getAttribute("role")).toBeNull();
+      expect(row.getAttribute("tabindex")).toBeNull();
+      expect(row.querySelector('[role="button"] button, button button')).toBeNull();
+    }
+    const folder = getByRole("button", { name: /^decisions/ });
+    expect(folder.className).toBe("fm-open");
+    expect(folder.textContent).not.toMatch(/Upload|New folder|Delete/);
+    expect(folder.getAttribute("aria-expanded")).toBe("true");
+    // The actions are the row's, not the button's.
+    expect(folder.contains(getByLabelText("Delete decisions"))).toBe(false);
+    expect(folder.parentElement?.querySelector(".rsrc-acts")).toBeTruthy();
+    fireEvent.click(folder);
+    expect(folder.getAttribute("aria-expanded")).toBe("false");
+    expect(getByLabelText("Open overview.md").tagName).toBe("BUTTON");
+    // A file nothing can open keeps the row's face but offers no control.
+    const pdf = container.querySelector(".fm-row.file:not(.openable) .fm-open");
+    expect(pdf?.tagName).toBe("SPAN");
   });
 
   it("new-folder input commits on Enter with mkdir -p semantics", async () => {

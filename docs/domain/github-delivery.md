@@ -53,7 +53,7 @@ Chips render only `header`, `probe` and `violation` sources as proof; `assumed` 
 `unchecked` read "unproven (verified on first use)" (ruling 19). A connection's
 `valid` verdict is re-proven before use once it is older than 24 hours
 (`ensureConnectionFresh`; a downgrade audits `org.connection.validation_downgraded`).
-Project "Re-check scopes" / "Grant scope" (`revalidateProjectCredential`, 60-second
+Project "Re-check scopes" (`revalidateProjectCredential`, 60-second
 cooldown) resolves open violations, but a **write** scope clears only on header or
 probe evidence, never on `assumed`.
 
@@ -546,7 +546,7 @@ not require. …" instead of a "**Policy violation:**" `policy` event
 Ruling 144(c): a workflow-file push refused for the `workflow` scope opens a `workflow`
 violation on the task through the same door (the `policy` event, the inbox notification,
 the credential-card flag, the rail count), and delivery answers `scope_violation` with a
-remedy that names the Grant / Re-check control on the project's GitHub view. It resolves
+remedy that names the Re-check scopes control on the project's GitHub page. It resolves
 on a re-check whose header lists `workflow` (header scopes are evidence for every scope
 they name), or on the next successful push of workflow files. A push whose workflow
 files could not be measured (`workflowFiles: null`) leaves the violation standing: the

@@ -239,14 +239,15 @@ export function ProjectCard({
 }) {
   return (
     <article className="pj-card" data-screen-label={"Project card · " + p.name}>
-      <Link
-        className="pj-link"
-        to={`/projects/${p.slug}/board`}
-        aria-label={"Open " + p.name + " board"}
-      >
+      {/* Interface review 2026-09-24 (acce-8): no aria-label. "Open X board"
+          replaced the content, so a screen reader never heard the repo, the
+          stage counts, "N waiting on you" or the last update. The link is
+          named by what it shows; only the decorative initial is hidden. */}
+      <Link className="pj-link" to={`/projects/${p.slug}/board`}>
         <div className="pj-top">
           <span
             className="pj-mark"
+            aria-hidden="true"
             style={{ boxShadow: "inset 0 -8px 0 " + p.accent }}
           >
             {p.name[0]}
@@ -301,13 +302,11 @@ export function ProjectRow({
 }) {
   return (
     <article className="pj-row" data-screen-label={"Project row · " + p.name}>
-      <Link
-        className="pj-link"
-        to={`/projects/${p.slug}/board`}
-        aria-label={"Open " + p.name + " board"}
-      >
+      {/* acce-8: named by its content, as `ProjectCard` is. */}
+      <Link className="pj-link" to={`/projects/${p.slug}/board`}>
         <span
           className="pj-mark"
+          aria-hidden="true"
           style={{ boxShadow: "inset 0 -7px 0 " + p.accent }}
         >
           {p.name[0]}
