@@ -434,7 +434,8 @@ export function McpModal({
           }}
         />
       </div>
-      {initial?.oauth && (transport !== initial.transport || target.trim() !== initial.target) && (
+      {initial?.oauth?.status === "signed_in" &&
+        (transport !== initial.transport || target.trim() !== initial.target) && (
         <span className="fhint">
           Saving this drops the server&apos;s OAuth sign-in: its tokens were issued for the old
           endpoint. Sign in again afterwards.

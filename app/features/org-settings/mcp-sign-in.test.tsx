@@ -132,6 +132,11 @@ describe("the MCP editor's OAuth sign-in (ruling 469)", () => {
       "Signed in (expires in 52 minutes, renews itself) · mcp.cloudflare.com",
     );
     expect(queryByLabelText(/Credential/)).toBeNull();
+    // Re-pointing drops the sign-in on save; the editor says so first.
+    const endpoint = getByLabelText(/Endpoint/);
+    fireEvent.change(endpoint, { target: { value: "https://mcp.cloudflare.com/other" } });
+    expect(getByRole("dialog").textContent).toContain("Saving this drops the server's OAuth sign-in");
+    fireEvent.change(endpoint, { target: { value: signedIn.target } });
     fireEvent.click(getByRole("button", { name: "Sign out" }));
     await waitFor(() =>
       expect(posted).toEqual([expect.objectContaining({ intent: "mcp-oauth-sign-out", mcpId: "mcp_cf" })]),
