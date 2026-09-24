@@ -390,6 +390,47 @@ describe("health, runs and sign-out (ruling 469)", () => {
   });
 });
 
+describe("a pasted credential and what is left of a sign-in (R-oauth-2)", () => {
+  const base = () => ({ id: MCP_ID, name: "cloudflare-api", transport: "HTTP", target: server.url });
+
+  it("pasting over 'needs sign-in' or 'sign-in expired' clears the sign-in's leftovers, so no surface says the server is not mounted", async () => {
+    // CANARY: keep `oauth_json` when a save holds a credential and the row
+    // reads "needs sign-in" for good, beside the credential runs mount.
+    await startServer();
+    await saveMcpServer(db, { ...base(), cred: "" }, ADMIN.actor);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("needs_sign_in");
+    await saveMcpServer(db, { ...base(), cred: "a-pasted-token-123" }, ADMIN.actor);
+    expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });
+    expect(rawRow().cred_ref).not.toBeNull();
+    expect(getMcpServer(db, MCP_ID)).toMatchObject({ hasCred: true, oauth: null });
+
+    // An expired sign-in's sealed half (its registration) goes too: the
+    // connection holds one credential, and it is the pasted one.
+    await signIn();
+    server.options.refresh = "invalid_grant";
+    server.invalidateAccessTokens();
+    await expect(callWhoami()).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
+    await saveMcpServer(db, { ...base(), cred: "a-pasted-token-456" }, ADMIN.actor);
+    expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });
+    expect(getMcpServer(db, MCP_ID)?.oauth).toBeNull();
+    expect(listAuditEvents(db, { action: "org.mcp.updated" })[0]?.details).toMatchObject({ oauthDropped: true });
+  });
+
+  it("a row that holds a pasted credential reads no sign-in status, whatever its OAuth columns still say", async () => {
+    // CANARY: map the public half regardless of `cred_ref`, and a row the
+    // resolver mounts with its credential reads "needs sign-in".
+    await startServer();
+    db.prepare(`UPDATE org_mcp_servers SET cred_ref = ?, oauth_json = ? WHERE id = ?`).run(
+      sealSecret("a-pasted-token-789"),
+      JSON.stringify({ status: "needs_sign_in", expiresAt: null, renews: false, issuer: null, resourceMetadataUrl: null, reason: null }),
+      MCP_ID,
+    );
+    expect(getMcpServer(db, MCP_ID)).toMatchObject({ hasCred: true, oauth: null });
+    expect(listMcpServers(db).find((mcp) => mcp.id === MCP_ID)?.oauth).toBeNull();
+  });
+});
+
 describe("no token material leaves the server (ruling 469)", () => {
   it("not in an audit row, a log line or a view, across sign-in, renewal, expiry and sign-out", async () => {
     const lines: string[] = [];
