@@ -9,6 +9,7 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { insertUser } from "~/server/auth/user-store.server";
 import { healthSnapshot } from "~/server/ops/health-snapshot.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -73,6 +74,9 @@ function mode(file: string): number {
 describe("agentUidFor: one stable, unique, never-reused uid per person (ruling 460)", () => {
   it("allocates from the floor, keeps a person's uid, and never hands a removed person's uid on", () => {
     const db = ctx.makeDb();
+    for (const id of ["u_ada", "u_bo", "u_cy"]) {
+      insertUser(db, { id, email: `${id}@viberr.dev`, name: id, role: "member" });
+    }
     const ada = agentUidFor(db, "u_ada");
     const bo = agentUidFor(db, "u_bo");
     expect(ada).toBe(AGENT_UID_FLOOR);
