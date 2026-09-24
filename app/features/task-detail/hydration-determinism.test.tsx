@@ -47,12 +47,14 @@ import type { RecommendationView } from "./operator-recommendations";
  * server-rendered console before that transition has flushed (React 19
  * answers it by hydrating synchronously, ahead of the transition), and then a
  * `run.log-appended` update of the shape `useRunLogStream` produces, delivered
- * through the page's own EventSource and `/resources/run-log` tail fetch.
+ * through the workspace layout's live stream (the tab's one EventSource,
+ * ruling 457) and the console's `/resources/run-log` tail fetch.
  */
 
 type PageProps = ComponentProps<typeof TaskDetailPage>;
 type PageModule = typeof import("./task-detail-page");
 type ToastModule = typeof import("~/ui/toast");
+type LiveModule = typeof import("~/features/live-updates/use-live-updates");
 
 /** The container's zone: no `TZ` at all in the shipped image. */
 const SERVER_ZONE = "UTC";
@@ -400,12 +402,20 @@ async function pageIn(zone: string): Promise<(props: PageProps) => ReactElement>
   vi.resetModules();
   const page: PageModule = await import("./task-detail-page");
   const toast: ToastModule = await import("~/ui/toast");
+  const live: LiveModule = await import("~/features/live-updates/use-live-updates");
+  // The workspace layout's stream (`routes/project.tsx`): it carries the
+  // console's frames to the page (ruling 457).
+  const LayoutStream = ({ slug, taskKey }: { slug: string; taskKey: string }) => {
+    live.useLiveUpdates([`project:${slug}`, `task:${slug}/${taskKey}`]);
+    return null;
+  };
   return (props) => {
     const Stub = createRoutesStub([
       {
         path: "/",
         Component: () => (
           <toast.ToastProvider>
+            <LayoutStream slug={props.task.projectSlug} taskKey={props.task.key} />
             <page.TaskDetailPage {...props} />
           </toast.ToastProvider>
         ),
@@ -555,8 +565,9 @@ describe.each([
       seq: number;
     }
     // The page's own live-tail plumbing, so the update takes the real path:
-    // `useRunLogStream` opens THIS EventSource in its effect, and answers a
-    // `run.log-appended` frame with a `/resources/run-log` tail fetch.
+    // The layout's `useLiveUpdates` opens THIS EventSource in its effect, and
+    // the console answers a `run.log-appended` frame on it with a
+    // `/resources/run-log` tail fetch.
     class FakeEventSource {
       static readonly CONNECTING = 0;
       static readonly OPEN = 1;
@@ -627,7 +638,7 @@ describe.each([
       container.querySelector('button[title="Show raw stream events"]')!.getAttribute("aria-pressed"),
     ).toBe("true");
 
-    // The hydration effects opened the page's stream on the task scope; the
+    // The hydration effects opened the layout's stream on the task scope; the
     // appended line then arrives the way the run sink publishes it.
     const source = FakeEventSource.instances[0];
     expect(source).toBeDefined();

@@ -97,7 +97,7 @@ the default.
 | `VIBERR_TRANSCRIPT_RETENTION_DAYS` | `30` | Age at which `runtimes/<backend>/<runId>.jsonl` is pruned (`transcript-retention.server.ts`, via `getEnv()`). `0` keeps forever; a negative or non-numeric value reads as the default. Aligned with the 30-day `run_log_lines` window. |
 | `VIBERR_SESSION_HOME_RETENTION_DAYS` | `30` | Same window and rules for the per-person provider session files (`runtimes/users/*/claude-home/projects/**`, `runtimes/users/*/codex-home/sessions/**`). `*.jsonl` only, so a sign-in file is never pruned. |
 
-### Maintenance, disk space and the write probe (ruling 455(c))
+### Maintenance, disk space and the write probe (ruling 458(c))
 
 Parsed by the schema, which owns their coercion and defaults; each module reads the
 typed value through `getEnv()`. The numbers take `Number()` coercion (so `1.5` and `1e3`

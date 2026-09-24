@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useState, type ComponentProps } from "react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { NotificationView } from "~/features/notifications/notification-item";
-import { BELL_LIST_CAP, TopBell } from "./top-bell";
+import { BELL_LIST_CAP, BELL_LIST_URL, TopBell } from "./top-bell";
 import { UserMenu } from "./user-menu";
 import { PageTopbar } from "./page-topbar";
-import { Topbar } from "./topbar";
+import { LivePausedStrip, Topbar, WORKSPACE_PAUSED_SENTENCE } from "./topbar";
 import { Rail } from "./rail";
 
 /**
@@ -35,43 +35,110 @@ function notification(i: number): NotificationView {
   };
 }
 
-function renderIn(node: React.ReactNode) {
+function renderIn(node: React.ReactNode, list: NotificationView[] = []) {
+  const listLoads: string[] = [];
   const Stub = createRoutesStub([
     { path: "/", Component: () => <ToastProvider>{node}</ToastProvider> },
     // The account menu's Theme item really posts here. Without the route the
     // fetcher 404s and React Router's default ErrorBoundary replaces the whole
     // tree — which reads in a test exactly like the menu having closed.
     { path: "/prefs/theme", action: () => ({ ok: true, theme: "light" }) },
+    // Ruling 457: the bell's own list (`routes/resources.notifications.ts`).
+    {
+      path: BELL_LIST_URL,
+      loader: ({ request }) => {
+        listLoads.push(request.url);
+        return { notifications: list };
+      },
+    },
   ]);
-  return render(<Stub initialEntries={["/"]} />);
+  return { ...render(<Stub initialEntries={["/"]} />), listLoads };
+}
+
+/** Opens the bell and waits for its list to land. */
+async function openBell(view: ReturnType<typeof renderIn>) {
+  fireEvent.click(view.getByLabelText(/Notifications/));
+  await waitFor(() =>
+    expect(view.container.querySelector(".ntf-pop-list")!.getAttribute("aria-busy")).toBe("false"),
+  );
 }
 
 describe("UI-14: the bell popover discloses its own cap", () => {
-  it("says which slice it is showing once the list hits the loader cap", () => {
+  it("says which slice it is showing once the list hits the loader cap", async () => {
     const items = Array.from({ length: BELL_LIST_CAP }, (_, i) => notification(i));
-    const { getByLabelText, getByText } = renderIn(
-      <TopBell notifications={items} unread={150} />,
-    );
-    fireEvent.click(getByLabelText(/Notifications/));
+    const view = renderIn(<TopBell unread={150} orphanUnread={0} />, items);
+    await openBell(view);
     // The head claims 150 unread while the list holds 100 rows — before the fix
     // there was no notice at all that the list was truncated.
-    expect(getByText("150 unread")).toBeTruthy();
-    expect(getByText(`Showing the newest ${BELL_LIST_CAP}`)).toBeTruthy();
+    expect(view.getByText("150 unread")).toBeTruthy();
+    expect(view.getByText(`Showing the newest ${BELL_LIST_CAP}`)).toBeTruthy();
   });
 
-  it("says nothing when the list is not capped", () => {
-    const { getByLabelText, queryByText } = renderIn(
-      <TopBell notifications={[notification(1)]} unread={1} />,
-    );
-    fireEvent.click(getByLabelText(/Notifications/));
-    expect(queryByText(/Showing the newest/)).toBeNull();
+  it("says nothing when the list is not capped", async () => {
+    const view = renderIn(<TopBell unread={1} orphanUnread={0} />, [notification(1)]);
+    await openBell(view);
+    expect(view.queryByText(/Showing the newest/)).toBeNull();
+  });
+});
+
+/**
+ * Ruling 457 (owner, 2026-09-24; FL-4 / SRV-6): pages carry the bell's counts,
+ * not its list. The bell fetches the list when the pointer or the focus reaches
+ * it and on open, and while open whenever the counts move.
+ */
+describe("ruling 457: the bell loads its own list", () => {
+  it("fetches on the pointer's arrival, so the open that follows needs no second fetch", async () => {
+    const view = renderIn(<TopBell unread={1} orphanUnread={0} />, [notification(1)]);
+    // Nothing is fetched for a bell nobody reached for.
+    expect(view.listLoads).toHaveLength(0);
+    fireEvent.pointerEnter(view.getByLabelText(/Notifications/));
+    await waitFor(() => expect(view.listLoads).toHaveLength(1));
+    await openBell(view);
+    expect(view.getByText("Notification 1")).toBeTruthy();
+    expect(view.listLoads).toHaveLength(1);
+  });
+
+  it("a first open with no intent before it shows a loading row, then the list", async () => {
+    const view = renderIn(<TopBell unread={1} orphanUnread={0} />, [notification(1)]);
+    fireEvent.click(view.getByLabelText(/Notifications/));
+    expect(view.getByText("Loading notifications…")).toBeTruthy();
+    await waitFor(() => expect(view.getByText("Notification 1")).toBeTruthy());
+    expect(view.queryByText("Loading notifications…")).toBeNull();
+    expect(view.listLoads).toHaveLength(1);
+  });
+
+  it("while open, a count that moves reloads the list", async () => {
+    let setCounts: (n: number) => void = () => {};
+    function Host() {
+      const [unread, setUnread] = useState(1);
+      setCounts = setUnread;
+      return <TopBell unread={unread} orphanUnread={0} />;
+    }
+    const view = renderIn(<Host />, [notification(1)]);
+    await openBell(view);
+    expect(view.listLoads).toHaveLength(1);
+    // A notification.created revalidated the page: its counts moved.
+    await act(async () => setCounts(2));
+    await waitFor(() => expect(view.listLoads).toHaveLength(2));
+    expect(view.getByText("2 unread")).toBeTruthy();
+  });
+
+  it("F19-25: the head counts rows whose project is gone, from the counts", async () => {
+    const orphan = { ...notification(2), unread: true, href: null, targetMissing: true };
+    const view = renderIn(<TopBell unread={0} orphanUnread={1} />, [orphan]);
+    // The badge leaves the orphan out; the head and Mark all read keep it.
+    expect(view.container.querySelector(".bell-badge")).toBeNull();
+    await openBell(view);
+    expect(view.getByText("1 unread")).toBeTruthy();
+    expect(view.getByText("Mark all read")).toBeTruthy();
   });
 });
 
 describe("UI-45: popovers rendered before their trigger move focus", () => {
   it("focuses the bell panel on open and restores the button on close", () => {
     const { getByLabelText, container } = renderIn(
-      <TopBell notifications={[notification(1)]} unread={1} />,
+      <TopBell unread={1} orphanUnread={0} />,
+      [notification(1)],
     );
     const button = getByLabelText(/Notifications/);
     fireEvent.click(button);
@@ -80,7 +147,7 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
     expect(document.activeElement).toBe(button);
   });
 
-  it("the account menu no longer declares menu roles it does not implement", () => {
+  it("the account menu no longer declares menu roles it does not implement", async () => {
     const { getByLabelText, container } = renderIn(
       <UserMenu
         user={{
@@ -99,8 +166,13 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
     // Ruling 166: the menu roles are BACK, and this time they are honoured.
     // UI-45 had dropped them because they were declared with no arrow-key
     // handling — a contract that promises Up/Down navigation that does not
-    // exist. Radix implements the widget, so the promise is kept.
-    const menu = container.querySelector('[role="menu"]');
+    // exist. Radix implements the widget, so the promise is kept. (Ruling 457:
+    // the menu module is lazy, so the press opens it once it has arrived.)
+    const menu = await waitFor(() => {
+      const found = container.querySelector('[role="menu"]');
+      if (!found) throw new Error("the menu has not opened yet");
+      return found;
+    });
     expect(menu, "the panel is a real menu again").not.toBeNull();
     expect(menu).toBe(container.querySelector(".user-menu"));
     expect(container.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0);
@@ -136,7 +208,7 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
  * and pressing outside a menu to close it is what a menu should do.
  */
 describe("P16-UI-12: the shell popovers dismiss on Escape, not on any press", () => {
-  function openMenu() {
+  async function openMenu() {
     const view = renderIn(
       <UserMenu
         user={{
@@ -150,28 +222,29 @@ describe("P16-UI-12: the shell popovers dismiss on Escape, not on any press", ()
       />,
     );
     fireEvent.pointerDown(view.getByLabelText("Account menu"), { button: 0 });
-    expect(view.container.querySelector(".user-menu")).not.toBeNull();
+    await waitFor(() => expect(view.container.querySelector(".user-menu")).not.toBeNull());
     return view;
   }
 
-  it("the account menu cycles theme in place, without closing", () => {
+  it("the account menu cycles theme in place, without closing", async () => {
     // The behaviour the old outside-press assertion stood in for. Every other
     // item dismisses the menu; this one must not, or cycling
     // light -> dark -> system becomes three trips through the trigger.
-    const { container, getByText } = openMenu();
+    const { container, getByText } = await openMenu();
     fireEvent.click(getByText(/Switch theme/));
     expect(container.querySelector(".user-menu")).not.toBeNull();
   });
 
-  it("the account menu closes on Escape from anywhere", () => {
-    const { container } = openMenu();
+  it("the account menu closes on Escape from anywhere", async () => {
+    const { container } = await openMenu();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(container.querySelector(".user-menu")).toBeNull();
   });
 
   it("the bell popover survives an outside press and closes on Escape", () => {
     const { getByLabelText, container } = renderIn(
-      <TopBell notifications={[notification(1)]} unread={1} />,
+      <TopBell unread={1} orphanUnread={0} />,
+      [notification(1)],
     );
     fireEvent.click(getByLabelText(/Notifications/));
     fireEvent.mouseDown(document.body);
@@ -195,8 +268,8 @@ describe("Topbar: UI-03 paused chip + UI-55 shortcut hint", () => {
         avatarTone: "",
       }}
       theme="system"
-      notifications={[]}
       unread={0}
+      orphanUnread={0}
       {...props}
     />
   );
@@ -206,28 +279,45 @@ describe("Topbar: UI-03 paused chip + UI-55 shortcut hint", () => {
     expect(queryByText(/live updates paused/)).toBeNull();
   });
 
-  it("surfaces a dropped stream as a status, with the retry as a real control", () => {
+  it("layo-10: the header row carries no chip or Retry while paused", () => {
+    // The ~186px pair sat in a fixed-height row that cannot wrap, and at
+    // 320-375px pushed the bell and account menu past `.main`'s clipped edge.
+    // The row keeps only the announcer; the layout renders the strip below.
+    // Canary: put the chip back in Topbar and this goes red.
+    const { container, queryByRole } = renderIn(topbar({ livePaused: true }));
+    expect(container.querySelector(".topbar .pill")).toBeNull();
+    expect(container.querySelector(".archived-banner")).toBeNull();
+    expect(queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("surfaces a dropped stream as a strip, with the retry as a real control", () => {
     let retried = 0;
-    const { getByText, getByRole } = renderIn(
-      topbar({ livePaused: true, onReconnect: () => (retried += 1) }),
+    const { container, getByText, getByRole } = renderIn(
+      <LivePausedStrip
+        message={WORKSPACE_PAUSED_SENTENCE}
+        onReconnect={() => (retried += 1)}
+      />,
     );
     // The sentence is a status; the retry is an action. One `.pill` (no cursor,
     // no hover) with role="status" over a click handler was neither, and
     // role="status" hid the button role, so "retry" was unreachable by name.
-    const chip = getByText("live updates paused");
-    expect(chip.tagName).toBe("SPAN");
-    // The chip is not itself the live region, and it keeps its own words as its
-    // accessible name (an `aria-label` here only replaced them with a longer
-    // duplicate of the `title`).
-    expect(chip.getAttribute("role")).toBeNull();
-    expect(chip.getAttribute("aria-label")).toBeNull();
+    const sentence = getByText(
+      "Live updates paused. Counts and board state may be out of date.",
+    );
+    expect(sentence.tagName).toBe("SPAN");
+    // The strip is not itself the live region (the header's always-mounted
+    // announcer is), so the sentence is not read twice on the drop.
+    expect(container.querySelector(".archived-banner")!.getAttribute("role")).toBeNull();
+    expect(sentence.closest('[role="status"]')).toBeNull();
     fireEvent.click(getByRole("button", { name: "Retry" }));
     expect(retried).toBe(1);
   });
 
   it("renders no retry control when there is nothing to reconnect", () => {
-    const { getByText, queryByRole } = renderIn(topbar({ livePaused: true }));
-    expect(getByText("live updates paused")).toBeTruthy();
+    const { getByText, queryByRole } = renderIn(
+      <LivePausedStrip message={WORKSPACE_PAUSED_SENTENCE} />,
+    );
+    expect(getByText(WORKSPACE_PAUSED_SENTENCE)).toBeTruthy();
     expect(queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
@@ -291,8 +381,8 @@ function topbarAt(entry: string, openTask: { key: string; title: string } | null
       openTask={openTask}
       user={USER}
       theme="system"
-      notifications={[]}
       unread={0}
+      orphanUnread={0}
     />,
     entry,
   );
@@ -312,6 +402,47 @@ function railAt(entry: string) {
     entry,
   );
 }
+
+describe("acce-19: the rail's violations count says what it counts", () => {
+  function railWith(violations: number) {
+    return renderAt(
+      <Rail
+        projectSlug="viberr-core"
+        projectName="Viberr Core"
+        projectRepo={null}
+        membersCount={1}
+        boardCount={10}
+        reviewCount={3}
+        violations={violations}
+      />,
+      "/projects/viberr-core/board",
+    );
+  }
+
+  it("names the alarm in words, so red is not the only cue", () => {
+    // A bare red "1" gave the link the name "Settings 1" — the same shape as
+    // the neutral "Board 10" — and read as just another count in grayscale.
+    const one = railWith(1);
+    expect(one.getByText("Settings").closest("a")!.textContent).toBe(
+      "Settings1 violation",
+    );
+    expect(one.container.querySelector(".count.violations")!.textContent).toBe(
+      "1 violation",
+    );
+    cleanup();
+    const many = railWith(3);
+    expect(many.container.querySelector(".count.violations")!.textContent).toBe(
+      "3 violations",
+    );
+    // The neutral counts keep their bare numerals: the item names them.
+    expect(many.getByText("Board").closest("a")!.textContent).toBe("Board10");
+  });
+
+  it("renders no count at all while nothing is open", () => {
+    const { container } = railWith(0);
+    expect(container.querySelector(".count.violations")).toBeNull();
+  });
+});
 
 describe("P13-D-35: in-app paths back to the board keep filter and search", () => {
   it("keeps the project crumb pointed at the filtered board", () => {
@@ -428,8 +559,8 @@ describe("Topbar: palette trigger + rail toggle", () => {
         openTask={null}
         user={USER}
         theme="system"
-        notifications={[]}
         unread={0}
+        orphanUnread={0}
         railOpen={false}
         onToggleRail={() => (toggled += 1)}
       />,
@@ -482,8 +613,8 @@ describe("F15-18/UI-C: the mobile rail overlay has a keyboard way out", () => {
             openTask={null}
             user={USER}
             theme="system"
-            notifications={[]}
             unread={0}
+            orphanUnread={0}
             railOpen={open}
             onToggleRail={() => {
               onToggle();
@@ -550,14 +681,16 @@ describe("ruling 145: the standalone-page header", () => {
               title={title}
               user={USER}
               theme="system"
-              notifications={[notification(1)]}
               unread={3}
+              orphanUnread={0}
               onOpenPalette={() => (opened += 1)}
             />
           </ToastProvider>
         ),
       },
       { path: "/", Component: () => <p>home</p> },
+      // Ruling 457: the bell loads its own list.
+      { path: BELL_LIST_URL, loader: () => ({ notifications: [notification(1)] }) },
     ]);
     return {
       ...render(<Stub initialEntries={["/org/settings"]} />),

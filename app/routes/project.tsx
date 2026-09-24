@@ -1,7 +1,7 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { useEffect, useState } from "react";
 import { pageTitle } from "~/shared/page-title";
 import {
-  data,
   Outlet,
   useLocation,
   useRouteLoaderData,
@@ -11,30 +11,30 @@ import type { loader as taskLoader } from "./project.task";
 import type { loader as rootLoader } from "../root";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { getBoard } from "~/server/projections/board-query.server";
-import { readRepoHealth } from "~/server/github/repo-health.server";
-import { decisionsRequiring } from "~/server/projections/decisions.server";
-import {
-  countUnreadNotifications,
-  listNotifications,
-} from "~/server/projections/notifications.server";
+import { bellCounts } from "~/server/projections/notifications.server";
 import { countOpenPolicyViolations } from "~/server/projections/policy-violations.server";
-import { getReviewQueue } from "~/server/projections/review-queue.server";
-import { withLiveRun, type TaskSummary } from "~/shared/mapping/task.server";
-import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { roleCan } from "~/shared/rbac";
+import { readWorkspace } from "./project-workspace.server";
 import { isArchived } from "~/features/board/board-filters";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { Icon } from "~/ui/icon";
 import { SkipLink } from "~/ui/skip-link";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { Rail } from "~/features/shell/rail";
-import { Topbar } from "~/features/shell/topbar";
+import {
+  LivePausedStrip,
+  Topbar,
+  WORKSPACE_PAUSED_SENTENCE,
+} from "~/features/shell/topbar";
+import { WORKSPACE_FONT_PRELOADS } from "~/features/shell/font-preloads";
 
 /**
  * Workspace shell layout for /projects/:slug (shell spec): rail with live
  * counts + topbar + child view Outlet. Children read this loader's data via
- * useRouteLoaderData("routes/project").
+ * useRouteLoaderData("routes/project"): the viewer, the project's shell slice,
+ * its members and the viewer's role. Ruling 457 (BOARD-6): the board's columns
+ * are the board route's own loader (routes/project.board.tsx); both read the
+ * project through `readWorkspace`, once per request.
  *
  * Rail counts: board = ALL LIVE tasks incl. Done (ruling 16), review = the
  * review queue's own `total` (U35-5, pass 35: the queue's membership is no
@@ -67,85 +67,40 @@ import { Topbar } from "~/features/shell/topbar";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   return [
-    { title: pageTitle(loaderData?.board.project.name) },
+    { title: pageTitle(loaderData?.project.name) },
   ];
 }
+
+// Ruling 457: the rail, crumbs and board chrome draw at 500 on first paint.
+export const links: Route.LinksFunction = () => WORKSPACE_FONT_PRELOADS;
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const user = await requireUser(request);
   const db = getDb();
-  const raw = getBoard(db, params.slug);
-  if (!raw) {
-    throw data(`No project at projects/${params.slug}.`, { status: 404 });
-  }
-  // R15-4: refuse BEFORE any viewer-scoped projection work — the decision and
-  // review-queue scans below are per-viewer reads a non-member must never
-  // trigger, and the message must stay byte-identical to the unknown-slug one.
-  const memberRole =
-    raw.members.find((m) => m.userId === user.id)?.role ?? null;
-  // D2 (R7-1): an ORG admin holds audited emergency project-admin authority on
-  // every project. When they view a project they're NOT a member of, the UI
-  // unlocks the admin affordances the server would grant anyway (each use is
-  // audited server-side as `project.org_admin.override`) and the topbar shows
-  // an honest "org-admin override" pill instead of silently pretending
-  // membership. `user.role` is the session's resolved org role.
-  const orgAdminOverride = memberRole === null && user.role === "admin";
-  if (memberRole === null && !orgAdminOverride) {
-    throw data(`No project at projects/${params.slug}.`, { status: 404 });
-  }
-  // R8-3: annotate each task with whether an open decision here needs THIS
-  // viewer's action (the single member-scoped source), so the board's
-  // "Waiting on me" chip + per-card badge stop reading the project-wide
-  // `waiting === "human"` enum. `waitingOnMe` is viewer-specific, so derive
-  // fresh task objects instead of mutating the ones getBoard returned — a
-  // future read-model cache in board-query.server must never let one viewer's
-  // annotation leak into another's board (RU #11).
-  // UI-48: the board's "waiting on me" and the review queue's "Waiting on your
-  // acceptance" answered the same question differently — `decisionsRequiring`
-  // only scans tasks that carry a packet or a recommendation, while the review
-  // queue deliberately does NOT require a decision object (a review-stage task
-  // waiting on a human can have no packet). A maintainer therefore saw VIB-142
-  // under "Waiting on your acceptance" while the board's chip excluded it.
-  // Union the two predicates here so both surfaces read one answer; the review
-  // queue's `ready` list is already viewer-scoped by acceptance authority.
-  // U35-5: read the queue ONCE; `ready` feeds the board's "waiting on me" and
-  // `total` is the rail badge, so the badge links to a list of the same length.
-  const reviewQueue = getReviewQueue(db, params.slug, { viewerUserId: user.id });
-  const myDecisions = new Set([
-    ...decisionsRequiring(db, user.id, { projectSlug: params.slug }).mine.map(
-      (d) => d.taskKey,
-    ),
-    ...reviewQueue.ready.map((r) => r.key),
-  ]);
-  // Gap 10: generic, so the columns keep the fields the activity projection
-  // adds (`lastActivityAt`, `quiet`). Re-typing through `TaskSummary` erased
-  // them from the type while the spread carried them at runtime — the feature
-  // worked, but nothing downstream could see it in the type system.
-  // Ruling 349: a card says "agent queued" for a run the cap parked; the fact
-  // is on the run row, read once for the project.
-  const liveRuns = liveRunStateByTask(db, params.slug);
-  const annotate = <T extends TaskSummary>(t: T): T =>
-    withLiveRun({ ...t, waitingOnMe: myDecisions.has(t.key) }, liveRuns.get(t.key) ?? null);
-  const board = {
-    ...raw,
-    columns: raw.columns.map((c) => ({ ...c, tasks: c.tasks.map(annotate) })),
-    orphanTasks: raw.orphanTasks.map(annotate),
-  };
-  const tasks = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks];
+  // R15-4: the membership refusal (the unknown-slug 404) comes first, inside
+  // `readWorkspace`, before any viewer-scoped projection work.
+  const workspace = readWorkspace(request, db, params.slug, user);
+  const { board, memberRole, orgAdminOverride, reviewQueue } = workspace;
   // F19-9: the SAME predicate the board header and the review queue use — an
   // archived task is a terminal disposition, not work waiting at a boundary.
-  const liveTasks = tasks.filter((t) => !isArchived(t));
+  const liveTasks = workspace.tasks.filter((t) => !isArchived(t));
   const myRole = memberRole ?? (orgAdminOverride ? ("admin" as const) : null);
+  const { project } = board;
   return {
     user,
-    board,
+    // Ruling 457 (BOARD-6): the shell's slice of the project. The columns are
+    // the board route's own loader; every page under this layout used to
+    // compute and ship them on every revalidation.
+    project: {
+      slug: project.slug,
+      name: project.name,
+      repo: project.repo,
+      archived: project.archived,
+    },
+    // The task page's assignees and mention chips, the rail's member count.
+    members: board.members,
     myRole,
     orgAdminOverride,
-    // U33-2: the LAST recorded repository probe, never a fresh one — the board
-    // is the surface people live on and it must not call GitHub to render. The
-    // row is written where the answer was already known (project creation and
-    // the GitHub page's cached probe); null means nothing has ever looked.
-    repoAccess: readRepoHealth(db, params.slug)?.result ?? null,
     taskCount: liveTasks.length,
     // U35-5: the queue's own count. It already answers the archived-project
     // case with 0 (F25-2 / D-1: an archived project has no review boundary) and
@@ -153,8 +108,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // one number by construction, not by two predicates kept in step.
     reviewCount: reviewQueue.total,
     violations: countOpenPolicyViolations(db, params.slug),
-    notifications: listNotifications(db, user.id, { limit: 100 }),
-    unread: countUnreadNotifications(db, user.id),
+    // Ruling 457 (FL-4 / SRV-6): the bell's counts; the bell loads its own
+    // list when it is wanted, instead of every revalidation shipping it.
+    ...bellCounts(db, user.id),
   };
 }
 
@@ -193,7 +149,7 @@ export function ArchivedBanner({ canRestore }: { canRestore: boolean }) {
 }
 
 export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
-  const { user, board } = loaderData;
+  const { user, project } = loaderData;
   const rootData = useRouteLoaderData<typeof rootLoader>("root");
   const taskData = useRouteLoaderData<typeof taskLoader>("routes/project.task");
   const openTask = taskData ? taskData.task : null;
@@ -204,9 +160,10 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   // badge updates silently — shell spec defines no incoming-notification
   // toast), and the open task adds its own `task:` scope (task-detail
   // brief) — any matching event revalidates layout + child loaders, except a
-  // run's console line: that revalidates only the page of the task it belongs
-  // to, at most every 2 s (`SSE_RUN_LINE_EVENTS`).
-  const slug = board.project.slug;
+  // run's console line: that revalidates nothing, and goes to the open task's
+  // console through this same stream (`onLiveFrame`, ruling 457: the tab's one
+  // live connection).
+  const slug = project.slug;
   // UI-03: `paused` is true once the stream has failed (an expired session 401s
   // and an EventSource never retries a failed connection) — the topbar says so.
   const live = useLiveUpdates(
@@ -255,10 +212,10 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
       <SkipLink inert={railOpen} />
       <Rail
         open={railOpen}
-        projectSlug={board.project.slug}
-        projectName={board.project.name}
-        projectRepo={board.project.repo}
-        membersCount={board.members.filter((m) => !m.missing).length}
+        projectSlug={project.slug}
+        projectName={project.name}
+        projectRepo={project.repo}
+        membersCount={loaderData.members.filter((m) => !m.missing).length}
         boardCount={loaderData.taskCount}
         reviewCount={loaderData.reviewCount}
         violations={loaderData.violations}
@@ -295,8 +252,8 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           attribute is gone. */}
       <main className="main" inert={railOpen}>
         <Topbar
-          projectSlug={board.project.slug}
-          projectName={board.project.name}
+          projectSlug={project.slug}
+          projectName={project.name}
           orgAdminOverride={loaderData.orgAdminOverride}
           openTask={openTask}
           user={{
@@ -307,14 +264,22 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
             avatarTone: user.avatarTone,
           }}
           theme={rootData?.theme ?? "system"}
-          notifications={loaderData.notifications}
           unread={loaderData.unread}
+          orphanUnread={loaderData.orphanUnread}
           livePaused={live.paused}
-          onReconnect={live.reconnect}
           railOpen={railOpen}
           onToggleRail={() => setRailOpen((open) => !open)}
         />
-        {board.project.archived ? (
+        {/* Interface review 2026-09-24 (layo-10): under the header, not in
+            its fixed-height row, where it pushed the bell and account menu
+            off a phone-width screen. */}
+        {live.paused ? (
+          <LivePausedStrip
+            message={WORKSPACE_PAUSED_SENTENCE}
+            onReconnect={live.reconnect}
+          />
+        ) : null}
+        {project.archived ? (
           <ArchivedBanner
             canRestore={roleCan(loaderData.myRole, "edit-policy")}
           />
@@ -325,3 +290,6 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
     </div>
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project");

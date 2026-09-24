@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { MAX_LABEL_LENGTH, MAX_TASK_LABELS } from "~/schemas/task-file.schema";
 import { countLabel } from "~/shared/text/plural";
 import { Icon } from "./icon";
@@ -63,6 +63,13 @@ export function LabelInput({
   const query = normalize(buffer);
   const q = query.toLowerCase();
   const room = value.length < max;
+  // Interface review 2026-09-24 (writ-8): at the cap the refusal was a
+  // screen-reader-only status and the typed label was cleared anyway, so a
+  // sighted person saw it vanish as if saved. The same sentence is now shown
+  // under the field before anything is refused, and a refused label stays in
+  // the field.
+  const capNote = `A task can have at most ${max} labels. Remove one to add another.`;
+  const capNoteId = useId();
   const suggestRows: Row[] = room
     ? suggestions
         .filter((s) => !has(s) && (q === "" || s.toLowerCase().includes(q)))
@@ -93,34 +100,38 @@ export function LabelInput({
     setStatus(`${verb} label ${label}, ${next.length} of ${max}`);
   };
 
-  const addLabel = (raw: string) => {
+  /** False only when the cap refused the label — the caller then keeps the
+   *  typed text. A duplicate is already there as a chip, so it clears. */
+  const addLabel = (raw: string): boolean => {
     const label = normalize(raw);
-    if (!label) return;
+    if (!label) return true;
     if (has(label)) {
       setStatus("That label is already added");
-      return;
+      return true;
     }
     if (value.length >= max) {
-      setStatus(`Maximum ${max} labels reached`);
-      return;
+      setStatus(capNote);
+      return false;
     }
     const next = [...value, label];
     onChange(next);
     announce(next, "Added", label);
+    return true;
   };
 
   /** Fold one or more raw strings into the set in a SINGLE onChange — so a
-   *  multi-item paste/comma-list doesn't stale-closure-overwrite itself. */
-  const addLabels = (raws: readonly string[]) => {
+   *  multi-item paste/comma-list doesn't stale-closure-overwrite itself.
+   *  Returns the raw strings the cap refused, for the caller to keep. */
+  const addLabels = (raws: readonly string[]): string[] => {
     let next = value;
     let added = 0;
     let dup = false;
-    let capped = false;
-    for (const raw of raws) {
+    let refused: string[] = [];
+    for (const [i, raw] of raws.entries()) {
       const label = normalize(raw);
       if (!label) continue;
       if (next.length >= max) {
-        capped = true;
+        refused = raws.slice(i);
         break;
       }
       if (next.some((l) => l.toLowerCase() === label.toLowerCase())) {
@@ -133,11 +144,20 @@ export function LabelInput({
     if (added > 0) {
       onChange(next);
       setStatus(`Added ${countLabel(added, "label")}, ${next.length} of ${max}`);
-    } else if (capped) {
-      setStatus(`Maximum ${max} labels reached`);
+    } else if (refused.length > 0) {
+      setStatus(capNote);
     } else if (dup) {
       setStatus("That label is already added");
     }
+    return refused;
+  };
+
+  /** Enter / blur: commit the typed text. Whatever the cap refuses stays in the
+   *  field — and text the comma path put back there is still comma-separated,
+   *  so it splits the same way rather than landing as one "a, b" label. */
+  const commitTyped = () => {
+    if (buffer.includes(",")) setBuffer(addLabels(buffer.split(",")).join(","));
+    else if (addLabel(query)) setBuffer("");
   };
 
   const removeLabel = (label: string) => {
@@ -174,8 +194,7 @@ export function LabelInput({
       e.preventDefault();
       if (showList && activeRow >= 0) toggleRow(activeRow);
       else if (query !== "") {
-        addLabel(query);
-        setBuffer("");
+        commitTyped();
         setActive(-1);
       }
     } else if (e.key === "Escape" && showList) {
@@ -198,8 +217,7 @@ export function LabelInput({
     if (v.includes(",")) {
       const parts = v.split(",");
       const tail = parts.pop() ?? "";
-      addLabels(parts);
-      setBuffer(tail);
+      setBuffer([...addLabels(parts), tail].join(","));
     } else {
       setBuffer(v);
     }
@@ -249,17 +267,22 @@ export function LabelInput({
             // deterministic (no dependence on mousedown/mouseup/blur ordering).
             const next = e.relatedTarget;
             if (next instanceof Node && !wrapRef.current?.contains(next)) {
-              if (query !== "") {
-                addLabel(query); // commit a half-typed label so it is not lost
-                setBuffer("");
-              }
+              // Commit a half-typed label so it is not lost; one the cap
+              // refuses stays in the field.
+              if (query !== "") commitTyped();
               setOpen(false);
             }
           }}
           placeholder={value.length === 0 ? "Add a label" : ""}
           aria-label="Add a label"
+          aria-describedby={room ? undefined : capNoteId}
         />
       </div>
+      {!room && (
+        <p className="fine" id={capNoteId}>
+          {capNote}
+        </p>
+      )}
       {showList && (
         <ul
           ref={listRef}

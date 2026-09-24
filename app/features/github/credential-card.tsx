@@ -171,7 +171,7 @@ export function CredentialCard({
   );
 }
 
-/** The remove confirm, on the shared `ConfirmDialog` (ruling 455(f)). */
+/** The remove confirm, on the shared `ConfirmDialog` (ruling 458(f)). */
 function RemoveCredentialDialog({
   onCancel,
   onConfirm,

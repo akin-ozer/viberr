@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
+import { hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { useElapsed } from "./runs-helpers";
 
@@ -10,6 +11,9 @@ import { useElapsed } from "./runs-helpers";
  * flight: React reported a hydration mismatch and the elapsed clock flickered.
  * The fix seeds `now` to `null` and installs the real clock only after mount,
  * which makes SSR and first-paint markup byte-identical by construction.
+ * Ruling 457 (RF-9): the clock is the shared one (`~/ui/use-clock`), null on
+ * the server and during hydration, so the contract holds for hydration while a
+ * counter mounted later reads the real clock at once.
  *
  * These pin that determinism directly (server string vs. first client render)
  * rather than just checking that a number eventually appears.
@@ -39,29 +43,54 @@ describe("useElapsed determinism (F10-37)", () => {
     expect(html).toContain(">0<");
   });
 
-  it("the FIRST client render matches the server render exactly", () => {
+  it("the hydration render matches the server render exactly", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-20T12:00:00.000Z"));
 
     const server = renderToString(<Elapsed startedAt={LONG_AGO} active />);
 
     // Advance the clock between the two renders, as a real response in flight
-    // would. The first client render must still agree with the server — that
-    // is the hydration contract. (Testing-library flushes effects on render,
-    // so record the render-phase values rather than reading the settled DOM.)
+    // would. The hydration render must still agree with the server — that is
+    // the hydration contract. (Record the render-phase values rather than
+    // reading the settled DOM.)
     vi.setSystemTime(new Date("2026-07-20T12:00:09.000Z"));
     const seen: number[] = [];
     function Probe() {
       const v = useElapsed(LONG_AGO, true);
       seen.push(v);
-      return <span>{v}</span>;
+      return <span data-testid="v">{v}</span>;
     }
-    render(<Probe />);
+    const container = document.body.appendChild(document.createElement("div"));
+    container.innerHTML = renderToString(<Probe />);
+    seen.length = 0;
+    const errors: string[] = [];
+    let root: Root | null = null;
+    await act(async () => {
+      root = hydrateRoot(container, <Probe />, {
+        onRecoverableError: (error) => errors.push(String(error)),
+      });
+    });
 
     expect(server).toContain(">0<");
     expect(seen[0]).toBe(0);
+    expect(errors).toEqual([]);
     // ...and only afterwards does the real clock take over.
     expect(seen.at(-1)).toBeGreaterThan(0);
+    act(() => root?.unmount());
+    container.remove();
+  });
+
+  it("ruling 457: a counter mounted after hydration reads the clock on its first render", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T12:00:30.000Z"));
+    const seen: number[] = [];
+    function Probe() {
+      const v = useElapsed("2026-07-20T12:00:00.000Z", true);
+      seen.push(v);
+      return <span>{v}</span>;
+    }
+    render(<Probe />);
+    expect(seen).toEqual([30]);
   });
 
   it("after mount it reports real elapsed seconds and ticks while active", () => {

@@ -471,7 +471,7 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
     ).toHaveLength(0);
   });
 
-  // Ruling 455(c): the env opt-in is read through `getEnv()`, which parses once
+  // Ruling 458(c): the env opt-in is read through `getEnv()`, which parses once
   // per process — so the case drops the cached parse on the way in and out.
   it("the env opt-in turns the dry-run on when the caller passes no writeProbe", async () => {
     const gh = fakeGithubFetch({

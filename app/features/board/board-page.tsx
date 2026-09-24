@@ -1,6 +1,9 @@
 import {
   Fragment,
+  memo,
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -35,7 +38,7 @@ import {
 } from "@dnd-kit/dom";
 import { laneAt, resolveBoardDrop, slotInLane, type LaneBlock } from "./board-dnd";
 import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
-import type { TaskSummary } from "~/shared/mapping/task.server";
+import type { BoardCard } from "./board-card";
 import {
   archivedTaskBlockedReason,
   closedPrBlockedReason,
@@ -46,6 +49,7 @@ import {
   type TaskPriority,
 } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
+import { createVelocityTracker, springFrames, springProgress, type Spring } from "~/ui/spring";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
 import { Icon, type IconName } from "~/ui/icon";
@@ -61,11 +65,12 @@ import {
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
 import { stageLabel, stageName } from "~/shared/workflow/stage-roles";
-import { countLabel } from "~/shared/text/plural";
+import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { useStableRows } from "~/ui/use-stable-rows";
 import {
   boardEmptyCopy,
   countArchived,
@@ -119,20 +124,12 @@ const SR_ONLY: CSSProperties = {
 };
 
 /**
- * Gap-10: a board card's task, plus the two activity fields `listProjectTasks`
- * annotates every summary with (`TaskActivitySummary` in board-query.server.ts).
- *
- * They are OPTIONAL here for one reason only: `routes/project.tsx` re-types the
- * columns through `annotate: (t: TaskSummary): TaskSummary`, which erases them
- * from the type while the spread carries the values through at runtime. The
- * one-line patch that restores the type is in this pass's report; until it
- * lands, `undefined` means "no loader annotated this" and reads as "not quiet",
- * which is the safe direction — a missing signal must never invent a cue.
+ * A board card's task: the board card projection (ruling 457, BOARD-3,
+ * `board-card.ts`), which carries the Gap-10 `quiet` annotation and the
+ * loader's viewer annotations beside the fields the card, its filters and the
+ * acceptance ceremony read.
  */
-export interface BoardTask extends TaskSummary {
-  lastActivityAt?: string | null;
-  quiet?: boolean;
-}
+export type BoardTask = BoardCard;
 
 export interface BoardColumnData {
   stage: BoardStage;
@@ -191,6 +188,13 @@ const BOARD_PLUGINS = defaultPreset.plugins.filter(
  * home and then vanished for the whole round trip). A cancelled drag, or a
  * drop that changes nothing, has no landing preview and flies home as before.
  */
+/** Critically damped: the card lands in a slot between two others, where an
+ *  overshoot would draw it over its neighbour. The response is the low end of
+ *  the default UI range, so the flight stays quick. */
+const DROP_SPRING: Spring = { dampingRatio: 1, response: 0.3 };
+/** The pointer's velocity through the drag, read by the flight at release.
+ *  One board drags at a time, so one tracker serves the module. */
+const dragVelocity = createVelocityTracker();
 const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, placeholder }) => {
   // Only the card that was lifted flies. When the server's answer re-renders
   // the card in its new lane while the drop is still settling, dnd-kit adopts
@@ -231,17 +235,32 @@ const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, plac
   const tx = m ? Number(m[1]) : 0;
   const ty = m ? Number(m[2]) : 0;
   feedbackElement.setAttribute("data-dnd-dropping", "");
-  const timing: KeyframeAnimationOptions = {
-    duration: 180,
-    easing: "cubic-bezier(.23, 1, .32, 1)",
-    fill: "forwards",
-  };
+  // The flight is a spring that leaves at the pointer's release velocity
+  // (spring.ts says why a fixed curve could not): a card let go of at rest
+  // eases off instead of lurching, and one let go of mid-throw carries on
+  // at the throw's speed instead of stopping dead first.
+  const { frames, duration } = springFrames(
+    DROP_SPRING,
+    { x: tx, y: ty },
+    { x: tx + dx, y: ty + dy },
+    dragVelocity.velocity(performance.now()),
+  );
+  const timing: KeyframeAnimationOptions = { duration, easing: "linear", fill: "forwards" };
   const flight = feedbackElement.animate(
-    { translate: [`${tx}px ${ty}px 0`, `${tx + dx}px ${ty + dy}px 0`] },
+    { translate: frames.map((f) => `${f.x}px ${f.y}px 0`) },
     timing,
   );
+  // The hole closes on the same frames, from rest, so the landing stops
+  // moving on the frame the card reaches it.
+  const progress = springProgress(DROP_SPRING, frames.length);
   const closing = closes
-    ? placeholder.animate({ marginBlockEnd: ["0px", `${-share}px`], opacity: [1, 0] }, timing)
+    ? placeholder.animate(
+        {
+          marginBlockEnd: progress.map((p) => `${-share * p}px`),
+          opacity: progress.map((p) => 1 - p),
+        },
+        timing,
+      )
     : null;
   try {
     await flight.finished;
@@ -277,7 +296,9 @@ const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, plac
  * Deliberately no dependency array: `StageMenu` re-renders its trigger on
  * open/busy/stage change, and React never writes `tabIndex` on that button, so
  * re-applying on every render is both necessary and free of any tug-of-war with
- * React's own attribute reconciliation.
+ * React's own attribute reconciliation. Ruling 457: it writes only a value
+ * that differs, because an unconditional write is a DOM mutation on every
+ * card each time the board renders (40 per revalidation).
  */
 function useRovingStageMenu(active: boolean) {
   const ref = useRef<HTMLDivElement>(null);
@@ -285,7 +306,8 @@ function useRovingStageMenu(active: boolean) {
     const btn = ref.current?.querySelector<HTMLButtonElement>(
       "button.stage-menu-btn",
     );
-    if (btn) btn.tabIndex = active ? 0 : -1;
+    const tabIndex = active ? 0 : -1;
+    if (btn && btn.tabIndex !== tabIndex) btn.tabIndex = tabIndex;
   });
   return ref;
 }
@@ -298,7 +320,7 @@ function useRovingStageMenu(active: boolean) {
  * 218px lanes cut to "shop-6…" and told nobody anything the key beside it had
  * not; the task page's GitHub trace prints both in full.
  */
-function TraceMark({ task }: { task: TaskSummary }) {
+function TraceMark({ task }: { task: BoardTask }) {
   if (task.pr) {
     return (
       <span className="trace pr" title={"Pull request #" + task.pr.number}>
@@ -329,7 +351,7 @@ function TraceMark({ task }: { task: TaskSummary }) {
  * carrying the task draws nothing: the ghost owner avatar and a "ready" status
  * already say so, and "no agent" on every Triage card was noise.
  */
-function WhoStack({ task }: { task: TaskSummary }) {
+function WhoStack({ task }: { task: BoardTask }) {
   const sp = task.specialist;
   return (
     <span className="who">
@@ -345,7 +367,7 @@ function WhoStack({ task }: { task: TaskSummary }) {
  * pulse for its mark (R21-8); a clock rest names its instant (ruling 225) and
  * falls back to "on its own" for a schedule the read boundary could not parse.
  */
-function StatusChip({ task }: { task: TaskSummary }) {
+function StatusChip({ task }: { task: BoardTask }) {
   const s = cardStatus(task);
   if (!s) return null;
   return (
@@ -372,7 +394,7 @@ function StatusChip({ task }: { task: TaskSummary }) {
  * rather than filled pills. Every fact stays visible, on hover here and in
  * full on the task page (rulings 40/12/14).
  */
-function ProblemChips({ task }: { task: TaskSummary }) {
+function ProblemChips({ task }: { task: BoardTask }) {
   const problems = cardProblems(task);
   const shown = problems.slice(0, PROBLEM_CAP);
   const folded = problems.slice(PROBLEM_CAP);
@@ -396,7 +418,7 @@ function ProblemChips({ task }: { task: TaskSummary }) {
 /** The card's property row: the status chip, then the problems. Drawn by the
  *  card and the list row alike (F19-13: one state block, both layouts), and
  *  absent when there is nothing to say. */
-function CardChips({ task }: { task: TaskSummary }) {
+function CardChips({ task }: { task: BoardTask }) {
   if (cardStatus(task) === null && cardProblems(task).length === 0) return null;
   return (
     <div className="card-props">
@@ -408,7 +430,7 @@ function CardChips({ task }: { task: TaskSummary }) {
 
 /** The list row's agent: the badge and the name — the row has the room the
  *  card does not, and ruling 168(c)'s name stays printed here. */
-function ListAgent({ task }: { task: TaskSummary }) {
+function ListAgent({ task }: { task: BoardTask }) {
   const sp = task.specialist;
   if (!sp) return null;
   return (
@@ -428,7 +450,7 @@ function ListAgent({ task }: { task: TaskSummary }) {
  * only beside an engaged agent, which is what left a human-owned card without
  * one with a bare right end.
  */
-function OwnerSeat({ task, label }: { task: TaskSummary; label?: boolean }) {
+function OwnerSeat({ task, label }: { task: BoardTask; label?: boolean }) {
   const o = task.owner;
   const human = o && o.kind === "human" ? o : null;
   const name = human ? human.name : task.operator ? "awaiting owner" : "unassigned";
@@ -450,7 +472,28 @@ function OwnerSeat({ task, label }: { task: TaskSummary; label?: boolean }) {
   );
 }
 
-function TaskCard({
+/**
+ * The card's sortable plugins, made once (ruling 457). dnd-kit compares the
+ * option by reference and re-resolves it whenever it changes, so an inline
+ * function rebuilt the card's plugins on every render of every card.
+ */
+const cardPlugins = ((defaults) => [
+  ...defaults.filter((plugin) => plugin !== OptimisticSortingPlugin),
+  Feedback.configure({ feedback: "clone", dropAnimation: boardDropAnimation }),
+]) satisfies NonNullable<Parameters<typeof useSortable>[0]["plugins"]>;
+
+/** Row keys for `useStableRows` (stable, module-level). */
+const taskKeyOf = (task: BoardTask) => task.key;
+const stageIdOf = (stage: BoardStage) => stage.id;
+
+/**
+ * Ruling 457: memoised, so a revalidation or a drag renders only the cards
+ * whose props changed. Its lanes hand it the task object the page already held
+ * when the task is unchanged (`useStableRows`), and the board keeps the stage
+ * list and the move callback stable; before this every live update rendered
+ * all forty cards of the demo board and ran their sixteen effects each.
+ */
+const TaskCard = memo(function TaskCard({
   task,
   index,
   canTransition,
@@ -458,6 +501,9 @@ function TaskCard({
   inFlight,
   allStages,
   onMoveTask,
+  onNudgeTask,
+  canMoveUp,
+  canMoveDown,
   roving,
 }: {
   task: BoardTask;
@@ -473,6 +519,11 @@ function TaskCard({
   /** F10-25: all stages, for the keyboard-accessible "Move to stage" menu. */
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  /** acce-17: Move up / Move down within the lane; the edges say whether this
+   *  card has a neighbour on that side. */
+  onNudgeTask: (taskKey: string, stageId: string, dir: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
   /** D19: this card holds the board's single tab stop (see `onCardKeyDown`). */
   roving: boolean;
 }) {
@@ -505,10 +556,7 @@ function TaskCard({
     // the rect it last measured in the OLD lane — a 600px excursion off-screen
     // and back, right after the flight landed it (observed frame by frame).
     transition: null,
-    plugins: (defaults) => [
-      ...defaults.filter((plugin) => plugin !== OptimisticSortingPlugin),
-      Feedback.configure({ feedback: "clone", dropAnimation: boardDropAnimation }),
-    ],
+    plugins: cardPlugins,
   });
   // Pass 30: the wait-human/urgent class pushes are gone — ruling 16 removed
   // the card-level accent layer and no rule has styled either class since
@@ -566,12 +614,15 @@ function TaskCard({
             stages={allStages}
             currentStageId={task.stage}
             onSelect={(stageId) => onMoveTask(task.key, stageId)}
+            onReorder={(dir) => onNudgeTask(task.key, task.stage, dir)}
+            canMoveUp={canMoveUp}
+            canMoveDown={canMoveDown}
           />
         </div>
       )}
     </div>
   );
-}
+});
 
 /**
  * The card's face — everything inside the link. Rendered by the card itself
@@ -650,7 +701,7 @@ function DropPreview({ task, landing = false }: { task: BoardTask; landing?: boo
 
 function Column({
   stage,
-  tasks,
+  tasks: laneTasks,
   count,
   isDone,
   isEntry,
@@ -666,6 +717,7 @@ function Column({
   inFlightKey,
   allStages,
   onMoveTask,
+  onNudgeTask,
   emptyCopy,
   rovingKey,
 }: {
@@ -699,6 +751,7 @@ function Column({
   inFlightKey: string | null;
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  onNudgeTask: (taskKey: string, stageId: string, dir: -1 | 1) => void;
 }) {
   // The lane is a droppable for two reasons that are not its collisions: the
   // slot rule (`refineSlot`) finds the lanes' live rectangles through dnd-kit's
@@ -711,6 +764,9 @@ function Column({
     id: `stage:${stage.id}`,
     collisionPriority: 1,
   });
+  // Ruling 457: the task objects this lane already drew, wherever a
+  // revalidation brought the same task back, so the memoised cards skip.
+  const tasks = useStableRows(laneTasks, taskKeyOf);
   const showPreview = dropTarget && previewTask !== null;
   const preview = showPreview ? <DropPreview task={previewTask!} /> : null;
   const landingEl = landing ? <DropPreview task={landing.task} landing /> : null;
@@ -799,6 +855,9 @@ function Column({
                   inFlight={inFlightKey === t.key}
                   allStages={allStages}
                   onMoveTask={onMoveTask}
+                  onNudgeTask={onNudgeTask}
+                  canMoveUp={i > 0}
+                  canMoveDown={i < tasks.length - 1}
                   roving={rovingKey === t.key}
                 />
               </Fragment>
@@ -813,8 +872,9 @@ function Column({
 }
 
 /** D19: extracted from `ListView`'s map so the row can hold the roving-tab-stop
- *  hook — a hook cannot be called inside a `.map` callback. */
-function ListRow({
+ *  hook — a hook cannot be called inside a `.map` callback. Ruling 457:
+ *  memoised like the card, for the same reason. */
+const ListRow = memo(function ListRow({
   task,
   stages,
   canTransition,
@@ -882,10 +942,10 @@ function ListRow({
       <CardChips task={task} />
     </div>
   );
-}
+});
 
 function ListView({
-  tasks,
+  tasks: visibleTasks,
   stages,
   canTransition,
   onMoveTask,
@@ -907,6 +967,8 @@ function ListView({
   rovingKey: string | null;
   onCardKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
 }) {
+  // Ruling 457: unchanged tasks keep the objects the rows already drew.
+  const tasks = useStableRows(visibleTasks, taskKeyOf);
   return (
     <div className="board list">
       {/* The lanes give the stage layout its h2s; the list has one lane, so
@@ -963,7 +1025,7 @@ function ListView({
  * A refusal shown here is final — the board has no force-accept to bypass it.
  */
 function boardAcceptRefusal(
-  task: TaskSummary,
+  task: BoardTask,
   fromStageName: string,
   terminalName: string,
 ): string | null {
@@ -1030,7 +1092,7 @@ function AcceptOnBoardConfirm({
   onCancel,
   onConfirm,
 }: {
-  task: TaskSummary;
+  task: BoardTask;
   /** Project stages in order — supplies the shared ceremony's stage list and
    *  names the terminal (merge) stage. */
   stages: BoardStage[];
@@ -1123,9 +1185,10 @@ function NewTaskModal({
 
   const valid = title.trim().length >= 3;
   // The dialog opened on an empty title, so `!valid` was true from first paint
-  // and the footer greeted every new task with "A title is required." — an error
-  // for something the person had not had a chance to do yet. The requirement is
-  // only *unmet* once they have left the field or tried to submit.
+  // and the footer greeted every new task with "A title needs at least 3
+  // characters." — an error for something the person had not had a chance to
+  // do yet. The requirement is only *unmet* once they have left the field or
+  // tried to submit.
   const [titleTouched, setTitleTouched] = useState(false);
   // One condition for the red hint, the alert role, the field's aria-invalid
   // and its describedby, so the four can never disagree.
@@ -1200,6 +1263,7 @@ function NewTaskModal({
         <div className="field">
           <label className="flabel" htmlFor="new-task-title">
             Title<span className="req">*</span>
+            <span className="fhint">at least 3 characters</span>
           </label>
           <input
             id="new-task-title"
@@ -1272,6 +1336,9 @@ function NewTaskModal({
             </label>
             <DatePicker
               id="new-task-due"
+              label="Due date"
+              // Visible text inside the name "Due date: not set" (label in name).
+              placeholder="Not set"
               value={dueDate || null}
               onChange={(v) => setDueDate(v ?? "")}
             />
@@ -1303,8 +1370,10 @@ function NewTaskModal({
           // whenever the title is what is wrong.
           role={serverError || titleError ? "alert" : undefined}
         >
+          {/* Interface review 2026-09-24 (writ-4): "A title is required." said
+              nothing to someone who had typed "QA"; the rule is the length. */}
           {titleError
-            ? "A title is required."
+            ? "A title needs at least 3 characters."
             : serverError
               ? serverError
               : "The task key is assigned automatically."}
@@ -1634,7 +1703,7 @@ function FilterBar({
   );
 }
 
-function OrphanBanner({ orphanTasks }: { orphanTasks: TaskSummary[] }) {
+function OrphanBanner({ orphanTasks }: { orphanTasks: BoardTask[] }) {
   return (
     <div className="board-orphans" role="region" aria-label="Unstaged tasks">
       <Icon name="alert" />
@@ -1739,6 +1808,7 @@ export function StageBoard({
   inFlight,
   inFlightTask,
   onMoveTask,
+  onNudgeTask,
   emptyCopyFor,
   rovingKey,
   onCardKeyDown,
@@ -1768,9 +1838,16 @@ export function StageBoard({
   inFlightTask: BoardTask | null;
   /** F10-25: the StageMenu move — the always-available non-drag path. */
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  /** acce-17: the StageMenu's Move up / Move down — the non-drag path to a
+   *  slot within the lane. */
+  onNudgeTask: (taskKey: string, stageId: string, dir: -1 | 1) => void;
 }) {
-  // All stages, for the per-card keyboard "Move to stage" menu (F10-25).
-  const allStages = columns.map((c) => c.stage);
+  // All stages, for the per-card keyboard "Move to stage" menu (F10-25). The
+  // same array while the stages are unchanged (ruling 457): every card takes it.
+  const allStages = useStableRows(
+    columns.map((c) => c.stage),
+    stageIdOf,
+  );
   // The slot a drop would submit RIGHT NOW — the same resolution `onDragEnd`
   // runs, so the preview shows exactly what the drop would ask for, and shows
   // nothing where a drop would change nothing (the card's own slot in its own
@@ -1891,6 +1968,7 @@ export function StageBoard({
             inFlightKey={flight && flightFrom === c.stage.id ? flight.key : null}
             allStages={allStages}
             onMoveTask={onMoveTask}
+            onNudgeTask={onNudgeTask}
             rovingKey={rovingKey}
           />
         );
@@ -1942,7 +2020,7 @@ export function BoardPage({
   // R19-14: creation always lands at the entry stage, so this is a plain
   // open/closed flag — no per-lane stage rides along any more.
   const [creating, setCreating] = useState(false);
-  const rescanFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const rescanFetcher = useFetcher<{ ok: boolean; error?: string; errors?: number }>();
   const csrf = useCsrfToken();
   const push = useToast();
 
@@ -2024,6 +2102,7 @@ export function BoardPage({
     const t = allTasks.find((x) => x.key === key);
     if (!t) return;
     setDrag({ key, fromStage: t.stage });
+    dragVelocity.reset();
     setOverStage(t.stage);
     // "Before itself": the slot the card already holds, so nothing previews
     // until the pointer moves (null would preview the lane's END on lift).
@@ -2059,7 +2138,13 @@ export function BoardPage({
     setBeforeKey((prev) => (prev === before ? prev : before));
   };
   const onDragOver = refineSlot;
-  const onDragMove = refineSlot;
+  // Only a MOVE is a velocity sample: `dragover` repeats the last position
+  // under a later clock, which would read as the pointer slowing down.
+  const onDragMove = (event: DragMoveEvent, manager: DragDropManager) => {
+    const { x, y } = event.operation.position.current;
+    dragVelocity.push(x, y, performance.now());
+    refineSlot(event, manager);
+  };
   // Fires on drop AND cancel (Escape, released outside a column). The server
   // stays authoritative: nothing commits client-side; a resolved drop submits
   // the governed reorder and revalidation applies the server's order.
@@ -2169,6 +2254,63 @@ export function BoardPage({
     }
     submitReorder(taskKey, toStageId, "");
   };
+  // Ruling 457: every card and list row takes the move callback, so it keeps
+  // one identity and runs the latest render's `onMoveTask` (which reads the
+  // current columns); a fresh closure per render re-rendered every card.
+  const latestMoveTask = useRef(onMoveTask);
+  useLayoutEffect(() => {
+    latestMoveTask.current = onMoveTask;
+  });
+  const moveTask = useCallback(
+    (taskKey: string, toStageId: string) => latestMoveTask.current(taskKey, toStageId),
+    [],
+  );
+
+  // Interface review 2026-09-24 (acce-17): the card menu's Move up / Move down,
+  // the keyboard and single-pointer way to a slot within the lane, which only
+  // the drag offered. The SAME governed reorder the drop submits, read against
+  // the same visible() order: up lands before the card above, down before the
+  // card two below, or at the lane's end.
+  const refocusKey = useRef<string | null>(null);
+  const nudgeTaskNow = (taskKey: string, stageId: string, dir: -1 | 1) => {
+    const keys = visible(columns.find((c) => c.stage.id === stageId)?.tasks ?? []).map(
+      (t) => t.key,
+    );
+    const i = keys.indexOf(taskKey);
+    if (i < 0 || (dir > 0 && i === keys.length - 1)) return;
+    const beforeKey = dir < 0 ? keys[i - 1] : (keys[i + 2] ?? "");
+    if (beforeKey === undefined) return;
+    refocusKey.current = taskKey;
+    submitReorder(taskKey, stageId, beforeKey);
+  };
+  // Ruling 457: the memoised cards take this as a prop, so it keeps one
+  // identity and runs the latest render's nudge, as `moveTask` does above.
+  const latestNudgeTask = useRef(nudgeTaskNow);
+  useLayoutEffect(() => {
+    latestNudgeTask.current = nudgeTaskNow;
+  });
+  const onNudgeTask = useCallback(
+    (taskKey: string, stageId: string, dir: -1 | 1) =>
+      latestNudgeTask.current(taskKey, stageId, dir),
+    [],
+  );
+  // The card hides while its move is in flight (`.in-flight`), which drops the
+  // focus the menu handed back to its trigger. Once the answer is in, a nudge
+  // puts it back there, so the next nudge is one keystroke away. Only when
+  // focus really was dropped: a person who moved on meanwhile keeps their place.
+  useEffect(() => {
+    const key = refocusKey.current;
+    if (inFlight || !key) return;
+    refocusKey.current = null;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const card = [...document.querySelectorAll<HTMLElement>(".card-wrap[data-card-key]")].find(
+      (el) => el.dataset.cardKey === key,
+    );
+    const trigger = card?.querySelector<HTMLButtonElement>("button.stage-menu-btn");
+    if (!trigger) return;
+    setFocusKey(key);
+    trigger.focus();
+  }, [inFlight]);
 
   // Toast on completion (and drop the pulse if the move was rejected).
   useFetcherResult(transitionFetcher, (d) => {
@@ -2197,7 +2339,11 @@ export function BoardPage({
     return () => window.clearTimeout(t);
   }, [arrivedKey]);
 
-  const stages = columns.map((c) => c.stage);
+  // One array while the stages are unchanged (ruling 457): every list row takes it.
+  const stages = useStableRows(
+    columns.map((c) => c.stage),
+    stageIdOf,
+  );
   const doneStageId = stages[stages.length - 1]?.id;
   const allTasks = useMemo(
     () => [...columns.flatMap((c) => c.tasks), ...orphanTasks],
@@ -2462,6 +2608,17 @@ export function BoardPage({
     if (rescanFetcher.state === "submitting") rescanDone.current = false;
     if (rescanFetcher.state === "idle" && rescanFetcher.data && !rescanDone.current) {
       rescanDone.current = true;
+      const { ok, errors } = rescanFetcher.data;
+      // Interface review 2026-09-24 (writ-2): a file the re-scan could not
+      // project comes back as `errors` on an ok answer, and this said the
+      // board matched the store. Same sentence as Home's re-scan.
+      if (ok && errors) {
+        push(
+          `Re-scan finished, but ${countLabel(errors, "file")} could not be read. The server log names each one. Fix ${pluralNoun(errors, "it", "them")} and re-scan.`,
+          "error",
+        );
+        return;
+      }
       // Surface BOTH outcomes — a swallowed {ok:false} (e.g. a role 403) used to
       // leave the "Re-scanning…" toast as the last word (MU-3).
       push(
@@ -2586,7 +2743,8 @@ export function BoardPage({
             draggedTask={draggedTask}
             inFlight={inFlight}
             inFlightTask={inFlightTask}
-            onMoveTask={onMoveTask}
+            onMoveTask={moveTask}
+            onNudgeTask={onNudgeTask}
             rovingKey={rovingKey}
             onCardKeyDown={onCardKeyDown}
           />
@@ -2596,7 +2754,7 @@ export function BoardPage({
           tasks={visibleAllTasks}
           stages={stages}
           canTransition={canTransition}
-          onMoveTask={onMoveTask}
+          onMoveTask={moveTask}
           emptyCopy={emptyCopyFor(allTasks.length, true)}
           rovingKey={rovingKey}
           onCardKeyDown={onCardKeyDown}

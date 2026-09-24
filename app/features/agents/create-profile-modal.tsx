@@ -1198,8 +1198,15 @@ function ResourcePicker({
                         aria-pressed={selSet.has(it.id)}
                         onClick={() => toggleRes(g.key, it.id)}
                       >
-                        {selSet.has(it.id) && <Icon name="check" />}
+                        {/* Interface review 2026-09-24 (acce-33): a dangling
+                            grant says so in shape and word, not amber alone. */}
+                        {it.missing ? (
+                          <Icon name="alert" />
+                        ) : (
+                          selSet.has(it.id) && <Icon name="check" />
+                        )}
                         {it.label ?? it.id}
+                        {it.missing && <span className="res-chip-note">missing</span>}
                       </button>
                     ))}
                   </div>

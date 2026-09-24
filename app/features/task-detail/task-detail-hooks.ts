@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
@@ -115,29 +115,40 @@ export function useRunControls({
   // task-actions.server.ts). The button was gated on the viewer's grant alone,
   // so the two surfaces on one task disagreed. An unowned task (null principal)
   // has nobody to bill on either backend.
-  const retryBackends = runPrincipal
-    ? (["claude", "codex"] as const).filter((b) => runPrincipal[b].available)
-    : [];
+  //
+  // Ruling 457 (TASK-4): kept as one array while the answer is the same, so the
+  // memoised console does not re-render on a revalidation that changed nothing.
+  const claudeAvailable = runPrincipal?.claude.available ?? false;
+  const codexAvailable = runPrincipal?.codex.available ?? false;
+  const retryBackends = useMemo(
+    () =>
+      (["claude", "codex"] as const).filter((b) =>
+        b === "claude" ? claudeAvailable : codexAvailable,
+      ),
+    [claudeAvailable, codexAvailable],
+  );
   // Retry the failed run's agent on the OTHER backend after a backend
   // availability / quota failure (D4). Routes by the failed run's kind —
   // a reviewer retries as THAT reviewer, not as the primary. The override
   // also persists to the assignment snapshot server-side, so the operator's
   // next prompt follows the switched backend. admin|maintainer; server
   // re-checks.
-  const onRetryBackend =
-    canRunAgents && !anyRunActive
-      ? (backend: "claude" | "codex", run: RunView) => {
-          if (runBusy || !retryBackends.includes(backend)) return;
-          const fd = new FormData();
-          fd.set("_csrf", csrf);
-          // Dynamic-dispatch rework: one run-agent intent for every agent kind
-          // — the failed run's own profileId identifies who retries.
-          fd.set("intent", "run-agent");
-          fd.set("profileId", run.profileId);
-          fd.set("backend", backend);
-          runFetcher.submit(fd, { method: "post" });
-        }
-      : undefined;
+  const submitRun = runFetcher.submit;
+  const retryOnBackend = useCallback(
+    (backend: "claude" | "codex", run: RunView) => {
+      if (runBusy || !retryBackends.includes(backend)) return;
+      const fd = new FormData();
+      fd.set("_csrf", csrf);
+      // Dynamic-dispatch rework: one run-agent intent for every agent kind
+      // — the failed run's own profileId identifies who retries.
+      fd.set("intent", "run-agent");
+      fd.set("profileId", run.profileId);
+      fd.set("backend", backend);
+      void submitRun(fd, { method: "post" });
+    },
+    [runBusy, retryBackends, csrf, submitRun],
+  );
+  const onRetryBackend = canRunAgents && !anyRunActive ? retryOnBackend : undefined;
   // Complete the real merge of an accepted (merge-pending) PR (S2).
   //
   // F19-24: this SUBMITS — it performs the irreversible GitHub merge, and it is
@@ -215,7 +226,7 @@ export function useRunControls({
  * BUG 3: commenting an @agent auto-selects that agent's grouped log entry and
  * scrolls the Agent-logs panel into view. The reply run is the group
  * representative → selecting its id shows its live output (streamed by the
- * existing useRunLogStream). Revalidation (fired by the comment fetcher)
+ * page's run-log store, `useRunLogStream`). Revalidation (fired by the comment fetcher)
  * brings the run into `runtime`; the pending id is kept until it appears so
  * the selection lands after revalidation, not before it.
  */
@@ -229,20 +240,29 @@ export function useLogSelection(runtime: RunView[]) {
   const pendingLogReady =
     pendingLogSel !== null && runtime.some((r) => r.id === pendingLogSel);
   const shownLogSel = pendingLogReady ? pendingLogSel : logSel;
-  const selectLog = (id: string | null) => {
-    if (pendingLogReady) setPendingLogSel(null);
-    setLogSel(id);
-  };
+  // Ruling 457 (TASK-4): stable while `pendingLogReady` holds, so the memoised
+  // console and run card do not re-render on a revalidation that changed
+  // nothing they draw.
+  const selectLog = useCallback(
+    (id: string | null) => {
+      if (pendingLogReady) setPendingLogSel(null);
+      setLogSel(id);
+    },
+    [pendingLogReady],
+  );
   // F39 (owner decision): while a run is LIVE its console is disclosed inside
   // the run card, so the strip's own control is a toggle rather than a jump to
   // a panel a viewport below with the timeline in between.
   // Open by default — the console was always on the page before, just far
   // from the strip that describes it.
   const [consoleOpen, setConsoleOpen] = useState(true);
-  const onViewLogs = (id: string) => {
-    selectLog(id);
-    setConsoleOpen((open) => !open);
-  };
+  const onViewLogs = useCallback(
+    (id: string) => {
+      selectLog(id);
+      setConsoleOpen((open) => !open);
+    },
+    [selectLog],
+  );
   const onAgentLog = (threadId: string) => {
     setPendingLogSel(threadId);
     setLogSel(threadId);

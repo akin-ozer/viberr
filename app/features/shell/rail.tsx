@@ -95,11 +95,12 @@ export function Rail({
           {n.label}
           {n.id === "board" && <span className="count">{boardCount}</span>}
           {n.id === "review" && <span className="count">{reviewCount}</span>}
+          {/* Interface review 2026-09-24 (acce-19): the red numeral was the
+              only cue, read as "Settings 1" like the neutral Board count; the
+              word says what it counts, and the red stays as a second cue. */}
           {n.id === "settings" && violations > 0 && (
-            <span
-              className="count violations"
-            >
-              {violations}
+            <span className="count violations">
+              {violations} {violations === 1 ? "violation" : "violations"}
             </span>
           )}
         </Link>

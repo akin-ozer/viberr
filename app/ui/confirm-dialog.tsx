@@ -17,7 +17,7 @@ import { useDialog } from "~/ui/use-dialog";
  * one grammar, an outcome-naming `confirmLabel` (never a bare "Remove"), reusing
  * the existing `.confirm-card` chrome and `useDialog` behaviors (Escape,
  * backdrop-click close, focus trap, focus restore). `org-settings`' `ConfirmDelete`
- * delegates here (C6); the D6 sites render it directly. Ruling 455(f) moved the
+ * delegates here (C6); the D6 sites render it directly. Ruling 458(f) moved the
  * hand-written copies of this card here too: the user disable, the credential
  * removal, the projection rebuild, the KB browser's delete and replace, and the
  * agent profile delete.
@@ -78,7 +78,10 @@ export function ConfirmDialog({
       aria-label={title}
       data-screen-label={screenLabel}
     >
-      <div className="confirm-icon">
+      {/* Interface review 2026-09-24 (colo-7): the icon wash follows the tone —
+          the coral danger wash above a blue primary commit said "destructive"
+          about a decision that takes nothing away. */}
+      <div className={"confirm-icon " + tone}>
         <Icon name={icon} />
       </div>
       <h3>{title}</h3>

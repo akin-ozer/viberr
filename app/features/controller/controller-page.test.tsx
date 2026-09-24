@@ -449,6 +449,10 @@ describe("the conversation rail (U33-8)", () => {
     expect(marked.map((a) => a.textContent)).toEqual([
       expect.stringContaining("Board thread"),
     ]);
+    // Interface review 2026-09-24 (acce-9): the open thread is exposed as the
+    // current page, and only that row.
+    const current = [...container.querySelectorAll('a.ctl-conv[aria-current="page"]')];
+    expect(current).toEqual(marked);
   });
 });
 

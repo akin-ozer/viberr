@@ -16,25 +16,35 @@ export const SSE_CONTROL_EVENTS: readonly SseEventName[] = ["stream.open"];
 
 /**
  * Stream events: one reference per console line of a run, consumed by the
- * dedicated log consumer (`useRunLogStream`) and by nothing else. They ride the
- * `user` scope, which every signed-in surface subscribes for its bell, so a
- * surface-wide revalidation per line would refetch Home, a board and the
- * settings page for every tool call of somebody's controller turn.
- * `run.log-appended` is not here: it is a {@link SSE_RUN_LINE_EVENTS} event.
+ * run-log console (`useRunLogStream`, through `onLiveFrame`) and by nothing
+ * else, so no surface revalidates on them. `controller.log-appended` rides the
+ * `user` scope every signed-in surface subscribes for its bell;
+ * `run.log-appended` reaches only a connection holding its task's scope (ruling
+ * 457, LIVE-5). The task page used to revalidate root, layout and task on its
+ * own run's lines every 2 s to move the Live run strip; the strip now reads the
+ * facts each tail fetch returns (ruling 457, LIVE-1).
  */
-export const SSE_STREAM_EVENTS: readonly SseEventName[] = ["controller.log-appended"];
+export const SSE_STREAM_EVENTS: readonly SseEventName[] = [
+  "controller.log-appended",
+  "run.log-appended",
+];
 
 /**
- * Run-line events: one reference per console line of a TASK run. The task
- * page's Live run strip (phase, step, turns, tokens) is loader data that moves
- * with every line, so the page showing that task still revalidates on them —
- * but ONLY that page, and at most once per `RUN_LINE_REVALIDATE_MS`
- * (`use-live-updates.ts`). Every surface holding the `project:` scope receives
- * the frame too (the board, the controller page, and every OTHER open task page,
- * which subscribes its project for the rail), and nothing any of them renders
- * changes per line: the board's "agent running" fact moves on `run.state-changed`.
+ * Conversation events (ruling 457, CTL-4): a controller conversation changed —
+ * a message landed, a turn started or settled. Only the two controller pages
+ * render a conversation, so only they revalidate on it (`useLiveUpdates`'s
+ * `conversations` option). Everywhere else the one thing that shows a
+ * conversation is the dock, which reloads its own two resources when the
+ * stream hands it {@link CONTROLLER_UPDATED_EVENT}. One dock send publishes five
+ * of these, and each used to re-run every loader of every page the asker had
+ * open, none of which render a word of it.
  */
-export const SSE_RUN_LINE_EVENTS: readonly SseEventName[] = ["run.log-appended"];
+export const SSE_CONVERSATION_EVENTS: readonly SseEventName[] = ["controller.updated"];
+
+/** The window event a live stream dispatches, debounced, for a conversation
+ *  event (and for a reconnect or resync, which may have missed one) on a
+ *  surface that does not render conversations: the dock's cue to reload. */
+export const CONTROLLER_UPDATED_EVENT = "viberr:controller-updated";
 
 export const SSE_ENDPOINT = "/resources/events";
 
@@ -47,10 +57,16 @@ export const sseScopes = {
   task: (slug: string, key: string) => `task:${slug}/${key}`,
 };
 
-/** Builds the stream URL for a set of scopes. */
-export function buildEventsUrl(scopes: readonly string[]): string {
-  const params = scopes
-    .map((scope) => `scope=${encodeURIComponent(scope)}`)
-    .join("&");
-  return `${SSE_ENDPOINT}?${params}`;
+/**
+ * Builds the stream URL for a set of scopes. `lastEventId` is where this tab
+ * stands in the broker's event ids: the broker replays what the tab missed
+ * since then, on the new connection's scopes, or answers `stream.resync` when
+ * its buffer no longer reaches back that far (ruling 457). A new EventSource
+ * cannot send the `Last-Event-ID` header itself; the browser's own retry of
+ * the same source does, and the header wins.
+ */
+export function buildEventsUrl(scopes: readonly string[], lastEventId: number | null = null): string {
+  const params = scopes.map((scope) => `scope=${encodeURIComponent(scope)}`);
+  if (lastEventId !== null) params.push(`lastEventId=${lastEventId}`);
+  return `${SSE_ENDPOINT}?${params.join("&")}`;
 }

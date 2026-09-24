@@ -544,6 +544,13 @@ const BASELINE_TABLES: readonly string[] = [
 const BASELINE_INDEXES: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_controller_conversations__scope
      ON controller_conversations (user_id, project_slug, task_key, last_message_at DESC)`,
+  // Ruling 457: the task page's GitHub freshness reads, which otherwise walk
+  // every task's reconcile rows (the audit heartbeat grows ~288 rows a day per
+  // delivered task and is kept 90 days).
+  `CREATE INDEX IF NOT EXISTS idx_audit_events__task_action
+     ON audit_events (project_slug, task_key, action, occurred_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_provenance__path_action
+     ON provenance (source_path, action)`,
 ];
 
 export function ensureBaselineColumns(db: DatabaseSync): void {

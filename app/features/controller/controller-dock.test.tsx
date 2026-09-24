@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createRoutesStub, Outlet } from "react-router";
-import { ToastProvider } from "~/ui/toast";
-import { ControllerDock } from "./controller-dock";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ControllerDockView } from "./controller-dock-query.server";
 import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
+import { CONTROLLER_UPDATED_EVENT } from "~/features/live-updates/event-types";
+import { mountDock as mount } from "../../../test-support/controller-dock-stub";
 
 /**
  * Ruling 121 — the controller dock, driven through a routed stub: the trigger
@@ -56,64 +55,6 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     viewerOwnsActive: false,
     ...over,
   };
-}
-
-interface MountOptions {
-  path: string;
-  view: (request: Request) => ControllerDockView;
-  /** O39-d: the viewer's unseen replies (none by default). */
-  unseen?: () => UnseenReplyView[];
-  action?: (form: FormData) => { ok: true; conversationId: string } | { ok: false; error: string };
-}
-
-function mount(opts: MountOptions) {
-  const loads: URL[] = [];
-  const sends: FormData[] = [];
-  const Stub = createRoutesStub([
-    {
-      id: "root",
-      path: "/",
-      loader: () => ({ csrf: "tok", theme: "system" }),
-      Component: () => (
-        <ToastProvider>
-          <Outlet />
-          <ControllerDock />
-        </ToastProvider>
-      ),
-      children: [
-        {
-          id: "routes/project",
-          path: "projects/:slug",
-          Component: () => <Outlet />,
-          children: [
-            { id: "routes/project.board", path: "board", Component: () => <div>board page</div> },
-            { id: "routes/project.task", path: "tasks/:key", Component: () => <div>task page</div> },
-            { id: "routes/project.controller", path: "controller", Component: () => <div>controller page</div> },
-          ],
-        },
-        {
-          id: "routes/resources.controller-unseen",
-          path: "resources/controller-unseen",
-          loader: () => ({ unseen: opts.unseen ? opts.unseen() : [] }),
-        },
-        {
-          id: "routes/resources.controller",
-          path: "resources/controller",
-          loader: ({ request }) => {
-            loads.push(new URL(request.url));
-            return { view: opts.view(request) };
-          },
-          action: async ({ request }) => {
-            const form = await request.formData();
-            sends.push(form);
-            return opts.action ? opts.action(form) : { ok: true as const, conversationId: "cnv_new" };
-          },
-        },
-      ],
-    },
-  ]);
-  const utils = render(<Stub initialEntries={[opts.path]} />);
-  return { ...utils, loads, sends };
 }
 
 /**
@@ -174,6 +115,56 @@ describe("the dock tells a person a reply is waiting (O39-d)", () => {
     // about the reply they are reading.
     await waitFor(() => expect(screen.getByRole("button", { name: /^Controller · VIB-1 · Viberr$/ })).toBeTruthy());
     expect(screen.queryByText(/New reply in/)).toBeNull();
+  });
+
+  /**
+   * Ruling 448, and ruling 457 (CTL-3): only the OPEN dock reads the transcript
+   * it shows. The view was a root-owned fetcher, so once the dock had been
+   * opened, every page revalidation reloaded its last URL, `seen=1` and all:
+   * the reply's own `controller.updated` revalidated the page, which marked the
+   * reply read with the panel closed, and the dot never lit.
+   */
+  it("lights the dot for a reply that lands in the last-opened thread while the panel is closed", async () => {
+    const shown: UnseenReplyView = {
+      id: "cnv_a",
+      title: "First",
+      projectSlug: "viberr",
+      taskKey: "VIB-1",
+      href: "/projects/viberr/controller?c=cnv_a",
+    };
+    let replied = false;
+    let readAfterReply = false;
+    const { loads } = mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: (request) => {
+        // What the route does: a `seen=1` load marks the thread read.
+        if (replied && new URL(request.url).searchParams.get("seen") === "1") readAfterReply = true;
+        return taskView({
+          conversation: conversationFixture(),
+          viewerOwnsActive: true,
+          threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
+        });
+      },
+      unseen: () => (replied && !readAfterReply ? [shown] : []),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    await screen.findByText("Knows the VIB-1 task file and its place in the Viberr workflow · acts with your permissions");
+    fireEvent.click(screen.getByRole("button", { name: "Close the controller dock" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
+    const closedAt = loads.length;
+
+    // The reply lands. Its `controller.updated` reaches the page's stream: the
+    // page revalidates for its own reasons, and the dock gets its cue.
+    replied = true;
+    fireEvent.click(screen.getByRole("button", { name: "revalidate page" }));
+    act(() => {
+      window.dispatchEvent(new Event(CONTROLLER_UPDATED_EVENT));
+    });
+    // CANARY: drop `shouldRevalidate` from the dock's view route and the
+    // revalidation reloads the transcript with `seen=1`, reading the reply.
+    const fab = await screen.findByRole("button", { name: /a new reply/ });
+    expect(fab.querySelector(".unseen-dot")).not.toBeNull();
+    expect(loads.length).toBe(closedAt);
   });
 
   it("marks an unread thread in the panel's own list", async () => {
@@ -373,6 +364,58 @@ describe("the controller dock (ruling 121)", () => {
     expect(screen.getByRole("dialog", { name: "Controller dock" })).toBeTruthy();
   });
 
+  /**
+   * Interface review 2026-09-24 (acce-14): no focus trap (ruling 121), so Tab
+   * reaches page controls the panel covers. Escape there uncovers the control
+   * without moving focus. jsdom has no layout, so the hit test is stubbed: it
+   * answers the panel for a covered control and the control itself otherwise.
+   */
+  async function withPageControl(
+    covered: boolean,
+    setup: (control: HTMLButtonElement) => void,
+    check: (control: HTMLButtonElement) => Promise<void>,
+  ) {
+    mount({ path: "/projects/viberr/board", view: () => taskView() });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · viberr" }));
+    const panel = await screen.findByRole("dialog", { name: "Controller dock" });
+    const control = document.createElement("button");
+    control.textContent = "Edit";
+    document.body.append(control);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: () => (covered ? panel : control),
+    });
+    try {
+      setup(control);
+      control.focus();
+      fireEvent.keyDown(control, { key: "Escape" });
+      await check(control);
+    } finally {
+      Reflect.deleteProperty(document, "elementFromPoint");
+      control.remove();
+    }
+  }
+
+  it("Escape on a page control under the panel closes the dock and leaves focus there (acce-14)", async () => {
+    await withPageControl(true, () => {}, async (control) => {
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
+      expect(document.activeElement).toBe(control);
+      expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("0");
+    });
+  });
+
+  it.each([
+    ["the control is not under the panel", false, () => {}],
+    ["the control is an open popover's trigger", true, (c: HTMLButtonElement) => c.setAttribute("aria-expanded", "true")],
+    ["something else already handled the Escape", true, (c: HTMLButtonElement) =>
+      c.addEventListener("keydown", (e) => e.preventDefault())],
+  ])("Escape on a page control leaves the dock alone when %s (acce-14)", async (_, covered, setup) => {
+    await withPageControl(covered, setup, async () => {
+      await waitFor(() => expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("1"));
+      expect(screen.getByRole("dialog", { name: "Controller dock" })).toBeTruthy();
+    });
+  });
+
   it("restores open without stealing focus, and never re-aims off a control (findings 7, 10)", async () => {
     window.sessionStorage.setItem("viberr.dock.open", "1");
     mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
@@ -459,6 +502,48 @@ describe("the controller dock (ruling 121)", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it("ruling 454: at sheet width a pull down the header dismisses the dock, and focus comes back", async () => {
+    // The 720px block's flag is what makes the panel a sheet; jsdom lays
+    // nothing out, so the sheet's height is stubbed (halfway at 300px).
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (query: string) => ({ matches: false, media: query }),
+    });
+    const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
+    try {
+      mount({ path: "/projects/viberr/board", view: () => taskView() });
+      const trigger = await screen.findByRole("button", { name: "Controller · viberr" });
+      fireEvent.click(trigger);
+      const panel = await screen.findByRole("dialog", { name: "Controller dock" });
+      // The grabber only says "this pulls"; Close stays the named way out.
+      const grabber = panel.querySelector(".dock-grabber");
+      expect(grabber?.getAttribute("aria-hidden")).toBe("true");
+      expect(grabber?.hasAttribute("data-sheet-handle")).toBe(true);
+      const head = panel.querySelector<HTMLElement>("header.dock-head");
+      expect(head?.hasAttribute("data-sheet-handle")).toBe(true);
+      panel.style.setProperty("--sheet-draggable", "1");
+      const at = (type: string, y: number) =>
+        fireEvent(
+          head!,
+          new PointerEvent(type, { pointerId: 1, isPrimary: true, button: 0, clientY: y, bubbles: true }),
+        );
+      at("pointerdown", 100);
+      for (let y = 120; y <= 500; y += 20) at("pointermove", y);
+      const dock = panel.closest<HTMLElement>(".dock")!;
+      expect(dock.style.getPropertyValue("--sheet-drag")).toBe("380px");
+      at("pointerup", 500);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(trigger);
+      // The dock let go of the drag, so its button returns to rest.
+      expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
+      expect(dock.style.getPropertyValue("--sheet-drag")).toBe("");
+    } finally {
+      height.mockRestore();
+      Reflect.deleteProperty(window, "matchMedia");
+    }
+  });
+
   it("the Threads toggle keeps one name and lets aria-pressed carry the state (finding 25)", async () => {
     mount({
       path: "/projects/viberr/tasks/VIB-1",
@@ -491,15 +576,33 @@ describe("the controller dock (ruling 121)", () => {
     expect(document.getElementById("controller-dock-panel")).not.toBeNull();
   });
 
+  /**
+   * Finding 32, and ruling 457 (CTL-2): while a turn works the dock polls every
+   * 5 s, open or closed. It polls the small status (unseen replies, turns
+   * working), not the transcript: the step line moves from the status, and
+   * the transcript reloads once, when the status says the turn settled.
+   */
   it("keeps polling while a turn works, and stops when it settles (finding 32)", async () => {
-    let working = true;
-    const { loads } = mount({
+    // The turn starts after the fake clock goes in (below): the status the
+    // dock loads on mount would otherwise arm the poll on the real one.
+    let working = false;
+    let step = "Reading the task file";
+    const { loads, unseenLoads } = mount({
       path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView({ turn: { working, runId: "run_1", phase: null, step: null } }),
+      view: () =>
+        taskView({
+          conversation: conversationFixture(),
+          viewerOwnsActive: true,
+          turn: working
+            ? { working: true, runId: "run_1", phase: null, step }
+            : { working: false, runId: null, phase: null, step: null },
+        }),
+      working: () =>
+        working ? [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step }] : [],
     });
     const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
-    // The poll is armed by an effect of the VIEW that says a turn is working —
-    // not by the click, and not by the request for that view. This test used
+    // The poll is armed by an effect of the ANSWER that says a turn is working —
+    // not by the click, and not by the request for it. This test used
     // to wait for the request (`loads.length > 0`), which the click makes
     // synchronously, and then jump the clock 5 s. When the view took longer
     // than one `shouldAdvanceTime` tick to land (a loaded machine, a cold first
@@ -511,28 +614,40 @@ describe("the controller dock (ruling 121)", () => {
     // and every step is an awaited act(), which does not return until what it
     // started — the request, the view that answers it, that view's effects —
     // has committed. What follows each one is a plain read.
+    await restored();
     vi.useFakeTimers();
+    working = true;
     try {
       await act(async () => {
         fireEvent.click(trigger);
       });
       expect(screen.getByText("Controller is working")).toBeTruthy();
-      const afterOpen = loads.length;
+      expect(screen.getByText("Reading the task file")).toBeTruthy();
+      const views = loads.length;
+      const polls = unseenLoads.length;
+      // Ruling 250: the step moves between polls. CANARY: poll the view again
+      // (or render the view's step instead of the status's) and this either
+      // reloads the transcript or never moves.
+      step = "Editing task.md";
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
-      expect(loads.length).toBe(afterOpen + 1);
-      // The turn settles: the next answer says so, and the poll stops asking.
+      expect(unseenLoads.length).toBe(polls + 1);
+      expect(loads.length).toBe(views);
+      expect(screen.getByText("Editing task.md")).toBeTruthy();
+      // The turn settles: the next status says so, the transcript reloads
+      // once to show it, and the poll stops asking.
       working = false;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
       expect(screen.queryByText("Controller is working")).toBeNull();
-      const afterSettle = loads.length;
+      expect(loads.length).toBe(views + 1);
+      const afterSettle = loads.length + unseenLoads.length;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(15_000);
       });
-      expect(loads.length).toBe(afterSettle);
+      expect(loads.length + unseenLoads.length).toBe(afterSettle);
     } finally {
       vi.useRealTimers();
     }
@@ -541,16 +656,22 @@ describe("the controller dock (ruling 121)", () => {
   /**
    * O39-d: the working poll runs with the panel closed too, and a load nobody
    * is reading must not mark the reply it fetches as seen. Only the open
-   * panel's loads say `seen`.
+   * panel's loads say `seen`, and since ruling 457 the closed dock loads no
+   * transcript at all.
    */
   it("O39-d: only an OPEN panel's load marks its transcript seen", async () => {
-    const { loads } = mount({
+    // The turn starts once the fake clock is in, so the poll arms on it.
+    let started = false;
+    const { loads, unseenLoads } = mount({
       path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView({ turn: { working: true, runId: "run_1", phase: null, step: null } }),
+      view: () => taskView({ turn: { working: started, runId: "run_1", phase: null, step: null } }),
+      working: () =>
+        started ? [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }] : [],
     });
     const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
     await restored();
     vi.useFakeTimers();
+    started = true;
     try {
       await act(async () => {
         fireEvent.click(trigger);
@@ -562,13 +683,14 @@ describe("the controller dock (ruling 121)", () => {
       });
       expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull();
       const closedAt = loads.length;
+      const polledAt = unseenLoads.length;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
-      // CANARY: build the dock URL with `seen` always set and this poll marks
-      // the reply read while nobody is looking.
-      expect(loads.length).toBeGreaterThan(closedAt);
-      expect(loads.at(-1)!.searchParams.get("seen")).toBeNull();
+      // CANARY: load the view from the closed dock's poll again and it reads
+      // the reply while nobody is looking.
+      expect(unseenLoads.length).toBeGreaterThan(polledAt);
+      expect(loads.length).toBe(closedAt);
     } finally {
       vi.useRealTimers();
     }
@@ -595,38 +717,32 @@ describe("the controller dock (ruling 121)", () => {
       text: "second",
     };
     let messages: ControllerDockView["messages"] = [first];
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      mount({
-        path: "/projects/viberr/tasks/VIB-1",
-        view: () =>
-          taskView({
-            conversation: conversationFixture(),
-            messages,
-            viewerOwnsActive: true,
-            // A working turn is what makes the dock poll, which is how the
-            // second message arrives while the panel is up.
-            turn: { working: true, runId: "run_1", phase: null, step: null },
-          }),
-      });
-      fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
-      await screen.findByText("first");
-      // History never wears the marker…
-      expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
-      // …but the reply that lands while the panel is up does.
-      messages = [first, second];
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
-      });
-      await screen.findByText("second");
-      const fresh = [...document.querySelectorAll(".ctl-msg[data-fresh]")].map(
-        (el) => el.textContent ?? "",
-      );
-      expect(fresh.some((t) => t.includes("second"))).toBe(true);
-      expect(fresh.some((t) => t.includes("first"))).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          conversation: conversationFixture(),
+          messages,
+          viewerOwnsActive: true,
+        }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    await screen.findByText("first");
+    // History never wears the marker…
+    expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
+    // …but the reply that lands while the panel is up does. It arrives the way
+    // replies arrive (ruling 457): the page's stream hands the dock the
+    // `controller.updated` its conversation published.
+    messages = [first, second];
+    act(() => {
+      window.dispatchEvent(new Event(CONTROLLER_UPDATED_EVENT));
+    });
+    await screen.findByText("second");
+    const fresh = [...document.querySelectorAll(".ctl-msg[data-fresh]")].map(
+      (el) => el.textContent ?? "",
+    );
+    expect(fresh.some((t) => t.includes("second"))).toBe(true);
+    expect(fresh.some((t) => t.includes("first"))).toBe(false);
   });
 
   it("U39-29: a task the reply names opens from the dock too", async () => {
@@ -772,6 +888,8 @@ describe("the controller dock (ruling 121)", () => {
           threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
           viewerOwnsActive: true,
         }),
+      // Ruling 457: the button's dot reads the dock's status.
+      working: () => [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }],
     });
     const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
     fireEvent.click(trigger);

@@ -25,7 +25,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/` | `_index.tsx` | user, form | Home: pinned, all and archived projects, waiting counts, the Settings tiles (connections, users, resources, insights), store strip (org admin), new-project modal | `create-project`, `pin`, `view`, `rescan` (org admin), `rebuild-projections` (org admin) |
 | `/projects` | `projects.tsx` | user | redirects to `/` | |
 | `/projects/:slug` | `project.tsx` + `project._index.tsx` | user → member (404 parity) | workspace shell (rail, topbar, palette, live updates); index redirects to the board | |
-| `/projects/:slug/board` | `project.board.tsx` | member, form | board by stage (a card is one status chip, a row of problem chips and an avatar stack, ruling 365), filters in the URL (`filter`, `view`, `q`), drag-and-drop, accept-from-board confirm, the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first) | `create-task`, `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
+| `/projects/:slug/board` | `project.board.tsx` | member (the layout's `readWorkspace` gate), form | board by stage from its own loader (ruling 457: the columns, as board cards carrying the fields the board reads, `toBoardCard`; the layout carries none) (a card is one status chip, a row of problem chips and an avatar stack, ruling 365), filters in the URL (`filter`, `view`, `q`), drag-and-drop and the card's Move menu (a stage, or Move up / Move down within the lane: the keyboard and single-pointer path to a slot, ruling 455(c)), accept-from-board confirm, the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first) | `create-task`, `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
 | `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" (tasks at a stage the workflow makes acceptance legal from, whose acceptance nothing blocks, for a viewer who can accept) and "Still in review" (every other review-work row: at the review stage, an open review PR at any stage, or a required reviewer's verdict outstanding; a row before the boundary reads "Review in progress at Validation · PR #8 · awaiting verdict", or names the live PR fact instead when it carries one: unpushed revision, conflict, drifted head; U35-5). A row whose open PR shares changed paths with another open PR carries a "collides with <keys>" chip on both rows (ruling 236, read-only). Header: "N in review · M waiting on your acceptance" | |
 | `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project: New conversation in the page head, a sticky rail (conversations first, then goal chains) and a capped transcript (ruling 419); unseen replies marked (ruling 448); goal chain controls, `cancel` and skip behind a confirm; with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `goal-op` (`op`: `pause`, `resume`, `cancel`, `skip_link`, `retry_link`; `goalId`, `index`, `reason`), `interrupt` (`conversationId`, `runId`) |
 | `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail (a copy whose grants differ from its template says so on the scope line and under each list, ruling 156; the project's rulings knowledge base named when one is set, ruling 239), capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile`, `sync-profile-resources` (org admin only, carries the record's fingerprint) |
@@ -44,12 +44,13 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/notifications/read` | `notifications.read.tsx` | user (CSRF as a result) | fetcher target; GET redirects to `/notifications` | `read` (the default; repeatable `id`), `read-all` |
 | `/prefs/theme` | `prefs.theme.tsx` | user (CSRF as a result) | writes `theme` to the user row and the `viberr_theme` cookie; GET redirects to `/` | |
 | `/resources/events` | `resources.events.ts` | user (401 JSON) | SSE stream, scopes `project:<slug>`, `task:<slug>/<key>`, `projects`, `user` | |
-| `/resources/run-log` | `resources.run-log.ts` | member / conversation owner | run log lines for `runId` by `since` or `before`, `limit` clamped to 500 | |
+| `/resources/run-log` | `resources.run-log.ts` | member / conversation owner | run log lines for `runId` by `since` or `before`, `limit` clamped to 500, each answer with the run row's live facts (phase, step, turns, tokens, cache; the Live run strip reads them); `raw=0` leaves the stored envelopes out; `window=1` answers the run's agent group's console window as a hard refresh ships it (display lines, their keys, the window facts; ruling 457) | |
 | `/resources/health` | `resources.health.ts` | public | liveness; `?probe=readiness` → 503 when degraded | |
 | `/resources/search` | `resources.search.ts` | user | ⌘K palette query (`q`) over visible projects | |
 | `/resources/model-catalog` | `resources.model-catalog.ts` | user | models and efforts per backend (Claude enhanced with the VIEWER's own account) | |
 | `/resources/controller` | `resources.controller.ts` | user; a project or task scope the viewer cannot reach answers an empty `unavailable` view (GET) or `{ ok:false }` (POST), never a thrown response, because it feeds a root-owned fetcher | the controller dock's view for the scope the person is standing in (ruling 121); `?seen=1` marks the shown transcript read (ruling 448) | `send` (`text`, `conversationId`, `project`, `task`, `surface`, `timeZone`) |
-| `/resources/controller-unseen` | `resources.controller-unseen.ts` | user | the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448) | |
+| `/resources/notifications` | `resources.notifications.ts` | user | the bell popover's list: the viewer's newest `BELL_LIST_CAP` (100) notifications. Pages carry only the bell's counts (`bellCounts`); the bell loads this when the pointer or focus reaches it and on open, and again once the page has re-read the counts since (at once while open). It answers `shouldRevalidate` false; a signed-out request gets a 401, never a login redirect, and its `clientLoader` turns any failed load into the bell's failure row (ruling 457) | |
+| `/resources/controller-unseen` | `resources.controller-unseen.ts` | user | the dock's status: the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448); and the viewer's turns working right now, with scope, phase and step (ruling 457). Like `/resources/controller`, it answers `shouldRevalidate` false: the dock loads it itself | |
 | `/resources/backend-login` | `resources.backend-login.ts` | user | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts; an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
 | `/resources/session-export` | `resources.session-export.ts` | member / conversation owner | `?run=<id>`: resume-script download | |
 
@@ -83,10 +84,21 @@ Intents behind `project.task.tsx` are explained in
   `/profile` and `/notifications`, so the shortcut works app-wide without
   double-registering.
 - **Topbar**: project crumb, notifications bell (popover), and the account menu. The
+  bell (one implementation for the topbar, Home and the standalone header, ruling 14)
+  draws the badge from the page's `unread` count and the popover head from
+  `unread + orphanUnread` (F19-25); its list is its own fetch of
+  `/resources/notifications`, started when the pointer or focus reaches the bell or on
+  open (a first open with neither may show one "Loading notifications…" row) and reloaded
+  once the page has re-read the counts since, whatever values they came back with (at
+  once while open). A failed load shows "Couldn't load notifications." with Try again,
+  never the error page. At the cap the list discloses it ("Showing the newest
+  100", UI-14) (ruling 457). The
   account menu is a Radix ARIA menu (arrows, typeahead, Home/End, focus back to the
-  avatar on close; ruling 166) holding "Profile & preferences", "Switch project" where
-  it applies, "Switch theme · <value>" (cycles in place without closing), "Instance
-  settings" for org admins, and Sign out.
+  avatar on close; ruling 166), fetched when the pointer or focus reaches the avatar or
+  on the first press, which opens it on arrival unless Escape, a second press, or a press
+  or the focus elsewhere took it back first (ruling 457). It holds "Profile &
+  preferences", "Switch project" where it applies, "Switch theme · <value>" (cycles in
+  place without closing), "Instance settings" for org admins, and Sign out.
 - **The standalone-page header** (ruling 145) is the same header on the instance
   pages that render outside the workspace: brand → Home, a `Home › <page>` crumb,
   the ⌘K trigger, the bell and the account menu. `palette-shell` mounts it, and
@@ -99,12 +111,19 @@ Intents behind `project.task.tsx` are explained in
   scrolls inside itself.
 - **Live updates** are mounted by the workspace layout, Home, Notifications, Org
   settings and the controller page; every governed change arrives by loader
-  revalidation. A hidden tab holds no stream: both the layout's `useLiveUpdates` and the
-  console's `use-run-log-stream` close on `visibilitychange` and reopen, revalidating,
-  on return (ruling 301). While the stream is down, the workspace header and Home both
-  show a "live updates paused" chip (a plain span: a pill has no cursor and no hover, so
-  it is the sentence, not a control) beside a `Retry` button, rendered only when the
-  surface really has a reconnect to offer. The sentence is also announced through a
+  revalidation, of the loaders that read what changed (`revalidation-policy.ts`,
+  ruling 457: a board filter keystroke, the echo of one's own action and root's theme
+  and csrf on a live event re-run nothing). A task tab holds ONE stream, the layout's:
+  the run-log console takes its frames from it (`onLiveFrame`) instead of opening a
+  second one, and a console line revalidates nothing (ruling 457). A hidden tab holds no
+  stream: `useLiveUpdates` closes on `visibilitychange` and reopens on return from the
+  last event id it saw, the broker replays what it missed (or answers `stream.resync`,
+  which pulls every loader once), and the console reads whatever it missed as one gap
+  (ruling 301). While the stream is down, the workspace and Home both show a
+  strip directly under the header (the archived banner's idiom: "Live updates paused. …"
+  with a trailing `Retry` button, the button rendered only when the surface really has a
+  reconnect to offer). It used to be a chip inside the header row, where at 320–375 px it
+  pushed search, the bell and the account menu off the screen (ruling 455(f)). The sentence is also announced through a
   visually hidden `role="status"` region that is mounted at all times and only changes
   its text: a live region inserted together with its text is the one case screen
   readers skip.
@@ -113,21 +132,38 @@ Intents behind `project.task.tsx` are explained in
   pages, and `/profile` and `/notifications` (both render their whole page inside a
   `showModal()` overlay, which would leave the dock inert behind it). It is a floating
   bottom-right button named `Controller · <scope>` opening a non-modal panel bound to
-  the current instance, board or task (a bottom sheet at ≤ 720 px). Its composer is
+  the current instance, board or task (a bottom sheet at ≤ 720 px, which a finger pulls down
+  to dismiss, ruling 454). Its composer is
   disabled, with the same sentence the full page uses, when the VIEWER has not connected
-  Claude (ruling 127). The button carries a pulsing dot while a turn works and a still
-  blue dot when a reply its owner has not seen waits in any scope
-  (`/resources/controller-unseen`, ruling 448); the open panel links to replies
-  elsewhere. On `/insights`, which has no stream of its own, the open panel opens one
-  (`DOCK_SELF_STREAM_ROUTE_IDS`). Details in
+  Claude (ruling 127). The button carries a pulsing dot while a turn works in its scope
+  and a still blue dot when a reply its owner has not seen waits in any scope
+  (`/resources/controller-unseen`, rulings 448 and 457); the open panel links to replies
+  elsewhere. Root ships only the button, the panel's frame and header; the panel's body
+  loads on the first open, preloaded on hover or focus (ruling 457). The dock's data
+  rides no page revalidation: the page's `user` stream hands it `controller.updated`
+  instead (ruling 457). On `/insights`, which has no stream of its own, the open panel
+  opens one (`DOCK_SELF_STREAM_ROUTE_IDS`). Details in
   [../domain/controller-and-goals.md §2.1](../domain/controller-and-goals.md#21-the-dock-ruling-121).
 - **Theme**: light / dark / system, per user plus the `viberr_theme` cookie for
   first paint. Motion follows the OS `prefers-reduced-motion` setting only. After first
   paint, `setDocumentTheme` (`shell/theme-preference.ts`) is the one writer of
-  `<html data-theme>`: it swaps under a `transition: none` override that lives for one
-  forced style recalc, so the colour transitions in the sheet cannot smear the flip.
-  The menu, the profile page and the root effect's OS-follow listener all go through
-  it; the boot script paints once and registers no listener of its own.
+  `<html data-theme>`. A change fades over `THEME_FLIP_MS` (250 ms) on ONE clock: for
+  the flip's length an override gives every element the same colour transitions, so
+  text and its fill move together instead of each rule crossfading on its own, and the
+  page stays clickable throughout (ruling 453(c); a view transition would swallow the
+  clicks of someone cycling the account menu's theme item). The menu, the profile page
+  and the root effect's OS-follow listener all go through it; the boot script paints
+  once and registers no listener of its own.
+- **Motion, materials and type** (ruling 453). The board's drop flight is a critically
+  damped spring (`ui/spring.ts`) that leaves at the pointer's release velocity. A
+  dialog, page overlay or the dock closed while its entrance is still playing leaves
+  from where it got to (`ui/live-pose.ts`). Every transform transition, and so every
+  press, runs on `--ease-out`. The Home and standalone header, and the page overlay's
+  sticky head, draw their bottom edge only once content scrolls under them. The OS
+  increased-contrast setting swaps every frame and divider onto `--border-control`,
+  the two lighter text rungs onto `--muted`, and the translucent chrome solid, as
+  reduced transparency does. Headings track by size (`--track-title`,
+  `--track-section`, `--track-page`: -.011, -.017 and -.021em at 16, 20 and 28px).
 - **Responsive**: same surface, reflowed; the rail collapses at ≤ 720 px, the topbar
   trims at ≤ 760 px. There is no review-first mobile mode. Under the breakpoint
   the rail is a drawer: opening it moves focus to the `nav`, sets `inert` on
@@ -135,7 +171,9 @@ Intents behind `project.task.tsx` are explained in
   controller dock (which root mounts beside the layout, so `<body
   data-rail-open>` carries the state for it); closing it by Escape, the scrim,
   a rail link or a resize returns focus to the toggle after the close has
-  committed, and an open modal dialog keeps its own Escape. Under the same
+  committed, and an open modal dialog keeps its own Escape. Closed, the drawer is
+  `visibility: hidden` as well as translated away, so its links leave the tab order
+  (ruling 455). Under the same
   breakpoint the typing surfaces render at the 1.05rem scale step (16.8px) so
   iOS Safari does not zoom on focus: every `.field` input and textarea,
   `select`, the search, board-filter and palette inputs, the comment and
@@ -239,7 +277,7 @@ removal dialog`, `Member removal dialog`, `Schedule cancel dialog`, `Interrupt r
 dialog`, `Dismiss recommendation dialog`, `Interrupt turn dialog`, `Cancel goal dialog`
 and `Skip link dialog` (ruling 419), and `Disable user dialog`, `Credential removal
 dialog`, `Rebuild projections dialog`, `Store deletion dialog`, `Replace document dialog`
-and `Profile deletion dialog` (the hand-written confirms ruling 455(f) moved onto it).
+and `Profile deletion dialog` (the hand-written confirms ruling 458(f) moved onto it).
 `screenLabel` is a required prop on `ConfirmDialog`, so a new call site cannot ship
 unlabelled; the typecheck refuses it.
 
@@ -279,6 +317,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   task rests on a clock (rulings 36, 91, 225).
 - A failure toast never renders the success tick: the kind is passed from the server
   result (`use-action-toast.ts`).
+- An error toast stays until it is dismissed (it carries a Dismiss button); a success
+  toast lasts 5 s and pauses while the pointer or focus is inside the stack
+  (`ui/toast.tsx`, ruling 455(a)).
 - **Every attachment kind opens a card, and every card carries Download** (ruling 105):
   images show the picture; the known binary kinds (archives, media, fonts, office and
   PDF documents, executables, databases) are decided by name and get an honest "no
@@ -289,6 +330,20 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   after the completion-time prune, 413 over the 50 MB cap, an auth redirect) reports the
   failure and drops Download rather than saving an error body under the real filename.
   The `Attachment lightbox` screen label covers all three.
+- **The console fills itself** (ruling 457, owner decision 2): a hard refresh arrives
+  with the shown agent's console drawn (its display lines; the stored envelopes load
+  when `{ } raw` opens, each row saying "loading the stored envelope…" until they
+  land); a client navigation or a revalidation carries no console lines, and the
+  console fills the thread it shows with one request, reading "loading this console…"
+  meanwhile; a console already drawn when its agent starts a new run keeps its lines on
+  screen until the new run's window replaces them; another agent's console loads when
+  the picker opens it. A line appends one row, keyed by its run and seq, and leaves
+  every drawn row alone; the Live run strip's phase, step, turns and tokens move with
+  each line of whichever running agent it shows (the console's tail reads carry them,
+  and a line of an agent whose console is not loaded reads that run's facts alone), and
+  its Elapsed clock ticks alone. The console's rows skip layout and paint while off
+  screen (`content-visibility: auto`). While the tab's live stream is down the
+  console's footer says "Live tail disconnected: reconnecting…".
 - **A live run's console is disclosed on its own card** (ruling 380): while a run streams,
   the Agent-logs console renders INSIDE the Live-run strip, open by default, and the strip's
   trigger reads "Hide console"/"Show console" with `aria-expanded`; the panel below is the
@@ -308,14 +363,19 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   bucket ("cache 1h"), the run's writes and reads, the peak prompt (the last prompt, what a
   resume would replay, in its tooltip) and the compaction count; each figure rides a `data-`
   attribute, and a run with no first call says "no first call yet". The Live-run strip's
-  Tokens cell says on hover what the cache wrote and read.
+  Tokens cell says on hover what the cache wrote and read. Both follow the console's tail
+  reads while a run streams (ruling 457).
 - Timestamps render through `app/shared/dates/format.ts` only: zero-padded `HH:MM`,
   `{day} · {time}`, relative forms. **The hydration contract** (pass 34, C6): a
   timestamp's first pass depends on the timestamp alone (the `*UTC` formatters take no
   `now` and render the absolute UTC day + UTC clock, `Jul 3 · 23:59`, identical on the
-  server and in any viewer's browser at any clock) and an effect swaps in the
-  viewer-local form after hydration (`LocalDayDotTime`, `LocalRelative`, `useHydrated`
-  in `app/ui/local-time.tsx`; the console's line clocks sit behind the same flag).
+  server and in any viewer's browser at any clock) and the viewer-local form replaces it
+  once hydration commits (`LocalDayDotTime`, `LocalRelative`, `useHydrated` in
+  `app/ui/local-time.tsx`; the console's line clocks sit behind the same flag). The flag
+  is React's own hydration state (`useSyncExternalStore` with a server snapshot), so a
+  stamp that mounts after hydration (a client navigation, a new row, a console opened
+  later) renders local from its first commit instead of drawing the UTC form for a
+  frame (ruling 457).
   Calendar dates (`formatCalendarDate`, host-zone by construction) render through
   `LocalCalendarDate` for the same reason: `YYYY-MM-DD (UTC)` first, the local calendar
   date after hydration. Gated by `app/features/task-detail/hydration-determinism.test.tsx`

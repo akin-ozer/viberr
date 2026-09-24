@@ -47,7 +47,10 @@ describe("root ErrorBoundary (route error responses)", () => {
         "Internal Server Error",
       ),
     );
-    expect(container.querySelector("h2")!.textContent).toBe("Error 403");
+    // writ-1: the title says what happened to the reader, not the status.
+    expect(container.querySelector("h2")!.textContent).toBe(
+      "You don't have access to this page",
+    );
     expect(container.querySelector(".detail-line")!.textContent).toBe(
       "Only project members can view this project's policy.",
     );
@@ -71,6 +74,18 @@ describe("root ErrorBoundary (route error responses)", () => {
     );
   });
 
+  it("keeps the generic 404 copy over the router's own 'No route matches' diagnostic", () => {
+    // Live, an unmatched URL's 404 carries the router's diagnostic string, not
+    // null, and it used to become the page's sentence (interface review 2026-09-24).
+    const { container } = renderBoundary(
+      routeError(404, 'Error: No route matches URL "/nope-404"', "Not Found"),
+    );
+    expect(container.querySelector(".detail-line")!.textContent).toBe(
+      "The page you are looking for does not exist.",
+    );
+    expect(document.title).toBe("Page not found · Viberr");
+  });
+
   it("D32-15: shows the reason from requireRole's JSON envelope, not 'Forbidden'", () => {
     // requireRole answers page requests with the API envelope; a non-admin
     // opening /org/settings used to learn THAT they were refused, never WHY.
@@ -79,27 +94,51 @@ describe("root ErrorBoundary (route error responses)", () => {
     const { container } = renderBoundary(
       routeError(
         403,
-        { error: { code: "forbidden", message: "This area requires the admin role." } },
+        {
+          error: {
+            code: "forbidden",
+            message:
+              "Only org admins can open this page. Ask an org admin for access.",
+          },
+        },
         "Forbidden",
       ),
     );
     expect(container.querySelector(".detail-line")!.textContent).toBe(
-      "This area requires the admin role.",
+      "Only org admins can open this page. Ask an org admin for access.",
     );
   });
 
-  it("falls back to statusText, then generic copy, for non-string data", () => {
-    // An envelope WITHOUT a message is transport noise, not page copy.
+  it("writ-1: never shows statusText; the generic copy says how to recover", () => {
+    // An envelope WITHOUT a message is transport noise, not page copy — and
+    // so is statusText: "Forbidden" names no way out.
+    const recover =
+      "Reload the page to try again. If it keeps failing, go back to Home.";
     const { container: withStatusText } = renderBoundary(
       routeError(403, { error: { code: "forbidden" } }, "Forbidden"),
     );
     expect(
       withStatusText.querySelector(".detail-line")!.textContent,
-    ).toBe("Forbidden");
+    ).toBe(recover);
 
-    const { container: bare } = renderBoundary(routeError(500, {}));
-    expect(bare.querySelector(".detail-line")!.textContent).toBe(
-      "An unexpected error occurred.",
+    const { container: bare } = renderBoundary(
+      routeError(500, {}, "Internal Server Error"),
+    );
+    expect(bare.querySelector("h2")!.textContent).toBe(
+      "Unable to load this page",
+    );
+    expect(bare.querySelector(".detail-line")!.textContent).toBe(recover);
+  });
+
+  it("writ-1: a thrown non-route error gets the same recoverable copy", () => {
+    const { container } = render(
+      <ErrorBoundary error={"not an Error"} params={{}} />,
+    );
+    expect(container.querySelector("h2")!.textContent).toBe(
+      "Unable to load this page",
+    );
+    expect(container.querySelector(".detail-line")!.textContent).toBe(
+      "Reload the page to try again. If it keeps failing, go back to Home.",
     );
   });
 });

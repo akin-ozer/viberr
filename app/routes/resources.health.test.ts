@@ -86,7 +86,7 @@ async function takeSubsystemsDown(): Promise<void> {
  *  with any room at all classifies `ok` — the "low"/"critical" cases raise
  *  them instead of fabricating a measurement. The thresholds are read through
  *  `getEnv()`, which parses once per process, so the cached parse goes too
- *  (ruling 455(c)). */
+ *  (ruling 458(c)). */
 async function setDiskThresholds(lowMb: number, criticalMb: number): Promise<void> {
   process.env.VIBERR_DISK_LOW_FREE_MB = String(lowMb);
   process.env.VIBERR_DISK_CRITICAL_FREE_MB = String(criticalMb);

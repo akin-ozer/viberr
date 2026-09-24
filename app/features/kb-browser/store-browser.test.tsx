@@ -217,7 +217,7 @@ describe("StoreBrowser", () => {
     expect(
       getByText("The file is removed from the store. Agents lose it on their next context load."),
     ).toBeTruthy();
-    // Ruling 455(f): the shared ConfirmDialog, named by its title, stacked over
+    // Ruling 458(f): the shared ConfirmDialog, named by its title, stacked over
     // the browser, and no longer described by an id nothing carries.
     const confirm = getByRole("alertdialog", { name: "Delete “overview.md”?" });
     expect(confirm.getAttribute("data-screen-label")).toBe("Store deletion dialog");
@@ -395,7 +395,7 @@ describe("StoreBrowser document editor", () => {
     // overwrote with the same "saved" toast.
     expect(lastForm).toBeNull();
     expect(getByText("Replace “overview.md”?")).toBeTruthy();
-    // Ruling 455(f): the shared ConfirmDialog, named by its title and stacked
+    // Ruling 458(f): the shared ConfirmDialog, named by its title and stacked
     // over the browser.
     const confirm = getByRole("alertdialog", { name: "Replace “overview.md”?" });
     expect(confirm.getAttribute("data-screen-label")).toBe("Replace document dialog");

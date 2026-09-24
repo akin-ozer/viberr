@@ -86,7 +86,7 @@ export function KBModal({
       {!initial && (
         <div className="field">
           <span className="flabel">Content</span>
-          {/* Ruling 455(f), UI-58: a `role="radiogroup"` of plain buttons
+          {/* Ruling 458(f), UI-58: a `role="radiogroup"` of plain buttons
               promises arrow keys it never wires and makes each radio its own
               tab stop. `RadioSeg` carries the same roles with the roving keys
               (one tab stop, ←/→, Home/End), and a choice commits on
@@ -536,7 +536,7 @@ export function SkillModal({
       {!initial && (
         <div className="field">
           <span className="flabel">Content</span>
-          {/* Ruling 455(f): on `RadioSeg` for the same reason as KBModal's. */}
+          {/* Ruling 458(f): on `RadioSeg` for the same reason as KBModal's. */}
           <RadioSeg
             className="mode-radios"
             label="How the skill gets its content"

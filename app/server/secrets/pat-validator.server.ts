@@ -93,7 +93,7 @@ export interface ValidatePatTokenOptions {
 
 /** Env opt-in for the write dry-run (see {@link ValidatePatTokenOptions}). The
  *  env schema parses `VIBERR_GITHUB_WRITE_PROBE` and refuses a spelling it does
- *  not know at boot (ruling 455(c)). */
+ *  not know at boot (ruling 458(c)). */
 function writeProbeEnabled(explicit?: boolean): boolean {
   return explicit ?? getEnv().VIBERR_GITHUB_WRITE_PROBE;
 }

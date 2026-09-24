@@ -14,7 +14,8 @@ import { assertCsrf } from "~/server/auth/csrf.server";
  * written for.
  *
  * Returns `null` when the token is valid, or the 403 result the client toast
- * handlers already know how to read.
+ * handlers already know how to read. `requireFormAction` answers with it too
+ * (ruling 457, RV-1).
  */
 export async function csrfError(
   request: Request,
@@ -30,7 +31,10 @@ export async function csrfError(
         {
           ok: false as const,
           error:
-            "That request expired. Reload the page and try again (security token mismatch).",
+            // Not "reload the page": a reload loses what the person typed, and
+            // the 403 re-reads root's token, so trying again works (ruling
+            // 457, RV-1).
+            "That request expired (security token mismatch). Try again.",
         },
         { status: 403 },
       );

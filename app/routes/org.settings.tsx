@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data } from "react-router";
 import { pageTitle } from "~/shared/page-title";
 import { countLabel } from "~/shared/text/plural";
@@ -838,3 +839,6 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/org.settings");

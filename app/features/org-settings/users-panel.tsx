@@ -569,7 +569,7 @@ function EditUserModal({
 
 /** Disable confirm — killing sessions + blocking sign-in is disruptive, so a
  * confirm gate mirrors the remove flow (native <dialog>, ruling 16; the shared
- * `ConfirmDialog` since ruling 455(f)). */
+ * `ConfirmDialog` since ruling 458(f)). */
 function DisableUserDialog({
   name,
   onCancel,

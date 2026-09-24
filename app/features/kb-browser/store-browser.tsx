@@ -505,7 +505,7 @@ function StoreTree({
 }
 
 /** Nested delete confirm on its OWN native <dialog> (the shared `ConfirmDialog`,
- * ruling 455(f)) — showModal stacking makes it the topmost layer, so its
+ * ruling 458(f)) — showModal stacking makes it the topmost layer, so its
  * Escape/backdrop land there (useDialog), not on the browser card underneath. */
 function DeleteConfirm({
   node,
@@ -835,7 +835,7 @@ function useDocEditor(
 }
 
 /** Nested "this file already exists" confirm — its own native <dialog> (the
- *  shared `ConfirmDialog`, ruling 455(f)), so it stacks over the browser card
+ *  shared `ConfirmDialog`, ruling 458(f)), so it stacks over the browser card
  *  exactly like the delete confirm (UI-59). */
 function ReplaceConfirm({
   path,

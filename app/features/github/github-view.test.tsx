@@ -398,7 +398,7 @@ describe("CredentialManageActions (finding #13)", () => {
     // Remove is gated by the confirm dialog.
     fireEvent.click(bound.getByText("Remove credential"));
     expect(onClear).not.toHaveBeenCalled();
-    // Ruling 455(f): the shared ConfirmDialog, named by its title.
+    // Ruling 458(f): the shared ConfirmDialog, named by its title.
     expect(
       bound
         .getByRole("alertdialog", { name: "Remove this credential?" })

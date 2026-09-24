@@ -13,6 +13,7 @@ import {
   deliveringEngagement,
   deriveValidation,
   supportingEngagements,
+  type TaskFileEvent,
   type TaskFrontmatter,
   type Validation,
   type Waiting,
@@ -23,7 +24,11 @@ import {
   resolveRequiredReviewers,
   type RequiredReviewerView,
 } from "~/server/tasks/required-reviewers.server";
-import { emitProjectionEvent } from "~/server/events/projection-events.server";
+import { withTransaction } from "~/server/db/transaction.server";
+import {
+  collectProjectionEvents,
+  emitProjectionEvent,
+} from "~/server/events/projection-events.server";
 import {
   clearProjectionFault,
   recordProjectionFault,
@@ -95,6 +100,20 @@ export interface RebuildFileResult {
   projectSlug?: string;
   taskKey?: string;
   goalId?: string;
+  /**
+   * Projects only, on `projected`: whether a field the project's TASK and goal
+   * projections derive from changed (see `projectContextForTasks`), i.e.
+   * whether they must be re-projected. False for a write that only moved
+   * `nextTaskNumber`, a file lease or the description.
+   */
+  taskFacingChanged?: boolean;
+  /**
+   * Projects only: the keys of the tasks the cascade could not re-project.
+   * The project row landed; they did not, and the row keeps the F28-D3
+   * sentinel so the next rebuild of project.md runs the cascade again (ruling
+   * 218's retry re-arms on this as on `error`).
+   */
+  failedTasks?: string[];
 }
 
 export interface RescanSummary {
@@ -109,6 +128,27 @@ export interface RescanSummary {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Ruling 457 (SRV-4): one file's re-projection is ONE transaction. It used to
+ * run as N+5 autocommit writes (one WAL sync per timeline event: 305 commits
+ * for a 300-event task), and with the project cascade below that multiplied by
+ * every task in the project. The projection events the body raises are held
+ * until COMMIT, the way `rebuildProjections` already holds its own, so no SSE
+ * subscriber revalidates against rows that have not landed (and a body that
+ * throws rolls back and announces nothing).
+ *
+ * A caller that already holds a transaction (the full rebuild, a cascade from
+ * the project row) gets the body inline: SQLite does not nest BEGIN, and that
+ * caller's own commit is the one that counts. The F28-D3 sentinel hash below
+ * stays as defence in depth.
+ */
+function inOneTransaction<T>(db: DatabaseSync, body: () => T): T {
+  if (db.isTransaction) return body();
+  const { result, events } = collectProjectionEvents(() => withTransaction(db, body));
+  for (const event of events) emitProjectionEvent(event);
+  return result;
 }
 
 // P13-D-16: the provenance INSERT used to be copied verbatim here and in
@@ -160,19 +200,75 @@ interface ProjectContextRow {
   required_reviewers_json: string;
 }
 
-function getMemberIds(db: DatabaseSync, slug: string): Set<string> {
-  // SAFETY: the statement selects the single `user_id` column, which
-  // 0001_baseline declares NOT NULL on `project_members`.
-  const rows = db
-    .prepare(`SELECT user_id FROM project_members WHERE project_slug = ?`)
-    .all(slug) as { user_id: string }[];
-  return new Set(rows.map((r) => r.user_id));
+/** Everything a task's projection reads from its project. */
+interface TaskProjectContext {
+  row: ProjectContextRow;
+  /** Member user ids, for the actor resolver's guest flags. */
+  memberIds: Set<string>;
+  /** The whole context as one comparable string (member ids sorted). */
+  digest: string;
+}
+
+/**
+ * The ONE reader of the project facts a task projection derives from (stages
+ * for reference diagnostics and the terminal stage, the workflow for the
+ * acceptance boundary, the resolved required reviewers, the repo, the member
+ * ids behind guest flags). `rebuildTaskFile` reads its context here, and
+ * `rebuildProjectFile` compares this digest before and after it writes the row
+ * to decide whether the tasks must follow (ruling 457, SRV-3), so the cascade
+ * test can never drift from what a task actually reads.
+ */
+function projectContextForTasks(
+  db: DatabaseSync,
+  slug: string,
+): TaskProjectContext | null {
+  // SAFETY: the SELECT names exactly ProjectContextRow's five members plus
+  // `member_ids`; 0001_baseline declares `slug`, `stages_json`, `workflow_json`
+  // and `required_reviewers_json` NOT NULL and `repo` nullable, which is how the
+  // row types them, and `json_group_array` over the NOT NULL
+  // `project_members.user_id` always yields a JSON array of strings.
+  const row = db
+    .prepare(
+      `SELECT slug, repo, stages_json, workflow_json, required_reviewers_json,
+              (SELECT json_group_array(user_id) FROM project_members
+                WHERE project_slug = projects.slug) AS member_ids
+         FROM projects WHERE slug = ?`,
+    )
+    .get(slug) as (ProjectContextRow & { member_ids: string }) | undefined;
+  if (!row) return null;
+  // SAFETY: see above — a JSON array of the member ids.
+  const members = (JSON.parse(row.member_ids) as string[]).sort();
+  return {
+    row: {
+      slug: row.slug,
+      repo: row.repo,
+      stages_json: row.stages_json,
+      workflow_json: row.workflow_json,
+      required_reviewers_json: row.required_reviewers_json,
+    },
+    memberIds: new Set(members),
+    digest: JSON.stringify([
+      row.repo,
+      row.stages_json,
+      row.workflow_json,
+      row.required_reviewers_json,
+      members,
+    ]),
+  };
 }
 
 export function rebuildProjectFile(
   db: DatabaseSync,
   slug: string,
   options: RebuildOptions = {},
+): RebuildFileResult {
+  return inOneTransaction(db, () => rebuildProjectFileNow(db, slug, options));
+}
+
+function rebuildProjectFileNow(
+  db: DatabaseSync,
+  slug: string,
+  options: RebuildOptions,
 ): RebuildFileResult {
   const absPath = projectFilePath(slug, options.dataRoot);
   const sourcePath = storeRelativePath(absPath, options.dataRoot);
@@ -214,6 +310,13 @@ export function rebuildProjectFile(
     fallbackSlug: slug,
   });
   const fm = parsed.frontmatter;
+  // SRV-3: what the tasks derived from, read BEFORE this write. A row still
+  // carrying the F28-D3 sentinel is a rebuild that never finished, so what its
+  // tasks were built from is unknown and they re-project.
+  const tasksBuiltFrom =
+    existing && existing.content_hash !== ""
+      ? (projectContextForTasks(db, slug)?.digest ?? null)
+      : null;
 
   db.prepare(
     `INSERT INTO projects
@@ -247,8 +350,9 @@ export function rebuildProjectFile(
     fm.credentialPolicy ? JSON.stringify(fm.credentialPolicy) : null,
     JSON.stringify(fm.guardrails),
     // Ruling 178: RESOLVED here (stage and agent names) so the task walk below
-    // prints the gate's sentence from the row alone. A changed project file
-    // cascades into every task (below), so a rule edit refreshes the queue.
+    // prints the gate's sentence from the row alone. A rule edit changes what
+    // tasks derive from, which cascades into every task (below), so the queue
+    // refreshes.
     JSON.stringify(resolveRequiredReviewers(fm, options.dataRoot)),
     sourcePath,
     // F28-D3: sentinel hash; the real content_hash is the LAST write below, so a
@@ -278,12 +382,6 @@ export function rebuildProjectFile(
     action: "projected",
     details: { diagnostics: diagnostics.length, members: fm.members.length },
   });
-  // F28-D3: commit marker — the true content_hash lands only after the projects
-  // row, project_members and diagnostics have all been written.
-  db.prepare(`UPDATE projects SET content_hash = ? WHERE slug = ?`).run(
-    contentHash,
-    fm.slug,
-  );
   emitProjectionEvent({
     type: "project.updated",
     projectSlug: fm.slug,
@@ -293,20 +391,86 @@ export function rebuildProjectFile(
   // Project-derived data is baked into task projections (stage-reference
   // diagnostics + readiness floors, effective repo, guest flags) — cascade a
   // forced re-projection of this project's tasks whenever the project row is
-  // newly created OR its content actually changed (stages, members, repo,
-  // anything). Unchanged project files short-circuit above, so the common
-  // no-change rescan stays cheap. rebuildAll suppresses the cascade and
-  // forces its own task walk instead (see skipTaskCascade).
-  const cascade =
-    !options.skipTaskCascade &&
-    (existing === undefined || existing.content_hash !== contentHash);
-  if (cascade) {
+  // newly created OR a field tasks derive from changed. Unchanged project files
+  // short-circuit above, so the common no-change rescan stays cheap.
+  // rebuildAll suppresses the cascade and forces its own task walk instead
+  // (see skipTaskCascade), reading `taskFacingChanged` for the same answer.
+  //
+  // Ruling 457 (SRV-3): "the project file changed" was the test here, and
+  // every task creation changes it — `allocateTaskKey` bumps nextTaskNumber —
+  // so creating one task re-projected all of them and sent one task.updated per
+  // task to every open board and task page (30 tasks: 30 events, 279 commits).
+  // A counter, a file lease or the description reaches no task row, so it now
+  // costs the project row and one project.updated.
+  const taskFacingChanged =
+    tasksBuiltFrom === null ||
+    tasksBuiltFrom !== (projectContextForTasks(db, slug)?.digest ?? null);
+  const failedTasks: string[] = [];
+  if (taskFacingChanged && !options.skipTaskCascade) {
     for (const key of listTaskDirs(slug, options.dataRoot)) {
-      rebuildTaskFile(db, slug, key, { ...options, force: true });
+      if (!reprojectCascadedTask(db, slug, key, options)) failedTasks.push(key);
     }
   }
 
-  return { action: "projected", kind: "project", projectSlug: slug };
+  // F28-D3: commit marker — the true content_hash lands only after the projects
+  // row, project_members, diagnostics and every cascaded task have been
+  // written. A task the cascade could not re-project leaves the sentinel, and
+  // SRV-3 reads a sentinel as "tasks built from an unknown project", so the
+  // next rebuild of this file runs the cascade again.
+  if (failedTasks.length === 0) {
+    db.prepare(`UPDATE projects SET content_hash = ? WHERE slug = ?`).run(
+      contentHash,
+      fm.slug,
+    );
+  }
+
+  return {
+    action: "projected",
+    kind: "project",
+    projectSlug: slug,
+    taskFacingChanged,
+    ...(failedTasks.length > 0 && { failedTasks }),
+  };
+}
+
+/**
+ * Ruling 457: one task of the project cascade, in a SAVEPOINT of the project's
+ * transaction. Since the project row became one transaction (SRV-4), a task
+ * that threw here rolled back the project row and its members too: an admin's
+ * member add never landed, and every later write of project.md (a task-key
+ * allocation included) failed the same way while the fault was reported
+ * against project.md. The task's own writes roll back to the savepoint, its
+ * failure is reported against ITS file (ruling 218: a fault belongs to the file
+ * that has it), the events it raised are dropped, and the cascade goes on.
+ * Returns whether the task projected.
+ */
+function reprojectCascadedTask(
+  db: DatabaseSync,
+  slug: string,
+  key: string,
+  options: RebuildOptions,
+): boolean {
+  const rel = storeRelativePath(taskFilePath(slug, key, options.dataRoot), options.dataRoot);
+  db.exec("SAVEPOINT cascade_task");
+  try {
+    const { result, events } = collectProjectionEvents(() =>
+      rebuildTaskFile(db, slug, key, { ...options, force: true }),
+    );
+    db.exec("RELEASE cascade_task");
+    // Into the project's own collection: they reach subscribers after COMMIT.
+    for (const event of events) emitProjectionEvent(event);
+    succeeded(rel, result);
+    return true;
+  } catch (error) {
+    // Some errors (a full disk, an I/O error) make SQLite end the whole
+    // transaction: nothing of the project's can land then, and `rebuildPath`
+    // reports the original error against project.md.
+    if (!db.isTransaction) throw error;
+    db.exec("ROLLBACK TO cascade_task");
+    db.exec("RELEASE cascade_task");
+    reportRebuildFailure(db, rel, error instanceof Error ? error : new Error(String(error)));
+    return false;
+  }
 }
 
 // ----------------------------------------------------------------- tasks
@@ -409,6 +573,15 @@ export function rebuildTaskFile(
   key: string,
   options: RebuildOptions = {},
 ): RebuildFileResult {
+  return inOneTransaction(db, () => rebuildTaskFileNow(db, slug, key, options));
+}
+
+function rebuildTaskFileNow(
+  db: DatabaseSync,
+  slug: string,
+  key: string,
+  options: RebuildOptions,
+): RebuildFileResult {
   const absPath = taskFilePath(slug, key, options.dataRoot);
   const sourcePath = storeRelativePath(absPath, options.dataRoot);
 
@@ -477,16 +650,8 @@ export function rebuildTaskFile(
 
   // Project context (already-projected row): stages for reference checks,
   // default repo, member ids for guest flags.
-  // SAFETY: the SELECT names exactly ProjectContextRow's five members;
-  // 0001_baseline declares `slug`, `stages_json`, `workflow_json` and
-  // `required_reviewers_json` NOT NULL and `repo` nullable, which is how the
-  // row types them.
-  const project = db
-    .prepare(
-      `SELECT slug, repo, stages_json, workflow_json, required_reviewers_json
-         FROM projects WHERE slug = ?`,
-    )
-    .get(slug) as ProjectContextRow | undefined;
+  const projectContext = projectContextForTasks(db, slug);
+  const project = projectContext?.row;
   // SAFETY: `stages_json` has ONE writer — rebuildProjectFile above stores
   // `JSON.stringify(fm.stages)`, and every stage the project-file schema parses
   // carries an `id`. Only the ids are read here.
@@ -645,7 +810,7 @@ export function rebuildTaskFile(
     dependenciesListed: fm.blockedBy.length > 0,
   });
 
-  const memberIds = project ? getMemberIds(db, slug) : undefined;
+  const memberIds = projectContext?.memberIds;
   // Agent events render under the agent's OWN name (e.g. "Reviewer"), not the
   // backend/runtime label — resolved from this project's run rows.
   const actorOptions: Parameters<typeof createActorResolver>[1] = {
@@ -786,65 +951,12 @@ export function rebuildTaskFile(
     nowIso(),
   );
 
-
-
-  db.prepare(
-    `DELETE FROM task_events WHERE project_slug = ? AND task_key = ?`,
-  ).run(slug, fm.key);
-  const insertEvent = db.prepare(
-    `INSERT INTO task_events
-       (project_slug, task_key, position, occurred_at, type, actor_kind,
-        actor_ref, actor_json, title, text, to_agent, evidence_json,
-        attachments_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  syncTaskEvents(
+    db,
+    slug,
+    fm.key,
+    parsed.timeline.map((event) => taskEventColumns(event, resolveActor)),
   );
-  parsed.timeline.forEach((event, position) => {
-    // Tolerantly-kept unrecognized authors project as system actors so their
-    // events stay visible in feeds (D7 — never dropped over an author).
-    const actorKind =
-      event.actor.kind === "human"
-        ? "human"
-        : event.actor.kind === "system" || event.actor.kind === "unknown"
-          ? "system"
-          : event.actor.kind === "operator"
-            ? "operator"
-            : event.actor.kind === "controller"
-              ? "controller"
-              : "agent";
-    const actorRef =
-      event.actor.kind === "human"
-        ? event.actor.userId
-        : event.actor.kind === "agent"
-          // D32-14 (pass 32): keyed by PROFILE, not by (backend, profile). A
-          // fork that ran one leg on Codex and one on Claude is ONE actor to a
-          // reader; keying on the backend listed "Docs Writer" twice in the
-          // Activity actor filter, each option finding half the events.
-          ? `agent/${event.actor.profileId}`
-          : event.actor.kind === "system"
-            ? event.actor.systemId
-            : event.actor.kind === "unknown"
-              ? event.actor.raw
-              : event.actor.kind === "controller"
-                ? "controller"
-                : "operator";
-    insertEvent.run(
-      slug,
-      fm.key,
-      position,
-      event.occurredAt,
-      event.type,
-      actorKind,
-      actorRef,
-      JSON.stringify(resolveActor(event.actor)),
-      event.title,
-      event.text,
-      event.toAgent ? 1 : 0,
-      event.evidence ? JSON.stringify(event.evidence) : null,
-      event.attachments && event.attachments.length > 0
-        ? JSON.stringify(event.attachments)
-        : null,
-    );
-  });
 
   replaceDiagnostics(db, {
     sourcePath,
@@ -864,9 +976,9 @@ export function rebuildTaskFile(
     },
   });
   // F28-D3: commit marker — flip the sentinel to the true content_hash only now
-  // that the projection row, the task_events rewrite and the diagnostics have
-  // all landed. Everything above is a single synchronous statement sequence, so
-  // this row is consistent by the time the hash lets a later rebuild skip it.
+  // that the projection row, the task_events rows and the diagnostics have all
+  // landed. Everything above runs in one transaction (ruling 457), so this row
+  // is consistent by the time the hash lets a later rebuild skip it.
   db.prepare(
     `UPDATE task_projections SET content_hash = ? WHERE project_slug = ? AND task_key = ?`,
   ).run(contentHash, slug, fm.key);
@@ -878,6 +990,213 @@ export function rebuildTaskFile(
   });
 
   return { action: "projected", kind: "task", projectSlug: slug, taskKey: fm.key };
+}
+
+/** One `task_events` row's columns, as the rebuilder writes them. A type alias,
+ *  not an interface, so the SELECT-row assertion in `syncTaskEvents` is checked
+ *  against SQLite's own output types (see `TaskEventRow`). */
+type TaskEventColumns = {
+  occurred_at: string;
+  type: string;
+  actor_kind: "human" | "agent" | "operator" | "controller" | "system";
+  actor_ref: string;
+  actor_json: string;
+  title: string | null;
+  text: string;
+  to_agent: 0 | 1;
+  evidence_json: string | null;
+  attachments_json: string | null;
+};
+
+/** A stored row: the columns plus its identity and place. */
+type StoredTaskEventRow = TaskEventColumns & { id: number; position: number };
+
+function taskEventColumns(
+  event: TaskFileEvent,
+  resolveActor: ReturnType<typeof createActorResolver>,
+): TaskEventColumns {
+  // Tolerantly-kept unrecognized authors project as system actors so their
+  // events stay visible in feeds (D7 — never dropped over an author).
+  const actorKind =
+    event.actor.kind === "human"
+      ? "human"
+      : event.actor.kind === "system" || event.actor.kind === "unknown"
+        ? "system"
+        : event.actor.kind === "operator"
+          ? "operator"
+          : event.actor.kind === "controller"
+            ? "controller"
+            : "agent";
+  const actorRef =
+    event.actor.kind === "human"
+      ? event.actor.userId
+      : event.actor.kind === "agent"
+        // D32-14 (pass 32): keyed by PROFILE, not by (backend, profile). A
+        // fork that ran one leg on Codex and one on Claude is ONE actor to a
+        // reader; keying on the backend listed "Docs Writer" twice in the
+        // Activity actor filter, each option finding half the events.
+        ? `agent/${event.actor.profileId}`
+        : event.actor.kind === "system"
+          ? event.actor.systemId
+          : event.actor.kind === "unknown"
+            ? event.actor.raw
+            : event.actor.kind === "controller"
+              ? "controller"
+              : "operator";
+  return {
+    occurred_at: event.occurredAt,
+    type: event.type,
+    actor_kind: actorKind,
+    actor_ref: actorRef,
+    actor_json: JSON.stringify(resolveActor(event.actor)),
+    title: event.title,
+    text: event.text,
+    to_agent: event.toAgent ? 1 : 0,
+    evidence_json: event.evidence ? JSON.stringify(event.evidence) : null,
+    attachments_json:
+      event.attachments && event.attachments.length > 0
+        ? JSON.stringify(event.attachments)
+        : null,
+  };
+}
+
+/** Same event: the heading a timeline entry is written under. */
+function sameTaskEvent(a: TaskEventColumns, b: TaskEventColumns): boolean {
+  return (
+    a.occurred_at === b.occurred_at &&
+    a.type === b.type &&
+    a.actor_kind === b.actor_kind &&
+    a.actor_ref === b.actor_ref
+  );
+}
+
+/** Same content under that heading (the actor snapshot included). */
+function sameTaskEventContent(a: TaskEventColumns, b: TaskEventColumns): boolean {
+  return (
+    a.actor_json === b.actor_json &&
+    a.title === b.title &&
+    a.text === b.text &&
+    a.to_agent === b.to_agent &&
+    a.evidence_json === b.evidence_json &&
+    a.attachments_json === b.attachments_json
+  );
+}
+
+/**
+ * Ruling 457 (CS-6, CS-1): write a task's timeline rows (`fresh`, newest
+ * first, position 0 = newest) without re-issuing the rows that did not change.
+ *
+ * The rebuilder used to DELETE every row and INSERT them all again, so one
+ * comment on a 100-event task cost 102 statements and gave all 100 existing
+ * rows new ids. The task page keys its timeline on that id (and the Activity
+ * page its stream), so every write remounted every item: each comment
+ * re-parsed its Markdown, lost its Show-more state and re-clamped after paint.
+ *
+ * A timeline grows at its NEWEST end, so the stored rows are aligned with the
+ * fresh ones from the OLDEST end: while both carry the same event (same time,
+ * type and actor), the stored row is kept and its id with it. Kept rows move
+ * by one position shift (one UPDATE for the lot) and take any changed content
+ * in place (a rename's actor snapshot, an edited text); the stored rows past
+ * the first difference are deleted and the fresh ones inserted. A compaction
+ * or a hand edit in the middle simply keeps less. Positions that are not the
+ * contiguous 0..n-1 this writer produces are rewritten from scratch.
+ */
+function syncTaskEvents(
+  db: DatabaseSync,
+  slug: string,
+  key: string,
+  fresh: readonly TaskEventColumns[],
+): void {
+  // SAFETY: the SELECT names exactly `id`, `position` and TaskEventColumns'
+  // members, all `task_events` columns with the nullability TaskEventColumns
+  // gives them (0001_baseline.sql); `actor_kind` is CHECK-pinned to its union
+  // and `to_agent` is written as 0/1 by `taskEventColumns` alone.
+  const stored = db
+    .prepare(
+      `SELECT id, position, occurred_at, type, actor_kind, actor_ref, actor_json,
+              title, text, to_agent, evidence_json, attachments_json
+         FROM task_events WHERE project_slug = ? AND task_key = ?
+        ORDER BY position DESC, id DESC`,
+    )
+    .all(slug, key) as StoredTaskEventRow[];
+  // `stored` is oldest first; fresh[fresh.length - 1 - j] is its j-th oldest.
+  const contiguous = stored.every((row, j) => row.position === stored.length - 1 - j);
+  let kept = 0;
+  while (
+    contiguous &&
+    kept < stored.length &&
+    kept < fresh.length &&
+    sameTaskEvent(stored[kept]!, fresh[fresh.length - 1 - kept]!)
+  ) {
+    kept += 1;
+  }
+
+  if (kept === 0) {
+    if (stored.length > 0) {
+      db.prepare(`DELETE FROM task_events WHERE project_slug = ? AND task_key = ?`).run(
+        slug,
+        key,
+      );
+    }
+  } else {
+    if (kept < stored.length) {
+      db.prepare(`DELETE FROM task_events WHERE id IN (SELECT value FROM json_each(?))`).run(
+        JSON.stringify(stored.slice(kept).map((row) => row.id)),
+      );
+    }
+    // Kept row j moves from stored.length-1-j to fresh.length-1-j: one shift.
+    if (fresh.length !== stored.length) {
+      db.prepare(
+        `UPDATE task_events SET position = position + ? WHERE project_slug = ? AND task_key = ?`,
+      ).run(fresh.length - stored.length, slug, key);
+    }
+    const update = db.prepare(
+      `UPDATE task_events SET actor_json = ?, title = ?, text = ?, to_agent = ?,
+              evidence_json = ?, attachments_json = ?
+        WHERE id = ?`,
+    );
+    for (let j = 0; j < kept; j += 1) {
+      const row = fresh[fresh.length - 1 - j]!;
+      if (sameTaskEventContent(stored[j]!, row)) continue;
+      update.run(
+        row.actor_json,
+        row.title,
+        row.text,
+        row.to_agent,
+        row.evidence_json,
+        row.attachments_json,
+        stored[j]!.id,
+      );
+    }
+  }
+
+  const insert = db.prepare(
+    `INSERT INTO task_events
+       (project_slug, task_key, position, occurred_at, type, actor_kind,
+        actor_ref, actor_json, title, text, to_agent, evidence_json,
+        attachments_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  // The new rows are the newest ones, positions 0.. — inserted newest first,
+  // as the full rewrite always did.
+  for (let position = 0; position < fresh.length - kept; position += 1) {
+    const row = fresh[position]!;
+    insert.run(
+      slug,
+      key,
+      position,
+      row.occurred_at,
+      row.type,
+      row.actor_kind,
+      row.actor_ref,
+      row.actor_json,
+      row.title,
+      row.text,
+      row.to_agent,
+      row.evidence_json,
+      row.attachments_json,
+    );
+  }
 }
 
 // ---------------------------------------------------------------- goals
@@ -897,6 +1216,15 @@ export function rebuildGoalFile(
   slug: string,
   goalId: string,
   options: RebuildOptions = {},
+): RebuildFileResult {
+  return inOneTransaction(db, () => rebuildGoalFileNow(db, slug, goalId, options));
+}
+
+function rebuildGoalFileNow(
+  db: DatabaseSync,
+  slug: string,
+  goalId: string,
+  options: RebuildOptions,
 ): RebuildFileResult {
   const absPath = goalFilePath(slug, goalId, options.dataRoot);
   const sourcePath = storeRelativePath(absPath, options.dataRoot);
@@ -1126,42 +1454,47 @@ export function rebuildPath(
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error("projection rebuild failed", {
-      sourcePath: rel,
-      err: error instanceof Error ? error : new Error(String(error)),
-    });
-    // Ruling 217 (F37-37): this catch is deliberately quiet so one bad file
-    // cannot take the process down — and for the twelve minutes the store was
-    // `SQLITE_CORRUPT`, quiet is exactly what it was, while health reported
-    // `degraded: []`. The log line stays; the FACT now has somewhere to live.
-    recordProjectionFault(rel, message);
-    // Ruling 219 (F37-39): the provenance row is a NOTE ABOUT the failure, and
-    // it is written to the same store that just failed — so when the store
-    // itself is the fault, this threw out of the catch and `rebuildPath` raised
-    // after all. Live: `resolvePacket` wrote SHOP-4's file (packet resolved,
-    // `waiting: agent`), called `reprojectTask`, and died here — so the operator
-    // re-invoke that the resolution owes never ran, and the task sat at
-    // "agent working" with nothing running for eleven minutes. The canonical
-    // write had already succeeded; only the MIRROR failed, and a mirror must
-    // never take down the action that already told the truth.
-    try {
-      recordProvenance(db, {
-        sourcePath: rel,
-        contentHash: null,
-        action: "error",
-        details: { message },
-      });
-    } catch (provenanceError) {
-      logger.warn("could not record the rebuild failure's provenance row either", {
-        sourcePath: rel,
-        err:
-          provenanceError instanceof Error
-            ? provenanceError
-            : new Error(String(provenanceError)),
-      });
-    }
+    reportRebuildFailure(db, rel, error instanceof Error ? error : new Error(String(error)));
     return { action: "error", kind: "other" };
+  }
+}
+
+/**
+ * A rebuild of `rel` threw: say so without raising. Shared by `rebuildPath`
+ * and the project cascade's per-task isolation.
+ */
+function reportRebuildFailure(db: DatabaseSync, rel: string, error: Error): void {
+  const message = error.message;
+  logger.error("projection rebuild failed", { sourcePath: rel, err: error });
+  // Ruling 217 (F37-37): this catch is deliberately quiet so one bad file
+  // cannot take the process down — and for the twelve minutes the store was
+  // `SQLITE_CORRUPT`, quiet is exactly what it was, while health reported
+  // `degraded: []`. The log line stays; the FACT now has somewhere to live.
+  recordProjectionFault(rel, message);
+  // Ruling 219 (F37-39): the provenance row is a NOTE ABOUT the failure, and
+  // it is written to the same store that just failed — so when the store
+  // itself is the fault, this threw out of the catch and `rebuildPath` raised
+  // after all. Live: `resolvePacket` wrote SHOP-4's file (packet resolved,
+  // `waiting: agent`), called `reprojectTask`, and died here — so the operator
+  // re-invoke that the resolution owes never ran, and the task sat at
+  // "agent working" with nothing running for eleven minutes. The canonical
+  // write had already succeeded; only the MIRROR failed, and a mirror must
+  // never take down the action that already told the truth.
+  try {
+    recordProvenance(db, {
+      sourcePath: rel,
+      contentHash: null,
+      action: "error",
+      details: { message },
+    });
+  } catch (provenanceError) {
+    logger.warn("could not record the rebuild failure's provenance row either", {
+      sourcePath: rel,
+      err:
+        provenanceError instanceof Error
+          ? provenanceError
+          : new Error(String(provenanceError)),
+    });
   }
 }
 
@@ -1223,13 +1556,15 @@ export function rebuildProject(
   if (projectExists) {
     summary.projects += 1;
     // Suppress the in-file cascade — this walk re-projects every task itself
-    // (with force when the project row changed), matching rebuildAll's pattern.
+    // (with force when a field tasks derive from changed), matching rebuildAll's
+    // pattern.
     const result = rebuildPath(db, projectFilePath(slug, options.dataRoot), {
       ...options,
       skipTaskCascade: true,
     });
     track(result);
-    projectChanged = result.action === "projected";
+    // SRV-3: only a change tasks derive from forces them (see rebuildProjectFile).
+    projectChanged = result.action === "projected" && result.taskFacingChanged === true;
   }
 
   const taskOptions = projectChanged ? { ...options, force: true } : options;
@@ -1333,7 +1668,7 @@ export function rebuildAll(
   };
 
   for (const slug of slugs) {
-    // When the project row is (re)projected, its tasks must be re-projected
+    // When a field tasks derive from changed, its tasks must be re-projected
     // too — stage-reference diagnostics, effective repo and guest flags are
     // baked into task rows, so the task-side content-hash short-circuit
     // would otherwise keep them stale forever. The cascade inside
@@ -1348,7 +1683,8 @@ export function rebuildAll(
         skipTaskCascade: true,
       });
       track(result);
-      projectChanged = result.action === "projected";
+      // SRV-3: only a change tasks derive from forces them (see rebuildProjectFile).
+      projectChanged = result.action === "projected" && result.taskFacingChanged === true;
     }
     const taskOptions = projectChanged ? { ...options, force: true } : options;
     for (const key of listTaskDirs(slug, options.dataRoot)) {

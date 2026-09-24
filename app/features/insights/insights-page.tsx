@@ -695,24 +695,34 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
         under each cache TTL. Claude reports both the write figure and the lifetime; Codex
         reports neither, so a group of Codex runs reads "not reported" rather than zero.
       </p>
-      <table className="cache-table">
-        <thead>
-          <tr>
-            <th>group</th>
-            <th>runs</th>
-            <th>warm starts</th>
-            <th>written</th>
-            <th>read</th>
-            <th>write / read</th>
-            <th>first writes &gt; {fmtTokens(cache.largeWriteTokens)}</th>
-            <th>lifetime</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows("by run kind", cache.byKind)}
-          {rows("by credential kind", cache.byCredentialKind)}
-        </tbody>
-      </table>
+      {/* Interface review 2026-09-24 (layo-21): eight nowrap columns are wider
+          than a phone, so the table scrolls in its own box (the markdown
+          tables' wrap), focusable so the keyboard can scroll it too. */}
+      <div
+        className="md-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label="Prompt cache by group"
+      >
+        <table className="cache-table">
+          <thead>
+            <tr>
+              <th>group</th>
+              <th>runs</th>
+              <th>warm starts</th>
+              <th>written</th>
+              <th>read</th>
+              <th>write / read</th>
+              <th>first writes &gt; {fmtTokens(cache.largeWriteTokens)}</th>
+              <th>lifetime</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows("by run kind", cache.byKind)}
+            {rows("by credential kind", cache.byCredentialKind)}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

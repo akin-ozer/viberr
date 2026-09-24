@@ -14,11 +14,12 @@ npm run lint        # oxlint + vendored anti-slop plugin; must exit 0
 npm run typecheck   # react-router typegen + tsc
 npm test            # vitest run, app/**/*.test.{ts,tsx}
 npm run build       # react-router build (production build)
+node scripts/measure-routes.mjs --check   # bundle ratchet over build/client (ruling 457)
 npm run e2e         # playwright against the production Docker image (Docker required)
 ```
 
 CI (`.github/workflows/ci.yml`, push and PR on `main`) runs two jobs on `ubuntu-latest`
-with Node 26: `verify` = `npm ci` → lint → typecheck → test → build; `e2e` = `npm ci` →
+with Node 26: `verify` = `npm ci` → lint → typecheck → test → build → the bundle ratchet (`measure-routes.mjs --check`); `e2e` = `npm ci` →
 `npx playwright install --with-deps chromium` → `npm run e2e`, uploading
 `playwright-report/` for 7 days on failure. No secrets are needed: the unit setup file
 seeds synthetic ones and `compose.e2e.yml` carries its own.
@@ -368,7 +369,7 @@ with `hydrateRoot` in the viewer's (Pacific/Auckland, 00:00:01Z) with React's
 `onRecoverableError` collected, over a live run with a streaming console and an
 `accept_completion` card, plus the interrupted case that mirrors `entry.client.tsx`
 (hydration inside `startTransition`, a discrete event before the flush, then a
-`run.log-appended` update through the page's own EventSource and `/resources/run-log`
-tail fetch). The zones are applied per environment with `vi.resetModules()` and a dynamic
+`run.log-appended` update through the workspace layout's EventSource, the tab's one
+stream, and the console's `/resources/run-log` tail fetch). The zones are applied per environment with `vi.resetModules()` and a dynamic
 import, because `shared/dates/format.ts` builds its `Intl.DateTimeFormat` instances at
 import time.

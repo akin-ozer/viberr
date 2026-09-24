@@ -119,3 +119,50 @@ describe("GET /resources/run-log paging (P13-D-11)", () => {
     expect(zero.lines.length).toBe(1); // clamped up to 1, not down to "all"
   });
 });
+
+/**
+ * Ruling 457: the console's two ruling-457 asks of this route. `raw=0` leaves
+ * the stored envelopes out (the console asks for them only while its raw view
+ * is open), every answer carries the run row's live facts (the Live run strip
+ * follows the tail, LIVE-1), and `window=1` answers the group's console window
+ * the way a hard refresh ships it (TASK-1).
+ */
+describe("GET /resources/run-log for the console (ruling 457)", () => {
+  it("`raw=0` drops each line's envelope and keeps its display", async () => {
+    const data = await get("since=9&raw=0");
+    expect(texts(data)).toEqual(["l10", "l11"]);
+    for (const line of data.lines) expect(line).not.toHaveProperty("raw");
+    const withRaw = await get("since=9");
+    expect(withRaw.lines[0]!.raw).toBe(JSON.stringify({ i: 10 }));
+  });
+
+  it("carries the run row's live facts on every page", async () => {
+    const data = await get("since=11");
+    expect(data.lines).toEqual([]);
+    expect(data.facts).toMatchObject({ phase: null, step: null, turns: 0, tokensEstimated: true });
+  });
+
+  it("`window=1` answers the group's window: display lines, keys, facts, no envelope", async () => {
+    const { loader } = await import("~/routes/resources.run-log");
+    const { cookie } = await app.cookieFor(ardaId);
+    const request = app.request(`/resources/run-log?runId=${RUN_ID}&window=1`, { cookie });
+    const res = await loader({
+      request,
+      url: new URL(request.url),
+      params: {},
+      pattern: "/resources/run-log",
+      context: new RouterContextProvider(),
+    });
+    expect(res.status).toBe(200);
+    // SAFETY: a 200 from the route's `window=1` branch, which answers
+    // `Response.json({ data: runLogWindowFor(...) })` (`RunLogWindowPage`).
+    const body = (await res.json()) as {
+      data: { runId: string; lines: { text: string }[]; lineKeys: string[]; logWindow: { headSeq: number } };
+    };
+    expect(body.data.runId).toBe(RUN_ID);
+    expect(body.data.lines.map((l) => l.text)).toEqual(Array.from({ length: LINES }, (_, i) => `l${i}`));
+    expect(body.data.lineKeys.at(-1)).toBe(`0:${LINES - 1}`);
+    expect(body.data.logWindow.headSeq).toBe(LINES - 1);
+    expect(JSON.stringify(body)).not.toContain('"raw"');
+  });
+});

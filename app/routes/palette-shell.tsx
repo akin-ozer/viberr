@@ -1,13 +1,11 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { useState } from "react";
 import { Outlet, useLocation, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/palette-shell";
 import type { loader as rootLoader } from "../root";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
-import {
-  countUnreadNotifications,
-  listNotifications,
-} from "~/server/projections/notifications.server";
+import { bellCounts } from "~/server/projections/notifications.server";
 import { CommandPalette } from "~/features/shell/command-palette";
 import { standalonePageLabel } from "~/features/shell/nav";
 import { PageTopbar } from "~/features/shell/page-topbar";
@@ -64,10 +62,10 @@ export async function loader({ request }: Route.LoaderArgs) {
         role: user.role,
         avatarTone: user.avatarTone,
       },
-      // The same slice the workspace topbar and Home read, so the bell says the
-      // same thing on every surface (its own popover discloses the cap).
-      notifications: listNotifications(db, user.id, { limit: 100 }),
-      unread: countUnreadNotifications(db, user.id),
+      // The same counts the workspace topbar and Home read, so the bell says
+      // the same thing on every surface. Ruling 457 (FL-4): the bell loads its
+      // own list, and its popover discloses the cap.
+      ...bellCounts(db, user.id),
     },
   };
 }
@@ -112,8 +110,8 @@ export default function PaletteShell({ loaderData }: Route.ComponentProps) {
           title={title}
           user={header.user}
           theme={rootData?.theme ?? "system"}
-          notifications={header.notifications}
           unread={header.unread}
+          orphanUnread={header.orphanUnread}
           onOpenPalette={() => setPalette(true)}
         />
       )}
@@ -126,3 +124,6 @@ export default function PaletteShell({ loaderData }: Route.ComponentProps) {
     </div>
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/palette-shell");

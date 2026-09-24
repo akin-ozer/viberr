@@ -1,8 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import {
+  consoleBoundaryKey,
+  consoleLineKey,
   runBoundaryLine,
+  RUN_LOG_WINDOW_LINES,
+  SESSION_MISSING_SUFFIX,
   type LogLine,
   type RunBackend,
+  type RunLiveFacts,
   type RunLogWindow,
   type RunState,
   type RunView,
@@ -10,13 +16,18 @@ import {
 import { findUserById } from "~/server/auth/user-store.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
+  listRunLineDisplays,
+  listRunLineSizes,
   listRunLinesTail,
   listRunsForTaskRows,
-  runLineStats,
+  runLineRaw,
+  runLineStatsForTask,
   type AgentRunRow,
+  type RunLineStats,
+  type TailBudget,
 } from "./run-store.server";
 import { transcriptExists } from "./session-export.server";
-import { classifyRunEnd } from "./provider-refusal.server";
+import { classifyRunEndOf, type RunEnd } from "./provider-refusal.server";
 
 /**
  * Projects agent_runs rows (+ their log lines) into the `RunView[]` the
@@ -58,8 +69,10 @@ export const SDK_LABEL = {
  * This PAGINATES, it does not truncate: UI-53 deliberately widened the console
  * to the agent's whole history on the task, and `logWindow` carries the cursor
  * that walks backwards through it via `/resources/run-log?before=`.
+ *
+ * The line budget is declared in runtime-types.ts, because the console reads
+ * it too (ruling 457, CON-2: a tail further behind than one window re-windows).
  */
-export const RUN_LOG_WINDOW_LINES = 400;
 export const RUN_LOG_WINDOW_BYTES = 384 * 1024;
 
 /** Backward-paging cursor + honesty markers for one agent group's console.
@@ -109,13 +122,69 @@ function renderStateOf(lifecycle: RunState, finished: string | null): RunView["s
   }
 }
 
+/**
+ * Ruling 457 (LIVE-1): the facts of a run row that move while it streams —
+ * the Live run strip's phase, step, turns and tokens and the console's cache
+ * row. One mapping for the loader's `RunView` and the `/resources/run-log`
+ * answer the console tails with, so the two can never read a row differently.
+ */
+export function runLiveFacts(row: AgentRunRow): RunLiveFacts {
+  const finished = finishedLabel(row.finished_at);
+  const facts: RunLiveFacts = {
+    phase: row.phase,
+    step: row.step,
+    turns: row.turns,
+    // F35-1: null until a usage envelope has landed (a Codex run before its
+    // turn ends, a Claude run before its first API message) and the run is
+    // still live; a terminal row prints the figure it has rather than
+    // "pending" for ever.
+    tokens:
+      row.usage_final === 0 && row.input_tokens + row.output_tokens === 0 && !finished
+        ? null
+        : row.input_tokens + row.output_tokens,
+    // Whether the figure is an estimate is the column's own question, and the
+    // run ending does not answer it: a run somebody stopped, and one that
+    // errored before the provider replied, keep the adapter's estimate for
+    // good. Dropping the tilde there would print an estimate as the
+    // provider's total, which is the dishonesty F35-1 exists to remove, and
+    // would disagree with the Insights sums, which leave that same row out.
+    tokensEstimated: row.usage_final === 0,
+    // Ruling 369: read off the row as stored; the sink folded every figure.
+    cache: {
+      writeTokens: row.cache_write_tokens,
+      readTokens: row.cached_input_tokens,
+      firstCall:
+        row.first_call_warm === null
+          ? null
+          : {
+              promptTokens: row.first_call_prompt_tokens ?? 0,
+              write: row.first_call_cache_write ?? 0,
+              read: row.first_call_cache_read ?? 0,
+              warm: row.first_call_warm === 1,
+              missReason: row.first_call_miss_reason,
+            },
+      ttlBucket: row.cache_ttl_bucket,
+      peakPromptTokens: row.peak_prompt_tokens,
+      lastPromptTokens: row.last_prompt_tokens,
+      compactions: row.compactions,
+    },
+  };
+  // Ruling 457 (CON-7): the row's version (`patchRun` moves `updated_at` on
+  // every fact write), so the console keeps the newer of a revalidation's
+  // read and a tail read, whichever lands last.
+  const factsAt = Date.parse(row.updated_at);
+  if (Number.isFinite(factsAt)) facts.factsAt = factsAt;
+  return facts;
+}
+
 function projectRow(
   db: DatabaseSync,
   row: AgentRunRow,
-  lines: LogLine[],
-  raw: string[],
-  logWindow: RunLogWindow,
+  slice: GroupConsoleSlice,
+  /** Ruling 130(a) / ruling 416: how the run ended (`classifyRunEndOf`). */
+  end: RunEnd,
 ): ProjectedRunView {
+  const { display: lines, raw, keys: lineKeys, meta: logWindow, sessionMissing } = slice;
   const op = row.kind === "operator";
   const backend = row.backend;
   // The picker/header label is the AGENT's own name ("dev"/"Operator"/a
@@ -171,11 +240,7 @@ function projectRow(
   const noPrincipal = row.credential_user_id === null;
   // Ruling 130(a) / ruling 416: one classification of how the run ended,
   // shared with the review-round counter so the two can never disagree.
-  const { failureKind, failureOrigin, failedBackendUnavailable } = classifyRunEnd(
-    row.state,
-    lines,
-    raw,
-  );
+  const { failureKind, failureOrigin, failedBackendUnavailable } = end;
   const view: ProjectedRunView = {
     id: row.thread_id,
     serverRunId: row.id,
@@ -203,52 +268,18 @@ function projectRow(
     lifecycle: row.state,
     interruptedBy,
     interruptedReason,
-    phase: row.phase,
-    step: row.step,
     startedAt: row.started_at,
     finished,
-    turns: row.turns,
-    // F35-1: null until a usage envelope has landed (a Codex run before its
-    // turn ends, a Claude run before its first API message) and the run is
-    // still live; a terminal row prints the figure it has rather than
-    // "pending" for ever.
-    tokens:
-      row.usage_final === 0 && row.input_tokens + row.output_tokens === 0 && !finished
-        ? null
-        : row.input_tokens + row.output_tokens,
-    // Whether the figure is an estimate is the column's own question, and the
-    // run ending does not answer it: a run somebody stopped, and one that
-    // errored before the provider replied, keep the adapter's estimate for
-    // good. Dropping the tilde there would print an estimate as the
-    // provider's total, which is the dishonesty F35-1 exists to remove, and
-    // would disagree with the Insights sums, which leave that same row out.
-    tokensEstimated: row.usage_final === 0,
-    // Ruling 369: read off the row as stored; the sink folded every figure.
-    cache: {
-      writeTokens: row.cache_write_tokens,
-      readTokens: row.cached_input_tokens,
-      firstCall:
-        row.first_call_warm === null
-          ? null
-          : {
-              promptTokens: row.first_call_prompt_tokens ?? 0,
-              write: row.first_call_cache_write ?? 0,
-              read: row.first_call_cache_read ?? 0,
-              warm: row.first_call_warm === 1,
-              missReason: row.first_call_miss_reason,
-            },
-      ttlBucket: row.cache_ttl_bucket,
-      peakPromptTokens: row.peak_prompt_tokens,
-      lastPromptTokens: row.last_prompt_tokens,
-      compactions: row.compactions,
-    },
+    ...runLiveFacts(row),
     lines,
     raw,
+    lineKeys,
     // P13-D-11: the count of lines that EXIST, not of the ones this payload
     // carries (`lines.length`) — the console's "N events" footer must not shrink
     // just because the loader now ships a window.
     lineCount: logWindow.totalLines,
     logWindow,
+    sessionMissing,
   };
   if (failureKind) view.failureKind = failureKind;
   if (failureOrigin) view.failureOrigin = failureOrigin;
@@ -296,6 +327,33 @@ function pickRepresentative(rows: AgentRunRow[]): AgentRunRow {
 }
 
 /**
+ * Ruling 457 (owner decision 2, 2026-09-24): how much of each agent group's
+ * console a projection carries.
+ *
+ *   - `all`: every group's window, display lines and stored envelopes. The
+ *     server callers (the interrupt result, a reply's log thread) and the
+ *     projection's own tests.
+ *   - `shown`: a document load. Only the group the console opens on (the
+ *     running one, else the first, `shownGroupIndex`) carries its window, and
+ *     as display lines only: the envelopes load when the raw view opens.
+ *   - `none`: a `.data` request (a revalidation, a client navigation). No
+ *     group carries lines; each keeps its window facts, and the console fills
+ *     the thread it shows with one `/resources/run-log?window=1` request.
+ *   - `withheld`: UI-30, a viewer who may not read logs. No window is even
+ *     bounded; the summary strip and the failure class stay.
+ */
+export type ConsoleShipping = "all" | "shown" | "none" | "withheld";
+
+/**
+ * The group the console opens on when nothing is selected, the same rule
+ * `AgentLogsPanel` applies: the running one, else the first.
+ */
+function shownGroupIndex(representatives: AgentRunRow[]): number {
+  const running = representatives.findIndex((row) => row.state === "running");
+  return running >= 0 ? running : 0;
+}
+
+/**
  * All runs for a task as RunView[], GROUPED to ONE entry per agent (BUG 2):
  * the operator, the primary specialist (across every resume), and any
  * reviewer each appears exactly once, labeled by the agent's own name.
@@ -308,11 +366,37 @@ export function projectRunsForTask(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
+  { console: shipping = "all" }: { console?: ConsoleShipping } = {},
 ): ProjectedRunView[] {
-  const rows = listRunsForTaskRows(db, projectSlug, taskKey);
+  const groups = groupRuns(listRunsForTaskRows(db, projectSlug, taskKey));
+  if (groups.length === 0) return [];
+  const representatives = groups.map(pickRepresentative);
+  // Ruling 457 (TASK-1): one COUNT/MAX for the task, not one per run.
+  const stats =
+    shipping === "withheld" ? new Map<string, RunLineStats>() : runLineStatsForTask(db, projectSlug, taskKey);
+  const shown = shipping === "shown" ? shownGroupIndex(representatives) : -1;
+  return groups.map((bucket, i) => {
+    const representative = representatives[i]!;
+    const read: WindowRead =
+      shipping === "withheld"
+        ? "withheld"
+        : shipping === "all"
+          ? "full"
+          : i === shown
+            ? "display"
+            : "sizes";
+    return projectRow(
+      db,
+      representative,
+      windowForGroup(db, bucket, representative, stats, read),
+      classifyRunEndOf(db, representative),
+    );
+  });
+}
 
-  // Group rows by agent, preserving first-seen (created_at ASC) group order.
-  const order: string[] = [];
+/** Rows grouped by agent, in first-seen (created_at ASC) group order. */
+function groupRuns(rows: AgentRunRow[]): AgentRunRow[][] {
+  const order: AgentRunRow[][] = [];
   const groups = new Map<string, AgentRunRow[]>();
   for (const row of rows) {
     const key = groupKeyOf(row);
@@ -320,31 +404,146 @@ export function projectRunsForTask(
     if (!bucket) {
       bucket = [];
       groups.set(key, bucket);
-      order.push(key);
+      order.push(bucket);
     }
     bucket.push(row);
   }
+  return order;
+}
 
-  return order.map((key) => {
-    const bucket = groups.get(key)!;
-    const representative = pickRepresentative(bucket);
-    const window = windowForGroup(db, bucket, representative);
-    return projectRow(
-      db,
-      representative,
-      window.display,
-      window.raw,
-      window.meta,
-    );
-  });
+/**
+ * Ruling 457 (TASK-1, owner decision 2): the console window of the agent group
+ * `run` belongs to, as the task loader would ship it for the shown group:
+ * display lines, their keys and the window facts, plus the representative's
+ * live facts. The console fills a thread with this one request when the page
+ * payload did not carry it (a client navigation, a revalidation, or a group
+ * other than the one a hard refresh opened on).
+ */
+export interface RunLogWindowPage {
+  /** The group's representative run and its thread id right now. */
+  runId: string;
+  threadId: string;
+  lines: LogLine[];
+  lineKeys: string[];
+  logWindow: RunLogWindow;
+  facts: RunLiveFacts;
+}
+
+export function runLogWindowFor(db: DatabaseSync, run: AgentRunRow): RunLogWindowPage {
+  const key = groupKeyOf(run);
+  const bucket = listRunsForTaskRows(db, run.project_slug, run.task_key).filter(
+    (row) => groupKeyOf(row) === key,
+  );
+  // The run itself is always in its own group; the guard only keeps a row
+  // deleted mid-request from indexing an empty bucket.
+  const group = bucket.length > 0 ? bucket : [run];
+  const representative = pickRepresentative(group);
+  const slice = windowForGroup(
+    db,
+    group,
+    representative,
+    runLineStatsForTask(db, run.project_slug, run.task_key),
+    "display",
+  );
+  return {
+    runId: representative.id,
+    threadId: representative.thread_id,
+    lines: slice.display,
+    lineKeys: slice.keys,
+    logWindow: slice.meta,
+    facts: runLiveFacts(representative),
+  };
 }
 
 /** One agent group's console slice: the projected lines, their raw envelopes
- *  (index-aligned), and the window metadata the client pages with. */
+ *  (index-aligned, or empty when not read), their keys, the window metadata
+ *  the client pages with, and the continuity marker inside the window. */
 interface GroupConsoleSlice {
   display: LogLine[];
   raw: string[];
+  keys: string[];
   meta: RunLogWindow;
+  sessionMissing: RunView["sessionMissing"];
+}
+
+/**
+ * How much of each line a window reads (ruling 457): `full` bodies and
+ * envelopes, `display` bodies only, `sizes` neither (only the facts that
+ * bound the window and find the continuity marker), `withheld` nothing.
+ */
+type WindowRead = "full" | "display" | "sizes" | "withheld";
+
+/** One line inside a window, as much of it as the read asked for. */
+interface WindowLine {
+  seq: number;
+  bytes: number;
+  tag: string;
+  display: LogLine | null;
+  raw: string | null;
+}
+
+/**
+ * The newest lines of one run that fit what is left of the window, oldest
+ * first: drop from the OLDEST end of the run's tail until the byte budget
+ * fits — one 300 KB tool output must not evict the whole rest of the window —
+ * but keep at least `budget.keep` of the newest (see `windowForGroup`). The
+ * two ruling-457 reads apply that rule inside their query, so a line outside
+ * the window is neither returned nor parsed.
+ */
+function readTail(db: DatabaseSync, runId: string, budget: TailBudget, read: WindowRead): WindowLine[] {
+  if (read === "display") {
+    return listRunLineDisplays(db, runId, budget).map((l) => ({
+      seq: l.seq,
+      bytes: l.bytes,
+      tag: l.display.tag,
+      display: l.display,
+      raw: null,
+    }));
+  }
+  if (read === "sizes" || read === "withheld") {
+    return listRunLineSizes(db, runId, budget).map((l) => ({
+      seq: l.seq,
+      bytes: l.bytes,
+      tag: l.tag,
+      display: null,
+      raw: null,
+    }));
+  }
+  const tail = listRunLinesTail(db, runId, budget.lines);
+  let start = 0;
+  let bytes = tail.reduce((sum, l) => sum + l.bytes, 0);
+  while (start < tail.length - budget.keep && bytes > budget.bytes) {
+    bytes -= tail[start]!.bytes;
+    start += 1;
+  }
+  return tail.slice(start).map((l) => ({
+    seq: l.seq,
+    bytes: l.bytes,
+    tag: l.display.tag,
+    display: l.display,
+    raw: l.raw,
+  }));
+}
+
+/** The one field the continuity panel reads out of a marker's envelope. A
+ *  blank id is the same as none: the panel must not print `session <empty>`. */
+const deadSessionEnvelope = z.object({ session_id: z.string().trim().min(1) });
+
+/**
+ * The dead session id from the marker line's STORED wire envelope. Structured,
+ * not scraped: `recordSessionMissing` writes `{type:"error", source:"viberr",
+ * reason:"session_missing", session_id, message}`. An adapter envelope that
+ * carries no id yields null, and the panel says nothing about a session it
+ * cannot name.
+ */
+function deadSessionId(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const envelope = deadSessionEnvelope.safeParse(JSON.parse(raw));
+    return envelope.success ? envelope.data.session_id : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -359,82 +558,108 @@ interface GroupConsoleSlice {
  * Fills newest-run-first so the tail — the part anyone is actually reading —
  * always survives the budget, then re-assembles chronologically with the same
  * explicit `run N of M` boundary UI-53 introduced.
+ *
+ * Ruling 457: the window is bounded the same way whatever `read` carries, so a
+ * thread the console fills later gets exactly the window a document load
+ * would have shipped, and the continuity marker (P13-D-2) counts only while it
+ * is inside that window (the panel's retirement rule, continuity-recovery.tsx).
  */
 function windowForGroup(
   db: DatabaseSync,
   bucket: AgentRunRow[],
   representative: AgentRunRow,
+  stats: Map<string, RunLineStats>,
+  read: WindowRead,
 ): GroupConsoleSlice {
-  const stats = bucket.map((row) => runLineStats(db, row.id));
-  const totalLines = stats.reduce((sum, s) => sum + s.count, 0);
+  if (read === "withheld") {
+    return {
+      display: [],
+      raw: [],
+      keys: [],
+      meta: { totalLines: 0, hasMore: false, runIds: [], oldest: null, headSeq: -1 },
+      sessionMissing: null,
+    };
+  }
+  const countOf = (row: AgentRunRow) => stats.get(row.id)?.count ?? 0;
+  const totalLines = bucket.reduce((sum, row) => sum + countOf(row), 0);
 
   let lineBudget = RUN_LOG_WINDOW_LINES;
   let byteBudget = RUN_LOG_WINDOW_BYTES;
   /** Per bucket index (only for runs that contributed), oldest-first later. */
-  const included = new Map<number, { seq: number; display: LogLine; raw: string }[]>();
+  const included = new Map<number, WindowLine[]>();
 
   for (let i = bucket.length - 1; i >= 0; i--) {
     if (lineBudget <= 0 || byteBudget <= 0) break;
-    const tail = listRunLinesTail(db, bucket[i]!.id, lineBudget);
     // A run with NO lines yet (the freshly-queued newest resume is the common
     // case) contributes nothing but must not end the walk — otherwise the
-    // console would go blank the instant an agent is re-engaged.
-    if (tail.length === 0) continue;
-    // Drop from the OLDEST end of this run's tail until the byte budget fits —
-    // one 300 KB tool output must not evict the whole rest of the window. While
-    // nothing is in the window yet, keep at least the newest line even if it
-    // busts the budget on its own: an empty console is a worse answer than an
-    // oversized one, and the next run of the walk sees an exhausted budget.
-    const minKeep = included.size === 0 ? 1 : 0;
-    let start = 0;
-    let bytes = tail.reduce((sum, l) => sum + l.bytes, 0);
-    while (start < tail.length - minKeep && bytes > byteBudget) {
-      bytes -= tail[start]!.bytes;
-      start += 1;
-    }
-    // Non-empty tail, nothing kept → the byte budget is spent; older runs are
-    // outside the window by definition.
-    const kept = tail.slice(start);
+    // console would go blank the instant an agent is re-engaged. The task's
+    // counts say so without a query.
+    if (countOf(bucket[i]!) === 0) continue;
+    // While nothing is in the window yet, keep at least the newest line even
+    // if it busts the budget on its own: an empty console is a worse answer
+    // than an oversized one, and the next run of the walk sees an exhausted
+    // budget.
+    const kept = readTail(
+      db,
+      bucket[i]!.id,
+      { lines: lineBudget, bytes: byteBudget, keep: included.size === 0 ? 1 : 0 },
+      read,
+    );
+    // A run with lines but none kept → the byte budget is spent; older runs
+    // are outside the window by definition.
     if (kept.length === 0) break;
     lineBudget -= kept.length;
-    byteBudget -= bytes;
-    included.set(
-      i,
-      kept.map((l) => ({ seq: l.seq, display: l.display, raw: l.raw })),
-    );
+    byteBudget -= kept.reduce((sum, l) => sum + l.bytes, 0);
+    included.set(i, kept);
   }
 
+  const shipped = read !== "sizes";
   const display: LogLine[] = [];
   const raw: string[] = [];
-  let shipped = 0;
+  const keys: string[] = [];
+  let count = 0;
   let oldest: RunLogWindow["oldest"] = null;
+  let marker: { runId: string; line: WindowLine } | null = null;
   let first = true;
   for (let i = 0; i < bucket.length; i++) {
     const lines = included.get(i);
     if (!lines || lines.length === 0) continue;
     if (!oldest) oldest = { runId: bucket[i]!.id, seq: lines[0]!.seq };
-    if (!first) {
+    if (!first && shipped) {
       display.push(runBoundaryLine(i + 1, bucket.length));
-      raw.push("");
+      if (read === "full") raw.push("");
+      keys.push(consoleBoundaryKey(i));
     }
     first = false;
     for (const line of lines) {
-      display.push(line.display);
-      raw.push(line.raw);
-      shipped += 1;
+      count += 1;
+      if (!marker && line.tag.endsWith(SESSION_MISSING_SUFFIX)) marker = { runId: bucket[i]!.id, line };
+      if (!shipped) continue;
+      display.push(line.display!);
+      if (read === "full") raw.push(line.raw ?? "");
+      keys.push(consoleLineKey(i, line.seq));
     }
   }
 
-  const repIndex = bucket.indexOf(representative);
+  const repStats = stats.get(representative.id);
   return {
     display,
     raw,
+    keys,
     meta: {
       totalLines,
-      hasMore: shipped < totalLines,
+      hasMore: count < totalLines,
       runIds: bucket.map((row) => row.id),
-      oldest: shipped < totalLines ? oldest : null,
-      headSeq: repIndex >= 0 ? stats[repIndex]!.maxSeq : -1,
+      oldest: count < totalLines ? oldest : null,
+      headSeq: repStats ? repStats.maxSeq : -1,
+      loaded: shipped,
     },
+    sessionMissing: marker
+      ? {
+          sessionId: deadSessionId(
+            marker.line.raw ?? runLineRaw(db, marker.runId, marker.line.seq),
+          ),
+        }
+      : null,
   };
 }

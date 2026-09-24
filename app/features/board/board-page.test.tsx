@@ -37,10 +37,7 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     waiting: "none",
     waitingOnMe: false,
     urgent: false,
-    priority: "normal",
     labels: [],
-    dueDate: null,
-    blockedBy: [],
     archived: false,
     validation: "none",
     blockReason: null,
@@ -53,26 +50,11 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     reviewers: [],
     operator: null,
     branch: null,
-    repo: "akin-ozer/viberr",
     pr: null,
     prChecks: null,
     prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
-    goal: "",
     packet: null,
-    eventCount: 0,
-    commentCount: 0,
-    diagnosticCount: 0,
-    createdAt: "2026-07-01T09:00:00.000Z",
-    updatedAt: "2026-07-01T09:00:00.000Z",
-    boardRank: null,
-    filePath: "projects/viberr-core/tasks/VIB-142/task.md",
-    // Gap-10: `listProjectTasks` annotates every summary with these two.
-    lastActivityAt: null,
+    // Gap-10: `listProjectTasks` annotates every summary with `quiet`.
     quiet: false,
     // D4: projected runtime-continuity fact (null = healthy).
     continuity: null,
@@ -105,8 +87,8 @@ function renderBoard(
      *  request is handed through so a case can read what the board actually
      *  POSTed (ruling 88's acknowledgment fields). */
     action?: (args: { request: Request }) =>
-      | { ok: boolean; toast?: string; error?: string }
-      | Promise<{ ok: boolean; toast?: string; error?: string }>;
+      | { ok: boolean; toast?: string; error?: string; errors?: number }
+      | Promise<{ ok: boolean; toast?: string; error?: string; errors?: number }>;
   } = {},
 ) {
   // The route carries an `action` key only when a case supplies one: leaving it
@@ -645,6 +627,30 @@ describe("P13-D-10: a rejected board action must not render the success tick", (
     expect(progress.getAttribute("data-kind")).toBe("success");
   });
 
+  // Interface review 2026-09-24 (writ-2): the route answers ok with an `errors`
+  // count, and the board said it matched the store with a success tick.
+  it("toasts a re-scan that could not read a file as an error, with the way out", async () => {
+    const { container, getByText } = renderBoard([task()], {
+      action: () => ({ ok: true as const, errors: 1 }),
+    });
+    fireEvent.click(getByText("Re-scan"));
+    await waitFor(() =>
+      expect(
+        [...container.querySelectorAll(".toast")].some((t) =>
+          t.textContent!.includes("could not be read"),
+        ),
+      ).toBe(true),
+    );
+    const failure = [...container.querySelectorAll(".toast")].find((t) =>
+      t.textContent!.includes("could not be read"),
+    )!;
+    expect(failure.textContent).toContain(
+      "Re-scan finished, but 1 file could not be read. The server log names each one. Fix it and re-scan.",
+    );
+    expect(failure.getAttribute("data-kind")).toBe("error");
+    expect(container.textContent).not.toContain("matches the file-native store");
+  });
+
   it("keeps the success tick on an accepted transition", async () => {
     const { container, getByLabelText, getByRole } = renderBoard(
       [task({ key: "VIB-1", stage: "impl" })],
@@ -909,7 +915,7 @@ describe("the new-task dialog does not accuse an untouched form", () => {
       key: "Enter",
     });
     const hint = container.querySelector(".foot-hint")!;
-    expect(hint.textContent).toBe("A title is required.");
+    expect(hint.textContent).toBe("A title needs at least 3 characters.");
     expect(hint.className).toContain("err");
   });
 
@@ -919,8 +925,18 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     fireEvent.change(input, { target: { value: "ab" } });
     fireEvent.blur(input);
     const hint = container.querySelector(".foot-hint")!;
-    expect(hint.textContent).toBe("A title is required.");
+    expect(hint.textContent).toBe("A title needs at least 3 characters.");
     expect(hint.className).toContain("err");
+  });
+
+  // Interface review 2026-09-24 (writ-4): "A title is required." answered a
+  // two-letter title ("QA") with a demand already met, and nothing said the
+  // rule was a length. The label states it before any mistake.
+  it("states the length rule on the label before any mistake", () => {
+    const { container } = openDialog();
+    const label = container.querySelector('label[for="new-task-title"]')!;
+    expect(label.querySelector(".fhint")!.textContent).toBe("at least 3 characters");
+    expect(container.querySelector(".foot-hint")!.className).not.toContain("err");
   });
 
   // Interface review 2026-09-06: the primary used to be hard-disabled (and
@@ -952,7 +968,7 @@ describe("the new-task dialog does not accuse an untouched form", () => {
     fireEvent.click(create);
 
     const hint = container.querySelector("#new-task-hint")!;
-    expect(hint.textContent).toBe("A title is required.");
+    expect(hint.textContent).toBe("A title needs at least 3 characters.");
     expect(hint.className).toContain("err");
     expect(hint.getAttribute("role")).toBe("alert");
     expect(input.getAttribute("aria-invalid")).toBe("true");
@@ -1475,7 +1491,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
     expect(
       openConfirm({
         readiness: "input_required",
-        packet: { ...blockedPacket, type: "input", kind: "Completion report" },
+        packet: { type: "input", title: blockedPacket.title },
         blockReason: null,
       }),
     ).not.toContain("blocked decision");
@@ -2053,7 +2069,6 @@ describe("gap-10: the board says when a task has gone quiet", () => {
   const quietTask = (patch: Partial<BoardTask> = {}) =>
     task({
       waiting: "agent",
-      lastActivityAt: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
       quiet: true,
       ...patch,
     });
@@ -2424,11 +2439,8 @@ describe("ruling 172: a held task's card says `blocked`, not what it waits on", 
       readiness: "blocked",
       displayReadiness: "blocked",
       waiting: "none",
-      blockedBy: [
-        { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "done", taskKey: "JC-3", goalId: "goal-1" },
-        { ref: "goal-1 link 3", label: "goal-1 link 3", state: "open", taskKey: null, goalId: "goal-1" },
-        { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
-      ],
+      // Ruling 457 (BOARD-3): the card no longer even carries the entries the
+      // task waits on; the readiness word is the whole hold.
     });
   const waitChipOf = (root: Element) =>
     [...root.querySelectorAll(".chip")].find((p) => (p.textContent ?? "").startsWith("blocked by "));
@@ -2748,12 +2760,7 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
     const withOperator = renderBoard([
       task({
         key: "VIB-4",
-        operator: {
-          name: "Operator",
-          assignedAtStageId: "triage",
-          sinceStageIndex: 1,
-          sinceLabel: "since Triage",
-        },
+        operator: { name: "Operator" },
       }),
     ]);
     expect(seats(withOperator.container).owner).toBe("Owner: awaiting owner");
@@ -2967,6 +2974,7 @@ describe("a move in flight draws its request until the columns show the answer",
             inFlight={state.flight}
             inFlightTask={state.tasks.find((t) => t.key === state.flight?.key) ?? null}
             onMoveTask={() => {}}
+            onNudgeTask={() => {}}
             rovingKey={null}
             onCardKeyDown={() => {}}
           />
@@ -3108,5 +3116,112 @@ describe("ruling 349: a run parked behind the cap reads 'agent queued'", () => {
     // CANARY: render the working branch for every waiting: "agent" card.
     expect(tag.querySelector(".working")).toBeNull();
     expect(container.textContent).not.toContain("agent working");
+  });
+});
+
+/**
+ * Interface review 2026-09-24 (acce-17) — a card's slot within its lane could be
+ * set only by a pointer drag: the Move menu refused a same-lane pick and always
+ * appended. Move up / Move down in the card's menu submit the drop's own
+ * governed reorder, against the lane as drawn.
+ */
+describe("acce-17: Move up / Move down reorder a card within its lane", () => {
+  const lane = () => [
+    task({ key: "VIB-1", stage: "impl" }),
+    task({ key: "VIB-2", stage: "impl" }),
+    task({ key: "VIB-3", stage: "impl" }),
+  ];
+
+  function menuFor(container: HTMLElement, key: string) {
+    const card = [...container.querySelectorAll<HTMLElement>(".card-wrap")].find(
+      (el) => el.dataset.cardKey === key,
+    )!;
+    const trigger = card.querySelector<HTMLButtonElement>("button.stage-menu-btn")!;
+    fireEvent.click(trigger);
+    return trigger;
+  }
+
+  function item(name: string): HTMLButtonElement {
+    const found = [
+      ...document.querySelectorAll<HTMLButtonElement>('.stage-menu-pop [role="menuitem"]'),
+    ].find((b) => b.textContent!.trim() === name);
+    if (!found) throw new Error(`no menu item ${name}`);
+    return found;
+  }
+
+  function renderLane() {
+    const posted: Record<string, string>[] = [];
+    const view = renderBoard(lane(), {
+      action: async ({ request }) => {
+        const fd = await request.formData();
+        const row: Record<string, string> = {};
+        for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
+        posted.push(row);
+        return { ok: true as const, toast: `Reordered ${row.taskKey}` };
+      },
+    });
+    return { ...view, posted };
+  }
+
+  it("disables the edge a card cannot move past", () => {
+    const { container } = renderLane();
+    menuFor(container, "VIB-1");
+    expect(item("Move up").disabled).toBe(true);
+    expect(item("Move down").disabled).toBe(false);
+    fireEvent.keyDown(document.querySelector(".stage-menu-pop")!, { key: "Escape" });
+
+    menuFor(container, "VIB-3");
+    expect(item("Move up").disabled).toBe(false);
+    expect(item("Move down").disabled).toBe(true);
+  });
+
+  it("Move up lands before the card above", async () => {
+    const { container, posted } = renderLane();
+    menuFor(container, "VIB-2");
+    fireEvent.click(item("Move up"));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({
+      intent: "reorder",
+      taskKey: "VIB-2",
+      to: "impl",
+      beforeKey: "VIB-1",
+    });
+  });
+
+  it("Move down lands before the card two below, or at the lane's end", async () => {
+    const { container, posted } = renderLane();
+    menuFor(container, "VIB-1");
+    fireEvent.click(item("Move down"));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({ taskKey: "VIB-1", to: "impl", beforeKey: "VIB-3" });
+
+    await waitFor(() =>
+      expect(container.querySelector(".card-wrap.in-flight")).toBeNull(),
+    );
+    menuFor(container, "VIB-2");
+    fireEvent.click(item("Move down"));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    // Empty is the server's "append": VIB-2 was second to last.
+    expect(posted[1]).toMatchObject({ taskKey: "VIB-2", to: "impl", beforeKey: "" });
+  });
+
+  it("puts focus back on the card's Move trigger once the answer is in", async () => {
+    // The card hides while its move is in flight, and a browser drops the
+    // focus it held; jsdom has no layout, so the drop is stated.
+    const { container, posted } = renderLane();
+    const trigger = menuFor(container, "VIB-2");
+    fireEvent.click(item("Move up"));
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    expect(document.activeElement).toBe(document.body);
+    await waitFor(() => expect(posted).toHaveLength(1));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    // …and the roving tab stop moved with it.
+    await waitFor(() => expect(trigger.tabIndex).toBe(0));
+  });
+
+  it("the list view's menu offers no reorder (the list has no lanes)", () => {
+    const { container } = renderBoard(lane(), { view: "list" });
+    fireEvent.click(container.querySelector<HTMLButtonElement>("button.stage-menu-btn")!);
+    expect(document.querySelector('.stage-menu-pop [role="menuitem"]')).toBeNull();
   });
 });

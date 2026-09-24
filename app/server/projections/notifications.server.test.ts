@@ -21,6 +21,7 @@ import { setNotifRoutingPref } from "~/features/profile/profile-actions.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import {
+  bellCounts,
   countUnreadNotifications,
   createNotification,
   isTaskViewNavigation,
@@ -86,6 +87,13 @@ describe("notifications", () => {
     createNotification(db, { id: "gone", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: "wiped-proj", taskKey: "WIP-9" });
     // The orphan ("gone") does not inflate the badge — only org + live count.
     expect(countUnreadNotifications(db, "u_1")).toBe(2);
+    // Ruling 457 / F19-25: the bell's head counts the orphan beside the badge,
+    // from the server now that pages no longer ship the list; read rows and
+    // other people's rows count in neither.
+    createNotification(db, { id: "gone-read", userId: "u_1", kind: "packet", text: "t", projectSlug: "wiped-proj", readAt: "2026-07-04T00:00:00Z" });
+    createNotification(db, { id: "theirs", userId: "u_2", kind: "packet", text: "t", projectSlug: "wiped-proj" });
+    expect(bellCounts(db, "u_1")).toEqual({ unread: 2, orphanUnread: 1 });
+    expect(bellCounts(db, "u_3")).toEqual({ unread: 0, orphanUnread: 0 });
   });
 
   it("read-marking is idempotent and monotonic", () => {

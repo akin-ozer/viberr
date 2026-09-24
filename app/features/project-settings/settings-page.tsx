@@ -1857,7 +1857,8 @@ function RepairRepoDialog({
   const flagged = refused > 0 ? missing : null;
   return (
     <dialog ref={ref} className="confirm-card" aria-label="Repair repository">
-      <div className="confirm-icon">
+      {/* colo-7: a primary commit, so the primary wash, not the danger one. */}
+      <div className="confirm-icon primary">
         <Icon name="github" />
       </div>
       <h3>Repair repository</h3>

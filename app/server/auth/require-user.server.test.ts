@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { UserRole } from "~/shared/mapping/user.server";
+import {
+  statementsMatching,
+  tallyServerReads,
+  type ServerReadTally,
+} from "../../../test-support/perf-counters";
 import { setupAppTest } from "../../../test-support/test-app";
-import { authenticate, requireAuth, roleSatisfies } from "./require-user.server";
+import {
+  authenticate,
+  requireAuth,
+  requireRole,
+  roleSatisfies,
+} from "./require-user.server";
 import { insertUser } from "./user-store.server";
 
 describe("roleSatisfies (RBAC matrix)", () => {
@@ -88,6 +98,26 @@ describe("authenticate (better-auth session)", () => {
     expect(count.c).toBe(0);
   });
 
+  it("writ-1: requireRole refuses a member with the org-admin sentence", async () => {
+    // The root error boundary renders this message verbatim (D32-15), so it
+    // names the tier in the product's term and says who can help.
+    const { cookie } = await seedUser("member");
+    const thrown: unknown = await requireRole(
+      app.request("/org/settings", { cookie }),
+      "admin",
+    ).catch((e) => e);
+    expect(thrown).toBeInstanceOf(Response);
+    const refusal = thrown instanceof Response ? thrown : null;
+    expect(refusal?.status).toBe(403);
+    expect(await refusal?.json()).toEqual({
+      error: {
+        code: "forbidden",
+        message:
+          "Only org admins can open this page. Ask an org admin for access.",
+      },
+    });
+  });
+
   it("surfaces the pwreset_required gate", async () => {
     app = await setupAppTest();
     const user = insertUser(app.db, {
@@ -100,6 +130,56 @@ describe("authenticate (better-auth session)", () => {
     const { cookie } = await app.cookieFor(user.id);
     const auth = await authenticate(app.request("/x", { cookie }));
     expect(auth?.pwresetRequired).toBe(true);
+  });
+});
+
+/**
+ * Ruling 457 (FL-8 / SRV-7): React Router hands every loader of one request
+ * the same Request, so the session is resolved once per Request — for reads.
+ */
+describe("one session resolution per Request (ruling 457)", () => {
+  let app: Awaited<ReturnType<typeof setupAppTest>>;
+  afterEach(() => app?.cleanup());
+
+  async function signedIn() {
+    app = await setupAppTest();
+    const user = insertUser(app.db, {
+      id: "u_memo",
+      email: "memo@viberr.test",
+      name: "Memo User",
+      role: "member",
+    });
+    return { user, ...(await app.cookieFor(user.id)) };
+  }
+
+  const sessionReads = (tally: ServerReadTally) => statementsMatching(tally, /from "session"/i).length;
+
+  it("every guard on one GET shares a single resolution", async () => {
+    const { user, cookie } = await signedIn();
+    const request = app.request("/projects/acme/board.data", { cookie });
+    const { result, tally } = await tallyServerReads(app.dataRoot, async () => [
+      await authenticate(request),
+      await requireAuth(request),
+      await authenticate(request),
+    ]);
+    expect(result.map((r) => r?.user.id)).toEqual([user.id, user.id, user.id]);
+    expect(sessionReads(tally)).toBe(1);
+  });
+
+  it("a new Request resolves again, so a revoked session is seen at once", async () => {
+    const { user, cookie } = await signedIn();
+    expect(await authenticate(app.request("/x", { cookie }))).not.toBeNull();
+    app.db.prepare(`DELETE FROM session WHERE userId = ?`).run(user.id);
+    expect(await authenticate(app.request("/x", { cookie }))).toBeNull();
+  });
+
+  it("a POST resolves on every call: an action can change its own session", async () => {
+    const { user, cookie } = await signedIn();
+    const request = app.request("/logout", { method: "POST", cookie });
+    expect(await authenticate(request)).not.toBeNull();
+    app.db.prepare(`DELETE FROM session WHERE userId = ?`).run(user.id);
+    // CANARY: memoize mutations too and this still answers the deleted session.
+    expect(await authenticate(request)).toBeNull();
   });
 });
 

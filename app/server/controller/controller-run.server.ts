@@ -43,7 +43,8 @@ import {
   type RunPrincipalRefusal,
 } from "~/server/runtimes/run-principal.server";
 import type { UserBackendHealth } from "~/server/runtimes/backend-credentials.server";
-import { RUN_PHASE, type RunMcpServers } from "~/server/runtimes/adapter.server";
+import type { RunMcpServers } from "~/server/runtimes/adapter.server";
+import { namedTurnPhase } from "~/features/runtime/runtime-types";
 import {
   interruptRun,
   registerRunCompletion,
@@ -881,6 +882,15 @@ const IDLE_TURN: ConversationTurnState = {
   step: null,
 };
 
+/**
+ * Ruling 457 (CTL-2): the conversations holding a turn right now, read off the
+ * in-process lease table (no query). The dock's status asks this every 5 s
+ * while a turn works instead of reloading a whole transcript.
+ */
+export function liveTurnConversationIds(): string[] {
+  return [...leases()].filter(([, entry]) => entry.runId !== null).map(([id]) => id);
+}
+
 export function conversationTurnState(
   db: DatabaseSync,
   conversationId: string,
@@ -894,7 +904,7 @@ export function conversationTurnState(
   return {
     working: true,
     runId: entry.runId,
-    phase: run.phase === RUN_PHASE.working ? null : run.phase,
+    phase: namedTurnPhase(run.phase),
     step: run.step,
   };
 }

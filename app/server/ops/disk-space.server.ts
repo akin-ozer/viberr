@@ -33,7 +33,7 @@ import { getDataRoot } from "~/server/files/file-store-root.server";
  *
  * `VIBERR_DISK_LOW_FREE_MB` / `VIBERR_DISK_CRITICAL_FREE_MB` override them,
  * read through `getEnv()`: the env schema holds the defaults and fails boot on
- * a value that is not a positive number (ruling 455(c)).
+ * a value that is not a positive number (ruling 458(c)).
  *
  * An unmeasurable volume returns `null`, NEVER a fabricated zero: "we could not
  * measure" and "there is no space" must not render the same (R17-5 — a

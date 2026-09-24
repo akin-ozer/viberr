@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import {
   formatCalendarDate,
   formatDayDotTime,
@@ -12,7 +12,8 @@ import {
  * differ, so rendering the viewer-local form on both sides hydrates to
  * different text — a recoverable React #418 that forces a full client
  * re-render of the page. First paint is the UTC form, identical on server
- * and client by construction; an effect swaps in the viewer-local rendering.
+ * and client by construction; the viewer-local rendering replaces it as soon as
+ * hydration commits. A stamp mounted after that renders local at once.
  */
 export function LocalDayDotTime({ iso }: { iso: string }) {
   const local = useHydrated();
@@ -23,11 +24,27 @@ export function LocalDayDotTime({ iso }: { iso: string }) {
  * True after hydration. For timezone-dependent text that cannot render its
  * viewer-local form during SSR: render a timezone-DETERMINISTIC form (UTC, or
  * the raw stored value) while this is false, and the local form after.
+ *
+ * Ruling 457: false only on the server and during hydration, where React uses
+ * the server snapshot and then re-renders once with the client's. A component
+ * that mounts later (a client navigation, a new row, a console opened on
+ * demand) reads true on its first render. The per-mount effect this replaced
+ * made every such mount commit twice and swap all of its stamps after the
+ * first paint, where a "Sep 24 · 11:02" visibly shrank to "14:02".
  */
 export function useHydrated(): boolean {
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
-  return hydrated;
+  return useSyncExternalStore(subscribeToNothing, clientSnapshot, serverSnapshot);
+}
+
+/** Hydration is the only change, and React observes it without a store. */
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+function clientSnapshot(): boolean {
+  return true;
+}
+function serverSnapshot(): boolean {
+  return false;
 }
 
 /**

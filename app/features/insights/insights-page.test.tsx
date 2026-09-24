@@ -768,6 +768,16 @@ describe("the prompt-cache panel (ruling 369)", () => {
     // The line the large-write column counts against is named.
     expect(panel.textContent).toContain("above 100.0K");
   });
+
+  it("scrolls the table in its own keyboard-reachable box, not the page (layo-21)", () => {
+    // Eight nowrap columns are ~690px: without the wrap, /insights scrolled
+    // sideways at phone width and at 200% zoom.
+    const { getByRole } = renderPage(FULL);
+    const region = getByRole("region", { name: "Prompt cache by group" });
+    expect(region.classList.contains("md-table-wrap")).toBe(true);
+    expect(region.getAttribute("tabindex")).toBe("0");
+    expect(region.querySelector("table.cache-table")).not.toBeNull();
+  });
 });
 
 /**

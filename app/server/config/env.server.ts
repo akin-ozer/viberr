@@ -30,7 +30,7 @@ export const DEFAULT_DISK_LOW_FREE_MB = 2048;
 export const DEFAULT_DISK_CRITICAL_FREE_MB = 512;
 
 /**
- * Ruling 455(c): a knob that must be a positive number. `Number()` coercion,
+ * Ruling 458(c): a knob that must be a positive number. `Number()` coercion,
  * as the modules applied it, and a value that is not a finite number above zero
  * fails boot instead of quietly running the default.
  */
@@ -175,7 +175,7 @@ const envSchema = z.object({
   VIBERR_TRANSCRIPT_RETENTION_DAYS: z.string().optional(),
   VIBERR_SESSION_HOME_RETENTION_DAYS: z.string().optional(),
   // C01-A6 (pass 32) declared the last raw `process.env` readers so the schema
-  // and `.env.example` stop denying they exist. Ruling 455(c): the schema also
+  // and `.env.example` stop denying they exist. Ruling 458(c): the schema also
   // parses the first five, and their modules read the typed value through
   // `getEnv()`. A value that does not parse fails boot like every other key,
   // where each module's own fallback used to run the default in silence:

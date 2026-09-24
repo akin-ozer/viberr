@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data } from "react-router";
 import type { Route } from "./+types/project.controller";
 import { pageTitle } from "~/shared/page-title";
@@ -24,6 +25,7 @@ import {
   getControllerSurface,
   selectedConversationId,
 } from "~/features/controller/controller-query.server";
+import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
  * /projects/:slug/controller — the controller addressed INSIDE one project
@@ -57,6 +59,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         projectSlug: params.slug,
       }),
       all: url.searchParams.get("all") === "1",
+      // Ruling 457 (owner decision 2): console lines on a document load only.
+      console: isDocumentNavigation(request) ? "shown" : "none",
     },
   );
   // The goal redirect controls follow the goal-actions gate (creator OR
@@ -200,3 +204,6 @@ export default function ProjectControllerRoute({
     />
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.controller");

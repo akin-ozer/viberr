@@ -253,7 +253,7 @@ function recordPass(reason: MaintenanceReason, freedBytes: number): void {
 
 /** What /resources/health reports about maintenance — proof the timer is live.
  *  The two periods are the env schema's (defaults, and the refusal of a value
- *  that does not parse, live there: ruling 455(c)). */
+ *  that does not parse, live there: ruling 458(c)). */
 export function maintenanceState(): MaintenanceState {
   const env = getEnv();
   return {

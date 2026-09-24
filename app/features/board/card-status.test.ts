@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TaskSummary } from "~/shared/mapping/task.server";
+import type { BoardCard } from "./board-card";
 import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
 
 /**
@@ -9,7 +9,9 @@ import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
  * problem order the fold counts against.
  */
 
-function task(patch: Partial<TaskSummary> = {}): TaskSummary {
+/** A board card (ruling 457, BOARD-3: the board ships these, not the whole
+ *  task summary). */
+function task(patch: Partial<BoardCard> = {}): BoardCard {
   return {
     projectSlug: "viberr-core",
     key: "VIB-1",
@@ -19,10 +21,7 @@ function task(patch: Partial<TaskSummary> = {}): TaskSummary {
     displayReadiness: "ready",
     waiting: "none",
     urgent: false,
-    priority: "normal",
     labels: [],
-    dueDate: null,
-    blockedBy: [],
     archived: false,
     validation: "none",
     blockReason: null,
@@ -32,25 +31,12 @@ function task(patch: Partial<TaskSummary> = {}): TaskSummary {
     reviewers: [],
     operator: null,
     branch: null,
-    repo: null,
     pr: null,
     prChecks: null,
     prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
-    goal: "",
     packet: null,
-    eventCount: 0,
-    commentCount: 0,
-    diagnosticCount: 0,
-    createdAt: null,
-    updatedAt: null,
-    boardRank: null,
-    filePath: "projects/viberr-core/tasks/VIB-1/task.md",
     continuity: null,
+    quiet: false,
     ...patch,
   };
 }
@@ -104,7 +90,7 @@ describe("cardStatus: the wait takes the seat, else the readiness word", () => {
 
   it("an unknown value never greenwashes (C12)", () => {
     // SAFETY: the point of the case is a value outside the enum reaching the card.
-    const s = cardStatus(task({ displayReadiness: "on_track" as TaskSummary["displayReadiness"] }))!;
+    const s = cardStatus(task({ displayReadiness: "on_track" as BoardCard["displayReadiness"] }))!;
     expect(s).toEqual({ kind: "unknown", label: "unknown", icon: "activity" });
   });
 

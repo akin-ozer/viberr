@@ -10,10 +10,10 @@ import {
 import { Icon } from "./icon";
 
 /**
- * Bottom-center toast stack with 2600 ms auto-dismiss. Errors render
- * inline or at route level; the root mounts one
- * ToastProvider in root.tsx; features call useToast() instead of the
- * mock's prop-drilled `push`.
+ * Bottom-center toast stack. A success toast auto-dismisses after 5000 ms,
+ * paused while the pointer or focus is on the stack; an error toast stays until
+ * its Dismiss button is pressed. The root mounts one ToastProvider in root.tsx;
+ * features call useToast() instead of the mock's prop-drilled `push`.
  */
 
 export type ToastKind = "success" | "error";
@@ -27,7 +27,14 @@ export interface Toast {
   leaving?: boolean;
 }
 
-const TOAST_DISMISS_MS = 2600;
+/**
+ * Interface review 2026-09-24 (acce-3): every toast, errors included, used to
+ * vanish after 2600 ms with no pause and no way to keep it — for most refusals
+ * the toast is the only account of what went wrong. Success toasts now get the
+ * 5 s floor and pause on hover/focus; error toasts get no timer at all and
+ * carry a Dismiss button. TOAST_STACK_CAP still bounds how many can pile up.
+ */
+const TOAST_DISMISS_MS = 5000;
 const TOAST_EXIT_MS = 200;
 /**
  * P16-UI-13: the stack was unbounded. A burst of failures — an SSE reconnect
@@ -38,7 +45,7 @@ const TOAST_EXIT_MS = 200;
  * Every other list in the app is capped (BELL_LIST_CAP 100,
  * COMMAND_GROUP_LIMIT 6, the feed limits); this is the one that wasn't. Four is
  * the most that fit above the fold on the shortest supported viewport, and past
- * three or four simultaneous 2.6 s messages nobody is reading them anyway.
+ * three or four simultaneous messages nobody is reading them anyway.
  *
  * Oldest drops. The two-phase exit is untouched: a toast that reaches its own
  * timer still plays `.leaving` for 200 ms. A toast pushed out by the cap is
@@ -49,43 +56,88 @@ const TOAST_EXIT_MS = 200;
  */
 const TOAST_STACK_CAP = 4;
 
-/** What the provider wires together: the live stack and its one pusher. */
+/** What the provider wires together: the live stack, its one pusher, the
+ *  Dismiss control's action and the hover/focus hold on the success timers. */
 export interface ToastStack {
   toasts: Toast[];
   push: (text: string, kind?: ToastKind) => void;
+  dismiss: (id: string) => void;
+  hold: (on: boolean) => void;
 }
+
+type Timer = ReturnType<typeof setTimeout>;
 
 export function useToasts(): ToastStack {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  /** Success toasts still waiting to leave, by id: the armed timer, or null
+   *  while the stack is held. Errors never get an entry. */
+  const waiting = useRef(new Map<string, Timer | null>());
+  /** The 200 ms `.leaving` → unmount timers; never held. */
+  const exits = useRef<Timer[]>([]);
+  const held = useRef(false);
 
   useEffect(
     () => () => {
-      for (const timer of timers.current) clearTimeout(timer);
+      for (const timer of waiting.current.values()) {
+        if (timer !== null) clearTimeout(timer);
+      }
+      for (const timer of exits.current) clearTimeout(timer);
     },
     [],
   );
 
-  const push = useCallback((text: string, kind: ToastKind = "success") => {
-    const id = crypto.randomUUID();
-    setToasts((t) => [...t, { id, text, kind }].slice(-TOAST_STACK_CAP));
-    // Two-phase dismissal: mark `leaving` (CSS plays the exit transition,
-    // mirroring the `rise` entrance path), then unmount after it settles.
-    timers.current.push(
-      setTimeout(() => {
-        setToasts((t) =>
-          t.map((x) => (x.id === id ? { ...x, leaving: true } : x)),
-        );
-      }, TOAST_DISMISS_MS),
-    );
-    timers.current.push(
+  // Two-phase dismissal: mark `leaving` (CSS plays the exit transition,
+  // mirroring the `rise` entrance path), then unmount after it settles.
+  const dismiss = useCallback((id: string) => {
+    const timer = waiting.current.get(id);
+    if (timer) clearTimeout(timer);
+    waiting.current.delete(id);
+    setToasts((t) => t.map((x) => (x.id === id ? { ...x, leaving: true } : x)));
+    exits.current.push(
       setTimeout(() => {
         setToasts((t) => t.filter((x) => x.id !== id));
-      }, TOAST_DISMISS_MS + TOAST_EXIT_MS),
+      }, TOAST_EXIT_MS),
     );
   }, []);
 
-  return { toasts, push };
+  const arm = useCallback(
+    (id: string) => {
+      waiting.current.set(
+        id,
+        setTimeout(() => dismiss(id), TOAST_DISMISS_MS),
+      );
+    },
+    [dismiss],
+  );
+
+  const push = useCallback(
+    (text: string, kind: ToastKind = "success") => {
+      const id = crypto.randomUUID();
+      setToasts((t) => [...t, { id, text, kind }].slice(-TOAST_STACK_CAP));
+      if (kind !== "success") return;
+      if (held.current) waiting.current.set(id, null);
+      else arm(id);
+    },
+    [arm],
+  );
+
+  /** Pointer or focus on the stack: stop every success timer; on leaving it,
+   *  give each waiting toast its full time again. A toast already `.leaving`
+   *  finishes its exit either way. */
+  const hold = useCallback(
+    (on: boolean) => {
+      if (on === held.current) return;
+      held.current = on;
+      for (const [id, timer] of waiting.current) {
+        if (timer !== null) clearTimeout(timer);
+        if (on) waiting.current.set(id, null);
+        else arm(id);
+      }
+    },
+    [arm],
+  );
+
+  return { toasts, push, dismiss, hold };
 }
 
 /**
@@ -111,7 +163,10 @@ const TOAST_HOST_STYLE: React.CSSProperties = {
   padding: 0,
   border: 0,
   background: "transparent",
-  width: "auto",
+  // max-content, not auto: `left: 50%` leaves an auto width only the half of
+  // the viewport right of centre to shrink into (160px at 320px), and the
+  // translate then centres that narrow box (interface review 2026-09-24).
+  width: "max-content",
   height: "auto",
   maxWidth: "min(92vw, 40rem)",
   overflow: "visible",
@@ -148,9 +203,28 @@ const TOAST_HOST_STYLE: React.CSSProperties = {
  * the region out of the a11y tree and back mid-burst, costing the very
  * announcement it exists to make.
  */
-function ToastHost({ toasts }: { toasts: Toast[] }) {
+function ToastHost({
+  toasts,
+  dismiss,
+  hold,
+}: {
+  toasts: Toast[];
+  dismiss: (id: string) => void;
+  hold: (on: boolean) => void;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [regionReady, setRegionReady] = useState(false);
+  /** Pointer over the stack / focus inside it: either one holds the success
+   *  timers (acce-3). */
+  const hovered = useRef(false);
+  const focused = useRef(false);
+  // Where keyboard focus came from before it entered the stack, so dismissing
+  // the last error toast hands it back instead of dropping it on <body>.
+  const returnTo = useRef<HTMLElement | null>(null);
+  const syncHold = useCallback(
+    () => hold(hovered.current || focused.current),
+    [hold],
+  );
   /** Whether the host currently holds a place in the top layer. */
   const promoted = useRef(false);
   /** The dialogs that were open when it took that place. */
@@ -213,6 +287,17 @@ function ToastHost({ toasts }: { toasts: Toast[] }) {
     }
   }, [empty, toasts.length]);
 
+  // Re-read the hold whenever the stack changes. A dismissed error toast takes
+  // its focused button with it, and no blur from a removed node reaches React;
+  // a drained host is hidden under a pointer that may never "leave" it. Either
+  // would otherwise hold every later success toast on screen indefinitely.
+  useEffect(() => {
+    const el = hostRef.current;
+    focused.current = !!el && el.contains(document.activeElement);
+    if (empty) hovered.current = false;
+    syncHold();
+  }, [empty, toasts.length, syncHold]);
+
   return (
     <div
       ref={hostRef}
@@ -225,6 +310,29 @@ function ToastHost({ toasts }: { toasts: Toast[] }) {
       // whole stack on every arrival — up to TOAST_STACK_CAP messages for one
       // event. Only the toast that just landed is news.
       aria-atomic="false"
+      onPointerEnter={() => {
+        hovered.current = true;
+        syncHold();
+      }}
+      onPointerLeave={() => {
+        hovered.current = false;
+        syncHold();
+      }}
+      onFocus={(e) => {
+        if (
+          e.relatedTarget instanceof HTMLElement &&
+          !e.currentTarget.contains(e.relatedTarget)
+        )
+          returnTo.current = e.relatedTarget;
+        focused.current = true;
+        syncHold();
+      }}
+      onBlur={(e) => {
+        focused.current =
+          e.relatedTarget instanceof Node &&
+          e.currentTarget.contains(e.relatedTarget);
+        syncHold();
+      }}
     >
       {/* P13-D-10: `data-kind` makes the success/failure distinction assertable
           (and stylable) — the icon is the only other carrier, and an inline
@@ -239,6 +347,31 @@ function ToastHost({ toasts }: { toasts: Toast[] }) {
               pref rollbacks used to render with a green success tick. */}
           <Icon name={t.kind === "error" ? "alert" : "check"} />
           {t.text}
+          {/* acce-3: an error has no timer, so it needs a way out. */}
+          {t.kind === "error" && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Dismiss"
+              onClick={(e) => {
+                // Keep a keyboard user's place: the next error's Dismiss,
+                // else wherever focus came from before the stack.
+                const self = e.currentTarget;
+                const next = [
+                  ...(hostRef.current?.querySelectorAll<HTMLButtonElement>(
+                    '.toast[data-kind="error"]:not(.leaving) .icon-btn',
+                  ) ?? []),
+                ].find((b) => b !== self);
+                const hadFocus = document.activeElement === self;
+                dismiss(t.id);
+                if (!hadFocus) return;
+                if (next) next.focus();
+                else if (returnTo.current?.isConnected) returnTo.current.focus();
+              }}
+            >
+              <Icon name="x" />
+            </button>
+          )}
         </div>
       ))}
     </div>
@@ -251,17 +384,18 @@ const ToastContext = createContext<(text: string, kind?: ToastKind) => void>(
 
 /** App-wide toast context: mounts the single ToastHost (root layout). */
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const { toasts, push } = useToasts();
+  const { toasts, push, dismiss, hold } = useToasts();
   return (
     <ToastContext.Provider value={push}>
       {children}
-      <ToastHost toasts={toasts} />
+      <ToastHost toasts={toasts} dismiss={dismiss} hold={hold} />
     </ToastContext.Provider>
   );
 }
 
-/** `push(text, kind?)` — 2600 ms auto-dismissing toast (`"error"` for failures,
- *  which renders the alert icon instead of the success tick). */
+/** `push(text, kind?)` — a success toast auto-dismisses after 5000 ms (held
+ *  while hovered or focused); `"error"` renders the alert icon instead of the
+ *  success tick and stays until dismissed. */
 export function useToast(): (text: string, kind?: ToastKind) => void {
   return useContext(ToastContext);
 }

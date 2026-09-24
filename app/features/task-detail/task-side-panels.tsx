@@ -615,7 +615,13 @@ export function TaskDetailsPanel({
           <div className="meta-field">
             <span className="meta-label">Due date</span>
             <input type="hidden" name="dueDate" value={due} />
-            <DatePicker value={due || null} onChange={(v) => setDue(v ?? "")} />
+            <DatePicker
+              label="Due date"
+              // Visible text inside the name "Due date: not set" (label in name).
+              placeholder="Not set"
+              value={due || null}
+              onChange={(v) => setDue(v ?? "")}
+            />
           </div>
           <div className="meta-edit-actions">
             <button

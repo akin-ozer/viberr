@@ -17,8 +17,6 @@
  * sentence verbatim; none re-derives the words from the counts.
  */
 
-import { countLabel } from "./text/plural";
-
 export interface RevisionDrift {
   /** The PR head this measurement describes (full sha). */
   headSha: string;
@@ -41,8 +39,16 @@ export interface RevisionDriftDescription {
   unreviewed: boolean;
 }
 
+/** "1 merge commit" / "2 merge commits". This module reaches the closed
+ *  controller dock's static closure (through `sse-event.schema` and
+ *  `task-file.schema`), which ruling 457 (FL-1) budgets by module count, so
+ *  it keeps this one-liner rather than importing `countLabel`
+ *  (`~/shared/text/plural`) and adding a module to every page. */
+const plural = (n: number, noun: string): string =>
+  `${n} ${noun}${n === 1 ? "" : "s"}`;
+
 function baseRefreshClause(refresh: { merges: number; commits: number }): string {
-  return `base refreshed · ${countLabel(refresh.merges, "merge commit")} · ${countLabel(refresh.commits, "base commit")}`;
+  return `base refreshed · ${plural(refresh.merges, "merge commit")} · ${plural(refresh.commits, "base commit")}`;
 }
 
 /**
@@ -67,7 +73,7 @@ export function describeRevisionDrift(
   if (authored === 0 && !refresh) {
     return { kind: "none", sentence: "", unreviewed: false };
   }
-  const authoredClause = `${countLabel(authored, "authored commit")} since review ${authored === 1 ? "merges" : "merge"} unreviewed`;
+  const authoredClause = `${plural(authored, "authored commit")} since review ${authored === 1 ? "merges" : "merge"} unreviewed`;
   if (authored > 0 && refresh) {
     return {
       kind: "both",
@@ -99,11 +105,11 @@ export function revisionDriftNote(drift: RevisionDrift | null | undefined): stri
   // The canonical sentence rides along verbatim, so the permanent record and
   // every live surface can be matched word for word.
   if (described.kind === "base_refresh" && refresh) {
-    return ` The PR head (${head}) carries a base refresh made after the review (${countLabel(refresh.merges, "merge commit")}, ${countLabel(refresh.commits, "base commit")}) and no authored commits outside the reviewed revision: ${described.sentence}.`;
+    return ` The PR head (${head}) carries a base refresh made after the review (${plural(refresh.merges, "merge commit")}, ${plural(refresh.commits, "base commit")}) and no authored commits outside the reviewed revision: ${described.sentence}.`;
   }
   const authored = `${drift.authored === 1 ? "1 authored commit was" : `${drift.authored} authored commits were`} added to the PR head (${head}) after the review, outside the reviewed revision`;
   if (described.kind === "both" && refresh) {
-    return ` ${authored}; the head also carries a base refresh (${countLabel(refresh.merges, "merge commit")}, ${countLabel(refresh.commits, "base commit")}): ${described.sentence}.`;
+    return ` ${authored}; the head also carries a base refresh (${plural(refresh.merges, "merge commit")}, ${plural(refresh.commits, "base commit")}): ${described.sentence}.`;
   }
   return ` ${authored}: ${described.sentence}.`;
 }

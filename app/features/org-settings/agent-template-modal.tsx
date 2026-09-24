@@ -87,7 +87,11 @@ export function MissingChips({
           title="No longer in the store. Click to remove this grant"
           onClick={() => onDrop(id)}
         >
+          {/* Interface review 2026-09-24 (acce-33): the amber alone was the
+              only cue; the icon and word are the profile page's res-chip ones. */}
+          <Icon name="alert" />
           {id}
+          <span className="res-chip-note">missing</span>
         </button>
       ))}
     </>

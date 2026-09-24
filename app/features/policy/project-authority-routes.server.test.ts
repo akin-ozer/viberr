@@ -363,10 +363,13 @@ describe("every project-scoped route carries a membership gate", () => {
     "project.task.tsx",
     "project.tsx",
   ];
-  /** Everything except `project.board.tsx` — the layout serves the board's read. */
-  const EXPECTED_LOADER_ROUTES = EXPECTED_PROJECT_ROUTES.filter(
-    (f) => f !== "project.board.tsx",
-  );
+  /** Every project route: since ruling 457 (BOARD-6) the board serves its own
+   *  columns instead of the layout serving them. */
+  const EXPECTED_LOADER_ROUTES = EXPECTED_PROJECT_ROUTES;
+
+  /** Ruling 457 (BOARD-6): the layout and the board read the project through
+   *  ONE gated read, `readWorkspace` (routes/project-workspace.server.ts). */
+  const WORKSPACE_READ = "readWorkspace(request, db, params.slug, user)";
 
   /**
    * The BODY of one exported entry point, not the whole module.
@@ -406,7 +409,9 @@ describe("every project-scoped route carries a membership gate", () => {
     const taskLoader = body("project.task.tsx", "loader")!;
     expect(taskLoader.split("\n").length).toBeGreaterThan(5);
     expect(taskLoader).toContain("requireVisibleProject(");
-    expect(body("project.board.tsx", "loader")).toBeNull(); // the layout serves it
+    // Ruling 457 (BOARD-6): the board has its own loader, gated by the
+    // layout's own read.
+    expect(body("project.board.tsx", "loader")).toContain(WORKSPACE_READ);
     // …and it has to extract the NON-async form too — the exact shape BS-1 hid.
     const indexLoader = body("project._index.tsx", "loader");
     expect(
@@ -433,18 +438,23 @@ describe("every project-scoped route carries a membership gate", () => {
   });
 
   it("every project route LOADER gates the read in its own body", () => {
-    // `project.tsx` is the layout: it is the read chokepoint itself and inlines
-    // the members-only 404 (its member lookup + `orgAdminOverride` resolution
-    // feed the whole shell), so it carries no guard CALL. Every other project
-    // loader runs alone under single fetch's `?_routes=` filter and needs its
-    // own gate.
+    // `project.tsx` is the layout: it is the read chokepoint itself, and its
+    // members-only 404 (the member lookup + `orgAdminOverride` resolution feed
+    // the whole shell) lives in `readWorkspace`, which the board's loader reads
+    // through too. Every other project loader runs alone under single fetch's
+    // `?_routes=` filter and needs its own gate.
     const withLoader = files.filter((f) => body(f, "loader") !== null);
     expect(withLoader).toEqual(EXPECTED_LOADER_ROUTES);
+    // Ruling 457 (BOARD-6): the layout's inlined members-only 404 moved into
+    // the one read the layout and the board share, which refuses an unknown
+    // slug and a non-member with the same bytes before any viewer-scoped read.
+    const workspaceRead = readFileSync(path.join(routesDir, "project-workspace.server.ts"), "utf8");
+    const readBody = workspaceRead.slice(workspaceRead.indexOf("function readUncached("));
+    expect(readBody.split("throw data(`No project at projects/${slug}.`, { status: 404 });")).toHaveLength(3);
+    expect(readBody.indexOf("status: 404")).toBeLessThan(readBody.indexOf("getReviewQueue("));
     for (const f of withLoader) {
-      if (f === "project.tsx") {
-        expect(body(f, "loader")).toContain(
-          "No project at projects/${params.slug}.",
-        );
+      if (f === "project.tsx" || f === "project.board.tsx") {
+        expect(body(f, "loader")).toContain(WORKSPACE_READ);
         continue;
       }
       if (f === "project._index.tsx") {

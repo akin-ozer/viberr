@@ -26,7 +26,7 @@ const DEFAULT_DISK_LOW_FREE_BYTES = DEFAULT_DISK_LOW_FREE_MB * MB;
 const DEFAULT_DISK_CRITICAL_FREE_BYTES = DEFAULT_DISK_CRITICAL_FREE_MB * MB;
 
 /** The thresholds are read through `getEnv()`, which parses once per process:
- *  a case that sets them drops the cached parse (ruling 455(c)). */
+ *  a case that sets them drops the cached parse (ruling 458(c)). */
 function setThresholdsMb(env: {
   VIBERR_DISK_LOW_FREE_MB?: string;
   VIBERR_DISK_CRITICAL_FREE_MB?: string;
@@ -180,7 +180,7 @@ describe("thresholds", () => {
     });
   });
 
-  // Ruling 455(c): a nonsense override used to be ignored for the default. It
+  // Ruling 458(c): a nonsense override used to be ignored for the default. It
   // still cannot disable the signal, and it no longer passes in silence: the
   // env schema refuses it, which fails boot.
   it("refuses a nonsense override rather than disabling the signal", () => {

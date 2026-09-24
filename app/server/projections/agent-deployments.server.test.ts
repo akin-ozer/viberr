@@ -315,7 +315,7 @@ describe("F34-5: an engagement's status is read from its own run row", () => {
     expect(rows.find((d) => d.engagement === "primary")!.status).toBe("waiting on human");
   });
 
-  it("a supporting run's r<n> thread id picks the n-th supporting engagement (ruling 455(a))", () => {
+  it("a supporting run's r<n> thread id picks the n-th supporting engagement (ruling 458(a))", () => {
     // Canary: read index 0 for every reviewer thread and the live run lands on
     // the first supporting engagement instead of the second.
     const store = setupTestStore(ctx);

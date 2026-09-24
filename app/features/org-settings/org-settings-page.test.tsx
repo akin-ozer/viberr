@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, getNodeText, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
@@ -348,7 +348,7 @@ describe("UsersPanel", () => {
     // Disabling another user goes through the confirm.
     fireEvent.click(getByLabelText("Disable Selin Aksoy"));
     expect(getByText("Disable Selin Aksoy?")).toBeTruthy();
-    // Ruling 455(f): the shared ConfirmDialog, named by its title.
+    // Ruling 458(f): the shared ConfirmDialog, named by its title.
     expect(
       getByRole("alertdialog", { name: "Disable Selin Aksoy?" }).getAttribute(
         "data-screen-label",
@@ -977,20 +977,17 @@ describe("ResourcesPanel", () => {
 
     // They were preserved on every save and rendered NOWHERE, so an orphan
     // could not be seen or removed from org settings at all.
-    const missing = [...document.querySelectorAll(".pick-chip.missing")].map(
-      (c) => c.textContent,
-    );
-    expect(missing).toEqual(["deleted-craft", "vm-memory", "gone-kb"]);
+    // Interface review 2026-09-24 (acce-33): each chip also carries an alert
+    // glyph and a "missing" note, so the id is the chip's own text.
+    const chips = () => [...document.querySelectorAll<HTMLElement>(".pick-chip.missing")];
+    expect(chips().map(getNodeText)).toEqual(["deleted-craft", "vm-memory", "gone-kb"]);
+    for (const chip of chips()) {
+      expect(chip.querySelector(".res-chip-note")?.textContent).toBe("missing");
+    }
 
     // Clicking one drops it from the grant list that gets submitted.
-    fireEvent.click(
-      [...document.querySelectorAll(".pick-chip.missing")].find(
-        (c) => c.textContent === "vm-memory",
-      )!,
-    );
-    expect(
-      [...document.querySelectorAll(".pick-chip.missing")].map((c) => c.textContent),
-    ).toEqual(["deleted-craft", "gone-kb"]);
+    fireEvent.click(chips().find((c) => getNodeText(c) === "vm-memory")!);
+    expect(chips().map(getNodeText)).toEqual(["deleted-craft", "gone-kb"]);
   });
 
   it("F19-5: a missing chip announces itself as GRANTED, not as an ungranted resource", () => {
@@ -1025,11 +1022,11 @@ describe("ResourcesPanel", () => {
     // The point of the attribute: a screen reader can now tell a dangling grant
     // apart from a live resource this profile does NOT grant. `pressed` matches
     // on the attribute, so an element without it lands in neither list.
-    const pressed = getAllByRole("button", { pressed: true }).map((b) => b.textContent);
+    const pressed = getAllByRole("button", { pressed: true }).map(getNodeText);
     expect(pressed).toEqual(
       expect.arrayContaining(["deleted-craft", "vm-memory", "gone-kb"]),
     );
-    const unpressed = getAllByRole("button", { pressed: false }).map((b) => b.textContent);
+    const unpressed = getAllByRole("button", { pressed: false }).map(getNodeText);
     expect(unpressed).toEqual(
       expect.arrayContaining(["github-mcp", "Architecture notes"]),
     );
@@ -1050,8 +1047,8 @@ describe("ResourcesPanel", () => {
     );
     fireEvent.click(getByLabelText("Edit Spare"));
     fireEvent.click(
-      [...document.querySelectorAll(".pick-chip.missing")].find(
-        (c) => c.textContent === "deleted-craft",
+      [...document.querySelectorAll<HTMLElement>(".pick-chip.missing")].find(
+        (c) => getNodeText(c) === "deleted-craft",
       )!,
     );
     fireEvent.click(getByText("Save changes"));
@@ -2119,7 +2116,7 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
   });
 
   /**
-   * Ruling 455(f), UI-58: the content group was a `role="radiogroup"` of plain
+   * Ruling 458(f), UI-58: the content group was a `role="radiogroup"` of plain
    * buttons, so it promised arrow keys it never wired and each radio was its
    * own tab stop. On `RadioSeg` it is one tab stop that ←/→ traverse, and a
    * choice commits on activation, never on focus (RadioSeg's note).

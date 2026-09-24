@@ -256,7 +256,7 @@ describe("checkDiskPressure (gap 16)", () => {
    * real `statfs` and the status it acts on is the one the product computes.
    * `× 2` rather than `+ 1` so a concurrent write cannot cross the line. The
    * thresholds are read through `getEnv()`, which parses once per process, so
-   * pinning them drops the cached parse (ruling 455(c)).
+   * pinning them drops the cached parse (ruling 458(c)).
    */
   function pinThresholds(
     dataRoot: string,

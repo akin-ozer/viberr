@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { ConfirmDialog } from "./confirm-dialog";
 
 /**
- * Ruling 455(f) moved the hand-written plain confirms onto `ConfirmDialog`. Two
+ * Ruling 458(f) moved the hand-written plain confirms onto `ConfirmDialog`. Two
  * of them needed what the shared card did not carry: the KB browser's confirms
  * stack over the browser's own dialog (`over-modal`), and the agent profile
  * delete shows a glyph in its confirm button. Both are optional props, so the

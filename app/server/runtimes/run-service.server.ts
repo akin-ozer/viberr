@@ -3,6 +3,7 @@ import { z } from "zod";
 import type {
   LogLine,
   RunKind,
+  RunLiveFacts,
   RunState,
   RunView,
 } from "~/features/runtime/runtime-types";
@@ -44,18 +45,20 @@ import { publishRunStateChanged } from "./run-events.server";
 import {
   projectRunsForTask,
   SDK_LABEL,
+  runLiveFacts,
+  type ConsoleShipping,
   type ProjectedRunView,
 } from "./run-projection.server";
 import { createRunSink, runPersistDrained } from "./run-sink.server";
 import {
   appendRawLine,
   getRun,
+  hasRunLinesBefore,
   insertRunLine,
   listRunLines,
   listRunLinesTail,
   nextSeq,
   patchRun,
-  runLineStats,
   upsertRun,
   type AgentRunRow,
   type InsertRunInput,
@@ -2653,13 +2656,15 @@ async function noteRunStarted(
 
 // ---------------------------------------------- reads
 
-/** All runs for a task as RunView[] + their D-11 log windows (task loader). */
+/** All runs for a task as RunView[] + their D-11 log windows (task loader).
+ *  `console` says how much of each window to carry (ruling 457). */
 export function listRunsForTask(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
+  options: { console?: ConsoleShipping } = {},
 ): ProjectedRunView[] {
-  return projectRunsForTask(db, projectSlug, taskKey);
+  return projectRunsForTask(db, projectSlug, taskKey, options);
 }
 
 export interface RunLog {
@@ -2672,6 +2677,9 @@ export interface RunLog {
   oldestSeq: number;
   /** P13-D-11: lines older than `oldestSeq` exist for this run. */
   hasMore: boolean;
+  /** Ruling 457 (LIVE-1): the run row's moving facts as of this read, so the
+   *  Live run strip follows the console's tail instead of a revalidation. */
+  facts: RunLiveFacts;
 }
 
 /** Backward page size when the caller names none (P13-D-11). */
@@ -2710,7 +2718,16 @@ export function getRunLog(
   query: RunLogQuery = {},
 ): RunLog | null {
   const run = getRun(db, runId);
-  if (!run) return null;
+  return run ? runLogPage(db, run, query) : null;
+}
+
+/**
+ * `getRunLog` for a caller that already read the run row — the run-log route
+ * reads it for its membership gate, and the live tail calls that route once
+ * per streamed line per viewer (ruling 457, LIVE-9).
+ */
+export function runLogPage(db: DatabaseSync, run: AgentRunRow, query: RunLogQuery): RunLog {
+  const runId = run.id;
   const backward = query.before !== undefined || query.limit !== undefined;
   const lines: RunLog["lines"] = backward
     ? listRunLinesTail(db, runId, query.limit ?? RUN_LOG_PAGE_LINES, query.before).map(
@@ -2720,7 +2737,6 @@ export function getRunLog(
   const sinceSeq = query.since ?? -1;
   const head = lines.length ? lines[lines.length - 1]!.seq : sinceSeq;
   const oldestSeq = lines.length ? lines[0]!.seq : -1;
-  const stats = runLineStats(db, runId);
   return {
     runId,
     threadId: run.thread_id,
@@ -2730,8 +2746,10 @@ export function getRunLog(
     oldestSeq,
     // Older lines exist below this page. An EMPTY backward page means we
     // reached the start of this run (the console then steps to the previous
-    // run id in the group's `logWindow.runIds`).
-    hasMore: lines.length > 0 && oldestSeq > stats.minSeq,
+    // run id in the group's `logWindow.runIds`). One index probe, not a count
+    // of the run's lines (ruling 457).
+    hasMore: lines.length > 0 && hasRunLinesBefore(db, runId, oldestSeq),
+    facts: runLiveFacts(run),
   };
 }
 

@@ -48,6 +48,10 @@ function boundaryAfter(ch: string | undefined): boolean {
 }
 
 export function findMentionSpans(text: string, names: string[]): MentionSpan[] {
+  // Ruling 457 (CS-5): every span starts at an `@`, so a text without one has
+  // none — answered before the name list is built and sorted, which the
+  // composer's per-keystroke transform and every server resolver pay for.
+  if (!text.includes("@")) return [];
   // De-dupe + sort known names longest-first for greedy matching. The reserved
   // role handles are always known — they route on every task.
   const sorted = Array.from(

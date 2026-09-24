@@ -81,16 +81,24 @@ Rules that hold in the tree (verified by grep, restated from
 ## 4. Request lifecycle
 
 **Process start.** `entry.server.tsx` awaits `bootServer()` at module scope, so boot
-finishes before the first request (§5). `root.tsx` mounts the request-correlation
-middleware; the root loader authenticates through better-auth (forwarding the rolling
-session cookie), reads the theme cookie, and mints the CSRF token. A signed-in page also
-mounts the controller dock (ruling 121).
+finishes before the first request (§5). `root.tsx` mounts three middlewares: request
+correlation, the SSE broker's head read before any loader (a document load hands it to
+the page's first stream, ruling 457) and the rolling-session renewal, which forwards
+better-auth's refreshed cookie on whichever GET resolved the session (F10-17). The root
+loader authenticates, reads the theme cookie and mints the CSRF token; it re-runs only
+after a sign-in, a sign-out, a theme or profile change and on a document load (ruling
+457). A signed-in page also mounts the controller dock (ruling 121).
 
-**Read path** (`/projects/:slug/board`): layout loader → `requireUser` → project query
-→ membership check from the project's projected `members` list (files are truth) with the
-audited org-admin override → non-member and unknown slug both 404 → viewer-scoped
-annotations (decisions requiring the viewer, the review queue split) → rail counts and
-notifications. Child routes read the layout data with `useRouteLoaderData`.
+**Read path** (`/projects/:slug/board`): layout loader and board loader, together on one
+request → `requireUser` → `readWorkspace` (`routes/project-workspace.server.ts`, once per
+request): project query → membership check from the project's projected `members` list
+(files are truth) with the audited org-admin override → non-member and unknown slug both
+404 → the review queue. The layout returns the shell's slice (the project's name, slug,
+repo and archived flag, members, the viewer's role), the rail counts and the bell's two
+counts; the board loader returns the columns as board cards (`toBoardCard`), annotated
+with the viewer's decisions and live runs (ruling 457). Child routes read the layout data
+with `useRouteLoaderData`; only the board reads the columns, and the bell loads its own
+list (`/resources/notifications`).
 
 **Write path** (`intent=create-task`): route action → `requireFormAction` (session,
 `assertCsrf`: the request must *prove* same-origin through Origin / Sec-Fetch-Site /
@@ -116,11 +124,13 @@ everything below a task dir except `task.md` ignored; goal files included) →
 
 **Live updates.** Projection events are emitted in-process (buffered inside
 transactional rebuilds until commit), translated to the zod-parsed wire shape `{ type,
-entityId, occurredAt, data }`, appended to a 256-event ring buffer and fanned out to
-the scope-matching connections on `GET /resources/events`. The client revalidates the
-active loaders (300 ms debounce); run logs are fetched by reference from
-`/resources/run-log`. A hidden tab holds no stream (ruling 301). There is no optimistic
-UI for governed state.
+entityId, occurredAt, data }`, appended to a 256-event replay ring (console lines have
+their own) and fanned out to the scope-matching connections on `GET /resources/events`. The client revalidates the
+loaders that read what an event changed (300 ms debounce; `revalidation-policy.ts`,
+ruling 457), and not those whose data was requested after the event arrived; run logs
+are fetched by reference from `/resources/run-log`. A hidden tab holds no stream (ruling
+301); a reconnect replays what it missed from the ring buffer. There is no optimistic UI
+for governed state.
 
 ## 5. Boot sequence (`app/server/boot.server.ts`)
 

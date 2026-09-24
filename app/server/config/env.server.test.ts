@@ -180,13 +180,13 @@ describe("parseEnv", () => {
 });
 
 /**
- * Ruling 455(c): the C01-A6 knobs are the schema's to parse. Their modules used
+ * Ruling 458(c): the C01-A6 knobs are the schema's to parse. Their modules used
  * to read `process.env` and run the default for a value that did not parse, so
  * a mistyped threshold or interval was silently ignored. The schema now applies
  * the same `Number()` coercion and the same defaults, and a value outside what
  * the modules accepted fails boot with the rest of the invalid variables.
  */
-describe("the C01-A6 knobs (ruling 455(c))", () => {
+describe("the C01-A6 knobs (ruling 458(c))", () => {
   const NUMERIC = [
     "VIBERR_MAINTENANCE_INTERVAL_MS",
     "VIBERR_DISK_CHECK_INTERVAL_MS",
@@ -366,7 +366,7 @@ describe("no undeclared VIBERR_* env reads (C01-A6)", () => {
     expect(undeclared).toEqual([]);
   });
 
-  // Ruling 455(c) moved the five C01-A6 knobs off raw reads and onto
+  // Ruling 458(c) moved the five C01-A6 knobs off raw reads and onto
   // `getEnv()`, so the declared keys are held to `.env.example` too: a knob the
   // schema parses must stay documented once no raw read names it any more.
   it("documents every declared key and every raw process.env.VIBERR_* read in .env.example", () => {
