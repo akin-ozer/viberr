@@ -56,43 +56,83 @@ function loaded(n: number, patch: Partial<ConsoleThreadInput> = {}): ConsoleThre
   });
 }
 
+/** A line of a tail or backward page; `raw` is absent under `raw=0`. */
+interface WireLine {
+  seq: number;
+  display: LogLine;
+  raw?: string;
+}
+
+/** A tail or backward page (`RunLog` in run-service.server.ts), as far as
+ *  these tests spell it out. */
+interface PageAnswer {
+  runId: string;
+  lines: WireLine[];
+  oldestSeq: number;
+  hasMore: boolean;
+  state?: string;
+  headSeq?: number;
+  facts?: RunLiveFacts;
+}
+
+/** The `window=1` answer (`RunLogWindowPage` in run-projection.server.ts). */
+interface WindowAnswer {
+  runId: string;
+  threadId: string;
+  lines: LogLine[];
+  lineKeys: string[];
+  logWindow: RunLogWindow;
+  facts: RunLiveFacts;
+}
+
+/** The `data` of a `/resources/run-log` answer, in whichever mode was asked. */
+type AnswerData = PageAnswer | WindowAnswer;
+
 /** One `/resources/run-log` answer, as much of a `Response` as the store reads. */
 interface Answer {
   ok: boolean;
   status: number;
-  json: () => Promise<{ data: object }>;
+  json: () => Promise<{ data: AnswerData }>;
 }
-const ok = (data: object): Answer => ({ ok: true, status: 200, json: async () => ({ data }) });
+const ok = (data: AnswerData): Answer => ({ ok: true, status: 200, json: async () => ({ data }) });
 
-const tailPage = (
-  runId: string,
-  seqs: number[],
-  extra: { facts?: RunLiveFacts; raw?: boolean } = {},
-): Answer =>
-  ok({
+/** A tail (or backward) page of `runId`'s lines at `seqs`: with their
+ *  envelopes when `raw`, and carrying `facts` when given. */
+function tailPage(runId: string, seqs: number[], extra: { facts?: RunLiveFacts; raw?: boolean } = {}): Answer {
+  const lines = seqs.map((seq) => {
+    const wire: WireLine = { seq, display: line(`${runId}:${seq}`) };
+    if (extra.raw) wire.raw = `{"n":${seq}}`;
+    return wire;
+  });
+  const data: PageAnswer = {
     runId,
     state: "running",
-    lines: seqs.map((seq) => ({ seq, display: line(`${runId}:${seq}`), ...(extra.raw ? { raw: `{"n":${seq}}` } : {}) })),
+    lines,
     headSeq: seqs.at(-1) ?? -1,
     oldestSeq: seqs[0] ?? -1,
     hasMore: false,
-    ...(extra.facts ? { facts: extra.facts } : {}),
-  });
+  };
+  if (extra.facts) data.facts = extra.facts;
+  return ok(data);
+}
 
 /**
- * `fetch`, answered by the first route whose pattern the URL contains; a
- * route answering a function is called per request, so a test can hold one in
- * flight. Every URL asked is recorded.
+ * `fetch`, answered by the first route whose pattern the URL contains. Each
+ * route answers per request, so a test can hold one in flight. Every URL
+ * asked is recorded.
  */
 let asked: string[] = [];
-let routes: [string, Answer | (() => Promise<Answer>)][] = [];
-function route(pattern: string, answer: Answer | (() => Promise<Answer>)) {
+let routes: [string, () => Promise<Answer>][] = [];
+function answerWith(pattern: string, answer: () => Promise<Answer>) {
   routes = [[pattern, answer], ...routes.filter(([p]) => p !== pattern)];
+}
+function route(pattern: string, answer: Answer) {
+  answerWith(pattern, async () => answer);
 }
 /** A route's next answer, held until the test releases it. */
 function held(pattern: string): (answer: Answer) => void {
   let release: (answer: Answer) => void = () => {};
-  route(pattern, () => new Promise<Answer>((resolve) => (release = resolve)));
+  answerWith(pattern, () => new Promise<Answer>((resolve) => (release = resolve)));
   return (answer) => release(answer);
 }
 
@@ -104,9 +144,7 @@ beforeEach(() => {
     vi.fn(async (url: string) => {
       asked.push(url);
       const hit = routes.find(([pattern]) => url.includes(pattern));
-      if (!hit) return { ok: false, status: 599, json: async () => ({}) };
-      const answer = hit[1];
-      return typeof answer === "function" ? answer() : answer;
+      return hit ? hit[1]() : { ok: false, status: 599, json: async () => ({}) };
     }),
   );
 });

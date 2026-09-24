@@ -99,15 +99,16 @@ export type ConsoleThreadInput = Pick<
 
 /** The live facts a page's projection carries for its representative run. */
 function factsOf(input: ConsoleThreadInput): RunLiveFacts {
-  return {
+  const facts: RunLiveFacts = {
     phase: input.phase,
     step: input.step,
     turns: input.turns,
     tokens: input.tokens,
     tokensEstimated: input.tokensEstimated,
     cache: input.cache,
-    ...(input.factsAt === undefined ? {} : { factsAt: input.factsAt }),
   };
+  if (input.factsAt !== undefined) facts.factsAt = input.factsAt;
+  return facts;
 }
 
 /** What the console reads and asks of its line source. */
