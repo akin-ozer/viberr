@@ -10,7 +10,8 @@ import type {
   loader as policyLoader,
   action as policyAction,
 } from "~/routes/project.policy";
-import { RBAC_ROWS, ROLE_IDS } from "./policy-data";
+import { RBAC_ROWS } from "./policy-data";
+import { PROJECT_ROLES } from "~/shared/rbac";
 
 /**
  * Route-level tests for /projects/:slug/policy: loader read model from the
@@ -126,7 +127,7 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
       "Edit workflow & policy",
       "Force-accept past the review gate",
     ]);
-    expect(ROLE_IDS).toEqual(["admin", "maintainer", "contributor", "viewer"]);
+    expect(PROJECT_ROLES).toEqual(["admin", "maintainer", "contributor", "viewer"]);
     // Admin holds everything. Q5 clean tiering: a viewer is strictly read +
     // comment; the contributor tier adds "Create tasks" AND task ownership.
     // R8-4: reconcile-github is now maintainer+ (was contributor+).
@@ -136,7 +137,7 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
     // nothing in this table can render as membership-free.
     expect(RBAC_ROWS.every((r) => Object.keys(r.grant).length === 4)).toBe(true);
     expect(
-      RBAC_ROWS.filter((r) => ROLE_IDS.every((role) => r.grant[role] === 1)).map(
+      RBAC_ROWS.filter((r) => PROJECT_ROLES.every((role) => r.grant[role] === 1)).map(
         (r) => r.action,
       ),
     ).toEqual(["View board, tasks & timelines", "Comment on tasks"]);

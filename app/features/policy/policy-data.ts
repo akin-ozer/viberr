@@ -1,16 +1,12 @@
 import { ALWAYS_HUMAN_CAPABILITY_IDS, capabilityById } from "~/shared/capabilities";
-import {
-  PROJECT_ROLES,
-  RBAC_DEFINITIONS,
-  type ProjectRole,
-} from "~/shared/rbac";
+import { RBAC_DEFINITIONS, type ProjectRole } from "~/shared/rbac";
 import type { AgentProfileView } from "~/features/agents/agent-types";
-export { ROLE_LABEL } from "~/shared/rbac";
 
 /**
- * Client-safe policy constants for the Policy/Profile UI. The role list, labels,
- * and the RBAC permission table all come from the ONE canonical source
- * (app/shared/rbac.ts) that the server guards also consult — display can't drift
+ * Client-safe policy constants for the Policy/Profile UI. The RBAC permission
+ * table is built from the ONE canonical source (app/shared/rbac.ts) that the
+ * server guards also consult, and the UI reads the role list and labels
+ * (`PROJECT_ROLES`, `ROLE_LABEL`) straight from there — display can't drift
  * from enforcement. `policy-rbac.server.test.ts` drives each guard per role to
  * keep them bound.
  *
@@ -19,8 +15,6 @@ export { ROLE_LABEL } from "~/shared/rbac";
  * can reach the project: that is membership, and a non-member never gets far
  * enough to be refused by role.
  */
-
-export const ROLE_IDS = PROJECT_ROLES;
 
 export interface RbacRow {
   action: string;

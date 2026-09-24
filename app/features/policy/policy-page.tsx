@@ -28,11 +28,14 @@ import {
   BOUNDARIES,
   operatorAutonomyState,
   RBAC_ROWS,
-  ROLE_IDS,
-  ROLE_LABEL,
   type OperatorAutonomyState,
 } from "./policy-data";
-import { roleCan, type ProjectRole } from "~/shared/rbac";
+import {
+  PROJECT_ROLES,
+  ROLE_LABEL,
+  roleCan,
+  type ProjectRole,
+} from "~/shared/rbac";
 import { stageFlowPath } from "~/shared/workflow/transitions";
 import { isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
@@ -186,11 +189,11 @@ export function HumanAccess({
                 className="mini-seg"
                 label={"Role for " + m.name}
                 value={m.role}
-                // SAFETY: the options are ROLE_IDS, whose members are
+                // SAFETY: the options are PROJECT_ROLES, whose members are
                 // ProjectRole, so Radix hands back one of them.
                 onChange={(r) => setRole(m, r as ProjectRole)}
               >
-                {ROLE_IDS.map((r) => (
+                {PROJECT_ROLES.map((r) => (
                   <RadioSegOption
                     key={r}
                     value={r}
@@ -220,7 +223,7 @@ export function HumanAccess({
           <thead>
             <tr>
               <th>Action</th>
-              {ROLE_IDS.map((r) => (
+              {PROJECT_ROLES.map((r) => (
                 <th key={r}>
                   {ROLE_LABEL[r]} · {counts[r]}
                 </th>
@@ -246,7 +249,7 @@ export function HumanAccess({
                       comes to learn what a role can do, so the scope is here. */}
                   {row.covers ? <span className="act-covers">{row.covers}</span> : null}
                 </td>
-                {ROLE_IDS.map((r) => (
+                {PROJECT_ROLES.map((r) => (
                   <td key={r}>
                     {/* Ruling 148: same words as the profile page's "Your
                         access" list — the check is aria-hidden, so a glyph-only

@@ -6,12 +6,11 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { readTemplate } from "~/server/agents/deployment-view.server";
-import { projectFilePath } from "~/server/files/file-store-root.server";
 import {
   readProjectFile,
   updateProjectFile,
 } from "~/server/files/project-writer.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { deploymentFingerprint } from "~/features/agents/agent-profile-actions.server";
 import type {
   ResourceDrift,
@@ -291,7 +290,7 @@ export async function propagateTemplateResources(
       written = true;
     });
     if (written) {
-      rebuildPath(db, projectFilePath(slug, ctx.dataRoot), { dataRoot: ctx.dataRoot });
+      reprojectProject(db, ctx, slug);
       recordAudit(db, {
         action: "project.agent_profile.resources_synced",
         actor,

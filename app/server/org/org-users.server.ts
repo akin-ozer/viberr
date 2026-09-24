@@ -30,13 +30,12 @@ import {
   retireUserBackends,
   type BackendBinaries,
 } from "~/server/runtimes/backend-credentials.server";
-import { projectFilePath } from "~/server/files/file-store-root.server";
 import {
   readProjectFile,
   updateProjectFile,
 } from "~/server/files/project-writer.server";
 import { listProjects } from "~/server/projections/board-query.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { releaseTasksOwnedBy } from "~/server/tasks/task-actions.server";
 import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { newId } from "~/shared/ids/new-id.server";
@@ -435,9 +434,7 @@ export async function pruneUserFromProjects(
           (m) => m.userId !== userId,
         );
       });
-      rebuildPath(db, projectFilePath(project.slug, ctx.dataRoot), {
-        dataRoot: ctx.dataRoot,
-      });
+      reprojectProject(db, ctx, project.slug);
     }
     // A3: release the tasks this user OWNED before their account disappears, so no
     // task strands on a ghost owner. Mirrors the project-level removeMember path —

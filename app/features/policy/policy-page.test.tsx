@@ -6,7 +6,8 @@ import type { TransitionView } from "./policy-query.server";
 import { AgentCapability, Guardrails, HumanAccess, RequiredReviewers, WorkflowRules, type PcapProfile } from "./policy-page";
 import type { GuardrailView } from "./policy-query.server";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
-import { ROLE_IDS, operatorAutonomyState } from "./policy-data";
+import { operatorAutonomyState } from "./policy-data";
+import { PROJECT_ROLES } from "~/shared/rbac";
 
 afterEach(cleanup);
 
@@ -126,7 +127,7 @@ describe("HumanAccess", () => {
     // signed-in non-member on every page of the project (board, task, policy)
     // and on a comment POST. The View row now reads as four role grants.
     for (const row of container.querySelectorAll(".rbac-table tbody tr")) {
-      expect(row.querySelectorAll("td")).toHaveLength(1 + ROLE_IDS.length);
+      expect(row.querySelectorAll("td")).toHaveLength(1 + PROJECT_ROLES.length);
       expect(row.querySelector("[colspan]")).toBeNull();
     }
     const viewRow = [...container.querySelectorAll(".rbac-table tbody tr")].find(

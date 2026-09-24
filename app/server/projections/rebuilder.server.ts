@@ -1174,6 +1174,18 @@ function succeeded(rel: string, result: RebuildFileResult): RebuildFileResult {
   return result;
 }
 
+/** project.md write already happened — reproject it incrementally, through
+ *  `rebuildPath` so a failed rebuild is recorded rather than thrown. */
+export function reprojectProject(
+  db: DatabaseSync,
+  ctx: { dataRoot?: string },
+  projectSlug: string,
+): void {
+  rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
+    dataRoot: ctx.dataRoot,
+  });
+}
+
 // --------------------------------------------------------- scoped rescan
 
 /**

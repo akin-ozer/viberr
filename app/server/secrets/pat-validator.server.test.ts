@@ -18,6 +18,8 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { createPat, getPatMetadata, setProjectCredential } from "./pat-store.server";
 import {
   REVALIDATE_COOLDOWN_MS,
+  repoPermissionsSchema,
+  repoWritable,
   revalidateProjectCredential,
   validatePat,
   validatePatToken,
@@ -981,5 +983,47 @@ describe("ruling 144 — the classic token's header list is recorded", () => {
     });
     expect(result.status).toBe("network_error");
     expect(result.headerScopes).toBeNull();
+  });
+});
+
+/**
+ * F20-15 / F21-11: the one decoder and verdict for the `permissions` block. The
+ * validator, the project-repair probe (settings-actions) and the create probe
+ * (project-create) all judge repository write through these, each inside its
+ * own response wrapper — so the tri-state is pinned here once, including the
+ * inputs the three used to decode differently (a missing, `null` or
+ * non-boolean key).
+ */
+describe("repoWritable over repoPermissionsSchema (the shared write verdict)", () => {
+  it.each([
+    // [permissions block, verdict]
+    [{ push: true }, true],
+    [{ admin: true }, true],
+    [{ maintain: true }, true],
+    [{ admin: true, push: false }, true], // admin outranks a push: false
+    [{ maintain: true, push: false }, true],
+    [{ push: false }, false], // the PROVEN read-only repo
+    [{ admin: false, maintain: false, push: false }, false],
+    [{ push: false, triage: "yes", pull: 1 }, false], // a drifted neighbour cannot void it
+    [{ admin: "true", maintain: 1, push: false }, false], // only a real `true` grants
+    [{}, null],
+    [{ admin: false, maintain: false }, null],
+    [{ push: undefined }, null],
+    [{ push: null }, null],
+    [{ push: "yes" }, null],
+    [{ push: 1 }, null],
+    [{ admin: 1, maintain: "yes" }, null],
+  ] as const)("%j → %s", (block, verdict) => {
+    expect(repoWritable(repoPermissionsSchema.parse(block))).toBe(verdict);
+  });
+
+  it("reads an absent or undecodable block as unknown, never as read-only", () => {
+    expect(repoWritable(undefined)).toBeNull();
+    expect(repoWritable(null)).toBeNull();
+    // Not an object at all: the schema refuses it, and each caller's wrapper
+    // turns that into `undefined`/`null` (or a failed parse), which reads null.
+    for (const block of [null, undefined, "x", 5, true, []]) {
+      expect(repoPermissionsSchema.safeParse(block).success).toBe(false);
+    }
   });
 });

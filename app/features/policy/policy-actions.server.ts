@@ -4,19 +4,19 @@ import { DEFAULT_GUARDRAILS } from "~/shared/workflow/templates";
 import { guardrailKind, guardrailLabel } from "~/shared/workflow/guardrail-labels";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { PROJECT_ROLES, BOUNDARY_VALUES } from "~/schemas/project-file.schema";
+import { ROLE_LABEL } from "~/shared/rbac";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
-import { projectFilePath } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import {
   countLiveAdmins,
   removedAccountLabel,
 } from "~/features/project-settings/membership.server";
 import { stageName } from "~/shared/workflow/stage-roles";
 import { defaultTransitionBy } from "~/shared/workflow/transitions";
-import { ROLE_LABEL, BOUNDARIES } from "./policy-data";
+import { BOUNDARIES } from "./policy-data";
 
 /**
  * Policy mutations (policy spec §5): member role assignment + workflow
@@ -65,16 +65,6 @@ function requirePolicyAction(
   // enforcement independently of the other (pass-4 XS-9). Both are admin-only
   // today, but this closes the single-source bypass.
   return assertProjectAction(db, action, projectSlug, actor, what, {
-    dataRoot: ctx.dataRoot,
-  });
-}
-
-function reprojectProject(
-  db: DatabaseSync,
-  ctx: PolicyMutationContext,
-  projectSlug: string,
-): void {
-  rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
     dataRoot: ctx.dataRoot,
   });
 }

@@ -20,11 +20,10 @@ import { assertProjectAction } from "~/server/auth/project-authority.server";
 import {
   agentProfileFilePath,
   agentProfilesDir,
-  projectFilePath,
   resolveStoreSegment,
 } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import {
   defaultEffortFor,
   defaultModelFor,
@@ -286,16 +285,6 @@ function requireProjectAction(
     "change agent capability policy",
     { dataRoot: ctx.dataRoot },
   );
-}
-
-function reprojectProject(
-  db: DatabaseSync,
-  ctx: ProfileMutationContext,
-  projectSlug: string,
-): void {
-  rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
-    dataRoot: ctx.dataRoot,
-  });
 }
 
 function parseForm(raw: SubmittedProfileForm): ProfileFormInput {

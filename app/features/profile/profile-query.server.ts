@@ -21,9 +21,8 @@ import {
   type BackendQuotaRow,
 } from "~/server/runtimes/backend-quota.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { ROLE_IDS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
-import { ROLE_RANK } from "~/shared/rbac";
+import { PROJECT_ROLES, ROLE_RANK } from "~/shared/rbac";
 import { observedAfter } from "~/shared/freshness";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import {
@@ -319,7 +318,7 @@ export function listUserMemberships(
     .all(userId) as MembershipRow[];
   return rows
     .filter((r): r is MembershipRow & { role: ProjectRole } =>
-      ROLE_IDS.some((id) => id === r.role),
+      PROJECT_ROLES.some((id) => id === r.role),
     )
     .map((r) => ({ slug: r.slug, name: r.name, role: r.role }));
 }

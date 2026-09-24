@@ -185,11 +185,10 @@ import {
   readProjectFile,
 } from "~/server/files/project-writer.server";
 import {
-  projectFilePath,
   taskAttachmentsDir,
   taskDir,
 } from "~/server/files/file-store-root.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import { projectRunsForTask } from "~/server/runtimes/run-projection.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
@@ -804,9 +803,7 @@ export async function createTask(
   await createTaskFile(taskRef(ctx, input.projectSlug, key), createInput);
 
   // project.md changed too (counter bump) — reproject both.
-  rebuildPath(db, projectFilePath(input.projectSlug, ctx.dataRoot), {
-    dataRoot: ctx.dataRoot,
-  });
+  reprojectProject(db, ctx, input.projectSlug);
   reprojectTask(db, ctx, input.projectSlug, key);
 
   // Ruling 140(b): a creation that seats someone ELSE tells them, in the same
