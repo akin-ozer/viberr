@@ -14,6 +14,7 @@ import {
   mountHarness,
   notificationRead,
   OTHER_TASK,
+  runLogAppended,
   runStateChanged,
   sendComment,
   settle,
@@ -292,6 +293,27 @@ describe("reconnects replay what the tab missed (RF-1, ruling 301)", () => {
     await advance(1_000);
     // CANARY: open the task's stream without its position and the event is lost.
     expect(harness.calls["routes/project.task"]).toBe(2);
+  });
+
+  it("opening a task whose run printed 300 lines while the board watched reloads only the task (RV-3)", async () => {
+    const harness = await tab({ path: BOARD });
+    // The lines go to the task's scope only, so the board's stream never
+    // moves past them.
+    for (let seq = 1; seq <= 300; seq += 1) runLogAppended(TASK, seq);
+    await act(async () => {
+      await harness.router.navigate(TASK_PAGE);
+    });
+    await settle();
+    await connect();
+    await advance(1_000);
+    // CANARY: share one ring between console lines and data events and the
+    // reopen falls off it: stream.resync reloads the layout and the task again.
+    expect(harness.calls).toEqual({
+      root: 0,
+      "routes/project": 0,
+      "routes/project.board": 0,
+      "routes/project.task": 1,
+    });
   });
 
   it("an event still inside the 300 ms window when the stream re-scopes still reaches the page", async () => {

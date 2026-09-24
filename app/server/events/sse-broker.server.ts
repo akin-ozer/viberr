@@ -1,5 +1,6 @@
 import { createContext, type MiddlewareFunction } from "react-router";
 import type { SseEvent } from "~/schemas/sse-event.schema";
+import { SSE_STREAM_EVENTS } from "~/features/live-updates/event-types";
 import {
   releaseDataRootLock,
   stopDataRootLockGuard,
@@ -25,11 +26,13 @@ import { logger } from "~/server/logging/logger.server";
  *   any throw (closed controller, backpressure limit exceeded — see the
  *   route) drops and closes that connection. A slow client can never block
  *   or crash the publisher.
- * - Ring buffer of the last 256 published events with a monotonically
+ * - Ring buffers of the last published events with a monotonically
  *   increasing id (`id:` SSE field), unique across processes (ruling 454,
- *   RV-5). A reconnect presenting Last-Event-ID replays the missed events
- *   (scope-filtered); when the id predates the buffer window (or this
- *   process) the client gets `stream.resync` and revalidates once instead.
+ *   RV-5): 256 data events, and 256 stream events (console lines) in a ring
+ *   of their own (RV-3). A reconnect presenting Last-Event-ID replays the
+ *   missed events of both (scope-filtered, in id order); when a data event it
+ *   missed has left its ring (or the id predates this process) the client
+ *   gets `stream.resync` and revalidates once instead.
  * - HMR-safe singleton (global-symbol state, same pattern as getDb()) +
  *   graceful shutdown: SIGINT/SIGTERM runs `runProcessShutdown` (connections,
  *   database, data-root writer lock), then re-raises the signal for the default
@@ -44,6 +47,17 @@ import { logger } from "~/server/logging/logger.server";
 
 export const HEARTBEAT_INTERVAL_MS = 25_000;
 export const RING_BUFFER_SIZE = 256;
+/**
+ * Ruling 454 (RV-3): the stream events' own ring (`SSE_STREAM_EVENTS`: one
+ * `run.log-appended` or `controller.log-appended` per console line). They used
+ * to share the data ring, and a connection's position moves only on events in
+ * its own scopes: a board open while an agent printed 300 lines stood at a
+ * position the ring no longer reached, so opening that task answered
+ * `stream.resync` and reloaded the page for lines its console reads itself.
+ * Lines this ring has let go of never resync: the console fetches whatever
+ * lies past its cursor on the next frame or reload.
+ */
+export const STREAM_RING_BUFFER_SIZE = 256;
 
 // ---------------------------------------------------------------- scopes
 
@@ -148,7 +162,13 @@ interface SseConnection {
 interface BrokerState {
   nextEventId: number;
   nextConnectionId: number;
+  /** Data events: every name but the stream events. */
   buffer: BufferedEvent[];
+  /** Stream events (console lines), ruling 454 (RV-3). */
+  streamBuffer: BufferedEvent[];
+  /** The newest data event id the data ring has let go of (this process's
+   *  base until it lets one go): a position below it missed one for good. */
+  replayFloor: number;
   connections: Map<number, SseConnection>;
   signalsRegistered: boolean;
 }
@@ -174,10 +194,13 @@ function getState(): BrokerState {
   const cache: Record<symbol, BrokerState | undefined> = globalThis;
   let state = cache[BROKER_KEY];
   if (!state) {
+    const base = eventIdBase();
     state = {
-      nextEventId: eventIdBase(),
+      nextEventId: base,
       nextConnectionId: 0,
       buffer: [],
+      streamBuffer: [],
+      replayFloor: base,
       connections: new Map(),
       signalsRegistered: false,
     };
@@ -346,16 +369,18 @@ export function connectSseClient(input: ConnectSseInput): SseConnectionHandle {
   );
 
   // Reconnect catch-up: replay everything the client missed (scope-filtered)
-  // when the buffer still covers its position; otherwise tell it to resync.
+  // when the data ring still holds every data event after its position;
+  // otherwise tell it to resync. The stream ring replays what it still holds
+  // and never resyncs (ruling 454, RV-3).
   const last = input.lastEventId;
   if (!conn.closed && last !== null && last !== undefined && last !== headId) {
-    const oldest = state.buffer[0]?.id;
-    const covered =
-      last <= headId && (oldest === undefined ? last === headId : last >= oldest - 1);
+    const covered = last <= headId && last >= state.replayFloor;
     if (covered) {
-      for (const buffered of state.buffer) {
+      const missed = [...state.buffer, ...state.streamBuffer]
+        .filter((buffered) => buffered.id > last)
+        .toSorted((a, b) => a.id - b.id);
+      for (const buffered of missed) {
         if (conn.closed) break;
-        if (buffered.id <= last) continue;
         if (!routeMatchesConnection(buffered.route, conn)) continue;
         safeWrite(state, conn, formatSseMessage(buffered.id, buffered.name, buffered.json));
       }
@@ -390,16 +415,23 @@ export function connectSseClient(input: ConnectSseInput): SseConnectionHandle {
 // ----------------------------------------------------------------- publish
 
 /**
- * Publishes one event: assigns the next monotonic id, appends it to the
- * ring buffer, fans out to every scope-matching connection. Returns the id.
+ * Publishes one event: assigns the next monotonic id, appends it to its ring
+ * (a stream event's own, or the data ring), fans out to every scope-matching
+ * connection. Returns the id.
  */
 export function publishSseEvent(event: SseEvent, route: SseRoute): number {
   const state = getState();
   const id = ++state.nextEventId;
   const json = JSON.stringify(event);
-  state.buffer.push({ id, name: event.type, json, route });
-  if (state.buffer.length > RING_BUFFER_SIZE) {
-    state.buffer.splice(0, state.buffer.length - RING_BUFFER_SIZE);
+  if (SSE_STREAM_EVENTS.includes(event.type)) {
+    state.streamBuffer.push({ id, name: event.type, json, route });
+    if (state.streamBuffer.length > STREAM_RING_BUFFER_SIZE) state.streamBuffer.shift();
+  } else {
+    state.buffer.push({ id, name: event.type, json, route });
+    if (state.buffer.length > RING_BUFFER_SIZE) {
+      const evicted = state.buffer.shift();
+      if (evicted) state.replayFloor = evicted.id;
+    }
   }
   const chunk = formatSseMessage(id, event.type, json);
   // A failed write drops the connection it was writing to — deleting the entry
@@ -503,7 +535,7 @@ export function getSseBrokerStats(): SseBrokerStats {
   const state = getState();
   return {
     connections: state.connections.size,
-    bufferedEvents: state.buffer.length,
+    bufferedEvents: state.buffer.length + state.streamBuffer.length,
     headId: state.nextEventId,
   };
 }

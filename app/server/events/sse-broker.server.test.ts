@@ -18,6 +18,7 @@ import {
   publishSseEvent,
   resetSseBrokerForTests,
   RING_BUFFER_SIZE,
+  STREAM_RING_BUFFER_SIZE,
   routeMatchesConnection,
   runProcessShutdown,
   type SseScope,
@@ -366,6 +367,46 @@ describe("ring buffer replay (Last-Event-ID)", () => {
     // CANARY: start every process's ids at 0 and the old position reads as
     // covered: no resync, and the id-5 change is never replayed.
     expect(conn.names()).toEqual(["stream.open", "stream.resync"]);
+  });
+
+  /**
+   * Ruling 454 (RV-3): console lines (`run.log-appended`, one per line of a
+   * run) used to share the one 256-event ring with every data event, and a
+   * stream's position only moves on events in its own scopes. So a board left
+   * open while the agent it shows printed 300 lines stood at a position the
+   * ring no longer reached, and opening that task answered `stream.resync`: the
+   * page reloaded everything to catch up on lines its console reads by itself.
+   */
+  it("keeps console lines in a ring of their own, so a busy run cannot push a data event out of replay", () => {
+    const standing = publishSseEvent(taskEvent("p", "K-2"), { projectSlug: "p", taskKey: "K-2" });
+    for (let seq = 1; seq <= 300; seq += 1) {
+      publishSseEvent(
+        {
+          type: "run.log-appended",
+          entityId: "p/K-1",
+          occurredAt: new Date().toISOString(),
+          data: { projectSlug: "p", taskKey: "K-1", runId: "run_1", threadId: "primary", seq },
+        },
+        { projectSlug: "p", taskKey: "K-1", taskOnly: true },
+      );
+    }
+    publishSseEvent(taskEvent("p", "K-3"), { projectSlug: "p", taskKey: "K-3" });
+
+    // The board stood at `standing`; the person opens K-1.
+    const conn = connect("u1", [{ kind: "project", slug: "p" }, { kind: "task", slug: "p", key: "K-1" }], {
+      lastEventId: standing,
+    });
+    // CANARY: put console lines back in the data ring and this is a resync.
+    expect(conn.names()).not.toContain("stream.resync");
+    expect(conn.names().filter((n) => n === "task.updated")).toHaveLength(1);
+    expect(conn.writes.at(-1)).toContain("K-3");
+    // The newest console lines replay too, in id order (the console reads
+    // any older ones through its own cursor).
+    expect(conn.names().filter((n) => n === "run.log-appended")).toHaveLength(STREAM_RING_BUFFER_SIZE);
+    const ids = conn.writes
+      .slice(1)
+      .map((w) => Number(/^id: (\d+)$/m.exec(w)?.[1]));
+    expect(ids).toEqual(ids.toSorted((a, b) => a - b));
   });
 
   it("caps the buffer at RING_BUFFER_SIZE", () => {

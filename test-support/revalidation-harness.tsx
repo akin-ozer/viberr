@@ -195,6 +195,20 @@ export function runStateChanged(
   );
 }
 
+/** One console line of `taskKey`'s run, routed as `run-events.server.ts`
+ *  routes it: to that task's scope only (`taskOnly`). */
+export function runLogAppended(taskKey = TASK, seq = 1): number {
+  return publish(
+    {
+      type: "run.log-appended",
+      entityId: `${SLUG}/${taskKey}`,
+      occurredAt: OCCURRED_AT,
+      data: { projectSlug: SLUG, taskKey, runId: `run_${taskKey}`, threadId: "primary", seq },
+    },
+    { projectSlug: SLUG, taskKey, taskOnly: true },
+  );
+}
+
 export function notificationRead(): number {
   return publish(
     {

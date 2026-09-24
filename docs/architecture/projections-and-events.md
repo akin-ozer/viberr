@@ -255,12 +255,16 @@ dropped and `projects` is expanded to their memberships; an empty result is a 40
 first message sets `retry: 5000` and sends `stream.open`. A 25-second heartbeat
 (`: hb`) also **re-authorizes** every connection, dropping ones whose scopes vanished (a
 throw keeps the existing scopes: a check that could not run must neither widen access
-nor tear down a healthy stream). A 256-event ring buffer replays, on the new
-connection's scopes, every event after the position a connection names: the browser's
+nor tear down a healthy stream). Two 256-event rings replay, on the new connection's
+scopes and in id order, every event after the position a connection names: the browser's
 own `Last-Event-ID` header when it retries a source, or the `lastEventId` query param a
-new `EventSource` carries (ruling 454; the header wins). An id older than the buffer, or
-a restart (ids are unique across processes: each starts at a thousand per millisecond
-of its boot clock), sends `stream.resync` and the client revalidates once. Root's
+new `EventSource` carries (ruling 454; the header wins). One ring holds data events, the
+other stream events (console lines, `SSE_STREAM_EVENTS`), so a busy run cannot push a
+data event out of reach. A position below a data event the ring has let go of, or from
+an earlier process (ids are unique across processes: each starts at a thousand per
+millisecond of its boot clock), gets `stream.resync` and the client revalidates once;
+console lines the stream ring has let go of never resync, since the console reads past
+its own cursor. Root's
 `liveHeadMiddleware` reads the head before any loader of a request runs, and a document
 load hands it to the page as root's `liveHead`, so the page's first stream replays what
 was published between the server render and hydration. Queue backpressure caps at 1024
