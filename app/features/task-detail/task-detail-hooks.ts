@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
+import { inFlightIntent } from "~/ui/in-flight";
 import { useToast } from "~/ui/toast";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import {
@@ -85,6 +86,15 @@ export function useRunControls({
   const runFetcher = useFetcher<ActionResult>();
   useActionFeedback(runFetcher);
   const runBusy = runFetcher.state !== "idle";
+  // Ruling 368: this one fetcher carries four requests (interrupt, the backend
+  // retry, complete-merge, force-accept), so the page reads which one — and
+  // for which run or agent — off its form data. The button that started it
+  // shows the work; every other one only waits on `runBusy`.
+  const runIntent = inFlightIntent(runFetcher);
+  const interruptingRunId =
+    runIntent === "run-interrupt" ? String(runFetcher.formData?.get("runId") ?? "") : null;
+  const retryingProfileId =
+    runIntent === "run-agent" ? String(runFetcher.formData?.get("profileId") ?? "") : null;
   // Any live (queued/running) run — the D4 backend-retry affordance stays gated
   // on "nothing currently in flight" (F10-04 keeps this coarse gate; per-
   // engagement gating applies to the primary/reviewer Run buttons only).
@@ -217,6 +227,9 @@ export function useRunControls({
     : undefined;
   return {
     runBusy,
+    runIntent,
+    interruptingRunId,
+    retryingProfileId,
     canInterrupt,
     onInterrupt,
     onRetryBackend,

@@ -2126,13 +2126,13 @@ function renderExec(opts: {
         canRunAgents={opts.canRunAgents ?? true}
         liveAgentRuns={opts.liveAgentRuns ?? []}
         operatorRunActive={false}
-        runBusy={false}
+        runInFlight={null}
         onRunAgent={(profileId, prompt, delayMinutes) =>
           calls.runAgent.push({ profileId, prompt, delayMinutes })
         }
         releaseBusy={false}
         onReleaseAgent={(id) => calls.releaseAgent.push(id)}
-        operatorBusy={false}
+        operatorInFlight={null}
         onRunOperator={(steer, delayMinutes) =>
           calls.runOperator.push({ steer, delayMinutes })
         }
@@ -2865,6 +2865,106 @@ describe("ruling 368: a recommendation's request in flight", () => {
     void getByText;
     await act(async () => {
       held2.answer();
+    });
+  });
+});
+
+/**
+ * Ruling 368 across the task page: each request shows itself on the button that
+ * started it, read off its own fetcher, and a control that merely waits claims
+ * nothing. These go through the real fetchers and the page's own wiring.
+ */
+describe("ruling 368: the task page's requests in flight", () => {
+  it("a Schedule click reads Scheduling…, not Running…", async () => {
+    // Canary: map every run-operator request to "run" in task-main-sections.tsx
+    // (`runKind`) and this reads Starting… for a schedule, as it read Running….
+    const held = heldAction();
+    const { container, submitted, getByLabelText } = renderPage({ myRole: "admin", held });
+    fireEvent.change(getByLabelText("When the operator run starts"), {
+      target: { value: "5" },
+    });
+    fireEvent.click(findButton(container, "Schedule")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("schedule-action");
+    const busy = findButton(container, "Scheduling…")!;
+    await waitFor(() => expect(busy.getAttribute("aria-busy")).toBe("true"));
+    expect(busy.disabled).toBe(true);
+    expect(busy.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(findButton(container, "Running…")).toBeUndefined();
+    await act(async () => {
+      held.answer();
+    });
+  });
+
+  it("an archive reads Archiving…, and Accept waits without reading Accepting…", async () => {
+    // Canary: fold `dispositionBusy` back into the Accept label in
+    // task-side-panels.tsx, which is what made it read "Accepting · merging…".
+    const held = heldAction();
+    const { container, submitted } = renderPage({ myRole: "admin", held });
+    fireEvent.click(findButton(container, "Archive task")!);
+    fireEvent.click(findButton(container, "Archive VIB-151")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    const archiving = findButton(container, "Archiving…")!;
+    await waitFor(() => expect(archiving.getAttribute("aria-busy")).toBe("true"));
+    expect(archiving.querySelector("svg.ico.spin")).not.toBeNull();
+    const accept = findButton(container, "Accept completion → Done")!;
+    expect(accept.disabled).toBe(true);
+    expect(accept.hasAttribute("aria-busy")).toBe(false);
+    expect(findButton(container, "Accepting")).toBeUndefined();
+    await act(async () => {
+      held.answer();
+    });
+  });
+
+  it("an acceptance reads Accepting… on Accept", async () => {
+    const held = heldAction();
+    const { container, submitted } = renderPage({ myRole: "admin", held });
+    fireEvent.click(findButton(container, "Accept completion → Done")!);
+    fireEvent.click(findButton(container, "Accept → Done")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    const accepting = findButton(container, "Accepting…")!;
+    await waitFor(() => expect(accepting.getAttribute("aria-busy")).toBe("true"));
+    expect(accepting.querySelector("svg.ico.spin")).not.toBeNull();
+    // Archive only waits.
+    expect(findButton(container, "Archive task")!.hasAttribute("aria-busy")).toBe(false);
+    await act(async () => {
+      held.answer();
+    });
+  });
+
+  it("a details save reads Saving…, busy, the loader spinning", async () => {
+    // Canary: drop `aria-busy` from the details form's Save in task-side-panels.tsx.
+    const held = heldAction();
+    const { container, submitted } = renderPage({ myRole: "admin", held });
+    fireEvent.click(findButton(container, "Edit details")!);
+    fireEvent.click(
+      container.querySelector<HTMLButtonElement>(".meta-edit-actions button[type=submit]")!,
+    );
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    const saving = findButton(container, "Saving…")!;
+    await waitFor(() => expect(saving.getAttribute("aria-busy")).toBe("true"));
+    expect(saving.disabled).toBe(true);
+    expect(saving.querySelector("svg.ico.spin")).not.toBeNull();
+    await act(async () => {
+      held.answer();
+    });
+  });
+
+  it("a merge reads Merging… on Complete merge", async () => {
+    const held = heldAction();
+    const { container, submitted } = renderPage({
+      myRole: "admin",
+      task: { pr: { number: 147, state: "accepted", title: "[VIB-151] Compress timelines" } },
+      held,
+    });
+    fireEvent.click(findButton(container, "Complete merge")!);
+    fireEvent.click(findButton(container, "Merge PR #147")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    const merging = findButton(container, "Merging…")!;
+    await waitFor(() => expect(merging.getAttribute("aria-busy")).toBe("true"));
+    expect(merging.querySelector("svg.ico.spin")).not.toBeNull();
+    await act(async () => {
+      held.answer();
     });
   });
 });

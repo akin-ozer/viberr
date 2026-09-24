@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import type { ControllerDockView } from "./controller-dock-query.server";
 import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
 import { CONTROLLER_UPDATED_EVENT } from "~/features/live-updates/event-types";
 import { mountDock as mount } from "../../../test-support/controller-dock-stub";
+import { DockPanelBody } from "./controller-dock-panel";
 
 /**
  * Ruling 121 — the controller dock, driven through a routed stub: the trigger
@@ -903,5 +905,39 @@ describe("the controller dock (ruling 121)", () => {
     await waitFor(() => expect(trigger.querySelector(".live-dot")).not.toBeNull());
     // History never wears the entry animation marker.
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 368: the dock's Send named its work ("Sending…") but sat at the .45
+ * refused step with no busy mark while the controller took the message. It is
+ * `aria-busy` now, the loader spinning.
+ * Canary: drop `aria-busy={busy || undefined}` in controller-dock-panel.tsx.
+ */
+describe("ruling 368: the dock's send in flight", () => {
+  it("Send reads Sending…, busy, the loader spinning", () => {
+    render(
+      <MemoryRouter>
+        <DockPanelBody
+          current={taskView({ viewerOwnsActive: true })}
+          turn={null}
+          unseen={[]}
+          threadsOpen={false}
+          busy
+          disabled={false}
+          text="Move it along"
+          onText={() => {}}
+          onSubmit={() => {}}
+          onPick={() => {}}
+          onLeave={() => {}}
+          composerRef={{ current: null }}
+          onMount={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    const sending = screen.getByRole("button", { name: "Sending…" });
+    expect(sending.getAttribute("aria-busy")).toBe("true");
+    expect(sending.hasAttribute("disabled")).toBe(true);
+    expect(sending.querySelector("svg.ico.spin")).not.toBeNull();
   });
 });

@@ -90,7 +90,10 @@ export function MoveBackConfirm({
             disabled={!ready || busy}
             onClick={() => onConfirm(reason.trim())}
           >
-            {busy ? "Moving…" : "Move back"}
+            {/* Ruling 368: both callers close this dialog on the click, so a
+                busy step here is always SOMEONE ELSE's move in flight; the
+                button waits and claims nothing (it read "Moving…"). */}
+            Move back
           </button>
         </div>
       </div>

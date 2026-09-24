@@ -710,11 +710,15 @@ export function Guardrails({
   guardrails,
   canManage,
   busy,
+  inFlight = null,
   onSet,
 }: {
   guardrails: GuardrailView[];
   canManage: boolean;
   busy: boolean;
+  /** Ruling 368: the guardrail and op whose request is in flight, so the
+   *  button that sent it shows the work and every other control only waits. */
+  inFlight?: { id: string; op: string } | null;
   onSet: (id: string, op: GuardrailOp, value?: number) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -846,10 +850,17 @@ export function Guardrails({
                       type="button"
                       className="btn sm"
                       disabled={busy || !valueChanged}
-                      aria-busy={busy}
+                      aria-busy={(inFlight?.id === g.id && inFlight.op === "value") || undefined}
                       onClick={applyValue}
                     >
-                      Apply
+                      {inFlight?.id === g.id && inFlight.op === "value" ? (
+                        <>
+                          <Icon name="loader" className="spin" />
+                          Applying…
+                        </>
+                      ) : (
+                        "Apply"
+                      )}
                     </button>
                   </span>
                   {showRefusal && (
@@ -891,10 +902,20 @@ export function Guardrails({
                       type="button"
                       className="btn ghost sm danger"
                       disabled={busy}
+                      aria-busy={(inFlight?.id === g.id && inFlight.op === "remove") || undefined}
                       onClick={() => onSet(g.id, "remove")}
                     >
-                      <Icon name="x" />
-                      Remove
+                      {inFlight?.id === g.id && inFlight.op === "remove" ? (
+                        <>
+                          <Icon name="loader" className="spin" />
+                          Removing…
+                        </>
+                      ) : (
+                        <>
+                          <Icon name="x" />
+                          Remove
+                        </>
+                      )}
                     </button>
                   )}
                 </span>
@@ -1092,6 +1113,14 @@ export function PolicyPage({
               guardrails={data.guardrails}
               canManage={canEditPolicy}
               busy={busy}
+              inFlight={
+                guardFetcher.state !== "idle" && guardFetcher.formData
+                  ? {
+                      id: String(guardFetcher.formData.get("id") ?? ""),
+                      op: String(guardFetcher.formData.get("op") ?? ""),
+                    }
+                  : null
+              }
               onSet={onSetGuardrail}
             />
             {/* Ruling 178: the acceptance rule beside the other rules; the
