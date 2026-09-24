@@ -9,10 +9,7 @@ import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { heldDataRootLock } from "~/server/db/data-root-lock.server";
 import { getEnv } from "~/server/config/env.server";
-import {
-  countUnreadNotifications,
-  listNotifications,
-} from "~/server/projections/notifications.server";
+import { bellCounts } from "~/server/projections/notifications.server";
 import { rescanProjections } from "~/server/projections/rescan.server";
 import { rebuildProjections } from "~/server/projections/rebuild.server";
 import {
@@ -52,8 +49,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     projects: listHomeProjectsForUser(db, { id: user.id, role: user.role }),
     prefs: getHomePrefs(db, user.id),
     org: getHomeOrgSummary(db),
-    notifications: listNotifications(db, user.id, { limit: 100 }),
-    unread: countUnreadNotifications(db, user.id),
+    // Ruling 454 (FL-4): the bell's counts; the bell loads its own list.
+    ...bellCounts(db, user.id),
     // B-FD4: `VIBERR_DATA_ROOT` is a HOST filesystem path. It exists here only
     // for the New-project modal's "creates …/projects/<slug>/" hint, and every
     // control that acts on the store is org-admin gated — so a member gets the

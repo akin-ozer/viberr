@@ -86,11 +86,16 @@ middleware; the root loader authenticates through better-auth (forwarding the ro
 session cookie), reads the theme cookie, and mints the CSRF token. A signed-in page also
 mounts the controller dock (ruling 121).
 
-**Read path** (`/projects/:slug/board`): layout loader → `requireUser` → project query
-→ membership check from the project's projected `members` list (files are truth) with the
-audited org-admin override → non-member and unknown slug both 404 → viewer-scoped
-annotations (decisions requiring the viewer, the review queue split) → rail counts and
-notifications. Child routes read the layout data with `useRouteLoaderData`.
+**Read path** (`/projects/:slug/board`): layout loader and board loader, together on one
+request → `requireUser` → `readWorkspace` (`routes/project-workspace.server.ts`, once per
+request): project query → membership check from the project's projected `members` list
+(files are truth) with the audited org-admin override → non-member and unknown slug both
+404 → the review queue. The layout returns the shell's slice (the project's name, slug,
+repo and archived flag, members, the viewer's role), the rail counts and the bell's two
+counts; the board loader returns the columns as board cards (`toBoardCard`), annotated
+with the viewer's decisions and live runs (ruling 454). Child routes read the layout data
+with `useRouteLoaderData`; only the board reads the columns, and the bell loads its own
+list (`/resources/notifications`).
 
 **Write path** (`intent=create-task`): route action → `requireFormAction` (session,
 `assertCsrf`: the request must *prove* same-origin through Origin / Sec-Fetch-Site /

@@ -1,6 +1,7 @@
 import {
   forwardRef,
   lazy,
+  memo,
   startTransition,
   Suspense,
   useCallback,
@@ -188,8 +189,13 @@ const StandIn = forwardRef<
   );
 });
 
-export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposerProps>(
-  function CommentComposer(props, ref) {
+/**
+ * Ruling 454 (CS-7): memoised. The timeline hands it stable callbacks and
+ * directories, so a revalidation or a send's fetcher states re-render the
+ * timeline without re-rendering the editor under it.
+ */
+export const CommentComposer = memo(
+  forwardRef<CommentComposerHandle, CommentComposerProps>(function CommentComposer(props, ref) {
     // Every mount renders the stand-in first: the server has no editor to
     // render, so hydration must see the stand-in too.
     const [wanted, setWanted] = useState(false);
@@ -255,5 +261,5 @@ export const CommentComposer = forwardRef<CommentComposerHandle, CommentComposer
         {wanted ? <LazyCommentEditor ref={editorRef} {...props} carry={carry} /> : standIn}
       </Suspense>
     );
-  },
+  }),
 );

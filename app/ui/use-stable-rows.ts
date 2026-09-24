@@ -68,6 +68,24 @@ export function shareRows<T>(
 }
 
 /**
+ * One loader value (a directory, a lookup map, a list with no row keys),
+ * kept as the object this component last committed while its content is the
+ * same, so the memos and memoised children that depend on it hold still
+ * across a revalidation.
+ */
+export function useStableValue<T>(value: T): T {
+  const committed = useRef(value);
+  const stable = useMemo(
+    () => (sameRow(committed.current, value) ? committed.current : value),
+    [value],
+  );
+  useLayoutEffect(() => {
+    committed.current = stable;
+  }, [stable]);
+  return stable;
+}
+
+/**
  * The hook form: `rows`, shared against what this component last committed.
  * `keyOf` must be stable (a module-level function).
  */

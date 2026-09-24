@@ -5,7 +5,7 @@ import type { PerfBudgetTable } from "../perf-verdict";
 const TASK_REVALIDATION =
   "demo seed, arda, VIB-142 + 60 comments (69 events): root + layout + task loaders on one .data Request, second (warm) revalidation";
 const BOARD_REVALIDATION =
-  "demo seed viberr-core (10 tasks), arda: root + layout loaders on one board .data Request, second (warm) revalidation";
+  "demo seed viberr-core (10 tasks), arda: root + layout + board loaders on one board .data Request, second (warm) revalidation";
 const DOCK =
   "demo seed + shipped default agent assets, arda with 6 unseen controller replies on viberr-core, second (warm) call";
 
@@ -38,8 +38,10 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
   // SRV-7 / FL-3 / BOARD-5 / SRV-5 / TASK-7: every SQL statement execution.
   // 86 before one session resolution per Request.
   // 76 before the layout built the task list once.
+  // 64 before the layout stopped reading the bell's list (FL-4 / SRV-6) and
+  // the board's decisions, live runs and repo probe (BOARD-6).
   "server-read:task-revalidation.sql": {
-    ceiling: 64,
+    ceiling: 49,
     unit: "count",
     journey: "server",
     fixture: TASK_REVALIDATION,
@@ -79,8 +81,10 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
   // FL-3 / BOARD-5 / SRV-5 / FL-8: every SQL statement execution.
   // 54 before one session resolution per Request.
   // 49 before the layout built the task list once (getBoardWithTasks feeds the review queue).
+  // 37 before the bell's list left the layout (FL-4 / SRV-6); the board
+  // route's own loader (BOARD-6) shares the layout's read of the project.
   "server-read:board-revalidation.sql": {
-    ceiling: 37,
+    ceiling: 29,
     unit: "count",
     journey: "server",
     fixture: BOARD_REVALIDATION,

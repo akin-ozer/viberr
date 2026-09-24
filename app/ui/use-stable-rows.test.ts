@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
+import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { sameRow, shareRows } from "./use-stable-rows";
+import { sameRow, shareRows, useStableValue } from "./use-stable-rows";
 
 /**
  * Ruling 454: structural sharing must never hand a page stale data. A row is
@@ -78,5 +80,28 @@ describe("sameRow (ruling 454)", () => {
     expect(sameRow({ a: [1, 2] }, { a: [1, 2, 3] })).toBe(false);
     expect(sameRow({ a: undefined }, {})).toBe(false);
     expect(sameRow<Row["labels"] | Row["pr"]>([], null)).toBe(false);
+  });
+});
+
+interface Directory {
+  agents: { handle: string }[];
+  users: string[];
+}
+
+describe("useStableValue (ruling 454)", () => {
+  it("keeps the object it holds while the content is the same, takes a changed one", () => {
+    const first: Directory = { agents: [{ handle: "dev" }], users: [] };
+    const view = renderHook(({ value }) => useStableValue(value), {
+      initialProps: { value: first },
+    });
+    expect(view.result.current).toBe(first);
+    view.rerender({ value: structuredClone(first) });
+    expect(view.result.current).toBe(first);
+    const changed: Directory = { agents: [{ handle: "dev" }, { handle: "qa" }], users: [] };
+    view.rerender({ value: changed });
+    expect(view.result.current).toBe(changed);
+    // ...and a copy of the changed one is held from then on.
+    view.rerender({ value: structuredClone(changed) });
+    expect(view.result.current).toBe(changed);
   });
 });

@@ -1446,7 +1446,7 @@ export default function TaskDetailRoute({
   const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
   if (!layout) return null;
 
-  const members: TaskMemberView[] = layout.board.members.map((m) => ({
+  const members: TaskMemberView[] = layout.members.map((m) => ({
     userId: m.userId,
     role: m.role,
     user: {

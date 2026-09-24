@@ -42,17 +42,25 @@ interface RailData {
   reviewCount: number;
 }
 
+/** The rail (the workspace layout's loader) and the board it counts (ruling
+ *  454, BOARD-6: the board route's own loader), as one board request runs
+ *  them: together, on one Request. */
 async function railCounts(): Promise<RailData> {
-  const { loader } = await import("~/routes/project");
+  const [{ loader: layoutLoader }, { loader: boardLoader }] = await Promise.all([
+    import("~/routes/project"),
+    import("~/routes/project.board"),
+  ]);
   const { cookie } = await app.cookieFor(ardaId);
-  // SAFETY: the loader reads only `request` and `params.slug`; the rest of the
+  // SAFETY: both loaders read only `request` and `params.slug`; the rest of the
   // generated `Route.LoaderArgs` (the router context provider, its matches) is
   // untouched on every path this file exercises.
-  return loader({
+  const args = {
     request: app.request("/projects/viberr-core/board", { cookie }),
     params: { slug: "viberr-core" },
     context: {},
-  } as never);
+  } as never;
+  const [rail, board] = await Promise.all([layoutLoader(args), boardLoader(args)]);
+  return { ...rail, board };
 }
 
 /** Every task the loader shipped, archived ones included (the raw list the
@@ -162,9 +170,9 @@ describe("F19-9: the rail badges count the tasks their surfaces list", () => {
  * Ruling 349 (pass 38, F38-3): the board reads the run row, so a run the cap
  * parked is "agent queued" and only a streaming one is "agent working".
  */
-describe("ruling 349: the layout annotates each task with its live run", () => {
-  // The loader ships whole TaskSummary objects; RailData names only the fields
-  // the badge tests read, so this test parses the three more it reads.
+describe("ruling 349: the board annotates each task with its live run", () => {
+  // The loader ships board cards; RailData names only the fields the badge
+  // tests read, so this test parses the three more it reads.
   const liveTaskSchema = z.object({
     key: z.string(),
     archived: z.boolean(),

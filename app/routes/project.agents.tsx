@@ -310,7 +310,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       deployments={loaderData.deployments}
       stages={loaderData.stages}
       workflow={loaderData.workflow}
-      projectSlug={layout?.board.project.slug ?? ""}
+      projectSlug={layout?.project.slug ?? ""}
       projectName={loaderData.projectName}
       myRole={layout?.myRole ?? null}
       viewerIsOrgAdmin={loaderData.viewerIsOrgAdmin}

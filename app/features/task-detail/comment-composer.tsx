@@ -1,8 +1,10 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   type RefObject,
 } from "react";
@@ -275,7 +277,11 @@ export const CommentEditor = forwardRef<
       [],
     );
 
-    const handleChange = (editorState: EditorState) => {
+    // Ruling 454 (CS-7): stable, since it reads only refs. OnChangePlugin
+    // registers its update listener in an effect keyed on this function, so a
+    // new one on each render (every keystroke inside an @token, every render
+    // the page made) tore the listener down and registered it again.
+    const handleChange = useCallback((editorState: EditorState) => {
       editorState.read(() => {
         const root = $getRoot();
         const text = root.getTextContent();
@@ -284,7 +290,8 @@ export const CommentEditor = forwardRef<
         onChangeRef.current(text);
         menuRef.current.refreshFrom(text, caret);
       });
-    };
+    }, []);
+    const mentionNames = useMemo(() => mentionNamesFor(mentionables), [mentionables]);
 
     return (
       <LexicalComposer
@@ -315,7 +322,7 @@ export const CommentEditor = forwardRef<
         />
         <HistoryPlugin />
         <OnChangePlugin onChange={handleChange} ignoreSelectionChange={false} />
-        <MentionHighlightPlugin names={mentionNamesFor(mentionables)} />
+        <MentionHighlightPlugin names={mentionNames} />
         <ComposerKeysPlugin menuRef={menuRef} onSubmitRef={onSubmitRef} />
         {/* After OnChangePlugin, whose listener (a layout effect too) must
             exist before the carried draft lands. The mention transform needs

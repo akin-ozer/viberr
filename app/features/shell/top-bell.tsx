@@ -9,6 +9,7 @@ import {
   NotificationItem,
   type NotificationView,
 } from "~/features/notifications/notification-item";
+import type { loader as bellListLoader } from "~/routes/resources.notifications";
 
 /**
  * Bell button + notifications popover — ONE implementation for both the
@@ -19,31 +20,65 @@ import {
  * ruling-9 stub projects exist only in the demo seed).
  *
  * Additions over the mock (sanctioned): Escape closes the popover.
+ *
+ * Ruling 454 (owner decision 2026-09-24, FL-4 / SRV-6): pages carry only the
+ * bell's counts. The list is this component's own fetch
+ * (`/resources/notifications`): it starts when the pointer or the focus
+ * reaches the bell, or on open, so a first open without either may show one
+ * brief loading row. While the popover is open the list follows the counts: a
+ * notification created or read revalidates the page (its `user` scope), and a
+ * count that moved reloads the list. A later intent reloads it only when the
+ * counts moved since it was fetched.
  */
 
 /**
- * UI-14: the popover list is loaded with `limit: 100` by both callers
- * (routes/project.tsx, routes/_index.tsx) while the head renders the FULL
- * unread count, so the header could claim more unread than the list can show.
- * At the cap the footer says so.
+ * UI-14: the list holds the newest `BELL_LIST_CAP` rows while the head renders
+ * the FULL unread count, so the header could claim more unread than the list
+ * can show. At the cap the footer says so; the disclosure lives with the list.
  */
 export const BELL_LIST_CAP = 100;
+
+/** The list's resource route (`routes/resources.notifications.ts`). */
+export const BELL_LIST_URL = "/resources/notifications";
+
 export function TopBell({
-  notifications,
   unread,
+  orphanUnread,
 }: {
-  notifications: NotificationView[];
+  /** The badge (`bellCounts`): unread rows that lead somewhere. */
   unread: number;
+  /** F19-25: unread rows whose project is gone (`bellCounts`). */
+  orphanUnread: number;
 }) {
-  // F19-25: `unread` comes from `countUnreadNotifications`, which EXCLUDES rows
-  // whose project no longer exists (F18-1). Those orphan rows are still rendered
-  // below, still wearing their unread dot — so the popover said "caught up" and
-  // withdrew Mark all read while unread rows were on screen. The two sets are
-  // disjoint by construction, so adding them cannot double-count.
-  const shownUnread =
-    unread + notifications.filter((n) => n.unread && n.targetMissing).length;
+  // F19-25: `unread` EXCLUDES rows whose project no longer exists (F18-1).
+  // Those orphan rows are still rendered in the list, still wearing their
+  // unread dot — so the popover said "caught up" and withdrew Mark all read
+  // while unread rows were on screen. The two sets are disjoint by
+  // construction, so adding them cannot double-count. Ruling 454: the server
+  // counts the orphans (the list is no longer here to count them from).
+  const shownUnread = unread + orphanUnread;
+
+  const list = useFetcher<typeof bellListLoader>();
+  // The counts the list was last fetched for: the list is stale exactly when
+  // they moved.
+  const counts = `${unread}:${orphanUnread}`;
+  const fetchedFor = useRef<string | null>(null);
+  const loadList = list.load;
+  const want = () => {
+    if (fetchedFor.current === counts) return;
+    fetchedFor.current = counts;
+    void loadList(BELL_LIST_URL);
+  };
+  const notifications: NotificationView[] = list.data?.notifications ?? [];
+  const loading = list.data === undefined;
 
   const [open, setOpen] = useState(false);
+  // On open, and while open whenever the counts move.
+  useEffect(() => {
+    if (!open || fetchedFor.current === counts) return;
+    fetchedFor.current = counts;
+    void loadList(BELL_LIST_URL);
+  }, [open, counts, loadList]);
   const navigate = useNavigate();
   const location = useLocation();
   const readFetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -145,19 +180,22 @@ export function TopBell({
                 </button>
               )}
             </div>
-            <div className="ntf-pop-list">
-              {notifications.length === 0 && (
+            <div className="ntf-pop-list" aria-busy={list.state !== "idle"}>
+              {loading ? (
+                <div className="empty">Loading notifications…</div>
+              ) : notifications.length === 0 ? (
                 <div className="empty">Nothing yet. You're caught up.</div>
-              )}
+              ) : null}
               {notifications.map((n) => (
                 <NotificationItem key={n.id} notification={n} onOpen={openItem} />
               ))}
             </div>
             <div className="ntf-pop-foot">
               {/* UI-14: the head can claim "150 unread" while this list holds
-                  the newest 100 (the loaders cap at `limit: 100`). Disclose the
-                  cap instead of letting the count silently disagree with the
-                  rows — the same truncation notice /notifications already got. */}
+                  the newest 100 (the list route caps at `BELL_LIST_CAP`).
+                  Disclose the cap instead of letting the count silently
+                  disagree with the rows — the same truncation notice
+                  /notifications already got. */}
               {notifications.length >= BELL_LIST_CAP && (
                 <span className="sub pull">
                   Showing the newest {notifications.length}
@@ -189,6 +227,8 @@ export function TopBell({
         }
         aria-haspopup="dialog"
         aria-expanded={open}
+        onPointerEnter={want}
+        onFocus={want}
         onClick={() => setOpen((b) => !b)}
       >
         <Icon name="bell" />

@@ -1,7 +1,6 @@
 import { Link } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Icon } from "~/ui/icon";
-import type { NotificationView } from "~/features/notifications/notification-item";
 import { PaletteTrigger } from "./palette-trigger";
 import { TopBell } from "./top-bell";
 import { UserMenu, type MenuUser } from "./user-menu";
@@ -29,16 +28,17 @@ export function PageTopbar({
   title,
   user,
   theme,
-  notifications,
   unread,
+  orphanUnread,
   onOpenPalette,
 }: {
   /** The page's name, as the current crumb (`Instance settings`, `Insights`). */
   title: string;
   user: MenuUser;
   theme: ThemePreference;
-  notifications: NotificationView[];
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 454). */
   unread: number;
+  orphanUnread: number;
   /** The palette lives in the layout (one mount per surface), so the trigger
    *  reports the click rather than owning the dialog. */
   onOpenPalette: () => void;
@@ -66,7 +66,7 @@ export function PageTopbar({
           </span>
         </nav>
         <PaletteTrigger onOpen={onOpenPalette} />
-        <TopBell notifications={notifications} unread={unread} />
+        <TopBell unread={unread} orphanUnread={orphanUnread} />
         {/* No "Switch project" item: these pages are not inside a project, so
             the brand and the crumb root already ARE that navigation — the same
             reason Home omits it. */}

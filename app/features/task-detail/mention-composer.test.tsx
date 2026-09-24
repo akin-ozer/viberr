@@ -8,6 +8,7 @@ import {
   $getRoot,
   $isParagraphNode,
   UNDO_COMMAND,
+  SKIP_DOM_SELECTION_TAG,
   type LexicalEditor,
 } from "lexical";
 import { ToastProvider } from "~/ui/toast";
@@ -121,7 +122,10 @@ async function renderComposer(opts: ComposerOptions = {}) {
 
 /** Set the whole draft (caret at end) through a real editor update. Async:
  *  Lexical commits in a microtask, so the act must flush it before the test
- *  fires keys at the (otherwise still-empty) editor. */
+ *  fires keys at the (otherwise still-empty) editor. The update skips the DOM
+ *  selection: jsdom has no layout, and one Lexical writes comes back through a
+ *  queued selectionchange that, on a loaded machine, re-read the caret as 0
+ *  and closed the @menu mid-test. */
 async function setText(editor: LexicalEditor, text: string) {
   await act(async () => {
     editor.update(() => {
@@ -135,7 +139,7 @@ async function setText(editor: LexicalEditor, text: string) {
       const paragraph = $createParagraphNode();
       root.append(paragraph);
       $setParagraphPlainText(paragraph, text);
-    });
+    }, { tag: SKIP_DOM_SELECTION_TAG });
   });
 }
 

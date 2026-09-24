@@ -1,3 +1,5 @@
+import { act } from "@testing-library/react";
+
 /**
  * Ruling 454: counts which components rendered in each React commit, for the
  * render ratchets (`*.perf.test.tsx`). React's `<Profiler onRender>` says THAT
@@ -65,6 +67,8 @@ export interface RenderCounter {
   total: () => number;
   /** Commits seen since `attach` or `reset`. */
   commits: () => number;
+  /** Renders per component name since `attach` or `reset`, for messages. */
+  breakdown: () => Record<string, number>;
   reset: () => void;
 }
 
@@ -112,11 +116,29 @@ export function createRenderCounter(): RenderCounter {
     renders: (name) => counts.get(name) ?? 0,
     total: () => [...counts.values()].reduce((sum, n) => sum + n, 0),
     commits: () => commits,
+    breakdown: () => Object.fromEntries([...counts].sort(([a], [b]) => a.localeCompare(b))),
     reset: () => {
       counts = new Map();
       commits = 0;
     },
   };
+}
+
+/**
+ * Waits until the tree stops committing: a quiet window with no commit. Reset
+ * a counter only after this, so the measured window holds the interaction and
+ * not the tail of the step before it. Under a loaded suite that tail lands
+ * late, and a ratchet must read the same figure however busy the machine is.
+ */
+export async function settle(counter: RenderCounter, quietMs = 25): Promise<void> {
+  for (let round = 0; round < 40; round++) {
+    const before = counter.commits();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, quietMs));
+    });
+    if (counter.commits() === before) return;
+  }
+  throw new Error("settle: the tree never stopped committing");
 }
 
 /**

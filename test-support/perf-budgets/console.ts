@@ -103,9 +103,10 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   },
   // TASK-4 (console half): 254 while the console and the run card
   // re-reconciled on identical data; neither renders now (the stable run
-  // projection, memoised panels). The 54 left are the page's other panels.
+  // projection, memoised panels). The 51 left are the page's other panels
+  // (54 before the timeline and composer memos of perf/journeys-pass).
   "console:task-page.renders-per-noop-revalidation": {
-    ceiling: 54,
+    ceiling: 51,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 400 rows; component renders for a structuredClone of the same props`,
@@ -141,9 +142,10 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
     fixture: `${TASK_PAGE}; 400 rows; MutationObserver records for "load older lines" (a 200-line page)`,
   },
   // LIVE-11: 23 while the elapsed clock re-rendered the whole Live run card;
-  // now its leaf, and only the digit field that moved.
+  // now its leaf on the shared clock, and only the digit field that moved
+  // (6 until the event count stopped committing per frame, LIVE-7).
   "console:task-page.renders-per-clock-tick": {
-    ceiling: 6,
+    ceiling: 5,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 40 rows; component renders for one 1 s tick`,

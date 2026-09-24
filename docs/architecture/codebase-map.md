@@ -67,8 +67,10 @@ client bundle; `ui/` never imports `features/` or `server/`; `features/` may imp
 and diagnostics severity live only under `server/interpretation/`, freshness thresholds
 only in `shared/freshness.ts`; DB rows map to camelCase only through `shared/mapping/`.
 Tests are co-located (`foo.server.test.ts`). There are no `utils.ts` dumping grounds.
-`app/routes/` holds 36 modules (35 routes plus `project-visibility.server.ts`, the
-members-only 404 guard); the route table is `app/routes.ts`.
+`app/routes/` holds 38 modules (36 routes plus `project-visibility.server.ts`, the
+members-only 404 guard for actions, and `project-workspace.server.ts`, the one gated read
+of a project the workspace layout and the board loader share per request, ruling 454);
+the route table is `app/routes.ts`.
 
 ## 3. `app/server/` by directory
 
@@ -106,9 +108,9 @@ members-only 404 guard); the route table is `app/routes.ts`.
 
 | Directory | Surface |
 |---|---|
-| `shell/` | Workspace rail (`nav.ts` order: Board, Review queue, Controller, Agents, Policy, GitHub, Activity, Settings), topbar, the standalone-page header (`page-topbar.tsx`, ruling 145 — mounted by the `palette-shell` layout for the routes `standalonePageLabel` names), the shared palette trigger both headers render, ⌘K palette and its server query, bell popover, user menu, theme preference, route pending bar, CSRF result helper. |
+| `shell/` | Workspace rail (`nav.ts` order: Board, Review queue, Controller, Agents, Policy, GitHub, Activity, Settings), topbar, the standalone-page header (`page-topbar.tsx`, ruling 145 — mounted by the `palette-shell` layout for the routes `standalonePageLabel` names), the shared palette trigger both headers render, ⌘K palette and its server query, bell popover (pages ship its counts; it loads its list from `routes/resources.notifications.ts`, ruling 454), user menu, theme preference, route pending bar, CSRF result helper. |
 | `home/` | `/`: project cards, pinned/all/archived groups, new-project modal (name, key, connection, repo, workflow, agent policy preset), project creation server logic, org tiles, admin store strip (re-scan, rebuild). |
-| `board/` | Board columns, the card's one status seat and problem chips (`card-status.ts`, ruling 365), filters (URL params), dnd-kit drag with server-authoritative drop resolution (`board-dnd.ts`), list view, new-task modal, board-drop acceptance confirm, orphan and repo-access banners. |
+| `board/` | Board columns, the board card projection the board loader ships (`board-card.ts`, `toBoardCard`: the fields the board reads, ruling 454), the card's one status seat and problem chips (`card-status.ts`, ruling 365), filters (URL params), dnd-kit drag with server-authoritative drop resolution (`board-dnd.ts`), list view, new-task modal, board-drop acceptance confirm, orphan and repo-access banners. |
 | `task-detail/` | Hero, diagnostics, recommendations, execution profile with the agent picker, run controls and scheduling, decision packet, live run strip, agent logs, timeline (Lexical composer with @mention autocomplete, loaded lazily behind a same-size stand-in that keeps what was typed, ruling 454; sliced newest-first), attachments panel and lightbox, side panels (GitHub trace, current state, permissions), accept/release/archive/move-back confirms (move-back asks why, ruling 381), delivery and completion toasts, continuity recovery panel, plus the per-person run principal every run control answers from (`run-principal-view.ts`, ruling 127). |
 | `runtime/` | Run panels (live strip, log console, raw view), the run-log console's store and hook (`run-log-store.ts`, `use-run-log-stream.ts`: lines outside React state, frames from the layout's live stream, ruling 454), the incremental console fold (`console-fold.ts`), the readable live step, log noise filter and clock helpers. |
 | `review/` | The review queue split by acceptance authority. |
@@ -142,7 +144,10 @@ filename grammar, loaded on first use), `mention-spans`, `toast` (bottom-center,
 `confirm-dialog`, `use-dialog` (native `<dialog>` contract: Escape, backdrop click, focus
 restore), `use-dismiss`, `page-overlay`, `stage-menu`, `task-meta` (priority, labels, due
 date), `label-input`, `calendar` + `date-picker`, `local-time` + `use-relative-time`
-(hydration-safe timestamps), `number-ticker` (counts up to a figure, ruling 366(f)),
+(hydration-safe timestamps), `use-clock` (one shared interval per cadence for every
+ticking reader, ruling 454), `use-stable-rows` (structural sharing of loader rows and
+values across revalidations, ruling 454), `number-ticker` (counts up to a figure,
+ruling 366(f); it commits only when the drawn digits change),
 `csrf-input`, `skip-link`, `radio-seg` (single-select group on Radix `ToggleGroup`,
 ruling 166), `toggle`, `use-fetcher-result` / `use-action-toast`, `use-shortcut-hint`.
 

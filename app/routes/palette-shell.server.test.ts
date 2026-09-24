@@ -42,13 +42,15 @@ async function loadShell(path: string, userId?: string) {
 }
 
 describe("palette-shell loader (ruling 145)", () => {
-  it("hands the header the viewer and their notifications on a page route", async () => {
+  it("hands the header the viewer and their bell's counts on a page route", async () => {
     const result = await loadShell("/org/settings", ardaId);
     expect(result.header).not.toBeNull();
     expect(result.header!.user.id).toBe(ardaId);
     expect(result.header!.user.name).toBeTruthy();
     expect(result.header!.unread).toBeGreaterThanOrEqual(0);
-    expect(Array.isArray(result.header!.notifications)).toBe(true);
+    expect(result.header!.orphanUnread).toBe(0);
+    // Ruling 454 (owner, 2026-09-24): the bell loads its own list.
+    expect(result.header).not.toHaveProperty("notifications");
   });
 
   it("answers the same on the other page route", async () => {
