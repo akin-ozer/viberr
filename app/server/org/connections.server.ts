@@ -7,11 +7,13 @@ import {
   type PatTokenKind,
   type PatValidation,
 } from "~/schemas/github-pat.schema";
-import { reachSummary, type ConnectionReach } from "~/shared/connection-reach";
+import { reachSummary, type ConnectionReach, type ReachedRepo } from "~/shared/connection-reach";
 import {
   parseConnectionReach,
+  parseStoredReach,
   readTokenReach,
   unknownReach,
+  withCreatedRepository,
   type StoredReach,
 } from "./connection-reach.server";
 import {
@@ -108,7 +110,9 @@ export interface ConnectionRecord {
    * Ruling 463 (F40-6): which repositories the token reaches, read from
    * `GET /user/repos` whenever the token is validated (create, replace,
    * Re-check, the 24-hour re-proof). Null when no validation has read it yet;
-   * a failed read is `unknown` with GitHub's reason, never an empty list.
+   * a failed read is `unknown` with GitHub's reason, never an empty list. A
+   * repository Viberr creates through the token joins a `read` list
+   * (`recordCreatedRepositoryInReach`, ruling 463's dated note).
    */
   reach: ConnectionReach | null;
   /**
@@ -686,6 +690,36 @@ export async function recheckConnection(
     connection,
     toast: `${existing.owner} re-checked: scopes verified${reachClause(connection)}`,
   };
+}
+
+/**
+ * Ruling 463's dated note (pre-merge review R-seams-4): Viberr just created
+ * `repo` through this connection's token (ruling 462), so the stored reach
+ * lists it. Otherwise the card undercounts and `list_github_connections` tells
+ * the controller the token cannot see the repository it has just made, until
+ * a Re-check or the 24-hour re-proof reads the list again. A reach not read,
+ * or read as unknown, is left for those. No GitHub call; returns whether the
+ * stored reach changed.
+ */
+export function recordCreatedRepositoryInReach(
+  db: DatabaseSync,
+  connectionId: string,
+  repo: ReachedRepo,
+): boolean {
+  // SAFETY: `reach_json` is nullable TEXT on `github_connections`; the row may
+  // be gone (a connection removed mid-creation), which reads as no row.
+  const row = db
+    .prepare(`SELECT reach_json FROM github_connections WHERE id = ?`)
+    .get(connectionId) as { reach_json: string | null } | undefined;
+  const stored = parseStoredReach(row?.reach_json ?? null);
+  const next = stored ? withCreatedRepository(stored, repo) : null;
+  if (!next) return false;
+  db.prepare(`UPDATE github_connections SET reach_json = ?, updated_at = ? WHERE id = ?`).run(
+    JSON.stringify(next),
+    new Date().toISOString(),
+    connectionId,
+  );
+  return true;
 }
 
 export type SetDefaultResult =

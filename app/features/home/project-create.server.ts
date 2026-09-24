@@ -30,7 +30,10 @@ import {
   isReservedTaskPrefix,
   RESERVED_TASK_PREFIX_REFUSAL,
 } from "~/shared/dependencies";
-import { getConnection } from "~/server/org/connections.server";
+import {
+  getConnection,
+  recordCreatedRepositoryInReach,
+} from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { recordRepoAccess } from "~/server/github/repo-health.server";
@@ -170,7 +173,13 @@ function presetAgents(
  * to create, so an answer it cannot give refuses instead.
  */
 type RepoProbe =
-  | { status: "ok"; defaultBranch: string | null; empty: boolean }
+  | {
+      status: "ok";
+      defaultBranch: string | null;
+      empty: boolean;
+      /** `repoWritable`: true, or null when GitHub sent no permissions block. */
+      canPush: boolean | null;
+    }
   | { status: "read_only"; defaultBranch: string | null; empty: boolean }
   | { status: "not_found" }
   | { status: "forbidden" }
@@ -226,10 +235,11 @@ async function probeRemoteRepo(
     // F20-14/F20-15: Repair refuses a repo the credential can only read; the same
     // check belongs at create time (live: creating against a read-only-visible
     // repo was silently accepted and failed only at first delivery).
-    if (repoWritable(data.permissions) === false) {
+    const canPush = repoWritable(data.permissions);
+    if (canPush === false) {
       return { status: "read_only", defaultBranch, empty };
     }
-    return { status: "ok", defaultBranch, empty };
+    return { status: "ok", defaultBranch, empty, canPush };
   } catch {
     return { status: "unreachable" };
   }
@@ -305,6 +315,8 @@ async function createRepositoryWhenMissing(
     probe: RepoProbe;
     token: string;
     patId: string;
+    /** The connection whose token makes it: its stored reach gains it. */
+    connectionId: string;
     owner: string;
     repoName: string;
     slug: string;
@@ -339,30 +351,68 @@ async function createRepositoryWhenMissing(
   };
   const description = request.description?.trim();
   if (description) body.description = description;
+  // Sent once: the client's 5xx retry would turn a create GitHub made before
+  // failing into a 422 "name already exists", and so into "Nothing was
+  // created" (R-repo-1).
   const created = await createGithubClient(clientOptions).request(
     "POST",
     personal ? "/user/repos" : `/orgs/${encodeURIComponent(owner)}/repos`,
     z.unknown(),
-    { body },
+    { body, retryServerError: false },
   );
-  if (!created.ok) {
-    throw AppError.validation(repositoryRefusal(created, owner, repo, personal));
+  const made = `Created ${repo} on GitHub (${request.private ? "private" : "public"})`;
+  // Ruling 463's dated note (R-seams-4): the token that made the repository
+  // reaches it, so the connection's stored reach lists it from now on.
+  const reachIt = (after: RepoProbe) =>
+    recordCreatedRepositoryInReach(db, target.connectionId, {
+      fullName: repo,
+      private: request.private,
+      canPush: after.status === "ok" ? after.canPush : after.status === "read_only" ? false : null,
+    });
+  if (created.ok) {
+    recordRepositoryCreated(db, target.slug, repo, request.private, actor);
+    const after = await probeRemoteRepo(token, repo, fetchImpl);
+    reachIt(after);
+    return { probe: after, note: `${made}.` };
   }
-  // A GitHub-side write the person asked for: audited the moment it happened,
-  // so a project write that fails after it still leaves the repository on the
-  // record.
+  // A 5xx or a dropped connection does not say whether GitHub made it (a slow
+  // `auto_init` create can outlive the gateway), so GitHub is asked. The probe
+  // said 404 a moment ago; a repository there now is the one this call made.
+  const unanswered =
+    created.kind === "network" || (created.kind === "http" && created.status >= 500);
+  if (unanswered) {
+    const after = await probeRemoteRepo(token, repo, fetchImpl);
+    if (after.status === "ok" || after.status === "read_only") {
+      recordRepositoryCreated(db, target.slug, repo, request.private, actor);
+      reachIt(after);
+      const answer =
+        created.kind === "network"
+          ? "the connection dropped before GitHub answered"
+          : `GitHub answered ${created.status}`;
+      return { probe: after, note: `${made}: ${answer}, but the repository is there now.` };
+    }
+  }
+  throw AppError.validation(repositoryRefusal(created, owner, repo, personal));
+}
+
+/** A GitHub-side write the person asked for: audited the moment GitHub is
+ *  known to have made it, so a project write that fails after it still leaves
+ *  the repository on the record. */
+function recordRepositoryCreated(
+  db: DatabaseSync,
+  slug: string,
+  repo: string,
+  isPrivate: boolean,
+  actor: { userId: string; label: string },
+): void {
   recordAudit(db, {
     action: "project.repository.created",
     actor,
     subjectKind: "project",
-    subjectId: target.slug,
-    projectSlug: target.slug,
-    details: { repo, private: request.private },
+    subjectId: slug,
+    projectSlug: slug,
+    details: { repo, private: isPrivate },
   });
-  return {
-    probe: await probeRemoteRepo(token, repo, fetchImpl),
-    note: `Created ${repo} on GitHub (${request.private ? "private" : "public"}).`,
-  };
 }
 
 /**
@@ -596,6 +646,7 @@ async function createProjectImpl(
             probe,
             token,
             patId: connection.patId,
+            connectionId: connection.id,
             owner,
             repoName,
             slug,
@@ -628,6 +679,7 @@ async function createProjectImpl(
           repo,
           remoteDefaultBranch: probe.defaultBranch ?? null,
           private: false,
+          readOnly: true,
         };
         if (probe.empty) repoAccess.empty = true;
         repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
@@ -649,8 +701,12 @@ async function createProjectImpl(
 
   // Ruling 468: an empty repository is stated, not warned about: Viberr makes
   // its first commit (ruling 128's bootstrap) before the first task branch.
+  // Its dated note (R-repo-2): not with a token that can only read, which
+  // GitHub refuses that commit; the fix is the token, and the note says so.
   if (repoAccess?.status === "connected" && repoAccess.empty) {
-    const empty = `${repo} is empty: Viberr will create its first commit on ${defaultBranch} before the first task branch, so nobody needs to push one.`;
+    const empty = repoAccess.readOnly
+      ? `${repo} is empty, and this connection's token can only read it, so Viberr cannot create its first commit on ${defaultBranch} yet. Once the token can push, Viberr makes that commit before the first task branch.`
+      : `${repo} is empty: Viberr will create its first commit on ${defaultBranch} before the first task branch, so nobody needs to push one.`;
     repoNote = repoNote ? `${repoNote} ${empty}` : empty;
   }
 

@@ -691,6 +691,160 @@ describe("ruling 462: createRepository creates the repository before the project
     expect(existsSync(join(store.dataRoot, "projects", "website"))).toBe(false);
   });
 
+  /** GitHub makes the repository but answers the create 502, and refuses a
+   *  second create of the same name the way it does ("name already exists"). */
+  function madeThenBadGateway(owner: string, name: string) {
+    let made = false;
+    return fakeGithubFetch({
+      [`GET /repos/${owner}/${name}`]: () =>
+        made
+          ? { body: { default_branch: "main", permissions: { push: true } } }
+          : { status: 404, body: { message: "Not Found" } },
+      "POST /user/repos": () => {
+        if (made) {
+          return {
+            status: 422,
+            body: {
+              message: "Repository creation failed.",
+              errors: [{ message: "name already exists on this account" }],
+            },
+          };
+        }
+        made = true;
+        return { status: 502, body: { message: "Server Error" } };
+      },
+    });
+  }
+
+  it("a create GitHub made but answered 502 is sent once, recorded as made, and the project uses it (R-repo-1)", async () => {
+    // CANARY: let the client retry the POST and the retry's 422 says "Nothing
+    // was created" about a repository Viberr just made, with no audit row;
+    // skip the read-back after a 5xx and it refuses without looking.
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = madeThenBadGateway("akin-ozer", "website");
+
+    const result = await createProject(store.db, website(), ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+    });
+
+    expect(gh.callsTo("POST /user/repos")).toHaveLength(1);
+    expect(result.repoNote).toBe(
+      "Created akin-ozer/website on GitHub (private): GitHub answered 502, but the repository is there now.",
+    );
+    expect(result.repoWarning).toBeNull();
+    expect(
+      listAuditEvents(store.db, { action: "project.repository.created" }).map((e) => e.details),
+    ).toEqual([{ repo: "akin-ozer/website", private: true }]);
+    expect(readProjectFile({ projectSlug: result.slug, dataRoot: store.dataRoot })?.parsed.frontmatter.repo).toBe(
+      "akin-ozer/website",
+    );
+  });
+
+  it("the repository it creates joins the connection's stored reach; an unknown reach stays unknown (R-seams-4)", async () => {
+    // CANARY: drop the reach update and `list_github_connections` (which reads
+    // this record) says the token cannot see the repository it just made.
+    const { getConnection } = await import("~/server/org/connections.server");
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const readAt = "2026-09-24T20:00:00.000Z";
+    store.db
+      .prepare(`UPDATE github_connections SET reach_json = ? WHERE id = 'akin-ozer'`)
+      .run(
+        JSON.stringify({
+          status: "read",
+          readAt,
+          repos: [{ fullName: "akin-ozer/viberr", private: false, canPush: true }],
+          capped: false,
+        }),
+      );
+    const gh = missingThenCreated("akin-ozer", "website", {
+      status: 201,
+      body: { full_name: "akin-ozer/website", default_branch: "main" },
+    });
+
+    await createProject(store.db, website(), ACTOR, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+
+    expect(getConnection(store.db, "akin-ozer")?.reach).toEqual({
+      status: "read",
+      readAt,
+      repos: [
+        { fullName: "akin-ozer/viberr", private: false, canPush: true },
+        { fullName: "akin-ozer/website", private: true, canPush: true },
+      ],
+      capped: false,
+      total: 2,
+      privateCount: 1,
+    });
+
+    // A reach that could not be read is not made into a one-repository count.
+    const unknown = { status: "unknown", readAt, reason: "GitHub answered 403 on /user/repos (no)" };
+    store.db
+      .prepare(`UPDATE github_connections SET reach_json = ? WHERE id = 'akin-ozer'`)
+      .run(JSON.stringify(unknown));
+    const again = missingThenCreated("akin-ozer", "docs", {
+      status: 201,
+      body: { full_name: "akin-ozer/docs", default_branch: "main" },
+    });
+    await createProject(
+      store.db,
+      website({ name: "Docs", key: "DOC", repoName: "docs" }),
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: again.fetchImpl },
+    );
+    expect(getConnection(store.db, "akin-ozer")?.reach).toEqual(unknown);
+  });
+
+  it("a create whose connection dropped is read back the same way (R-repo-1)", async () => {
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    let made = false;
+    const reads = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": () =>
+        made
+          ? { body: { default_branch: "main", permissions: { push: true } } }
+          : { status: 404, body: { message: "Not Found" } },
+    });
+    const fetchImpl: typeof fetch = async (input, init) => {
+      if ((init?.method ?? "GET").toUpperCase() === "POST") {
+        made = true;
+        throw new TypeError("socket hang up");
+      }
+      return reads.fetchImpl(input, init);
+    };
+
+    const result = await createProject(store.db, website(), ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl,
+    });
+
+    expect(result.repoNote).toBe(
+      "Created akin-ozer/website on GitHub (private): the connection dropped before GitHub answered, but the repository is there now.",
+    );
+    expect(listAuditEvents(store.db, { action: "project.repository.created" })).toHaveLength(1);
+  });
+
+  it("a 5xx that made nothing refuses without saying nothing was created (R-repo-1)", async () => {
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": { status: 404, body: { message: "Not Found" } },
+      "POST /user/repos": { status: 502, body: { message: "Server Error" } },
+    });
+
+    const refused = createProject(store.db, website(), ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+    });
+    await expect(refused).rejects.toThrow(
+      "GitHub answered 502 when asked to create akin-ozer/website: Server Error. No project was written; ask again.",
+    );
+    expect(gh.callsTo("POST /user/repos")).toHaveLength(1);
+    expect(existsSync(join(store.dataRoot, "projects", "website"))).toBe(false);
+    expect(listAuditEvents(store.db, { action: "project.repository.created" })).toHaveLength(0);
+  });
+
   it("an existing repository makes the flag a no-op, and the reply says it was used", async () => {
     // CANARY: POST whatever the probe said and this sees a create call.
     const store = setupTestStore(ctx);
@@ -978,5 +1132,34 @@ describe("ruling 468: an empty repository is recognised at creation", () => {
     const { readRepoHealth } = await import("~/server/github/repo-health.server");
     expect(readRepoHealth(store.db, result.slug)?.result).not.toHaveProperty("empty");
     expect(result.repoNote).toBeNull();
+  });
+
+  it("an empty repository behind a token that can only read names the token, not a commit Viberr cannot make (R-repo-2)", async () => {
+    // CANARY: drop the read-only arm from the note and it promises a first
+    // commit GitHub will refuse, beside the warning that says it cannot push.
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": {
+        body: { default_branch: "main", permissions: { pull: true, push: false }, size: 0 },
+      },
+      "GET /repos/akin-ozer/website/commits": { status: 409, body: { message: "Git Repository is empty." } },
+    });
+    const result = await createProject(
+      store.db,
+      { name: "Website", key: "WEB", owner: "akin-ozer", repoName: "website", policy: "balanced" },
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const { readRepoHealth } = await import("~/server/github/repo-health.server");
+    expect(readRepoHealth(store.db, result.slug)?.result).toMatchObject({
+      status: "connected",
+      empty: true,
+      readOnly: true,
+    });
+    expect(result.repoWarning).toContain("can read akin-ozer/website but cannot push to it");
+    expect(result.repoNote).toBe(
+      "akin-ozer/website is empty, and this connection's token can only read it, so Viberr cannot create its first commit on main yet. Once the token can push, Viberr makes that commit before the first task branch.",
+    );
   });
 });

@@ -31,7 +31,9 @@ through `repoWritable`) as `reach_json`. A fine-grained token lists exactly the
 repositories it was granted. A failed read is stored as `unknown` with GitHub's reason,
 never as zero; a token whose validation just failed gets an `unknown` reach without a
 read; NULL means the connection has not been validated since the read existed, and
-Re-check reads it. The card says "Reaches 3 repositories · 1 private" with the list one
+Re-check reads it. A repository Viberr creates through the token (ruling 462) joins a
+`read` reach at once (`recordCreatedRepositoryInReach`, no GitHub call, `readAt` kept); an
+unread or `unknown` reach is left for the next validation. The card says "Reaches 3 repositories · 1 private" with the list one
 disclosure away. The account's public-repo count (`GET /users/{owner}` →
 `public_repos`) is no longer read or stored: it said nothing about the token.
 `GET /users/{owner}` is still the owner-existence check. Re-check (`connection-recheck`,
@@ -108,8 +110,13 @@ characters; last 8 lines, 600 characters.
   token needs **Administration: Read and write** for All repositories (a classic one
   `repo`); a 422 relays GitHub's message; a probe that cannot tell whether the
   repository exists (token refused, GitHub unreachable) and a name outside
-  `[A-Za-z0-9._-]` refuse before any create. Audit `project.repository.created
-  {repo, private}` under the acting person, recorded as soon as GitHub answers.
+  `[A-Za-z0-9._-]` refuse before any create. The create is sent once
+  (`retryServerError: false`: the client's 5xx retry would turn a create GitHub made
+  before failing into a 422 "name already exists"), and a 5xx or a dropped connection is
+  read back with the probe: a repository there now was made, is recorded and used, and
+  the reply says what GitHub answered; one that is not refuses without claiming nothing
+  was made. Audit `project.repository.created {repo, private}` under the acting person,
+  recorded as soon as GitHub is known to have made it.
 - **Changing the repo later is a repair** (`repair-repo`, `edit-policy`): normalizes
   `owner/name` or a URL, demands `confirmFootprint` when tasks already carry GitHub
   records, probes with the bound credential and refuses 404/401/403 or a read-only
@@ -140,15 +147,21 @@ characters; last 8 lines, 600 characters.
   (`repositoryIsEmpty`), and record `empty: true` on the connected repo access; creation's
   reply and toast say "<repo> is empty: Viberr will create its first commit on <branch>
   before the first task branch", the GitHub page's Repository panel carries a Contents
-  row, and `get_github_state` a `contents` line. The operator's checkout
+  row, and `get_github_state` a `contents` line. When GitHub's permissions block says the
+  token cannot push, the connected access also records `readOnly: true` and all three say
+  instead that Viberr cannot make that commit until the token can push: the Contents PUT
+  would be refused, so the fix is the token, never a pushed commit. The operator's checkout
   (`ensureOperatorRepoCheckout`) is the other path that needs the base: a checkout whose
   HEAD has no commit runs the same bootstrap (actor `system:delivery`, the timeline naming
   the operator's first checkout) and is moved onto the new commit by ruling 129's
   refresh, on the first clone and on a checkout an earlier run left unborn
   (`initializeUnbornCheckout`). The bootstrap is idempotent under a race: a create GitHub
   refuses because another call already made the branch re-reads the ref and answers
-  `exists`, writing nothing. A token that cannot write gets ruling 128's `repo` scope
-  violation, as delivery does. The operator's doctrine says the first commit is Viberr's
+  `exists`, writing nothing. The PUT is sent once too, and when its answer said nothing
+  (a 5xx, a dropped connection) the branch's head is read: a root commit carrying the
+  PUT's own message is Viberr's first commit and is audited and put on the timeline as
+  the bootstrap; any other head is `exists`. A token that cannot write gets ruling 128's
+  `repo` scope violation, as delivery does. The operator's doctrine says the first commit is Viberr's
   and never a person's.
 
 Only github.com is supported; there is no GitHub Enterprise host configuration.

@@ -136,10 +136,16 @@ export function RepositoryPanel({
         {data.connection.status === "connected" && data.connection.empty && (
           <div className="kv-row">
             <span className="k">Contents</span>
+            {/* Its dated note (R-repo-2): a token that can only read gets that
+                commit refused, so the row names the token, not a promise. */}
             <span className="v plain">
-              empty: Viberr will create the first commit on{" "}
-              <span className="mono">{data.project.defaultBranch}</span> before
-              the first task branch
+              {data.connection.readOnly
+                ? "empty, and the token can only read it: Viberr cannot create the first commit on "
+                : "empty: Viberr will create the first commit on "}
+              <span className="mono">{data.project.defaultBranch}</span>
+              {data.connection.readOnly
+                ? " until the token can push"
+                : " before the first task branch"}
             </span>
           </div>
         )}

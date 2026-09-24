@@ -1391,4 +1391,48 @@ describe("ruling 465: the queue is visible and every reply names its message", (
       installFakeRuntime();
     }
   });
+
+  it("a message queued while a first turn was starting gets its own note when that start fails", async () => {
+    // The start awaits (the MCP pre-flight here; a stdio server's spawn or a
+    // continuity reset live), and a send from another surface in that window
+    // joins the lease's queue. The catch deleted the lease and noted only the
+    // first message, so the second read back as a question nobody answered.
+    const { createConversation, listMessages } = await import("./controller-conversations.server");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { configureRunServiceForTests } = await import("~/server/runtimes/run-service.server");
+    const { installFakeRuntime } = await import("../../../test-support/fake-runtime");
+    const throwingAdapter = (backend: "claude" | "codex") => ({
+      backend,
+      start(): never {
+        throw new Error("the turn could not start");
+      },
+    });
+    configureRunServiceForTests({ claude: throwingAdapter("claude"), codex: throwingAdapter("codex") });
+    try {
+      const conversation = createConversation(app.db, {
+        userId: ownerId,
+        userLabel: "selin@viberr.dev",
+        projectSlug: null,
+      });
+      const user = { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" as const };
+      const send = (text: string) =>
+        runControllerTurn(app.db, { conversationId: conversation.id, text, user, dataRoot: app.dataRoot });
+      // Both sends begin before the first start reaches the adapter.
+      const [first, second] = await Promise.allSettled([send("Part 1."), send("Part 2.")]);
+      expect(first.status).toBe("rejected");
+      expect(second.status === "fulfilled" ? second.value.state : second.status).toBe("queued");
+
+      const messages = listMessages(app.db, conversation.id);
+      const [one, two] = messages.filter((m) => m.author === "user");
+      const notes = messages.filter((m) => m.author === "controller");
+      // CANARY: drop the queue drain from `runControllerTurn`'s catch and part
+      // 2 has no note (and the next boot calls it a restart).
+      expect(notes.map((m) => [m.text, m.replyTo])).toEqual([
+        ["I could not start this turn: The controller turn could not start.", one!.id],
+        ["I dropped this message: the turn before it could not start. Say it again to retry.", two!.id],
+      ]);
+    } finally {
+      installFakeRuntime();
+    }
+  });
 });

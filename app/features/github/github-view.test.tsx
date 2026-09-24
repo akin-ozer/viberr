@@ -534,6 +534,33 @@ describe("RepositoryPanel", () => {
     expect(panel(false).container.textContent).not.toContain("first commit");
   });
 
+  it("R-repo-2: an empty repository behind a token that can only read names the token, not a commit", () => {
+    const { container } = render(
+      <RepositoryPanel
+        data={{
+          project: { slug: "web", name: "Website", repo: "akin-ozer/website", defaultBranch: "main" },
+          connection: {
+            status: "connected",
+            repo: "akin-ozer/website",
+            remoteDefaultBranch: "main",
+            private: false,
+            empty: true,
+            readOnly: true,
+          },
+          credential: noneCredential,
+        }}
+        onOpenTask={() => {}}
+        canSeeCredential
+      />,
+    );
+    // CANARY: drop the read-only wording and the row promises a commit GitHub
+    // will refuse.
+    const contents = [...container.querySelectorAll(".kv-row")].find((r) => r.textContent?.startsWith("Contents"));
+    expect(contents?.textContent).toBe(
+      "Contentsempty, and the token can only read it: Viberr cannot create the first commit on main until the token can push",
+    );
+  });
+
   it("says an unset repository in words, not a dash (ruling 148)", () => {
     const { container } = render(
       <RepositoryPanel

@@ -561,6 +561,12 @@ CREATE TABLE controller_messages (
   -- belongs to which message. NULL on user rows and on a note that answers
   -- no message (a released project's note).
   reply_to TEXT,
+  -- Ruling 465: 1 on a user message written before reply links whose answer
+  -- the backfill could not prove (a restart or a failed start lost it, or the
+  -- writers' order stopped proving anything): earlier history, not linked,
+  -- which boot recovery never notes as unanswered. 0 on everything written
+  -- since.
+  unlinked_history INTEGER NOT NULL DEFAULT 0,
   UNIQUE (conversation_id, seq)
 );
 CREATE TABLE "agent_runs" (

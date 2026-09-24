@@ -193,7 +193,7 @@ registers for key rotation: `github_pats.encrypted_token`, `org_mcp_servers.cred
 | `org_skills` | P (metadata) | `id`, `name` (unique; slug and folder), `summary`, `created_at`, `updated_at`. Content is `skills/<name>/SKILL.md`, judged by `assertSkillBodyWellFormed` at every writer (ruling 183). |
 | `org_mcp_servers` | P | `id`, `name` (unique slug), `transport` (`HTTP \| stdio`), `target` (endpoint or command), optional sealed credential `cred_ref`, probe results (`tools_count`, `up`, `last_checked_at`, `last_error`), warm-up bookkeeping (`warming_since`, `first_success_at`, `heuristic_warmups`), `created_at`, `updated_at`. Ruling 176: `tool_policy_json` (the admin-marked write tools as `{ name, gate: "repo-write" }`; NULL until first reviewed, `[]` a reviewed none) and `tool_names_json` (the names the last successful probe listed, kept across a failed one and cleared when the target changes). |
 | `model_availability` | C | Models the provider refused for this account, keyed (`backend`, `model`): `reason` (the provider's redacted sentence), `marked_at`, `run_id`. Written only from a real run's failure and cleared by a real run's success; presence = unavailable. |
-| `controller_conversations` / `controller_messages` | P | The controller's transcripts, owned by the asking user. `controller_conversations`: `id`, `user_id`, `user_label`, the scope (ruling 121) `project_slug` + `task_key` (both null = instance, slug alone = board, slug + key = one task; `CHECK (task_key IS NULL OR project_slug IS NOT NULL)`), `title`, `created_at`, `updated_at`, `last_message_at`, and `seen_seq`, the highest message `seq` the owner has seen (ruling 448). `controller_messages`: `id`, `conversation_id`, `seq` (unique per conversation), `author` (`user \| controller`), `user_id` (null on controller rows), `text`, `run_id` (the run behind a controller reply), `surface` (the in-app path a user message was sent from), `created_at`, and `reply_to`, on a controller row the id of the user message it answers (ruling 465). |
+| `controller_conversations` / `controller_messages` | P | The controller's transcripts, owned by the asking user. `controller_conversations`: `id`, `user_id`, `user_label`, the scope (ruling 121) `project_slug` + `task_key` (both null = instance, slug alone = board, slug + key = one task; `CHECK (task_key IS NULL OR project_slug IS NOT NULL)`), `title`, `created_at`, `updated_at`, `last_message_at`, and `seen_seq`, the highest message `seq` the owner has seen (ruling 448). `controller_messages`: `id`, `conversation_id`, `seq` (unique per conversation), `author` (`user \| controller`), `user_id` (null on controller rows), `text`, `run_id` (the run behind a controller reply), `surface` (the in-app path a user message was sent from), `created_at`, `reply_to`, on a controller row the id of the user message it answers (ruling 465), and `unlinked_history`, 1 on an old user message whose answer the backfill could not prove (earlier history, not linked; boot recovery skips it). |
 
 ### Runs
 
@@ -320,9 +320,12 @@ second adds each missing `BASELINE_COLUMNS` entry with `ALTER TABLE … ADD COLU
 - `controller_conversations`: `task_key`, `seen_seq` (backfilled to each conversation's
   newest `seq`, so existing threads count as read);
 - `org_mcp_servers`: `tool_policy_json`, `tool_names_json`;
-- `controller_messages`: `surface`, `reply_to` (backfilled by replaying the writers' order:
-  a run's reply answers the oldest waiting message, a run-less note the newest, so old
-  replies keep their messages and boot recovery does not note them again);
+- `controller_messages`: `surface`, `reply_to` and `unlinked_history` (one walk backfills
+  both: it replays the writers' order and links only what it proves, a run's reply to the
+  oldest waiting message while the walk is in step, a refusal to the message directly
+  before it; at a restart or a failed start it stops, and what was still waiting is marked
+  earlier history that boot recovery does not note; a root the first `reply_to` backfill
+  already linked is walked again when it gains `unlinked_history`, ruling 465's dated note);
 - `projects`: `required_reviewers_json`;
 - `task_projections`: `recommendation_kinds`.
 

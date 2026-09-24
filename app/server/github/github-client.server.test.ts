@@ -101,6 +101,24 @@ describe("github-client", () => {
     expect(gh2.callsTo("GET /down")).toHaveLength(2);
   });
 
+  it("sends a write that must not be sent twice once, and hands its 5xx back (R-repo-1)", async () => {
+    // A create GitHub made before answering 502 would be refused by the retry,
+    // and the caller would read "nothing was made".
+    // CANARY: ignore `retryServerError` and the POST goes out twice.
+    const { gh, client: c } = client({
+      "POST /user/repos": (call) =>
+        call.attempt === 1
+          ? { status: 502, body: { message: "Server Error" } }
+          : { status: 422, body: { message: "Repository creation failed." } },
+    });
+    const result = await c.request("POST", "/user/repos", z.unknown(), {
+      body: { name: "website" },
+      retryServerError: false,
+    });
+    expect(gh.callsTo("POST /user/repos")).toHaveLength(1);
+    expect(result.ok === false && result.kind === "http" ? result.status : null).toBe(502);
+  });
+
   it("does NOT retry 4xx and extracts GitHub's error message", async () => {
     const { gh, client: c } = client({
       "GET /missing": { status: 404, body: { message: "Not Found" } },

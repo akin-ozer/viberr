@@ -49,6 +49,9 @@ import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
  *   GET  /repos/{r}/branches?per_page=1  → `[]` on an empty repository.
  *   PUT  /repos/{r}/contents/README.md   → 201 `{ commit: { sha } }`, and the
  *        `branch` field names the branch the commit lands on (created if absent).
+ *   GET  /repos/{r}/git/commits/{sha}    → `{ message, parents }`; read only when
+ *        the PUT's answer said nothing (a 5xx, a dropped connection), to tell
+ *        Viberr's own first commit (no parents, its message) from another's.
  *   GET  /repos/{r}/commits?sha=<b>      → newest first, paginated by `Link`.
  *   POST /repos/{r}/git/refs             → 201, or 422 "Reference already
  *        exists", which is success here.
@@ -84,6 +87,21 @@ const ghBranchesSchema = z.array(z.unknown());
 const ghRepoSchema = z.object({ default_branch: z.string().nullable().optional() }).loose();
 const ghContentsSchema = z.object({ commit: z.object({ sha: z.string() }) }).loose();
 const ghCommitsSchema = z.array(z.object({ sha: z.string() }).loose());
+
+const ghGitCommitSchema = z
+  .object({ message: z.string(), parents: z.array(z.unknown()) })
+  .loose();
+
+/** Whether `sha` is a first commit carrying `message`, the one this module's
+ *  Contents write makes. Any failure to read it is "not shown". */
+async function isInitialCommit(gh: GithubContext, sha: string, message: string): Promise<boolean> {
+  const commit = await gh.client.request(
+    "GET",
+    `/repos/${gh.repo}/git/commits/${encodeURIComponent(sha)}`,
+    ghGitCommitSchema,
+  );
+  return commit.ok && commit.data.parents.length === 0 && commit.data.message.trim() === message;
+}
 
 /** Follow `Link: <…>; rel="next"` for at most `maxPages` pages and return the
  *  OLDEST commit sha of `branch`, or null when GitHub could not be read. */
@@ -199,19 +217,35 @@ export async function ensureDefaultBranch(
     const content = Buffer.from(`# ${projectName}\n\nInitialized by Viberr.\n`, "utf8").toString(
       "base64",
     );
+    const message = `Initialize ${projectName}`;
+    // Sent once: the client's 5xx retry would meet the file this PUT had
+    // already made ("sha wasn't supplied"), and the race arm below would then
+    // file Viberr's own first commit as another call's (R-repo-1).
     const put = await gh.client.request(
       "PUT",
       `/repos/${gh.repo}/contents/README.md`,
       ghContentsSchema,
       {
         body: {
-          message: `Initialize ${projectName}`,
+          message,
           content,
           branch: base,
         },
+        retryServerError: false,
       },
     );
-    if (!put.ok) {
+    let sha: string;
+    if (put.ok) {
+      // Re-probe: the ref must exist now, or the bootstrap did not take.
+      const again = await gh.client.request("GET", refPath, ghRefSchema);
+      if (!again.ok) {
+        // The commit landed; this is the confirming READ. A 5xx here proves
+        // nothing about the ref, so it degrades rather than claiming the
+        // bootstrap did not take.
+        return failureOf(again, base, `confirming branch \`${base}\` after the initial commit`, "read");
+      }
+      sha = put.data.commit.sha;
+    } else {
       if (put.kind === "http" && put.status === 403) {
         return await violation(
           db,
@@ -227,18 +261,21 @@ export async function ensureDefaultBranch(
       // the branch moved). The branch existing is the outcome both wanted,
       // so a refused create that finds it answers `exists` and writes nothing.
       const raced = await gh.client.request("GET", refPath, ghRefSchema);
-      if (raced.ok) return { status: "exists", defaultBranch: base };
-      return failureOf(put, base, `creating the initial commit on \`${base}\``, "create");
+      if (!raced.ok) {
+        return failureOf(put, base, `creating the initial commit on \`${base}\``, "create");
+      }
+      // A 5xx, a dropped connection or an undecodable 2xx did not say whether
+      // THIS write landed. The branch's head being a root commit with this
+      // write's message is Viberr's first commit, recorded as one.
+      const unanswered =
+        put.kind === "network" || put.kind === "decode" || (put.kind === "http" && put.status >= 500);
+      const head = raced.data.object.sha;
+      if (!unanswered || !(await isInitialCommit(gh, head, message))) {
+        return { status: "exists", defaultBranch: base };
+      }
+      sha = head;
     }
-    // Re-probe: the ref must exist now, or the bootstrap did not take.
-    const again = await gh.client.request("GET", refPath, ghRefSchema);
-    if (!again.ok) {
-      // The commit landed; this is the confirming READ. A 5xx here proves
-      // nothing about the ref, so it degrades rather than claiming the
-      // bootstrap did not take.
-      return failureOf(again, base, `confirming branch \`${base}\` after the initial commit`, "read");
-    }
-    outcome = { status: "bootstrapped", defaultBranch: base, how: "initial_commit", sha: put.data.commit.sha };
+    outcome = { status: "bootstrapped", defaultBranch: base, how: "initial_commit", sha };
   } else {
     const repoInfo = await gh.client.request("GET", `/repos/${gh.repo}`, ghRepoSchema);
     if (!repoInfo.ok) return failureOf(repoInfo, base, "reading the repository", "read");

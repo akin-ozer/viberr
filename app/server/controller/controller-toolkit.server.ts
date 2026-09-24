@@ -2904,9 +2904,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           connection: data.connection.status,
           // Ruling 468: say it, so nobody is asked to push a first commit.
           // Null when the repository has commits (or its state is unknown).
+          // Its dated note (R-repo-2): a token that can only read gets that
+          // commit refused, so the line names the token instead.
           contents:
             data.connection.status === "connected" && data.connection.empty
-              ? `empty: viberr will create the first commit on ${data.project.defaultBranch} before the first task branch`
+              ? data.connection.readOnly
+                ? `empty, and this token can only read it: viberr cannot create the first commit on ${data.project.defaultBranch} until the token is granted write access (the fix is the token, not a pushed commit)`
+                : `empty: viberr will create the first commit on ${data.project.defaultBranch} before the first task branch`
               : null,
           reconcile: data.reconcile,
           prs: data.prs.map((p) => ({

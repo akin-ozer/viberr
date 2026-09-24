@@ -5,6 +5,10 @@ import {
   type GithubContextOptions,
 } from "./github-context.server";
 import type { GithubClient } from "./github-client.server";
+import {
+  repoPermissionsSchema,
+  repoWritable,
+} from "~/server/secrets/pat-validator.server";
 
 /**
  * Repo access check (Phase 7): the "Connection" fact for the GitHub view's
@@ -27,6 +31,15 @@ export type RepoAccessResult =
        * Absent on a result recorded before the ruling.
        */
       empty?: boolean;
+      /**
+       * GitHub's permissions block says this token can read the repository
+       * but not push to it (`repoWritable` false). An empty repository then
+       * gets no first commit from Viberr until the token can write, so every
+       * surface that says Viberr will make one says this instead (pre-merge
+       * review of pass 40, R-repo-2). Absent when it can push or GitHub sent
+       * no block.
+       */
+      readOnly?: boolean;
     }
   | { status: "no_repo_configured" }
   | { status: "no_pat_configured"; repo: string | null }
@@ -44,6 +57,9 @@ const ghRepoSchema = z
     private: z.boolean().optional().catch(undefined),
     default_branch: z.string().optional().catch(undefined),
     size: z.number().optional().catch(undefined),
+    // Decoded by `repoPermissionsSchema` where it is read, not here: the
+    // validator's module can be mid-evaluation when this one loads.
+    permissions: z.unknown().optional(),
   })
   .catch({});
 
@@ -84,6 +100,8 @@ export async function checkRepoAccess(
       private: result.data.private ?? false,
     };
     if (await repositoryIsEmpty(ctx.client, ctx.repo, result.data.size)) connected.empty = true;
+    const permissions = repoPermissionsSchema.optional().catch(undefined).parse(result.data.permissions);
+    if (repoWritable(permissions) === false) connected.readOnly = true;
     return connected;
   }
   if (result.kind === "network") {

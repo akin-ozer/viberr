@@ -92,8 +92,14 @@ import {
 } from "~/server/runtimes/prompt-prefix.server";
 import { controllerCompactAnchor } from "~/server/runtimes/context-policy.server";
 import { normalizeTimeZone } from "~/shared/dates/time-zone";
-import { countLabel } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
+import {
+  DROPPED_AFTER_QUEUED_START,
+  DROPPED_AFTER_START,
+  RESTART_NOTE,
+  queuedStartFailedNote,
+  startFailedNote,
+} from "./controller-reply-links.server";
 
 /**
  * The controller conversation engine (ruling 99).
@@ -384,6 +390,12 @@ export async function runControllerTurn(
     );
     return { state: "started", runId, messageId: message.id };
   } catch (error) {
+    // The start awaits (the stdio MCP pre-flight, a continuity reset), and a
+    // message sent from another surface meanwhile joined this lease's queue.
+    // The lease dies here and that queue with it, so each such message gets
+    // its own note, as `settleTurn`'s queued-start failure writes them: none
+    // may read back as a question the controller ignored (ruling 465).
+    const dropped = entry.queue.splice(0);
     map.delete(conversation.id);
     const reason =
       error instanceof AppError
@@ -392,9 +404,17 @@ export async function runControllerTurn(
     appendMessage(db, {
       conversationId: conversation.id,
       author: "controller",
-      text: `I could not start this turn: ${reason}`,
+      text: startFailedNote(reason),
       replyTo: message.id,
     });
+    for (const lost of dropped) {
+      appendMessage(db, {
+        conversationId: conversation.id,
+        author: "controller",
+        text: DROPPED_AFTER_START,
+        replyTo: lost.messageId,
+      });
+    }
     if (error instanceof AppError) throw error;
     logger.error("controller turn start failed", {
       conversationId: conversation.id,
@@ -873,17 +893,14 @@ async function settleTurn(
     appendMessage(db, {
       conversationId,
       author: "controller",
-      text:
-        dropped.length === 0
-          ? "I could not start the queued turn. Say it again to retry."
-          : `I could not start the queued turn, and I dropped the ${countLabel(dropped.length, "message")} you sent after it. Say them again to retry.`,
+      text: queuedStartFailedNote(dropped.length),
       replyTo: next.messageId,
     });
     for (const lost of dropped) {
       appendMessage(db, {
         conversationId,
         author: "controller",
-        text: "I dropped this message: the queued turn before it could not start. Say it again to retry.",
+        text: DROPPED_AFTER_QUEUED_START,
         replyTo: lost.messageId,
       });
     }
@@ -1011,10 +1028,15 @@ export function conversationTurnState(
  * newest message a controller one). A dead turn's note also carries its run
  * id, which settles that run: turns ran in FIFO order, so the dead runs answer
  * the oldest waiting messages, in order.
+ *
+ * A message marked `unlinked_history` is not unanswered: it predates reply
+ * links, and the backfill (`backfillControllerReplyLinks`) could not prove its
+ * answer, because an earlier restart or failure lost it or the order stopped
+ * proving anything. A restart note under it would be false, and it would be
+ * written into a thread weeks old.
  */
 export function recoverControllerConversations(db: DatabaseSync): number {
-  const note =
-    "This turn was interrupted by a server restart before I could answer. Say it again and I will pick it up.";
+  const note = RESTART_NOTE;
   let recovered = 0;
 
   // SAFETY: `agent_runs.id` and `.task_key` are both declared NOT NULL TEXT
@@ -1041,6 +1063,7 @@ export function recoverControllerConversations(db: DatabaseSync): number {
     .prepare(
       `SELECT m.id, m.conversation_id FROM controller_messages m
         WHERE m.author = 'user'
+          AND m.unlinked_history = 0
           AND NOT EXISTS (SELECT 1 FROM controller_messages r
                            WHERE r.conversation_id = m.conversation_id
                              AND r.reply_to = m.id)
