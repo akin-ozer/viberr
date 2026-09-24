@@ -10,6 +10,7 @@ import {
   type AuditActor,
   SYSTEM_ACTOR,
 } from "~/server/audit/audit-recorder.server";
+import { getEnv } from "~/server/config/env.server";
 import {
   createGithubClient,
   type GithubClientOptions,
@@ -90,13 +91,11 @@ export interface ValidatePatTokenOptions {
   writeProbe?: boolean;
 }
 
-/** Env opt-in for the write dry-run (see {@link ValidatePatTokenOptions}).
- *  Read from the raw env rather than `getEnv()` so an operator can flip it
- *  without the process-lifetime env cache pinning the old answer. */
+/** Env opt-in for the write dry-run (see {@link ValidatePatTokenOptions}). The
+ *  env schema parses `VIBERR_GITHUB_WRITE_PROBE` and refuses a spelling it does
+ *  not know at boot (ruling 455(c)). */
 function writeProbeEnabled(explicit?: boolean): boolean {
-  if (explicit !== undefined) return explicit;
-  const v = process.env.VIBERR_GITHUB_WRITE_PROBE;
-  return v === "1" || v === "true" || v === "yes";
+  return explicit ?? getEnv().VIBERR_GITHUB_WRITE_PROBE;
 }
 
 /** The legacy permission block GitHub computes for the AUTHENTICATED token on

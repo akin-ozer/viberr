@@ -13,6 +13,35 @@ try {
 
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
+const HOUR_MS = 3_600_000;
+
+/** Maintenance-pass cadence. Six hours: retention windows are 30-90 days, so a
+ *  pass is cheap and rarely finds anything; the point is that a 90-day uptime
+ *  gets ~360 passes instead of zero. `VIBERR_MAINTENANCE_INTERVAL_MS` overrides
+ *  it. */
+export const DEFAULT_MAINTENANCE_INTERVAL_MS = 6 * HOUR_MS;
+/** Free-space check cadence. Five minutes: disks fill over hours, and this is
+ *  the signal that must arrive BEFORE the volume is full, not after. */
+const DEFAULT_DISK_CHECK_INTERVAL_MS = 5 * 60_000;
+/** Free space on the data root, in MB, below which the deployment is degraded
+ *  but still working (why absolute sizes: `disk-space.server.ts`). */
+export const DEFAULT_DISK_LOW_FREE_MB = 2048;
+/** Free space, in MB, below which a single run can plausibly fill the volume. */
+export const DEFAULT_DISK_CRITICAL_FREE_MB = 512;
+
+/**
+ * Ruling 455(c): a knob that must be a positive number. `Number()` coercion,
+ * as the modules applied it, and a value that is not a finite number above zero
+ * fails boot instead of quietly running the default.
+ */
+function positiveNumber(unit: string, fallback: number) {
+  const message = `must be a positive number of ${unit}`;
+  return z.coerce
+    .number({ error: message })
+    .positive(message)
+    .default(fallback);
+}
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
@@ -145,10 +174,11 @@ const envSchema = z.object({
   VIBERR_GIT_CLONE_TIMEOUT_MS: z.string().optional(),
   VIBERR_TRANSCRIPT_RETENTION_DAYS: z.string().optional(),
   VIBERR_SESSION_HOME_RETENTION_DAYS: z.string().optional(),
-  // C01-A6 (pass 32): the remaining raw `process.env` readers, declared so the
-  // schema and `.env.example` stop denying they exist. Each module keeps its
-  // own coercion + fallback (and reads the live env so an operator can flip
-  // it without the process-lifetime cache pinning the old answer):
+  // C01-A6 (pass 32) declared the last raw `process.env` readers so the schema
+  // and `.env.example` stop denying they exist. Ruling 455(c): the schema also
+  // parses the first five, and their modules read the typed value through
+  // `getEnv()`. A value that does not parse fails boot like every other key,
+  // where each module's own fallback used to run the default in silence:
   //  - VIBERR_MAINTENANCE_INTERVAL_MS: period of the maintenance pass
   //    (retention, transcript pruning; default 6 h).
   //  - VIBERR_DISK_CHECK_INTERVAL_MS: period of the free-space check
@@ -156,14 +186,30 @@ const envSchema = z.object({
   //  - VIBERR_DISK_LOW_FREE_MB / VIBERR_DISK_CRITICAL_FREE_MB: the free-space
   //    thresholds behind health's `disk.status` (defaults 2048 / 512).
   //  - VIBERR_GITHUB_WRITE_PROBE: `1`/`true`/`yes` opts PAT validation into the
-  //    empty-payload write dry-run (ruling 18).
+  //    empty-payload write dry-run (ruling 18); `0`/`false`/`no`, or unset,
+  //    leaves it off.
   //  - VIBERR_BUILD_VERSION / VIBERR_BUILD_SHA / VIBERR_BUILD_TIME: build
   //    identity baked into the image (build-info.server.ts); null when unset.
-  VIBERR_MAINTENANCE_INTERVAL_MS: z.string().optional(),
-  VIBERR_DISK_CHECK_INTERVAL_MS: z.string().optional(),
-  VIBERR_DISK_LOW_FREE_MB: z.string().optional(),
-  VIBERR_DISK_CRITICAL_FREE_MB: z.string().optional(),
-  VIBERR_GITHUB_WRITE_PROBE: z.string().optional(),
+  VIBERR_MAINTENANCE_INTERVAL_MS: positiveNumber(
+    "ms",
+    DEFAULT_MAINTENANCE_INTERVAL_MS,
+  ),
+  VIBERR_DISK_CHECK_INTERVAL_MS: positiveNumber(
+    "ms",
+    DEFAULT_DISK_CHECK_INTERVAL_MS,
+  ),
+  VIBERR_DISK_LOW_FREE_MB: positiveNumber("MB", DEFAULT_DISK_LOW_FREE_MB),
+  VIBERR_DISK_CRITICAL_FREE_MB: positiveNumber(
+    "MB",
+    DEFAULT_DISK_CRITICAL_FREE_MB,
+  ),
+  VIBERR_GITHUB_WRITE_PROBE: z
+    .enum(["1", "true", "yes", "0", "false", "no"], {
+      error:
+        "must be 1, true or yes to turn the write dry-run on (0, false or no leaves it off)",
+    })
+    .transform((value) => value === "1" || value === "true" || value === "yes")
+    .default(false),
   VIBERR_BUILD_VERSION: z.string().optional(),
   VIBERR_BUILD_SHA: z.string().optional(),
   VIBERR_BUILD_TIME: z.string().optional(),
@@ -191,8 +237,8 @@ export type Env = z.infer<typeof envSchema>;
 /**
  * Every variable the schema declares — the list the "no undeclared env reads"
  * gate (`env.server.test.ts`) compares raw `process.env.VIBERR_*` reads
- * against, so a knob cannot ship that neither this file nor `.env.example`
- * admits exists (C3, pass 31; C01-A6, pass 32).
+ * against, and holds `.env.example` to, so a knob cannot ship that neither
+ * this file nor `.env.example` admits exists (C3, pass 31; C01-A6, pass 32).
  */
 export const ENV_KEYS: readonly string[] = envSchema.keyof().options;
 

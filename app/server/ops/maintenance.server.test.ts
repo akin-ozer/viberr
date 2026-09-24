@@ -8,6 +8,10 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import {
+  DEFAULT_MAINTENANCE_INTERVAL_MS,
+  resetEnvCacheForTests,
+} from "~/server/config/env.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -24,7 +28,6 @@ import { formatBytes, measureDataRootSpace } from "./disk-space.server";
 const {
   activeRunCount,
   checkDiskPressure,
-  DEFAULT_MAINTENANCE_INTERVAL_MS,
   maintenanceState,
   resetMaintenanceStateForTests,
   runMaintenancePass,
@@ -38,6 +41,7 @@ afterEach(() => {
   resetMaintenanceStateForTests();
   delete process.env.VIBERR_DISK_LOW_FREE_MB;
   delete process.env.VIBERR_DISK_CRITICAL_FREE_MB;
+  resetEnvCacheForTests();
   vi.useRealTimers();
   vi.restoreAllMocks();
   ctx.cleanup();
@@ -250,7 +254,9 @@ describe("checkDiskPressure (gap 16)", () => {
    * configures (`VIBERR_DISK_*_FREE_MB`), set relative to what the volume under
    * the test's data root really has free — so `checkDiskPressure` runs against a
    * real `statfs` and the status it acts on is the one the product computes.
-   * `× 2` rather than `+ 1` so a concurrent write cannot cross the line.
+   * `× 2` rather than `+ 1` so a concurrent write cannot cross the line. The
+   * thresholds are read through `getEnv()`, which parses once per process, so
+   * pinning them drops the cached parse (ruling 455(c)).
    */
   function pinThresholds(
     dataRoot: string,
@@ -262,6 +268,7 @@ describe("checkDiskPressure (gap 16)", () => {
     process.env.VIBERR_DISK_LOW_FREE_MB = verdict === "ok" ? "1" : String(aboveFreeMb);
     process.env.VIBERR_DISK_CRITICAL_FREE_MB =
       verdict === "critical" ? String(aboveFreeMb) : "1";
+    resetEnvCacheForTests();
   }
 
   it("warns on the transition into low space and reclaims immediately", () => {

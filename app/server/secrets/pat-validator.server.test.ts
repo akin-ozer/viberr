@@ -7,6 +7,7 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
+import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countOpenPolicyViolations,
@@ -468,6 +469,48 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
     expect(
       gh.callsTo("PUT /repos/akin-ozer/viberr/contents/viberr-scope-probe"),
     ).toHaveLength(0);
+  });
+
+  // Ruling 455(c): the env opt-in is read through `getEnv()`, which parses once
+  // per process — so the case drops the cached parse on the way in and out.
+  it("the env opt-in turns the dry-run on when the caller passes no writeProbe", async () => {
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "viberr-bot" } },
+      "GET /repos/akin-ozer/viberr": {
+        body: { full_name: REPO, permissions: { push: true } },
+      },
+      "GET /repos/akin-ozer/viberr/pulls": { body: [] },
+      "POST /repos/akin-ozer/viberr/pulls": {
+        status: 422,
+        body: { message: "Validation Failed" },
+      },
+    });
+    process.env.VIBERR_GITHUB_WRITE_PROBE = "yes";
+    resetEnvCacheForTests();
+    try {
+      const result = await validatePatToken(FINE, {
+        repo: REPO,
+        requiredScopes: ["pull_request:write"],
+        fetchImpl: gh.fetchImpl,
+      });
+      expect(result.scopes[0]).toMatchObject({
+        ok: true,
+        source: "probe",
+        note: "write proven by dry-run",
+      });
+      expect(gh.callsTo("POST /repos/akin-ozer/viberr/pulls")).toHaveLength(1);
+      // An explicit `writeProbe: false` still wins over the env opt-in.
+      await validatePatToken(FINE, {
+        repo: REPO,
+        requiredScopes: ["pull_request:write"],
+        fetchImpl: gh.fetchImpl,
+        writeProbe: false,
+      });
+      expect(gh.callsTo("POST /repos/akin-ozer/viberr/pulls")).toHaveLength(1);
+    } finally {
+      delete process.env.VIBERR_GITHUB_WRITE_PROBE;
+      resetEnvCacheForTests();
+    }
   });
 
   it("an opted-in dry-run 403 is a REFUSED write", async () => {

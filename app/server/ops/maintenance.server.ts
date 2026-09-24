@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { getEnv } from "~/server/config/env.server";
 import { applyRetention, type RetentionResult } from "~/server/db/retention.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -57,15 +58,6 @@ import {
  * rows boot recovery reads, so neither can touch anything in flight.
  */
 
-const HOUR_MS = 3_600_000;
-
-/** Full pass cadence. Six hours: retention windows are 30-90 days, so a pass is
- *  cheap and rarely finds anything; the point is that a 90-day uptime gets ~360
- *  passes instead of zero. `VIBERR_MAINTENANCE_INTERVAL_MS` overrides it. */
-export const DEFAULT_MAINTENANCE_INTERVAL_MS = 6 * HOUR_MS;
-/** Free-space check cadence. Five minutes: disks fill over hours, and this is
- *  the signal that must arrive BEFORE the volume is full, not after. */
-export const DEFAULT_DISK_CHECK_INTERVAL_MS = 5 * 60_000;
 /** Floor between disk-pressure-triggered passes, so a wedged low-space
  *  condition cannot turn the disk check into a busy loop of sweeps. */
 export const MIN_PRESSURE_PASS_GAP_MS = 30 * 60_000;
@@ -259,25 +251,14 @@ function recordPass(reason: MaintenanceReason, freedBytes: number): void {
   lastFreedBytes = freedBytes;
 }
 
-/** The two maintenance periods belong to env.server.ts's C01-A6 live-env
- *  group: read from the raw env rather than `getEnv()` so an operator can flip
- *  them without the process-lifetime env cache pinning the old answer. */
-export function maintenanceIntervalMs(): number {
-  const raw = Number(process.env.VIBERR_MAINTENANCE_INTERVAL_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAINTENANCE_INTERVAL_MS;
-}
-
-/** A raw env read for the same C01-A6 reason as {@link maintenanceIntervalMs}. */
-export function diskCheckIntervalMs(): number {
-  const raw = Number(process.env.VIBERR_DISK_CHECK_INTERVAL_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DISK_CHECK_INTERVAL_MS;
-}
-
-/** What /resources/health reports about maintenance — proof the timer is live. */
+/** What /resources/health reports about maintenance — proof the timer is live.
+ *  The two periods are the env schema's (defaults, and the refusal of a value
+ *  that does not parse, live there: ruling 455(c)). */
 export function maintenanceState(): MaintenanceState {
+  const env = getEnv();
   return {
-    intervalMs: maintenanceIntervalMs(),
-    diskCheckIntervalMs: diskCheckIntervalMs(),
+    intervalMs: env.VIBERR_MAINTENANCE_INTERVAL_MS,
+    diskCheckIntervalMs: env.VIBERR_DISK_CHECK_INTERVAL_MS,
     lastPassAt,
     lastPassReason,
     lastFreedBytes,
@@ -388,8 +369,9 @@ export function startMaintenanceScheduler(
 ): void {
   if (timers().length > 0) return;
 
-  const intervalMs = options.intervalMs ?? maintenanceIntervalMs();
-  const diskMs = options.diskCheckIntervalMs ?? diskCheckIntervalMs();
+  const env = getEnv();
+  const intervalMs = options.intervalMs ?? env.VIBERR_MAINTENANCE_INTERVAL_MS;
+  const diskMs = options.diskCheckIntervalMs ?? env.VIBERR_DISK_CHECK_INTERVAL_MS;
   const rootOption = options.dataRoot ? { dataRoot: options.dataRoot } : {};
 
   let passRunning = false;

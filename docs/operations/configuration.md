@@ -96,11 +96,22 @@ the default.
 | `VIBERR_GIT_CLONE_TIMEOUT_MS` | `900000` (15 min) | Ceiling on one `git clone` / mirror fetch (`cloneTimeoutMs`, `git-clone-auth.server.ts`, via `getEnv()`); the schedule claim lease is sized against it. Ignored unless a positive integer. |
 | `VIBERR_TRANSCRIPT_RETENTION_DAYS` | `30` | Age at which `runtimes/<backend>/<runId>.jsonl` is pruned (`transcript-retention.server.ts`, via `getEnv()`). `0` keeps forever; a negative or non-numeric value reads as the default. Aligned with the 30-day `run_log_lines` window. |
 | `VIBERR_SESSION_HOME_RETENTION_DAYS` | `30` | Same window and rules for the per-person provider session files (`runtimes/users/*/claude-home/projects/**`, `runtimes/users/*/codex-home/sessions/**`). `*.jsonl` only, so a sign-in file is never pruned. |
-| `VIBERR_MAINTENANCE_INTERVAL_MS` | `21600000` (6 h) | Cadence of the periodic store-maintenance pass (`maintenanceIntervalMs`, `app/server/ops/maintenance.server.ts`, raw). |
-| `VIBERR_DISK_CHECK_INTERVAL_MS` | `300000` (5 min) | Cadence of the free-space check on the data root (`maintenance.server.ts`, raw). |
-| `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`diskThresholds`, `app/server/ops/disk-space.server.ts`, raw). |
+
+### Maintenance, disk space and the write probe (ruling 455(c))
+
+Parsed by the schema, which owns their coercion and defaults; each module reads the
+typed value through `getEnv()`. The numbers take `Number()` coercion (so `1.5` and `1e3`
+parse) and must come out above zero. A value that does not parse fails boot with
+"Invalid environment configuration", like any other invalid variable. Like the rest of
+the env, they are read once per process: restart to apply a change.
+
+| Variable | Default | Read by |
+|---|---|---|
+| `VIBERR_MAINTENANCE_INTERVAL_MS` | `21600000` (6 h) | Cadence of the periodic store-maintenance pass (`startMaintenanceScheduler`, `app/server/ops/maintenance.server.ts`). |
+| `VIBERR_DISK_CHECK_INTERVAL_MS` | `300000` (5 min) | Cadence of the free-space check on the data root (`maintenance.server.ts`). |
+| `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`diskThresholds`, `app/server/ops/disk-space.server.ts`). |
 | `VIBERR_DISK_CRITICAL_FREE_MB` | `512` | Threshold for `critical`. Either state marks health `degraded` and triggers an out-of-band maintenance pass at most every 30 minutes (`MIN_PRESSURE_PASS_GAP_MS`). |
-| `VIBERR_GITHUB_WRITE_PROBE` | unset | `1`, `true` or `yes` opts the PAT validator into an empty-payload write probe; by default write access is proved read-only from the repo `permissions` block (`writeProbeEnabled`, `pat-validator.server.ts`, raw). |
+| `VIBERR_GITHUB_WRITE_PROBE` | off | `1`, `true` or `yes` opts the PAT validator into an empty-payload write probe; `0`, `false` or `no` leaves it off, and any other spelling fails boot. Off, write access is proved read-only from the repo `permissions` block (`writeProbeEnabled`, `pat-validator.server.ts`). |
 
 ### Governed browser
 
@@ -167,11 +178,11 @@ at deploy time and restarting.
 
 What is left here is honoured but not declared in the schema.
 `env.server.test.ts` gates the `VIBERR_*` names: every raw `process.env.VIBERR_*` read in
-a non-test file under `app/` must be declared in the schema AND appear as a `NAME=` or
-`#NAME=` line in `.env.example`. The exceptions are named in the test: the test-only hooks
-`VIBERR_CATALOG_PROBE_MARKER`, `VIBERR_CLAUDE_TEST_MARKER`, `VIBERR_CODEX_TEST_MARKER`,
-and `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`, which `.env.example` documents only as a
-commented rotation note.
+a non-test file under `app/` must be declared in the schema, and it and every declared key
+must appear as a `NAME=` or `#NAME=` line in `.env.example`. The exceptions are named in
+the test: the test-only hooks `VIBERR_CATALOG_PROBE_MARKER`, `VIBERR_CLAUDE_TEST_MARKER`,
+`VIBERR_CODEX_TEST_MARKER`, and `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`, which
+`.env.example` documents only as a commented rotation note.
 
 | Variable | Default | Where |
 |---|---|---|

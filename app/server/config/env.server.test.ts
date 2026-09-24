@@ -180,6 +180,86 @@ describe("parseEnv", () => {
 });
 
 /**
+ * Ruling 455(c): the C01-A6 knobs are the schema's to parse. Their modules used
+ * to read `process.env` and run the default for a value that did not parse, so
+ * a mistyped threshold or interval was silently ignored. The schema now applies
+ * the same `Number()` coercion and the same defaults, and a value outside what
+ * the modules accepted fails boot with the rest of the invalid variables.
+ */
+describe("the C01-A6 knobs (ruling 455(c))", () => {
+  const NUMERIC = [
+    "VIBERR_MAINTENANCE_INTERVAL_MS",
+    "VIBERR_DISK_CHECK_INTERVAL_MS",
+    "VIBERR_DISK_LOW_FREE_MB",
+    "VIBERR_DISK_CRITICAL_FREE_MB",
+  ] as const;
+
+  it("applies the documented defaults when unset or empty", () => {
+    for (const env of [
+      parseEnv(REQUIRED_ENV),
+      parseEnv({
+        ...REQUIRED_ENV,
+        ...Object.fromEntries(
+          [...NUMERIC, "VIBERR_GITHUB_WRITE_PROBE"].map((key) => [key, ""]),
+        ),
+      }),
+    ]) {
+      expect(env.VIBERR_MAINTENANCE_INTERVAL_MS).toBe(6 * 3_600_000);
+      expect(env.VIBERR_DISK_CHECK_INTERVAL_MS).toBe(5 * 60_000);
+      expect(env.VIBERR_DISK_LOW_FREE_MB).toBe(2048);
+      expect(env.VIBERR_DISK_CRITICAL_FREE_MB).toBe(512);
+      expect(env.VIBERR_GITHUB_WRITE_PROBE).toBe(false);
+    }
+  });
+
+  it("coerces a positive number the way the modules did", () => {
+    const env = parseEnv({
+      ...REQUIRED_ENV,
+      VIBERR_MAINTENANCE_INTERVAL_MS: "60000",
+      VIBERR_DISK_CHECK_INTERVAL_MS: " 1e3 ",
+      VIBERR_DISK_LOW_FREE_MB: "10",
+      VIBERR_DISK_CRITICAL_FREE_MB: "1.5",
+    });
+    expect(env.VIBERR_MAINTENANCE_INTERVAL_MS).toBe(60_000);
+    expect(env.VIBERR_DISK_CHECK_INTERVAL_MS).toBe(1_000);
+    expect(env.VIBERR_DISK_LOW_FREE_MB).toBe(10);
+    expect(env.VIBERR_DISK_CRITICAL_FREE_MB).toBe(1.5);
+  });
+
+  it("fails boot on a value the modules used to replace with the default", () => {
+    for (const key of NUMERIC) {
+      for (const value of ["not-a-number", "0", "-5", "Infinity"]) {
+        expect(
+          () => parseEnv({ ...REQUIRED_ENV, [key]: value }),
+          `${key}=${value}`,
+        ).toThrowError(
+          new RegExp(
+            `^Invalid environment configuration:[\\s\\S]*${key}: must be a positive number of`,
+          ),
+        );
+      }
+    }
+  });
+
+  it("reads the write probe's spellings: 1/true/yes on, 0/false/no off", () => {
+    const probe = (value: string) =>
+      parseEnv({ ...REQUIRED_ENV, VIBERR_GITHUB_WRITE_PROBE: value })
+        .VIBERR_GITHUB_WRITE_PROBE;
+    for (const on of ["1", "true", "yes"]) expect(probe(on)).toBe(true);
+    for (const off of ["0", "false", "no"]) expect(probe(off)).toBe(false);
+  });
+
+  it("fails boot on a write-probe spelling it does not know", () => {
+    // `TRUE` and `on` used to read as OFF without a word; now the operator hears.
+    for (const value of ["TRUE", "on", "enabled"]) {
+      expect(() =>
+        parseEnv({ ...REQUIRED_ENV, VIBERR_GITHUB_WRITE_PROBE: value }),
+      ).toThrowError(/VIBERR_GITHUB_WRITE_PROBE: must be 1, true or yes/);
+    }
+  });
+});
+
+/**
  * U8 — `BETTER_AUTH_URL=http://…` silently downgrades the session cookie.
  *
  * Viberr sets no cookie security flag of its own: better-auth derives
@@ -286,12 +366,15 @@ describe("no undeclared VIBERR_* env reads (C01-A6)", () => {
     expect(undeclared).toEqual([]);
   });
 
-  it("documents every raw process.env.VIBERR_* read in .env.example", () => {
+  // Ruling 455(c) moved the five C01-A6 knobs off raw reads and onto
+  // `getEnv()`, so the declared keys are held to `.env.example` too: a knob the
+  // schema parses must stay documented once no raw read names it any more.
+  it("documents every declared key and every raw process.env.VIBERR_* read in .env.example", () => {
     const example = readFileSync(`${process.cwd()}/.env.example`, "utf8");
     // Documented only in the secret-key rotation runbook, on purpose: it is a
     // one-shot migration variable, not a knob to leave in a template.
     const RUNBOOK_ONLY = new Set(["VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS"]);
-    const missing = [...rawReads().keys()].filter(
+    const missing = [...new Set([...ENV_KEYS, ...rawReads().keys()])].filter(
       (name) =>
         !TEST_ONLY_HOOKS.has(name) &&
         !RUNBOOK_ONLY.has(name) &&
