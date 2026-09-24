@@ -111,16 +111,16 @@ The harnesses, one home each:
 
 ## 5. What the first pass measured
 
-Ruling 457 records the pass. From `main` @ `2169f940` to the merged pass, on the fixtures
-the budgets name (103 budgets in 27 perf test files, plus 8 bundle closures):
+Ruling 457 records the pass. On the fixtures the budgets name, from `main` @ `2169f940`
+to the pass (the bundle rows compare `main` @ `639e1e64`, the main it merged, built alone) (103 budgets in 27 perf test files, plus 8 bundle closures):
 
 | Journey | Figure | Before | After |
 |---|---|---|---|
-| fresh-load | root closure, gzip | 275,352 B | 168,823 B |
-| fresh-load | Home closure, gzip | 319,392 B | 188,914 B |
-| fresh-load | board closure, gzip | 368,729 B | 237,090 B |
-| fresh-load | render-blocking stylesheet, gzip | 55,592 B | 35,669 B |
-| task-open | task closure, gzip | 422,641 B | 304,870 B |
+| fresh-load | root closure, gzip | 279,776 B | 173,172 B |
+| fresh-load | Home closure, gzip | 325,489 B | 195,421 B |
+| fresh-load | board closure, gzip | 374,418 B | 243,175 B |
+| fresh-load | render-blocking stylesheet, gzip | 56,797 B | 36,856 B |
+| task-open | task closure, gzip | 427,853 B | 311,038 B |
 | task-open | a big task's `.data` | 1,048,869 B | 13,073 B |
 | server | YAML parses per task revalidation | 35 | 0 |
 | server | SQL statements per task revalidation | 86 | 49 |
