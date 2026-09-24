@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLiveRunLogStore, type ConsoleThreadInput } from "./run-log-store";
 import {
   NO_RUN_CACHE,
+  runBoundaryLine,
   type LogLine,
   type RunLiveFacts,
   type RunLogWindow,
@@ -145,5 +146,43 @@ describe("CON-1: every running group's strip moves, shown or not (ruling 454, LI
     await flush();
     expect(asked).toHaveLength(2);
     expect(store.facts("run_spec")?.turns).toBe(3);
+  });
+});
+
+describe("CON-5: a window that answers for a newer run is followed on that run", () => {
+  it("adopts the window's run: no old-run lines appended after it, the new run's frames tail it", async () => {
+    const store = createLiveRunLogStore(TASK, [
+      thread({ serverRunId: "run_a", logWindow: win({ runIds: ["run_a"], headSeq: 2, totalLines: 3, loaded: false }) }),
+    ]);
+    // run_a writes two more lines and ends; run_b becomes the representative
+    // before the page's state-change revalidation lands.
+    route(FACTS_ONLY, tailPage("run_a", []));
+    store.onFrame("run_a", 3);
+    store.onFrame("run_a", 4);
+    await flush();
+    route(
+      "window=1",
+      ok({
+        runId: "run_b",
+        threadId: "primary",
+        lines: [0, 1, 2, 3, 4].map((s) => line(`a${s}`)).concat([runBoundaryLine(2, 2), line("b0")]),
+        lineKeys: ["0:0", "0:1", "0:2", "0:3", "0:4", "1:resumed", "1:0"],
+        logWindow: win({ runIds: ["run_a", "run_b"], headSeq: 0, totalLines: 6 }),
+        facts: FACTS,
+      }),
+    );
+    route("runId=run_a&since=", tailPage("run_a", [3, 4]));
+    store.show("primary");
+    await flush();
+    // CANARY: keep `t.runId` on run_a in `loadWindow` and the tail reads
+    // run_a since=2, appending 0:3 and 0:4 a second time after b0.
+    const keys = store.thread("primary")?.lines.map((l) => l.key) ?? [];
+    expect(keys).toEqual(["0:0", "0:1", "0:2", "0:3", "0:4", "1:resumed", "1:0"]);
+    expect(asked.filter((u) => u.includes("runId=run_a&since=2"))).toEqual([]);
+
+    route("runId=run_b&since=0", tailPage("run_b", [1]));
+    store.onFrame("run_b", 1);
+    await flush();
+    expect(store.thread("primary")?.lines.at(-1)?.key).toBe("1:1");
   });
 });

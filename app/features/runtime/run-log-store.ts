@@ -492,7 +492,16 @@ export function createLiveRunLogStore(
       const seeded = keyedLines(lines, lineKeys, []);
       t.runIds = logWindow.runIds;
       t.page = seedPageCursor(logWindow);
-      if (runId === t.runId) t.cursor = logWindow.headSeq;
+      // Ruling 454 (CON-5): the window answers for the group's representative
+      // NOW, which may be a newer run than the page projected (a resume
+      // before the state-change revalidation landed). Follow that run: kept on
+      // the old one, the tail re-read its lines past a stale cursor and
+      // appended them after the new run's, and the new run's frames matched
+      // no thread.
+      const previous = t.runId;
+      t.runId = runId;
+      t.cursor = logWindow.headSeq;
+      t.announced = runId === previous ? Math.max(t.announced, t.cursor) : t.cursor;
       setFacts(runId, facts);
       update(t, {
         lines: seeded,
