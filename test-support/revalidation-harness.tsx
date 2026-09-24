@@ -8,6 +8,7 @@ import {
   Outlet,
   RouterProvider,
   useFetcher,
+  useParams,
   useRouteLoaderData,
   useSearchParams,
   type DataStrategyFunction,
@@ -50,10 +51,13 @@ import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
  *   are the server's own.
  * - The routes are the workspace's shape (root > routes/project > board | task)
  *   with loaders that count their calls and return a fresh object each time,
- *   as a decoded single-fetch payload is.
+ *   as a decoded single-fetch payload is, plus `/inbox`, a surface streaming
+ *   the `user` scope alone.
  */
 
 export const SLUG = "viberr-core";
+/** A second project, for a navigation that changes the layout's slug. */
+export const OTHER_SLUG = "billing";
 export const TASK = "VIB-1";
 export const OTHER_TASK = "VIB-9";
 export const USER_ID = "u_harness";
@@ -168,15 +172,15 @@ export function publish(event: SseEvent, route: SseRoute): number {
   return publishSseEvent(event, route);
 }
 
-export function taskUpdated(taskKey = TASK): number {
+export function taskUpdated(taskKey = TASK, slug = SLUG): number {
   return publish(
     {
       type: "task.updated",
-      entityId: `${SLUG}/${taskKey}`,
+      entityId: `${slug}/${taskKey}`,
       occurredAt: OCCURRED_AT,
-      data: { projectSlug: SLUG, taskKey, stage: "impl", readiness: "ready" },
+      data: { projectSlug: slug, taskKey, stage: "impl", readiness: "ready" },
     },
-    { projectSlug: SLUG, taskKey },
+    { projectSlug: slug, taskKey },
   );
 }
 
@@ -346,14 +350,23 @@ export function typeInFilter(value: string): void {
 }
 
 function Layout() {
+  const slug = useParams().slug ?? SLUG;
   const task = useRouteLoaderData<typeof taskLoader>("routes/project.task");
-  // The scopes `routes/project.tsx` subscribes.
+  // The scopes `routes/project.tsx` subscribes. One instance across a slug
+  // change, as the route module's is.
   useLiveUpdates(
     task
-      ? [sseScopes.project(SLUG), sseScopes.task(SLUG, task.key), sseScopes.user()]
-      : [sseScopes.project(SLUG), sseScopes.user()],
+      ? [sseScopes.project(slug), sseScopes.task(slug, task.key), sseScopes.user()]
+      : [sseScopes.project(slug), sseScopes.user()],
   );
   return <Outlet />;
+}
+
+/** A surface that streams the `user` scope alone (the notifications page,
+ *  Instance settings, the profile): no project events reach its stream. */
+function UserSurface() {
+  useLiveUpdates([sseScopes.user()]);
+  return <Link to={`/projects/${SLUG}/board`}>board</Link>;
 }
 
 function Board() {
@@ -438,6 +451,12 @@ export function mountHarness(options: HarnessOptions): Harness {
             notificationRead();
             return { ok: true };
           },
+        },
+        {
+          // No loader: only the stream matters here.
+          id: "user-surface",
+          path: "inbox",
+          element: <UserSurface />,
         },
         {
           id: "routes/project",

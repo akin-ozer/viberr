@@ -13,6 +13,7 @@ import {
   markRead,
   mountHarness,
   notificationRead,
+  OTHER_SLUG,
   OTHER_TASK,
   runLogAppended,
   runStateChanged,
@@ -293,6 +294,60 @@ describe("reconnects replay what the tab missed (RF-1, ruling 301)", () => {
     await advance(1_000);
     // CANARY: open the task's stream without its position and the event is lost.
     expect(harness.calls["routes/project.task"]).toBe(2);
+  });
+
+  /**
+   * RV-2: the new project's events are not on the old stream, so the tab's
+   * position says nothing about them. It moved past one published after the
+   * new board's loader read (a console line of the task being left), and the
+   * reopen named that position.
+   */
+  it("a slug change replays what the new project published after its load was sent (RV-2)", async () => {
+    const board = gate();
+    const harness = await tab({ path: TASK_PAGE, gate: { "routes/project.board": board.wait } });
+    board.close();
+    let navigated: Promise<void> = Promise.resolve();
+    await act(async () => {
+      navigated = harness.router.navigate(`/projects/${OTHER_SLUG}/board`);
+    });
+    await until(() => harness.calls["routes/project.board"] === 1);
+    // The new board's loader has read. A member moves a card there, then the
+    // task being left prints a line, which its still-open stream delivers.
+    taskUpdated("BIL-1", OTHER_SLUG);
+    runLogAppended(TASK, 1);
+    await act(async () => board.open());
+    await act(async () => navigated);
+    await settle();
+    await connect();
+    await advance(1_000);
+    expect(harness.router.state.location.pathname).toBe(`/projects/${OTHER_SLUG}/board`);
+    // CANARY: open the re-scoped stream from the newest id the old one saw
+    // and the move is never replayed: the board keeps its first answer.
+    expect(harness.calls["routes/project.board"]).toBe(2);
+    expect(harness.calls["routes/project"]).toBe(2);
+  });
+
+  it("a surface's first stream replays what its load could not have seen (RV-2)", async () => {
+    const board = gate();
+    const harness = await tab({ path: "/inbox", gate: { "routes/project.board": board.wait } });
+    board.close();
+    let navigated: Promise<void> = Promise.resolve();
+    await act(async () => {
+      navigated = harness.router.navigate(BOARD);
+    });
+    await until(() => harness.calls["routes/project.board"] === 1);
+    // After the board's loader read, a change on the board; then the inbox's
+    // stream (the user scope alone) moves the tab's position past it.
+    taskUpdated(OTHER_TASK);
+    notificationRead();
+    await act(async () => board.open());
+    await act(async () => navigated);
+    await settle();
+    await connect();
+    await advance(1_000);
+    // CANARY: start the layout's first stream at the tab's newest position
+    // and the change is lost.
+    expect(harness.calls["routes/project.board"]).toBe(2);
   });
 
   it("opening a task whose run printed 300 lines while the board watched reloads only the task (RV-3)", async () => {

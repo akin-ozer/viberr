@@ -333,7 +333,14 @@ broker replays what the tab missed on the new scopes, which revalidates like any
 only a reconnect that could not say where it stood pulls every loader once. So a
 deliberate re-scope (opening, switching or closing a task) and a quiet return from a
 hidden tab reload nothing, and a return after events, or a failure recovered on the
-backoff, reloads what those events concern. An event the closing stream had delivered
+backoff, reloads what those events concern. A stream's position moves only on its own
+scopes' events, so a reopen after more than 256 data events elsewhere on the instance
+falls off the ring and resyncs. A stream that takes on a project, the `projects`
+firehose or the `user` scope (a slug change, a surface's first stream) opens from the
+tab's position when the navigation's loads were sent, not the newest id the old stream
+saw, since the old scopes say nothing about the new one's events (ruling 454, RV-2);
+it can replay an event its load already held, one redundant reload at most (entering a
+project from a `user`-only surface such as notifications, after that project changed). An event the closing stream had delivered
 but not yet flushed (a hide or a re-scope inside the 300 ms window) is still in the
 ledger, and the reopened stream flushes it. A hidden tab holds no stream: the hook
 closes on `visibilitychange` and reopens on return (ruling 301), and the replay is its

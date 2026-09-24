@@ -256,6 +256,8 @@ export function useLiveUpdates(
   // the hello's head, then every event after it. A reopen asks the broker to
   // replay from here.
   const positionRef = useRef<number | null>(null);
+  // The scopes of this surface's last stream (null before its first).
+  const scopesRef = useRef<readonly string[] | null>(null);
   // A dock notice this surface's last stream had not handed over when it
   // closed: its conversation event will not be replayed to the next stream.
   const dockOwedRef = useRef(false);
@@ -359,7 +361,22 @@ export function useLiveUpdates(
     // A surface's first stream starts where the tab stands (the server
     // render's reading, or the stream of the surface before it); a reopen
     // starts where this surface's own streams stood.
-    const from = positionRef.current ?? ledger.position;
+    const standing = positionRef.current ?? ledger.position;
+    // Ruling 454 (RV-2): a stream that takes on a project, the firehose or the
+    // user scope (a slug change, a surface's first stream) cannot trust that
+    // position for them: it moved on the old scopes' events only, and can be
+    // past one the new scope published after the navigation's loaders read.
+    // It opens from the tab's position when those loads were sent instead;
+    // what the old scopes delivered since is replayed and recorded once. A
+    // task scope brings only its console lines, so opening a task keeps the
+    // surface's own position and replays nothing new.
+    const previous = scopesRef.current;
+    const gains =
+      previous === null ||
+      scopeList.some((scope) => !scope.startsWith("task:") && !previous.includes(scope));
+    scopesRef.current = scopeList;
+    const sent = gains ? ledger.positionAtLoad : null;
+    const from = standing !== null && sent !== null ? Math.min(standing, sent) : (standing ?? sent);
     const url = buildEventsUrl(scopeList, from);
     const source = new EventSource(url);
     source.addEventListener("stream.open", (event: MessageEvent<string>) => {

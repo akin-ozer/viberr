@@ -244,10 +244,21 @@ export class LiveLedger {
    * hello and events.
    */
   position: number | null = null;
+  /**
+   * Ruling 454 (RV-2): the tab's position when the loads that brought the
+   * latest data to land were SENT (the smallest, like coverage; null when one
+   * was sent before any position was known). A stream that takes on a scope
+   * the tab's streams did not carry opens from here: the tab's position says
+   * nothing about that scope's events, and one published after the loader
+   * read can sit below it.
+   */
+  positionAtLoad: number | null = null;
   private seq = 0;
   private obligations: Obligation[] = [];
   private readonly coverage = new Map<string, number>();
   private readonly loads = new Map<string, number>();
+  /** The tab's position when each load in flight was sent. */
+  private readonly loadPositions = new Map<string, number | null>();
   private readonly recent = new Set<string>();
   private last: RouterState;
   /** True while the live hook's own `revalidate()` call runs. */
@@ -257,7 +268,10 @@ export class LiveLedger {
   constructor(router: DataRouter) {
     this.router = router;
     this.last = router.state;
-    for (const key of loadsInFlight(router.state)) this.loads.set(key, 0);
+    for (const key of loadsInFlight(router.state)) {
+      this.loads.set(key, 0);
+      this.loadPositions.set(key, null);
+    }
     router.subscribe((state) => this.observe(state));
   }
 
@@ -368,11 +382,14 @@ export class LiveLedger {
     //    covers what was recorded before the earliest of them started.
     if (this.loads.size > 0) {
       const start = Math.min(...this.loads.values());
+      let landed = false;
       for (const match of state.matches) {
         const id = match.route.id;
         if (!(id in state.loaderData) || state.loaderData[id] === prev.loaderData[id]) continue;
         this.coverage.set(id, Math.max(this.coverage.get(id) ?? 0, start));
+        landed = true;
       }
+      if (landed) this.positionAtLoad = this.earliestLoadPosition();
     }
 
     // 2. Obligations that start now, before any load they cause is sent.
@@ -395,11 +412,30 @@ export class LiveLedger {
 
     // 3. Loads that start now cover everything recorded so far.
     const inFlight = new Set(loadsInFlight(state));
-    for (const key of this.loads.keys()) if (!inFlight.has(key)) this.loads.delete(key);
-    for (const key of inFlight) if (!this.loads.has(key)) this.loads.set(key, this.seq);
+    for (const key of this.loads.keys()) {
+      if (inFlight.has(key)) continue;
+      this.loads.delete(key);
+      this.loadPositions.delete(key);
+    }
+    for (const key of inFlight) {
+      if (this.loads.has(key)) continue;
+      this.loads.set(key, this.seq);
+      this.loadPositions.set(key, this.position);
+    }
 
     this.prune();
     if (this.flushWanted && !busy(state)) queueMicrotask(() => this.flushLive());
+  }
+
+  /** The smallest position a load in flight was sent at; null when one was
+   *  sent before any was known. */
+  private earliestLoadPosition(): number | null {
+    let earliest: number | null = null;
+    for (const at of this.loadPositions.values()) {
+      if (at === null) return null;
+      if (earliest === null || at < earliest) earliest = at;
+    }
+    return earliest;
   }
 
   /** Drops obligations every route on screen has loaded past, unless a load
