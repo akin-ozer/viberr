@@ -3,6 +3,7 @@ import { PACKET_NOTE_MAX, type PacketOptionKind } from "~/schemas/task-file.sche
 import type { PacketRender } from "~/shared/mapping/task.server";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon, type IconName } from "~/ui/icon";
+import { Markdown } from "~/ui/markdown";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
@@ -56,6 +57,21 @@ function renderInlineCode(text: string): ReactNode[] {
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
+}
+/**
+ * Ruling 472: the body is the asking agent's own text, and agents write it as
+ * markdown — numbered dashboard steps, bold field names, a heading per part.
+ * Rendered through the inline-code pass alone, a 3,500-character Connect guide
+ * read as one paragraph with literal `**` and `##` (WEB-3, 2026-09-24). It goes
+ * through the same GFM renderer as the timeline's comments; a <div>, because a
+ * list cannot sit inside a <p>.
+ */
+function PacketBody({ text }: { text: string }): ReactNode {
+  return (
+    <div className="packet-lede md-body">
+      <Markdown text={text} />
+    </div>
+  );
 }
 /**
  * LV-09: packet observations are written by the operator, which serializes an
@@ -1074,7 +1090,7 @@ export function DecisionPacket({
         </div>
         <div className="packet-body">
           <h2>{p.title}</h2>
-          <p className="packet-lede">{renderInlineCode(p.body)}</p>
+          <PacketBody text={p.body} />
           <div className="options" data-decided="">
             {p.options.map((o, i) => (
               <button
@@ -1155,9 +1171,7 @@ export function DecisionPacket({
       </div>
       <div className="packet-body">
         <h2>{p.title}</h2>
-        <p className="packet-lede">
-          {renderInlineCode(p.body)}
-        </p>
+        <PacketBody text={p.body} />
 
         <div className="packet-obs">
           {p.observations

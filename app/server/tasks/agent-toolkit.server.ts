@@ -395,7 +395,9 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           body: z
             .string()
             .optional()
-            .describe("Context a human needs to answer (no raw logs/secrets)."),
+            .describe(
+              "Context a human needs to answer, in markdown: it renders like a comment (headings, numbered steps, bold, `code`). No raw logs or secrets.",
+            ),
           options: z
             .array(
               z.strictObject({

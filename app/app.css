@@ -5806,6 +5806,10 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   max-width: 70ch;
 }
 .packet-lede.spaced { margin-top: .75rem; }
+/* Ruling 472: a heading an agent writes inside its packet body sits under the
+   packet's own title, so it reads as a run-in label at the body's size — never
+   as the 1rem `.md-body` heading that would outrank the title above it. */
+.packet-lede :is(h1, h2, h3, h4, h5, h6) { font-size: .75rem; }
 .field.packet-note-field { margin-top: .5rem; }
 .composer-err { font-size: .75rem; color: var(--coral-dark); }
 

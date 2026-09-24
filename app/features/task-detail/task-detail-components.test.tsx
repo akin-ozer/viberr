@@ -3376,6 +3376,31 @@ describe("DecisionPacket — pass-20 governance", () => {
       "PR #143 was closed on GitHub without merging.",
     );
   });
+  it("ruling 472: the asking agent's markdown body renders as steps, not literal ** and ##", () => {
+    // Live on WEB-3 (pass 40) a 3,500-character Cloudflare Connect guide read as
+    // one paragraph: `**Worker name:**`, `## (a) Connect…` and `1. …` as typed.
+    const guide = withOptions(packet142.options, {
+      body:
+        "**Why this is yours:** the Connect flow is your step.\n\n" +
+        "## (a) Connect Workers Builds\n" +
+        "1. Open **Workers & Pages**.\n" +
+        "2. Set the name to `akinozer-com`.\n",
+    });
+    const { container } = render(
+      <DecisionPacket packet={guide} busy={false} canResolve canResolveCompletion canEditGoal canArchive onResolveCustom={() => {}} onResolve={() => {}} onAsk={() => {}} />,
+    );
+    const body = container.querySelector(".packet-body > .packet-lede")!;
+    expect(body.textContent).not.toContain("**");
+    expect(body.textContent).not.toContain("##");
+    expect(body.querySelector("strong")!.textContent).toBe("Why this is yours:");
+    expect(body.querySelector("h2")!.textContent).toBe("(a) Connect Workers Builds");
+    expect([...body.querySelectorAll("ol > li")].map((li) => li.textContent)).toEqual([
+      "Open Workers & Pages.",
+      "Set the name to akinozer-com.",
+    ]);
+    // Inline code keeps its chip, as it did before.
+    expect(body.querySelector("code")!.textContent).toBe("akinozer-com");
+  });
 });
 
 /* ------------- packet observation key humanising (P13 / C7) ------------- */
@@ -3406,6 +3431,7 @@ describe("observationLabel", () => {
     expect(long.length).toBeLessThanOrEqual(40);
     expect(long.startsWith("origin/main test-artifacts/")).toBe(true);
   });
+
 });
 
 /* ------------- panel-head / CTA / toast-kind regressions (pass 13) ------------- */
