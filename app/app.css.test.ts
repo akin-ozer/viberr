@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { escapeRegExp } from "~/shared/text/regexp";
 
 /**
  * Stylesheet-integrity gate for `app/app.css`, the app's ONLY stylesheet.
@@ -149,7 +150,7 @@ describe("app.css custom properties (P13-D-18)", () => {
       [".sched-row", /border(-top)?:\s*1px solid var\(--(hairline|border)\)/],
     ] as const) {
       const rule = CODE.match(
-        new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
+        new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`),
       );
       expect(rule, `${selector} must have a rule`).toBeTruthy();
       expect(rule![1]).toMatch(borderRe);
@@ -434,7 +435,7 @@ describe("app.css select treatment (P16-UI-05)", () => {
     // consolidation has been undone.
     for (const selector of [".op-sel", ".fm-toolbar select"]) {
       const rule = CODE.match(
-        new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
+        new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`),
       );
       if (!rule) continue;
       expect(rule[1], `${selector} must not re-declare the border`).not.toMatch(/border:/);
@@ -2946,9 +2947,7 @@ describe("D32-5 (pass 32): a SELECTED segment keeps its text color under hover",
  */
 describe("interface review 2026-09-06: the rules the fixes rest on", () => {
   const decls = (selector: string): string => {
-    const re = new RegExp(
-      selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
-    );
+    const re = new RegExp(escapeRegExp(selector) + "\\s*\\{([^}]*)\\}");
     const m = CODE.match(re);
     expect(m, selector).not.toBeNull();
     return m![1];
@@ -3192,9 +3191,7 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
 
 describe("app.css ruling 149: every typing control wears the sheet's chrome", () => {
   const decls = (selector: string): string => {
-    const re = new RegExp(
-      selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
-    );
+    const re = new RegExp(escapeRegExp(selector) + "\\s*\\{([^}]*)\\}");
     const m = CODE.match(re);
     expect(m, selector).not.toBeNull();
     return m![1];
@@ -3239,9 +3236,7 @@ describe("app.css ruling 149: every typing control wears the sheet's chrome", ()
 
 describe("app.css ruling 149: the destructive control is GitHub's danger button", () => {
   const decls = (selector: string): string => {
-    const re = new RegExp(
-      selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
-    );
+    const re = new RegExp(escapeRegExp(selector) + "\\s*\\{([^}]*)\\}");
     const m = CODE.match(re);
     expect(m, selector).not.toBeNull();
     return m![1];
@@ -3475,7 +3470,7 @@ describe("app.css stage colour presets (ruling 364)", () => {
  */
 describe("app.css controller layout (ruling 419)", () => {
   const ruleBody = (css: string, selector: string): string => {
-    const m = css.match(new RegExp(`(?:^|\\n|\\})\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`));
+    const m = css.match(new RegExp(`(?:^|\\n|\\})\\s*${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`));
     expect(m, `${selector} must have a rule`).toBeTruthy();
     return m![1]!;
   };
