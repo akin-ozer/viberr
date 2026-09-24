@@ -236,7 +236,9 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   that started it, the `state` spent once) exchanges the code with the PKCE verifier,
   seals the tokens beside the row and says the tab can be closed; this page updates on
   the resource event. A sign-in replaces a pasted credential (a connection holds one),
-  a pasted one over a live sign-in is refused, and changing the endpoint drops the
+  a pasted one over a live sign-in is refused, a pasted one over a sign-in that is not
+  live ("needs sign-in", "expired") clears what is left of it — a row holding a pasted
+  credential reports no sign-in status at all — and changing the endpoint drops the
   sign-in. The row and the editor read "needs sign-in" (the server answered the MCP
   authorization challenge and holds no token), "auth: OAuth, signed in (expires in …,
   renews itself)" or "sign-in expired: an admin must sign in again" with the server's

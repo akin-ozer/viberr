@@ -1487,7 +1487,9 @@ runtime's answer for a missing grant.
   256-bit token for the run (`bindRunToMcpGateway`) and adds `headers: {Authorization:
   "Bearer <token>"}` to each such mount. The token is bound to the run id, the exact
   server names the run mounts and the write tools it withholds on each; it is revoked on
-  every path that ends the run (the settle, an interrupt with or without a live handle,
+  every path that ends the run (the settle — which stops its calls when the process exits
+  and revokes it once a completion compaction, which lists the same servers to keep the
+  cached prefix, is done — an interrupt with or without a live handle,
   a queued run the drain drops, a launch that throws) and dies with the process, and the
   gateway also refuses it once the run's row is no longer running or queued. An unknown,
   revoked or wrong-server token gets a 401 with a JSON-RPC error and nothing is
@@ -1497,14 +1499,22 @@ runtime's answer for a missing grant.
   `Authorization: Bearer <credential>`, falling back to the legacy SSE transport on a
   4xx other than 401/403; a stdio server is a command the SERVER spawns (its own uid, the
   secret-filtered env plus `MCP_CREDENTIAL`, a process group of its own), one upstream
-  per (run, server), killed at revoke. An HTTP server an org admin **signed in with
+  per (run, server), killed at revoke — and at shutdown, even mid-handshake. An HTTP
+  upstream that ends the session the gateway holds (a 404, or the 400 of servers built
+  from the SDK's examples, to a request that carried it) gets a new session and the
+  request is sent again, once; the run's own session never notices. An HTTP server an org admin **signed in with
   OAuth** (ruling 469) takes the same road: its tokens are sealed beside the registry row
   (`oauth_ref`), and the gateway (and the health probe) ask
-  `mcpOAuthTokenSource` for the access token on every request — renewed with the refresh
+  `mcpOAuthTokenSource` — bound to the endpoint its connection was opened against, so a
+  connection to an endpoint the row no longer names is handed nothing and the gateway
+  reconnects to the new one — for the access token on every request — renewed with the refresh
   token when it is within a minute of running out and once after an upstream 401
   (single-flight per server, so two runs spend a rotating refresh token once), then
-  re-sealed. A renewal the authorization server refuses ends the sign-in: the tokens are
-  dropped, the row reads "sign-in expired: an admin must sign in again" with the
+  re-sealed. A renewal the authorization server refuses ends the sign-in — only while the
+  refused tokens are still the stored ones, so a sign-in that landed meanwhile stands —
+  the tokens are dropped (and the client registration too when the server refused the
+  client itself, `invalid_client`, so the next sign-in registers again), the row reads
+  "sign-in expired: an admin must sign in again" with the
   server's words, `org.mcp.oauth_failed` {stage: "refresh"} is audited, and the run's
   call fails with that sentence; a renewal that fails for now (unreachable, a 5xx,
   `temporarily_unavailable`) is reported and keeps the sign-in. A server that answers
@@ -1514,7 +1524,11 @@ runtime's answer for a missing grant.
   removed), `tools/call` (a withheld one refused with `mcpWriteToolDenyReason`),
   resources and prompts when the upstream declares them, and `list_changed`
   notifications; a timeout (5 minutes a call, reset by progress) or an upstream error
-  comes back as a JSON-RPC error naming the server. Every forwarded call is logged at
+  comes back as a JSON-RPC error naming the server. A stdio server that exits mid-call
+  answers the call with its own exit and stderr (the run's session then 404s and it
+  re-initializes onto a fresh process), and one that prints a single message over the
+  SDK's 10 MiB stdio line limit is stopped and its calls fail saying so — nothing a
+  child prints can throw out of the server's stream listener. Every forwarded call is logged at
   info (run id, server, tool, duration, outcome; never arguments or results), and a call
   to a tool an admin marked as a write tool is audited `task.agent.mcp_write_call` under
   the run's actor (the agent, the operator, or the asker as the controller's

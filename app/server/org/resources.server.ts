@@ -859,8 +859,10 @@ function mapMcp(row: McpRow): McpView {
     discoveredTools: storedToolNames(row.tool_names_json),
     // Ruling 278: computed from the stored command, so it cannot go stale.
     storePaths: row.transport === "stdio" ? storePathsInMcpTarget(row.target) : [],
-    // Ruling 469: the public half; reading it opens no box.
-    oauth: mcpOAuthView(row.oauth_json),
+    // Ruling 469: the public half; reading it opens no box. A pasted
+    // credential wins when present (469(e)) — it is what a run mounts — so a
+    // row holding one has no sign-in status to report (R-oauth-2).
+    oauth: row.cred_ref ? null : mcpOAuthView(row.oauth_json),
   };
 }
 
@@ -1635,6 +1637,14 @@ export async function saveMcpServer(
   // rather than silently shadowing it (the editor hides the field meanwhile).
   const oauthBefore = input.id ? mcpOAuthCredential(db, input.id) : null;
   const signedIn = oauthBefore?.state === "signed_in";
+  // SAFETY: `oauth_ref` and `oauth_json` are nullable TEXT columns of
+  // `org_mcp_servers` (0001_baseline.sql).
+  const oauthColumns = input.id
+    ? (db.prepare(`SELECT oauth_ref, oauth_json FROM org_mcp_servers WHERE id = ?`).get(input.id) as
+        | { oauth_ref: string | null; oauth_json: string | null }
+        | undefined)
+    : undefined;
+  const heldOAuth = oauthColumns !== undefined && (oauthColumns.oauth_ref !== null || oauthColumns.oauth_json !== null);
   const before = input.id ? getMcpServer(db, input.id) : null;
   // A sign-in's tokens are for the endpoint they were issued to: re-pointing
   // the row (or switching it to stdio) drops them rather than sending them to
@@ -1646,7 +1656,7 @@ export async function saveMcpServer(
     );
   }
   const oauthAuth =
-    signedIn && !repointed && input.id ? mcpOAuthTokenSource(db, input.id) : undefined;
+    signedIn && !repointed && input.id ? mcpOAuthTokenSource(db, input.id, target) : undefined;
 
   // SAFETY: `id` is the TEXT PRIMARY KEY of `org_mcp_servers`
   // (0001_baseline.sql), so a matching row hands back a string.
@@ -1780,9 +1790,15 @@ export async function saveMcpServer(
       effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
       now, id,
     );
-    // Ruling 469: tokens never follow a row to another endpoint.
-    const oauthDropped = repointed && existing.oauth != null;
-    if (repointed) {
+    // Ruling 469: tokens never follow a row to another endpoint. And a
+    // connection holds one credential: a pasted one (which wins, 469(e))
+    // replaces what is left of a sign-in that is not live — "needs sign-in",
+    // "expired", unreadable — whose status every surface would otherwise
+    // keep showing beside the credential runs mount, and whose sign-in the
+    // controller would advise, dropping the credential (R-oauth-2).
+    const pastedOverSignIn = cred !== null && !signedIn;
+    const oauthDropped = (repointed || pastedOverSignIn) && heldOAuth;
+    if (oauthDropped) {
       db.prepare(`UPDATE org_mcp_servers SET oauth_ref = NULL, oauth_json = NULL WHERE id = ?`).run(id);
     }
     // P14-KM-01: an MCP grant is a NAME reference, and this was the one rename
@@ -1906,7 +1922,7 @@ export async function testMcpServer(
   // Ruling 469: a signed-in server is probed with its sign-in; one that needs
   // a sign-in it does not have says so instead of blaming the endpoint.
   const oauth = sealed?.cred_ref ? null : mcpOAuthCredential(db, id);
-  const auth = oauth?.state === "signed_in" ? mcpOAuthTokenSource(db, id) : undefined;
+  const auth = oauth?.state === "signed_in" ? mcpOAuthTokenSource(db, id, existing.target) : undefined;
   const disc =
     existing.transport === "stdio"
       ? await discoverStdioMcpTools(existing.target, { ...options, token })

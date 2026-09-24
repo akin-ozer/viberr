@@ -7,10 +7,12 @@ import {
   startAuthorization,
 } from "@modelcontextprotocol/sdk/client/auth.js";
 import {
+  InvalidClientError,
   OAuthError,
   ServerError,
   TemporarilyUnavailableError,
   TooManyRequestsError,
+  UnauthorizedClientError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import {
   checkResourceAllowed,
@@ -58,12 +60,25 @@ export type McpOAuthEndpoints = z.infer<typeof oauthEndpointsSchema>;
 export const oauthClientSchema = z.object({
   client_id: z.string(),
   client_secret: z.string().optional(),
+  /** RFC 7591: when the secret stops working, in seconds since the epoch; 0
+   *  (or absent) is never. A lapsed one is registered again (R-oauth-4). */
+  client_secret_expires_at: z.number().optional(),
   token_endpoint_auth_method: z.string().optional(),
   /** The redirect URI it was registered with: a different instance origin
    *  registers again rather than being refused at the consent screen. */
   redirect_uri: z.string(),
 });
 export type McpOAuthClient = z.infer<typeof oauthClientSchema>;
+
+/** A client secret this close to its expiry is treated as lapsed. */
+const CLIENT_SECRET_SKEW_MS = 60_000;
+
+/** Whether a registered client's secret has lapsed (RFC 7591's
+ *  `client_secret_expires_at`), so it must not be reused. */
+export function clientSecretLapsed(client: McpOAuthClient, now: number = Date.now()): boolean {
+  const at = client.client_secret_expires_at;
+  return at !== undefined && at > 0 && at * 1000 - CLIENT_SECRET_SKEW_MS <= now;
+}
 
 /** Where a server's sign-in happens and what it asks for. */
 export interface McpOAuthDiscovery {
@@ -82,12 +97,30 @@ export class McpOAuthError extends Error {
   /** False for a failure worth retrying as is: the authorization server was
    *  unreachable, slow or answered 5xx, so a refresh token may still be good. */
   readonly definitive: boolean;
-  constructor(reason: string, options: { definitive?: boolean; cause?: unknown } = {}) {
+  /** The authorization server refused the CLIENT Viberr registered as
+   *  (`invalid_client`, `unauthorized_client`): the registration is dead. */
+  readonly clientRejected: boolean;
+  constructor(
+    reason: string,
+    options: { definitive?: boolean; clientRejected?: boolean; cause?: unknown } = {},
+  ) {
     super(reason, { cause: options.cause });
     this.name = "McpOAuthError";
     this.reason = reason;
     this.definitive = options.definitive ?? true;
+    this.clientRejected = options.clientRejected ?? false;
   }
+}
+
+/**
+ * R-oauth-4 (2026-09-25): whether a failure says the registered client itself
+ * is dead — the server forgot a dynamically registered client, or its secret
+ * lapsed — so it must not be reused for the next sign-in. The SDK's own
+ * `auth()` drops client credentials on exactly these two errors.
+ */
+export function isClientRefusal(cause: unknown): boolean {
+  if (cause instanceof McpOAuthError) return cause.clientRejected;
+  return cause instanceof InvalidClientError || cause instanceof UnauthorizedClientError;
 }
 
 /** `fetch` with a deadline, since the SDK's OAuth helpers set none. */
@@ -269,6 +302,7 @@ export async function registerMcpOAuthClient(
     });
     const client: McpOAuthClient = { client_id: full.client_id, redirect_uri: redirectUri };
     if (full.client_secret) client.client_secret = full.client_secret;
+    if (full.client_secret_expires_at !== undefined) client.client_secret_expires_at = full.client_secret_expires_at;
     if (full.token_endpoint_auth_method) client.token_endpoint_auth_method = full.token_endpoint_auth_method;
     return client;
   } catch (error) {
@@ -314,6 +348,7 @@ export async function exchangeMcpOAuthCode(
   } catch (error) {
     throw new McpOAuthError(`the code exchange failed: ${oauthFailureReason(error)}`, {
       definitive: isDefinitiveRefusal(error),
+      clientRejected: isClientRefusal(error),
       cause: error,
     });
   }
@@ -337,6 +372,7 @@ export async function refreshMcpOAuthTokens(
   } catch (error) {
     throw new McpOAuthError(oauthFailureReason(error), {
       definitive: isDefinitiveRefusal(error),
+      clientRejected: isClientRefusal(error),
       cause: error,
     });
   }

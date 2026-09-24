@@ -56,6 +56,8 @@ import {
   UPSTREAM_CONNECT_TIMEOUT_MS,
   UpstreamConnectError,
   upstreamFailureReason,
+  UpstreamReconnectNeeded,
+  type UpstreamConnection,
 } from "./upstream.server";
 
 /**
@@ -131,16 +133,26 @@ interface RunGrant {
    *  paths' braces: a token whose run has ended is refused even if a path
    *  forgot to revoke it. */
   isLive: () => boolean;
+  /** The run's process has exited (`closeRunMcpGatewayCalls`): the token
+   *  still opens `initialize` and the listings for its completion compaction,
+   *  and refuses every call. */
+  callsClosed: boolean;
 }
 
 interface Upstream {
   key: string;
   runId: string;
   server: string;
-  client: Client;
-  transport: "streamable-http" | "sse" | "stdio";
-  /** Ruling 176's marks as the registry held them at connect: the calls
-   *  audited as write calls. */
+  /** The connection requests go out on now: replaced when the server lost
+   *  its session and the gateway opened a new one (R-gateway-3). */
+  connection: UpstreamConnection;
+  /** The entry's abort: a close stops a reconnect in flight as well. */
+  signal: AbortSignal;
+  /** A reconnect in flight, so the calls that met one lost session wait for
+   *  one new connection. */
+  reconnecting: Promise<UpstreamConnection> | null;
+  /** Ruling 176's marks as the registry held them at the last connect: the
+   *  calls audited as write calls. */
   writeTools: ReadonlySet<string>;
   sessions: Set<Session>;
 }
@@ -148,7 +160,14 @@ interface Upstream {
 /** An upstream connecting (`ready` null) or connected. */
 interface UpstreamEntry {
   pending: Promise<Upstream>;
+  /** Set the moment the connect has an upstream, in the same synchronous
+   *  stretch, so no close ever finds a live connection it cannot reach. */
   ready: Upstream | null;
+  /** Aborted by a close that finds the upstream still connecting: its
+   *  transport closes at once — a stdio process still in its handshake is
+   *  killed before the close returns — instead of after the handshake,
+   *  which a shutdown never waits for (R-gateway-5). */
+  abort: AbortController;
 }
 
 interface Session {
@@ -169,8 +188,9 @@ interface GatewayState {
   /** runId → sha256(token). */
   byRun: Map<string, string>;
   /** `${runId}\0${server}` → the upstream, connecting (`ready` null) or
-   *  connected. `ready` is what lets a shutdown close a live upstream — and
-   *  kill a spawned stdio process — synchronously, before the signal lands. */
+   *  connected. `ready` and `abort` are what let a shutdown close an upstream
+   *  — and kill a spawned stdio process, connected or still in its handshake —
+   *  synchronously, before the signal lands. */
   upstreams: Map<string, UpstreamEntry>;
   /** MCP session id → session. */
   sessions: Map<string, Session>;
@@ -372,6 +392,7 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     isLive: input.isLive,
+    callsClosed: false,
   });
   state.byRun.set(input.runId, hash);
   logger.info("mcp gateway token minted", {
@@ -379,6 +400,22 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
     mcps: [...servers.keys()],
   });
   return out;
+}
+
+/**
+ * The run's process has exited, and its completion compaction may be about to
+ * replay the session (ruling 376). That request must carry the run's MCP
+ * servers with the same tools, or it is a different prefix and misses the
+ * cache it exists to read — so the token keeps opening `initialize` and the
+ * listings (on the upstreams the run already holds), and from now on refuses
+ * every call, resource read and prompt: nothing acts for a run that is over.
+ * `revokeRunMcpGateway` ends it once the compaction is done (R-gateway-4,
+ * 2026-09-25). A no-op for a run that holds no token.
+ */
+export function closeRunMcpGatewayCalls(runId: string): void {
+  const state = getState();
+  const grant = state.grants.get(state.byRun.get(runId) ?? "");
+  if (grant) grant.callsClosed = true;
 }
 
 /**
@@ -407,11 +444,12 @@ function closeUpstreamByKey(key: string): void {
   const entry = state.upstreams.get(key);
   if (!entry) return;
   state.upstreams.delete(key);
+  entry.abort.abort();
   const close = (upstream: Upstream): Promise<void> => {
     for (const session of Array.from(upstream.sessions)) closeSession(session);
     // `Client.close` reaches the transport's close — the stdio process-group
     // kill — before its first await, so a connected upstream dies now.
-    return upstream.client.close();
+    return upstream.connection.client.close();
   };
   const closing = entry.ready ? close(entry.ready) : entry.pending.then(close, () => undefined);
   closing.catch((error) => {
@@ -427,6 +465,25 @@ function closeSession(session: Session): void {
   if (session.id) state.sessions.delete(session.id);
   session.upstream.sessions.delete(session);
   void session.mcp.close().catch(() => undefined);
+}
+
+/**
+ * A session whose upstream closed under it. It stops routing now, so the
+ * run's next request is a 404 and it re-initializes (a fresh upstream), as the
+ * Streamable HTTP spec asks of a client. It CLOSES only once the calls in
+ * flight have answered: the SDK runs an upstream's `onclose` before it rejects
+ * the requests still waiting on it, and closing the session there aborted
+ * their handlers, so a call on a stdio server that died mid-call was never
+ * answered at all (R-gateway-2, 2026-09-25). Those rejections and the error
+ * answers they turn into are microtasks, so the close waits one macrotask.
+ */
+function retireSession(session: Session): void {
+  const state = getState();
+  if (session.id) state.sessions.delete(session.id);
+  session.upstream.sessions.delete(session);
+  setImmediate(() => {
+    void session.mcp.close().catch(() => undefined);
+  });
 }
 
 // ------------------------------------------------------------- HTTP
@@ -615,24 +672,28 @@ function upstreamFor(grant: RunGrant, server: string): Promise<Upstream> {
   const key = `${grant.runId}${SEP}${server}`;
   const existing = state.upstreams.get(key);
   if (existing) return existing.pending;
+  const abort = new AbortController();
   const entry: UpstreamEntry = {
-    pending: connectUpstream(grant, server, key),
+    pending: connectUpstream(grant, server, key, abort.signal, (upstream) => {
+      entry.ready = upstream;
+    }),
     ready: null,
+    abort,
   };
   state.upstreams.set(key, entry);
-  entry.pending.then(
-    (upstream) => {
-      entry.ready = upstream;
-    },
-    () => {
-      // A failed connect is not cached: the run's next initialize retries.
-      if (state.upstreams.get(key) === entry) state.upstreams.delete(key);
-    },
-  );
+  entry.pending.catch(() => {
+    // A failed connect is not cached: the run's next initialize retries.
+    if (state.upstreams.get(key) === entry) state.upstreams.delete(key);
+  });
   return entry.pending;
 }
 
-async function connectUpstream(grant: RunGrant, server: string, key: string): Promise<Upstream> {
+/** A connection opened for `server` as its registry row reads now. */
+async function openConnection(
+  grant: RunGrant,
+  server: string,
+  signal: AbortSignal,
+): Promise<{ connection: UpstreamConnection; writeTools: string[] }> {
   const state = getState();
   const row = listMcpServers(grant.db).find((entry) => entry.name === server);
   if (!row) throw new UpstreamConnectError("it is no longer in the org MCP registry");
@@ -643,36 +704,63 @@ async function connectUpstream(grant: RunGrant, server: string, key: string): Pr
   const token = credential.state === "ok" ? credential.token : null;
   // Ruling 469: an OAuth sign-in's access token is asked for on every request
   // (renewed when it has run out, and once after a 401), never handed over.
-  const auth = credential.state === "oauth" ? mcpOAuthTokenSource(grant.db, row.id) : undefined;
+  const auth =
+    credential.state === "oauth" ? mcpOAuthTokenSource(grant.db, row.id, row.target) : undefined;
+  const timeoutMs = state.timeouts.connectMs;
   const connection =
     row.transport === "stdio"
-      ? await connectStdioUpstream(row.target, { token, timeoutMs: state.timeouts.connectMs })
-      : await connectHttpUpstream(row.target, { token, auth, timeoutMs: state.timeouts.connectMs });
+      ? await connectStdioUpstream(row.target, { token, timeoutMs, signal })
+      : await connectHttpUpstream(row.target, { token, auth, timeoutMs, signal });
+  // A revoke or a stop that landed while this connected finds nothing to
+  // close yet, so the connection closes itself here.
+  if (!state.byRun.has(grant.runId) || signal.aborted) {
+    await connection.client.close().catch(() => undefined);
+    throw new UpstreamConnectError("the run has ended");
+  }
+  return { connection, writeTools: row.writeTools };
+}
+
+async function connectUpstream(
+  grant: RunGrant,
+  server: string,
+  key: string,
+  signal: AbortSignal,
+  onReady: (upstream: Upstream) => void,
+): Promise<Upstream> {
+  const { connection, writeTools } = await openConnection(grant, server, signal);
   const upstream: Upstream = {
     key,
     runId: grant.runId,
     server,
-    client: connection.client,
-    transport: connection.transport,
-    writeTools: new Set(row.writeTools),
+    connection,
+    signal,
+    reconnecting: null,
+    writeTools: new Set(writeTools),
     sessions: new Set(),
   };
-  // A revoke that landed while this connected finds nothing to close yet, so
-  // the connection closes itself here.
-  if (!state.byRun.has(grant.runId)) {
-    await connection.client.close().catch(() => undefined);
-    throw new UpstreamConnectError("the run has ended");
-  }
+  onReady(upstream);
+  wireConnection(upstream, connection);
+  logger.info("mcp gateway connected upstream", {
+    runId: grant.runId,
+    mcp: server,
+    transport: connection.transport,
+  });
+  return upstream;
+}
+
+/** The upstream's handlers on one of its connections. A connection the
+ *  upstream has since replaced (a reconnect) closes quietly. */
+function wireConnection(upstream: Upstream, connection: UpstreamConnection): void {
+  const state = getState();
   const client = connection.client;
   client.onclose = () => {
-    const entry = state.upstreams.get(key);
-    if (entry?.ready === upstream) state.upstreams.delete(key);
-    // The run's sessions on a dead upstream are closed, so the CLI's next
-    // request is a 404 and it re-initializes (a fresh upstream) as the
-    // Streamable HTTP spec asks of a client.
-    for (const session of Array.from(upstream.sessions)) closeSession(session);
+    if (upstream.connection !== connection) return;
+    const entry = state.upstreams.get(upstream.key);
+    if (entry?.ready === upstream) state.upstreams.delete(upstream.key);
+    for (const session of Array.from(upstream.sessions)) retireSession(session);
   };
   const broadcast = (send: (session: Session) => Promise<void>) => {
+    if (upstream.connection !== connection) return;
     for (const session of upstream.sessions) {
       void send(session).catch(() => undefined);
     }
@@ -686,12 +774,84 @@ async function connectUpstream(grant: RunGrant, server: string, key: string): Pr
   client.setNotificationHandler(PromptListChangedNotificationSchema, () =>
     broadcast((session) => session.mcp.sendPromptListChanged()),
   );
-  logger.info("mcp gateway connected upstream", {
-    runId: grant.runId,
-    mcp: server,
-    transport: connection.transport,
-  });
-  return upstream;
+}
+
+/**
+ * Replace `failed` with a new connection to the server as its row reads now.
+ * Single-flight per upstream: every call that met the same lost session waits
+ * for one reconnect. The run's sessions stay as they are — nothing the run
+ * holds points at the upstream's session.
+ */
+function reconnectUpstream(
+  grant: RunGrant,
+  upstream: Upstream,
+  failed: UpstreamConnection,
+  why: string,
+): Promise<UpstreamConnection> {
+  if (upstream.connection !== failed) return Promise.resolve(upstream.connection);
+  if (upstream.reconnecting) return upstream.reconnecting;
+  const attempt = (async () => {
+    const { connection, writeTools } = await openConnection(grant, upstream.server, upstream.signal);
+    upstream.connection = connection;
+    upstream.writeTools = new Set(writeTools);
+    wireConnection(upstream, connection);
+    void failed.client.close().catch(() => undefined);
+    logger.info("mcp gateway reconnected upstream", {
+      runId: grant.runId,
+      mcp: upstream.server,
+      transport: connection.transport,
+      why,
+    });
+    return connection;
+  })();
+  upstream.reconnecting = attempt;
+  const done = () => {
+    if (upstream.reconnecting === attempt) upstream.reconnecting = null;
+  };
+  void attempt.then(done, done);
+  return attempt;
+}
+
+/**
+ * Send one request upstream, answering a failure as a named error. When the
+ * connection is no longer the right one, nothing was processed and the gateway
+ * reconnects (once, however many calls met it) and sends the request again:
+ *
+ *  - the server says it no longer has the session the request rode on — a
+ *    restart, a redeploy, an idle expiry — and the MCP spec asks the client to
+ *    start a new one. Before, the upstream kept its dead session for the rest
+ *    of the run, and a run that re-initialized was handed the same one
+ *    (R-gateway-3, 2026-09-25);
+ *  - the registry row was re-pointed since the connection opened. Before, an
+ *    OAuth connection's token source followed the row, so a later sign-in's
+ *    token went to the old endpoint (R-oauth-1, 2026-09-25); now the new
+ *    connection goes where the row points, with its own sign-in.
+ */
+async function forward<T>(
+  grant: RunGrant,
+  upstream: Upstream,
+  send: (client: Client) => Promise<T>,
+): Promise<T> {
+  const connection = upstream.connection;
+  try {
+    return await send(connection.client);
+  } catch (error) {
+    if (!(error instanceof UpstreamReconnectNeeded)) throw namedError(upstream.server, error, connection);
+    let fresh: UpstreamConnection;
+    try {
+      fresh = await reconnectUpstream(grant, upstream, connection, error.reason);
+    } catch (reconnect) {
+      throw new GatewayRpcError(
+        UPSTREAM_UNREACHABLE_CODE,
+        `MCP server "${upstream.server}" failed through Viberr's gateway: ${error.reason}, and a new connection could not be opened: ${upstreamFailureReason(reconnect)}`,
+      );
+    }
+    try {
+      return await send(fresh.client);
+    } catch (retry) {
+      throw namedError(upstream.server, retry, fresh);
+    }
+  }
 }
 
 // ------------------------------------------------------------- sessions
@@ -711,8 +871,12 @@ class GatewayRpcError extends Error {
   }
 }
 
-/** An upstream error as the run reads it: the server named, the code kept. */
-function namedError(server: string, cause: unknown): GatewayRpcError {
+/**
+ * An upstream error as the run reads it: the server named, the code kept. A
+ * connection that closed under the call says why when it can — a stdio
+ * process's exit and its stderr beat the SDK's "Connection closed".
+ */
+function namedError(server: string, cause: unknown, connection: UpstreamConnection): GatewayRpcError {
   if (cause instanceof McpError && cause.code !== ErrorCode.ConnectionClosed) {
     const message = cause.message.replace(/^(?:MCP error -?\d+: )+/, "");
     const timedOut = cause.code === ErrorCode.RequestTimeout;
@@ -723,9 +887,24 @@ function namedError(server: string, cause: unknown): GatewayRpcError {
         : `MCP server "${server}": ${message}`,
     );
   }
+  const closed = cause instanceof McpError ? (connection.closedReason?.() ?? null) : null;
   return new GatewayRpcError(
     UPSTREAM_UNREACHABLE_CODE,
-    `MCP server "${server}" failed through Viberr's gateway: ${errorMessage(cause)}`,
+    `MCP server "${server}" failed through Viberr's gateway: ${closed ?? errorMessage(cause)}`,
+  );
+}
+
+/** R-gateway-4: a run whose process has exited lists, and calls nothing. */
+function assertCallsOpen(grant: RunGrant, server: string, method: string): void {
+  if (!grant.callsClosed) return;
+  logger.info("mcp gateway refused a call from a run that has ended", {
+    runId: grant.runId,
+    mcp: server,
+    method,
+  });
+  throw new GatewayRpcError(
+    UNAUTHORIZED_CODE,
+    `Viberr's MCP gateway refused this ${method}: the run has ended. Its completion compaction may list what "${server}" offers, but nothing is called for a run that is over.`,
   );
 }
 
@@ -740,7 +919,8 @@ function upstreamMeta(meta: RequestMeta | undefined): RequestMeta | undefined {
 async function openSession(grant: RunGrant, server: string, upstream: Upstream): Promise<Session> {
   const state = getState();
   const withheld = grant.servers.get(server) ?? new Set<string>();
-  const upstreamCaps = upstream.client.getServerCapabilities() ?? {};
+  const { client: opened } = upstream.connection;
+  const upstreamCaps = opened.getServerCapabilities() ?? {};
   const capabilities: ServerCapabilities = {};
   if (upstreamCaps.tools) capabilities.tools = upstreamCaps.tools.listChanged ? { listChanged: true } : {};
   if (upstreamCaps.resources) {
@@ -749,30 +929,27 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
   if (upstreamCaps.prompts) {
     capabilities.prompts = upstreamCaps.prompts.listChanged ? { listChanged: true } : {};
   }
-  const info = upstream.client.getServerVersion();
-  const instructions = upstream.client.getInstructions();
+  const info = opened.getServerVersion();
+  const instructions = opened.getInstructions();
   const mcp = new Server(
     { name: info?.name ?? server, version: info?.version ?? "0.0.0" },
     instructions ? { capabilities, instructions } : { capabilities },
   );
   const { listMs, callMs } = state.timeouts;
-  const client = upstream.client;
 
   if (capabilities.tools) {
     mcp.setRequestHandler(ListToolsRequestSchema, async (request, extra) => {
-      try {
-        const result = await client.request(
-          { method: "tools/list", params: request.params },
-          ListToolsResultSchema,
-          { signal: extra.signal, timeout: listMs },
-        );
-        // Ruling 176: a withheld write tool is not offered at all.
-        return { ...result, tools: result.tools.filter((tool) => !withheld.has(tool.name)) };
-      } catch (error) {
-        throw namedError(server, error);
-      }
+      const result = await forward(grant, upstream, (client) =>
+        client.request({ method: "tools/list", params: request.params }, ListToolsResultSchema, {
+          signal: extra.signal,
+          timeout: listMs,
+        }),
+      );
+      // Ruling 176: a withheld write tool is not offered at all.
+      return { ...result, tools: result.tools.filter((tool) => !withheld.has(tool.name)) };
     });
     mcp.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+      assertCallsOpen(grant, server, "tools/call");
       const tool = request.params.name;
       const started = Date.now();
       const marked = upstream.writeTools.has(tool);
@@ -805,11 +982,11 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
             void extra.sendNotification(notification).catch(() => undefined);
           };
         }
-        const result = await client.request({ method: "tools/call", params }, CallToolResultSchema, options);
+        const result = await forward(grant, upstream, (client) =>
+          client.request({ method: "tools/call", params }, CallToolResultSchema, options),
+        );
         outcome = result.isError ? "tool_error" : "ok";
         return result;
-      } catch (error) {
-        throw namedError(server, error);
       } finally {
         const durationMs = Date.now() - started;
         // Ruling 461(5): every forwarded call, never its arguments or result.
@@ -831,58 +1008,50 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
     });
   }
   if (capabilities.resources) {
-    mcp.setRequestHandler(ListResourcesRequestSchema, async (request, extra) => {
-      try {
-        return await client.request({ method: "resources/list", params: request.params }, ListResourcesResultSchema, {
+    mcp.setRequestHandler(ListResourcesRequestSchema, (request, extra) =>
+      forward(grant, upstream, (client) =>
+        client.request({ method: "resources/list", params: request.params }, ListResourcesResultSchema, {
           signal: extra.signal,
           timeout: listMs,
-        });
-      } catch (error) {
-        throw namedError(server, error);
-      }
-    });
-    mcp.setRequestHandler(ListResourceTemplatesRequestSchema, async (request, extra) => {
-      try {
-        return await client.request(
+        }),
+      ),
+    );
+    mcp.setRequestHandler(ListResourceTemplatesRequestSchema, (request, extra) =>
+      forward(grant, upstream, (client) =>
+        client.request(
           { method: "resources/templates/list", params: request.params },
           ListResourceTemplatesResultSchema,
           { signal: extra.signal, timeout: listMs },
-        );
-      } catch (error) {
-        throw namedError(server, error);
-      }
-    });
+        ),
+      ),
+    );
     mcp.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
-      try {
-        return await client.request({ method: "resources/read", params: request.params }, ReadResourceResultSchema, {
+      assertCallsOpen(grant, server, "resources/read");
+      return forward(grant, upstream, (client) =>
+        client.request({ method: "resources/read", params: request.params }, ReadResourceResultSchema, {
           signal: extra.signal,
           timeout: callMs,
-        });
-      } catch (error) {
-        throw namedError(server, error);
-      }
+        }),
+      );
     });
   }
   if (capabilities.prompts) {
-    mcp.setRequestHandler(ListPromptsRequestSchema, async (request, extra) => {
-      try {
-        return await client.request({ method: "prompts/list", params: request.params }, ListPromptsResultSchema, {
+    mcp.setRequestHandler(ListPromptsRequestSchema, (request, extra) =>
+      forward(grant, upstream, (client) =>
+        client.request({ method: "prompts/list", params: request.params }, ListPromptsResultSchema, {
           signal: extra.signal,
           timeout: listMs,
-        });
-      } catch (error) {
-        throw namedError(server, error);
-      }
-    });
+        }),
+      ),
+    );
     mcp.setRequestHandler(GetPromptRequestSchema, async (request, extra) => {
-      try {
-        return await client.request({ method: "prompts/get", params: request.params }, GetPromptResultSchema, {
+      assertCallsOpen(grant, server, "prompts/get");
+      return forward(grant, upstream, (client) =>
+        client.request({ method: "prompts/get", params: request.params }, GetPromptResultSchema, {
           signal: extra.signal,
           timeout: listMs,
-        });
-      } catch (error) {
-        throw namedError(server, error);
-      }
+        }),
+      );
     });
   }
 

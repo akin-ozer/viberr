@@ -35,6 +35,7 @@ import {
 } from "~/server/settings/instance-settings.server";
 import {
   RUN_PHASE,
+  type CompactOutcome,
   type RunCallbacks,
   type RunHandle,
   type RunMcpServers,
@@ -105,6 +106,7 @@ import { removeSkillPlugin, type SkillPlugin } from "./skill-mount.server";
 import { encodeActorRef } from "~/server/files/actor-ref.server";
 import {
   bindRunToMcpGateway,
+  closeRunMcpGatewayCalls,
   revokeRunMcpGateway,
 } from "~/server/mcp-proxy/gateway.server";
 import {
@@ -2332,9 +2334,12 @@ function launch(
 
   async function settleRun(exit: RunExit): Promise<void> {
       // Ruling 461: the process that held the run's gateway token has exited,
-      // so the token stops working now — before the completion compaction,
-      // which needs no org MCP server.
-      revokeRunMcpGateway(spec.runId);
+      // so the token calls nothing from now on. It is revoked once the
+      // completion compaction below is done (or at once when there is none):
+      // that request replays the session with the run's own MCP servers, and
+      // a server it cannot list is a different prefix that misses the cache
+      // ruling 376 compacts to read (R-gateway-4, 2026-09-25).
+      closeRunMcpGatewayCalls(spec.runId);
       try {
         // Ruling 369: a Codex run's per-call prompt sizes and compactions are
         // in the rollout the CLI wrote, never in its SDK stream; read once the
@@ -2386,10 +2391,15 @@ function launch(
             }
           }
           const compactionsBefore = stats?.compactionEvents.length ?? 0;
-          const outcome = await adapter.compact(spec, exit.sessionId, {
-            onLine: (line) => sink.line(line),
-            onPhase: (phase, step) => writePhase(phase, step),
-          });
+          let outcome: CompactOutcome;
+          try {
+            outcome = await adapter.compact(spec, exit.sessionId, {
+              onLine: (line) => sink.line(line),
+              onPhase: (phase, step) => writePhase(phase, step),
+            });
+          } finally {
+            revokeRunMcpGateway(spec.runId);
+          }
           logger.info("run compaction at completion", {
             runId: spec.runId,
             backend: exit.effectiveBackend,
@@ -2436,8 +2446,10 @@ function launch(
             }
           }
         }
+        revokeRunMcpGateway(spec.runId);
         sink.finalize(exit);
       } catch (error) {
+        revokeRunMcpGateway(spec.runId);
         logger.error("run finalize persist failed", {
           runId: spec.runId,
           err: toError(error),

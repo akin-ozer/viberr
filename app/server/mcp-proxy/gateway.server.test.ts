@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -6,9 +7,12 @@ import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { gone } from "../../../test-support/process-liveness";
+import { waitFor } from "../../../test-support/polling";
 import {
   startHttpUpstream,
+  startSessionfulHttpUpstream,
   startSseUpstream,
+  writeSilentStdioUpstream,
   writeStdioUpstream,
   type UpstreamHandle,
 } from "../../../test-support/mcp-upstream";
@@ -298,6 +302,46 @@ describe("the gateway against an HTTP upstream that requires its bearer", () => 
     expect(jsonRpcError.parse(await response.json()).error.message).toContain("authentication rejected");
   });
 
+  for (const lostStatus of [404, 400] as const) {
+    it(`R-gateway-3: an upstream that loses its session (${lostStatus}) gets a new one and the call goes through`, async () => {
+      // CANARY: let the lost session's refusal reach the run as an error and
+      // every later call fails for the rest of the run.
+      const upstream = await startSessionfulHttpUpstream(SECRET, lostStatus);
+      upstreams.push(upstream);
+      addMcp("cloudflare", "HTTP", upstream.url, SECRET);
+      const client = await connect(mountRun(["cloudflare"]).servers.cloudflare);
+      textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+      expect(upstream.initializes()).toBe(1);
+
+      upstream.forgetSessions();
+      const called = textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+      expect(called.content[0]?.text).toBe("whoami: ok");
+      expect(upstream.initializes()).toBe(2);
+      // The refused request was never processed; the one sent again was.
+      expect(upstream.calls).toEqual(["whoami", "whoami"]);
+
+      // Two calls that meet the next loss at once open ONE new session.
+      upstream.forgetSessions();
+      const [a, b] = await Promise.all([client.listTools(), client.listTools()]);
+      expect(a.tools.map((tool) => tool.name)).toEqual(b.tools.map((tool) => tool.name));
+      expect(upstream.initializes()).toBe(3);
+      expect(new Set(upstream.authorizations)).toEqual(new Set([`Bearer ${SECRET}`]));
+    });
+  }
+
+  it("R-gateway-3: a legacy SSE upstream that forgot the session gets a new one too", async () => {
+    const upstream = await startSseUpstream(SECRET);
+    upstreams.push(upstream);
+    addMcp("legacy", "HTTP", upstream.url, SECRET);
+    const client = await connect(mountRun(["legacy"]).servers.legacy);
+    textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+    upstream.forgetSessions();
+    const called = textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+    expect(called.content[0]?.text).toBe("whoami: ok");
+    expect(upstream.initializes()).toBe(2);
+    expect(upstream.calls).toEqual(["whoami", "whoami"]);
+  });
+
   it("falls back to the legacy SSE transport when the upstream answers that way", async () => {
     const upstream = await startSseUpstream(SECRET);
     upstreams.push(upstream);
@@ -347,6 +391,81 @@ describe("the gateway against a stdio upstream the server spawns", () => {
 
     revokeRunMcpGateway(runId);
     expect(await gone(pid)).toBe(true);
+  });
+
+  function addStdioPg(): void {
+    addMcp("pg", "stdio", writeStdioUpstream(ctx.makeTempDir("viberr-gw-stdio-")), SECRET);
+  }
+
+  /** The credentialed stdio server mounted on a fresh run, the run's client
+   *  and the pid of the process the gateway spawned for it. */
+  async function stdioRun(runId: string): Promise<{ client: Client; pid: number }> {
+    const resolution = resolveSpecialistMcpServersDetailed(db, ["pg"]);
+    const servers = bindRunToMcpGateway({
+      db,
+      runId,
+      servers: resolution.servers,
+      toolDenials: resolution.toolDenials,
+      actor: { userId: null, label: "operator" },
+      projectSlug: "acme",
+      taskKey: "VIB-1",
+      isLive: () => true,
+    });
+    const client = await connect(servers.pg);
+    const pid = Number(textResult.parse(await client.callTool({ name: "pid", arguments: {} })).content[0]?.text);
+    return { client, pid };
+  }
+
+  it("R-gateway-1: an answer over the 10 MiB stdio line limit fails that call by name, stops the process and leaves the server up", async () => {
+    // Before the fix the SDK's ReadBuffer threw inside the stdout listener: an
+    // uncaughtException that exits the whole Viberr process. CANARY: drop the
+    // try/catch around the append and vitest reports the unhandled error while
+    // this call only times out.
+    addStdioPg();
+    const { client, pid } = await stdioRun("run_gw_huge");
+    await expect(client.callTool({ name: "huge", arguments: {} }, undefined, { timeout: 10_000 })).rejects.toThrow(
+      /MCP server "pg" failed through Viberr's gateway: stopped: it sent one message over the 10 MiB stdio limit/,
+    );
+    expect(await gone(pid)).toBe(true);
+    // The run's session went with the process; a new one gets a new process.
+    const again = await stdioRun("run_gw_huge_2");
+    expect(again.pid).not.toBe(pid);
+  });
+
+  it("R-gateway-2: a process that dies mid-call answers the call with its own exit, not a hang", async () => {
+    // CANARY: close the sessions in the upstream's onclose (before the SDK
+    // rejects the calls in flight) and the answer is never written: the
+    // run's client hears nothing until its own timeout.
+    addStdioPg();
+    const { client, pid } = await stdioRun("run_gw_exit");
+    await expect(client.callTool({ name: "exit", arguments: {} }, undefined, { timeout: 5_000 })).rejects.toThrow(
+      /MCP server "pg" failed through Viberr's gateway: exited \(exit code 3\)/,
+    );
+    expect(await gone(pid)).toBe(true);
+    // The session is gone with the upstream, so the run's next request is a
+    // 404 and it re-initializes onto a fresh process.
+    await expect(client.listTools()).rejects.toMatchObject({ code: 404 });
+    const again = await stdioRun("run_gw_exit_2");
+    expect(again.pid).not.toBe(pid);
+  });
+
+  it("R-gateway-5: a shutdown while a stdio upstream is still in its handshake kills that process at once", async () => {
+    // A handshake clock far longer than the check below, so only the stop
+    // itself can end the process in time. CANARY: leave a connecting
+    // upstream to `pending.then(close)` and it outlives the shutdown until
+    // this 20 s timeout fires.
+    await stopMcpGateway();
+    await startMcpGateway({ port: 0, connectTimeoutMs: 20_000 });
+    const { command, pidFile } = writeSilentStdioUpstream(ctx.makeTempDir("viberr-gw-silent-"));
+    addMcp("slow", "stdio", command, SECRET);
+    const mount = gatewayConfig.parse(mountRun(["slow"]).servers.slow);
+    const answered = rawInitialize(mount.url, mount.headers.Authorization).catch(() => null);
+    await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, "utf8") !== "", "the stdio process to start");
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    // What `runProcessShutdown` does right before it re-raises the signal.
+    void stopMcpGateway();
+    expect(await gone(pid, 1_000)).toBe(true);
+    await answered;
   });
 });
 

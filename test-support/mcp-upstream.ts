@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -113,12 +114,79 @@ export async function startHttpUpstream(token: string): Promise<UpstreamHandle> 
   };
 }
 
+/** A server that keeps sessions and can lose them, the way a restart, a
+ *  redeploy or an idle expiry loses them. */
+export interface SessionfulUpstreamHandle extends UpstreamHandle {
+  /** How many `initialize` requests opened a session. */
+  initializes(): number;
+  /** Forget every session: the next request on one is refused. */
+  forgetSessions(): void;
+}
+
+/**
+ * A stateful Streamable HTTP MCP server that answers only `Bearer <token>`.
+ * A request on a session it does not hold is refused with `lostStatus`: 404 is
+ * what the MCP spec (and the SDK's server transport) answers, 400 what servers
+ * built from the SDK's examples answer.
+ */
+export async function startSessionfulHttpUpstream(
+  token: string,
+  lostStatus: 404 | 400 = 404,
+): Promise<SessionfulUpstreamHandle> {
+  const calls: string[] = [];
+  const authorizations: (string | null)[] = [];
+  const sessions = new Map<string, StreamableHTTPServerTransport>();
+  let initializes = 0;
+  const server = await listen(async (req, res) => {
+    authorizations.push(req.headers.authorization ?? null);
+    if (req.headers.authorization !== `Bearer ${token}`) {
+      refuse(res);
+      return;
+    }
+    const header = req.headers["mcp-session-id"];
+    const sessionId = Array.isArray(header) ? header[0] : header;
+    if (sessionId !== undefined) {
+      const transport = sessions.get(sessionId);
+      if (!transport) {
+        res.writeHead(lostStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Session not found" }, id: null }));
+        return;
+      }
+      await transport.handleRequest(req, res);
+      return;
+    }
+    initializes += 1;
+    const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (id) => {
+        sessions.set(id, transport);
+      },
+    });
+    await fixtureServer(calls).connect(transport);
+    await transport.handleRequest(req, res);
+  });
+  return {
+    url: `http://127.0.0.1:${server.port}/mcp`,
+    calls,
+    authorizations,
+    initializes: () => initializes,
+    forgetSessions: () => {
+      for (const transport of sessions.values()) void transport.close();
+      sessions.clear();
+    },
+    close: server.close,
+  };
+}
+
 /** A legacy HTTP+SSE MCP server: GET /sse streams, POST /messages sends, and a
- *  POST to /sse is refused the way an SSE-only server refuses it. */
-export async function startSseUpstream(token: string): Promise<UpstreamHandle> {
+ *  POST to /sse is refused the way an SSE-only server refuses it. Forgetting
+ *  its sessions leaves the event streams open, so a client does not
+ *  reconnect on its own and only a POST finds out. */
+export async function startSseUpstream(token: string): Promise<SessionfulUpstreamHandle> {
   const calls: string[] = [];
   const authorizations: (string | null)[] = [];
   const sessions = new Map<string, SSEServerTransport>();
+  let initializes = 0;
   const server = await listen(async (req, res) => {
     authorizations.push(req.headers.authorization ?? null);
     if (req.headers.authorization !== `Bearer ${token}`) {
@@ -127,6 +195,7 @@ export async function startSseUpstream(token: string): Promise<UpstreamHandle> {
     }
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (url.pathname === "/sse" && req.method === "GET") {
+      initializes += 1;
       const transport = new SSEServerTransport("/messages", res);
       sessions.set(transport.sessionId, transport);
       res.on("close", () => sessions.delete(transport.sessionId));
@@ -150,14 +219,21 @@ export async function startSseUpstream(token: string): Promise<UpstreamHandle> {
     url: `http://127.0.0.1:${server.port}/sse`,
     calls,
     authorizations,
+    initializes: () => initializes,
+    forgetSessions: () => sessions.clear(),
     close: server.close,
   };
 }
 
+/** How far past the SDK's 10 MiB stdio line limit `huge` answers. */
+const HUGE_ANSWER_BYTES = 11 * 1024 * 1024;
+
 /**
  * A stdio MCP server as a plain Node script: `read_credential` answers with the
- * `MCP_CREDENTIAL` in its environment, `pid` with its process id. Returns the
- * registry command line that starts it.
+ * `MCP_CREDENTIAL` in its environment, `pid` with its process id, `huge` with
+ * one JSON-RPC line of 11 MiB (past the SDK's 10 MiB stdio limit), and `exit`
+ * never answers: it prints a sentence on stderr and exits 3 mid-call. Returns
+ * the registry command line that starts it.
  */
 export function writeStdioUpstream(dir: string): string {
   const script = path.join(dir, "stdio-upstream.cjs");
@@ -183,11 +259,17 @@ process.stdin.on("data", (chunk) => {
       send({ jsonrpc: "2.0", id: message.id, result: { tools: [
         { name: "read_credential", inputSchema: { type: "object" } },
         { name: "pid", inputSchema: { type: "object" } },
+        { name: "huge", inputSchema: { type: "object" } },
+        { name: "exit", inputSchema: { type: "object" } },
       ] } });
+    } else if (message.method === "tools/call" && message.params.name === "exit") {
+      process.stderr.write("the database went away\\n", () => process.exit(3));
     } else if (message.method === "tools/call") {
       const text = message.params.name === "pid"
         ? String(process.pid)
-        : (process.env.MCP_CREDENTIAL ?? "<none>");
+        : message.params.name === "huge"
+          ? "x".repeat(${HUGE_ANSWER_BYTES})
+          : (process.env.MCP_CREDENTIAL ?? "<none>");
       send({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text }] } });
     } else if (message.id !== undefined) {
       send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "not found" } });
@@ -197,4 +279,27 @@ process.stdin.on("data", (chunk) => {
 `,
   );
   return `"${process.execPath}" "${script}"`;
+}
+
+/** A stdio fixture's registry command line and where it writes its pid. */
+export interface StdioFixture {
+  command: string;
+  pidFile: string;
+}
+
+/**
+ * A stdio MCP server that never finishes its handshake: it writes its pid to
+ * `pidFile` and reads stdin without ever answering, the way a cold `npx -y`
+ * install holds `initialize` open. For a shutdown that lands mid-handshake.
+ */
+export function writeSilentStdioUpstream(dir: string): StdioFixture {
+  const script = path.join(dir, "silent-upstream.cjs");
+  const pidFile = path.join(dir, "silent-upstream.pid");
+  writeFileSync(
+    script,
+    `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+process.stdin.on("data", () => {});
+`,
+  );
+  return { command: `"${process.execPath}" "${script}"`, pidFile };
 }

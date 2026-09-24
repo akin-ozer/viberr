@@ -53,7 +53,9 @@ const startedSpecs: RunSpec[] = [];
  *  the compaction to a rollout there, as the real app-server would). */
 interface QueuedCompaction {
   outcome: CompactOutcome;
-  onCompact?: () => void;
+  /** Awaited, so a hook can do what a real compaction does meanwhile (the
+   *  CLI reconnecting to the run's MCP servers, say) before it answers. */
+  onCompact?: () => void | Promise<void>;
 }
 interface QueuedCompactions {
   claude: QueuedCompaction[];
@@ -65,7 +67,7 @@ const compactedSpecs: { spec: RunSpec; sessionId: string }[] = [];
 export function queueFakeCompaction(
   backend: RealBackend,
   outcome: CompactOutcome,
-  onCompact?: () => void,
+  onCompact?: () => void | Promise<void>,
 ): void {
   const queued: QueuedCompaction = { outcome };
   if (onCompact) queued.onCompact = onCompact;
@@ -194,7 +196,7 @@ function createFakeAdapter(backend: RealBackend): RuntimeAdapter {
     async compact(spec: RunSpec, sessionId: string, cb: CompactCallbacks): Promise<CompactOutcome> {
       compactedSpecs.push({ spec, sessionId });
       const queued = queuedCompactions[backend].shift();
-      queued?.onCompact?.();
+      await queued?.onCompact?.();
       const outcome: CompactOutcome = queued?.outcome ?? {
         compacted: false,
         reason: "no compaction queued",

@@ -14,6 +14,7 @@ import {
   OAUTH_SIGN_IN_EXPIRED,
   connectHttpUpstream,
   listAllTools,
+  type McpFetch,
 } from "~/server/mcp-proxy/upstream.server";
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
@@ -102,7 +103,7 @@ function rawRow(): { cred_ref: string | null; oauth_ref: string | null; oauth_js
 /** What a tool call through the token source's upstream sends and gets. */
 async function callWhoami(): Promise<string> {
   const connection = await connectHttpUpstream(server.url, {
-    auth: mcpOAuthTokenSource(db, MCP_ID),
+    auth: mcpOAuthTokenSource(db, MCP_ID, server.url),
     timeoutMs: 5_000,
   });
   try {
@@ -303,7 +304,7 @@ describe("the token upstream: use, renew, expire (ruling 469)", () => {
     await startServer({ accessTokenTtlSec: 5 });
     await signIn();
     server.options.accessTokenTtlSec = 3600;
-    const source = mcpOAuthTokenSource(db, MCP_ID);
+    const source = mcpOAuthTokenSource(db, MCP_ID, server.url);
     const [a, b] = await Promise.all([source.accessToken(), source.accessToken()]);
     expect(a).toBe(b);
     expect(server.tokenRequests.filter((request) => request.grant === "refresh_token")).toHaveLength(1);
@@ -387,6 +388,176 @@ describe("health, runs and sign-out (ruling 469)", () => {
     expect(repointed.mcp.oauth).toBeNull();
     expect(rawRow().oauth_ref).toBeNull();
     expect(listAuditEvents(db, { action: "org.mcp.updated" })[0]?.details).toMatchObject({ oauthDropped: true });
+  });
+});
+
+describe("a sign-in ended or landed while a request was on the wire (R-oauth-3)", () => {
+  /** A `fetch` that, the first time it carries `grant`, lets `meanwhile`
+   *  land first — what an admin's other tab does inside one round trip. */
+  function landingDuring(grant: string, meanwhile: () => Promise<void>): McpFetch {
+    let landed = false;
+    return async (url, init) => {
+      if (!landed && String(init?.body ?? "").includes(`grant_type=${grant}`)) {
+        landed = true;
+        await meanwhile();
+      }
+      return fetch(url, init);
+    };
+  }
+
+  it("a renewal refused after a new sign-in landed leaves the new sign-in alone", async () => {
+    // CANARY: expire whatever was read before the refresh, and the admin's
+    // fresh sign-in is wiped to "sign-in expired" with the old registration.
+    await startServer({ refresh: "invalid_grant" });
+    await signIn();
+    const [firstAccess] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
+    const signInAgain = async () => {
+      await signIn();
+    };
+    const source = mcpOAuthTokenSource(db, MCP_ID, server.url, { fetchImpl: landingDuring("refresh_token", signInAgain) });
+    const token = await source.renewAfterRefusal(firstAccess ?? "");
+    const [, secondAccess] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
+    expect(token).toBe(secondAccess);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("signed_in");
+    expect(listAuditEvents(db, { action: "org.mcp.oauth_failed" })).toEqual([]);
+  });
+
+  it("a renewed token refused after the sign-in moved on ends nothing; the stored one refused does", async () => {
+    // CANARY: expire whatever `current()` holds, whatever token was refused.
+    await startServer();
+    await signIn();
+    const [stale] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
+    await signIn();
+    const [, live] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
+    const source = mcpOAuthTokenSource(db, MCP_ID, server.url);
+    await source.refusedAfterRenewal(stale ?? "");
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("signed_in");
+    const ended = await source.refusedAfterRenewal(live ?? "");
+    expect(ended.reason).toBe(OAUTH_SIGN_IN_EXPIRED);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
+  });
+
+  it("a callback whose row was re-pointed during the code exchange writes nothing and keeps the credential that save pasted", async () => {
+    // CANARY: write after the exchange without reading the row again, and a
+    // sign-in for the old endpoint lands on the re-pointed row and erases
+    // the credential its save just pasted.
+    await startServer();
+    const started = await startMcpOAuthSignIn(db, {
+      mcpId: MCP_ID,
+      redirectUri: REDIRECT,
+      userId: ADMIN.userId,
+      sessionId: ADMIN.sessionId,
+      actor: ADMIN.actor,
+    });
+    const back = await consentAt(started.authorizationUrl);
+    const repoint = async () => {
+      await saveMcpServer(
+        db,
+        { id: MCP_ID, name: "cloudflare-api", transport: "HTTP", target: `${server.origin}/other`, cred: "a-pasted-token-123" },
+        ADMIN.actor,
+      );
+    };
+    const result = await completeMcpOAuthSignIn(db, {
+      ...callbackInput(back),
+      fetchImpl: landingDuring("authorization_code", repoint),
+    });
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining("endpoint changed") });
+    expect(rawRow().cred_ref).not.toBeNull();
+    expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });
+    expect(getMcpServer(db, MCP_ID)?.target).toBe(`${server.origin}/other`);
+  });
+});
+
+describe("a registered client the authorization server no longer accepts (R-oauth-4)", () => {
+  it("a renewal refused with invalid_client drops the client, so the next sign-in registers again", async () => {
+    // CANARY: keep the client on a client refusal and the next sign-in
+    // reuses the dead id; the consent screen refuses it (no redirect back).
+    await startServer();
+    await signIn();
+    const [first] = server.registrations.map((client) => client.clientId);
+    server.forgetClients();
+    server.invalidateAccessTokens();
+    await expect(callWhoami()).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
+    expect(rawRow().oauth_ref).toBeNull();
+    expect(getMcpServer(db, MCP_ID)?.oauth).toMatchObject({ status: "expired", reason: expect.stringContaining("invalid_client") });
+
+    const again = await signIn();
+    expect(again.result.ok).toBe(true);
+    expect(server.registrations.map((client) => client.clientId)).not.toContain(first);
+    expect(server.registrations).toHaveLength(1);
+    expect(await callWhoami()).toContain("whoami");
+  });
+
+  it("a code exchange refused with invalid_client drops the stored client it reused", async () => {
+    // CANARY: leave the stored client alone after the refused exchange and
+    // every later sign-in reuses it and fails the same way.
+    await startServer();
+    await signIn();
+    server.rotateClientSecrets();
+    const refused = await signIn();
+    expect(refused.result).toMatchObject({ ok: false, message: expect.stringContaining("invalid_client") });
+    expect(rawRow().oauth_ref).toBeNull();
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
+
+    const again = await signIn();
+    expect(again.result.ok).toBe(true);
+    expect(server.registrations).toHaveLength(2);
+    expect(await callWhoami()).toContain("whoami");
+  });
+
+  it("a client whose secret has lapsed (client_secret_expires_at) is registered again rather than reused", async () => {
+    // CANARY: drop the lapse check from the reuse and the second sign-in
+    // reuses the first registration.
+    await startServer({ clientSecretExpiresAt: Math.floor(Date.now() / 1000) - 60 });
+    await signIn();
+    await signIn();
+    expect(server.registrations).toHaveLength(2);
+    // One that does not lapse is reused, as before.
+    server.options.clientSecretExpiresAt = 0;
+    await signIn();
+    await signIn();
+    expect(server.registrations).toHaveLength(3);
+  });
+});
+
+describe("a pasted credential and what is left of a sign-in (R-oauth-2)", () => {
+  const base = () => ({ id: MCP_ID, name: "cloudflare-api", transport: "HTTP", target: server.url });
+
+  it("pasting over 'needs sign-in' or 'sign-in expired' clears the sign-in's leftovers, so no surface says the server is not mounted", async () => {
+    // CANARY: keep `oauth_json` when a save holds a credential and the row
+    // reads "needs sign-in" for good, beside the credential runs mount.
+    await startServer();
+    await saveMcpServer(db, { ...base(), cred: "" }, ADMIN.actor);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("needs_sign_in");
+    await saveMcpServer(db, { ...base(), cred: "a-pasted-token-123" }, ADMIN.actor);
+    expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });
+    expect(rawRow().cred_ref).not.toBeNull();
+    expect(getMcpServer(db, MCP_ID)).toMatchObject({ hasCred: true, oauth: null });
+
+    // An expired sign-in's sealed half (its registration) goes too: the
+    // connection holds one credential, and it is the pasted one.
+    await signIn();
+    server.options.refresh = "invalid_grant";
+    server.invalidateAccessTokens();
+    await expect(callWhoami()).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
+    await saveMcpServer(db, { ...base(), cred: "a-pasted-token-456" }, ADMIN.actor);
+    expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });
+    expect(getMcpServer(db, MCP_ID)?.oauth).toBeNull();
+    expect(listAuditEvents(db, { action: "org.mcp.updated" })[0]?.details).toMatchObject({ oauthDropped: true });
+  });
+
+  it("a row that holds a pasted credential reads no sign-in status, whatever its OAuth columns still say", async () => {
+    // CANARY: map the public half regardless of `cred_ref`, and a row the
+    // resolver mounts with its credential reads "needs sign-in".
+    await startServer();
+    db.prepare(`UPDATE org_mcp_servers SET cred_ref = ?, oauth_json = ? WHERE id = ?`).run(
+      sealSecret("a-pasted-token-789"),
+      JSON.stringify({ status: "needs_sign_in", expiresAt: null, renews: false, issuer: null, resourceMetadataUrl: null, reason: null }),
+      MCP_ID,
+    );
+    expect(getMcpServer(db, MCP_ID)).toMatchObject({ hasCred: true, oauth: null });
+    expect(listMcpServers(db).find((mcp) => mcp.id === MCP_ID)?.oauth).toBeNull();
   });
 });
 

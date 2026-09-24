@@ -11,7 +11,7 @@ import {
   type OAuthMcpServerHandle,
 } from "../../../test-support/mcp-oauth-server";
 import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
-import { getMcpServer } from "~/server/org/resources.server";
+import { getMcpServer, saveMcpServer } from "~/server/org/resources.server";
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { bindRunToMcpGateway, startMcpGateway, stopMcpGateway } from "./gateway.server";
 import { OAUTH_NEEDS_SIGN_IN, OAUTH_SIGN_IN_EXPIRED } from "./upstream.server";
@@ -112,6 +112,38 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
     await expect(client.callTool({ name: "whoami", arguments: {} })).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
     expect(getMcpServer(db, "mcp_cf")?.oauth?.status).toBe("expired");
     expect(server.calls).toEqual([]);
+  });
+
+  it("R-oauth-1: a re-point and a new sign-in never send the new tokens to the endpoint the run's connection was opened on", async () => {
+    // CANARY: bind the token source to the row id alone and the run's held
+    // connection sends the new sign-in's token to the OLD server, whose 401
+    // then spends the new refresh token and ends the new sign-in.
+    const { client } = await runClient();
+    await client.callTool({ name: "whoami", arguments: {} });
+    const moved = await startOAuthMcpServer();
+    try {
+      await saveMcpServer(
+        db,
+        { id: "mcp_cf", name: "cloudflare-api", transport: "HTTP", target: moved.url, cred: "" },
+        TEST_OAUTH_ADMIN.actor,
+      );
+      const before = server.authorizations.length;
+      // Re-pointed and not signed in yet: the run's next call reconnects to
+      // the new endpoint, which needs a sign-in, and says so.
+      await expect(client.callTool({ name: "whoami", arguments: {} })).rejects.toThrow(OAUTH_NEEDS_SIGN_IN);
+      expect((await signInWithOAuth(db, "mcp_cf")).ok).toBe(true);
+
+      const called = textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+      expect(called.content[0]?.text).toBe("whoami: ok");
+      expect(moved.calls).toEqual(["whoami"]);
+      // The old endpoint heard nothing more, and none of the new tokens.
+      expect(server.authorizations.length).toBe(before);
+      const oldHeard = JSON.stringify(server.authorizations);
+      for (const secret of moved.issuedSecrets()) expect(oldHeard).not.toContain(secret);
+      expect(getMcpServer(db, "mcp_cf")?.oauth?.status).toBe("signed_in");
+    } finally {
+      await moved.close();
+    }
   });
 
   it("a sign-out takes effect on the run's next call", async () => {

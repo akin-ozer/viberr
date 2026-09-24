@@ -37,6 +37,9 @@ export interface OAuthServerOptions {
   registration: boolean;
   /** Whether the metadata advertises PKCE S256. */
   pkce: boolean;
+  /** RFC 7591 `client_secret_expires_at` on the next registration (seconds
+   *  since the epoch); null leaves it out. Recorded, not enforced. */
+  clientSecretExpiresAt: number | null;
 }
 
 export interface OAuthRegistration {
@@ -69,6 +72,14 @@ export interface OAuthMcpServerHandle {
   /** The live access tokens stop working (the next MCP call is a 401), the
    *  way a server-side revocation or a rotated signing key looks upstream. */
   invalidateAccessTokens(): void;
+  /** The server forgets every client it registered (a store reset, a GC of
+   *  dynamically registered clients): the token endpoint then answers
+   *  `invalid_client` and the authorization endpoint refuses the id. */
+  forgetClients(): void;
+  /** Every registered client's secret changes, the way a lapsed secret
+   *  looks: the client id still opens the consent screen, and the token
+   *  endpoint answers the old secret `invalid_client`. */
+  rotateClientSecrets(): void;
   close(): Promise<void>;
 }
 
@@ -79,6 +90,7 @@ const DEFAULTS: OAuthServerOptions = {
   consent: "approve",
   registration: true,
   pkce: true,
+  clientSecretExpiresAt: null,
 };
 
 interface PendingCode {
@@ -125,6 +137,7 @@ interface AuthorizationServerDocument {
 interface RegistrationReply {
   client_id: string;
   client_secret?: string;
+  client_secret_expires_at?: number;
   redirect_uris: string[];
   token_endpoint_auth_method: string;
   grant_types: string[];
@@ -254,6 +267,7 @@ export async function startOAuthMcpServer(
         response_types: ["code"],
       };
       if (client.clientSecret) reply.client_secret = client.clientSecret;
+      if (options.clientSecretExpiresAt !== null) reply.client_secret_expires_at = options.clientSecretExpiresAt;
       sendJson(res, 201, JSON.stringify(reply));
       return;
     }
@@ -389,6 +403,16 @@ export async function startOAuthMcpServer(
     revoked,
     issuedSecrets: () => [...issued],
     invalidateAccessTokens: () => accessTokens.clear(),
+    forgetClients: () => {
+      registrations.length = 0;
+    },
+    rotateClientSecrets: () => {
+      for (const client of registrations) {
+        if (client.clientSecret === null) continue;
+        client.clientSecret = token("cs");
+        issued.push(client.clientSecret);
+      }
+    },
     close: server.close,
   };
 }
