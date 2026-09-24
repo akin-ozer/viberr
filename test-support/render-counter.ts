@@ -121,11 +121,16 @@ export function createRenderCounter(): RenderCounter {
 
 /**
  * Ruling 454: the DOM writes a change makes under `target`, as MutationObserver
- * records, drained synchronously (`takeRecords`) so a test reads them right
- * after its `act`.
+ * records. The ones still queued are drained synchronously (`takeRecords`) so a
+ * test reads them right after its `act`; the ones a microtask checkpoint
+ * already delivered (an `async` act that awaits a fetch) are kept by the
+ * callback, so they are counted too.
  */
 export function observeMutations(target: Node) {
-  const observer = new MutationObserver(() => {});
+  const delivered: MutationRecord[] = [];
+  const observer = new MutationObserver((records) => {
+    delivered.push(...records);
+  });
   observer.observe(target, {
     subtree: true,
     childList: true,
@@ -134,7 +139,10 @@ export function observeMutations(target: Node) {
   });
   return {
     /** The records since the last call, and clears them. */
-    take: (): MutationRecord[] => observer.takeRecords(),
+    take: (): MutationRecord[] => {
+      const out = [...delivered.splice(0), ...observer.takeRecords()];
+      return out;
+    },
     disconnect: () => observer.disconnect(),
   };
 }
