@@ -43,6 +43,7 @@ import {
 import { publishRunStateChanged } from "./run-events.server";
 import {
   projectRunsForTask,
+  SDK_LABEL,
   type ProjectedRunView,
 } from "./run-projection.server";
 import { createRunSink, runPersistDrained } from "./run-sink.server";
@@ -373,11 +374,6 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
 }
 
 // ---------------------------------------------- start / resume
-
-const SDK_LABEL = {
-  claude: "Claude Agent SDK",
-  codex: "Codex SDK",
-} satisfies Record<RealBackend, string>;
 
 export interface StartRunInput {
   projectSlug: string;

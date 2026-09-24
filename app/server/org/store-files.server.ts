@@ -10,7 +10,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { StoreNode } from "~/features/kb-browser/tree";
@@ -34,6 +33,7 @@ import {
 } from "~/shared/text/store-extensions";
 import { logger } from "~/server/logging/logger.server";
 import { assertSkillBodyWellFormed } from "~/server/files/skill-body.server";
+import { sha256Hex } from "~/server/files/content-hash.server";
 import { newId } from "~/shared/ids/new-id.server";
 import {
   getDefaultConnectionTokenFresh,
@@ -444,7 +444,7 @@ export function storeDocVersion(target: StoreTarget, nodePath: string[]): string
   const abs = path.join(target.rootAbs, ...parts);
   assertInsideRoot(target.rootAbs, abs);
   if (!existsSync(abs) || !statSync(abs).isFile()) return null;
-  return createHash("sha256").update(readFileSync(abs)).digest("hex").slice(0, 12);
+  return sha256Hex(readFileSync(abs)).slice(0, 12);
 }
 
 export function readStoreDoc(

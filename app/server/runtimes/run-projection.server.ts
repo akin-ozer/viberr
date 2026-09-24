@@ -28,7 +28,10 @@ import { classifyRunEnd } from "./provider-refusal.server";
  * the mock's per-task order.
  */
 
-const SDK_LABEL = {
+/** The SDK a backend's runs go through, as the run picker names it — run-service
+ *  stamps it on the run row it reserves and starts; a row stored without one
+ *  falls back to it here. */
+export const SDK_LABEL = {
   claude: "Claude Agent SDK",
   codex: "Codex SDK",
 } satisfies Record<RunBackend, string>;

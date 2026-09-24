@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { createHash } from "node:crypto";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { z } from "zod";
 import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.schema";
@@ -15,6 +14,7 @@ import {
 import { deliveryWithheld } from "~/server/tasks/specialist-tool-policy";
 import { slugify } from "~/shared/ids/slugify";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { sha256Hex } from "~/server/files/content-hash.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import {
@@ -213,7 +213,7 @@ export function deploymentFingerprint(deployment: AgentDeployment): string {
     extras: deployment.extras,
     definition: deployment.definition ?? null,
   });
-  return createHash("sha256").update(canonical, "utf8").digest("hex").slice(0, 32);
+  return sha256Hex(canonical).slice(0, 32);
 }
 
 const profileFormSchema = z.object({

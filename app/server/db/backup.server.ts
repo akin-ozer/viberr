@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -15,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
+import { sha256Hex } from "~/server/files/content-hash.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { DATA_ROOT_LOCK_FILENAME } from "./data-root-lock.server";
@@ -138,10 +138,6 @@ export interface BackupResult {
   text: string;
 }
 
-function sha256File(file: string): string {
-  return createHash("sha256").update(readFileSync(file)).digest("hex");
-}
-
 /** What a copied tree contributes to the manifest's store totals. */
 interface StoreFileTotals {
   files: number;
@@ -222,7 +218,7 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
     projection = {
       file: PROJECTION_NAME,
       bytes: statSync(target).size,
-      sha256: sha256File(target),
+      sha256: sha256Hex(readFileSync(target)),
       rows: countRows(target),
     };
   }
