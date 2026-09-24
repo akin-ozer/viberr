@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useRevalidator } from "react-router";
 import {
   buildEventsUrl,
   CONTROLLER_UPDATED_EVENT,
@@ -9,6 +8,7 @@ import {
   SSE_EVENT_NAMES,
   type SseEventName,
 } from "./event-types";
+import { useLiveLedger } from "./revalidation-policy";
 
 /**
  * Live updates (Phase 6): subscribe the current surface to its SSE scopes
@@ -16,21 +16,39 @@ import {
  * changes. No optimistic state, no client caches — revalidation IS the
  * update mechanism (docs/architecture/decisions.md "no optimistic UI for governed state").
  *
- * Revalidations are debounced 300 ms (trailing) so event bursts — a rescan
- * projecting ten tasks, a mutation emitting task + project + notification —
- * coalesce into one loader round-trip. Stream events (one per console line)
- * revalidate nothing: they go to the tab's run-log consoles through
- * `onLiveFrame` (ruling 454). Conversation events are the other exception
- * (ruling 454): only a surface that renders a conversation revalidates on
- * them; elsewhere they go, debounced the same way, to the controller dock as
- * `CONTROLLER_UPDATED_EVENT`.
+ * Ruling 454: each data event is recorded, the moment it arrives, in the
+ * tab's revalidation ledger (`revalidation-policy.ts`), and a debounced flush
+ * (300 ms, trailing) revalidates once if a route on screen still owes one of
+ * them. An event is owed by the routes that read what it changes (a run's
+ * state is not the workspace shell's, a notification is not a task page's),
+ * and it is not owed by a route whose data was requested after the event
+ * arrived: the echo of the person's own action, published while the action
+ * ran, is already in the action's own revalidation, so the flush finds
+ * nothing to do. Bursts — a rescan projecting ten tasks, a mutation emitting
+ * task + project + notification — still coalesce into one loader round-trip.
+ * Stream events (one per console line) revalidate nothing: they go to the
+ * tab's run-log consoles through `onLiveFrame`. Conversation events only
+ * revalidate a surface that renders a conversation; elsewhere they go,
+ * debounced the same way, to the controller dock as `CONTROLLER_UPDATED_EVENT`.
+ *
+ * Ruling 454 (RF-1): every (re)connect asks the broker to replay what this
+ * tab missed since the last event id it saw (`lastEventId` on the URL; the
+ * browser's own retry sends the header), so a reconnect revalidates only for
+ * events it actually missed, and a deliberate re-scope (opening a task)
+ * revalidates nothing. When the buffer cannot reach back that far, the broker
+ * answers `stream.resync` and the surface catches up with one revalidation.
+ * The document's first stream starts from the position root's middleware read
+ * before any loader ran (root's `liveHead`, seeded into the tab's
+ * `LiveLedger`), so an event published between the server render and
+ * hydration is replayed rather than lost.
  *
  * Loop safety: revalidation only re-runs loaders (GETs). The one loader-side
  * write — R19-15's task-view read-marking — is MONOTONIC (`read_at IS NULL`
  * guard) and emits only when rows actually change, so an SSE-triggered
  * revalidation marks nothing on the second pass and the chain stops there;
  * no other loader writes files or projections. The initial `stream.open`
- * hello is also ignored, so merely connecting never revalidates.
+ * hello only records where the stream stands, so merely connecting never
+ * revalidates.
  *
  * UI-03 — DISCONNECT HANDLING. `/resources/events` answers 401 for an expired
  * session, 400 for an invalid scope and 403 for all-foreign scopes. Per the
@@ -70,7 +88,7 @@ const recentFrames = new Set<string>();
  * event: `run.log-appended`, `controller.log-appended`). Returns the
  * unsubscribe. The stream itself belongs to the surface's `useLiveUpdates`,
  * with everything that implies: closed while the tab is hidden (ruling 301),
- * reopened on a backoff, a revalidation on every reconnect.
+ * reopened on a backoff, the frames it missed replayed on every reconnect.
  */
 export function onLiveFrame(name: SseEventName, handler: FrameHandler): () => void {
   let handlers = frameHandlers.get(name);
@@ -217,7 +235,7 @@ export function useLiveUpdates(
   scopes: readonly string[],
   { conversations = false }: LiveUpdatesOptions = {},
 ): LiveUpdatesState {
-  const revalidator = useRevalidator();
+  const ledger = useLiveLedger();
   const [paused, setPaused] = useState(false);
   const [attempt, setAttempt] = useState(0);
   // OBS-6: the session behind this stream is gone (a probe said 401), so no
@@ -229,11 +247,18 @@ export function useLiveUpdates(
   // six connections per origin — so four open tabs deadlock the whole app for
   // every tab at once, with no error anywhere. A hidden tab does not need a
   // push; it needs to be correct when you come back, and the reopen below
-  // already revalidates on any connect that follows a previous stream.
+  // asks the broker for every event it missed meanwhile (ruling 454).
   const [hidden, setHidden] = useState(false);
   // True once ANY stream of this surface's life has opened — the marker that a
   // later `onopen` is a REconnect (scope change or recovery), not the first.
   const everOpenedRef = useRef(false);
+  // Ruling 454 (RF-1): the broker event id this surface's streams stand at —
+  // the hello's head, then every event after it. A reopen asks the broker to
+  // replay from here.
+  const positionRef = useRef<number | null>(null);
+  // A dock notice this surface's last stream had not handed over when it
+  // closed: its conversation event will not be replayed to the next stream.
+  const dockOwedRef = useRef(false);
   // OBS-6: consecutive failures with NO successful open between them. A ref, not
   // state: a successful open must reset the backoff without re-running the
   // effect (whose deps would tear down the stream that just opened).
@@ -244,12 +269,6 @@ export function useLiveUpdates(
     const token = streamTokenRef.current;
     return () => setStreamFailed(token, false);
   }, []);
-
-  // Latest revalidate without resubscribing per render.
-  const revalidateRef = useRef(revalidator.revalidate);
-  useEffect(() => {
-    revalidateRef.current = revalidator.revalidate;
-  });
 
   const scopeKey = scopes.join(SCOPE_SEPARATOR);
   // The human asked for a retry: forget the 401 verdict and the backoff with it
@@ -282,6 +301,8 @@ export function useLiveUpdates(
     // OBS-6: a probe proved this session is not authenticated — opening another
     // stream would 401 again, on a loop nothing breaks out of.
     if (signedOut) return;
+    // Live updates need the data router the ledger lives on.
+    if (!ledger) return;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let dockTimer: ReturnType<typeof setTimeout> | null = null;
@@ -290,13 +311,20 @@ export function useLiveUpdates(
     // This surface's entry in the tab's failed-stream set (`useLiveStreamFailed`),
     // held across the reopens of one outage the way `paused` is.
     const token = streamTokenRef.current;
-    const revalidateNow = () => {
+    // Ruling 454: the event is in the ledger already (`recordLive` below); the
+    // trailing flush revalidates once if a route on screen still owes it.
+    const flushNow = () => {
       timer = null;
-      void revalidateRef.current();
+      ledger.flushLive();
     };
-    const scheduleRevalidate = () => {
+    const scheduleFlush = () => {
       if (timer !== null) clearTimeout(timer);
-      timer = setTimeout(revalidateNow, REVALIDATE_DEBOUNCE_MS);
+      timer = setTimeout(flushNow, REVALIDATE_DEBOUNCE_MS);
+    };
+    const recordLive = (name: SseEventName, event: MessageEvent<string>) => {
+      notePosition(event);
+      ledger.recordLive(name, event);
+      scheduleFlush();
     };
     // Ruling 454 (CTL-4): a conversation event on a surface that renders no
     // conversation is the dock's, debounced the same way (a send publishes
@@ -308,16 +336,41 @@ export function useLiveUpdates(
         notifyDock();
       }, REVALIDATE_DEBOUNCE_MS);
     };
-    const scheduleConversationEvent = conversations ? scheduleRevalidate : scheduleDockNotice;
-    // A reconnect or a resync may have lost a conversation event too, and the
-    // dock's resources do not ride the revalidation that catches the page up.
+    // A resync (the broker could not replay what this tab missed) may have
+    // lost a conversation event too, and the dock's resources do not ride the
+    // revalidation that catches the page up.
     const scheduleCatchUp = () => {
-      scheduleRevalidate();
+      ledger.recordResync();
+      scheduleFlush();
       if (!conversations) scheduleDockNotice();
     };
+    // Where this stream stands in the broker's ids. The hello carries the
+    // head the connection starts at (the replay that follows is at or below
+    // it); every later event moves it on.
+    let sawId = false;
+    const notePosition = (event: MessageEvent<string>) => {
+      if (!/^\d+$/.test(event.lastEventId)) return;
+      const id = Number(event.lastEventId);
+      sawId = true;
+      if (positionRef.current === null || id > positionRef.current) positionRef.current = id;
+      if (ledger.position === null || id > ledger.position) ledger.position = id;
+    };
     const scopeList = scopeKey.split(SCOPE_SEPARATOR);
-    const url = buildEventsUrl(scopeList);
+    // A surface's first stream starts where the tab stands (the server
+    // render's reading, or the stream of the surface before it); a reopen
+    // starts where this surface's own streams stood.
+    const from = positionRef.current ?? ledger.position;
+    const url = buildEventsUrl(scopeList, from);
     const source = new EventSource(url);
+    source.addEventListener("stream.open", (event: MessageEvent<string>) => {
+      if (!/^\d+$/.test(event.lastEventId)) return;
+      const head = Number(event.lastEventId);
+      sawId = true;
+      // A head below where the stream stood means the server restarted (its
+      // ids start over); the broker answered the replay with a resync.
+      positionRef.current = head;
+      ledger.position = head;
+    });
     for (const name of SSE_EVENT_NAMES) {
       if (SSE_CONTROL_EVENTS.includes(name)) continue;
       // A stream event (one per console line) revalidates nothing: revalidating
@@ -326,18 +379,27 @@ export function useLiveUpdates(
       // revalidate root, layout and task every 2 s during a run only to move
       // the Live run strip; the strip now reads the console's own tail.
       if (SSE_STREAM_EVENTS.includes(name)) {
-        source.addEventListener(name, (event: MessageEvent<string>) => dispatchFrame(name, event));
+        source.addEventListener(name, (event: MessageEvent<string>) => {
+          notePosition(event);
+          dispatchFrame(name, event);
+        });
         continue;
       }
-      if (SSE_CONVERSATION_EVENTS.includes(name)) {
-        source.addEventListener(name, scheduleConversationEvent);
+      if (SSE_CONVERSATION_EVENTS.includes(name) && !conversations) {
+        // Ruling 454 (CTL-4): a conversation event on a surface that renders
+        // no conversation is the dock's, debounced the same way (a send
+        // publishes five).
+        source.addEventListener(name, (event: MessageEvent<string>) => {
+          notePosition(event);
+          scheduleDockNotice();
+        });
         continue;
       }
       if (name === "stream.resync") {
         source.addEventListener(name, scheduleCatchUp);
         continue;
       }
-      source.addEventListener(name, scheduleRevalidate);
+      source.addEventListener(name, (event: MessageEvent<string>) => recordLive(name, event));
     }
     source.onopen = () => {
       setPaused(false);
@@ -345,16 +407,15 @@ export function useLiveUpdates(
       // OBS-6: a real recovery — the next outage starts its backoff from the
       // top, and the session probe is no longer owed.
       failuresRef.current = 0;
-      // A gap in the stream means the surface may have missed events; pull the
-      // loaders once on any (re)connect that FOLLOWS a previous stream — a
-      // failed one (attempt > 0) or a scope change (navigating between tasks
-      // re-scopes and reopens the stream, and an event emitted during that
-      // teardown/open gap is simply lost; live-proven with R19-15's
-      // view-marking emit, fired by the very navigation that re-scoped the
-      // stream, leaving the bell badge stale until the next interaction).
-      // Only the very first stream of the surface's life stays excluded: its
-      // loaders just ran, so a pull would be a redundant round-trip.
-      if (attempt > 0 || everOpenedRef.current) scheduleCatchUp();
+      // A gap in the stream means the surface may have missed events. Ruling
+      // 454 (RF-1): the connection asked the broker to replay them (`from` on
+      // the URL, or the browser's own `Last-Event-ID` when it retries this
+      // source), so the replay revalidates for what was missed and nothing
+      // else: a scope change (opening a task) and a quiet return from a
+      // hidden period pull no loader. Only a reconnect that could not say
+      // where it stood (no position was ever known) still pulls once.
+      const replayable = from !== null || sawId;
+      if ((attempt > 0 || everOpenedRef.current) && !replayable) scheduleCatchUp();
       everOpenedRef.current = true;
     };
     source.onerror = () => {
@@ -391,10 +452,23 @@ export function useLiveUpdates(
       }, delay);
     };
 
+    // The events this stream delivered before the one it replaces closed are
+    // in the ledger, and the replay starts after them: a flush still owed from
+    // then (a re-scope or a hide inside the 300 ms window) runs now. A flush
+    // with nothing owed does nothing.
+    scheduleFlush();
+    if (dockOwedRef.current) {
+      dockOwedRef.current = false;
+      scheduleDockNotice();
+    }
+
     return () => {
       closed = true;
       if (timer !== null) clearTimeout(timer);
-      if (dockTimer !== null) clearTimeout(dockTimer);
+      if (dockTimer !== null) {
+        clearTimeout(dockTimer);
+        dockOwedRef.current = true;
+      }
       if (reopen !== null) clearTimeout(reopen);
       source.close();
     };
@@ -405,9 +479,9 @@ export function useLiveUpdates(
     // from opening another until `reconnect` clears it.
     // `hidden` is ruling 301's trigger, on both edges: going hidden re-runs the
     // effect so the cleanup closes the connection, coming back opens a fresh
-    // one, and `onopen` treats that as the REconnect it is and pulls the
-    // loaders once. `conversations` is fixed per surface.
-  }, [scopeKey, attempt, signedOut, hidden, conversations]);
+    // one from where the tab stood, and the broker replays what it missed (or
+    // resyncs it). `conversations` is fixed per surface.
+  }, [scopeKey, attempt, signedOut, hidden, conversations, ledger]);
 
   return { paused, reconnect };
 }

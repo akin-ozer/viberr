@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { useState } from "react";
 import { Outlet, useLocation, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/palette-shell";
@@ -123,3 +124,6 @@ export default function PaletteShell({ loaderData }: Route.ComponentProps) {
     </div>
   );
 }
+
+/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/palette-shell");

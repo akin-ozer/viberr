@@ -30,6 +30,7 @@ import { setDocumentTheme } from "./features/shell/theme-preference";
 import { ControllerDock } from "./features/controller/controller-dock";
 import { SHELL_FONT_PRELOADS } from "./features/shell/font-preloads";
 import { ToastProvider } from "./ui/toast";
+import { revalidateWhen, useLiveLedger } from "./features/live-updates/revalidation-policy";
 import { getCsrfToken } from "./server/auth/csrf.server";
 import { requestContextMiddleware } from "./server/logging/request-context.server";
 import {
@@ -84,6 +85,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   if (!isDocumentNavigation(request)) return payload;
   return { ...payload, liveHead: context.get(liveHeadContext) };
 }
+
+/**
+ * Ruling 454 (RF-7): root re-runs after a sign-in, a sign-out, a theme or
+ * profile change and on a document load, and not for a live event, a
+ * navigation or a `revalidate()`, none of which changes its theme or csrf.
+ */
+export const shouldRevalidate = revalidateWhen("root");
 
 /**
  * Runs before first paint. Resolves the "system" preference against
@@ -144,6 +152,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   const rootData = useRouteLoaderData<typeof loader>("root");
   const theme: ThemePreference = rootData?.theme ?? "system";
+  // Ruling 454: the tab's live ledger (what its loaders owe), for every
+  // surface, seeded with the server render's stream position. In render,
+  // because the first stream opens in a child's effect and children's effects
+  // run before root's; the seed takes only the first value.
+  useLiveLedger(rootData && "liveHead" in rootData ? rootData.liveHead : null);
 
   // Keeps <html data-theme> in sync AFTER first paint (the boot script owns
   // first paint): re-applies when the pref changes (user-menu cycling

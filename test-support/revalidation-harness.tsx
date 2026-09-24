@@ -3,6 +3,7 @@ import { act, render } from "@testing-library/react";
 import { vi } from "vitest";
 import {
   createMemoryRouter,
+  data,
   Link,
   Outlet,
   RouterProvider,
@@ -26,6 +27,10 @@ import {
 } from "~/server/events/sse-broker.server";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
+import {
+  revalidateWhen,
+  useLiveLedger,
+} from "~/features/live-updates/revalidation-policy";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
 /**
@@ -246,21 +251,41 @@ function resetCounts(): void {
   tally.eventsParams = [];
 }
 
-function taskLoader({ request, params }: LoaderFunctionArgs) {
+/** Every loader answer's number, across routes: a later load has a larger one. */
+let version = 0;
+
+/** The mounted harness's options (one tab per test). */
+let active: HarnessOptions = { path: "/" };
+
+async function taskLoader({ request, params }: LoaderFunctionArgs) {
   calls["routes/project.task"] += 1;
   tally.eventsParams.push(new URL(request.url).searchParams.get("events"));
-  return { key: params.key ?? TASK, n: calls["routes/project.task"] };
+  active.onTaskLoader?.();
+  await active.gate?.["routes/project.task"]?.();
+  version += 1;
+  return { key: params.key ?? TASK, n: calls["routes/project.task"], version };
 }
 
 export interface HarnessOptions {
   /** Where the tab starts. */
   path: string;
-  /** Each route's `shouldRevalidate`, when the route module exports one. */
-  shouldRevalidate?: Partial<Record<HarnessRouteId, ShouldRevalidateFunction>>;
-  /** Root's own hooks, run inside root above the outlet. */
-  rootHooks?: () => void;
+  /**
+   * Replaces a route's `shouldRevalidate` (each defaults to the one its route
+   * module exports: `revalidateWhen(<id>)`, ruling 454). `null` leaves the
+   * route on React Router's default, as it was before ruling 454.
+   */
+  shouldRevalidate?: Partial<Record<HarnessRouteId, ShouldRevalidateFunction | null>>;
   /** Runs inside the task action, before it answers (its writes' events). */
   onTaskAction?: () => void;
+  /** The status the task action answers with (a refusal is a 4xx). */
+  taskActionStatus?: number;
+  /** Runs at the start of each task loader call (an event published while a
+   *  load is on its way). */
+  onTaskLoader?: () => void;
+  /** A loader awaits its route's gate before answering (a load in flight). */
+  gate?: Partial<Record<HarnessRouteId, () => Promise<void>>>;
+  /** Root's `liveHead`: the stream position of the server render. */
+  liveHead?: number | null;
   /** Runs inside the board action, before it answers. */
   onBoardAction?: () => void;
   /** The task page shows an active run (the F22 safety net arms). */
@@ -356,18 +381,28 @@ function Task({ activeRun }: { activeRun: boolean }) {
   return <Link to={`/projects/${SLUG}/board`}>board</Link>;
 }
 
-function RootShell({ hooks, children }: { hooks?: () => void; children: ReactNode }) {
-  hooks?.();
+/** Root's component, as `app/root.tsx` holds the tab's live ledger and seeds
+ *  it with the server render's stream position. */
+function RootShell({ children }: { children: ReactNode }) {
+  useLiveLedger(active.liveHead ?? null);
   return <>{children}</>;
 }
 
 export function mountHarness(options: HarnessOptions): Harness {
   resetCounts();
-  const counted = (id: HarnessRouteId) => () => {
+  active = options;
+  const counted = (id: HarnessRouteId) => async () => {
     calls[id] += 1;
-    return { id, n: calls[id] };
+    const n = calls[id];
+    await options.gate?.[id]?.();
+    version += 1;
+    return { id, n, version };
   };
-  const rule = (id: HarnessRouteId) => options.shouldRevalidate?.[id];
+  const rule = (id: HarnessRouteId) => {
+    const override = options.shouldRevalidate?.[id];
+    if (override === null) return undefined;
+    return override ?? revalidateWhen(id);
+  };
   const routes: RouteObject[] = [
     {
       id: "root",
@@ -375,7 +410,7 @@ export function mountHarness(options: HarnessOptions): Harness {
       loader: counted("root"),
       shouldRevalidate: rule("root"),
       element: (
-        <RootShell hooks={options.rootHooks}>
+        <RootShell>
           <Outlet />
         </RootShell>
       ),
@@ -417,7 +452,8 @@ export function mountHarness(options: HarnessOptions): Harness {
               action: () => {
                 tally.actions += 1;
                 options.onTaskAction?.();
-                return { ok: true };
+                const status = options.taskActionStatus ?? 200;
+                return data({ ok: status < 400 }, { status });
               },
               element: <Task activeRun={options.activeRun ?? false} />,
             },

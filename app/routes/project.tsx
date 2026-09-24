@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { useEffect, useState } from "react";
 import { pageTitle } from "~/shared/page-title";
 import {
@@ -276,3 +277,6 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
     </div>
   );
 }
+
+/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project");

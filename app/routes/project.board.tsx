@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.board";
 import { pageTitle } from "~/shared/page-title";
@@ -248,3 +249,6 @@ export default function Board({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.board");

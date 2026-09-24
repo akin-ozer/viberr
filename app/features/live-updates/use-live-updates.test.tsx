@@ -185,7 +185,13 @@ describe("useLiveUpdates", () => {
     expect(FakeEventSource.last().closed).toBe(false);
   });
 
-  it("ruling 301: coming back pulls the loaders, because the tab missed every event while it was away", () => {
+  /**
+   * Ruling 301, as ruling 454 (RF-1) carries it out: a returning tab must be
+   * correct, so it asks the broker for everything it missed since the last id
+   * it saw, and revalidates for what the broker replays. It used to pull every
+   * loader on every return, whether anything had happened or not.
+   */
+  it("ruling 301: coming back asks the broker for what the tab missed, from where it stood", () => {
     const visibility = { current: "visible" };
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -194,6 +200,7 @@ describe("useLiveUpdates", () => {
     render(<Probe scopes={["project:viberr-core"]} />, { wrapper: DataRouter });
     act(() => {
       FakeEventSource.last().onopen?.();
+      FakeEventSource.last().emit("stream.open", "42");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
     // The first stream of a surface's life never revalidates on open.
@@ -207,16 +214,63 @@ describe("useLiveUpdates", () => {
       visibility.current = "visible";
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    // The reopen is a RECONNECT, and a reconnect already means "you may have
-    // missed events". CANARY: make the reopen look like a first connect.
+    // CANARY: open the returning stream without its position and the broker
+    // has nothing to replay from.
+    expect(FakeEventSource.last().url).toBe(
+      "/resources/events?scope=project%3Aviberr-core&lastEventId=42",
+    );
     act(() => {
       FakeEventSource.last().onopen?.();
+      FakeEventSource.last().emit("stream.open", "44");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+    });
+    expect(loaderRuns, "nothing was missed, so nothing reloads").toBe(0);
+
+    // What the tab missed while it was away arrives as the broker's replay.
+    act(() => {
+      FakeEventSource.last().emit("task.updated", "43");
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
     expect(loaderRuns, "a returning tab rendered a stale snapshot").toBe(1);
   });
 
-  it("coalesces an event burst into ONE debounced revalidation", () => {
+  it("a reconnect that cannot say where it stood still pulls the loaders once", () => {
+    const visibility = { current: "visible" };
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility.current,
+    });
+    render(<Probe scopes={["project:viberr-core"]} />, { wrapper: DataRouter });
+    // No hello and no event ever carried an id.
+    act(() => {
+      FakeEventSource.last().onopen?.();
+    });
+    act(() => {
+      visibility.current = "hidden";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    act(() => {
+      visibility.current = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(FakeEventSource.last().url).toBe("/resources/events?scope=project%3Aviberr-core");
+    act(() => {
+      FakeEventSource.last().onopen?.();
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+    });
+    expect(loaderRuns).toBe(1);
+  });
+
+  it("a stream.resync (the broker could not replay that far back) pulls the loaders once", () => {
+    render(<Probe scopes={["project:viberr-core"]} />, { wrapper: DataRouter });
+    act(() => {
+      FakeEventSource.last().emit("stream.resync", "9");
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+    });
+    expect(loaderRuns).toBe(1);
+  });
+
+  it("coalesces an event burst into ONE debounced revalidation", async () => {
     render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     const es = FakeEventSource.last();
 
@@ -232,16 +286,42 @@ describe("useLiveUpdates", () => {
     });
     expect(loaderRuns).toBe(0);
 
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(1);
     });
     expect(loaderRuns).toBe(1);
 
     // A later, separate event revalidates again.
-    act(() => {
+    await act(async () => {
       es.emit("projection.rebuilt", "4");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
     });
+    expect(loaderRuns).toBe(2);
+  });
+
+  /**
+   * Ruling 454: a flush that finds a load in flight waits for it to land,
+   * because that load may already carry the event (the echo of one's own
+   * action). It then revalidates only if the event is still owed.
+   */
+  it("an event that arrives while a revalidation is in flight revalidates once it lands", async () => {
+    render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
+    const es = FakeEventSource.last();
+    act(() => {
+      es.emit("task.updated", "1");
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+    });
+    // The first revalidation is in flight (its loader ran; it has not landed).
+    expect(loaderRuns).toBe(1);
+    act(() => {
+      es.emit("task.updated", "2");
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+    });
+    expect(loaderRuns).toBe(1);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Received after that load was sent: not in it, so it reloads.
     expect(loaderRuns).toBe(2);
   });
 
@@ -520,31 +600,41 @@ describe("useLiveUpdates", () => {
   });
 
   /**
-   * An event emitted while the stream is torn down and reopened is simply
-   * lost (SSE has no replay here). Live-proven with R19-15: navigating to a
-   * task fires the view-marking `notification.read` DURING the navigation
-   * that re-scopes this very stream, so the bell badge stayed stale until
-   * the next interaction. A (re)connect that follows a previous stream must
-   * pull the loaders once; only the very first stream of the surface's life
-   * skips the pull (its loaders just ran).
+   * An event emitted while the stream is torn down and reopened must not be
+   * lost. Live-proven with R19-15: navigating to a task fired the
+   * view-marking `notification.read` DURING the navigation that re-scopes this
+   * very stream, and the bell badge stayed stale until the next interaction.
+   * The reopen used to pull every loader to cover that gap, so every task open
+   * loaded the task twice (RF-1). Ruling 454: the reopen names the last id the
+   * stream saw, the broker replays the gap on the new scopes, and a replayed
+   * event revalidates like any other; a gap with nothing in it reloads nothing.
    */
-  it("revalidates once when a SCOPE CHANGE reopens the stream (missed-event catch-up)", () => {
+  it("a SCOPE CHANGE reopens from where the stream stood and pulls nothing (ruling 454, RF-1)", () => {
     const { rerender } = render(<Probe scopes={["project:p", "user"]} />, {
       wrapper: DataRouter,
     });
     act(() => {
       FakeEventSource.last().onopen?.();
+      FakeEventSource.last().emit("stream.open", "7");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
     // First stream of the surface's life: opening must NOT revalidate.
     expect(loaderRuns).toBe(0);
 
     rerender(<Probe scopes={["project:p", "task:p/K-1", "user"]} />);
+    expect(FakeEventSource.last().url).toContain("&lastEventId=7");
     act(() => {
       FakeEventSource.last().onopen?.();
+      FakeEventSource.last().emit("stream.open", "8");
       vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
     });
-    // The reopened stream may have missed events emitted in the gap — one pull.
+    expect(loaderRuns).toBe(0);
+
+    // The broker replays the gap's notification.read: it reaches the page.
+    act(() => {
+      FakeEventSource.last().emit("notification.read", "8");
+      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+    });
     expect(loaderRuns).toBe(1);
   });
 });

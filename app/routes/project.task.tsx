@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { deliveryToast } from "~/features/task-detail/delivery-toast";
 import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import {
@@ -1542,3 +1543,6 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
     </div>
   );
 }
+
+/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.task");

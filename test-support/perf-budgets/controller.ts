@@ -6,8 +6,11 @@ export const CONTROLLER_BUDGETS: PerfBudgetTable = {
   // controller page (runs panels, run console, NumberFlow, thinking-orbs) and
   // the markdown pipeline for a panel that starts closed (48). The note moved
   // to not-connected.tsx and the open panel's body loads on demand.
+  // Raised 18 -> 19 by ruling 454 (RF-1/RF-5): the dock's live hook records
+  // into the tab's revalidation ledger (`live-updates/revalidation-policy.ts`),
+  // a module root imports itself, so no byte is added to the first download.
   "controller:closed-dock.static-modules": {
-    ceiling: 18,
+    ceiling: 19,
     unit: "count",
     journey: "fresh-load",
     fixture:

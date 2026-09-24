@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { projectRulingsKb } from "~/server/files/project-rulings.server";
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.agents";
@@ -320,3 +321,6 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.agents");

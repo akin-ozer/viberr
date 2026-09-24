@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import type { Route } from "./+types/insights";
 import { pageTitle } from "~/shared/page-title";
 import { getDb } from "~/server/db/sqlite.server";
@@ -22,3 +23,6 @@ export async function loader({ request }: Route.LoaderArgs) {
 export default function Insights({ loaderData }: Route.ComponentProps) {
   return <InsightsPage summary={loaderData.summary} />;
 }
+
+/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/insights");

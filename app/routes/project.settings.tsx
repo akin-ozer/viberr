@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data, redirect, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.settings";
 import { pageTitle } from "~/shared/page-title";
@@ -282,3 +283,6 @@ export default function SettingsView({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.settings");

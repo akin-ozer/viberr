@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data } from "react-router";
 import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/project.activity";
@@ -148,3 +149,6 @@ export default function ActivityView({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.activity");

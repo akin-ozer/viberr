@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data } from "react-router";
 import type { Route } from "./+types/project.controller";
 import { pageTitle } from "~/shared/page-title";
@@ -236,3 +237,6 @@ export default function ProjectControllerRoute({
     />
   );
 }
+
+/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.controller");
