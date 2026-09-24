@@ -68,7 +68,7 @@ export function GithubTrace({
   onForceAccept,
   onDeliver,
   delivering = false,
-  merging,
+  runIntent = null,
 }: {
   task: TaskDetail;
   /** GitHub web host for browse links — always the loader's `githubWebHost()`
@@ -125,8 +125,14 @@ export function GithubTrace({
    *  maintainer+ or the task owner; undefined hides the control. */
   onDeliver?: () => void;
   delivering?: boolean;
-  merging?: boolean;
+  /** Ruling 368: the intent the task page's run fetcher is carrying (it also
+   *  carries interrupt and retry), null while idle. Complete merge and Force
+   *  accept wait on any of them and show the work when it is theirs. */
+  runIntent?: string | null;
 }) {
+  const merging = runIntent !== null;
+  const completingMerge = runIntent === "complete-merge";
+  const forcing = runIntent === "force-accept";
   // Ruling 134(c) / 135: the recorded unpushed revision, current only.
   const unpushed = unpushedRevisionOf(task.pr, task.workRevisionSha ?? null);
   const prTerminal =
@@ -208,6 +214,7 @@ export function GithubTrace({
           // opens already commits in red.
           className="btn ghost sm full danger"
           disabled={merging}
+          aria-busy={forcing || undefined}
           onClick={onForceAccept}
           title={
             skipsStages
@@ -215,10 +222,12 @@ export function GithubTrace({
               : "Admin override: accept this task into Done past the review gate. Audited."
           }
         >
-          <Icon name="shield" />
-          {skipsStages
-            ? "Force accept (skips the remaining stages and the review gate)"
-            : "Force accept (override review gate)"}
+          <GlyphSwap rest="shield" alt="loader" on={forcing} spinAlt />
+          {forcing
+            ? "Force-accepting…"
+            : skipsStages
+              ? "Force accept (skips the remaining stages and the review gate)"
+              : "Force accept (override review gate)"}
         </button>
       </div>
     ) : null;
@@ -462,6 +471,7 @@ export function GithubTrace({
             type="button"
             className="btn primary sm panel-act"
             disabled={delivering || pushOffer?.relation === "diverged" || !!closedRefusal}
+            aria-busy={delivering || undefined}
             aria-describedby={closedRefusal ? "deliver-closed-refusal" : undefined}
             onClick={onDeliver}
             title={
@@ -474,7 +484,7 @@ export function GithubTrace({
                     : "Push the delivering agent's branch and open the review PR (audited)"
             }
           >
-            <Icon name="branch" />
+            <GlyphSwap rest="branch" alt="loader" on={delivering} spinAlt />
             {pushOffer
               ? delivering
                 ? "Pushing…"
@@ -496,11 +506,12 @@ export function GithubTrace({
             type="button"
             className="btn primary sm panel-act"
             disabled={merging}
+            aria-busy={completingMerge || undefined}
             onClick={onCompleteMerge}
             title={`Review and run the real GitHub merge for PR #${task.pr.number} (needs a valid project credential)`}
           >
-            <Icon name="check" />
-            Complete merge
+            <GlyphSwap rest="check" alt="loader" on={completingMerge} spinAlt />
+            {completingMerge ? "Merging…" : "Complete merge"}
           </button>
         )}
         {forceAcceptRow}
@@ -622,15 +633,24 @@ export function TaskDetailsPanel({
           <div className="meta-field">
             <span className="meta-label">Due date</span>
             <input type="hidden" name="dueDate" value={due} />
-            <DatePicker value={due || null} onChange={(v) => setDue(v ?? "")} />
+            <DatePicker
+              label="Due date"
+              // Visible text inside the name "Due date: not set" (label in name).
+              placeholder="Not set"
+              value={due || null}
+              onChange={(v) => setDue(v ?? "")}
+            />
           </div>
           <div className="meta-edit-actions">
+            {/* Ruling 368: the save in flight shows itself here. */}
             <button
               type="submit"
               className="btn primary sm"
               disabled={fetcher.state !== "idle"}
+              aria-busy={fetcher.state !== "idle" || undefined}
             >
-              Save
+              {fetcher.state !== "idle" && <Icon name="loader" className="spin" />}
+              {fetcher.state !== "idle" ? "Saving…" : "Save"}
             </button>
             <button
               type="button"
@@ -748,8 +768,10 @@ export function TaskDetailsPanel({
                   type="submit"
                   className="btn primary sm"
                   disabled={depFetcher.state !== "idle"}
+                  aria-busy={depFetcher.state !== "idle" || undefined}
                 >
-                  Save
+                  {depFetcher.state !== "idle" && <Icon name="loader" className="spin" />}
+                  {depFetcher.state !== "idle" ? "Saving…" : "Save"}
                 </button>
                 <button type="button" className="btn sm" onClick={() => setDepOpen(false)}>
                   Cancel
@@ -801,7 +823,7 @@ export function CurrentStatePanel({
   onAccept,
   onTransition,
   transitionBusy,
-  acceptBusy: acceptSubmitting,
+  acceptInFlight,
   dispositionBusy,
 }: {
   task: TaskDetail;
@@ -831,9 +853,11 @@ export function CurrentStatePanel({
   onTransition: (toStageId: string) => void;
   /** A stage transition is in flight (page-owned fetcher) — locks the menu. */
   transitionBusy: boolean;
-  /** The accept submission is in flight (page-owned fetcher). */
-  acceptBusy: boolean;
-  /** An accept / archive / restore submission is in flight. */
+  /** Ruling 368: the intent the page's accept fetcher is carrying (the
+   *  acceptance itself, or ruling 449's refresh-and-review), null while idle.
+   *  Accept shows the work only when it is the acceptance. */
+  acceptInFlight: string | null;
+  /** An archive / restore submission is in flight: the Archive button's own. */
   dispositionBusy: boolean;
 }) {
   // E32-9: the owner seat follows the task's closed state (accepted or merged),
@@ -854,7 +878,8 @@ export function CurrentStatePanel({
   const canReleaseAnyOwner = roleCan(role, "release-any-ownership");
   const owner = task.owner && task.owner.kind === "human" ? task.owner : null;
   const ownerMine = !!(owner && owner.userId === meId);
-  const acceptBusy = acceptSubmitting || dispositionBusy;
+  const accepting = acceptInFlight === "accept-completion";
+  const acceptBusy = acceptInFlight !== null || dispositionBusy;
   const terminalName =
     task.stages.length > 0 ? task.stages[task.stages.length - 1]!.name : "Done";
 
@@ -1082,11 +1107,16 @@ export function CurrentStatePanel({
                 type="button"
                 className="btn primary sm full"
                 disabled={!acceptance.canAccept || acceptBusy}
+                aria-busy={accepting || undefined}
                 onClick={onAccept}
               >
-                <Icon name="check" />
-                {acceptBusy
-                  ? "Accepting · merging the review PR…"
+                <GlyphSwap rest="check" alt="loader" on={accepting} spinAlt />
+                {/* Ruling 368: only the acceptance's own request reads as it;
+                    an archive or a refresh in flight leaves this waiting. */}
+                {accepting
+                  ? task.pr
+                    ? "Accepting · merging the review PR…"
+                    : "Accepting…"
                   : `Accept completion → ${terminalName}`}
               </button>
             )}
@@ -1139,10 +1169,22 @@ export function CurrentStatePanel({
             // Restoring is a recovery action and stays neutral.
             className={"btn ghost sm full" + (archived ? "" : " danger")}
             disabled={dispositionBusy}
+            aria-busy={dispositionBusy || undefined}
             onClick={onArchive}
           >
-            <GlyphSwap rest="lock" alt="refresh" on={archived} />
-            {archived ? "Restore from archive" : "Archive task"}
+            {/* Ruling 459 over ruling 368: the lock trades for the restore mark
+                with the task's state, and that resting cell trades for the
+                spinning loader while the disposition is in flight (GlyphSwap's
+                `busy`), so neither change is a hard swap and there is only
+                ever one loader. */}
+            <GlyphSwap rest="lock" alt="refresh" on={archived} busy={dispositionBusy} />
+            {archived
+              ? dispositionBusy
+                ? "Restoring…"
+                : "Restore from archive"
+              : dispositionBusy
+                ? "Archiving…"
+                : "Archive task"}
           </button>
           <p className="hint archive-hint">
             {archived

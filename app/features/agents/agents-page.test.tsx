@@ -1086,7 +1086,7 @@ describe("CapabilityMatrixModal", () => {
       }),
       mkProfile({}),
     ];
-    const { container, getByText, getAllByText } = render(
+    const { container, getByText, getAllByText, getAllByRole } = render(
       <CapabilityMatrixModal
         profiles={profiles}
         projectName="Viberr Core"
@@ -1094,11 +1094,16 @@ describe("CapabilityMatrixModal", () => {
       />,
     );
     expect(getByText("Capability matrix")).toBeTruthy();
-    // Substring match: the subheader now also carries the honest-enforcement
-    // note (F10-01/03) so the text node is no longer exactly this sentence.
-    expect(
-      getByText(/Every profile's permissions for each action in Viberr Core\./),
-    ).toBeTruthy();
+    // Interface review 2026-09-24 (layo-16): the head carries this one
+    // sentence; the honest-enforcement note (F10-01/03) is the first
+    // runtime note, inside the scroller, so it cannot squeeze the matrix out.
+    const sub = container.querySelector(".modal-head .mh-sub");
+    expect(sub?.textContent?.trim()).toBe(
+      "Every profile's permissions for each action in Viberr Core.",
+    );
+    const firstNote = container.querySelector(".mx-scroll .mx-notes li");
+    expect(firstNote?.textContent).toContain("Delivery (push · open/merge PR) is server-owned");
+    expect(firstNote?.textContent).toContain("Web egress stays gated on both.");
     expect(getByText("Repository & execution")).toBeTruthy();
     // "Human-only" appears both as a group header and as the mode
     // legend label (CAP_META.forbidden), so match at least one.
@@ -1111,9 +1116,16 @@ describe("CapabilityMatrixModal", () => {
     expect(DISPATCH_AGENTS_LABEL).toBe("Select & run agents");
     expect(getByText(DISPATCH_AGENTS_LABEL)).toBeTruthy();
     expect(container.textContent).not.toMatch(/primary specialist/i);
-    // Cell modes render as mx-cell classes with accessible titles.
+    // Cell modes render as mx-cell classes.
     expect(container.querySelectorAll(".mx-cell.human").length).toBeGreaterThan(0);
     expect(container.querySelectorAll(".mx-cell.off").length).toBeGreaterThan(0);
+    // Interface review 2026-09-24 (acce-20): each mode cell carries its mode as
+    // text, since a title alone left table navigation reading blank cells.
+    expect(getAllByRole("cell", { name: "Human-only" }).length).toBeGreaterThan(0);
+    for (const cell of container.querySelectorAll(".mx-cell")) {
+      expect(cell.textContent).not.toBe("");
+      expect(cell.textContent).toBe(cell.getAttribute("title"));
+    }
 
     // Escape on a native modal <dialog> fires the `cancel` event, which
     // useDialog turns into onClose.
@@ -1699,7 +1711,11 @@ describe("CreateProfileModal", () => {
     // A dangling grant IS a grant (clicking it removes one) — it reports pressed.
     fireEvent.click(getByText("Knowledge bases"));
     const ghost = container.querySelector<HTMLButtonElement>(".pick-chip.missing")!;
-    expect(ghost.textContent).toBe("retired-kb");
+    // Interface review 2026-09-24 (acce-33): the chip says "missing" in a word
+    // and an alert glyph (no granted check), not in amber alone.
+    expect(ghost.textContent).toBe("retired-kbmissing");
+    expect(ghost.querySelector(".res-chip-note")?.textContent).toBe("missing");
+    expect(ghost.querySelectorAll("svg.ico")).toHaveLength(1);
     expect(ghost.getAttribute("aria-pressed")).toBe("true");
   });
 
@@ -3132,6 +3148,9 @@ describe("U33-5: Edit profile opens the profile the roster just selected", () =>
     expect(container.querySelector(".ag-hero-name")!.textContent).toBe("Developer");
     expect(rosterItem(container, "Developer").className).toContain("on");
     expect(rosterItem(container, "Operator").className).not.toContain("on");
+    // Interface review 2026-09-24 (acce-9): the state is exposed, not only drawn.
+    expect(rosterItem(container, "Developer").getAttribute("aria-current")).toBe("true");
+    expect(rosterItem(container, "Operator").hasAttribute("aria-current")).toBe(false);
   });
 
   it("the pick still reaches the URL, so the selection stays linkable", async () => {

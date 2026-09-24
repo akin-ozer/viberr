@@ -151,6 +151,30 @@ describe("AttachmentsPanel attach control (F39-6)", () => {
     expect(input!.accept).not.toContain(".svg");
   });
 
+  // Ruling 368: the upload in flight is `aria-busy` on the control that
+  // started it, the loader spinning and the label naming the work.
+  // Canary: drop `aria-busy` from the label in attachments-panel.tsx.
+  it("ruling 368: an upload in flight reads Attaching…, busy, the loader spinning", async () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/t",
+        Component: () => <AttachmentsPanel base={BASE} attachments={[]} canAttach />,
+        // Never answers: the test reads the wait itself.
+        action: () => new Promise(() => {}),
+      },
+    ]);
+    const { container } = render(<Stub initialEntries={["/t"]} />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, {
+      target: { files: [new File(["a: 1"], "fixture.yaml", { type: "text/yaml" })] },
+    });
+    const label = input.closest("label")!;
+    await waitFor(() => expect(label.getAttribute("aria-busy")).toBe("true"));
+    expect(label.textContent).toBe("Attaching…");
+    expect(input.disabled).toBe(true);
+    expect(label.querySelector("svg.ico.spin")).not.toBeNull();
+  });
+
   it("stays silent for a viewer who may NOT attach and has no browser agent", () => {
     const { container } = renderPanel(
       <AttachmentsPanel base={BASE} attachments={[]} />,
@@ -493,7 +517,9 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
         </AttachmentLightboxProvider>,
       );
       fireEvent.click(container.querySelector(".tl-attach-chip")!);
-      await findByText("This attachment could not be loaded.");
+      await findByText(
+        "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.",
+      );
     } finally {
       globalThis.fetch = origFetch;
     }
@@ -530,7 +556,9 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
         </AttachmentLightboxProvider>,
       );
       fireEvent.click(container.querySelector(".tl-attach-chip")!);
-      await findByText("This attachment could not be loaded.");
+      await findByText(
+        "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.",
+      );
       // The proven failure also drops the Download button — downloading the
       // 404 would hand some browsers the error body as "capture.yml".
       expect(
@@ -619,7 +647,9 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
         </AttachmentLightboxProvider>,
       );
       fireEvent.click(container.querySelector(".tl-attach-chip")!);
-      await findByText("This attachment could not be loaded.");
+      await findByText(
+        "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.",
+      );
       const dialog = baseElement.querySelector(DIALOG)!;
       expect(dialog.querySelector('a[href$="?download=1"]')).toBeNull();
     } finally {
@@ -741,9 +771,12 @@ describe("attachment images degrade gracefully when the picture cannot load", ()
     const dialog = baseElement.querySelector(DIALOG)!;
     fireEvent.error(dialog.querySelector<HTMLImageElement>(".lightbox-img")!);
     expect(dialog.querySelector(".lightbox-img")).toBeNull();
-    expect(dialog.querySelector(".lightbox-broken")!.textContent).toContain(
-      "could not be loaded",
+    // writ-5: onError cannot name the cause, but Download (kept for bytes the
+    // browser cannot decode) and Open original are the way to the file.
+    expect(dialog.querySelector(".lightbox-broken")!.textContent).toBe(
+      "Unable to show this image. Use Download or Open original to get the file itself.",
     );
+    expect(dialog.querySelector('a[href$="?download=1"]')).not.toBeNull();
     const original = [...dialog.querySelectorAll("a")].find(
       (a) => a.textContent === "Open original",
     )!;

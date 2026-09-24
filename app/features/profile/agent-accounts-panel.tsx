@@ -5,6 +5,7 @@ import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalCalendarDate, LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
+import { inFlightIntent } from "~/ui/in-flight";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 import { utcDayKey } from "~/shared/dates/format";
@@ -287,12 +288,15 @@ function SignInSteps({
   label,
   login,
   busy,
+  inFlight,
   submit,
 }: {
   backend: "claude" | "codex";
   label: string;
   login: NonNullable<ProfileBackend["login"]>;
   busy: boolean;
+  /** Ruling 368: the intent THIS card sent, while it is in flight. */
+  inFlight: string | null;
   submit: (fields: Record<string, string>) => void;
 }) {
   const codeId = `agentacc-${backend}-code`;
@@ -455,10 +459,11 @@ function SignInSteps({
                   type="button"
                   className="btn sm"
                   disabled={!login.needsCode || busy}
-                  aria-busy={busy}
+                  aria-busy={inFlight === "backend-login-code" || undefined}
                   onClick={submitCode}
                 >
-                  Submit code
+                  {inFlight === "backend-login-code" && <Icon name="loader" className="spin" />}
+                  {inFlight === "backend-login-code" ? "Submitting…" : "Submit code"}
                 </button>
               </div>
               {codeInvalid ? (
@@ -486,9 +491,11 @@ function SignInSteps({
           type="button"
           className="btn ghost sm push"
           disabled={busy}
+          aria-busy={inFlight === "backend-login-cancel" || undefined}
           onClick={() => submit({ intent: "backend-login-cancel", backend })}
         >
-          Cancel
+          {inFlight === "backend-login-cancel" && <Icon name="loader" className="spin" />}
+          {inFlight === "backend-login-cancel" ? "Cancelling…" : "Cancel"}
         </button>
       </div>
     </div>
@@ -618,6 +625,13 @@ function AgentAccountCard({
   });
 
   const busy = fetcher.state !== "idle";
+  // Ruling 368: both cards share the fetcher, so the request is THIS card's
+  // only when it names this backend; the button that sent it shows the work
+  // and every other control (this card's and the other card's) only waits.
+  const sent = inFlightIntent(fetcher);
+  const inFlight = sent !== null && fetcher.formData?.get("backend") === backend ? sent : null;
+  const startingMethod =
+    inFlight === "backend-login-start" ? String(fetcher.formData?.get("method") ?? "") : null;
   /** The badge says where this account STANDS, in the person's vocabulary. The
    *  stored `kind` (`api_key`, `access_token`) is our schema, not their word.
    *  An unconnected card says so in words: the "−" this slot used to show read
@@ -655,6 +669,7 @@ function AgentAccountCard({
               type="button"
               className="btn sm"
               disabled={busy}
+              aria-busy={startingMethod === login.method || undefined}
               onClick={() =>
                 submit({
                   intent: "backend-login-start",
@@ -663,7 +678,8 @@ function AgentAccountCard({
                 })
               }
             >
-              Start again
+              {startingMethod === login.method && <Icon name="loader" className="spin" />}
+              {startingMethod === login.method ? "Starting sign-in…" : "Start again"}
             </button>
           </div>
         </>
@@ -676,6 +692,7 @@ function AgentAccountCard({
           label={label}
           login={login}
           busy={busy}
+          inFlight={inFlight}
           submit={submit}
         />
       ) : health.kind !== null ? (
@@ -808,11 +825,13 @@ function AgentAccountCard({
                   type="button"
                   className="btn sm"
                   disabled={busy}
+                  aria-busy={startingMethod === method || undefined}
                   onClick={() =>
                     submit({ intent: "backend-login-start", backend, method })
                   }
                 >
-                  {SIGN_IN_LABEL[method]}
+                  {startingMethod === method && <Icon name="loader" className="spin" />}
+                  {startingMethod === method ? "Starting sign-in…" : SIGN_IN_LABEL[method]}
                 </button>
               ))}
             <button
@@ -820,6 +839,7 @@ function AgentAccountCard({
               // Ruling 149: dropping the stored credential is destructive.
               className="btn ghost sm danger"
               disabled={busy}
+              aria-busy={inFlight === "backend-disconnect" || undefined}
               onClick={() => {
                 // Close any paste form the card was showing before this
                 // connection existed, so disconnecting does not re-reveal a
@@ -828,7 +848,8 @@ function AgentAccountCard({
                 submit({ intent: "backend-disconnect", backend });
               }}
             >
-              Disconnect
+              {inFlight === "backend-disconnect" && <Icon name="loader" className="spin" />}
+              {inFlight === "backend-disconnect" ? "Disconnecting…" : "Disconnect"}
             </button>
           </div>
         </>
@@ -856,11 +877,13 @@ function AgentAccountCard({
                 // per card instead of six equal buttons.
                 className={"btn sm" + (i === 0 ? " primary" : "")}
                 disabled={busy}
+                aria-busy={startingMethod === method || undefined}
                 onClick={() =>
                   submit({ intent: "backend-login-start", backend, method })
                 }
               >
-                {SIGN_IN_LABEL[method]}
+                {startingMethod === method && <Icon name="loader" className="spin" />}
+                {startingMethod === method ? "Starting sign-in…" : SIGN_IN_LABEL[method]}
               </button>
             ))}
             {methods.paste.map((kind) => (

@@ -3,12 +3,11 @@ import { useFetcher } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import type { SessionUser } from "~/server/auth/require-user.server";
 import type { HomePrefs } from "~/server/prefs/user-prefs.server";
-import { countLabel } from "~/shared/text/plural";
+import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { SkipLink } from "~/ui/skip-link";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { useToast } from "~/ui/toast";
-import type { NotificationView } from "~/features/notifications/notification-item";
 import { CommandPalette } from "~/features/shell/command-palette";
 import { useCommandPaletteShortcut } from "~/features/shell/use-command-palette";
 import type { HomeOrgSummary, HomeProjectCard } from "./home-query.server";
@@ -41,8 +40,9 @@ export interface HomePageData {
   projects: HomeProjectCard[];
   prefs: HomePrefs;
   org: HomeOrgSummary;
-  notifications: NotificationView[];
+  /** The bell's counts; the bell loads its own list (ruling 457). */
   unread: number;
+  orphanUnread: number;
   /** B-FD4: the host data root, org admins only (null otherwise). */
   storeRoot: string | null;
   /** F18-5: the single-writer lock holder, org admins only (null otherwise). */
@@ -155,12 +155,19 @@ export function HomePage({
       push(d.error ?? "Re-scan failed. Check the server log", "error");
       return;
     }
-    const drift = (d.changed ?? 0) + (d.removed ?? 0) + (d.errors ?? 0);
+    // Interface review 2026-09-24 (writ-2): files the re-scan could not project
+    // were added into "N changed" under a success tick, so a broken file read
+    // as a clean sync. They are a failure with a way out now.
+    if (d.errors) {
+      push(
+        `Re-scan finished, but ${countLabel(d.errors, "file")} could not be read. The server log names each one. Fix ${pluralNoun(d.errors, "it", "them")} and re-scan.`,
+        "error",
+      );
+      return;
+    }
+    const updated = (d.changed ?? 0) + (d.removed ?? 0);
     push(
-      "Store re-scanned: " +
-        d.projects +
-        " project dirs, " +
-        (drift === 0 ? "no drift found" : drift + " changed"),
+      `Store re-scanned: ${countLabel(d.projects ?? 0, "project")}, ${updated === 0 ? "nothing changed" : countLabel(updated, "file") + " updated"}`,
     );
   });
   const rescan = () => {
@@ -241,8 +248,8 @@ export function HomePage({
         onOpenPalette={() => setPalette(true)}
         query={query}
         onQuery={setQuery}
-        notifications={data.notifications}
         unread={data.unread}
+        orphanUnread={data.orphanUnread}
         user={user}
         theme={theme}
         livePaused={livePaused}

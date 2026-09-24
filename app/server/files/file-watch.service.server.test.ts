@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -12,7 +12,8 @@ import {
   projectionFaultCount,
   resetProjectionFaultsForTests,
 } from "~/server/projections/store-health.server";
-import { projectDir, taskDir } from "./file-store-root.server";
+import { projectDir, projectFilePath, taskDir } from "./file-store-root.server";
+import { updateProjectFile } from "./project-writer.server";
 import {
   isFileWatcherAlive,
   shouldIgnoreWatchPath,
@@ -297,6 +298,75 @@ describe("a failed rebuild is retried (ruling 218)", () => {
       12_000,
     );
     expect(projectionFaultCount()).toBe(0);
+  }, 30_000);
+
+  /**
+   * Ruling 457: a project's cascade isolates each task (a SAVEPOINT apiece), so
+   * a task that cannot re-project no longer fails project.md's rebuild. The
+   * project row lands and keeps the F28-D3 sentinel, and the result names the
+   * task: without a retry on that, nothing would ever re-run the cascade, since
+   * neither file changes again.
+   */
+  it("re-runs a cascade that left a task behind, with no further file change", async () => {
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
+      timeline: [
+        {
+          occurredAt: "2026-08-26T10:00:00.000Z",
+          type: "comment",
+          actor: { kind: "human", userId: store.users.selin.id, nameHint: null },
+          title: null,
+          toAgent: false,
+          evidence: null,
+          text: "hi",
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const selinIsGuest = (): boolean =>
+      String(
+        store.db
+          .prepare(`SELECT actor_json FROM task_events WHERE project_slug = ? AND task_key = ?`)
+          .get(store.slug, "VIB-1")?.actor_json,
+      ).includes('"guest":true');
+    const selinIsMember = (): boolean =>
+      store.db
+        .prepare(`SELECT 1 FROM project_members WHERE project_slug = ? AND user_id = ?`)
+        .get(store.slug, store.users.selin.id) !== undefined;
+    expect(selinIsGuest()).toBe(false);
+    // See the test above for why the ladder is long and fast.
+    await startWatcherReady(
+      store,
+      Array.from({ length: 500 }, () => 40),
+    );
+
+    // The store cannot take VIB-1's events rewrite, so the cascade the member
+    // removal starts fails that task; the project row lands anyway.
+    store.db.exec(`ALTER TABLE task_events RENAME TO task_events_gone`);
+    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.members = parsed.frontmatter.members.filter(
+        (m) => m.userId !== store.users.selin.id,
+      );
+    });
+    const projectPath = projectFilePath(store.slug, store.dataRoot);
+    const rewriteProject = () => writeFileSync(projectPath, readFileSync(projectPath));
+    await waitFor(
+      () => projectionFaultCount() > 0 && !selinIsMember(),
+      "the member removal to land with VIB-1's fault latched",
+      rewriteProject,
+      12_000,
+    );
+
+    store.db.exec(`ALTER TABLE task_events_gone RENAME TO task_events`);
+    // CANARY: drop `|| result.failedTasks` from `rebuildFile` and this never
+    // converges: VIB-1 keeps showing selin as a member.
+    await waitFor(
+      () => selinIsGuest() && projectionFaultCount() === 0,
+      "the retry to re-run the cascade",
+      undefined,
+      12_000,
+    );
   }, 30_000);
 
   /**

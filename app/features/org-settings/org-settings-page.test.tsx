@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, getNodeText, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
@@ -958,20 +958,17 @@ describe("ResourcesPanel", () => {
 
     // They were preserved on every save and rendered NOWHERE, so an orphan
     // could not be seen or removed from org settings at all.
-    const missing = [...document.querySelectorAll(".pick-chip.missing")].map(
-      (c) => c.textContent,
-    );
-    expect(missing).toEqual(["deleted-craft", "vm-memory", "gone-kb"]);
+    // Interface review 2026-09-24 (acce-33): each chip also carries an alert
+    // glyph and a "missing" note, so the id is the chip's own text.
+    const chips = () => [...document.querySelectorAll<HTMLElement>(".pick-chip.missing")];
+    expect(chips().map(getNodeText)).toEqual(["deleted-craft", "vm-memory", "gone-kb"]);
+    for (const chip of chips()) {
+      expect(chip.querySelector(".res-chip-note")?.textContent).toBe("missing");
+    }
 
     // Clicking one drops it from the grant list that gets submitted.
-    fireEvent.click(
-      [...document.querySelectorAll(".pick-chip.missing")].find(
-        (c) => c.textContent === "vm-memory",
-      )!,
-    );
-    expect(
-      [...document.querySelectorAll(".pick-chip.missing")].map((c) => c.textContent),
-    ).toEqual(["deleted-craft", "gone-kb"]);
+    fireEvent.click(chips().find((c) => getNodeText(c) === "vm-memory")!);
+    expect(chips().map(getNodeText)).toEqual(["deleted-craft", "gone-kb"]);
   });
 
   it("F19-5: a missing chip announces itself as GRANTED, not as an ungranted resource", () => {
@@ -1006,11 +1003,11 @@ describe("ResourcesPanel", () => {
     // The point of the attribute: a screen reader can now tell a dangling grant
     // apart from a live resource this profile does NOT grant. `pressed` matches
     // on the attribute, so an element without it lands in neither list.
-    const pressed = getAllByRole("button", { pressed: true }).map((b) => b.textContent);
+    const pressed = getAllByRole("button", { pressed: true }).map(getNodeText);
     expect(pressed).toEqual(
       expect.arrayContaining(["deleted-craft", "vm-memory", "gone-kb"]),
     );
-    const unpressed = getAllByRole("button", { pressed: false }).map((b) => b.textContent);
+    const unpressed = getAllByRole("button", { pressed: false }).map(getNodeText);
     expect(unpressed).toEqual(
       expect.arrayContaining(["github-mcp", "Architecture notes"]),
     );
@@ -1031,8 +1028,8 @@ describe("ResourcesPanel", () => {
     );
     fireEvent.click(getByLabelText("Edit Spare"));
     fireEvent.click(
-      [...document.querySelectorAll(".pick-chip.missing")].find(
-        (c) => c.textContent === "deleted-craft",
+      [...document.querySelectorAll<HTMLElement>(".pick-chip.missing")].find(
+        (c) => getNodeText(c) === "deleted-craft",
       )!,
     );
     fireEvent.click(getByText("Save changes"));
@@ -1881,6 +1878,29 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
     // "Export to S3 now" stays on the card, unavailable until a target exists.
     const push = getByText("Export to S3 now").closest("button")!;
     expect(push.disabled).toBe(true);
+  });
+
+  // Ruling 368: the export in flight shows itself on Export to S3 now (busy,
+  // the loader, "Exporting…"); Remove, which shares the fetcher, only waits.
+  // Canary: drop `aria-busy={exporting || undefined}` in org-settings-page.tsx.
+  it("ruling 368: an export in flight reads Exporting… and Remove only waits", async () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => <ToastProvider>{page(S3)}</ToastProvider>,
+        // Never answers: the test reads the wait itself.
+        action: () => new Promise(() => {}),
+      },
+    ]);
+    const { getByText } = render(<Stub initialEntries={["/org/settings"]} />);
+    const push = getByText("Export to S3 now").closest("button")!;
+    fireEvent.click(push);
+    await waitFor(() => expect(push.getAttribute("aria-busy")).toBe("true"));
+    expect(push.textContent).toBe("Exporting…");
+    expect(push.querySelector("svg.ico.spin")).not.toBeNull();
+    const remove = getByText("Remove", { selector: ".audit-s3-actions button" });
+    expect(remove.hasAttribute("disabled")).toBe(true);
+    expect(remove.hasAttribute("aria-busy")).toBe(false);
   });
 
   it("ruling 147: an incomplete target is refused in the modal, field by field", () => {

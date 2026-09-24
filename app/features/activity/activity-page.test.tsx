@@ -85,6 +85,7 @@ function renderActivity(
   stream: ActivityStreamRowView[] = STREAM,
   audit: AuditLogEntryView[] = AUDIT,
   totals: { streamTotal?: number; auditTotal?: number } = {},
+  search = "",
 ) {
   const Stub = createRoutesStub([
     {
@@ -103,7 +104,9 @@ function renderActivity(
       ),
     },
   ]);
-  return render(<Stub initialEntries={["/projects/viberr-core/activity"]} />);
+  return render(
+    <Stub initialEntries={[`/projects/viberr-core/activity${search}`]} />,
+  );
 }
 
 describe("helpers", () => {
@@ -215,7 +218,7 @@ describe("ActivityPage", () => {
     const noSystemToday = STREAM.filter((r) => r.actor?.kind !== "system");
     const { getByText, unmount } = renderActivity(noSystemToday, []);
     fireEvent.click(getByText("System"));
-    expect(getByText("No events match this filter.")).toBeTruthy();
+    expect(getByText("No events match these filters.")).toBeTruthy();
     unmount();
 
     const empty = renderActivity([], []);
@@ -228,6 +231,10 @@ describe("ActivityPage", () => {
     const audit = container.querySelectorAll(".pev-list .pol-ev");
     expect(audit[0]!.querySelector(".pev-ico.violation")).toBeTruthy();
     expect(audit[0]!.querySelector(".pill.input")!.textContent).toBe("open");
+    // Interface review 2026-09-24 (acce-5): the remedy was title-only.
+    expect(audit[0]!.querySelector(".pill.input")!.parentElement!.textContent).toBe(
+      "open: grant the missing scope to resolve",
+    );
     expect(audit[0]!.querySelector(".keybtn")!.textContent).toBe("VIB-142");
     expect(audit[0]!.querySelector(".pev-t")!.textContent).toBe("today 09:38");
     expect(audit[1]!.querySelector(".pev-ico.change")).toBeTruthy();
@@ -247,6 +254,14 @@ describe("ActivityPage", () => {
     expect(pill.textContent).toBe("resolved");
     expect(pill.parentElement!.getAttribute("title")).toContain(
       "Resolved by Arda Kaya",
+    );
+    // …and the same who/when reaches the accessibility tree, not only a
+    // hovering mouse (interface review 2026-09-24, acce-5).
+    expect(pill.parentElement!.querySelector(".vh")!.textContent).toMatch(
+      /^ by Arda Kaya · /,
+    );
+    expect(pill.parentElement!.getAttribute("title")).toBe(
+      "Resolved" + pill.parentElement!.querySelector(".vh")!.textContent,
     );
   });
 
@@ -739,8 +754,11 @@ describe("per-panel feed filters (P21)", () => {
     // which cannot name the control once a page has four pickers).
     expect(getAllByText("From")).toHaveLength(2);
     expect(getAllByText("To")).toHaveLength(2);
-    expect(getByLabelText("From date for the activity stream")).not.toBeNull();
-    expect(getByLabelText("To date for the audit logs")).not.toBeNull();
+    // acce-16: the name carries the value too, so an unset range says so.
+    expect(
+      getByLabelText("From date for the activity stream: not set"),
+    ).not.toBeNull();
+    expect(getByLabelText("To date for the audit logs: not set")).not.toBeNull();
     // Audit bar — its type filter speaks in the panel's four display kinds.
     // SAFETY: the aria-label belongs to the audit bar's kind <select>
     // (FeedFilters); the bound query cannot state the element type.
@@ -758,6 +776,37 @@ describe("per-panel feed filters (P21)", () => {
     expect(queryByLabelText("Filter the audit logs by kind")).toBeNull();
     expect(queryByLabelText("Search the audit logs")).toBeNull();
     expect(getByLabelText("Search the activity stream")).not.toBeNull();
+  });
+
+  it("writ-7: a URL filter that matches nothing says so, not 'no activity'", () => {
+    // The loader filters server-side, so both the rows and the totals arrive
+    // already narrowed: an empty stream here is "no match", never "no activity".
+    const { getByText, queryByText } = renderActivity([], [], {}, "?sq=zzzqqxx");
+    expect(getByText("No events match these filters.")).toBeTruthy();
+    expect(queryByText("No activity yet.")).toBeNull();
+    expect(getByText("0 of 0 events (filtered)")).toBeTruthy();
+    // The way out stays on screen.
+    expect(getByText("Clear")).toBeTruthy();
+  });
+
+  it("writ-7: a filtered short audit log keeps its bar, its Clear and says so", () => {
+    // The gate reads the FILTERED total, so without the filter check a
+    // narrowed log unmounted the very search box that narrowed it.
+    const { getByText, getByLabelText, queryByLabelText, queryByText } =
+      renderActivity(STREAM, [], { auditTotal: 0 }, "?aq=zzzqqxx");
+    expect(getByText("No entries match these filters.")).toBeTruthy();
+    expect(queryByText("No policy or access events yet.")).toBeNull();
+    expect(getByText(/0 of 0 entries \(filtered\)/)).toBeTruthy();
+    // SAFETY: the aria-label belongs to the audit bar's search <input>
+    // (FeedFilters); the bound query cannot state the element type.
+    const search = getByLabelText("Search the audit logs") as HTMLInputElement;
+    expect(search.value).toBe("zzzqqxx");
+    // The stream panel is unfiltered: its count carries no mark.
+    expect(getByText("3 of 3 events")).toBeTruthy();
+    fireEvent.click(getByText("Clear"));
+    // Unfiltered and short again: the design-pass gate hides the bar.
+    expect(queryByLabelText("Search the audit logs")).toBeNull();
+    expect(getByText("No policy or access events yet.")).toBeTruthy();
   });
 
   it("typing a search writes the panel's own URL param and Clear removes it", () => {

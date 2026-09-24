@@ -12,10 +12,9 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "./app.css";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import {
-  data,
   isRouteErrorResponse,
   Links,
   Meta,
@@ -29,10 +28,17 @@ import type { Route } from "./+types/root";
 import { RoutePendingBar } from "./features/shell/route-pending-bar";
 import { setDocumentTheme } from "./features/shell/theme-preference";
 import { ControllerDock } from "./features/controller/controller-dock";
+import { SHELL_FONT_PRELOADS } from "./features/shell/font-preloads";
 import { ToastProvider } from "./ui/toast";
+import { revalidateWhen, useLiveLedger } from "./features/live-updates/revalidation-policy";
 import { getCsrfToken } from "./server/auth/csrf.server";
 import { requestContextMiddleware } from "./server/logging/request-context.server";
-import { authenticateWithHeaders } from "./server/auth/require-user.server";
+import {
+  authenticate,
+  sessionRenewalMiddleware,
+} from "./server/auth/require-user.server";
+import { liveHeadContext, liveHeadMiddleware } from "./server/events/sse-broker.server";
+import { isDocumentNavigation } from "./server/http/single-fetch.server";
 import {
   getThemePreference,
   type ThemePreference,
@@ -40,6 +46,8 @@ import {
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+  // Ruling 457: the faces every first paint draws, fetched alongside the CSS.
+  ...SHELL_FONT_PRELOADS,
 ];
 
 /**
@@ -53,36 +61,37 @@ export const links: Route.LinksFunction = () => [
  * opt-in `logger.child({ requestId })`, was never called by anything, and was
  * deleted as dead code — which is what happens to an opt-in nobody opts into.
  * This one is not optional.
+ *
+ * Ruling 457: `liveHeadMiddleware` reads the SSE broker's head before any
+ * loader runs (the page's first stream replays from it), and
+ * `sessionRenewalMiddleware` forwards the rolling-session renewal (F10-17) on
+ * every GET, which this loader used to do only when it ran.
  */
-export const middleware = [requestContextMiddleware];
+export const middleware = [requestContextMiddleware, liveHeadMiddleware, sessionRenewalMiddleware];
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
   const theme = getThemePreference(request);
-  // Runs on every document request: identifies the signed-in user (for the
-  // shell + <CsrfInput />) AND captures better-auth's rolling-session renewal
-  // cookie so the slide reaches the browser (F10-17).
-  const { ctx: auth, renewalHeaders } = await authenticateWithHeaders(request);
+  // Identifies the signed-in user for the shell and <CsrfInput />.
+  const auth = await authenticate(request);
   // Ruling 148(c): the in-app reduce-motion preference (and its
   // <html data-motion> hook) is gone; the OS setting is the one signal.
   const payload = {
     theme,
     csrf: auth ? getCsrfToken(auth.sessionId) : null,
   };
-  // Forward ONLY the renewal Set-Cookie(s) — never clobber other headers. Most
-  // requests are within the updateAge window and produce none, in which case
-  // the response carries no extra header.
-  const setCookies = renewalHeaders.getSetCookie();
-  if (setCookies.length === 0) return payload;
-  const headers = new Headers();
-  for (const cookie of setCookies) headers.append("Set-Cookie", cookie);
-  return data(payload, { headers });
+  // Ruling 457 (RF-1): where the page's first live stream starts. Only a
+  // document load seeds it; a `.data` answer would find the tab's streams
+  // already under way.
+  if (!isDocumentNavigation(request)) return payload;
+  return { ...payload, liveHead: context.get(liveHeadContext) };
 }
 
-// Surface loader headers (Set-Cookie renewal, F10-17) on routes without their
-// own headers export — React Router uses the deepest headers export available.
-export function headers({ loaderHeaders }: Route.HeadersArgs) {
-  return loaderHeaders;
-}
+/**
+ * Ruling 457 (RF-7): root re-runs after a sign-in, a sign-out, a theme or
+ * profile change and on a document load, and not for a live event, a
+ * navigation or a `revalidate()`, none of which changes its theme or csrf.
+ */
+export const shouldRevalidate = revalidateWhen("root");
 
 /**
  * Runs before first paint. Resolves the "system" preference against
@@ -134,6 +143,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
     if (onScreen === "dark" || onScreen === "light") return onScreen;
     return theme === "dark" ? "dark" : "light";
   });
+  // Ruling 457: one `{__html}` object per preference. React compares it by
+  // identity, and a fresh object rewrote the script's text on every root
+  // reload (the icon cost, in <head>).
+  const bootScript = useMemo(() => ({ __html: themeBootScript(theme) }), [theme]);
   return (
     <html lang="en" data-theme={htmlTheme} suppressHydrationWarning>
       <head>
@@ -141,9 +154,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
-        <script
-          dangerouslySetInnerHTML={{ __html: themeBootScript(theme) }}
-        />
+        <script dangerouslySetInnerHTML={bootScript} />
       </head>
       <body>
         {children}
@@ -157,6 +168,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   const rootData = useRouteLoaderData<typeof loader>("root");
   const theme: ThemePreference = rootData?.theme ?? "system";
+  // Ruling 457: the tab's live ledger (what its loaders owe), for every
+  // surface, seeded with the server render's stream position. In render,
+  // because the first stream opens in a child's effect and children's effects
+  // run before root's; the seed takes only the first value.
+  useLiveLedger(rootData && "liveHead" in rootData ? rootData.liveHead : null);
 
   // Keeps <html data-theme> in sync AFTER first paint (the boot script owns
   // first paint): re-applies when the pref changes (user-menu cycling
@@ -192,9 +208,9 @@ export default function App() {
  *  is user-facing copy when it came through as a string. D32-15 (pass 32): the
  *  role guard (`requireRole`) answers page and API requests alike with the JSON
  *  envelope `{ error: { code, message } }`, and a non-admin opening
- *  /org/settings or /insights read only "Forbidden" — the WHY ("This area
- *  requires the admin role.") was in the payload the boundary threw away. Both
- *  shapes are copy; anything else is transport noise. */
+ *  /org/settings or /insights read only "Forbidden" — the WHY (only org admins
+ *  can open it) was in the payload the boundary threw away. Both shapes are copy;
+ *  anything else is transport noise. */
 const thrownMessage = z
   .union([
     z.string(),
@@ -205,20 +221,28 @@ const thrownMessage = z
   .catch("");
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let title = "Something went wrong";
-  let detail = "An unexpected error occurred.";
+  // Interface review 2026-09-24 (writ-1): the page is titled by what happened
+  // to the reader, never by an HTTP status, and the detail says what to do.
+  let title = "Unable to load this page";
+  let detail =
+    "Reload the page to try again. If it keeps failing, go back to Home.";
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    title = error.status === 404 ? "Page not found" : `Error ${error.status}`;
+    if (error.status === 404) title = "Page not found";
+    else if (error.status === 403) title = "You don't have access to this page";
     // The thrown string (e.g. the 403 from requireProjectMember) IS the page
-    // copy. statusText is transport boilerplate, so it is only a fallback.
-    const thrown = thrownMessage.parse(error.data).trim();
+    // copy. statusText ("Forbidden", "Internal Server Error") is transport
+    // boilerplate that says nothing a reader can act on, so it never is.
+    // An unmatched URL's 404 carries the router's own diagnostic ("Error: No
+    // route matches URL …"), which is transport text too, not page copy.
+    const parsed = thrownMessage.parse(error.data).trim();
+    const thrown = parsed.startsWith("Error: No route matches URL") ? "" : parsed;
     detail =
       thrown ||
       (error.status === 404
         ? "The page you are looking for does not exist."
-        : error.statusText || detail);
+        : detail);
   } else if (import.meta.env.DEV && error instanceof Error) {
     detail = error.message;
     stack = error.stack;
@@ -226,6 +250,8 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
 
   return (
     <main className="app-splash">
+      {/* Hoisted into <head> by React: an error page had no <title> at all. */}
+      <title>{`${title} · Viberr`}</title>
       <section className="panel">
         <div className="panel-head">
           <h2>{title}</h2>

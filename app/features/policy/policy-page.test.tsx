@@ -711,6 +711,45 @@ describe("Guardrails card (E32-6, pass 32)", () => {
         .join(" | "),
     );
 
+  // Ruling 368: the request shows on the button that sent it. Apply claimed
+  // `aria-busy` for ANY policy request (every row's Apply at once) and the
+  // stale row's Remove went to the .45 refused step with its resting label.
+  // Canary: put `aria-busy={busy}` back on Apply in policy-page.tsx.
+  it("ruling 368: a removal in flight reads Removing… on its row; Apply claims nothing", () => {
+    const { getByText } = render(
+      <Guardrails
+        guardrails={rows}
+        canManage
+        busy
+        inFlight={{ id: "operator-brevity", op: "remove" }}
+        onSet={() => {}}
+      />,
+    );
+    const remove = getByText("Removing…").closest("button")!;
+    expect(remove.getAttribute("aria-busy")).toBe("true");
+    expect(remove.disabled).toBe(true);
+    expect(remove.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
+    const apply = getByText("Apply").closest("button")!;
+    expect(apply.disabled).toBe(true);
+    expect(apply.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("ruling 368: a value in flight reads Applying… on its own row", () => {
+    const { getByText } = render(
+      <Guardrails
+        guardrails={rows}
+        canManage
+        busy
+        inFlight={{ id: "compression-threshold", op: "value" }}
+        onSet={() => {}}
+      />,
+    );
+    const apply = getByText("Applying…").closest("button")!;
+    expect(apply.getAttribute("aria-busy")).toBe("true");
+    expect(apply.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(getByText("Remove").closest("button")!.hasAttribute("aria-busy")).toBe(false);
+  });
+
   it("renders one row per guardrail with the right control per kind", () => {
     const onSet = vi.fn();
     const { container, getByText, getByLabelText } = render(

@@ -1,12 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { LogLine } from "~/features/runtime/runtime-types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RUN_LOG_WINDOW_LINES, type LogLine } from "~/features/runtime/runtime-types";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertRunLine, patchRun, upsertRun, type InsertRunInput } from "./run-store.server";
 import {
   RUN_LOG_WINDOW_BYTES,
-  RUN_LOG_WINDOW_LINES,
   projectRunsForTask,
+  runLogWindowFor,
 } from "./run-projection.server";
+import { getRun } from "./run-store.server";
 import { runStatePill } from "~/features/runtime/runs-helpers";
 
 /**
@@ -384,6 +385,31 @@ describe("F35-1: tokens are marked estimated until the provider's total lands", 
   });
 });
 
+/**
+ * Ruling 457 (CON-7): a revalidation's projection and the console's tail
+ * reads race, so every read of a run's live facts carries the row's version,
+ * and the console keeps the newer one (`run-log-store.test.ts` "CON-7").
+ */
+describe("ruling 457 (CON-7): the live facts carry the row's version", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("stamps factsAt with agent_runs.updated_at, which every fact write moves", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
+    insert({ id: "run_v", threadId: "primary", state: "running" });
+    const first = projectRunsForTask(db, SLUG, TASK)[0]!.factsAt;
+    // CANARY: drop the stamp from `runLiveFacts` and every read carries none.
+    expect(first).toBe(Date.parse("2026-09-24T10:00:00.000Z"));
+
+    vi.setSystemTime(new Date("2026-09-24T10:00:02.000Z"));
+    patchRun(db, "run_v", { turns: 3 });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.factsAt).toBe(Date.parse("2026-09-24T10:00:02.000Z"));
+    // The console's window read stamps the same row the same way.
+    expect(runLogWindowFor(db, getRun(db, "run_v")!).facts.factsAt).toBe(view!.factsAt);
+  });
+});
+
 describe("projectRunsForTask — resumed history", () => {
   it("keeps every run's lines, with an explicit resume boundary", () => {
     insert({ id: "run_1", threadId: "primary-a", kind: "primary", backend: "claude", state: "finished" });
@@ -656,5 +682,207 @@ describe("ruling 369: the cache record on the run view", () => {
       lastPromptTokens: 0,
       compactions: 0,
     });
+  });
+});
+
+/* ------------- ruling 457: how much of the console a payload carries ------------- */
+
+/**
+ * Owner decision 2 (2026-09-24): a hard refresh carries the shown agent's
+ * console (display lines), a revalidation or a client navigation carries none,
+ * and the console fills a thread with one request. Whatever a projection
+ * carries, the WINDOW is the same one: the same bounds, the same cursor, the
+ * same keys, so a thread filled later is exactly the one a hard refresh would
+ * have shipped.
+ */
+describe("ruling 457: console shipping", () => {
+  /** `count` lines of ~`bytes` on `runId`, from `from`. */
+  function fill(runId: string, count: number, bytes = 40, from = 0): void {
+    for (let i = from; i < from + count; i++) {
+      insertRunLine(db, {
+        runId,
+        seq: i,
+        occurredAt: "2026-09-24T00:00:00.000Z",
+        raw: JSON.stringify({ i, filler: "x".repeat(bytes) }),
+        display: { t: "00:00:00", ev: "out", tag: "tool_result", text: `${runId} ${i}` },
+      });
+    }
+  }
+
+  /** Two agents: an operator (finished) and a resumed developer, running,
+   *  whose history outgrows the window by bytes. */
+  function twoAgents(): void {
+    insert({ id: "run_op", threadId: "op", kind: "operator", role: "Operator", agentName: "Operator", agentProfileId: "operator" });
+    fill("run_op", 30);
+    insert({ id: "run_d1", threadId: "primary", agentName: "dev", agentProfileId: "dev" });
+    insert({ id: "run_d2", threadId: "primary-r1", agentName: "dev", agentProfileId: "dev", state: "running" });
+    fill("run_d1", 120, 2_000);
+    fill("run_d2", 150, 2_000);
+  }
+
+  it("bounds the same window whatever it carries", () => {
+    twoAgents();
+    const all = projectRunsForTask(db, SLUG, TASK, { console: "all" });
+    for (const mode of ["shown", "none"] as const) {
+      const other = projectRunsForTask(db, SLUG, TASK, { console: mode });
+      other.forEach((view, i) => {
+        expect({ ...view.logWindow, loaded: true }, `${mode} ${view.id}`).toEqual(all[i]!.logWindow);
+        expect(view.lineCount).toBe(all[i]!.lineCount);
+      });
+    }
+    // The byte budget cut the developer's window inside run_d1.
+    expect(all[1]!.logWindow.oldest!.runId).toBe("run_d1");
+    expect(all[1]!.logWindow.hasMore).toBe(true);
+  });
+
+  it("a .data request carries no line, only each window's facts", () => {
+    twoAgents();
+    for (const view of projectRunsForTask(db, SLUG, TASK, { console: "none" })) {
+      expect(view.lines).toEqual([]);
+      expect(view.raw).toEqual([]);
+      expect(view.logWindow.loaded).toBe(false);
+    }
+  });
+
+  it("a document carries the running agent's display lines with their keys, and no envelope", () => {
+    twoAgents();
+    const all = projectRunsForTask(db, SLUG, TASK, { console: "all" });
+    const [op, dev] = projectRunsForTask(db, SLUG, TASK, { console: "shown" });
+    expect(op!.lines).toEqual([]);
+    expect(op!.logWindow.loaded).toBe(false);
+    expect(dev!.logWindow.loaded).toBe(true);
+    expect(dev!.lines).toEqual(all[1]!.lines);
+    expect(dev!.raw).toEqual([]);
+    // A line is keyed by its run's place in the group and its seq; the UI-53
+    // boundary by the run it opens.
+    expect(dev!.lineKeys).toEqual(all[1]!.lineKeys);
+    expect(dev!.lineKeys!.at(-1)).toBe("1:149");
+    expect(dev!.lineKeys).toContain("1:resumed");
+    expect(new Set(dev!.lineKeys).size).toBe(dev!.lineKeys!.length);
+  });
+
+  it("a document with nothing running carries the first agent's window", () => {
+    insert({ id: "run_op", threadId: "op", kind: "operator", role: "Operator", agentName: "Operator", agentProfileId: "operator" });
+    fill("run_op", 3);
+    insert({ id: "run_d", threadId: "primary", agentName: "dev", agentProfileId: "dev" });
+    fill("run_d", 3);
+    const [op, dev] = projectRunsForTask(db, SLUG, TASK, { console: "shown" });
+    expect(op!.lines.map((l) => l.text)).toEqual(["run_op 0", "run_op 1", "run_op 2"]);
+    expect(dev!.lines).toEqual([]);
+  });
+
+  it("the console's window request answers what a document carries for that group", () => {
+    twoAgents();
+    const [, dev] = projectRunsForTask(db, SLUG, TASK, { console: "shown" });
+    // Asked by any run of the group, it answers for the group's representative.
+    const page = runLogWindowFor(db, getRun(db, "run_d1")!);
+    expect(page.runId).toBe("run_d2");
+    expect(page.threadId).toBe("primary-r1");
+    expect(page.lines).toEqual(dev!.lines);
+    expect(page.lineKeys).toEqual(dev!.lineKeys);
+    expect(page.logWindow).toEqual(dev!.logWindow);
+    expect(page.facts).toMatchObject({ phase: dev!.phase, step: dev!.step, turns: dev!.turns });
+  });
+
+  it("UI-30: a withheld projection bounds no window and keeps the failure class", () => {
+    insert({ id: "run_q", threadId: "primary", state: "error", credentialUserId: "u_owner" });
+    insertRunLine(db, {
+      runId: "run_q",
+      seq: 0,
+      occurredAt: "2026-09-24T00:00:00.000Z",
+      raw: JSON.stringify({ type: "result" }),
+      display: { t: "00:00:00", ev: "err", tag: "run·error·quota", text: "refused" },
+    });
+    const [view] = projectRunsForTask(db, SLUG, TASK, { console: "withheld" });
+    expect(view!.lines).toEqual([]);
+    expect(view!.logWindow).toMatchObject({ totalLines: 0, runIds: [], headSeq: -1 });
+    expect(view!.failureKind).toBe("quota");
+    expect(view!.failedBackendUnavailable).toBe(true);
+  });
+});
+
+/**
+ * Ruling 457 (TASK-1) moved the Continuity Recovery Panel's marker search to
+ * the projection: the panel scanned `lines` and `raw`, which a payload now
+ * carries on a hard load only. P13-D-2's contract is unchanged: the marker is
+ * found by its tag's shared suffix, the dead session is read out of the STORED
+ * envelope (never display text), and only while the marker is inside the
+ * group's window (the panel's retirement rule).
+ */
+describe("ruling 457: the continuity marker (sessionMissing)", () => {
+  /** The envelope `recordSessionMissing` stores; `session_id` is ABSENT (not
+   *  null) when the writer never learned one. */
+  interface MarkerEnvelope {
+    type: string;
+    source: string;
+    reason: string;
+    session_id?: string;
+    message: string;
+  }
+  const MARKER_ENVELOPE = (sessionId?: string) => {
+    const envelope: MarkerEnvelope = {
+      type: "error",
+      source: "viberr",
+      reason: "session_missing",
+      message: "The Claude session was not found.",
+    };
+    if (sessionId !== undefined) envelope.session_id = sessionId;
+    return JSON.stringify(envelope);
+  };
+
+  function marked(tag: string, raw: string, after = 0): void {
+    insert({ id: "run_dead", threadId: "primary", agentName: "dev", agentProfileId: "dev", state: "error" });
+    insertRunLine(db, {
+      runId: "run_dead",
+      seq: 0,
+      occurredAt: "2026-09-24T00:00:00.000Z",
+      raw,
+      display: { t: "00:00:00", ev: "err", tag, text: "The Claude session was not found." },
+    });
+    insert({ id: "run_fresh", threadId: "primary-r1", agentName: "dev", agentProfileId: "dev", state: "running" });
+    for (let i = 0; i < after; i++) {
+      insertRunLine(db, {
+        runId: "run_fresh",
+        seq: i,
+        occurredAt: "2026-09-24T00:00:01.000Z",
+        raw: "{}",
+        display: { t: "00:00:01", ev: "text", tag: "assistant", text: `fresh ${i}` },
+      });
+    }
+  }
+
+  it("matches every writer's marker tag by its shared suffix, on every kind of payload", () => {
+    for (const tag of ["run·session_missing", "run·error·session_missing", "error·session_missing"]) {
+      ctx.cleanup();
+      ctx = createTestDbContext();
+      db = ctx.makeDb();
+      marked(tag, MARKER_ENVELOPE("sess-dead"));
+      for (const mode of ["all", "shown", "none"] as const) {
+        const [view] = projectRunsForTask(db, SLUG, TASK, { console: mode });
+        expect(view!.sessionMissing, `${tag} ${mode}`).toEqual({ sessionId: "sess-dead" });
+      }
+    }
+  });
+
+  it("names no session the envelope does not carry, and still reports the break", () => {
+    marked("run·session_missing", MARKER_ENVELOPE());
+    expect(projectRunsForTask(db, SLUG, TASK, { console: "none" })[0]!.sessionMissing).toEqual({ sessionId: null });
+  });
+
+  it("reads the id out of the stored envelope only (an unparseable one names nothing)", () => {
+    marked("run·session_missing", "not json");
+    expect(projectRunsForTask(db, SLUG, TASK)[0]!.sessionMissing).toEqual({ sessionId: null });
+  });
+
+  it("retires once the marker falls out of the group's window", () => {
+    marked("run·session_missing", MARKER_ENVELOPE("sess-dead"), RUN_LOG_WINDOW_LINES);
+    const [view] = projectRunsForTask(db, SLUG, TASK, { console: "none" });
+    expect(view!.logWindow.oldest!.runId).toBe("run_fresh");
+    expect(view!.sessionMissing).toBeNull();
+  });
+
+  it("reports nothing for a group with no marker", () => {
+    insert({ id: "run_ok", threadId: "primary", agentName: "dev", agentProfileId: "dev" });
+    expect(projectRunsForTask(db, SLUG, TASK)[0]!.sessionMissing).toBeNull();
   });
 });

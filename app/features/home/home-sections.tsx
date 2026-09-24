@@ -8,8 +8,8 @@ import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { useDialog } from "~/ui/use-dialog";
-import type { NotificationView } from "~/features/notifications/notification-item";
 import { TopBell } from "~/features/shell/top-bell";
+import { LivePausedStrip } from "~/features/shell/topbar";
 import { UserMenu } from "~/features/shell/user-menu";
 import type { HomeOrgSummary, HomeProjectCard } from "./home-query.server";
 import {
@@ -28,12 +28,14 @@ import {
  * unchanged.
  */
 
+const HOME_PAUSED_SENTENCE = "Live updates paused. Cards may be out of date.";
+
 export function HomeTopBar({
   searchRef,
   query,
   onQuery,
-  notifications,
   unread,
+  orphanUnread,
   user,
   theme,
   livePaused = false,
@@ -43,8 +45,9 @@ export function HomeTopBar({
   searchRef: RefObject<HTMLInputElement | null>;
   query: string;
   onQuery: (q: string) => void;
-  notifications: NotificationView[];
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 457). */
   unread: number;
+  orphanUnread: number;
   user: SessionUser;
   theme: ThemePreference;
   /** UI-03: the SSE stream is down — the cards are a stale snapshot. */
@@ -77,34 +80,12 @@ export function HomeTopBar({
             The sentence and the retry are then split the way the workspace
             header splits them (`shell/topbar.tsx`): a `.pill` has no cursor and
             no hover, so one element that was both read as neither, and with no
-            `onReconnect` it was a button that did nothing. The chip states the
-            fact; the Retry beside it exists only when there is something to
-            reconnect. */}
+            `onReconnect` it was a button that did nothing. Both now sit in the
+            strip under this row (layo-10, below). */}
         <span className="vh" role="status" aria-live="polite">
-          {livePaused ? "Live updates paused. Cards may be out of date." : ""}
+          {livePaused ? HOME_PAUSED_SENTENCE : ""}
         </span>
-        {livePaused && (
-          <span
-            className="pill risk sm push"
-            title="The live update stream dropped (often an expired session). These cards may be out of date."
-          >
-            live updates paused
-          </span>
-        )}
-        {livePaused && onReconnect && (
-          <button
-            type="button"
-            className="btn ghost sm"
-            title="Reconnect the live update stream"
-            onClick={onReconnect}
-          >
-            Retry
-          </button>
-        )}
-        <div
-          className="top-search"
-          style={livePaused ? undefined : { marginLeft: "auto" }}
-        >
+        <div className="top-search">
           <Icon name="search" />
           <input
             ref={searchRef}
@@ -129,7 +110,7 @@ export function HomeTopBar({
             {modifierHint}
           </button>
         </div>
-        <TopBell notifications={notifications} unread={unread} />
+        <TopBell unread={unread} orphanUnread={orphanUnread} />
         <UserMenu
           user={{
             id: user.id,
@@ -141,6 +122,15 @@ export function HomeTopBar({
           theme={theme}
         />
       </div>
+      {/* Interface review 2026-09-24 (layo-10): the chip and Retry sat in the
+          row above, which cannot wrap, and scrolled the page sideways at phone
+          width. The strip stays inside the sticky header. */}
+      {livePaused && (
+        <LivePausedStrip
+          message={HOME_PAUSED_SENTENCE}
+          onReconnect={onReconnect}
+        />
+      )}
     </header>
   );
 }
@@ -645,19 +635,29 @@ export function StoreStrip({
           GROUP is pushed to the end rather than the first button. What stays
           inline is this row's own layout, not compensation for that. */}
       <span className="inline-row">
+        {/* Ruling 368: each request shows itself on the button that started
+            it (busy, the loader spinning, the label naming the work) and
+            cannot be pressed again mid-flight: Rebuild used to stay live and
+            reopen its confirm while the rebuild it had started was running.
+            Ruling 459: the loader cross-fades in for the resting glyph
+            (`GlyphSwap`) instead of replacing it in one frame. */}
         <button
           type="button"
           className="btn ghost sm"
           onClick={onRescan}
+          disabled={scanning}
+          aria-busy={scanning || undefined}
           title="Re-read the task files and update any board row that drifted from them"
         >
-          <Icon name="refresh" className={scanning ? "spin" : ""} />
+          <GlyphSwap rest="refresh" alt="loader" on={scanning} spinAlt />
           {scanning ? "Scanning…" : "Re-scan store"}
         </button>
         <button
           type="button"
           className="btn ghost sm danger"
           onClick={onRebuild}
+          disabled={rebuilding}
+          aria-busy={rebuilding || undefined}
           title="Recovery: drop every projection row and re-project the whole store from files"
         >
           <GlyphSwap rest="memory" alt="loader" on={rebuilding} spinAlt />

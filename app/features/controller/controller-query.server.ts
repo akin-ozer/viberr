@@ -15,12 +15,13 @@ import {
   type ControllerMessage,
   type ListConversationsInput,
 } from "~/server/controller/controller-conversations.server";
-import { resolveControllerConfig } from "~/server/controller/controller-profile.server";
+import { resolveControllerName } from "~/server/controller/controller-profile.server";
 import {
   conversationTurnState,
   type ConversationTurnState,
 } from "~/server/controller/controller-run.server";
 import { listRunsForTask } from "~/server/runtimes/run-service.server";
+import type { ConsoleShipping } from "~/server/runtimes/run-projection.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-actions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
@@ -93,6 +94,10 @@ export function getControllerSurface(
     conversationId?: string | null;
     all?: boolean;
     dataRoot?: string;
+    /** Ruling 457 (owner decision 2): how much of the open thread's console
+     *  window to carry. The routes pass `shown` for a document load and
+     *  `none` for a `.data` request; omitted, every window is carried. */
+    console?: ConsoleShipping;
   },
 ): ControllerSurfaceView {
   const admin = isOrgAdmin(db, viewer.id);
@@ -136,7 +141,6 @@ export function getControllerSurface(
     markConversationSeen(db, conversation.id, viewer.id);
   }
   const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
-  const config = resolveControllerConfig(input.dataRoot);
   // Ruling 419(f): a person is named on this page the way the rest of the app
   // names them. A conversation stores its owner's EMAIL at creation (the
   // controller's prompt keeps it: an address is unambiguous to a model), and
@@ -165,7 +169,7 @@ export function getControllerSurface(
     available: isBackendAvailableFor(db, viewer.id, "claude", {
       dataRoot: input.dataRoot,
     }),
-    controllerName: config.name,
+    controllerName: resolveControllerName(input.dataRoot),
     projectName: scope ? (getProject(db, scope)?.name ?? scope) : null,
     conversations: rows.map((c) => ({
       id: c.id,
@@ -190,7 +194,9 @@ export function getControllerSurface(
     // Ruling 99: a controller run is stored at `project_slug = ''` with the
     // conversation id for its task key, which is the scope the grouping
     // projection is asked for here.
-    runtime: conversation ? listRunsForTask(db, "", conversation.id) : [],
+    runtime: conversation
+      ? listRunsForTask(db, "", conversation.id, input.console ? { console: input.console } : {})
+      : [],
     canInterruptTurn: conversation
       ? conversation.userId === viewer.id || admin
       : false,

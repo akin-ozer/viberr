@@ -57,6 +57,30 @@ describe("ruling 459: GlyphSwap keeps both glyphs and flips one attribute", () =
     expect(container.querySelector(".copy-glyph .spin")).toBeNull();
   });
 
+  it("`busy` trades the whole resting cell for the one spinning loader, one cell up (ruling 459 over 368)", () => {
+    // CANARY: draw the loader inside the inner cell (a third child), and the
+    // Run → Schedule trade and the busy trade fight over one `data-copied`.
+    const { container, rerender } = render(<GlyphSwap rest="bolt" alt="clock" on={false} busy={false} />);
+    const outer = container.firstElementChild!;
+    expect(outer.matches(".copy-glyph[aria-hidden='true']")).toBe(true);
+    expect(outer.hasAttribute("data-copied")).toBe(false);
+    const [inner, loader] = [...outer.children];
+    expect(outer.children).toHaveLength(2);
+    expect(inner!.matches(".copy-glyph")).toBe(true);
+    expect(loader!.matches("svg.ico.spin")).toBe(true);
+    expect(loader!.innerHTML).toBe(glyph("loader"));
+    expect(container.querySelectorAll(".spin")).toHaveLength(1);
+
+    rerender(<GlyphSwap rest="bolt" alt="clock" on busy={false} />);
+    expect(inner!.getAttribute("data-copied")).toBe("true");
+    expect(outer.hasAttribute("data-copied")).toBe(false);
+
+    rerender(<GlyphSwap rest="bolt" alt="clock" on busy />);
+    expect(outer.getAttribute("data-copied")).toBe("true");
+    // The same nodes carry both trades.
+    expect([...outer.children]).toEqual([inner, loader]);
+  });
+
   it("CopyGlyph is the copy mark trading for the check", () => {
     const { container } = render(<CopyGlyph copied />);
     const cell = container.querySelector(".copy-glyph")!;

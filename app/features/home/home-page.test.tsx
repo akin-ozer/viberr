@@ -75,8 +75,8 @@ function baseData(projects: HomeProjectCard[]): HomePageData {
       mcpServers: 1,
       skills: 4,
     },
-    notifications: [],
     unread: 0,
+    orphanUnread: 0,
     storeRoot: "/data",
   };
 }
@@ -267,42 +267,49 @@ describe("UI-24: the org tile counts the population the panel shows", () => {
 });
 
 describe("UI-03: a dropped live-update stream is surfaced", () => {
-  it("renders a paused chip only when the stream is down", () => {
-    const { queryByText, rerender } = renderHome(baseData([card()]));
-    expect(queryByText(/live updates paused/)).toBeNull();
+  const PAUSED = "Live updates paused. Cards may be out of date.";
+  // The announcer carries the same sentence, so queries pin the visible strip.
+  const STRIP_TEXT = { selector: ".archived-banner span" };
+
+  it("renders a paused strip only when the stream is down", () => {
+    const { container, rerender } = renderHome(baseData([card()]));
+    expect(container.querySelector(".archived-banner")).toBeNull();
     rerender(<div />);
 
-    const { getByText } = renderHome(baseData([card()]), { livePaused: true });
-    expect(getByText(/live updates paused/)).toBeTruthy();
+    const paused = renderHome(baseData([card()]), { livePaused: true });
+    // layo-10: a strip under the header row, inside the sticky header — the
+    // chip and Retry in the row (which cannot wrap) scrolled the page
+    // sideways at phone width. Canary: put the chip back in `.home-top-in`.
+    const strip = paused.container.querySelector("header.home-top > .archived-banner");
+    expect(strip?.textContent).toContain(PAUSED);
+    expect(paused.container.querySelector(".home-top-in .pill")).toBeNull();
   });
 
-  it("ruling 149: the sentence is a chip, the retry a real control", () => {
+  it("ruling 149: the sentence is a status line, the retry a real control", () => {
     // The same split the workspace header uses: a `.pill` has no cursor and no
     // hover, so one element that was both sentence and control read as neither.
-    // Canary: merge them back into one `.pill` button and the SPAN assertion
-    // fails; put `role="status"` on the chip and it stops being reachable by
-    // its own words.
+    // Canary: put `role="status"` on the strip and the sentence is read twice.
     let retried = 0;
     const { container, getByText, getByRole } = renderHome(baseData([card()]), {
       livePaused: true,
       onReconnect: () => (retried += 1),
     });
-    const chip = getByText("live updates paused");
-    expect(chip.tagName).toBe("SPAN");
-    expect(chip.closest('[role="status"]')).toBeNull();
+    const sentence = getByText(PAUSED, STRIP_TEXT);
+    expect(sentence.tagName).toBe("SPAN");
+    expect(sentence.closest('[role="status"]')).toBeNull();
     fireEvent.click(getByRole("button", { name: "Retry" }));
     expect(retried).toBe(1);
     const live = container.querySelector('span.vh[role="status"]');
-    expect(live?.textContent).toMatch(/Live updates paused/);
+    expect(live?.textContent).toBe(PAUSED);
   });
 
   it("ruling 149: no Retry when there is nothing to reconnect", () => {
     // The prop is optional, and a button that calls nothing is a control that
-    // does nothing — the chip still states the fact.
+    // does nothing — the strip still states the fact.
     const { getByText, queryByRole } = renderHome(baseData([card()]), {
       livePaused: true,
     });
-    expect(getByText("live updates paused")).toBeTruthy();
+    expect(getByText(PAUSED, STRIP_TEXT)).toBeTruthy();
     expect(queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
@@ -545,6 +552,40 @@ describe("F13: the home footer says what it is", () => {
     expect(dialog.textContent).toContain("never touched");
   });
 
+  // Ruling 368: the rebuild in flight shows itself on its trigger (busy, the
+  // loader spinning, "Rebuilding…") and cannot be pressed again: it used to
+  // stay live and reopen its confirm while the rebuild it had started ran.
+  // Canary: drop `disabled={rebuilding}` from the strip's Rebuild button.
+  it("ruling 368: a rebuild in flight is busy on its trigger and does not reopen the confirm", async () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <HomePage data={baseData([card()])} theme="system" />
+          </ToastProvider>
+        ),
+        // Never answers: the test reads the wait itself.
+        action: () => new Promise(() => {}),
+      },
+    ]);
+    const { container, getByText } = render(<Stub initialEntries={["/"]} />);
+    const trigger = getByText("Rebuild projections…").closest("button")!;
+    fireEvent.click(trigger);
+    fireEvent.click(
+      within(container.querySelector("dialog.confirm-card")!).getByText("Rebuild projections"),
+    );
+    await waitFor(() => expect(trigger.getAttribute("aria-busy")).toBe("true"));
+    expect(trigger.textContent).toBe("Rebuilding…");
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.querySelector("svg.ico.spin")).not.toBeNull();
+    fireEvent.click(trigger);
+    expect(container.querySelector("dialog.confirm-card")).toBeNull();
+    // Re-scan is its own request, at rest.
+    const rescan = getByText("Re-scan store").closest("button")!;
+    expect(rescan.hasAttribute("aria-busy")).toBe(false);
+  });
+
   it("hides both actions from a non-admin (they are 403 server-side)", () => {
     const data = baseData([card()]);
     const { container } = renderHome({
@@ -552,6 +593,81 @@ describe("F13: the home footer says what it is", () => {
       user: { ...data.user, role: "member" },
     });
     expect(container.querySelector(".store-strip")).toBeNull();
+  });
+});
+
+/**
+ * Interface review 2026-09-24 (writ-2): files the re-scan could not project were
+ * added into "N changed" and toasted with the success tick, in copy assembled
+ * from fragments ("1 project dirs, no drift found").
+ */
+describe("writ-2: the re-scan toast tells a failure from a sync", () => {
+  function rescanWith(result: {
+    ok: boolean;
+    projects?: number;
+    changed?: number;
+    removed?: number;
+    errors?: number;
+  }) {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <HomePage data={baseData([card()])} theme="system" />
+          </ToastProvider>
+        ),
+        action: () => result,
+      },
+    ]);
+    const view = render(<Stub initialEntries={["/"]} />);
+    fireEvent.click(view.getByText("Re-scan store").closest("button")!);
+    return view;
+  }
+
+  async function toast(container: HTMLElement): Promise<Element> {
+    await waitFor(() => expect(container.querySelector(".toast")).not.toBeNull());
+    return container.querySelector(".toast")!;
+  }
+
+  it("names unreadable files as an error, with the way out", async () => {
+    const { container } = rescanWith({
+      ok: true,
+      projects: 3,
+      changed: 1,
+      removed: 0,
+      errors: 2,
+    });
+    const t = await toast(container);
+    expect(t.textContent).toContain(
+      "Re-scan finished, but 2 files could not be read. The server log names each one. Fix them and re-scan.",
+    );
+    expect(t.getAttribute("data-kind")).toBe("error");
+  });
+
+  it("says nothing changed, with agreeing nouns, on a clean sync", async () => {
+    const { container } = rescanWith({
+      ok: true,
+      projects: 1,
+      changed: 0,
+      removed: 0,
+      errors: 0,
+    });
+    const t = await toast(container);
+    expect(t.textContent).toContain("Store re-scanned: 1 project, nothing changed");
+    expect(t.getAttribute("data-kind")).toBe("success");
+  });
+
+  it("counts updated files without the unreadable ones", async () => {
+    const { container } = rescanWith({
+      ok: true,
+      projects: 3,
+      changed: 1,
+      removed: 1,
+      errors: 0,
+    });
+    const t = await toast(container);
+    expect(t.textContent).toContain("Store re-scanned: 3 projects, 2 files updated");
   });
 });
 
@@ -705,5 +821,29 @@ describe("U33-2: an unreachable repository has a home on the project card", () =
     );
     expect(repoLine(none.container).textContent).toBe("no repository");
     expect(repoLine(none.container).querySelector(".pill")).toBeNull();
+  });
+});
+
+describe("acce-8: the project link is named by what it shows", () => {
+  // "Open X board" as an aria-label replaced the content, so a screen reader
+  // never heard the repo, the task counts, "N waiting on you" or the last
+  // update. Canary: restore the aria-label on either form.
+  function renderPiece(node: ReactNode) {
+    const Stub = createRoutesStub([{ path: "/", Component: () => <>{node}</> }]);
+    return render(<Stub initialEntries={["/"]} />);
+  }
+  const p = card({ total: 3, dist: { impl: 3 }, waiting: 2 });
+
+  it.each([
+    ["card", <ProjectCard key="c" p={p} starred={false} onStar={() => {}} />],
+    ["row", <ProjectRow key="r" p={p} starred={false} onStar={() => {}} />],
+  ])("the %s link carries the project's state and hides only the initial", (_, node) => {
+    const { container, getByRole } = renderPiece(node);
+    const link = container.querySelector("a.pj-link")!;
+    expect(link.hasAttribute("aria-label")).toBe(false);
+    expect(container.querySelector(".pj-mark")!.getAttribute("aria-hidden")).toBe("true");
+    expect(
+      getByRole("link", { name: /^Viberr Core.*akin-ozer\/viberr.*3 tasks.*2 waiting on you/ }),
+    ).toBe(link);
   });
 });

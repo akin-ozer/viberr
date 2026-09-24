@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { projectRulingsKb } from "~/server/files/project-rulings.server";
 import { data, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/project.agents";
@@ -174,7 +175,8 @@ interface ProfileMutationSuccess {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
 
   // E2 (pass 16): the layout loader does not run for an action, so the
   // members-only gate is repeated here. Without it a signed-in non-member got
@@ -310,7 +312,7 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
       deployments={loaderData.deployments}
       stages={loaderData.stages}
       workflow={loaderData.workflow}
-      projectSlug={layout?.board.project.slug ?? ""}
+      projectSlug={layout?.project.slug ?? ""}
       projectName={loaderData.projectName}
       myRole={layout?.myRole ?? null}
       viewerIsOrgAdmin={loaderData.viewerIsOrgAdmin}
@@ -320,3 +322,6 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.agents");

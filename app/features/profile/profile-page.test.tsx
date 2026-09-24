@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import { DEFAULT_NOTIF_PREFS } from "./notification-prefs";
+import { PROFILE_DATA as BASE } from "../../../test-support/profile-data";
 import {
   ProfilePage,
   type ProfileActionData,
@@ -12,64 +12,6 @@ import {
 } from "./profile-page";
 
 afterEach(cleanup);
-
-const BASE: ProfileData = {
-  user: {
-    id: "u_arda",
-    name: "Arda Kaya",
-    title: "Senior engineer",
-    email: "arda@viberr.dev",
-    idp: "local",
-    createdAt: "2026-02-18T09:00:00.000Z",
-    avatarTone: "",
-    hasPassword: true,
-    githubConnected: false,
-    githubHandle: null,
-  },
-  memberships: [{ slug: "viberr-core", name: "Viberr Core", role: "maintainer" }],
-  accessRole: "maintainer",
-  githubConfigured: true,
-  // Ruling 127: the viewer's own agent accounts, neither connected.
-  backends: [
-    {
-      backend: "claude",
-      health: {
-        backend: "claude",
-        userId: "u_arda",
-        available: false,
-        kind: null,
-        method: null,
-        verification: "none",
-        secretSuffix: null,
-        verifiedAt: null,
-        connectedAt: null,
-        detail:
-          "Claude isn't connected. Connect it on your Profile → Agent accounts.",
-      },
-      login: null,
-      methods: { signIn: ["claudeai", "console"], paste: ["api_key"] },
-    },
-    {
-      backend: "codex",
-      health: {
-        backend: "codex",
-        userId: "u_arda",
-        available: false,
-        kind: null,
-        method: null,
-        verification: "none",
-        secretSuffix: null,
-        verifiedAt: null,
-        connectedAt: null,
-        detail:
-          "Codex isn't connected. Connect it on your Profile → Agent accounts.",
-      },
-      login: null,
-      methods: { signIn: ["device"], paste: ["api_key", "access_token"] },
-    },
-  ],
-  prefs: { notifs: DEFAULT_NOTIF_PREFS, tlDefault: "all" },
-};
 
 let lastSubmit: Record<string, string> | null = null;
 let lastTheme: string | null = null;
@@ -443,5 +385,29 @@ describe("ProfilePage", () => {
     expect(container.querySelectorAll(".rbac-yes")).toHaveLength(0);
     // Nav copy renders as plain text (no dead keybtn).
     expect(container.querySelector(".keybtn")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 368: Connect named its work ("Connecting…") but kept the GitHub glyph
+ * and sat at the .45 refused step with a not-allowed cursor while better-auth
+ * built the OAuth redirect. It is `aria-busy` now, the loader spinning.
+ * Canary: drop `aria-busy={connectBusy || undefined}` in `profile-page.tsx`.
+ */
+describe("ruling 368: GitHub Connect in flight", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reads Connecting…, busy, the loader spinning, until the redirect", () => {
+    // The OAuth start never answers here: the test reads the wait itself.
+    vi.stubGlobal("fetch", () => new Promise(() => {}));
+    const { getByText } = renderProfile();
+    const connect = githubPanel(getByText).querySelector<HTMLButtonElement>(
+      ".cred-warn button.btn",
+    )!;
+    fireEvent.click(connect);
+    expect(connect.getAttribute("aria-busy")).toBe("true");
+    expect(connect.textContent).toBe("Connecting…");
+    expect(connect.disabled).toBe(true);
+    expect(connect.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
   });
 });

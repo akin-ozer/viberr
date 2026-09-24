@@ -267,6 +267,11 @@ function AuditRow({
 }) {
   const m = PEV_META[entry.kind] ?? PEV_META.change!;
   const resolved = entry.status === "resolved";
+  // What the pill's one word does not say: who resolved it and when, or how to.
+  const verdictDetail = resolved
+    ? (entry.resolvedBy ? ` by ${entry.resolvedBy}` : "") +
+      (entry.resolvedAt ? ` · ${timeLabel(entry.resolvedAt)}` : "")
+    : ": grant the missing scope to resolve";
   return (
     <div className={sub ? "pol-ev pev-sub" : "pol-ev"}>
       <span className={"pev-ico " + m.cls}>
@@ -289,20 +294,14 @@ function AuditRow({
         {entry.kind === "violation" && (
           <>
             {" "}
-            <span
-              title={
-                resolved
-                  ? "Resolved" +
-                    (entry.resolvedBy ? ` by ${entry.resolvedBy}` : "") +
-                    (entry.resolvedAt
-                      ? ` · ${timeLabel(entry.resolvedAt)}`
-                      : "")
-                  : "Open: grant the missing scope to resolve"
-              }
-            >
+            <span title={(resolved ? "Resolved" : "Open") + verdictDetail}>
               <Pill kind={resolved ? "done" : "input"} sm>
                 {resolved ? "resolved" : "open"}
               </Pill>
+              {/* Interface review 2026-09-24 (acce-5): the title is the
+                  pointer's extra; the rest of the sentence reaches touch,
+                  keyboard and screen readers as `.vh` after the pill. */}
+              {verdictDetail && <span className="vh">{verdictDetail}</span>}
             </span>
           </>
         )}
@@ -371,6 +370,7 @@ function CompactedSessions({
 function AuditLogs({
   entries,
   total,
+  filtered,
   utc,
   actorOptions,
   onOpen,
@@ -378,6 +378,8 @@ function AuditLogs({
 }: {
   entries: AuditLogEntryView[];
   total: number;
+  /** One of the panel's own URL filters is on, so `total` counts matches. */
+  filtered: boolean;
   /** Timezone-agnostic first-pass rendering until hydration (see ActivityPage). */
   utc: boolean;
   /** Everyone who ever wrote an audit row, for the actor filter — the stored
@@ -404,23 +406,20 @@ function AuditLogs({
               it has one now (P21), so the honest header is the same count the
               Stream carries — of the rows MATCHING the panel's filters. */}
           policy &amp; access · {entries.length} of {total} entries
+          {filtered ? " (filtered)" : ""}
         </span>
       </div>
       {/* Design pass 2026-09-08: the bar renders only for a log longer than
           one page. A one-entry log carried five controls above it — the
           filter apparatus was larger than the content it filtered — and a
-          list you can read whole does not need a search. */}
-      {total > AUDIT_STEP && (
+          list you can read whole does not need a search.
+          Interface review 2026-09-24 (writ-7): `total` is the FILTERED count,
+          so a filter that narrowed a long log below one page unmounted the
+          search box and its Clear. The bar stays while any filter is on. */}
+      {(total > AUDIT_STEP || filtered) && (
         <FeedFilters
           legend="audit logs"
-          params={{
-            q: "aq",
-            type: "aky",
-            actor: "aac",
-            task: "atk",
-            from: "afrom",
-            to: "ato",
-          }}
+          params={AUDIT_PARAMS}
           typeLabel="kind"
           typeOptions={AUDIT_KIND_OPTIONS}
           actorOptions={actorOptions}
@@ -445,7 +444,11 @@ function AuditLogs({
           ),
         )}
         {entries.length === 0 && (
-          <div className="feed-empty">No policy or access events yet.</div>
+          <div className="feed-empty">
+            {filtered
+              ? "No entries match these filters."
+              : "No policy or access events yet."}
+          </div>
         )}
         {remaining > 0 && (
           <button
@@ -495,6 +498,36 @@ interface FeedFilterParams {
   to: string;
 }
 
+const STREAM_PARAMS: FeedFilterParams = {
+  q: "sq",
+  type: "sty",
+  actor: "sac",
+  task: "stk",
+  from: "sfrom",
+  to: "sto",
+};
+
+const AUDIT_PARAMS: FeedFilterParams = {
+  q: "aq",
+  type: "aky",
+  actor: "aac",
+  task: "atk",
+  from: "afrom",
+  to: "ato",
+};
+
+/** Is any of one panel's URL filters set? The loader applies them server-side,
+ *  so while one is on, the panel's rows AND its total describe the matches,
+ *  not the project. */
+function feedFiltersActive(
+  searchParams: URLSearchParams,
+  params: FeedFilterParams,
+): boolean {
+  return Object.values(params).some(
+    (name) => (searchParams.get(name) ?? "") !== "",
+  );
+}
+
 /**
  * One panel's filter bar: search, a type/kind pick, an actor pick, a task id,
  * and a date range — all URL-driven (the board's own `?q=` pattern: the param
@@ -528,15 +561,8 @@ function FeedFilters({
       },
       { replace: true, preventScrollReset: true },
     );
-  const names = [
-    params.q,
-    params.type,
-    params.actor,
-    params.task,
-    params.from,
-    params.to,
-  ];
-  const active = names.some((name) => get(name) !== "");
+  const names = Object.values(params);
+  const active = feedFiltersActive(searchParams, params);
   return (
     <div className="feed-filters" role="group" aria-label={legend}>
       <label className="ff-search">
@@ -590,7 +616,7 @@ function FeedFilters({
         <DatePicker
           value={get(params.from) || null}
           placeholder="From"
-          ariaLabel={`From date for the ${legend}`}
+          label={`From date for the ${legend}`}
           onChange={(iso) => setParam(params.from, iso ?? "")}
         />
       </span>
@@ -601,7 +627,7 @@ function FeedFilters({
         <DatePicker
           value={get(params.to) || null}
           placeholder="To"
-          ariaLabel={`To date for the ${legend}`}
+          label={`To date for the ${legend}`}
           onChange={(iso) => setParam(params.to, iso ?? "")}
         />
       </span>
@@ -651,8 +677,12 @@ export function ActivityPage({
   auditActors: AuditActorOption[];
 }) {
   const navigate = useNavigate();
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [f, setF] = useState<ActorFilter>("all");
+  // Interface review 2026-09-24 (writ-7): the loader filters server-side, so
+  // an empty `stream` under a URL filter means "no match", not "no activity".
+  const streamFiltered = feedFiltersActive(searchParams, STREAM_PARAMS);
+  const auditFiltered = feedFiltersActive(searchParams, AUDIT_PARAMS);
   // Every timestamp on this page is viewer-local, but the server renders in
   // ITS zone (a UTC container in production), so the local forms hydrate to
   // different text — a recoverable React #418 that regenerates the whole page
@@ -734,20 +764,13 @@ export function ActivityPage({
                   {/* UI-47: `total` counts the FILTERED, already-bounded loaded
                       slice — it never described the project. Say what it is. */}
                   {total} of {streamTotal} events
-                  {f !== "all" ? " (filtered)" : ""}
+                  {f !== "all" || streamFiltered ? " (filtered)" : ""}
                 </span>
               </span>
             </div>
             <FeedFilters
               legend="activity stream"
-              params={{
-                q: "sq",
-                type: "sty",
-                actor: "sac",
-                task: "stk",
-                from: "sfrom",
-                to: "sto",
-              }}
+              params={STREAM_PARAMS}
               typeLabel="type"
               typeOptions={streamOptions.types.map((type) => ({
                 value: type,
@@ -796,9 +819,9 @@ export function ActivityPage({
             ))}
             {!shown.length && (
               <div className="feed-empty">
-                {stream.length === 0
+                {stream.length === 0 && !streamFiltered
                   ? "No activity yet."
-                  : "No events match this filter."}
+                  : "No events match these filters."}
               </div>
             )}
             {streamRemaining > 0 && (
@@ -827,6 +850,7 @@ export function ActivityPage({
           <AuditLogs
             entries={audit}
             total={auditTotal}
+            filtered={auditFiltered}
             utc={!local}
             actorOptions={auditActors}
             onOpen={onOpen}

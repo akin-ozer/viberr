@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ProjectCredentialHealth } from "~/server/secrets/pat-store.server";
 import { CredentialCard, CredentialManageActions } from "./credential-card";
 import { createRoutesStub } from "react-router";
@@ -55,6 +55,15 @@ const healthyCredential: ProjectCredentialHealth = {
     ok: true,
     source: "header" as const,
   })),
+};
+
+/** A `workflow` violation GitHub already raised: the advisory the delivery
+ *  refusal's remedy points at. */
+const workflowAdvisory: ProjectCredentialHealth["advisories"][number] = {
+  id: "workflow_scope",
+  scope: "workflow",
+  source: "violation",
+  text: "GitHub refused a push under .github/workflows/ with this token (VIB-142): it lacks the workflow scope. Grant it on GitHub, then use Re-check scopes on the project's GitHub page.",
 };
 
 const noneCredential: ProjectCredentialHealth = {
@@ -275,6 +284,10 @@ describe("CredentialCard states", () => {
     expect(container.querySelector(".cred-warn")!.textContent).toContain(
       "Scopes not yet verified",
     );
+    // writ-6: the sentence names the button by its label.
+    expect(container.querySelector(".cred-warn")!.textContent).toContain(
+      "Use Re-check scopes to verify them.",
+    );
   });
 
   /**
@@ -327,12 +340,41 @@ describe("CredentialCard states", () => {
       <CredentialCard
         credential={violationCredential}
         onOpenTask={() => {}}
-        warnActions={<button className="btn sm">Grant scope</button>}
+        warnActions={<button className="btn sm">Re-check scopes</button>}
       />,
     );
     expect(container.querySelector(".cred-warn .btn")!.textContent).toBe(
-      "Grant scope",
+      "Re-check scopes",
     );
+  });
+
+  it("an advisory-only credential keeps the green footer, and the re-check slot with it", () => {
+    // `workflow` and `checks:read` are never required scopes, so a card whose
+    // only problem is an advisory renders `.cred-ok`, which had no action slot
+    // while the advisory said to use Re-check scopes. CANARY: drop the slot
+    // from the `.cred-ok` branch.
+    const slot = <button className="btn sm">Re-check scopes</button>;
+    const advised = render(
+      <CredentialCard
+        credential={{ ...healthyCredential, advisories: [workflowAdvisory] }}
+        onOpenTask={() => {}}
+        warnActions={slot}
+      />,
+    );
+    expect(advised.container.querySelector(".cred-warn")).toBeNull();
+    expect(advised.container.querySelector(".cred-ok .btn")!.textContent).toBe(
+      "Re-check scopes",
+    );
+    // No advisory, nothing to re-check: the all-good footer stays bare.
+    const clean = render(
+      <CredentialCard
+        credential={healthyCredential}
+        onOpenTask={() => {}}
+        warnActions={slot}
+      />,
+    );
+    expect(clean.container.querySelector(".cred-ok")).not.toBeNull();
+    expect(clean.container.querySelector(".cred-ok .btn")).toBeNull();
   });
 
   it("renders the manageActions slot in every state, including 'none'", () => {
@@ -365,7 +407,7 @@ describe("CredentialManageActions (finding #13)", () => {
       <CredentialManageActions
         configured={false}
         canManage
-        busy={false}
+        inFlight={null}
         onSet={onSet}
         onClear={onClear}
       />,
@@ -379,7 +421,7 @@ describe("CredentialManageActions (finding #13)", () => {
       <CredentialManageActions
         configured
         canManage
-        busy={false}
+        inFlight={null}
         onSet={onSet}
         onClear={onClear}
       />,
@@ -412,7 +454,7 @@ describe("CredentialManageActions (finding #13)", () => {
       <CredentialManageActions
         configured
         canManage={false}
-        busy={false}
+        inFlight={null}
         onSet={() => {}}
         onClear={() => {}}
       />,
@@ -561,7 +603,7 @@ describe("RepositoryPanel", () => {
     // …and says why the rest is missing, naming the grant that carries it.
     const note = container.querySelector(".pol-note")!;
     expect(note.textContent).toContain(
-      "Credential details need the Grant GitHub scope grant (project admin or maintainer).",
+      "Credential details need the Manage the GitHub credential grant (project admin or maintainer).",
     );
     expect(note.textContent).toContain(
       "The Connection row above still shows whether this repository is reachable.",
@@ -720,9 +762,11 @@ describe("BranchesPanel", () => {
     expect(rows[0]!.querySelector(".live-task .key")!.textContent).toBe(
       "VIB-142",
     );
-    expect(rows[0]!.querySelector(".trace.ok")!.textContent).toBe(
-      "vib-142-attach-workspace",
-    );
+    // colo-12: the branch name is a plain `.trace` (secondary ink); the Sync
+    // pill carries the state.
+    const trace = rows[0]!.querySelector(".live-branch .trace")!;
+    expect(trace.textContent).toBe("vib-142-attach-workspace");
+    expect(trace.classList.contains("ok")).toBe(false);
     expect(rows[0]!.textContent).toContain("3 commits");
     expect(rows[0]!.textContent).toContain("#318");
     expect(rows[0]!.querySelector(".pill.ready")!.textContent).toContain(
@@ -934,7 +978,7 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     expect(container.textContent).not.toContain("pull_request:write");
     // The viewer is told why, and still learns the repository is connected.
     expect(container.textContent).toContain(
-      "Credential details need the Grant GitHub scope grant",
+      "Credential details need the Manage the GitHub credential grant",
     );
     expect(container.querySelector(".kv-row .pill.ready")!.textContent).toContain(
       "connected",
@@ -946,7 +990,7 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     expect(container.querySelector(".cred-card")).toBeNull();
     expect(container.textContent).not.toContain("github_pat_••••42af");
     expect(container.textContent).toContain(
-      "Credential details need the Grant GitHub scope grant",
+      "Credential details need the Manage the GitHub credential grant",
     );
   });
 
@@ -958,13 +1002,15 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     );
     expect(container.textContent).toContain("github_pat_••••42af");
     expect(container.querySelectorAll(".scope-chip").length).toBe(4);
-    // Same grant, so the card's own actions come with it.
-    expect(container.textContent).toContain("Grant scope");
+    // Same grant, so the card's own actions come with it. writ-6: the button
+    // re-checks scopes (Viberr cannot grant one), and its label says so.
+    expect(container.textContent).toContain("Re-check scopes");
+    expect(container.textContent).not.toContain("Grant scope");
     expect(container.querySelector(".cred-manage")).not.toBeNull();
     expect(container.textContent).toContain("Rotate credential");
     // The withheld-note is the viewer's line, not a second permanent fixture.
     expect(container.textContent).not.toContain(
-      "Credential details need the Grant GitHub scope grant",
+      "Credential details need the Manage the GitHub credential grant",
     );
   });
 
@@ -981,6 +1027,50 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     const { container } = renderPage(null);
     expect(container.querySelector(".cred-card")).toBeNull();
     expect(container.textContent).not.toContain("github_pat_••••42af");
+  });
+});
+
+/**
+ * The delivery refusal's remedy says "Grant the `workflow` scope on GitHub,
+ * then use Re-check on the project's GitHub view", and the pre-push check reads
+ * the cached header scopes. The card that remedy lands on is the green one (no
+ * required scope is missing), so the re-check has to be there or the only way
+ * out is rotating the credential.
+ */
+describe("an advisory's re-check is reachable from the green footer", () => {
+  it("a maintainer re-checks the credential from the card whose only problem is an advisory", async () => {
+    const intents: string[] = [];
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        action: async ({ request }) => {
+          intents.push(String((await request.formData()).get("intent")));
+          return { ok: true as const, toast: "Re-checked." };
+        },
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage
+              data={viewData({
+                credential: { ...healthyCredential, advisories: [workflowAdvisory] },
+              })}
+              reconcileCheck={NO_CHECK_ON_RECORD}
+              myRole="maintainer"
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/viberr-core/github"]} />,
+    );
+    expect(container.querySelector(".cred-warn")).toBeNull();
+    const recheck = container.querySelector<HTMLButtonElement>(
+      `.cred-ok button[title="Re-check the credential's scopes against GitHub"]`,
+    );
+    expect(recheck, "the re-check must sit in the green footer").not.toBeNull();
+    expect(recheck!.textContent).toBe("Re-check scopes");
+    fireEvent.click(recheck!);
+    await waitFor(() => expect(intents).toEqual(["grant-scope"]));
   });
 });
 
@@ -1044,6 +1134,17 @@ describe("R17-5: never-synced is neutral, only a stale cache warns", () => {
     });
     expect(chip.classList.contains("stale")).toBe(true);
     expect(chip.textContent).toContain("Last change 2h ago");
+  });
+
+  it("carries its title's explanation as text for assistive tech (interface review 2026-09-24, acce-5)", () => {
+    // The stale warning's "the branch and PR state below may be out of date"
+    // lived only in a hover title, which touch and screen-reader users never get.
+    const chip = renderChip({
+      at: "2026-08-04T00:00:00.000Z",
+      label: "2h ago",
+      stale: true,
+    });
+    expect(chip.querySelector(".vh")!.textContent).toBe(` · ${chip.getAttribute("title")}`);
   });
 
   it("renders a fresh cache neutral", () => {
@@ -1235,5 +1336,138 @@ describe("F19-22: the chip renders the last CHECK beside the last change", () =>
     );
     expect(changeOnly.textContent).toContain("Last change 4m ago");
     expect(changeOnly.classList.contains("stale")).toBe(false);
+  });
+});
+
+/**
+ * Ruling 368 (and 147(a)): a request shows itself in flight on the button that
+ * started it. Update status, Re-check scopes and the credential row used to go
+ * `disabled` for the whole wait with their resting glyph and label, so they
+ * painted the .45 refused step with a not-allowed cursor and said nothing. Now
+ * the starter carries `aria-busy` (the sheet's .7 busy step), the loader spins
+ * where its glyph was, and the label names the work; the sibling that merely
+ * waits stays at the disabled step and claims nothing.
+ *
+ * Canary: drop `aria-busy` from Update status in `github-view.tsx` and the first
+ * test fails; pass `inFlight={null}` to `CredentialManageActions` there and the
+ * credential test does.
+ */
+describe("ruling 368: the GitHub page's requests in flight", () => {
+  /** An action the TEST answers, when it decides to. */
+  function heldAction() {
+    let answer: (reply: { ok: true; toast: string }) => void = () => {};
+    const reply = new Promise<{ ok: true; toast: string }>((resolve) => {
+      answer = resolve;
+    });
+    return { action: () => reply, answer: () => answer({ ok: true, toast: "Done" }) };
+  }
+  const renderHeld = (action: () => Promise<{ ok: true; toast: string }>) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage
+              data={viewData({ credential: violationCredential })}
+              reconcileCheck={NO_CHECK_ON_RECORD}
+              myRole="maintainer"
+            />
+          </ToastProvider>
+        ),
+        action,
+      },
+    ]);
+    return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
+  };
+  const button = (c: HTMLElement, text: string) =>
+    [...c.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
+      b.textContent?.includes(text),
+    )!;
+
+  it("Update status says it is updating while Re-check scopes only waits", async () => {
+    const held = heldAction();
+    const { container } = renderHeld(held.action);
+    fireEvent.click(button(container, "Update status"));
+    await waitFor(() =>
+      expect(button(container, "Updating…").getAttribute("aria-busy")).toBe("true"),
+    );
+    const update = button(container, "Updating…");
+    expect(update.disabled).toBe(true);
+    // Ruling 459: the loader is always drawn in the glyph's cell (GlyphSwap),
+    // so "spinning" is the cell having traded the resting glyph for it.
+    expect(update.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
+    const recheck = button(container, "Re-check scopes");
+    expect(recheck.disabled).toBe(true);
+    expect(recheck.hasAttribute("aria-busy")).toBe(false);
+    expect(recheck.querySelector(".copy-glyph[data-copied]")).toBeNull();
+
+    held.answer();
+    await waitFor(() => expect(button(container, "Update status")).toBeTruthy());
+    expect(button(container, "Update status").hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("Re-check scopes says it is checking while Update status only waits", async () => {
+    const held = heldAction();
+    const { container } = renderHeld(held.action);
+    fireEvent.click(button(container, "Re-check scopes"));
+    await waitFor(() =>
+      expect(button(container, "Checking…").getAttribute("aria-busy")).toBe("true"),
+    );
+    expect(button(container, "Checking…").querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
+    const update = button(container, "Update status");
+    expect(update.disabled).toBe(true);
+    expect(update.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("a rotation says it is rotating while Remove only waits", async () => {
+    const held = heldAction();
+    const { container } = renderHeld(held.action);
+    fireEvent.click(button(container, "Rotate credential"));
+    await waitFor(() =>
+      expect(button(container, "Rotating…").getAttribute("aria-busy")).toBe("true"),
+    );
+    const remove = button(container, "Remove credential");
+    expect(remove.disabled).toBe(true);
+    expect(remove.hasAttribute("aria-busy")).toBe(false);
+  });
+});
+
+describe("ruling 368: CredentialManageActions names the request in flight", () => {
+  const renderRow = (configured: boolean, inFlight: string | null) =>
+    render(
+      <CredentialManageActions
+        configured={configured}
+        canManage
+        inFlight={inFlight}
+        onSet={() => {}}
+        onClear={() => {}}
+      />,
+    ).container;
+
+  it("an attach in flight: Attaching…, busy, the loader spinning", () => {
+    const c = renderRow(false, "set-credential");
+    const attach = c.querySelector<HTMLButtonElement>("button")!;
+    expect(attach.textContent).toBe("Attaching…");
+    expect(attach.getAttribute("aria-busy")).toBe("true");
+    expect(attach.disabled).toBe(true);
+    expect(attach.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
+  });
+
+  it("a removal in flight: Removing… on Remove, Rotate only waits", () => {
+    const c = renderRow(true, "clear-credential");
+    const [rotate, remove] = [...c.querySelectorAll<HTMLButtonElement>("button")];
+    expect(remove!.textContent).toBe("Removing…");
+    expect(remove!.getAttribute("aria-busy")).toBe("true");
+    expect(rotate!.textContent).toBe("Rotate credential");
+    expect(rotate!.disabled).toBe(true);
+    expect(rotate!.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("at rest: no busy mark anywhere", () => {
+    const c = renderRow(true, null);
+    for (const b of c.querySelectorAll<HTMLButtonElement>("button")) {
+      expect(b.hasAttribute("aria-busy")).toBe(false);
+      expect(b.disabled).toBe(false);
+    }
   });
 });

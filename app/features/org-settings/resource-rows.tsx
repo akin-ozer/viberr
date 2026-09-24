@@ -2,6 +2,7 @@ import { FolderIco } from "~/features/kb-browser/icons";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { EditIco } from "./mini-modal";
@@ -111,14 +112,19 @@ export function KbPanel({
               >
                 <FolderIco />
               </button>
+              {/* Ruling 368: the probe in flight shows itself here — busy, the
+                  loader spinning, a name that says the work — and a second
+                  press cannot re-submit it. */}
               <button
                 type="button"
                 className="stg-x"
-                title="Re-scan folder to refresh the doc count"
-                aria-label={"Re-scan " + kb.name}
+                title={reindexing === kb.id ? "Re-scanning…" : "Re-scan folder to refresh the doc count"}
+                aria-label={(reindexing === kb.id ? "Re-scanning " : "Re-scan ") + kb.name}
+                disabled={reindexing === kb.id}
+                aria-busy={reindexing === kb.id || undefined}
                 onClick={() => onReindex(kb)}
               >
-                <Icon name="refresh" className={reindexing === kb.id ? "spin" : ""} />
+                <GlyphSwap rest="refresh" alt="loader" on={reindexing === kb.id} spinAlt />
               </button>
               <button
                 type="button"
@@ -328,14 +334,17 @@ export function McpPanel({
               )}
             </span>
             <span className="rsrc-acts">
+              {/* Ruling 368: same shape as the KB re-scan above. */}
               <button
                 type="button"
                 className="stg-x"
-                title="Test connection"
-                aria-label={"Test " + m.name}
+                title={testing === m.id ? "Testing…" : "Test connection"}
+                aria-label={(testing === m.id ? "Testing " : "Test ") + m.name}
+                disabled={testing === m.id}
+                aria-busy={testing === m.id || undefined}
                 onClick={() => onTest(m)}
               >
-                <Icon name="refresh" className={testing === m.id ? "spin" : ""} />
+                <GlyphSwap rest="refresh" alt="loader" on={testing === m.id} spinAlt />
               </button>
               <button
                 type="button"

@@ -185,6 +185,23 @@ describe("workspace layout loader (seeded)", () => {
       );
     });
 
+    it("ruling 457: the board's own loader refuses a non-member the same way", async () => {
+      // Single fetch honors `?_routes=`, so the board loader can run without
+      // the layout's (F19-28): it carries the layout's refusal, byte for byte.
+      const { loader } = await import("~/routes/project.board");
+      const { cookie } = await app.cookieFor(seedIds.deniz);
+      const thrown = await loader(
+        loaderArgs(
+          "/projects/viberr-core/board.data?_routes=routes/project.board",
+          `${PROJECT_PATTERN}/board`,
+          { slug: "viberr-core" },
+          cookie,
+        ),
+      ).catch((e) => e);
+      expect(thrown?.init?.status ?? thrown?.status).toBe(404);
+      expect(String(thrown?.data ?? thrown)).toBe("No project at projects/viberr-core.");
+    });
+
     it("the task-detail surface is refused too (the layout gate covers children)", async () => {
       const { loader } = await import("~/routes/project");
       const { cookie } = await app.cookieFor(seedIds.deniz);
@@ -320,18 +337,30 @@ describe("workspace layout loader (seeded)", () => {
   });
 
   it("returns the seeded board: 5 columns, VIB-142 in Review with its chips", async () => {
-    const { loader } = await import("~/routes/project");
+    const [{ loader }, { loader: boardLoader }] = await Promise.all([
+      import("~/routes/project"),
+      import("~/routes/project.board"),
+    ]);
     const { cookie } = await app.cookieFor(seedIds.arda);
-    const result = await loader(
-      loaderArgs(
-        "/projects/viberr-core",
-        PROJECT_PATTERN,
-        { slug: "viberr-core" },
-        cookie,
-      ),
+    // One board request: the layout and the board's own loader (ruling 457,
+    // BOARD-6) on one Request.
+    const args = loaderArgs(
+      "/projects/viberr-core/board",
+      `${PROJECT_PATTERN}/board`,
+      { slug: "viberr-core" },
+      cookie,
     );
+    const [result, board] = await Promise.all([loader(args), boardLoader(args)]);
 
-    expect(result.board.columns.map((c) => c.stage.id)).toEqual([
+    // The shell's slice: no columns ride the layout any more.
+    expect(result).not.toHaveProperty("board");
+    expect(result.project).toEqual({
+      slug: "viberr-core",
+      name: expect.any(String),
+      repo: expect.any(String),
+      archived: false,
+    });
+    expect(board.columns.map((c) => c.stage.id)).toEqual([
       "triage",
       "ready",
       "impl",
@@ -345,9 +374,12 @@ describe("workspace layout loader (seeded)", () => {
     expect(result.reviewCount).toBe(3);
     expect(result.violations).toBe(1); // seeded VIB-142 PAT-scope violation
     expect(result.myRole).toBe("admin");
-    expect(result.notifications.length).toBe(10);
+    // Ruling 457 (owner, 2026-09-24): the bell's counts, not its list.
+    expect(result.unread).toBe(6);
+    expect(result.orphanUnread).toBe(0);
+    expect(result).not.toHaveProperty("notifications");
 
-    const review = result.board.columns.find((c) => c.stage.id === "review")!;
+    const review = board.columns.find((c) => c.stage.id === "review")!;
     const vib142 = review.tasks.find((t) => t.key === "VIB-142")!;
     expect(vib142).toBeDefined();
     expect(vib142.urgent).toBe(true);
@@ -368,10 +400,10 @@ describe("workspace layout loader (seeded)", () => {
    * packet or recommendations); the review queue deliberately does not require
    * one — a review-stage task waiting on a human can have no packet. So the same
    * task appeared under "Waiting on your acceptance" in Review while the board
-   * chip excluded it. The layout loader unions both predicates now.
+   * chip excluded it. The board loader unions both predicates now.
    */
   it("waitingOnMe covers acceptance-ready review tasks with no decision object", async () => {
-    const { loader } = await import("~/routes/project");
+    const { loader } = await import("~/routes/project.board");
     const { baseTaskFrontmatter, writeTask } = await import(
       "../../../test-support/test-store"
     );
@@ -414,14 +446,14 @@ describe("workspace layout loader (seeded)", () => {
     const { cookie } = await app.cookieFor(seedIds.arda);
     const result = await loader(
       loaderArgs(
-        "/projects/viberr-core",
-        PROJECT_PATTERN,
+        "/projects/viberr-core/board",
+        `${PROJECT_PATTERN}/board`,
         { slug: "viberr-core" },
         cookie,
       ),
     );
     const flagged = new Set(
-      result.board.columns
+      result.columns
         .flatMap((c) => c.tasks)
         .filter((t) => t.waitingOnMe)
         .map((t) => t.key),

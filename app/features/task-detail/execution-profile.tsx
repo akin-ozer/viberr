@@ -226,6 +226,15 @@ function DelayPicker({
   );
 }
 
+/**
+ * Ruling 368: what a run control's own request is doing while it is in
+ * flight: starting a run now, or scheduling one. Null while it is idle. The
+ * control shows it on its button (busy, the loader spinning, "Starting…" or
+ * "Scheduling…"), because the picker resets to Now on the click, so the
+ * control's own state cannot say which one was sent.
+ */
+export type RunInFlight = "run" | "schedule" | null;
+
 /** Minutes a non-"now" delay stands for (the schedule intent's payload). */
 export function delayMinutes(delay: RunDelay): number | null {
   return delay === "now" ? null : Number(delay);
@@ -391,7 +400,7 @@ function holdNoteFor(entries: readonly DependencyRender[]): string {
 }
 
 function OperatorRunControl({
-  busy,
+  inFlight,
   disabled,
   blockedReason,
   holdNote,
@@ -404,7 +413,8 @@ function OperatorRunControl({
   onRun,
   onCancelSchedule,
 }: {
-  busy: boolean;
+  /** The operator-run fetcher's request, if one is in flight. */
+  inFlight: RunInFlight;
   /** Task is closed (terminal stage) — controls render disabled (G9). */
   disabled?: boolean;
   /** F20-5 (R20-1): a non-structural reason the manual run is refused — an open
@@ -439,6 +449,7 @@ function OperatorRunControl({
 }) {
   const [steer, setSteer] = useState("");
   const [delay, setDelay] = useState<RunDelay>("now");
+  const busy = inFlight !== null;
   const backendLabel = backendLabelOf(defaultBackend);
   // Hunt 2026-08-29: two different kinds of "off". `busy`/`disabled` (closed
   // task) kill the whole control; the open-packet refusal (F20-5) and a backend
@@ -462,8 +473,11 @@ function OperatorRunControl({
       <span className="op-backend">{backendLabel}</span>
       <PromptInput
         value={steer}
-        ariaLabel="Steer this operator run (optional)"
-        placeholder="Optional: tell the operator what this run should focus on"
+        ariaLabel="Steer this run (optional)"
+        // Interface review 2026-09-24 (acce-38): short enough to fit the box
+        // at every width (the long hint cut mid-word), and the first words of
+        // the accessible name, so what shows and what is announced agree.
+        placeholder="Steer this run (optional)"
         disabled={hardOff}
         maxLength={2000}
         onChange={setSteer}
@@ -479,8 +493,9 @@ function OperatorRunControl({
           primary is the decision-stakes commit of the current state. */}
       <button
         type="button"
-        className="btn sm"
+        className="btn sm run-go"
         disabled={off}
+        aria-busy={busy || undefined}
         onClick={run}
         title={
           blockedReason ??
@@ -491,8 +506,18 @@ function OperatorRunControl({
               : "Schedule this operator run")
         }
       >
-        <GlyphSwap rest="shield" alt="clock" on={delay !== "now"} />
-        {busy ? "Running…" : delay === "now" ? "Run operator" : "Schedule"}
+        {/* Ruling 459 over ruling 368: the resting mark trades for the clock
+            when the when-picker leaves Now, and that whole cell trades for
+            the spinning loader while this control's own request is in flight
+            (GlyphSwap's `busy`). */}
+        <GlyphSwap rest="shield" alt="clock" on={delay !== "now"} busy={busy} />
+        {inFlight === "schedule"
+          ? "Scheduling…"
+          : inFlight === "run"
+            ? "Starting…"
+            : delay === "now"
+              ? "Run operator"
+              : "Schedule"}
       </button>
       {runRefusal && (
         // P11-41's honesty without a picker: the run would fail fast, so say
@@ -565,7 +590,7 @@ function AgentRunControl({
   engagedSupportingIds,
   runPrincipal,
   meId,
-  busy,
+  inFlight,
   closed,
   schedules,
   scheduleBusy,
@@ -599,7 +624,8 @@ function AgentRunControl({
    *  engagement's shape, so the posture line must too (hunt 2026-08-29: a
    *  repo-write profile engaged supporting was promised delivery). */
   engagedSupportingIds: string[];
-  busy: boolean;
+  /** The run-agent fetcher's request, if one is in flight. */
+  inFlight: RunInFlight;
   /** G9/P14-WL-07: the task is at the terminal stage (or archived). */
   closed: boolean;
   /** Pending run-agent schedules, listed under the control. */
@@ -611,6 +637,7 @@ function AgentRunControl({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [delay, setDelay] = useState<RunDelay>("now");
+  const busy = inFlight !== null;
   // Ruling 147: counted, not boolean — each refused start re-inserts the alert,
   // because readers announce an insertion, not a role flip on unchanged text.
   const [refused, setRefused] = useState(0);
@@ -758,8 +785,8 @@ function AgentRunControl({
       />
       <PromptInput
         value={prompt}
-        ariaLabel="Tell the agent what this run should do (optional)"
-        placeholder="Optional: tell it what this run should do"
+        ariaLabel="Prompt for this agent run (optional)"
+        placeholder="Prompt (optional)"
         disabled={busy}
         maxLength={4000}
         onChange={setPrompt}
@@ -773,8 +800,9 @@ function AgentRunControl({
       />
       <button
         type="button"
-        className="btn sm"
+        className="btn sm run-go"
         disabled={off}
+        aria-busy={busy || undefined}
         onClick={run}
         title={
           !selected
@@ -786,8 +814,18 @@ function AgentRunControl({
                 : `Schedule a ${selected.name} run`
         }
       >
-        <GlyphSwap rest="bolt" alt="clock" on={delay !== "now"} />
-        {delay === "now" ? "Run" : "Schedule"}
+        {/* Ruling 459 over ruling 368: the resting mark trades for the clock
+            when the when-picker leaves Now, and that whole cell trades for
+            the spinning loader while this control's own request is in flight
+            (GlyphSwap's `busy`). */}
+        <GlyphSwap rest="bolt" alt="clock" on={delay !== "now"} busy={busy} />
+        {inFlight === "schedule"
+          ? "Scheduling…"
+          : inFlight === "run"
+            ? "Starting…"
+            : delay === "now"
+              ? "Run"
+              : "Schedule"}
       </button>
       {pickRefused && (
         // Ruling 147: the start stays ENABLED with nothing picked and answers
@@ -973,11 +1011,11 @@ export function ExecutionProfile({
   runPrincipal,
   canRunAgents,
   liveAgentRuns,
-  runBusy,
+  runInFlight,
   onRunAgent,
   releaseBusy,
   onReleaseAgent,
-  operatorBusy,
+  operatorInFlight,
   onRunOperator,
   operatorRunActive,
   schedules,
@@ -1013,8 +1051,8 @@ export function ExecutionProfile({
   /** A LIVE operator run (queued/running) exists — the only state honest
    * enough for the "operator active" pill (F7-UI1: attachment ≠ activity). */
   operatorRunActive: boolean;
-  /** The run-agent fetcher is in flight. */
-  runBusy: boolean;
+  /** Ruling 368: the run-agent fetcher's request, if one is in flight. */
+  runInFlight: RunInFlight;
   onRunAgent: (
     profileId: string,
     prompt: string,
@@ -1023,8 +1061,8 @@ export function ExecutionProfile({
   /** The release-agent fetcher is in flight. */
   releaseBusy: boolean;
   onReleaseAgent: (profileId: string) => void;
-  /** The operator-run fetcher is in flight. */
-  operatorBusy: boolean;
+  /** Ruling 368: the operator-run fetcher's request, if one is in flight. */
+  operatorInFlight: RunInFlight;
   /** Run (or schedule) the operator; the optional steer becomes the run's
    *  human directive. */
   onRunOperator: (steer: string, delayMinutes: number | null) => void;
@@ -1096,7 +1134,7 @@ export function ExecutionProfile({
             </div>
             {canRunAgents && (
               <OperatorRunControl
-                busy={operatorBusy}
+                inFlight={operatorInFlight}
                 disabled={closed}
                 {...(packetOpen && !closed
                   ? {
@@ -1139,7 +1177,7 @@ export function ExecutionProfile({
                 engagedSupportingIds={task.reviewers.map((r) => r.profileId)}
                 runPrincipal={runPrincipal}
                 meId={meId}
-                busy={runBusy}
+                inFlight={runInFlight}
                 closed={closed}
                 schedules={agentSchedules}
                 scheduleBusy={scheduleBusy}

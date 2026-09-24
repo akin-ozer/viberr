@@ -48,11 +48,13 @@ const ICON_PATHS = {
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/>',
   // The busy-state glyph: a three-quarter arc with no arrowhead (lucide's
   // `loader-circle`, the glyph shadcn/reui's Spinner draws), meant to be
-  // rendered with the `spin` class. `refresh` keeps its arrowhead for the
-  // re-scan / re-index / test-connection buttons, where the arrow IS the
-  // meaning and is already the glyph at rest. Every other busy state swaps
-  // its glyph for this one (ruling 459): sign-in, attach, import and rebuild
-  // spun `refresh` or the memory chip. app.css.test.ts holds the line.
+  // rendered with the `spin` class. Every busy state trades its glyph for
+  // this one (ruling 459: sign-in, attach, import and rebuild spun `refresh`
+  // or the memory chip), and ruling 368's 2026-09-24 extension put it in
+  // place of every in-flight starter's icon, Home's re-scan, the KB re-index
+  // and the MCP test among them. Only the board's re-scan still spins its own
+  // `refresh`, where the arrow IS the meaning and already the glyph at rest.
+  // app.css.test.ts holds the line.
   loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   bolt: '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
@@ -89,6 +91,23 @@ export function storeIcon(name: string): IconName {
   return name in ICON_PATHS ? (name as IconName) : "dot";
 }
 
+/**
+ * Ruling 457: one `{__html}` object per glyph, made once. React 19 compares
+ * `dangerouslySetInnerHTML` by the object's identity, so a fresh object on each
+ * render re-parsed the markup and replaced the SVG's children every time an
+ * icon re-rendered (60 per task-page render, 133 per board revalidation).
+ */
+const ICON_HTML = new Map<IconName, { __html: string }>();
+
+function iconHtml(name: IconName): { __html: string } {
+  let html = ICON_HTML.get(name);
+  if (!html) {
+    html = { __html: ICON_PATHS[name] || ICON_PATHS.dot };
+    ICON_HTML.set(name, html);
+  }
+  return html;
+}
+
 export function Icon({
   name,
   className,
@@ -96,7 +115,6 @@ export function Icon({
   name: IconName;
   className?: string;
 }) {
-  const inner = ICON_PATHS[name] || ICON_PATHS.dot;
   return (
     <svg
       className={"ico " + (className || "")}
@@ -106,7 +124,7 @@ export function Icon({
       strokeWidth="1.7"
       strokeLinecap="round"
       strokeLinejoin="round"
-      dangerouslySetInnerHTML={{ __html: inner }}
+      dangerouslySetInnerHTML={iconHtml(name)}
       aria-hidden="true"
     />
   );

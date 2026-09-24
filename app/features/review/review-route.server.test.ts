@@ -94,6 +94,30 @@ describe("/projects/:slug/review", () => {
     expect(sub).not.toContain("`");
   });
 
+  it("ships the board's own waiting-on-you answer (interface review 2026-09-24, writ-3)", async () => {
+    // The queue tagged VIB-142/145/160 "waiting on a human" while the board
+    // told the same viewer "waiting on you". Ruling 457 took the board's columns
+    // out of the layout, so both loaders now call `waitingOnViewer`; this pins
+    // them to one answer on the seeded store.
+    const { cookie } = await app.cookieFor(ardaId);
+    const review = await runLoader("viberr-core", cookie);
+    const { loader: boardLoader } = await import("~/routes/project.board");
+    const request = app.request("/projects/viberr-core/board", { cookie });
+    const board = await boardLoader({
+      request,
+      url: new URL(request.url),
+      params: { slug: "viberr-core" },
+      pattern: "/projects/:slug/board",
+      context: new RouterContextProvider(),
+    });
+    const flagged = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks]
+      .filter((t) => t.waitingOnMe)
+      .map((t) => t.key)
+      .sort();
+    expect(flagged.length).toBeGreaterThan(0);
+    expect([...review.waitingOnMe].sort()).toEqual(flagged);
+  });
+
   it("ships the acceptance-authority signal the queue copy needs (P13-D-9)", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const result = await runLoader("viberr-core", cookie);

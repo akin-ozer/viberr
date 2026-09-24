@@ -168,12 +168,16 @@ async function postIntent(
 }
 
 describe("loader — runtime projection shape", () => {
-  it("VIB-142: the finished run projects with lines, raw envelopes, and real usage", async () => {
+  it("VIB-142: the finished run projects with lines and real usage; its envelopes wait for the raw view", async () => {
     const { runtime } = await runLoader("VIB-142", ids.arda);
     const run = runtime.find((r) => r.serverRunId === finishedRunId)!;
     expect(run).toMatchObject({ backend: "codex", state: "done" });
     expect(run.lines.length).toBeGreaterThan(0);
-    expect(run.raw.length).toBe(run.lines.length);
+    // Ruling 457 (owner decision 2, 2026-09-24): a document load carries the
+    // shown agent's display lines, each with its key, and no stored envelope;
+    // the console loads the envelopes when its raw view opens.
+    expect(run.lineKeys).toHaveLength(run.lines.length);
+    expect(run.raw).toEqual([]);
     // Real usage — codex turn.completed in+out tokens (no fabrication).
     expect(run.tokens).toBe(128034 + 6188);
   });

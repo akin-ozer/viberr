@@ -179,18 +179,18 @@ export function listActivityStream(
   // which is why TaskEventRow types that one, and only that one, nullable.
   const rows = db
     .prepare(
-      // F28-D1: tie-break on `id ASC`, NOT `id DESC`. Unlike the append-only
-      // notifications / audit tables (where a larger id IS newer, so their
-      // shared `id DESC` idiom is right), `task_events` is rebuilt wholesale
-      // per task with `position 0` (the file's NEWEST) inserted FIRST — so the
-      // smallest id is the newest event. The task page orders `position ASC`
-      // (newest first); matching that here means smallest-id-first on a
-      // same-`occurred_at` tie, i.e. `id ASC`. `id DESC` reversed the two
-      // relative to the task page whenever timestamps collided (e.g. the up-to-4
-      // events one reconcile pass stamps in a single tick).
+      // F28-D1: a same-`occurred_at` tie is ordered the way the task page
+      // orders it, `position ASC` (position 0 = the file's NEWEST). `id DESC`
+      // reversed the two relative to the task page whenever timestamps
+      // collided (e.g. the up-to-4 events one reconcile pass stamps in a
+      // single tick). The tie-break used to be `id ASC`, which only agreed
+      // while every write re-inserted a task's rows newest first; ruling 457
+      // keeps the ids of unchanged rows (CS-1), so a newer event appended
+      // later carries the LARGER id and only `position` still says which is
+      // newer. `id` stays last so ties across tasks remain deterministic.
       `SELECT id, task_key, type, actor_json, occurred_at, title, text
        FROM task_events WHERE ${where.sql}
-       ORDER BY occurred_at DESC, id ASC LIMIT ?`,
+       ORDER BY occurred_at DESC, position ASC, id ASC LIMIT ?`,
     )
     .all(...where.args, options.limit ?? ACTIVITY_STREAM_LIMIT) as Pick<
     TaskEventRow,

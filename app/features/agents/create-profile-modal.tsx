@@ -1193,11 +1193,19 @@ function ResourcePicker({
                         aria-pressed={selSet.has(it.id)}
                         onClick={() => toggleRes(g.key, it.id)}
                       >
-                        {/* Ruling 459: always drawn, and faded in by the
-                            sheet on `.on`, so a toggle never resizes the chip
-                            and re-wraps the row under the pointer. */}
-                        <Icon name="check" className="pc-check" />
+                        {/* Interface review 2026-09-24 (acce-33): a dangling
+                            grant says so in shape and word, not amber alone.
+                            Ruling 459: any other chip's check is always drawn,
+                            and faded in by the sheet on `.on`, so a toggle
+                            never resizes the chip and re-wraps the row under
+                            the pointer. */}
+                        {it.missing ? (
+                          <Icon name="alert" />
+                        ) : (
+                          <Icon name="check" className="pc-check" />
+                        )}
                         {it.label ?? it.id}
+                        {it.missing && <span className="res-chip-note">missing</span>}
                       </button>
                     ))}
                   </div>

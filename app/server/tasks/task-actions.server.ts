@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import {
   writeTaskAttachment,
   type WrittenAttachment,
@@ -173,6 +174,7 @@ import {
   appendTimelineEvent,
   createTaskFile,
   readTaskFile,
+  resolveTaskFilePath,
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import {
@@ -1548,7 +1550,6 @@ export async function autoInvokeOperator(
 const AGENT_HANDLE_RE = /@(agent|operator|codex|claude)\b/i;
 
 export interface AppendCommentResult {
-  task: TaskSummary;
   toAgent: boolean;
   mentionedUserIds: string[];
 }
@@ -1592,8 +1593,9 @@ export async function appendComment(
   // frozen until it is restored.
   requireProjectMutable(loadProjectContext(ctx, input.projectSlug), "comment on this task");
 
-  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-  if (!existing) {
+  // Existence only: the locked write below reads and parses the file itself
+  // (ruling 457, CS-5 — this used to parse it a second time just to ask).
+  if (!existsSync(resolveTaskFilePath(taskRef(ctx, input.projectSlug, input.taskKey)))) {
     throw AppError.notFound(`Task ${input.taskKey} not found.`);
   }
 
@@ -1670,31 +1672,37 @@ export async function appendComment(
 
   // Mention fan-out (notification kind `mention`, contracts §4) — the shared
   // helper every comment writer (human AND agent) funnels through (NEW-4).
-  const actorName = userName(db, actor.userId);
-  const mentionedUserIds = await stampNotifiedRecipients(
-    taskRef(ctx, input.projectSlug, input.taskKey),
-    event.occurredAt,
-    notifyMentionedUsers(db, {
-    text,
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    excludeUserId: actor.userId,
-    occurredAt: event.occurredAt,
-    from: {
-      kind: "human",
-      userId: actor.userId,
-      name: actorName,
-      initials: initialsOfName(actorName),
-      tone: avatarTone(db, actor.userId),
-    },
-    }),
-  );
+  // Ruling 457 (CS-5): a comment with no `@` can mention nobody (every mention
+  // starts at one), so the author's name and tone the notification would carry
+  // are not even looked up.
+  let mentionedUserIds: string[] = [];
+  if (text.includes("@")) {
+    const actorName = userName(db, actor.userId);
+    mentionedUserIds = await stampNotifiedRecipients(
+      db,
+      taskRef(ctx, input.projectSlug, input.taskKey),
+      event.occurredAt,
+      notifyMentionedUsers(db, {
+        text,
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        excludeUserId: actor.userId,
+        occurredAt: event.occurredAt,
+        from: {
+          kind: "human",
+          userId: actor.userId,
+          name: actorName,
+          initials: initialsOfName(actorName),
+          tone: avatarTone(db, actor.userId),
+        },
+      }),
+    );
+  }
 
-  return {
-    task: summaryOrThrow(db, input.projectSlug, input.taskKey),
-    toAgent,
-    mentionedUserIds,
-  };
+  // Ruling 457 (CS-5): no task summary here — every caller renders from its
+  // own revalidation, and building one cost four statements and four file
+  // reads per comment.
+  return { toAgent, mentionedUserIds };
 }
 
 // ----------------------------------------------------------- commentToAgent
@@ -2029,22 +2037,18 @@ export async function commentToAgent(
     resolveMentionedAgent,
     resumeWorkdir,
   } = await import("./agent-reply.server");
-  const target = resolveMentionedAgent(
-    db,
-    ctx,
-    input.projectSlug,
-    input.taskKey,
-    input.text,
-  );
+  // Ruling 457 (CS-5): an agent is engaged only by an @handle, so a comment
+  // without an `@` skips both agent resolvers (each reads the project file and
+  // every deployed profile) — the answer they would give, without the reads.
+  const mayMention = input.text.includes("@");
+  const target = mayMention
+    ? resolveMentionedAgent(db, ctx, input.projectSlug, input.taskKey, input.text)
+    : null;
 
   // 1. Record the comment (existing behavior, incl. mention fan-out). Flag
   //    the routed tint when an agent was resolved.
   const base = input.redelivered
-    ? {
-        task: summaryOrThrow(db, input.projectSlug, input.taskKey),
-        toAgent: true,
-        mentionedUserIds: [],
-      }
+    ? { toAgent: true, mentionedUserIds: [] }
     : await appendComment(
         db,
         target ? { ...input, forceToAgent: true } : input,
@@ -2057,7 +2061,9 @@ export async function commentToAgent(
     // — the refusal is right, but on its own it is a silent drop: no run, no
     // tint, no trace, while the composer still offers the handle. Say which
     // profiles the runtime handle covers so the human can re-tag precisely.
-    const ambiguous = ambiguousBackendHandle(ctx, input.projectSlug, input.text);
+    const ambiguous = mayMention
+      ? ambiguousBackendHandle(ctx, input.projectSlug, input.text)
+      : null;
     if (ambiguous) {
       await updateTaskFile(
         taskRef(ctx, input.projectSlug, input.taskKey),
@@ -3035,6 +3041,7 @@ export async function postAgentReplyComment(
     // mentions were already delivered by the mid-run comment it repeats).
     // Ruling 382: and the event records who it reached, so compaction keeps it.
     await stampNotifiedRecipients(
+      db,
       taskRef(ctx, input.projectSlug, input.taskKey),
       event.occurredAt,
       notifyMentionedUsers(db, {
@@ -3821,6 +3828,7 @@ export async function recordAgentCompletion(
   if (prepared.status === "event" && prepared.duplicatedText !== null) {
     // Ruling 382: and the event records who it reached, so compaction keeps it.
     await stampNotifiedRecipients(
+      db,
       taskRef(ctx, projectSlug, taskKey),
       prepared.event.occurredAt,
       notifyMentionedUsers(db, {
@@ -4361,6 +4369,7 @@ export async function recordAgentCompletion(
     if (postsReplyEvent) {
       // Ruling 382: and the event records who it reached, so compaction keeps it.
       await stampNotifiedRecipients(
+        db,
         taskRef(ctx, projectSlug, taskKey),
         prepared.event.occurredAt,
         notifyMentionedUsers(db, {
@@ -6195,6 +6204,7 @@ export async function operatorPromptAgent(
   // fan-out seam and the non-delivery report is still computed for the timeline.
   // Ruling 382: and the event records who it reached, so compaction keeps it.
   await stampNotifiedRecipients(
+    db,
     taskRef(ctx, input.projectSlug, input.taskKey),
     comment.occurredAt,
     notifyMentionedUsers(db, {
@@ -7675,7 +7685,7 @@ export async function performDelivery(
       await flagScopeViolation(db, flagInput, { dataRoot: ctx.dataRoot });
       const remedy =
         `Nothing was pushed and no review PR was opened. Grant the \`${push.scope}\` scope to the ` +
-        `project's token on GitHub, then use Re-check on the project's GitHub view, and deliver again.`;
+        `project's token on GitHub, then use Re-check scopes on the project's GitHub page, and deliver again.`;
       const message =
         push.phase === "before_push"
           ? `${taskKey}'s branch changes ${files}, and the project's classic token has no \`${push.scope}\` scope: GitHub would refuse the push. ${remedy}`

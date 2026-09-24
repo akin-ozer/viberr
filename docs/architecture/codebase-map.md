@@ -23,7 +23,10 @@ test-support/        vitest setup and harnesses: hermetic env + <dialog> polyfil
                      (writeFakeVendorBinaries, the sign-in driver's real child process), backend
                      credentials (connectFakeBackend / disconnectFakeBackend, ruling 127), the demo seed
                      and data, a custom 3-stage board, a raw audit reader, MCP tool-meta and
-                     strict-schema checks, the hermetic toolchain reading
+                     strict-schema checks, the hermetic toolchain reading, and the performance
+                     ratchet (ruling 457): perf-verdict / perf-budgets(/) / perf-ratchet, the
+                     counters (perf-counters, render-counter), the revalidation and dock harnesses,
+                     the console fixture, a static-import walker and the app.css rule parser
 tools/oxlint/        the vendored anti-slop lint plugin (15 rules) and its pinned manifest
 design/              the HTML/JSX prototype the UI was ported from, the design system, a PRD mirror
 planning/            canon (planning-artifacts/: prd, architecture, UX spec) and the discovery-pass
@@ -38,7 +41,8 @@ compose.yml          production-shaped single container (init: true, hostname vi
 Dockerfile           three stages: prod-deps, build, runtime (node:26-slim + git + make + curl + pnpm +
                      chromium + uv); no ENTRYPOINT, no backend credential, no runtime home baked in
                      (ruling 127); CMD runs node directly
-.claude/launch.json  two dev launchers (docker-data vs hermetic ./data on port 5174)
+.claude/launch.json  three launchers: dev on docker-data, dev on the hermetic ./data (port 5174), and the
+                     production build on ./data (port 5175) for measuring
 .claude/skills/, .agents/skills/
                      agent skills for coding sessions (skills-lock.json pins their sources)
 config               vite.config.ts, vitest.config.ts, playwright.config.ts, react-router.config.ts,
@@ -67,8 +71,10 @@ client bundle; `ui/` never imports `features/` or `server/`; `features/` may imp
 and diagnostics severity live only under `server/interpretation/`, freshness thresholds
 only in `shared/freshness.ts`; DB rows map to camelCase only through `shared/mapping/`.
 Tests are co-located (`foo.server.test.ts`). There are no `utils.ts` dumping grounds.
-`app/routes/` holds 36 modules (35 routes plus `project-visibility.server.ts`, the
-members-only 404 guard); the route table is `app/routes.ts`.
+`app/routes/` holds 38 modules (36 routes plus `project-visibility.server.ts`, the
+members-only 404 guard for actions, and `project-workspace.server.ts`, the one gated read
+of a project the workspace layout and the board loader share per request, ruling 457);
+the route table is `app/routes.ts`.
 
 ## 3. `app/server/` by directory
 
@@ -83,9 +89,10 @@ members-only 404 guard); the route table is `app/routes.ts`.
 | `controller/` | Conversations store (scopes: instance / board / task), run engine, the per-turn context read (`controller-context.server.ts`, ruling 121), toolkit (`viberr_controller`), ops MCP (`viberr_ops`), tool guards, controller profile, the controller's standing resource requests (`controller-requests.server.ts`, `agents/controller-requests.md`, ruling 390). |
 | `db/` | SQLite open + pragmas, the copy-first read-only open (ruling 158), migration runner, baseline-column backfill, data-root writer lock + guard, CLI lock for scripts, retention, self-heal of a corrupt DB, backup/restore, transaction helper. |
 | `errors/` | `AppError` and the stable `ERROR_CODES`. |
-| `events/` | Projection event emitter, the SSE broker (per-connection scopes, 25 s heartbeat, 256-event ring buffer, re-authorization each tick, the process shutdown hook), the publisher bridging the two. |
-| `files/` | The file store: data-root layout, atomic writes, per-file mutex, read-your-own-writes cache, frontmatter codec, task/project/goal/agent-profile readers and writers, actor-ref codec, the chokidar watcher (250 ms debounce, retrying failed rebuilds) and KB watcher, the KB index injector (ruling 283) and skill injection reader (24 000-char budget), the project rulings KB (ruling 239), attachments, the store doctor. |
+| `events/` | Projection event emitter, the SSE broker (per-connection scopes, 25 s heartbeat, a 256-event replay ring for data events and one for console lines, re-authorization each tick, the process shutdown hook), the publisher bridging the two. |
+| `files/` | The file store: data-root layout, atomic writes, per-file mutex, read-your-own-writes cache, the readers' content-keyed parse memo (ruling 457), frontmatter codec, task/project/goal/agent-profile readers and writers, actor-ref codec, the chokidar watcher (250 ms debounce, retrying failed rebuilds) and KB watcher, the KB index injector (ruling 283) and skill injection reader (24 000-char budget), the project rulings KB (ruling 239), attachments, the store doctor. |
 | `github/` | Client, project GitHub context, branch sync, empty-repo bootstrap (ruling 128), PR open/link/adopt and the adoption record, PR diff reads for the controller (ruling 266), workspace push and delivery reconciliation, reconciler + 5-minute poller, human-approval verdict, update-branch (merge, never rebase) and its operator decision half, the acceptance-boundary refresh rule (ruling 162), branch cleanup, scope-violation side effects, repo access check and remembered repo health, the agent GitHub read tool. |
+| `http/` | `isDocumentNavigation`: a document load (a hard load, a refresh, a new tab) versus single fetch's `.data` request; R19-15's read-marking and ruling 457's console shipping ask it. |
 | `insights/` | One aggregate query over `agent_runs` for `/insights`. |
 | `interpretation/` | Readiness derivation, diagnostics severity, freshness re-export. |
 | `logging/` | Dependency-free JSON logger; request correlation via `AsyncLocalStorage`. |
@@ -105,11 +112,11 @@ members-only 404 guard); the route table is `app/routes.ts`.
 
 | Directory | Surface |
 |---|---|
-| `shell/` | Workspace rail (`nav.ts` order: Board, Review queue, Controller, Agents, Policy, GitHub, Activity, Settings), topbar, the standalone-page header (`page-topbar.tsx`, ruling 145 — mounted by the `palette-shell` layout for the routes `standalonePageLabel` names), the shared palette trigger both headers render, ⌘K palette and its server query, bell popover, user menu, theme preference, route pending bar, CSRF result helper. |
+| `shell/` | Workspace rail (`nav.ts` order: Board, Review queue, Controller, Agents, Policy, GitHub, Activity, Settings), topbar, the standalone-page header (`page-topbar.tsx`, ruling 145 — mounted by the `palette-shell` layout for the routes `standalonePageLabel` names), the shared palette trigger both headers render, ⌘K palette and its server query, bell popover (pages ship its counts; it loads its list from `routes/resources.notifications.ts`, ruling 457), user menu, theme preference, route pending bar, CSRF result helper. |
 | `home/` | `/`: project cards, pinned/all/archived groups, new-project modal (name, key, connection, repo, workflow, agent policy preset), project creation server logic, org tiles, admin store strip (re-scan, rebuild). |
-| `board/` | Board columns, the card's one status seat and problem chips (`card-status.ts`, ruling 365), filters (URL params), dnd-kit drag with server-authoritative drop resolution (`board-dnd.ts`), list view, new-task modal, board-drop acceptance confirm, orphan and repo-access banners. |
-| `task-detail/` | Hero, diagnostics, recommendations, execution profile with the agent picker, run controls and scheduling, decision packet, live run strip, agent logs, timeline (Lexical composer with @mention autocomplete, sliced newest-first), attachments panel and lightbox, side panels (GitHub trace, current state, permissions), accept/release/archive/move-back confirms (move-back asks why, ruling 381), delivery and completion toasts, continuity recovery panel, plus the per-person run principal every run control answers from (`run-principal-view.ts`, ruling 127). |
-| `runtime/` | Run panels (live strip, log console, raw view), the dedicated run-log SSE consumer (`use-run-log-stream.ts`), the readable live step, log noise filter and clock helpers. |
+| `board/` | Board columns, the board card projection the board loader ships (`board-card.ts`, `toBoardCard`: the fields the board reads, ruling 457), the card's one status seat and problem chips (`card-status.ts`, ruling 365), filters (URL params), dnd-kit drag with server-authoritative drop resolution (`board-dnd.ts`), list view, new-task modal, board-drop acceptance confirm, orphan and repo-access banners. |
+| `task-detail/` | Hero, diagnostics, recommendations, execution profile with the agent picker, run controls and scheduling, decision packet, live run strip, agent logs, timeline (Lexical composer with @mention autocomplete, loaded lazily behind a same-size stand-in that keeps what was typed, ruling 457; sliced newest-first), attachments panel and lightbox, side panels (GitHub trace, current state, permissions), accept/release/archive/move-back confirms (move-back asks why, ruling 381), delivery and completion toasts, continuity recovery panel, plus the per-person run principal every run control answers from (`run-principal-view.ts`, ruling 127). |
+| `runtime/` | Run panels (live strip, log console, raw view), the run-log console's store and hook (`run-log-store.ts`, `use-run-log-stream.ts`: lines outside React state, frames from the layout's live stream, ruling 457), the incremental console fold (`console-fold.ts`), the readable live step, log noise filter and clock helpers. |
 | `review/` | The review queue split by acceptance authority. |
 | `agents/` | Profiles master-detail, create/edit modal, capability matrix modal, roster assembly, profile CRUD actions. |
 | `policy/` | Human access roles, agent capability rows, workflow rules, guardrails, required reviewers, permission table from `rbac.ts`. |
@@ -118,11 +125,11 @@ members-only 404 guard); the route table is `app/routes.ts`.
 | `project-settings/` | Identity, workflow stages (with colour presets, ruling 364), required reviewers, file leases, members, repository and credentials (repair, scope re-check, branch cleanup toggle), danger zone. |
 | `org-settings/` | Tabs: GitHub connections, users and access, sign-in & SSO, agent resources (KBs, MCP servers, skills, global agent templates, store browser), controller (profile, locks, standing requests); below the tabs: run concurrency and run spend cap, the audit export card, the storage line. |
 | `kb-browser/` | The store folder file manager (upload, folders, GitHub import, SKILL.md editing). |
-| `controller/` | The conversation surface and the Goals panel; the working-turn step row (ruling 250) and scoped example prompts (ruling 314); the controller dock (`controller-dock.tsx`, mounted by `root.tsx`), its route-derived scope (`controller-dock-context.ts`) and its view builder (`controller-dock-query.server.ts`, served by `routes/resources.controller.ts`). |
+| `controller/` | The conversation surface and the Goals panel; the working-turn step row (ruling 250) and scoped example prompts (ruling 314); the controller dock (`controller-dock.tsx`, mounted by `root.tsx`; its open panel's body `controller-dock-panel.tsx`, loaded on demand, ruling 457; the not-connected note both composers share, `not-connected.tsx`), its route-derived scope (`controller-dock-context.ts`) and its view builder (`controller-dock-query.server.ts`, served by `routes/resources.controller.ts`). |
 | `notifications/` | The inbox page and the shared notification row. |
 | `profile/` | Identity, notification routing, appearance, access view, GitHub identity, password change, and the **Agent accounts** panel (ruling 127): one card per backend with the hosted sign-in, the paste forms and Disconnect, polling `/resources/backend-login` while a sign-in is live. |
 | `insights/` | Read-only run analytics dashboard (oversight cards, backend quota, prompt cache, breakdowns, daily chart). |
-| `live-updates/` | `useLiveUpdates`: SSE subscription → debounced loader revalidation; `event-types.ts` mirrors the wire contract. |
+| `live-updates/` | `useLiveUpdates`: SSE subscription → debounced loader revalidation, replaying what a reconnect missed; `revalidation-policy.ts`: which loader re-runs on which trigger (every route's `shouldRevalidate`, and the tab's ledger of what its loaders owe, ruling 457); `event-types.ts` mirrors the wire contract. |
 
 Also under `features/`, five copy and behaviour pins: `copy-ban.test.ts` (the "govern*"
 word is banned from rendered copy), `retired-vocabulary.test.tsx` ("primary specialist"
@@ -137,12 +144,17 @@ for the operator), `icon` (one stroke icon set), `pill` (the one
 readiness/validation/state mapping), `rich-text` (inline `**bold**`, `` `code` ``,
 `@mention`), `markdown` (react-markdown + GFM with attachment-aware images), `code-view` +
 `code-language` + `code-highlight` (the ruling-363 reader: numbered lines, Shiki tokens by
-filename grammar, loaded on first use), `mention-spans`, `toast` (bottom-center, 2600 ms),
+filename grammar, loaded on first use), `mention-spans`, `toast` (bottom-center; success 5 s, paused on hover or focus; errors stay until dismissed, ruling 455),
 `confirm-dialog`, `use-dialog` (native `<dialog>` contract: Escape, backdrop click, focus
 restore), `live-pose` (a surface closed mid-entrance leaves from where it is, ruling
-453(b)), `spring` (the board drop's spring and pointer velocity, ruling 453(a)), `use-dismiss`, `page-overlay`, `stage-menu`, `task-meta` (priority, labels, due
+453(b)), `spring` (the board drop's spring and pointer velocity, ruling 453(a); momentum projection
+and rubber-banding, ruling 454), `use-sheet-drag` (the dock's pull-to-dismiss sheet, ruling
+454), `use-dismiss`, `page-overlay`, `stage-menu`, `task-meta` (priority, labels, due
 date), `label-input`, `calendar` + `date-picker`, `local-time` + `use-relative-time`
-(hydration-safe timestamps), `number-ticker` (counts up to a figure, ruling 366(f)),
+(hydration-safe timestamps), `use-clock` (one shared interval per cadence for every
+ticking reader, ruling 457), `use-stable-rows` (structural sharing of loader rows and
+values across revalidations, ruling 457), `number-ticker` (counts up to a figure,
+ruling 366(f); it commits only when the drawn digits change),
 `csrf-input`, `skip-link`, `radio-seg` (single-select group on Radix `ToggleGroup`,
 ruling 166), `toggle`, `use-fetcher-result` / `use-action-toast`, `use-shortcut-hint`.
 

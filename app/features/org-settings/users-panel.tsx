@@ -3,6 +3,7 @@ import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
 import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
@@ -536,11 +537,17 @@ function EditUserModal({
                 resetAction.submit({ intent: "user-reset-password", userId: user.id })
               }
               disabled={resetAction.busy}
+              // Ruling 368: the reset in flight shows itself here.
+              aria-busy={resetAction.busy || undefined}
             >
-              <Icon name="lock" />
+              <GlyphSwap rest="lock" alt="loader" on={resetAction.busy} spinAlt />
               {user.pwreset || user.status === "invited"
-                ? "Generate a new temp password"
-                : "Reset password"}
+                ? resetAction.busy
+                  ? "Generating…"
+                  : "Generate a new temp password"
+                : resetAction.busy
+                  ? "Resetting…"
+                  : "Reset password"}
             </button>
             <div className="def-note after">
               <Icon name="lock" />

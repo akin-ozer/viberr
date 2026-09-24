@@ -2,8 +2,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
@@ -30,7 +30,14 @@ const CONNECTED_PRINCIPAL = {
   codex: { available: true, detail: null },
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+// jsdom's Element carries no `scrollIntoView`; the panel's console door calls
+// it a frame after the click.
+Element.prototype.scrollIntoView = () => {};
 
 /**
  * D18 — the Continuity Recovery Panel, the fifth custom component and the only
@@ -49,27 +56,6 @@ afterEach(cleanup);
 /* ------------------------------------------------------------- fixtures */
 
 const DEAD_SESSION = "0f8b2b1e-9a44-4a1d-bb2f-7d9c2f1a55c1";
-
-/** The exact envelope `recordSessionMissing` persists for a vanished session —
- *  `session_id` is ABSENT (not null) when the writer never learned one. */
-interface SessionMissingEnvelope {
-  type: string;
-  source: string;
-  reason: string;
-  session_id?: string;
-  message: string;
-}
-
-function missingRaw(sessionId: string | null = DEAD_SESSION): string {
-  const envelope: SessionMissingEnvelope = {
-    type: "error",
-    source: "viberr",
-    reason: "session_missing",
-    message: "The Claude session no longer exists on this machine.",
-  };
-  if (sessionId) envelope.session_id = sessionId;
-  return JSON.stringify(envelope);
-}
 
 /** The err line `recordSessionMissing` projects onto the dead run. */
 const missingLine: LogLine = {
@@ -123,12 +109,18 @@ function run(patch: Partial<RunView> = {}): RunView {
   };
 }
 
-/** A run group that carries the dead-session marker (dead run + fresh run). */
+/**
+ * A run group whose console window holds the dead-session marker (dead run +
+ * fresh run). Ruling 457: the projection reports the marker as `sessionMissing`
+ * (the page no longer carries every window's lines to scan); how it finds it
+ * is pinned in `run-projection.server.test.ts`.
+ */
 function brokenRun(patch: Partial<RunView> = {}): RunView {
   return run({
     lines: [plainLine, missingLine, plainLine],
-    raw: ["{}", missingRaw(), "{}"],
+    raw: [],
     lineCount: 3,
+    sessionMissing: { sessionId: DEAD_SESSION },
     ...patch,
   });
 }
@@ -183,29 +175,28 @@ describe("deriveContinuityLoss", () => {
     });
   });
 
-  it("says nothing about a session the envelope does not carry (no text scraping)", () => {
+  it("says nothing about a session the marker's envelope did not carry", () => {
     const noId = deriveContinuityLoss({
       timeline: [],
-      runtime: [brokenRun({ raw: ["{}", missingRaw(null), "{}"] })],
+      runtime: [brokenRun({ sessionMissing: { sessionId: null } })],
     });
     expect(noId!.agents[0]!.sessionId).toBeNull();
-    const unparseable = deriveContinuityLoss({
-      timeline: [],
-      runtime: [brokenRun({ raw: ["{}", "not json", "{}"] })],
-    });
-    expect(unparseable!.agents[0]!.sessionId).toBeNull();
     // …and it still reports the break: the id is a detail, the loss is the fact.
-    expect(unparseable!.agents[0]!.name).toBe("Dana");
+    expect(noId!.agents[0]!.name).toBe("Dana");
   });
 
-  it("matches every writer's marker tag by its shared suffix", () => {
-    for (const tag of ["run·session_missing", "run·error·session_missing", "error·session_missing"]) {
-      const loss = deriveContinuityLoss({
-        timeline: [],
-        runtime: [brokenRun({ lines: [{ ...missingLine, tag }], raw: [missingRaw()] })],
-      });
-      expect(loss, tag).not.toBeNull();
-    }
+  it("reads the projection's report, not the lines a payload may not carry (ruling 457)", () => {
+    // A `.data` revalidation carries no console lines; the marker is still
+    // reported. CANARY: scan `run.lines` again and this returns null.
+    const loss = deriveContinuityLoss({
+      timeline: [],
+      runtime: [brokenRun({ lines: [], raw: [] })],
+    });
+    expect(loss!.agents).toHaveLength(1);
+    // A window that holds no marker reports none, whatever its lines say.
+    expect(
+      deriveContinuityLoss({ timeline: [], runtime: [run({ lines: [missingLine], sessionMissing: null })] }),
+    ).toBeNull();
   });
 
   it("labels the engagement the way the UI names it", () => {
@@ -580,5 +571,67 @@ describe("task detail wiring", () => {
     ).map((b) => b.textContent);
     expect(buttons.some((b) => b!.includes("Open Dana’s console"))).toBe(true);
     expect(buttons.some((b) => b!.includes("Ask operator"))).toBe(true);
+  });
+
+  /** A second agent, so the console has a thread to show before the click. */
+  const eli = (patch: Partial<RunView> = {}): RunView =>
+    run({
+      id: "reviewer",
+      serverRunId: "r_2",
+      kind: "reviewer",
+      profileId: "rev-1",
+      who: { kind: "agent", backend: "claude", name: "Eli", role: "reviewer" },
+      logWindow: { totalLines: 1, hasMore: false, runIds: ["r_2"], oldest: null, headSeq: 0 },
+      ...patch,
+    });
+  const live = { state: "running", lifecycle: "running", finished: null } as const;
+  /** The thread the console shows, read off its own picker. */
+  const shownThread = (root: ParentNode) =>
+    root.querySelector('[aria-label="Select agent log stream"]')?.textContent ?? "";
+
+  it("opens the named thread's console and leaves an open console open (ruling 380)", async () => {
+    const intoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    // "re-anchored · running": Dana's re-anchored run streams, so the console
+    // is disclosed on the run card, open by default, on the first running
+    // thread, which is Eli's.
+    const { container } = renderPage({}, [eli(live), brokenRun(live)]);
+    const panel = container.querySelector<HTMLElement>(".continuity-panel")!;
+    expect(panel.textContent).toContain("re-anchored · running");
+    const cardToggle = () =>
+      container.querySelector<HTMLButtonElement>(".runbar .run-actions button[aria-expanded]")!;
+    const inlineConsole = () => container.querySelector(".runbar-console");
+    expect(cardToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(shownThread(inlineConsole()!)).toContain("Eli");
+
+    fireEvent.click(within(panel).getByRole("button", { name: /Open Dana’s console/ }));
+
+    // CANARY: hand the panel the card's `onViewLogs` toggle again and the
+    // console this door names closes.
+    expect(cardToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(cardToggle().textContent).toContain("Hide console");
+    expect(inlineConsole()).not.toBeNull();
+    expect(shownThread(inlineConsole()!)).toContain("Dana");
+    await waitFor(() => expect(intoView).toHaveBeenCalledTimes(1));
+    expect(intoView.mock.contexts[0]).toBe(
+      inlineConsole()!.querySelector('[data-comment-anchor="agent-logs"]'),
+    );
+  });
+
+  it("with no run streaming, selects the thread in the archive and brings it into view", async () => {
+    const intoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    const { container } = renderPage({}, [eli(), brokenRun()]);
+    const archive = () => container.querySelector('[data-comment-anchor="agent-logs"]')!;
+    expect(container.querySelector(".runbar")).toBeNull();
+    expect(shownThread(archive())).toContain("Eli");
+
+    fireEvent.click(
+      within(container.querySelector<HTMLElement>(".continuity-panel")!).getByRole("button", {
+        name: /Open Dana’s console/,
+      }),
+    );
+
+    expect(shownThread(archive())).toContain("Dana");
+    await waitFor(() => expect(intoView).toHaveBeenCalledTimes(1));
+    expect(intoView.mock.contexts[0]).toBe(archive());
   });
 });

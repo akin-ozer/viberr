@@ -416,6 +416,13 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
           // on the backend or by the named account being replaced or
           // disconnected (ruling 165); the row says exactly that.
           if (credentialRefused) {
+            // D32-2 (ruling 4): the app's ONE date formatter, never the
+            // server locale's `toLocaleString`.
+            const refused = hydrated
+              ? `run ${credentialRefused.runId} was refused ${formatDayDotTime(
+                  credentialRefused.observedAt,
+                )}: ${credentialRefused.providerText}`
+              : undefined;
             return (
               <li key={backend} className="bar-row">
                 <span className="bar-label" title={backend}>
@@ -427,24 +434,27 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                 <span className="bar-val">
                   credential refused
                   {credentialRefused.credentialLabel ? ` · ${credentialRefused.credentialLabel}'s account` : ""}
-                  <span
-                    className="bar-cost"
-                    title={
-                      // D32-2 (ruling 4): the app's ONE date formatter, never the
-                      // server locale's `toLocaleString`.
-                      hydrated
-                        ? `run ${credentialRefused.runId} was refused ${formatDayDotTime(
-                            credentialRefused.observedAt,
-                          )}: ${credentialRefused.providerText}`
-                        : undefined
-                    }
-                  >
+                  <span className="bar-cost" title={refused}>
                     from a refused run · clears when a run on this backend completes or the account changes
+                    {/* Interface review 2026-09-24 (acce-5): the title is the
+                        pointer's extra; touch, keyboard and screen readers get
+                        the same sentence from `.vh` (the rows below too). */}
+                    {refused && <span className="vh">{" · " + refused}</span>}
                   </span>
                 </span>
               </li>
             );
           }
+          // Hydration-gated: a localized instant rendered during SSR is the
+          // SERVER's timezone, and React re-renders rather than patching it.
+          const refused =
+            refusal && hydrated
+              ? `run ${refusal.runId} was refused ${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
+              : undefined;
+          // The reading's own age — a weeks-old 91% must be visibly stale, not
+          // current (the server module's honesty rule). Same hydration gate.
+          const observed =
+            reading && hydrated ? `observed ${formatDayDotTime(reading.observedAt)}` : undefined;
           return (
             <li key={backend} className="bar-row">
               <span className="bar-label" title={backend}>
@@ -483,17 +493,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                       ? `${reading.rateLimitType.replaceAll("_", " ")} · utilization not reported`
                       : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
                 {refusal && (
-                  <span
-                    className="bar-cost"
-                    // Same hydration gate as the reading branch below: a
-                    // localized instant rendered during SSR is the SERVER's
-                    // timezone, and React re-renders rather than patching it.
-                    title={
-                      hydrated
-                        ? `run ${refusal.runId} was refused ${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
-                        : undefined
-                    }
-                  >
+                  <span className="bar-cost" title={refused}>
                     {[
                       // Say where this came from. It is NOT a utilization
                       // reading the provider volunteered, and a card that
@@ -526,22 +526,11 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     ]
                       .filter(Boolean)
                       .join(" · ")}
+                    {refused && <span className="vh">{" · " + refused}</span>}
                   </span>
                 )}
                 {!refusal && reading && (
-                  <span
-                    className="bar-cost"
-                    // The reading's own age — a weeks-old 91% must be visibly
-                    // stale, not current (the server module's honesty rule).
-                    // Hydration-gated: SSR would bake the SERVER's
-                    // locale/timezone into the attribute and React never
-                    // patches the mismatch (the app's local-time discipline).
-                    title={
-                      hydrated
-                        ? `observed ${formatDayDotTime(reading.observedAt)}`
-                        : undefined
-                    }
-                  >
+                  <span className="bar-cost" title={observed}>
                     {[
                       // A provider warning outranks the reset date — the panel
                       // exists to warn BEFORE a run fails, so "allowed_warning"
@@ -570,6 +559,7 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     ]
                       .filter(Boolean)
                       .join(" · ") || reading.status}
+                    {observed && <span className="vh">{" · " + observed}</span>}
                   </span>
                 )}
               </span>
@@ -644,6 +634,8 @@ function StatCard({
  * first call behind it prints "n/a", never 0%.
  */
 function CachePanel({ cache }: { cache: CacheSummary }) {
+  const warmWhy = (r: CacheRow) =>
+    `${fmtCount(r.warmStarts)} of ${fmtCount(r.firstCalls)} first calls read more than they wrote`;
   const rows = (group: string, list: CacheRow[]) => (
     <>
       <tr className="group">
@@ -656,9 +648,12 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
           <td
             data-warm-rate={r.warmRate === null ? "" : r.warmRate}
             className={r.warmRate === null ? "na" : undefined}
-            title={`${fmtCount(r.warmStarts)} of ${fmtCount(r.firstCalls)} first calls read more than they wrote`}
+            title={warmWhy(r)}
           >
             {r.warmRate === null ? "n/a" : fmtPercent(r.warmRate)}
+            {/* Interface review 2026-09-24 (acce-5): the fraction behind the
+                rate was title-only. */}
+            <span className="vh">{", " + warmWhy(r)}</span>
           </td>
           {/* Ruling 395: a group with no run on a backend that reports the
               figure has no figure, and the rest of this page already says
@@ -702,24 +697,34 @@ function CachePanel({ cache }: { cache: CacheSummary }) {
         under each cache TTL. Claude reports both the write figure and the lifetime; Codex
         reports neither, so a group of Codex runs reads "not reported" rather than zero.
       </p>
-      <table className="cache-table">
-        <thead>
-          <tr>
-            <th>group</th>
-            <th>runs</th>
-            <th>warm starts</th>
-            <th>written</th>
-            <th>read</th>
-            <th>write / read</th>
-            <th>first writes &gt; {fmtTokens(cache.largeWriteTokens)}</th>
-            <th>lifetime</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows("by run kind", cache.byKind)}
-          {rows("by credential kind", cache.byCredentialKind)}
-        </tbody>
-      </table>
+      {/* Interface review 2026-09-24 (layo-21): eight nowrap columns are wider
+          than a phone, so the table scrolls in its own box (the markdown
+          tables' wrap), focusable so the keyboard can scroll it too. */}
+      <div
+        className="md-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label="Prompt cache by group"
+      >
+        <table className="cache-table">
+          <thead>
+            <tr>
+              <th>group</th>
+              <th>runs</th>
+              <th>warm starts</th>
+              <th>written</th>
+              <th>read</th>
+              <th>write / read</th>
+              <th>first writes &gt; {fmtTokens(cache.largeWriteTokens)}</th>
+              <th>lifetime</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows("by run kind", cache.byKind)}
+            {rows("by credential kind", cache.byCredentialKind)}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -808,19 +813,23 @@ function DailyChart({ summary }: { summary: InsightsSummary }) {
       <div className="panel-head">
         <h2>Runs · last {summary.windowDays} days</h2>
       </div>
-      <div className="daily-chart" role="img" aria-label={`Agent runs per day over the last ${summary.windowDays} days`}>
-        {summary.daily.map((d) => (
-          <span
-            key={d.date}
-            className="daily-col"
-            title={`${d.date}: ${d.runs} run${d.runs === 1 ? "" : "s"}, ${d.cost == null ? "cost not reported" : fmtCost(d.cost)}`}
-          >
-            <span
-              className="daily-bar"
-              style={{ height: `${Math.max(3, Math.round((d.runs / max) * 100))}%` }}
-            />
-          </span>
-        ))}
+      {/* Interface review 2026-09-24 (acce-5): a list, not role="img" — an
+          image's children are presentational, so the per-day counts and costs
+          reached nobody but a hovering mouse. Each column says its day in
+          `.vh`; the title stays the pointer's extra. */}
+      <div className="daily-chart" role="list" aria-label={`Agent runs per day over the last ${summary.windowDays} days`}>
+        {summary.daily.map((d) => {
+          const day = `${d.date}: ${d.runs} run${d.runs === 1 ? "" : "s"}, ${d.cost == null ? "cost not reported" : fmtCost(d.cost)}`;
+          return (
+            <span key={d.date} className="daily-col" role="listitem" title={day}>
+              <span
+                className="daily-bar"
+                style={{ height: `${Math.max(3, Math.round((d.runs / max) * 100))}%` }}
+              />
+              <span className="vh">{day}</span>
+            </span>
+          );
+        })}
       </div>
     </section>
   );

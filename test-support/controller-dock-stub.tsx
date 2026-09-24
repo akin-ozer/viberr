@@ -1,0 +1,155 @@
+import { render } from "@testing-library/react";
+import { createRoutesStub, Link, Outlet, useRevalidator } from "react-router";
+import { ToastProvider } from "~/ui/toast";
+import { ControllerDock } from "~/features/controller/controller-dock";
+import type { ControllerDockView } from "~/features/controller/controller-dock-query.server";
+import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
+import { sseScopes } from "~/features/live-updates/event-types";
+import { dockResourceShouldRevalidate } from "~/features/controller/controller-dock-context";
+import type { LiveTurnView, UnseenReplyView } from "~/routes/resources.controller-unseen";
+
+/**
+ * Ruling 121: the controller dock under a routed stub shaped like the app —
+ * root (which mounts the dock), the workspace layout, a board, a task and the
+ * project controller page, and the dock's two resource routes. Shared by the
+ * dock's behaviour tests and its ruling-457 perf test, so both drive the same
+ * routes and count the same requests.
+ *
+ * Each page offers the two moves a person makes under the dock: links to the
+ * other page (a client navigation) and a button that revalidates (what the
+ * page's own live stream does on an event). `live` mounts the `user` stream
+ * a real board holds (`routes/project`), for tests that emit SSE events
+ * through a stubbed `EventSource`.
+ */
+
+const USER_SCOPES = [sseScopes.user()];
+
+export interface DockStubOptions {
+  path: string;
+  view: (request: Request) => ControllerDockView;
+  /** O39-d: the viewer's unseen replies (none by default). */
+  unseen?: () => UnseenReplyView[];
+  /** Ruling 457: the viewer's turns working right now (none by default). */
+  working?: () => LiveTurnView[];
+  action?: (form: FormData) => { ok: true; conversationId: string } | { ok: false; error: string };
+  /** The pages hold the `user` stream, as the workspace layout does. */
+  live?: boolean;
+}
+
+export interface DockStubCounters {
+  /** Every load of the dock's view (`/resources/controller`), in order. */
+  loads: URL[];
+  /** Every load of the unseen-reply list (`/resources/controller-unseen`). */
+  unseenLoads: URL[];
+  /** Every send (`POST /resources/controller`). */
+  sends: FormData[];
+  /** Every run of a PAGE loader (root, the layout, the board, the task). */
+  pageLoads: string[];
+}
+
+function Revalidate() {
+  const revalidator = useRevalidator();
+  return (
+    <button type="button" onClick={() => void revalidator.revalidate()}>
+      revalidate page
+    </button>
+  );
+}
+
+function LiveStream() {
+  useLiveUpdates(USER_SCOPES);
+  return null;
+}
+
+export function mountDock(opts: DockStubOptions) {
+  const counters: DockStubCounters = { loads: [], unseenLoads: [], sends: [], pageLoads: [] };
+  const page = (id: string) => () => {
+    counters.pageLoads.push(id);
+    return null;
+  };
+  const Stub = createRoutesStub([
+    {
+      id: "root",
+      path: "/",
+      loader: () => {
+        counters.pageLoads.push("root");
+        return { csrf: "tok", theme: "system" };
+      },
+      Component: () => (
+        <ToastProvider>
+          <Outlet />
+          <ControllerDock />
+        </ToastProvider>
+      ),
+      children: [
+        {
+          id: "routes/project",
+          path: "projects/:slug",
+          loader: page("routes/project"),
+          Component: () => (
+            <>
+              {opts.live && <LiveStream />}
+              <Outlet />
+              <Revalidate />
+            </>
+          ),
+          children: [
+            {
+              id: "routes/project.board",
+              path: "board",
+              loader: page("routes/project.board"),
+              Component: () => (
+                <>
+                  <div>board page</div>
+                  <Link to="/projects/viberr/tasks/VIB-1">open VIB-1</Link>
+                </>
+              ),
+            },
+            {
+              id: "routes/project.task",
+              path: "tasks/:key",
+              loader: page("routes/project.task"),
+              Component: () => (
+                <>
+                  <div>task page</div>
+                  <Link to="/projects/viberr/board">back to the board</Link>
+                </>
+              ),
+            },
+            { id: "routes/project.controller", path: "controller", Component: () => <div>controller page</div> },
+          ],
+        },
+        {
+          id: "routes/resources.controller-unseen",
+          path: "resources/controller-unseen",
+          // The real routes' own answer, so a page revalidation here reloads
+          // what it reloads in the app.
+          shouldRevalidate: dockResourceShouldRevalidate,
+          loader: ({ request }) => {
+            counters.unseenLoads.push(new URL(request.url));
+            return {
+              unseen: opts.unseen ? opts.unseen() : [],
+              working: opts.working ? opts.working() : [],
+            };
+          },
+        },
+        {
+          id: "routes/resources.controller",
+          path: "resources/controller",
+          shouldRevalidate: dockResourceShouldRevalidate,
+          loader: ({ request }) => {
+            counters.loads.push(new URL(request.url));
+            return { view: opts.view(request) };
+          },
+          action: async ({ request }) => {
+            const form = await request.formData();
+            counters.sends.push(form);
+            return opts.action ? opts.action(form) : { ok: true as const, conversationId: "cnv_new" };
+          },
+        },
+      ],
+    },
+  ]);
+  const utils = render(<Stub initialEntries={[opts.path]} />);
+  return { ...utils, ...counters };
+}

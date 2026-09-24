@@ -178,7 +178,10 @@ function GrantChips({
               className={"pick-chip missing on" + (mono ? " mono" : "")}
               title="No longer in the store, so this grant reaches no run. The section is locked on this deployment."
             >
+              {/* Interface review 2026-09-24 (acce-33): as MissingChips. */}
+              <Icon name="alert" />
               {id}
+              <span className="res-chip-note">missing</span>
             </span>
           ))
         ) : (

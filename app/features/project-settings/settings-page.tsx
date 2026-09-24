@@ -22,7 +22,9 @@ import { z } from "zod";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
+import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -54,7 +56,7 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * Project settings: project identity and workflow-stages editor
  * (rename / HTML5-DnD reorder / add / remove with triage+done locks),
  * members panel (invite/remove — roles live in Policy), repository &
- * credentials (shared CredentialCard + the real Grant-scope flow), danger
+ * credentials (shared CredentialCard + the real Re-check scopes flow), danger
  * zone. All governed state comes from the loader; every mutation is a
  * route-action POST (no optimistic UI). Client-side guard toasts mirror
  * the mock; the server re-checks every guard.
@@ -239,13 +241,23 @@ export function ProjectPanel({
           >
             Discard
           </button>
+          {/* Ruling 147(d): `dirty` stays a gate; ruling 368: the save in
+              flight shows itself here, Discard only waits. */}
           <button
             type="button"
             className="btn primary sm"
             disabled={!dirty || busy}
+            aria-busy={busy || undefined}
             onClick={save}
           >
-            Save changes
+            {busy ? (
+              <>
+                <Icon name="loader" className="spin" />
+                Saving…
+              </>
+            ) : (
+              "Save changes"
+            )}
           </button>
         </div>
       )}
@@ -795,6 +807,14 @@ function StageRow({
         title={locked ? `${stage.name} is fixed: ${locked}` : undefined}
       >
         {locked && <Icon name="lock" />}
+        {/* Interface review 2026-09-24 (acce-5): the title is a mouse extra —
+            it never opens for keyboard, touch or a screen reader, and the
+            disabled remove ✕ below can show nothing at all. */}
+        {locked && (
+          <span className="vh">
+            {stage.name} is fixed: {locked}. It can't be moved or removed.
+          </span>
+        )}
       </span>
       <StageColorMenu stage={stage} disabled={!canManage} onPick={onRecolor} />
       {editing ? (
@@ -1021,6 +1041,10 @@ export function StagesPanel({
           {canManage ? (
             <>
               Drag a row to reorder, or use its Move menu · click a name to rename.
+              {/* acce-5: the lock's reason, visibly — `title` never opens on
+                  the disabled remove ✕ or for touch. */}
+              {stages.length > 1 &&
+                ` ${stages[0]!.name} (the entry point) and ${stages.at(-1)!.name} (human acceptance) are fixed.`}{" "}
               Adding or removing a stage re-wires the transition chain around it.
               The new hop inherits the boundary it replaced. Loosen or tighten a
               boundary in{" "}
@@ -1629,6 +1653,7 @@ export function MembersPanel({
   projectName,
   canManage,
   busy,
+  removing = null,
   onInvite,
   onRemove,
   onNavPolicy,
@@ -1638,6 +1663,9 @@ export function MembersPanel({
   projectName: string;
   canManage: boolean;
   busy: boolean;
+  /** The member whose removal is in flight (ruling 368): only that row's ✕
+   *  reads busy; the others, and every row during an invite, only wait. */
+  removing?: string | null;
   onInvite: (name: string, email: string) => void;
   onRemove: (member: MembershipView) => void;
   onNavPolicy: () => void;
@@ -1756,7 +1784,9 @@ export function MembersPanel({
                     : "Remove member"
                 }
                 disabled={busy}
-                aria-busy={busy || undefined}
+                // Ruling 459's busy step (.7) on the row whose own removal is
+                // in flight; ruling 368: a row that only waits claims nothing.
+                aria-busy={removing === m.userId || undefined}
                 onClick={() => remove(m)}
               >
                 <Icon name="x" />
@@ -1862,7 +1892,8 @@ function RepairRepoDialog({
   const flagged = refused > 0 ? missing : null;
   return (
     <dialog ref={ref} className="confirm-card" aria-label="Repair repository">
-      <div className="confirm-icon">
+      {/* colo-7: a primary commit, so the primary wash, not the danger one. */}
+      <div className="confirm-icon primary">
         <Icon name="github" />
       </div>
       <h3>Repair repository</h3>
@@ -1958,8 +1989,8 @@ export function RepoPanel({
   repo,
   credential,
   canGrant,
-  busy,
-  credBusy,
+  inFlight,
+  credInFlight,
   canRepair,
   footprintTasks,
   branchCleanup,
@@ -1975,8 +2006,11 @@ export function RepoPanel({
   repo: string | null;
   credential: SettingsViewData["credential"];
   canGrant: boolean;
-  busy: boolean;
-  credBusy: boolean;
+  /** Ruling 368: the intent the repository fetcher is carrying (repair,
+   *  branch cleanup or the scope re-check), null while it is idle. */
+  inFlight: string | null;
+  /** The same for the credential fetcher (attach / rotate / remove). */
+  credInFlight: string | null;
   /** `edit-policy` (admin) — the repo is project identity, one tier above the
    *  credential actions. */
   canRepair: boolean;
@@ -1993,6 +2027,7 @@ export function RepoPanel({
   onOpenTask: (taskKey: string) => void;
 }) {
   const [repairing, setRepairing] = useState(false);
+  const rechecking = inFlight === "grant-scope";
   // Close the dialog only when a repair SUCCEEDS — a probe refusal keeps it
   // open with the typed reason so the owner can correct the input.
   // Ruling 459: through the dialog's exit (`repairDone`), then its onCancel
@@ -2113,18 +2148,19 @@ export function RepoPanel({
           credential={credential}
           onOpenTask={onOpenTask}
           warnActions={
-            // "Grant scope" re-checks a credential — on the no-credential card
+            // "Re-check scopes" re-validates a credential — on the no-credential card
             // it can only no-op into a toast, so it doesn't render there.
             credential.source !== "none" ? (
               <button
                 type="button"
                 className="btn sm push"
                 onClick={onGrantScope}
-                disabled={busy}
+                disabled={inFlight !== null}
+                aria-busy={rechecking || undefined}
                 title="Re-check the credential's scopes against GitHub"
               >
-                <Icon name="check" />
-                Grant scope
+                <GlyphSwap rest="check" alt="loader" on={rechecking} spinAlt />
+                {rechecking ? "Checking…" : "Re-check scopes"}
               </button>
             ) : undefined
           }
@@ -2132,7 +2168,7 @@ export function RepoPanel({
             <CredentialManageActions
               configured={credential.source === "pat"}
               canManage={canGrant}
-              busy={credBusy}
+              inFlight={credInFlight}
               onSet={onSetCredential}
               onClear={onClearCredential}
             />
@@ -2142,9 +2178,10 @@ export function RepoPanel({
         <div className="pol-note after last">
           <Icon name="lock" />
           <span>
-            Credential details need the <strong>Grant GitHub scope</strong>{" "}
-            grant (project admin or maintainer). The project GitHub page still
-            shows whether this repository is reachable.
+            Credential details need the{" "}
+            <strong>Manage the GitHub credential</strong> grant (project admin
+            or maintainer). The project GitHub page still shows whether this
+            repository is reachable.
           </span>
         </div>
       )}
@@ -2222,6 +2259,7 @@ export function DangerZone({
   myRole,
   archived,
   busy,
+  inFlight = null,
   onArchive,
   onDelete,
   gate = roleCan,
@@ -2230,6 +2268,10 @@ export function DangerZone({
   myRole: string | null;
   archived: boolean;
   busy: boolean;
+  /** Ruling 368: the intent in flight on the danger fetcher, so the control
+   *  that sent it (Archive/Restore, or Delete once its dialog has closed)
+   *  shows the work and the other only waits. */
+  inFlight?: string | null;
   onArchive: (archived: boolean) => void;
   onDelete: (confirmName: string) => void;
   /** See `ProjectActionGate`. Defaults to the shared `roleCan`. */
@@ -2244,6 +2286,8 @@ export function DangerZone({
   // through the shared helper. (`edit-policy` resolves to admin-only today, so
   // this is behavior-preserving; it stops being a hardcoded assumption.)
   const canManageLifecycle = gate(asProjectRole(myRole), "edit-policy");
+  const archiving = inFlight === "archive-project";
+  const deleting = inFlight === "delete-project";
 
   return (
     <div className="panel danger-panel">
@@ -2287,10 +2331,18 @@ export function DangerZone({
           // viewer/maintainer must not see an actionable control; the server
           // still enforces edit-policy.
           disabled={busy || !canManageLifecycle}
+          aria-busy={archiving || undefined}
           title={canManageLifecycle ? undefined : "Only a project admin can archive this project"}
           onClick={() => onArchive(!archived)}
         >
-          {archived ? "Restore" : "Archive"}
+          {archiving && <Icon name="loader" className="spin" />}
+          {archived
+            ? archiving
+              ? "Restoring…"
+              : "Restore"
+            : archiving
+              ? "Archiving…"
+              : "Archive"}
         </button>
       </div>
       <div className="dz-row">
@@ -2307,10 +2359,12 @@ export function DangerZone({
           // F10-34: project-admin only; disabled for everyone else so the
           // typed-confirm dialog can never be opened without authority.
           disabled={busy || !canManageLifecycle}
+          aria-busy={deleting || undefined}
           title={canManageLifecycle ? undefined : "Only a project admin can delete this project"}
           onClick={() => setConfirming(true)}
         >
-          Delete project
+          {deleting && <Icon name="loader" className="spin" />}
+          {deleting ? "Deleting…" : "Delete project"}
         </button>
       </div>
       {confirming && (
@@ -2509,6 +2563,11 @@ export function SettingsPage({
             projectName={data.project.name}
             canManage={canManageMembers}
             busy={memberFetcher.state !== "idle"}
+            removing={
+              inFlightIntent(memberFetcher) === "remove-member"
+                ? String(memberFetcher.formData?.get("userId") ?? "")
+                : null
+            }
             onInvite={(name, email) =>
               memberFetcher.submit(
                 { intent: "invite", _csrf: csrf, name, email },
@@ -2527,8 +2586,8 @@ export function SettingsPage({
             repo={data.project.repo}
             credential={data.credential}
             canGrant={canGrant}
-            busy={repoFetcher.state !== "idle"}
-            credBusy={credFetcher.state !== "idle"}
+            inFlight={inFlightIntent(repoFetcher)}
+            credInFlight={inFlightIntent(credFetcher)}
             canRepair={canEditPolicy}
             footprintTasks={data.repoFootprintTasks}
             branchCleanup={data.branchCleanupOnMerge}
@@ -2593,6 +2652,7 @@ export function SettingsPage({
           gate={gate}
           archived={data.project.archived}
           busy={dangerFetcher.state !== "idle"}
+          inFlight={inFlightIntent(dangerFetcher)}
           onArchive={(archived) =>
             dangerFetcher.submit(
               { intent: "archive-project", _csrf: csrf, archived: String(archived) },

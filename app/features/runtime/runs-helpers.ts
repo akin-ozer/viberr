@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
 import { z } from "zod";
 import type { PillKind } from "~/ui/pill";
+import { useClock } from "~/ui/use-clock";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import type { ConsoleEntry } from "./log-noise";
 import {
@@ -802,20 +802,19 @@ export function agentMessageProse(line: LogLine): string | null {
  * identical markup, no hydration mismatch. Wall-clock ticking begins only after
  * mount, when the effect installs the real client `Date.now()`. Never call
  * `Date.now()` during render.
+ *
+ * Ruling 457 (RF-9): the ticking is the shared one-second clock
+ * (`~/ui/use-clock`), one interval for every counter on the page instead of
+ * one per counter, and a counter mounted after hydration reads the client
+ * clock on its first render.
  */
 export function useElapsed(startedAt: string | null, active: boolean): number {
-  const [now, setNow] = useState<number | null>(null);
-  useEffect(() => {
-    setNow(Date.now());
-    if (!active) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [active]);
+  const now = useClock(1000, active);
   if (!startedAt) return 0;
   const started = new Date(startedAt).getTime();
   if (!Number.isFinite(started)) return 0;
-  // Before hydration `now` is null → elapsed 0 on both SSR and first client
-  // render; the post-mount effect supplies the real clock.
+  // On the server and during hydration `now` is null → elapsed 0 on both; the
+  // re-render right after hydration supplies the real clock.
   if (now === null) return 0;
   return Math.max(0, Math.floor((now - started) / 1000));
 }

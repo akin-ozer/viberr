@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
@@ -874,5 +874,72 @@ describe("ruling 294: copy the sign-in link", () => {
     ]);
     expect(container.querySelector("[data-usage]")).toBeNull();
     expect(queryByText(/usage not reported/)).toBeNull();
+  });
+});
+
+/**
+ * Ruling 368: both cards share one fetcher, so every control went `disabled`
+ * for the whole wait with its resting label, the one that was pressed
+ * included: it painted the .45 refused step and said nothing while the server
+ * started the sign-in. The request is read off the fetcher (its intent, its
+ * backend, its method) and shows on the button that sent it; everything else,
+ * the other card's controls included, only waits.
+ * Canary: drop the `fetcher.formData?.get("backend") === backend` check in
+ * `agent-accounts-panel.tsx` and the other card's button claims the work too.
+ */
+describe("ruling 368: the account request in flight", () => {
+  function renderHeld(backends: ProfileBackend[]) {
+    const Stub = createRoutesStub([
+      {
+        path: "/profile",
+        Component: () => {
+          const fetcher = useFetcher();
+          return (
+            <ToastProvider>
+              <AgentAccountsPanel
+                backends={backends}
+                fetcher={fetcher}
+                submit={(fields) => fetcher.submit(fields, { method: "post" })}
+              />
+            </ToastProvider>
+          );
+        },
+        // Never answers: the test reads the wait itself.
+        action: () => new Promise(() => {}),
+      },
+    ]);
+    return render(<Stub initialEntries={["/profile"]} />);
+  }
+
+  it("a sign-in start reads Starting sign-in… on its own button only", async () => {
+    const { getByText } = renderHeld(BOTH_UNCONNECTED);
+    const claude = getByText("Sign in with Claude").closest("button")!;
+    fireEvent.click(claude);
+    await waitFor(() => expect(claude.getAttribute("aria-busy")).toBe("true"));
+    expect(claude.textContent).toBe("Starting sign-in…");
+    expect(claude.disabled).toBe(true);
+    expect(claude.querySelector("svg.ico.spin")).not.toBeNull();
+    // The same card's other method, and the other card, only wait.
+    for (const text of ["Sign in with Console", "Sign in with ChatGPT"]) {
+      const b = getByText(text).closest("button")!;
+      expect(b.disabled).toBe(true);
+      expect(b.hasAttribute("aria-busy")).toBe(false);
+    }
+  });
+
+  it("a cancel reads Cancelling…, and Submit code does not claim it", async () => {
+    const { getByText } = renderHeld([
+      backend("claude", {
+        login: runningLogin("claude", { state: "awaiting-code", needsCode: true }),
+      }),
+      backend("codex"),
+    ]);
+    const cancel = getByText("Cancel").closest("button")!;
+    fireEvent.click(cancel);
+    await waitFor(() => expect(cancel.getAttribute("aria-busy")).toBe("true"));
+    expect(cancel.textContent).toBe("Cancelling…");
+    const submitCode = getByText("Submit code").closest("button")!;
+    expect(submitCode.disabled).toBe(true);
+    expect(submitCode.hasAttribute("aria-busy")).toBe(false);
   });
 });

@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { useEffect, useRef, useState } from "react";
 import { pageTitle } from "~/shared/page-title";
 import { data, Form, redirect, useNavigation } from "react-router";
@@ -482,9 +483,10 @@ export default function Login({
 
   return (
     <div className="login-wrap login-wrap-2col" data-screen-label="Login">
-      {/* F10-27: a desktop-only brand/value panel beside the card so the wide
-          viewport reads as an intentional composition rather than a lone card
-          in empty space. Hidden below the two-column breakpoint. */}
+      {/* F10-27: a brand/value panel beside the card so the wide viewport
+          reads as an intentional composition rather than a lone card in empty
+          space. Below the two-column breakpoint it stacks under the card
+          instead of hiding (app.css, interface review 2026-09-24 acce-27). */}
       {/* UXA-12: this panel used to be `aria-hidden="true"`. Its decorative
           MARK is decorative; its heading and three product claims are not, and
           they appear nowhere else — so an assistive-tech user got a bare
@@ -680,3 +682,6 @@ export default function Login({
     </div>
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/login");

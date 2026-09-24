@@ -114,11 +114,13 @@ Three proxy details worth getting right:
   `/resources/events`. That is the SSE endpoint every live page and the run console
   stream from; a buffering proxy stalls live updates. The response carries
   `Cache-Control: no-store, no-transform` and `X-Accel-Buffering: no`.
-- Each visible task page holds two SSE streams, and over HTTP/1.1 a browser allows about
-  six connections per origin, so several visible pages of one instance can exhaust the
-  pool and every request then hangs with no error (ruling 301; a hidden tab closes its
-  streams). The app serves HTTP/1.1; a proxy that speaks HTTP/2 to the browser multiplexes
-  the streams over one connection.
+- Each visible page holds at most one SSE stream, except the project controller page,
+  which holds two (the layout's and its own); `/insights` has none, and the controller
+  dock opens one there while its panel is open. Over HTTP/1.1 a browser allows about six
+  connections per origin, so several visible pages of one instance can exhaust the pool
+  and every request then hangs with no error (ruling 301; a hidden tab closes its
+  streams). The app serves HTTP/1.1; a proxy that speaks HTTP/2 to the browser
+  multiplexes the streams over one connection.
 
 HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
 

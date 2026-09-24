@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { balanced, cssRules, type CssRule } from "../test-support/css-rules";
 
 /**
  * Stylesheet-integrity gate for `app/app.css`, the app's ONLY stylesheet.
@@ -484,18 +485,23 @@ describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
     }
   });
 
-  it("holds 4.5:1 for both tokens over the 4% --fg surface tint labels sit on", () => {
+  it("holds 4.5:1 for both tokens over the 5% --tint-hover every row takes under the pointer", () => {
     // `.live-head`, `.cap-matrix-table tr.grp td` and `.field input[disabled]`
     // put --placeholder / --faint text on `color-mix(--fg, transparent 96-97%)`,
-    // which is measurably darker than --surface.
+    // which is measurably darker than --surface. Interface review 2026-09-24
+    // (colo-3): the gate mixed 4%, and missed the 5% --tint-hover that a
+    // hovered `.rq-row`, `.ntf-item` or `.ctl-conv` paints under its
+    // --placeholder timestamp: dark #868d9f measured 4.46:1 there. The mix is
+    // now the darkest one secondary text sits on. CANARY: set the dark
+    // --placeholder back to #868d9f.
     for (const [theme, block] of [["light", LIGHT_ROOT], ["dark", DARK_ROOT]] as const) {
       const surface = tokenIn(block, "--surface");
       const fg = tokenIn(block, "--fg");
-      const tint = mixHex(surface, fg, 0.04);
+      const tint = mixHex(surface, fg, 0.05);
       for (const token of ["--faint", "--placeholder"]) {
         expect(
           contrastRatio(tokenIn(block, token), tint),
-          `${theme} ${token} on a 4% --fg tint (${tint})`,
+          `${theme} ${token} on the 5% --tint-hover (${tint})`,
         ).toBeGreaterThanOrEqual(AA_SMALL_TEXT);
       }
     }
@@ -738,10 +744,11 @@ describe("app.css defines every class the markup uses (P16-UI-02)", () => {
   });
 
   it("keeps the composer's positioning contract in the stylesheet (P16-UI-03)", () => {
-    // `.composer-box .composer-placeholder` is position:absolute and MentionMenu
-    // positions itself absolutely, so both need a positioned ancestor. It used
-    // to be an inline `style={{position:"relative"}}` in timeline.tsx — delete
-    // that attribute and both jump to the viewport.
+    // MentionMenu positions itself absolutely, so it needs a positioned
+    // ancestor. It used to be an inline `style={{position:"relative"}}` in
+    // timeline.tsx — delete that attribute and it jumps to the viewport. (The
+    // placeholder was absolute too until interface review 2026-09-24, layo-12:
+    // it now shares the editor's grid cell, pinned in the block at the end.)
     for (const selector of [".composer-box", ".composer-input"]) {
       const rule = CODE.match(
         new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`),
@@ -961,7 +968,7 @@ const BREAKPOINTS = {
   "max-width: 1080px": "topbar tier 1 — brand wordmark, root crumb, shortcut chip",
   "max-width: 1000px": "settings tab rail goes horizontal",
   "max-width: 900px": "home topbar collapses to the palette; project-row stats drop",
-  "min-width: 900px": "the login page earns its brand aside (the one min-width)",
+  "min-width: 900px": "the login page's brand aside moves beside the card (the one min-width)",
   "max-width: 760px": "topbar tier 2 — the middle crumb",
   "max-width: 720px": "MOBILE SHELL — the project rail becomes an overlay",
   "max-width: 560px": "phone-width home rows — the pipeline meter yields",
@@ -1162,19 +1169,6 @@ function markupFiles(): string[] {
 function inBlockComment(src: string, index: number): boolean {
   const open = src.lastIndexOf("/*", index);
   return open !== -1 && src.lastIndexOf("*/", index) < open;
-}
-
-type Balanced = { body: string; end: number };
-
-/** The balanced `{…}` body starting at `open` (the index OF the brace). */
-function balanced(src: string, open: number): Balanced {
-  let depth = 0;
-  let i = open;
-  for (; i < src.length; i++) {
-    if (src[i] === "{") depth++;
-    else if (src[i] === "}" && --depth === 0) break;
-  }
-  return { body: src.slice(open + 1, i), end: i };
 }
 
 const lineAt = (src: string, index: number) =>
@@ -1604,56 +1598,8 @@ function mixHex(a: string, b: string, ratioB: number): string {
  * a gate rots back into the hand-list it replaced.
  */
 
-type CssRule = { selector: string; decls: Map<string, string>; at: string[] };
-
-/**
- * Every rule in the sheet: selector resolved through CSS nesting, declarations
- * separated from nested blocks, and the at-rule context it sits under.
- * `@keyframes` / `@font-face` bodies are not rules and are skipped.
- */
-function cssRules(css: string, parent = "", at: string[] = []): CssRule[] {
-  const out: CssRule[] = [];
-  for (let i = 0; ; ) {
-    const open = css.indexOf("{", i);
-    if (open < 0) break;
-    const head = css.slice(i, open).trim();
-    const { body, end } = balanced(css, open);
-    i = end + 1;
-    if (!head || head.startsWith("@keyframes") || head.startsWith("@font-face")) continue;
-    if (head.startsWith("@")) {
-      out.push(...cssRules(body, parent, [...at, head]));
-      continue;
-    }
-    const selector = head
-      .split(",")
-      .map((s) => s.trim())
-      .map((s) => (parent ? (s.includes("&") ? s.replace(/&/g, parent) : `${parent} ${s}`) : s))
-      .join(", ");
-    let rest = body;
-    for (;;) {
-      const nested = rest.indexOf("{");
-      if (nested < 0) break;
-      const cut = rest.lastIndexOf(";", nested);
-      const { body: nb, end: ne } = balanced(rest, nested);
-      out.push(...cssRules(`${rest.slice(cut + 1, nested).trim()}{${nb}}`, selector, at));
-      rest = rest.slice(0, cut + 1) + rest.slice(ne + 1);
-    }
-    const decls = new Map<string, string>();
-    for (const d of rest.split(";")) {
-      const colon = d.indexOf(":");
-      if (colon < 0) continue;
-      const prop = d.slice(0, colon).trim();
-      // Standard properties are letters/hyphens; custom properties may carry
-      // digits (a digit-bearing token used to be silently INVISIBLE to every
-      // gate built on this parser — found when --tint-1 resolved nowhere).
-      if (!/^[a-z-]+$/i.test(prop) && !/^--[\w-]+$/.test(prop)) continue;
-      decls.set(prop, d.slice(colon + 1).trim());
-    }
-    if (decls.size) out.push({ selector, decls, at });
-  }
-  return out;
-}
-
+// `cssRules` (test-support/css-rules.ts): every rule in the sheet, nesting
+// resolved, with the at-rule context it sits under.
 const RULES = cssRules(CODE);
 
 /* ----------------------------------------------------- colour resolution */
@@ -1780,6 +1726,12 @@ const THEMES = [
   ["dark", themeTokens(true)],
 ] as const;
 
+/** A rule under `@media (forced-colors: active)` paints in the SYSTEM palette
+ *  (`SelectedItem`, `Canvas`, …) that the UA and the user supply, not in either
+ *  app theme, so neither theme's sweep reads it (interface review 2026-09-24:
+ *  the selected chip, segment and calendar day name `SelectedItem` there). */
+const forcedColors = (rule: CssRule) => rule.at.some((q) => /forced-colors:\s*active/.test(q));
+
 /** A selector part with its state pseudo-classes and pseudo-elements dropped —
  *  `.card:hover` and `.card` paint the same box, and `.top-search input` is
  *  where `.top-search input::placeholder` sits. */
@@ -1807,6 +1759,7 @@ function paintMap(dark: boolean): Map<string, string> {
   const paints = new Map<string, string>();
   const scoped = new Map<string, string>();
   for (const rule of RULES) {
+    if (forcedColors(rule)) continue;
     const bg = rule.decls.get("background") ?? rule.decls.get("background-color");
     if (!bg) continue;
     for (const part of rule.selector.split(",")) {
@@ -1955,6 +1908,7 @@ function sweep(): Sweep {
     // with no background at all and invents a failure.
     const effective = new Map<string, Map<string, string>>();
     for (const rule of RULES) {
+      if (forcedColors(rule)) continue;
       for (const rawPart of rule.selector.split(",")) {
         const part = rawPart.trim();
         if (!part) continue;
@@ -2411,6 +2365,7 @@ const HIDDEN_BY_DESIGN = {
   ".crumbs .crumb-root": "topbar tier 1 drops the project crumb at 1080px. The destination is the board, which the project rail links from every width — INTENT §4 keeps the rail's width at every breakpoint precisely so the crumbs can truncate. Navigation duplicated, not removed.",
   ".crumbs .crumb-mid": "topbar tier 2 drops the middle crumb at 760px. Same duplication: the view it links to is a rail item, and at 720px the rail becomes an overlay that still lists all of them.",
   ".home-top .top-search input": "P16-G3. At 900px Home's finder collapses to its `.kbd` BUTTON, which becomes the whole 36×36 box and opens the command palette — the same search over the same projects. The capability moves to a control a phone can actually use; it is not withdrawn. The three tests in `app.css palette reachability on touch` pin the replacement.",
+  ".rail": "interface review 2026-09-24 (acce-13). At 720px the project rail is a drawer behind `.rail-toggle` (aria-expanded), and closed it is `visibility: hidden` so its links leave the tab order instead of taking nine invisible Tab stops off-screen. `.app[data-rail-open=\"true\"] .rail` restores visibility, so every link is one toggle press away, not removed.",
   ".pj-row .pj-stats .pill": "the 1100px tier drops the least load-bearing stat from a Home project ROW. `.pill` is a shared chip class that is a <button> elsewhere (the notification filter, the topbar's live-paused retry), and the ancestors here live in a different component from the pills, so the sweep widens to every `.pill` and picks those buttons up. The pills this rule reaches are project-cards.tsx spans inside `.pj-stats`, and the same numbers stay on the project's own page.",
 } satisfies Record<string, string>;
 
@@ -2429,7 +2384,7 @@ const UNFIXED_HIDDEN: Record<string, string> = {};
  *  changes WHAT IS RENDERED is the thing the contract bans; these move things
  *  that are already there. */
 const VIEWPORT_READS = {
-  "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
+  "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`, and (interface review 2026-09-24, layo-8) flips it above its trigger or caps its height when the room below runs out. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
 } satisfies Record<string, string>;
 
 type Hidden = {
@@ -2635,8 +2590,8 @@ describe("app/ gates no rendering on the viewport (R19-12)", () => {
 
   it("uses matchMedia for user PREFERENCES only, never for width", () => {
     // A width-driven matchMedia is how "no control is hidden at any width"
-    // gets broken in a place `app.css` cannot be read to find out. Both live
-    // uses ask the OS for a colour-scheme preference.
+    // gets broken in a place `app.css` cannot be read to find out. Every live
+    // use asks the OS for a preference: colour scheme or reduced motion.
     const queries: string[] = [];
     for (const file of sources) {
       const src = readFileSync(file, "utf8");
@@ -2645,11 +2600,14 @@ describe("app/ gates no rendering on the viewport (R19-12)", () => {
         queries.push(`${rel} — ${m[1]}`);
       }
     }
-    // Four sites: the SSR-safe first-paint script inlined in root.tsx, the
-    // listener that keeps `system` live, `theme-preference.ts`, and the board's
+    // Five sites: the SSR-safe first-paint script inlined in root.tsx, the
+    // listener that keeps `system` live, `theme-preference.ts`, the board's
     // drop animation asking for reduced motion before it flies a card
-    // (board-page.tsx, 2026-09-08).
-    expect(queries.length, "the scan must find the four preference reads").toBe(4);
+    // (board-page.tsx, 2026-09-08), and the dock sheet's release asking the
+    // same before it springs (use-sheet-drag.ts, ruling 454). The sheet knows
+    // it IS a sheet from the `--sheet-draggable` flag the 720px block sets,
+    // never from a width query.
+    expect(queries.length, "the scan must find the five preference reads").toBe(5);
     for (const q of queries) {
       expect(q, "matchMedia may only ask about a preference").toMatch(/\(prefers-[\w-]+:/);
       expect(q, "a width query here is the banned form").not.toMatch(/width/);
@@ -3088,8 +3046,10 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
         : [],
     );
     const selectors = looping.map((l) => l.selector);
+    // Ruling 457 moved the `pulse-a` loop onto each dot's `::after`, where it
+    // scales and fades a copy of the dot instead of animating box-shadow.
     expect(selectors).toEqual(
-      expect.arrayContaining([".chip .working", ".rdot.running", ".lcaret"]),
+      expect.arrayContaining([".chip .working::after", ".rdot.running::after", ".lcaret"]),
     );
     for (const spinner of Object.keys(SPINNERS)) {
       expect(selectors, `${spinner} is exempt as a spinner but no longer loops`).toContain(spinner);
@@ -3511,8 +3471,10 @@ describe("app.css controller layout (ruling 419)", () => {
     // half-height. CANARY: restore `- 56px`.
     const collapse720 = CODE.match(/\.dock\[data-open="true"\] \.dock-fab \{([^}]*)\}/);
     expect(collapse720, "the perch rule must exist").toBeTruthy();
+    // Ruling 454 adds the sheet's drag to the travel, so the button rides a
+    // pulled sheet; at rest the term is 0px.
     expect(collapse720![1]).toContain(
-      "calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px))",
+      "calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px) + var(--sheet-drag, 0px))",
     );
   });
 
@@ -3652,7 +3614,9 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     const played = RULES.flatMap((r) =>
       animationNames(r.decls.get("animation") ?? r.decls.get("animation-name") ?? "").map((n) => `${r.selector} → ${n}`),
     );
-    expect(played.length).toBeGreaterThan(40);
+    // A floor against a vacuous scan (it counts rules, and ruling 457 folded
+    // the five `pulse-a` rules into one).
+    expect(played.length).toBeGreaterThan(35);
     expect(played.filter((p) => !declared.has(p.split(" → ")[1]!))).toEqual([]);
     expect(rule(plain, ".cap-mbody").get("animation")).toMatch(/^reveal-down\b/);
   });
@@ -3829,6 +3793,22 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
   });
 });
 
+/**
+ * Ruling 457 (CSS-6): the console lays out only the rows near its viewport. A
+ * 400-row console showed about 14 and styled, laid out and painted all 400 on
+ * every pass (mount, a thread switch, load older, the width query). The rows
+ * keep their real height once seen (`auto`), which the console's follow-tail
+ * and load-older anchoring read back through `scrollHeight`.
+ */
+describe("app.css console rows skip off-screen work (ruling 457, CSS-6)", () => {
+  it("declares content-visibility and a remembered intrinsic size on the console's rows", () => {
+    // CANARY: drop the `.console > .log-line` rule.
+    const row = RULES.find((r) => r.at.length === 0 && r.selector === ".console > .log-line");
+    expect(row?.decls.get("content-visibility")).toBe("auto");
+    expect(row?.decls.get("contain-intrinsic-size")).toMatch(/^auto \d+px$/);
+  });
+});
+
 describe("app.css ruling 453: the Apple design pass", () => {
   const plain = RULES.filter((r) => r.at.length === 0);
   const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
@@ -3917,6 +3897,20 @@ describe("app.css ruling 453: the Apple design pass", () => {
     }
   });
 
+  it("(b) under reduced motion a pinned close never replays the dock's fade-in", () => {
+    // CANARY: drop `animation: none` from the reduced-motion
+    // `.dock .dock-panel[data-closing]`. pinLivePose switches the entrance off
+    // inline and releases it once data-closing lands; the reduced-motion
+    // `.dock .dock-panel { animation: fade-in }` (same weight, later) then
+    // restarted on the closing panel, which faded IN, never transitioned out,
+    // and vanished at the fallback timer (measured in headless Chromium).
+    const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+    expect(decls(reduced, ".dock .dock-panel").get("animation")).toMatch(/^fade-in\b/);
+    expect(decls(reduced, ".dock .dock-panel[data-closing]").get("animation")).toBe("none");
+    // Dialogs outrank their own reduced-motion fade-in by weight already.
+    expect(decls(plain, "dialog[data-closing]").get("animation")).toBe("none");
+  });
+
   it("(d) the OS increased-contrast setting gets defined edges and solid chrome, in both themes", () => {
     // CANARY: delete the `prefers-contrast: more` block — the app had no
     // answer to it before this pass.
@@ -3946,6 +3940,490 @@ describe("app.css ruling 453: the Apple design pass", () => {
       expect(decls(rules, ".home-top").get("backdrop-filter")).toBe("none");
       expect(decls(rules, ".topbar").get("background")).toBe("var(--surface)");
     }
+  });
+});
+
+describe("app.css ruling 454: the dock sheet under a finger", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decls = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const sheetWidth = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
+
+  it("marks the panel a sheet only at sheet width — the flag the script reads instead of the viewport", () => {
+    // CANARY: move `--sheet-draggable: 1` to the base `.dock-panel` rule and
+    // the floating desktop panel drags too.
+    expect(decls(sheetWidth, ".dock .dock-panel").get("--sheet-draggable")).toBe("1");
+    expect(RULES.filter((r) => r.decls.has("--sheet-draggable") && !sheetWidth.includes(r))).toEqual([]);
+  });
+
+  it("runs the sheet's surface on below its edge, so the spring's give never shows a gap", () => {
+    // CANARY: drop the extension layer — a return that overshoots, or a
+    // rubber-banded pull, lifts the sheet off the bottom edge. Or list it
+    // second: the first shadow paints on top, and the pop shadow's blur then
+    // draws a dark seam across the extension (seen live).
+    expect(decls(sheetWidth, ".dock .dock-panel").get("box-shadow")).toBe(
+      "0 calc(min(80dvh, 640px) - var(--radius-panel)) 0 var(--surface), var(--shadow-pop)",
+    );
+  });
+
+  it("shows the grabber only on the sheet, and gives the handles every one-finger touch", () => {
+    // CANARY: drop the touch-action — a pull on the header then scrolls the
+    // page behind the non-modal sheet instead of moving it. `pinch-zoom`, not
+    // `none`: a pinch that starts on the header still zooms (review), and
+    // `none` stands first for an engine that lacks the value.
+    expect(decls(plain, ".dock-grabber").get("display")).toBe("none");
+    expect(decls(sheetWidth, ".dock .dock-grabber").get("display")).toBe("block");
+    const handles = sheetWidth.find((r) => parts(r).includes(".dock .dock-head") && r.decls.has("touch-action"));
+    expect(handles, "the handles' touch rule").toBeTruthy();
+    expect(CODE).toMatch(
+      /\.dock \.dock-grabber, \.dock \.dock-head \{ touch-action: none; touch-action: pinch-zoom;/,
+    );
+    for (const handle of [".dock .dock-grabber", ".dock .dock-head"]) {
+      const d = decls(sheetWidth, handle);
+      expect(d.get("touch-action"), handle).toBe("pinch-zoom");
+      expect(d.get("user-select"), handle).toBe("none");
+    }
+  });
+
+  it("moves the sheet and its perched button on one value, with no transition behind the script's clock", () => {
+    // CANARY: drop `:not([data-closing])` — the Close button pressed while
+    // the sheet settles then has its exit overridden and never transitions.
+    expect(decls(plain, ".dock").get("--sheet-drag")).toBe("0px");
+    const held = decls(plain, ".dock[data-sheet-drag] .dock-panel:not([data-closing])");
+    expect(held.get("transform")).toBe("translateY(var(--sheet-drag, 0px))");
+    expect(held.get("transition")).toBe("none");
+    expect(decls(plain, ".dock[data-sheet-drag] .dock-fab").get("transition")).toBe("none");
+    for (const perch of ['.dock[data-open="true"] .dock-fab', '.dock[data-open="true"] .dock-fab:active']) {
+      const transform = decls(sheetWidth, perch).get("transform") ?? "";
+      expect(transform, perch).toContain("+ var(--sheet-drag, 0px))");
+      // CANARY: drop the `min(0px, …)` — a sheet pulled all the way out then
+      // carries the button 17px below its home, and it springs back up.
+      expect(transform, perch).toMatch(/^translate\(-8px, min\(0px, calc\(/);
+    }
+  });
+
+  it("under reduced motion the perched button never slides home", () => {
+    // CANARY: drop the reduced-motion `.dock .dock-fab` transition list — the
+    // button left hundreds of pixels up by a dismissed pull slides down on
+    // the base rule's transform transition.
+    const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+    expect(decls(reduced, ".dock .dock-fab").get("transition")).not.toMatch(/transform/);
+    expect(decls(reduced, ".dock:has(.dock-panel[data-closing]) .dock-fab").get("transition")).toBe("none");
+    // Later than the 720px block's equal-weight `:has()` return, so it wins.
+    const reducedAt = CODE.lastIndexOf(".dock:has(.dock-panel[data-closing]) .dock-fab { transition: none; }");
+    const sheetAt = CODE.indexOf(".dock:has(.dock-panel[data-closing]) .dock-fab {");
+    expect(reducedAt).toBeGreaterThan(sheetAt);
+  });
+});
+
+/* -------------------------------------- interface review 2026-09-24 (sheet) */
+
+/**
+ * Interface review 2026-09-24 — the sheet-side half of the whole-UI pass. Each
+ * of these rules is one declaration a later tidy-up could drop without any
+ * other test noticing, and each one's absence was measured: a clipped primary
+ * action, a heading cut to "E.", nine invisible Tab stops, a selected chip
+ * told apart by a 1.17:1 fill.
+ */
+describe("interface review 2026-09-24: the rules the fixes rest on", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const mobile = within(/max-width: 720px/);
+  const collapse = within(/max-width: 1100px/);
+  const reduce = within(/prefers-reduced-motion:\s*reduce/);
+  /** What the cascade leaves `selector` among `rules`: later declarations win. */
+  const cascade = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const decls = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) decls.set(k, v);
+    return decls;
+  };
+
+  it("layo-1: a dialog's action row wraps at phone width, and only there", () => {
+    // The footer sits outside the scrolling body of an overflow-hidden card, so
+    // at 320px a nowrap row put "Create project" 0% on screen. CANARY: move the
+    // wrap to the base rules; at 1440 it re-rowed the Archive footer.
+    for (const selector of [".modal-foot", ".modal-foot .foot-actions", ".confirm-actions"]) {
+      expect(cascade(mobile, selector).get("flex-wrap"), selector).toBe("wrap");
+      expect(cascade(plain, selector).get("flex-wrap"), `${selector} wraps only at 720px`).toBeUndefined();
+    }
+    expect(cascade(mobile, ".confirm-actions .btn").get("white-space")).toBe("normal");
+  });
+
+  it("layo-2: a panel title counts toward its head's line at phone width, so the wrap fires", () => {
+    // `flex: 1` is a zero basis: the title added nothing to the line, the
+    // cluster never dropped, and the title was squeezed to one letter.
+    const h2 = cascade(mobile, ".panel-head h2");
+    expect(h2.get("flex")).toBe("1 1 auto");
+    expect(h2.get("white-space")).toBe("normal");
+    expect(cascade(mobile, ".panel-head").get("flex-wrap")).toBe("wrap");
+  });
+
+  it("acce-13: the closed drawer is hidden, so its links leave the tab order", () => {
+    const rail = cascade(mobile, ".rail");
+    expect(rail.get("visibility")).toBe("hidden");
+    // Hidden AFTER the slide-out, not before it: the visibility step waits out
+    // the close's own slide (.15s since ruling 459 made the close shorter than
+    // the .2s open).
+    const slide = /\btransform ([\d.]+m?s)\b/.exec(rail.get("transition") ?? "")?.[1];
+    expect(slide).toBe(".15s");
+    expect(rail.get("transition")).toContain(`visibility 0s linear ${slide}`);
+    const open = cascade(mobile, '.app[data-rail-open="true"] .rail');
+    expect(open.get("visibility")).toBe("visible");
+    expect(open.get("transition-delay")).toBe("0s");
+    expect(Object.keys(HIDDEN_BY_DESIGN)).toContain(".rail");
+  });
+
+  it("ui-1: every entrance that rises has a later reduced-motion answer that does not", () => {
+    // The reduce block is an allow-list, and `.login-aside` was missing from it.
+    // Ruling 459 split the aside's rise across its chunks (`.login-aside > *`,
+    // staggered), so the chunks are the riser that needs the answer now.
+    // CANARY: drop `.login-aside > *` from the closing reduced-motion list.
+    const risers = RULES.flatMap((rule, index) =>
+      !rule.at.some((a) => /prefers-reduced-motion/.test(a)) &&
+      /^rise\b/.test(rule.decls.get("animation") ?? "")
+        ? parts(rule).map((selector) => ({ selector, index }))
+        : [],
+    );
+    expect(risers.map((r) => r.selector)).toEqual(
+      expect.arrayContaining([".toast", ".login-card", ".login-aside > *"]),
+    );
+    for (const { selector, index } of risers) {
+      const answered = RULES.some(
+        (rule, at) =>
+          at > index &&
+          reduce.includes(rule) &&
+          parts(rule).includes(selector) &&
+          /^(fade-in\b|none$)/.test(rule.decls.get("animation") ?? ""),
+      );
+      expect(answered, `${selector} rises; it needs a later reduced-motion answer`).toBe(true);
+    }
+  });
+
+  it("colo-1 / colo-2: a selected chip or segment carries an edge, not only a fill", () => {
+    // Weight, size and width are the same in both states, so the edge is the
+    // only non-hue cue. --border-control is held at 3:1 on --surface above.
+    // The chip's hover selector is in the rule because the plain hover rule
+    // outranks `.fchip.on` and would swap the edge back.
+    for (const selector of [".fchip.on", ".fchip.on:hover:not(:disabled)"]) {
+      expect(cascade(plain, selector).get("border-color"), selector).toBe("var(--border-control)");
+    }
+    expect(cascade(plain, ".seg button.on").get("box-shadow")).toBe("inset 0 0 0 1px var(--border-control)");
+    expect(cascade(plain, ".mini-seg button.on").get("box-shadow")).toBe("inset 0 0 0 1px var(--blue)");
+    expect(cascade(plain, ".mini-seg button.on:hover:not(:disabled)").has("box-shadow")).toBe(false);
+    // Forced colors paints both states alike unless the selected one names a
+    // system colour.
+    const forced = within(/forced-colors:\s*active/);
+    for (const selector of [".fchip.on", ".seg button.on", ".cal-day.sel"]) {
+      expect(cascade(forced, selector).get("background"), selector).toBe("SelectedItem");
+    }
+    // Ruling 459's hover on the selected segment sets its ink and outranks
+    // `.seg button.on`, so the forced rule names the hovered state as well.
+    for (const selector of [".fchip.on:hover:not(:disabled)", ".seg button.on:hover:not(:disabled)"]) {
+      expect(cascade(forced, selector).get("color"), selector).toBe("SelectedItemText");
+    }
+  });
+
+  it("acce-9: an open conversation or profile wears the selected pair, not the focus idiom", () => {
+    for (const selector of [".ctl-conv.on", ".ag-item.on"]) {
+      const decls = cascade(plain, selector);
+      expect(decls.get("background"), selector).toBe("var(--blue-soft)");
+      expect(decls.get("border-color"), selector).toBe("var(--blue)");
+      expect(decls.get("box-shadow") ?? "", selector).not.toContain("--focus-wash");
+    }
+    // --placeholder is 4.26:1 / 4.10:1 on --blue-soft; the selected rows lift
+    // their dim line to --faint, the pair the P13-D-12 block holds at 4.5:1.
+    expect(cascade(plain, ".ctl-conv.on .fine.dim").get("color")).toBe("var(--faint)");
+    expect(cascade(plain, ".ag-item.on .ag-idle").get("color")).toBe("var(--faint)");
+  });
+
+  it("acce-4: component focus rules add to the app ring instead of erasing it", () => {
+    for (const selector of [
+      "select:focus", ".goal-textarea:focus", ".datepick-trigger:focus-visible", ".op-steer:focus",
+      '.field input[type="text"]', ".field input:focus", ".field textarea:focus",
+      ".meta-edit-panel .meta-field input:focus", ".fm-gh input:focus", ".feed-filters .ff-task:focus",
+      '.guard-ctl input[type="number"]:focus', ".stg-input", ".ctl-composer textarea",
+    ]) {
+      expect(cascade(plain, selector).get("outline") ?? "", selector).not.toMatch(/^(0|none)$/);
+    }
+    // The two rules that replaced the ring with a box-shadow (which forced
+    // colors drops) are gone.
+    expect(CODE).not.toMatch(/\.cal-day[^{]*:focus-visible/);
+    expect(CODE).not.toMatch(/\.top-search \.kbd:focus-visible/);
+    // A borderless input's wrapper draws the ring for it.
+    for (const selector of [
+      "div.top-search:has(input:focus-visible)", ".board-filter-input:focus-within",
+      ".label-input:focus-within", ".repo-input:focus-within", ".feed-filters .ff-search:focus-within",
+      ".attach-add > label:has(input:focus-visible)",
+    ]) {
+      expect(cascade(plain, selector).get("outline"), selector).toBe("2px solid var(--blue)");
+    }
+  });
+
+  it("layo-5: the three horizontal scrollers mark their cut edge on their own timeline", () => {
+    for (const selector of [".rbac-scroll", ".md-table-wrap", ".md-body pre"]) {
+      const decls = cascade(plain, selector);
+      expect(decls.get("animation"), selector).toBe("x-cut-edge linear both");
+      expect(decls.get("animation-timeline"), selector).toBe("scroll(self inline)");
+    }
+    // The shorthand resets `animation-timeline`, so it has to come first.
+    expect(CODE).toMatch(
+      /\.rbac-scroll, \.md-table-wrap, \.md-body pre\s*\{\s*animation:[^;]*;\s*animation-timeline:/,
+    );
+    // No overflow (an inactive timeline) or no support must leave NO mask.
+    const frames = CODE.match(/@keyframes x-cut-edge\s*\{([\s\S]*?)\n\}/);
+    expect(frames, "the cue's keyframes must exist").toBeTruthy();
+    expect(frames![1]).toMatch(/100%\s*\{[^}]*\bmask-image:\s*none/);
+  });
+
+  it("acce-10: a long mono token may break rather than widen the page", () => {
+    for (const selector of [
+      ".conn-main .sub.mono", ".rsrc-main .sub.mono", ".rsrc-main b.mono-b", ".pol-note", ".hero-file",
+    ]) {
+      expect(cascade(plain, selector).get("overflow-wrap"), selector).toBe("anywhere");
+    }
+    expect(CODE, "the file-path chip's nowrap must not come back").not.toMatch(/\.hero-file,\s*\.hero-file \*/);
+  });
+
+  it("layo-12: the composer's placeholder shares the editor's cell instead of floating over the foot", () => {
+    expect(cascade(plain, ".composer-input").get("display")).toBe("grid");
+    const placeholder = cascade(plain, ".composer-box .composer-placeholder");
+    expect(placeholder.get("grid-area")).toBe("1 / 1");
+    expect(placeholder.has("position")).toBe(false);
+    expect(cascade(plain, ".composer-box .composer-ce").get("grid-area")).toBe("1 / 1");
+  });
+
+  it("layo-19 / acce-12: the stacked tables and the stacked Agents page can be scrolled to", () => {
+    // `.live-table` clips (overflow: hidden rounds its head band), so a row
+    // min-width only cut the columns off. CANARY: put it back on the rows.
+    expect(cascade(collapse, ".gh-table .live-table").get("min-width")).toBe("34rem");
+    expect(cascade(collapse, ".live-wrap .live-table").get("min-width")).toBe("42rem");
+    expect(collapse.some((r) => parts(r).includes(".gh-table .live-row") && r.decls.has("min-width"))).toBe(false);
+    const block = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
+    expect(block).toMatch(/\.board-wrap:has\(> \.agents-layout, > \.live-wrap\)\s*\{\s*overflow-y:\s*auto/);
+    // The shell-less controller is opted out of the clipped body like Home.
+    expect(CODE).toMatch(/body:has\(\.ctl-wrap\.standalone\)\s*\{[^}]*overflow:\s*auto/);
+  });
+
+  it("the credential card's green footer wraps like its warn box, so the re-check can take its own line", () => {
+    // The card puts its Re-check scopes slot in `.cred-ok` while an advisory is
+    // open. CANARY: drop `flex-wrap` and the button squeezes the sentence at
+    // 320px; drop the basis and the sentence falls under its own glyph.
+    expect(cascade(plain, ".cred-ok").get("flex-wrap")).toBe("wrap");
+    // Measured at 320px: a bare 12rem basis put the glyph on a line of its own
+    // (202px row on the card, 160px in the profile dialog). The cap is the row
+    // minus the glyph and the gap, so the pair always shares the first line.
+    for (const box of [".cred-ok", ".cred-warn"]) {
+      const sentence = cascade(plain, `${box} > span:not(.warn-acts)`);
+      expect(sentence.get("flex"), box).toBe("1 1 min(12rem, 100% - 14px - .5rem)");
+      expect(sentence.get("min-width"), box).toBe("0");
+      expect(cascade(plain, `${box} .ico`).get("width"), box).toBe("14px");
+      expect(cascade(plain, box).get("gap"), box).toBe(".5rem");
+    }
+    // A dismiss stays beside the sentence it dismisses, and the action pair may
+    // wrap its buttons rather than run past the card (266px in a 202px row).
+    expect(cascade(plain, ".cred-ok:has(> .modal-close)").get("flex-wrap")).toBe("nowrap");
+    const acts = cascade(plain, ".warn-acts");
+    expect(acts.get("flex-wrap")).toBe("wrap");
+    expect(acts.get("flex")).toBe("0 1 auto");
+  });
+
+  it("layo-8 / ui-3: a flipped stage menu and the closing dock button have reduced-motion answers", () => {
+    expect(cascade(plain, '.stage-menu-pop[data-side="top"]').get("animation-name")).toBe("menu-in-up");
+    expect(cascade(plain, ".stage-menu-pop").get("overflow-y")).toBe("auto");
+    // The data-side rule outranks `.stage-menu-pop`, so it needs its own entry.
+    expect(cascade(reduce, '.stage-menu-pop[data-side="top"]').get("animation")).toMatch(/^fade-in\b/);
+    expect(cascade(reduce, ".dock:has(.dock-panel[data-closing]) .dock-fab").get("transition")).toBe("none");
+  });
+});
+
+/**
+ * Interface review 2026-09-24, the MEDIUM findings (the owner: "fix the 12
+ * MEDIUM findings too"). The sheet-side halves; the markup halves are pinned
+ * by the GitHub view, store browser and login suites.
+ */
+describe("interface review 2026-09-24: the MEDIUM fixes", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const collapse = within(/max-width: 1100px/);
+  const wide = within(/min-width: 900px/);
+  /** What the cascade leaves `selector` among `rules`: later declarations win. */
+  const cascade = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const decls = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) decls.set(k, v);
+    return decls;
+  };
+
+  it("colo-4: a locked policy row takes one opacity step, and its chosen value keeps full strength", () => {
+    // CANARY: put `opacity: .55` back on `.cap-seg.locked`. Every option in a
+    // locked group is also disabled, so the two steps composited to .25.
+    const locked = cascade(plain, ".cap-seg.locked");
+    expect(locked.has("opacity")).toBe(false);
+    // The rule stays: it is the only one that defines `locked`.
+    expect(locked.get("pointer-events")).toBe("none");
+    expect(cascade(plain, ".cap-seg button:disabled").get("opacity")).toBe(".45");
+    expect(cascade(plain, ".cap-seg button.on:disabled").get("opacity")).toBe("1");
+  });
+
+  it("colo-8: today is a bold numeral with no ring, so only the selected day has ring and fill", () => {
+    const today = cascade(plain, ".cal-day.today:not(.sel)");
+    expect(today.has("box-shadow")).toBe(false);
+    expect(today.get("font-weight")).toBe("700");
+    const selected = cascade(plain, ".cal-day.sel");
+    expect(selected.get("box-shadow")).toBe("inset 0 0 0 1px var(--blue)");
+    expect(selected.get("background")).toBe("var(--blue-soft)");
+  });
+
+  it("typo-2 / colo-11: a commit subject wraps instead of ellipsizing, and its static SHA is not link-blue", () => {
+    const msg = cascade(plain, ".commit .msg");
+    for (const prop of ["overflow", "text-overflow", "white-space"]) {
+      expect(msg.has(prop), `.commit .msg ${prop}`).toBe(false);
+    }
+    expect(msg.get("overflow-wrap")).toBe("anywhere");
+    expect(cascade(plain, ".commit").get("align-items")).toBe("baseline");
+    expect(cascade(plain, ".commit .sha").has("color")).toBe(false);
+  });
+
+  it("colo-12: a branch trace takes the base ink, not the teal ready/OK one", () => {
+    expect(CODE).not.toMatch(/\.trace\.ok\b/);
+    expect(cascade(plain, ".trace").get("color")).toBe("var(--faint)");
+  });
+
+  it("layo-6: under 1100px a queue row's title takes line 1 by basis, not a 220px floor", () => {
+    // CANARY: put `min-width: 220px` back. It overflowed the Notifications
+    // panel at 320px and held titles at 220px beside the pills up to 1100px.
+    const main = cascade(collapse, ".rq-main");
+    expect(main.has("min-width")).toBe(false);
+    expect(main.get("flex")).toBe("1 1 calc(100% - 62px - 1rem)");
+    // The basis subtracts the key column and the row gap; they move together.
+    expect(cascade(plain, ".rq-key").get("width")).toBe("62px");
+    expect(cascade(plain, ".rq-row").get("gap")).toBe("1rem");
+  });
+
+  it("acce-27: below 900px the login aside stacks under the card instead of disappearing", () => {
+    // CANARY: put `.login-aside { display: none }` back outside the query. At
+    // 720px (200% zoom) and 320px the heading and the three claims, which
+    // appear nowhere else, were gone for everyone.
+    const aside = cascade(plain, ".login-aside");
+    expect(aside.get("display")).toBe("flex");
+    expect(aside.get("order")).toBe("1");
+    for (const selector of [".login-aside h2", ".login-aside p", ".login-aside-points", ".login-aside-points li"]) {
+      expect(cascade(plain, selector).get("display") ?? "", selector).not.toBe("none");
+    }
+    // The card right above shows the same mark, so the stacked aside drops it.
+    expect(cascade(plain, ".login-aside-mark").get("display")).toBe("none");
+    const beside = cascade(wide, ".login-aside");
+    expect(beside.get("order")).toBe("0");
+    // Beside the card it rises, as its chunks, staggered (ruling 459); stacked
+    // it has no entrance of its own.
+    expect(cascade(wide, ".login-aside > *").get("animation")).toMatch(/^rise\b/);
+    expect(aside.has("animation")).toBe(false);
+    expect(cascade(wide, ".login-aside-mark").get("display")).toBe("inline-grid");
+    const wrap = cascade(plain, ".login-wrap");
+    expect(wrap.get("gap")).toBe("1.5rem");
+    expect(wrap.get("align-content")).toBe("center");
+  });
+
+  it("acce-32: the store tree's open control is a bare button laid out as the row was", () => {
+    const open = cascade(plain, ".fm-open");
+    expect(open.get("display")).toBe("flex");
+    expect(open.get("flex-wrap")).toBe("wrap");
+    // A zero-basis button whose name keeps a 5rem basis inside it: at 320px the
+    // twist, glyph and name hold line 1 and the actions keep the row's line. A
+    // 12rem button basis dropped them to a third line (rows 85-101px, now 51-83).
+    expect(open.get("flex")).toBe("1 1 0");
+    expect(cascade(plain, ".fm-open .fm-name").get("flex")).toBe("1 1 5rem");
+    expect(cascade(plain, ".fm-name").get("flex")).toBe("1 1 9rem");
+    expect(open.get("min-width")).toBe("0");
+    expect(open.get("padding")).toBe("0");
+    expect(open.get("border")).toBe("0");
+    expect(open.get("text-align")).toBe("start");
+    // No cursor (the span on a file that cannot open must not show a hand) and
+    // no outline (the app ring draws its focus).
+    expect(open.has("cursor")).toBe(false);
+    expect(open.has("outline")).toBe(false);
+    // The glyph moved into the button; the new-folder row still has it bare.
+    expect(cascade(plain, ".fm-open > .ico").get("color")).toBe("var(--faint)");
+    expect(cascade(plain, ".fm-row.dir .fm-open > .ico").get("color")).toBe("var(--muted)");
+    expect(cascade(plain, ".fm-row.dir > .ico").get("color")).toBe("var(--muted)");
+    // The hand is the button's: the row's padding and gutter open nothing.
+    for (const selector of [".fm-row.dir", ".fm-row.openable"]) {
+      expect(plain.some((r) => parts(r).includes(selector) && r.decls.has("cursor")), selector).toBe(false);
+    }
+    expect(cascade(plain, ".fm-row.dir .fm-open").get("cursor")).toBe("pointer");
+  });
+});
+
+/**
+ * Better-ui review 2026-09-24, five small leftovers it filed. Two were already
+ * fixed by the interface review (ruling 455): the locked policy row's stacked
+ * opacity is pinned by colo-4 above, and the GitHub bar's neutral pill is
+ * pinned here, because the sweep only sees that pair while its rule exists.
+ * The move-back glyph and the markup halves of the other two are pinned by
+ * the task-disposition, execution-profile and top-bell suites.
+ */
+describe("better-ui review 2026-09-24: the small leftovers", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const plain = RULES.filter((r) => r.at.length === 0);
+  /** What the cascade leaves `selector` among `rules`: later declarations win. */
+  const cascade = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const decls = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) decls.set(k, v);
+    return decls;
+  };
+
+  it("the GitHub bar's neutral pill keeps a fill of its own and clears AA on the bar, in both themes", () => {
+    // CANARY: delete `.gh-bar .pill.neutral`. The sweep stays green, because it
+    // then measures only the base pill (--muted on --tint-press) against the
+    // page; on the inverted bar that pair drew at 2.48:1 light, 1.62:1 dark.
+    const onBar = SWEEP.pairs.filter((p) => p.selector === ".gh-bar .pill.neutral");
+    expect(onBar.map((p) => p.theme).sort()).toEqual(["dark", "light"]);
+    const barPaint = cascade(plain, ".gh-bar").get("background")!;
+    for (const p of onBar) {
+      expect(p.ratio, `${p.theme} ink on the pill`).toBeGreaterThanOrEqual(4.5);
+      // "Lost its fill" was a --fg tint on a --fg ground: the pill's own fill
+      // has to stand a visible step off the bar it sits on.
+      const tokens = THEMES.find(([theme]) => theme === p.theme)![1];
+      const bar = asHex(resolveColor(barPaint, tokens)!.rgb);
+      expect(contrastRatio(p.bg, bar), `${p.theme} fill against the bar`).toBeGreaterThan(1.25);
+    }
+  });
+
+  it("a run control's start holds the width of its widest label", () => {
+    // CANARY: drop the min-width, and the when-picker slides 21px (operator)
+    // or 32px (dispatch) under the pointer that just switched it to Schedule,
+    // and the row shifts again when the start reads "Scheduling…" (ruling 368).
+    // One floor serves both starts: "Scheduling…" is the widest label on each.
+    expect(cascade(plain, ".op-run > .run-go").get("min-width")).toBe("7.4rem");
+    // The widths were measured at these metrics; a change here re-opens them.
+    const sm = cascade(plain, ".btn.sm");
+    expect(sm.get("font-size")).toBe(".75rem");
+    expect(sm.get("padding")).toBe(".375rem .5rem");
+    expect(cascade(plain, ".btn").get("gap")).toBe(".375rem");
+  });
+
+  it("the open bell holds the icon-button family's pressed look", () => {
+    // CANARY: delete the rule, and the bell reads the same with its popover up
+    // as at rest while the account trigger beside it rings.
+    const open = cascade(plain, '.bell-btn[aria-expanded="true"]');
+    const pressed = cascade(plain, '.dock-head-acts .icon-btn[aria-pressed="true"]');
+    for (const prop of ["background", "color", "border-color"]) {
+      expect(open.get(prop), prop).toBe(pressed.get(prop));
+    }
+    expect(open.get("border-color")).toBe("var(--border)");
   });
 });
 
@@ -4906,8 +5384,12 @@ describe("app.css ruling 459: the better-ui pass — enter and exit", () => {
     expect(open.get("transition")).toBe("opacity .2s var(--ease-out)");
     // The drawer: out in .15s, in over .2s, both on --ease-out. The open rule
     // names only a duration, so reduced motion's `transition: none` keeps the
-    // slide off in both directions.
-    expect(own(phone, ".rail").get("transition")).toBe("transform .15s var(--ease-out)");
+    // slide off in both directions. The visibility step that takes the closed
+    // drawer's links out of the tab order (ruling 455, acce-13) waits out the
+    // same .15s slide.
+    expect(own(phone, ".rail").get("transition")).toBe(
+      "transform .15s var(--ease-out), visibility 0s linear .15s",
+    );
     const opening = own(phone, '.app[data-rail-open="true"] .rail');
     expect(opening.get("transition-duration")).toBe(".2s");
     expect(opening.has("transition")).toBe(false);
@@ -5191,15 +5673,11 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     }
     expect(wrong).toEqual([]);
     expect(loaders.length).toBeGreaterThanOrEqual(8);
-    // The controls whose arrow IS the meaning and already their glyph at
-    // rest, so busy swaps nothing: re-scan (Home and the board), re-index and
-    // test connection.
-    expect(arrows.sort()).toEqual([
-      path.join("features", "board", "board-page.tsx"),
-      path.join("features", "home", "home-sections.tsx"),
-      path.join("features", "org-settings", "resource-rows.tsx"),
-      path.join("features", "org-settings", "resource-rows.tsx"),
-    ]);
+    // The control whose arrow IS the meaning and already its glyph at rest,
+    // so busy swaps nothing: the board's re-scan. Home's re-scan, re-index and
+    // test connection spun their own arrow too until ruling 368's 2026-09-24
+    // extension put the loader in place of every in-flight starter's icon.
+    expect(arrows.sort()).toEqual([path.join("features", "board", "board-page.tsx")]);
     expect(source("./ui/icon.tsx")).toMatch(/\n\s*loader: '/);
   });
 
@@ -5249,17 +5727,26 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
   });
 
   it("(F52) the Agents page's running count carries the house's working dot, stilled under reduced motion", () => {
-    // CANARY: drop `.ag-running .working` from the reduced-motion list.
+    // CANARY: drop `.ag-running .working::after` from the reduced-motion list.
+    // The pulse is the house's compositor copy of the dot on ::after (ruling
+    // 457), so the dot matches the house's box and its ::after the house's
+    // ring.
     const house = own(plain, ".wait-tag .working");
+    const houseRing = own(plain, ".wait-tag .working::after");
     for (const selector of [".ag-active .working", ".ag-running .working"]) {
       const dot = own(plain, selector);
-      for (const p of ["width", "height", "border-radius", "background", "animation"]) {
+      for (const p of ["position", "width", "height", "border-radius", "background"]) {
         expect(dot.get(p), `${selector} ${p}`).toBe(house.get(p));
       }
       expect(dot.get("flex"), selector).toBe("none");
-      expect(own(reduced, selector).get("animation"), selector).toBe("none");
-      const { base, answer } = order(selector);
-      expect(answer, selector).toBeGreaterThan(base);
+      expect(dot.has("animation"), selector).toBe(false);
+      const ring = `${selector}::after`;
+      for (const p of ["content", "position", "inset", "border-radius", "background", "animation"]) {
+        expect(own(plain, ring).get(p), `${ring} ${p}`).toBe(houseRing.get(p));
+      }
+      expect(own(reduced, ring).get("animation"), ring).toBe("none");
+      const { base, answer } = order(ring);
+      expect(answer, ring).toBeGreaterThan(base);
     }
     const agents = source("./features/agents/agents-page.tsx");
     expect(agents).toMatch(/<span className="ag-active">\s*<span className="working" \/>/);
@@ -5272,15 +5759,20 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       (r) => r.decls.has("content") && !/^(?:""|attr\([^)]*\)(?: \/ "")?|counter\([^)]*\))$/.test(r.decls.get("content")!),
     ).map((r) => `${r.selector}: ${r.decls.get("content")}`);
     expect(typed).toEqual([]);
-    const li = own(wide, ".login-aside-points li");
+    // Stacked under the card (ruling 455, acce-27) or beside it, the same
+    // points: the rules sit outside the 900px query, which adds nothing.
+    const li = own(plain, ".login-aside-points li");
     expect(li.get("display")).toBe("flex");
     expect(li.get("align-items")).toBe("flex-start");
     // 16px glyph + .5rem = the 24px the text sat at under the old indent.
     expect(li.get("gap")).toBe(".5rem");
     expect(li.has("padding-left")).toBe(false);
-    const glyph = own(wide, ".login-aside-points .ico");
+    const glyph = own(plain, ".login-aside-points .ico");
     expect(glyph.get("margin-top")).toBe(".125rem");
     expect(glyph.get("color")).toBe("var(--teal-dark)");
+    for (const selector of [".login-aside-points li", ".login-aside-points .ico"]) {
+      expect(own(wide, selector).size, selector).toBe(0);
+    }
     const points = /<ul className="login-aside-points">([\s\S]*?)<\/ul>/.exec(source("./routes/login.tsx"))![1]!;
     const items = [...points.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]!.trim());
     expect(items).toHaveLength(3);
@@ -5411,7 +5903,9 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
       for (const m of src.matchAll(/<GlyphSwap\b([\s\S]*?)\/>/g)) {
         const rest = /\brest="(\w+)"/.exec(m[1]!)?.[1];
         const alt = /\balt="(\w+)"/.exec(m[1]!)?.[1];
-        swaps.push(`${rel}: ${rest} → ${alt}${/\bspinAlt\b/.test(m[1]!) ? " (spins)" : ""}`);
+        swaps.push(
+          `${rel}: ${rest} → ${alt}${/\bspinAlt\b/.test(m[1]!) ? " (spins)" : ""}${/\bbusy=/.test(m[1]!) ? " (busy)" : ""}`,
+        );
       }
       // The loader only ever arrives through the cell (or alone, where the
       // control had no glyph at rest: Dismiss).
@@ -5426,13 +5920,40 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/home/new-project-modal.tsx: plus → loader (spins)",
         "features/kb-browser/store-browser.tsx: arrow → loader (spins)",
         "features/task-detail/attachments-panel.tsx: file → loader (spins)",
-        "features/task-detail/execution-profile.tsx: bolt → clock",
-        "features/task-detail/execution-profile.tsx: shield → clock",
+        "features/task-detail/execution-profile.tsx: bolt → clock (busy)",
+        "features/task-detail/execution-profile.tsx: shield → clock (busy)",
         "features/task-detail/operator-recommendations.tsx: check → loader (spins)",
-        "features/task-detail/task-side-panels.tsx: lock → refresh",
+        "features/task-detail/task-side-panels.tsx: lock → refresh (busy)",
         "routes/login.tsx: github → loader (spins)",
         "routes/login.tsx: google → loader (spins)",
         "ui/copy-glyph.tsx: copy → check",
+        // Ruling 368's 2026-09-24 extension: every in-flight starter's loader
+        // takes its icon's place, and through the cell it trades rather than
+        // replacing it in one frame. Home's re-scan, Interrupt, Retry, Force
+        // accept, Deliver, Complete merge, Accept, Re-check scopes (GitHub
+        // page and Settings), Update status, the credential's Remove, Connect
+        // GitHub, Reset password, the KB re-scan and MCP test probes, Send to
+        // a maintainer and a stale guardrail's Remove. A control whose resting
+        // mark already trades with its state carries the loader one cell up
+        // (`busy`): the run starts, Archive, and the credential's Attach/Rotate.
+        "features/home/home-sections.tsx: refresh → loader (spins)",
+        "features/runtime/runs-panels.tsx: hand → loader (spins)",
+        "features/runtime/runs-panels.tsx: refresh → loader (spins)",
+        "features/task-detail/task-side-panels.tsx: shield → loader (spins)",
+        "features/task-detail/task-side-panels.tsx: branch → loader (spins)",
+        "features/task-detail/task-side-panels.tsx: check → loader (spins)",
+        "features/task-detail/task-side-panels.tsx: check → loader (spins)",
+        "features/github/credential-card.tsx: lock → refresh (busy)",
+        "features/github/credential-card.tsx: x → loader (spins)",
+        "features/github/github-view.tsx: check → loader (spins)",
+        "features/github/github-view.tsx: refresh → loader (spins)",
+        "features/project-settings/settings-page.tsx: check → loader (spins)",
+        "features/profile/profile-page.tsx: github → loader (spins)",
+        "features/org-settings/users-panel.tsx: lock → loader (spins)",
+        "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
+        "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
+        "features/task-detail/decision-packet.tsx: message → loader (spins)",
+        "features/policy/policy-page.tsx: x → loader (spins)",
       ].sort(),
     );
     // The cell centres both marks, whatever their box.

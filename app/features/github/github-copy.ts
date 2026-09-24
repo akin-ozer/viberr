@@ -57,9 +57,11 @@ export function grantScopeToast(input: GrantScopeToastInput): string {
     return "GitHub is unreachable. Kept the last-known scope results.";
   }
   if (input.resolvedCount > 0) {
-    // Mock string with the flagged task interpolated (spec §5.3).
+    // The flagged task interpolated (spec §5.3). Interface review 2026-09-24
+    // (writ-6): not the mock's "Scope granted" — Viberr grants nothing; the
+    // person granted it on GitHub and this press re-checked it.
     const flag = input.resolvedTaskKey ?? "project";
-    return `Scope granted · ${flag} policy flag resolved`;
+    return `Scopes re-checked · ${flag} policy flag resolved`;
   }
   switch (input.validationStatus) {
     case "revoked":

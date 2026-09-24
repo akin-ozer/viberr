@@ -72,7 +72,10 @@ export function ConfirmDialog({
       aria-label={title}
       data-screen-label={screenLabel}
     >
-      <div className="confirm-icon">
+      {/* Interface review 2026-09-24 (colo-7): the icon wash follows the tone —
+          the coral danger wash above a blue primary commit said "destructive"
+          about a decision that takes nothing away. */}
+      <div className={"confirm-icon " + tone}>
         <Icon name={icon} />
       </div>
       <h3>{title}</h3>

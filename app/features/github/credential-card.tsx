@@ -3,6 +3,7 @@ import type {
   ProjectCredentialHealth,
   ScopeChip,
 } from "~/server/secrets/pat-store.server";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 
@@ -10,7 +11,7 @@ import { useDialog } from "~/ui/use-dialog";
  * THE credential card (github-view spec §7.12: one component, used by the
  * GitHub view now and Settings → RepoSettings in Phase 9, so the two can't
  * drift). Markup is the mock's `.cred-card` verbatim; the footer action
- * slot is the only variation point ("Fix in Settings" here, "Grant scope"
+ * slot is the only variation point ("Fix in Settings" here, "Re-check scopes"
  * in Settings — this page currently renders both, see the phase report).
  *
  * States:
@@ -38,7 +39,8 @@ export function CredentialCard({
   credential: CredentialCardData;
   /** Opens the flagged task (the cred-warn `.keybtn`). */
   onOpenTask: (taskKey: string) => void;
-  /** Right-aligned footer action slot (Fix in Settings / Grant scope). */
+  /** Right-aligned footer action slot (Fix in Settings / Re-check scopes).
+   * The green footer carries it only while an advisory is open. */
   warnActions?: ReactNode;
   /** Always-visible manage row (attach / rotate / remove the credential). */
   manageActions?: ReactNode;
@@ -154,16 +156,25 @@ export function CredentialCard({
             {unproven.length > 0
               ? ` (${unproven.map((s) => s.id).join(", ")})`
               : ""}
-            . Run Grant scope to validate.
+            . Use Re-check scopes to verify them.
           </span>
           {warnActions}
         </div>
       ) : (
         <div className="cred-ok">
           <Icon name="check" />
-          {unproven.length > 0
-            ? "Every provable scope verified. Secrets stay isolated from task records and timelines."
-            : "All required scopes proven. Secrets stay isolated from task records and timelines."}
+          <span>
+            {unproven.length > 0
+              ? "Every provable scope verified. Secrets stay isolated from task records and timelines."
+              : "All required scopes proven. Secrets stay isolated from task records and timelines."}
+          </span>
+          {/* An advisory's scope (`workflow`, `checks:read`) is never required,
+              so a card whose only problem is an advisory lands here. Its copy
+              and the delivery remedies send the person to Re-check, and the
+              pre-push refusal reads the cached header scopes: without the slot
+              here, granting the scope on GitHub changed nothing short of
+              rotating the credential. */}
+          {credential.advisories.length > 0 && warnActions}
         </div>
       )}
       {manageActions}
@@ -217,13 +228,16 @@ function RemoveCredentialDialog({
 export function CredentialManageActions({
   configured,
   canManage,
-  busy,
+  inFlight,
   onSet,
   onClear,
 }: {
   configured: boolean;
   canManage: boolean;
-  busy: boolean;
+  /** Ruling 368: the intent the credential fetcher is carrying
+   *  (`inFlightIntent`), null while it is idle. The button that started it
+   *  shows the work; the other one only waits at the disabled step. */
+  inFlight: string | null;
   /** Attach (unconfigured) or rotate (configured) → set-credential. */
   onSet: () => void;
   /** Remove → clear-credential (after the confirm). */
@@ -231,6 +245,9 @@ export function CredentialManageActions({
 }) {
   const [confirming, setConfirming] = useState(false);
   if (!canManage) return null;
+  const busy = inFlight !== null;
+  const setting = inFlight === "set-credential";
+  const clearing = inFlight === "clear-credential";
   return (
     <div className="cred-manage">
       <button
@@ -238,14 +255,24 @@ export function CredentialManageActions({
         className="btn ghost sm"
         onClick={onSet}
         disabled={busy}
+        aria-busy={setting || undefined}
         title={
           configured
             ? "Re-bind to the default connection's PAT"
             : "Bind the default connection's PAT to this project"
         }
       >
-        <Icon name={configured ? "refresh" : "lock"} />
-        {configured ? "Rotate credential" : "Attach credential"}
+        {/* Ruling 459 over ruling 368: the lock trades for the rotate mark
+            once a credential is bound, and that resting cell trades for the
+            spinning loader while this button's own request is in flight. */}
+        <GlyphSwap rest="lock" alt="refresh" on={configured} busy={setting} />
+        {configured
+          ? setting
+            ? "Rotating…"
+            : "Rotate credential"
+          : setting
+            ? "Attaching…"
+            : "Attach credential"}
       </button>
       {configured && (
         <button
@@ -255,10 +282,11 @@ export function CredentialManageActions({
           className="btn ghost sm danger"
           onClick={() => setConfirming(true)}
           disabled={busy}
+          aria-busy={clearing || undefined}
           title="Unbind the credential from this project"
         >
-          <Icon name="x" />
-          Remove credential
+          <GlyphSwap rest="x" alt="loader" on={clearing} spinAlt />
+          {clearing ? "Removing…" : "Remove credential"}
         </button>
       )}
       {confirming && (

@@ -194,11 +194,13 @@ function ActiveBadge({
    *  refuses before it starts, so "idle" alone is a half-truth. */
   unusable?: string | undefined;
 }) {
+  // Ruling 455 names the count in words; ruling 459's violet working dot
+  // leads them, as on every other agent-at-work surface.
   if (count > 0)
     return (
       <span className="ag-active">
         <span className="working" />
-        {count}
+        {count} running
       </span>
     );
   if (unusable)
@@ -230,7 +232,14 @@ function ProfileItem({
       ? notConnectedNote(backendHealth.backend)
       : undefined;
   return (
-    <button type="button" className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
+    <button
+      type="button"
+      className={"ag-item" + (on ? " on" : "")}
+      // Interface review 2026-09-24 (acce-9): the open profile's state, not
+      // just its ring.
+      aria-current={on ? "true" : undefined}
+      onClick={onClick}
+    >
       <ProfileGlyph a={a} />
       <span className="ag-item-main">
         <span className="nm">{a.name}</span>

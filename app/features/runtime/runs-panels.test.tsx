@@ -1,15 +1,47 @@
 // @vitest-environment jsdom
+import { useMemo, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { createRoutesStub } from "react-router";
+import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { AgentLogsPanel, LiveRunPanel } from "./runs-panels";
 import {
   runBoundaryLine,
   RUN_INPUTS_TAG,
+  type LogLine,
   type RunInputs,
   type RunView,
 } from "./runtime-types";
 import { NO_RUN_CACHE } from "./runtime-types";
-import type { OlderLogState, StreamedLine } from "./use-run-log-stream";
+import { createLiveRunLogStore, staticRunLogStore, type OlderLogState } from "./run-log-store";
+
+/** A console line as a test hands it over; the key defaults to its position. */
+type StreamedLine = { display: LogLine; raw: string | null; key?: string };
+
+/**
+ * The console fed by hand (ruling 457): the lines, backward-paging state and
+ * stream error a live store would hold, in a `staticRunLogStore`.
+ */
+function Logs({
+  linesByThread,
+  olderByThread,
+  onLoadOlder,
+  streamError = null,
+  ...props
+}: Omit<ComponentProps<typeof AgentLogsPanel>, "store"> & {
+  linesByThread: Record<string, readonly StreamedLine[]>;
+  olderByThread?: Record<string, OlderLogState>;
+  onLoadOlder?: (threadId: string) => void;
+  streamError?: string | null;
+}) {
+  const store = useMemo(() => {
+    const input: Parameters<typeof staticRunLogStore>[0] = { linesByThread, streamError };
+    if (olderByThread) input.olderByThread = olderByThread;
+    if (onLoadOlder) input.onLoadOlder = onLoadOlder;
+    return staticRunLogStore(input);
+  }, [linesByThread, olderByThread, onLoadOlder, streamError]);
+  return <AgentLogsPanel {...props} store={store} />;
+}
 
 /** Ruling 366(f): the footer's total counts up to its figure, so a test reads
  *  the figure itself off the ticker's `data-count`, not the moving text. */
@@ -175,13 +207,13 @@ describe("LiveRunPanel", () => {
 
 describe("AgentLogsPanel", () => {
   it("renders the exact empty state when the task has no runtime", () => {
-    const { getByText } = render(<AgentLogsPanel runtime={[]} sel={null} onSel={() => {}} linesByThread={{}} />);
+    const { getByText } = render(<Logs runtime={[]} sel={null} onSel={() => {}} linesByThread={{}} />);
     expect(getByText("No agent runs yet. Runtime streams appear here once the operator engages a specialist.")).toBeTruthy();
   });
 
   it("running thread: streaming footer + cursor line + running pill", () => {
     const { container, getByText } = render(
-      <AgentLogsPanel runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "init", tag: "system·init", text: "x" }, raw: "{}" }] }} />,
+      <Logs runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "init", tag: "system·init", text: "x" }, raw: "{}" }] }} />,
     );
     expect(getByText("streaming: raw output stays here as evidence, never in the task record")).toBeTruthy();
     expect(container.querySelector(".log-line.cursor")).not.toBeNull();
@@ -194,7 +226,7 @@ describe("AgentLogsPanel", () => {
     const run = mkRun({ id: "controller", kind: "controller", role: "Controller",
       who: { kind: "agent", backend: "claude", name: "Controller", role: "Controller" } });
     const { getByText } = render(
-      <AgentLogsPanel runtime={[run]} sel="controller" onSel={() => {}} linesByThread={{}} />,
+      <Logs runtime={[run]} sel="controller" onSel={() => {}} linesByThread={{}} />,
     );
     expect(getByText("streaming: raw output stays here as evidence, never in the transcript")).toBeTruthy();
   });
@@ -208,7 +240,7 @@ describe("AgentLogsPanel", () => {
     const run = mkRun({ id: "controller", kind: "controller", role: "Controller", state: "done", lifecycle: "finished", finished: "0:56",
       who: { kind: "agent", backend: "claude", name: "Controller", role: "Controller" } });
     const { container, getByText } = render(
-      <AgentLogsPanel runtime={[run]} sel="controller" onSel={() => {}} linesByThread={{}} />,
+      <Logs runtime={[run]} sel="controller" onSel={() => {}} linesByThread={{}} />,
     );
     expect(getByText("turn finished at 0:56; send a message to continue the conversation")).toBeTruthy();
     expect(container.textContent).not.toContain("re-engaged");
@@ -218,7 +250,7 @@ describe("AgentLogsPanel", () => {
   it("done thread: 'run finished at …' footer, no cursor", () => {
     const run = mkRun({ state: "done", lifecycle: "finished", finished: "9:41" });
     const { container, getByText } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: run.lines.map((d, i) => ({ display: d, raw: run.raw[i]! })) }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: run.lines.map((d, i) => ({ display: d, raw: run.raw[i]! })) }} />,
     );
     expect(getByText("run finished at 9:41; thread can be re-engaged")).toBeTruthy();
     expect(container.querySelector(".log-line.cursor")).toBeNull();
@@ -227,7 +259,7 @@ describe("AgentLogsPanel", () => {
   it("error thread: continuity-error footer + blocked pill", () => {
     const run = mkRun({ state: "error", lifecycle: "error" });
     const { container, getByText } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "err", tag: "tool_result", text: "boom" }, raw: "{}" }] }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "err", tag: "tool_result", text: "boom" }, raw: "{}" }] }} />,
     );
     expect(getByText("stream ended on a continuity error; see the blocked packet")).toBeTruthy();
     expect(container.querySelector(".logs-bar .pill.blocked")).not.toBeNull();
@@ -247,7 +279,7 @@ describe("AgentLogsPanel", () => {
       failedBackendUnavailable: true,
     });
     const { container, getByText } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[run]}
         sel="primary"
         onSel={() => {}}
@@ -276,7 +308,7 @@ describe("AgentLogsPanel", () => {
     });
     const onRetryBackend = vi.fn();
     const { container, getByText, queryByText, rerender } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[run]}
         sel="primary"
         onSel={() => {}}
@@ -299,7 +331,7 @@ describe("AgentLogsPanel", () => {
     // Canary: drop the `retryOffered` gate — the operator footer claims the
     // task owner has not connected Codex, whether or not they have.
     rerender(
-      <AgentLogsPanel
+      <Logs
         runtime={[
           mkRun({
             id: "operator",
@@ -332,7 +364,7 @@ describe("AgentLogsPanel", () => {
 
     // Owner connects Codex: the same run now carries a real offer.
     rerender(
-      <AgentLogsPanel
+      <Logs
         runtime={[run]}
         sel="primary"
         onSel={() => {}}
@@ -357,7 +389,7 @@ describe("AgentLogsPanel", () => {
       altBackend: "codex",
     });
     const { getByText } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[run]}
         sel="primary"
         onSel={() => {}}
@@ -383,7 +415,7 @@ describe("AgentLogsPanel", () => {
       altBackend: "codex",
     });
     const { container, getByText } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[run]}
         sel="primary"
         onSel={() => {}}
@@ -412,7 +444,7 @@ describe("AgentLogsPanel", () => {
         startedAt: "2026-07-28T17:40:00.000Z",
       });
       const { container } = render(
-        <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "17:46:46", ev: "text", tag: "agent_message", text: "done" }, raw: "{}" }] }} />,
+        <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "17:46:46", ev: "text", tag: "agent_message", text: "done" }, raw: "{}" }] }} />,
       );
       const stamps = [...container.querySelectorAll(".log-line .lt")].map(
         (n) => n.textContent,
@@ -428,7 +460,7 @@ describe("AgentLogsPanel", () => {
   it("raw toggle renders the stored wire envelope verbatim", () => {
     const raw = '{"type":"system","subtype":"init","session_id":"51d8f0e2"}';
     const { container, getByText, queryByText } = render(
-      <AgentLogsPanel runtime={[mkRun({ state: "idle", lifecycle: "finished" })]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "init", tag: "system·init", text: "friendly text" }, raw }] }} />,
+      <Logs runtime={[mkRun({ state: "idle", lifecycle: "finished" })]} sel="primary" onSel={() => {}} linesByThread={{ primary: [{ display: { t: "1", ev: "init", tag: "system·init", text: "friendly text" }, raw }] }} />,
     );
     expect(getByText("friendly text")).toBeTruthy();
     fireEvent.click(getByText("{ } raw"));
@@ -442,7 +474,7 @@ describe("AgentLogsPanel", () => {
     const rawA = '{"type":"reasoning","text":"weighing the options"}';
     const rawB = '{"type":"reasoning","text":"picking the branch"}';
     const { container, getByText, queryByText } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 2 })]}
         sel="primary"
         onSel={() => {}}
@@ -471,7 +503,7 @@ describe("AgentLogsPanel", () => {
 
   it("renders a tool call as a chip and file changes as per-file chips", () => {
     const { container, getByText, queryByText } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 2 })]}
         sel="primary"
         onSel={() => {}}
@@ -541,7 +573,7 @@ describe("AgentLogsPanel", () => {
       raw: '{"type":"assistant"}',
     };
     const live = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[mkRun({ lineCount: 3 })]}
         sel="primary"
         onSel={() => {}}
@@ -591,7 +623,7 @@ describe("AgentLogsPanel", () => {
       raw: '{"type":"user"}',
     };
     const ended = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[mkRun({ lineCount: 4 })]}
         sel="primary"
         onSel={() => {}}
@@ -622,7 +654,7 @@ describe("AgentLogsPanel", () => {
   it("lifts multi-line output into a bounded block, whole and copyable", () => {
     const out = ["> npm test", "", "34 passed", "done in 1.2s"].join("\n");
     const { container, getByText } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 1 })]}
         sel="primary"
         onSel={() => {}}
@@ -647,7 +679,7 @@ describe("AgentLogsPanel", () => {
 
   it("colours diff polarity on top of the glyph the stored line already carries", () => {
     const { container } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 1 })]}
         sel="primary"
         onSel={() => {}}
@@ -679,7 +711,7 @@ describe("AgentLogsPanel", () => {
   it("folds wire telemetry into one row, and the raw toggle still shows it", () => {
     const rawTelemetry = '{"type":"rate_limit_event","rate_limits":{"primary":{"used_percent":12}}}';
     const { container, getByText, queryByText } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 4 })]}
         sel="primary"
         onSel={() => {}}
@@ -710,7 +742,7 @@ describe("AgentLogsPanel", () => {
   it("codex meta line vs claude meta line", () => {
     const codex = mkRun({ backend: "codex", sid: "0199a2c4-7b31-7802", state: "idle", lifecycle: "finished" });
     const { getByText } = render(
-      <AgentLogsPanel runtime={[codex]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[codex]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(getByText(/@openai\/codex-sdk · runStreamed\(\) · thread/)).toBeTruthy();
   });
@@ -720,7 +752,7 @@ describe("AgentLogsPanel", () => {
     const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });
     const dev = mkRun({ id: "primary", who: { kind: "agent", backend: "claude", name: "dev", role: "developer" }, state: "idle", lifecycle: "finished" });
     const { container } = render(
-      <AgentLogsPanel runtime={[op, dev]} sel="primary" onSel={() => {}} linesByThread={{ op: [], primary: [] }} />,
+      <Logs runtime={[op, dev]} sel="primary" onSel={() => {}} linesByThread={{ op: [], primary: [] }} />,
     );
     // The picker button shows the selected agent's name (not "Claude Code").
     expect(container.querySelector(".rsel-nm")!.textContent).toContain("dev");
@@ -737,7 +769,7 @@ describe("AgentLogsPanel", () => {
     const onSel = vi.fn();
     // Select "dev": its streamed lines render in the console.
     const { container, getByText, rerender } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[other, dev]}
         sel="op"
         onSel={onSel}
@@ -751,7 +783,7 @@ describe("AgentLogsPanel", () => {
     expect(container.textContent).toContain("operator line");
     // Simulate the auto-select landing on "dev" (parent set sel=primary).
     rerender(
-      <AgentLogsPanel
+      <Logs
         runtime={[other, dev]}
         sel="primary"
         onSel={onSel}
@@ -769,7 +801,7 @@ describe("AgentLogsPanel", () => {
   it("session id is trimmed but expandable and copyable in full", () => {
     const run = mkRun({ backend: "claude", sid: "51d8f0e2-3a7b-4c1b-9e0a-6f4d2b8c7151", state: "idle", lifecycle: "finished" });
     const { getByRole } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     // Trimmed by default.
     const idBtn = getByRole("button", { name: /Session id 51d8f0e2-3a7b-4c1b-9e0a-6f4d2b8c7151/ });
@@ -784,7 +816,7 @@ describe("AgentLogsPanel", () => {
   it("ruling 148: a run with no session id says so in words", () => {
     const run = mkRun({ backend: "claude", sid: null, state: "idle", lifecycle: "finished" });
     const { container, queryByRole } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     const meta = container.querySelector(".logs-meta")!;
     // The label word precedes it, so the line reads "session none" — a "−" sat
@@ -801,7 +833,7 @@ describe("AgentLogsPanel", () => {
     // Canary: put the `: "−"` fallback back and this goes red.
     const run = mkRun({ state: "done", lifecycle: "finished", finished: null });
     const { getByText, container } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(getByText("run finished; thread can be re-engaged")).toBeTruthy();
     expect(container.querySelector(".logs-foot")!.textContent).not.toContain("−");
@@ -816,7 +848,7 @@ describe("AgentLogsPanel", () => {
       exportable: false,
     });
     const { queryByTitle, rerender } = render(
-      <AgentLogsPanel runtime={[notExportable]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[notExportable]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(queryByTitle(/Export this session/)).toBeNull();
 
@@ -828,7 +860,7 @@ describe("AgentLogsPanel", () => {
       exportable: true,
     });
     rerender(
-      <AgentLogsPanel runtime={[exportable]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[exportable]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(queryByTitle(/Export this session/)).toBeTruthy();
   });
@@ -867,7 +899,7 @@ describe("P13-D-11: the console pages backwards", () => {
   it("offers a load-older affordance naming how many lines are withheld", () => {
     const onLoadOlder = vi.fn();
     const { getByText } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[withheldRun()]}
         sel="primary"
         onSel={() => {}}
@@ -883,7 +915,7 @@ describe("P13-D-11: the console pages backwards", () => {
 
   it("hides the affordance once nothing older remains, and states a failed page", () => {
     const { queryByText, getByText, rerender } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[withheldRun()]}
         sel="primary"
         onSel={() => {}}
@@ -895,7 +927,7 @@ describe("P13-D-11: the console pages backwards", () => {
     expect(queryByText("load older lines")).toBeNull();
 
     rerender(
-      <AgentLogsPanel
+      <Logs
         runtime={[withheldRun()]}
         sel="primary"
         onSel={() => {}}
@@ -911,7 +943,7 @@ describe("P13-D-11: the console pages backwards", () => {
     // jsdom reports 0 for every layout box, so the console's geometry is
     // stubbed — the assertion is on the ARITHMETIC the panel does with it.
     const { container, getByText, rerender } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[withheldRun()]}
         sel="primary"
         onSel={() => {}}
@@ -930,7 +962,7 @@ describe("P13-D-11: the console pages backwards", () => {
     fireEvent.click(getByText("load older lines"));
     height = 1600; // 30 older rows land ABOVE everything the reader was reading
     rerender(
-      <AgentLogsPanel
+      <Logs
         runtime={[withheldRun()]}
         sel="primary"
         onSel={() => {}}
@@ -960,7 +992,7 @@ describe("P13-D-11: the console pages backwards", () => {
       },
     });
     const { container, rerender } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[run]}
         sel="primary"
         onSel={() => {}}
@@ -979,7 +1011,7 @@ describe("P13-D-11: the console pages backwards", () => {
     // A live tail can run ahead of the loader's snapshot — the count follows
     // the lines that exist, so it never goes backwards.
     rerender(
-      <AgentLogsPanel
+      <Logs
         runtime={[run]}
         sel="primary"
         onSel={() => {}}
@@ -1034,7 +1066,7 @@ describe("the run picker speaks the same vocabulary as the panel around it", () 
     // roleShort and both assertions below fail.
     const runs = [interruptedDev(), queuedReviewer()];
     const { container, rerender } = render(
-      <AgentLogsPanel runtime={runs} sel="primary" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,
+      <Logs runtime={runs} sel="primary" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,
     );
     const role = () => container.querySelector(".rsel-role")!.textContent!;
     expect(role()).toContain("delivering");
@@ -1042,7 +1074,7 @@ describe("the run picker speaks the same vocabulary as the panel around it", () 
     // Execution profile on this same page calls "Delivering agent".
     expect(role()).not.toContain("primary");
     rerender(
-      <AgentLogsPanel runtime={runs} sel="c0" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,
+      <Logs runtime={runs} sel="c0" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,
     );
     expect(role()).toContain("supporting");
   });
@@ -1051,7 +1083,7 @@ describe("the run picker speaks the same vocabulary as the panel around it", () 
     // Canary: put `RUN_STATE[r.state].label` back in the option and the
     // interrupted/queued expectations below fail on "idle".
     const { container } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[interruptedDev(), queuedReviewer()]}
         sel="primary"
         onSel={() => {}}
@@ -1080,7 +1112,7 @@ describe("AgentPicker dismissal (shared useDismiss)", () => {
     const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });
     const dev = mkRun({ id: "primary", who: { kind: "agent", backend: "claude", name: "dev", role: "developer" }, state: "idle", lifecycle: "finished" });
     const view = render(
-      <AgentLogsPanel runtime={[op, dev]} sel="primary" onSel={() => {}} linesByThread={{ op: [], primary: [] }} />,
+      <Logs runtime={[op, dev]} sel="primary" onSel={() => {}} linesByThread={{ op: [], primary: [] }} />,
     );
     fireEvent.click(view.container.querySelector(".rsel-btn")!);
     expect(view.container.querySelector('[role="listbox"]')).not.toBeNull();
@@ -1151,7 +1183,7 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
   function renderConsole(lines: StreamedLine[]) {
     const run = mkRun({ state: "idle", lifecycle: "finished" });
     return render(
-      <AgentLogsPanel
+      <Logs
         runtime={[run]}
         sel="primary"
         onSel={() => {}}
@@ -1193,6 +1225,26 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
     expect(tags[1]).toBe("system·init");
   });
 
+  it("keeps an opened disclosure with its own agent (CON-6)", () => {
+    // Every thread's first line is `0:0`, so a disclosure keyed by the row
+    // alone opened the same row of whichever agent the picker showed next.
+    const op = mkRun({ id: "op", serverRunId: "run_op", state: "idle", lifecycle: "finished" });
+    const spec = mkRun({ id: "spec", serverRunId: "run_spec", state: "idle", lifecycle: "finished" });
+    const linesByThread = { op: [{ ...line, key: "0:0" }], spec: [{ ...line, key: "0:0" }] };
+    const { getByText, queryByText, rerender } = render(
+      <Logs runtime={[op, spec]} sel="op" onSel={() => {}} linesByThread={linesByThread} />,
+    );
+    fireEvent.click(getByText("show what this run was given"));
+    expect(getByText("hide what this run was given")).toBeTruthy();
+    rerender(<Logs runtime={[op, spec]} sel="spec" onSel={() => {}} linesByThread={linesByThread} />);
+    // CANARY: key the open set by `kind|row key` alone and this row opens.
+    expect(queryByText("hide what this run was given")).toBeNull();
+    expect(getByText("show what this run was given")).toBeTruthy();
+    // The operator's row is still open when the reader comes back to it.
+    rerender(<Logs runtime={[op, spec]} sel="op" onSel={() => {}} linesByThread={linesByThread} />);
+    expect(getByText("hide what this run was given")).toBeTruthy();
+  });
+
   it("yields to the raw toggle like every other line", () => {
     // The `{ } raw` contract is "the stored envelope, verbatim" — a viberr line
     // does not get to keep its friendly rendering there.
@@ -1213,7 +1265,7 @@ describe("ruling 130(a): the classified footer", () => {
   it("an OPERATOR run tagged run·error·quota renders the classified footer, and no retry button", () => {
     const run = mkRun({ id: "operator", kind: "operator", state: "error", lifecycle: "error", failureKind: "quota", failedBackendUnavailable: true });
     const { getByText, queryByText } = render(
-      <AgentLogsPanel runtime={[run]} sel="operator" onSel={() => {}} linesByThread={{ operator: [] }} />,
+      <Logs runtime={[run]} sel="operator" onSel={() => {}} linesByThread={{ operator: [] }} />,
     );
     expect(getByText(/Claude refused this run: the account's usage window is spent/)).toBeTruthy();
     // The state pill follows the class too: no "continuity error" anywhere.
@@ -1225,7 +1277,7 @@ describe("ruling 130(a): the classified footer", () => {
   it("an auth refusal on a specialist names the provider's rejection", () => {
     const run = mkRun({ state: "error", lifecycle: "error", failureKind: "auth", failedBackendUnavailable: true });
     const { getByText } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(getByText(/Claude refused this run: the account was rejected by the provider/)).toBeTruthy();
   });
@@ -1236,7 +1288,7 @@ describe("ruling 130(a): the classified footer", () => {
     // account that cannot run it" for the provider's own outage.
     const run = mkRun({ state: "error", lifecycle: "error", failureKind: "overloaded", failedBackendUnavailable: true });
     const { getByText, queryByText } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(
       getByText(/Claude could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes/),
@@ -1251,7 +1303,7 @@ describe("ruling 130(a): the classified footer", () => {
     // blames the provider for a TLS failure inside the container.
     const run = mkRun({ state: "error", lifecycle: "error", failureKind: "overloaded", failureOrigin: "local", failedBackendUnavailable: true });
     const { getByText, queryByText } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(
       getByText(/Claude could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes/),
@@ -1282,7 +1334,7 @@ describe("a run interrupted by a restart", () => {
 
   it("the pill and the footer name the restart and what recovery did for a task run", () => {
     const { container } = render(
-      <AgentLogsPanel runtime={[restartedDev()]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[restartedDev()]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(container.querySelector(".logs-bar .pill")!.textContent).toBe(
       "interrupted · by a restart",
@@ -1312,7 +1364,7 @@ describe("a run interrupted by a restart", () => {
 
   it("a controller turn names its own recovery: the conversation carries a note", () => {
     const { container } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[restartedDev({ kind: "controller", who: { kind: "agent", name: "Controller" } })]}
         sel="primary"
         onSel={() => {}}
@@ -1343,7 +1395,7 @@ describe("ruling 350: the footer follows the classified failure for every run ki
       state: "error", lifecycle: "error", failedBackendUnavailable: true, failureKind: "unavailable",
     });
     const { container } = render(
-      <AgentLogsPanel runtime={[run]} sel="op" onSel={() => {}} linesByThread={{ op: [] }} />,
+      <Logs runtime={[run]} sel="op" onSel={() => {}} linesByThread={{ op: [] }} />,
     );
     expect(container.textContent).toContain("could not run this");
     expect(container.textContent).not.toContain("continuity error");
@@ -1355,7 +1407,7 @@ describe("ruling 350: the footer follows the classified failure for every run ki
     // CANARY: drop the `max_budget` arm.
     const run = mkRun({ state: "error", lifecycle: "error", failureKind: "max_budget" });
     const { container } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(container.querySelector(".logs-bar .pill")!.textContent).toBe("cut off · spending cap");
     expect(container.textContent).toContain("cut off by the instance's spending cap");
@@ -1369,7 +1421,7 @@ describe("ruling 350: the footer follows the classified failure for every run ki
       interruptedBy: { userId: "u_1", label: "Arda Kaya" },
     });
     const { container } = render(
-      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
+      <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
     );
     expect(container.textContent).toContain("before a session existed, so there is no thread to resume");
     expect(container.textContent).not.toContain("resumable");
@@ -1383,7 +1435,7 @@ describe("ruling 350: the footer follows the classified failure for every run ki
       state: "error", lifecycle: "error",
     });
     const { container } = render(
-      <AgentLogsPanel runtime={[run]} sel="controller" onSel={() => {}} linesByThread={{ controller: [] }} />,
+      <Logs runtime={[run]} sel="controller" onSel={() => {}} linesByThread={{ controller: [] }} />,
     );
     expect(container.textContent).toContain("the error line above carries what the provider said");
     expect(container.textContent).not.toContain("blocked packet");
@@ -1413,7 +1465,7 @@ describe("the wait row's live count (ruling 366(e))", () => {
       raw: '{"type":"tool_progress"}',
     };
     const { container } = render(
-      <AgentLogsPanel runtime={[mkRun({ lineCount: 1 })]} sel="primary" onSel={() => {}} linesByThread={{ primary: [beat] }} />,
+      <Logs runtime={[mkRun({ lineCount: 1 })]} sel="primary" onSel={() => {}} linesByThread={{ primary: [beat] }} />,
     );
     // The mount effect supplies the clock: 30 s reported + 10 s since the heartbeat.
     await act(async () => {});
@@ -1432,7 +1484,7 @@ describe("the wait row's live count (ruling 366(e))", () => {
   it("links a tool row to what its summary cut, by name, inside the detail's own flow (366(d))", () => {
     const prompt = "p".repeat(200);
     const { container, getByText } = render(
-      <AgentLogsPanel
+      <Logs
         runtime={[mkRun({ state: "idle", lifecycle: "finished", lineCount: 3 })]}
         sel="primary"
         onSel={() => {}}
@@ -1485,7 +1537,7 @@ describe("the wait row's live count (ruling 366(e))", () => {
 describe("the console's prompt-cache facts (ruling 369)", () => {
   const facts = (run: RunView) => {
     const { container, unmount } = render(
-      <AgentLogsPanel runtime={[run]} sel={run.id} onSel={() => {}} linesByThread={{}} />,
+      <Logs runtime={[run]} sel={run.id} onSel={() => {}} linesByThread={{}} />,
     );
     const row = container.querySelector<HTMLElement>(".run-facts")!;
     const read = (attr: string) => row.querySelector<HTMLElement>(`[${attr}]`)?.getAttribute(attr) ?? null;
@@ -1623,7 +1675,7 @@ describe("ruling 451(c): copy controls trade their glyph in place", () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     const { container, getByRole } = render(
-      <AgentLogsPanel runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{}} />,
+      <Logs runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{}} />,
     );
     const button = getByRole("button", { name: "Copy full session id" });
     const glyph = button.querySelector(".copy-glyph")!;
@@ -1685,6 +1737,310 @@ describe("ruling 459: the live strip's first line stands still", () => {
 });
 
 /**
+ * Ruling 457: the console reads a live store (`createLiveRunLogStore`, the one
+ * `useRunLogStream` holds) rather than lines handed down by the page.
+ */
+describe("the console on a live store (ruling 457)", () => {
+  const text = (seq: number): LogLine => ({ t: "10:00:00", ev: "text", tag: "assistant", text: `line ${seq}` });
+  const running = () =>
+    mkRun({
+      lines: [0, 1, 2].map(text),
+      raw: [],
+      lineKeys: ["0:0", "0:1", "0:2"],
+      lineCount: 3,
+      logWindow: { totalLines: 3, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 2 },
+    });
+  const tail = (seq: number) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      data: {
+        runId: "run_1",
+        state: "running",
+        lines: [{ seq, display: text(seq) }],
+        headSeq: seq,
+        oldestSeq: seq,
+        hasMore: true,
+      },
+    }),
+  });
+  async function flush() {
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+  }
+  /** A `/resources/run-log` answer, as much of a `Response` as the store reads. */
+  interface RunLogAnswer {
+    ok: boolean;
+    status: number;
+    json: () => Promise<{ data: object }>;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("appends a line without touching the rows already drawn, and counts it", async () => {
+    const run = running();
+    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const { container } = render(<AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />);
+    const first = container.querySelector(".console > .log-line")!;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tail(3)));
+    await act(async () => {
+      store.onFrame("run_1", 3);
+      await flush();
+    });
+    // CANARY: key the rows by index and prepend-free appends still pass, but
+    // the load-older test below does not.
+    expect(container.querySelector(".console > .log-line")).toBe(first);
+    expect(container.textContent).toContain("line 3");
+    // The page loaded 3 lines; the tail's fourth is counted without a reload.
+    expect(footerCount(container)).toBe("4");
+  });
+
+  it("follows the tail to its newest line, and leaves a reader who scrolled up where they are", async () => {
+    const run = running();
+    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const { container } = render(<AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />);
+    const box = container.querySelector<HTMLElement>(".console")!;
+    let height = 1000;
+    Object.defineProperty(box, "scrollHeight", { get: () => height, configurable: true });
+    Object.defineProperty(box, "clientHeight", { get: () => 320, configurable: true });
+    const fetchMock = vi.fn().mockResolvedValueOnce(tail(3)).mockResolvedValueOnce(tail(4));
+    vi.stubGlobal("fetch", fetchMock);
+    height = 1021;
+    await act(async () => {
+      store.onFrame("run_1", 3);
+      await flush();
+    });
+    expect(box.scrollTop).toBe(1021);
+
+    // The reader scrolls up: `follow` turns off and the next line leaves them.
+    box.scrollTop = 200;
+    fireEvent.scroll(box);
+    height = 1042;
+    await act(async () => {
+      store.onFrame("run_1", 4);
+      await flush();
+    });
+    expect(container.textContent).toContain("line 4");
+    expect(box.scrollTop).toBe(200);
+  });
+
+  /**
+   * CON-4: the console's rows skip layout until they are near the view
+   * (`content-visibility: auto`, ruling 457 CSS-6), so a row the follow jump
+   * brings into view counts at its 21px placeholder when `scrollHeight` is read
+   * and reaches its real height in a later frame. Nothing re-pinned, so the
+   * newest line sat below the fold with `follow` still on; and the scroll
+   * event the browser then sent, with the view short of the end, turned
+   * `follow` off. jsdom lays nothing out, so the geometry is stubbed: a
+   * scroller that clamps like a browser's, a height that grows after the jump,
+   * and frames the test runs one at a time.
+   */
+  it("re-pins to the real bottom as rows grow after the jump, and the growth never turns follow off (CON-4)", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 1;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      frames.set(nextFrame, cb);
+      return nextFrame++;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const runFrame = () => {
+      const due = [...frames.values()];
+      frames.clear();
+      for (const cb of due) cb(0);
+    };
+
+    const run = running();
+    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const { container, getByRole } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />,
+    );
+    const box = container.querySelector<HTMLElement>(".console")!;
+    let height = 1000;
+    let top = 0;
+    Object.defineProperty(box, "scrollHeight", { get: () => height, configurable: true });
+    Object.defineProperty(box, "clientHeight", { get: () => 320, configurable: true });
+    Object.defineProperty(box, "scrollTop", {
+      get: () => top,
+      set: (v: number) => (top = Math.max(0, Math.min(v, height - 320))),
+      configurable: true,
+    });
+    const following = () => getByRole("button", { name: "follow" }).getAttribute("aria-pressed");
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tail(3)));
+    height = 1021; // the new row, at its placeholder height
+    await act(async () => {
+      store.onFrame("run_1", 3);
+      await flush();
+    });
+    expect(top).toBe(701);
+
+    // The first frame still reads the placeholder; the rows laid out at the
+    // end of it are 200px taller than their estimates.
+    act(runFrame);
+    height = 1221;
+    act(runFrame);
+    // CANARY: drop the re-pin and the view stays at 701, 200px short.
+    expect(top).toBe(901);
+
+    // More rows came near the view before the browser sent the scroll event
+    // for that pin: it arrives 79px short of the end.
+    height = 1300;
+    fireEvent.scroll(box);
+    // CANARY: derive follow from the distance alone and this reads "false".
+    expect(following()).toBe("true");
+    act(runFrame);
+    expect(top).toBe(980);
+    act(runFrame);
+    // Settled: the height stopped moving, so the pinning stopped with it.
+    height = 1400;
+    act(runFrame);
+    expect(top).toBe(980);
+
+    // A reader who scrolls up still stops following.
+    top = 500;
+    fireEvent.scroll(box);
+    expect(following()).toBe("false");
+  });
+
+  it("keeps every drawn row's node when older lines are loaded above it", async () => {
+    const run = mkRun({
+      lines: [3, 4].map(text),
+      raw: [],
+      lineKeys: ["0:3", "0:4"],
+      lineCount: 5,
+      logWindow: { totalLines: 5, hasMore: true, runIds: ["run_1"], oldest: { runId: "run_1", seq: 3 }, headSeq: 4 },
+    });
+    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const { container, getByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />,
+    );
+    const rows = () => [...container.querySelectorAll(".console > .log-line")].filter((el) => /line \d/.test(el.textContent ?? ""));
+    const before = rows();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: { runId: "run_1", lines: [0, 1, 2].map((seq) => ({ seq, display: text(seq) })), oldestSeq: 0, hasMore: false },
+        }),
+      }),
+    );
+    await act(async () => {
+      fireEvent.click(getByText("load older lines"));
+      await flush();
+    });
+    const after = rows();
+    expect(after.map((el) => el.querySelector(".lx")!.textContent)).toEqual(["line 0", "line 1", "line 2", "line 3", "line 4"]);
+    // LIVE-4: rows keyed by run and seq; index keys rewrote every row.
+    expect(after.slice(3)).toEqual(before);
+  });
+
+  it("fills a thread the page did not carry with one request, saying so meanwhile", async () => {
+    const run = mkRun({
+      lines: [],
+      raw: [],
+      lineCount: 2,
+      logWindow: { totalLines: 2, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 1, loaded: false },
+    });
+    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    let answer: (value: RunLogAnswer) => void = () => {};
+    const fetchMock = vi.fn().mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />);
+    expect(container.textContent).toContain("loading this console…");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("/resources/run-log?runId=run_1&window=1");
+    await act(async () => {
+      answer({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            runId: "run_1",
+            threadId: "primary",
+            lines: [text(0), text(1)],
+            lineKeys: ["0:0", "0:1"],
+            logWindow: { totalLines: 2, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 1 },
+            facts: { phase: null, step: null, turns: 0, tokens: 0, tokensEstimated: false, cache: NO_RUN_CACHE },
+          },
+        }),
+      });
+      await flush();
+    });
+    expect(container.textContent).not.toContain("loading this console…");
+    expect(container.textContent).toContain("line 1");
+  });
+
+  it("the raw view prints each stored envelope, loaded when it opens", async () => {
+    const run = running();
+    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    let answer: (value: RunLogAnswer) => void = () => {};
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise((resolve) => (answer = resolve))));
+    const { container, getByText } = render(
+      <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />,
+    );
+    await act(async () => {
+      fireEvent.click(getByText("{ } raw"));
+      await flush();
+    });
+    // While the envelopes are on their way the row says so, not the display text.
+    expect(container.querySelector(".console > .log-line .lx")!.textContent).toBe("loading the stored envelope…");
+    await act(async () => {
+      answer({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            runId: "run_1",
+            lines: [0, 1, 2].map((seq) => ({ seq, display: text(seq), raw: `{"seq":${seq}}` })),
+            oldestSeq: 0,
+            hasMore: false,
+          },
+        }),
+      });
+      await flush();
+    });
+    expect(container.querySelector(".console > .log-line .lx")!.textContent).toBe('{"seq":0}');
+  });
+
+  it("UI-03: says the live tail is down while the tab's stream reconnects", () => {
+    // The tab's one stream is the layout's (`useLiveUpdates`, ruling 457); its
+    // failure is what the console reads. It used to watch its own.
+    class FailingEventSource {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSED = 2;
+      static last: FailingEventSource | null = null;
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      url: string;
+      constructor(url: string) {
+        this.url = url;
+        FailingEventSource.last = this;
+      }
+      addEventListener() {}
+      close() {}
+    }
+    vi.stubGlobal("EventSource", FailingEventSource);
+    const store = staticRunLogStore({ linesByThread: { primary: [] } });
+    function Layout() {
+      useLiveUpdates(["project:p"]);
+      return <AgentLogsPanel runtime={[mkRun({})]} sel="primary" onSel={() => {}} store={store} />;
+    }
+    const Stub = createRoutesStub([{ path: "/", Component: Layout }]);
+    const { container } = render(<Stub initialEntries={["/"]} />);
+    const foot = () => container.querySelector(".logs-foot")!.textContent;
+    expect(foot()).toContain("streaming");
+    act(() => {
+      FailingEventSource.last!.readyState = FailingEventSource.CLOSED;
+      FailingEventSource.last!.onerror?.();
+    });
+    // CANARY: drop `liveDown` from the console's `stopped`.
+    expect(foot()).toContain("Live tail disconnected");
+  });
+});
+
+/**
  * Ruling 459: a wait row's orb and clock share one cell and trade in place
  * as the wait ends. React swapped the 20px canvas for the 14px clock in one
  * frame, so the tool chip beside it jumped 6px left.
@@ -1707,7 +2063,7 @@ describe("ruling 459: the wait row's orb trades for the clock in place", () => {
     raw: '{"type":"user"}',
   };
   const panel = (lines: StreamedLine[]) => (
-    <AgentLogsPanel runtime={[mkRun({ lineCount: lines.length })]} sel="primary" onSel={() => {}} linesByThread={{ primary: lines }} />
+    <Logs runtime={[mkRun({ lineCount: lines.length })]} sel="primary" onSel={() => {}} linesByThread={{ primary: lines }} />
   );
 
   it("keeps the orb it watched live, marked ended, so the sheet fades it out as the clock comes in", () => {
@@ -1736,5 +2092,82 @@ describe("ruling 459: the wait row's orb trades for the clock in place", () => {
     expect(cell.hasAttribute("data-live")).toBe(false);
     expect(cell.querySelector("canvas")).toBeNull();
     expect(cell.querySelectorAll(":scope > svg.ico")).toHaveLength(1);
+  });
+});
+
+/**
+ * Ruling 368: a run request shows itself on the button that started it. The
+ * task page's run fetcher carries interrupts, retries and merges alike, so
+ * Interrupt and Retry used to go `disabled` for ANY of them with their resting
+ * glyph and label: the one that was pressed painted the .45 refused step and
+ * said nothing. The page now names the run (or agent) in flight; that button
+ * carries `aria-busy`, the loader spinning and the work's own name. Ruling
+ * 459: the loader trades in for the resting glyph in its GlyphSwap cell, where
+ * it is always drawn, so "shown" is the cell's `data-copied`.
+ * Canary: drop `aria-busy` from Interrupt in `runs-panels.tsx`.
+ */
+describe("ruling 368: run requests in flight", () => {
+  it("Interrupt reads Interrupting… for the run being stopped", () => {
+    const { getByText } = render(
+      <LiveRunPanel
+        runtime={[mkRun({})]}
+        onViewLogs={() => {}}
+        onInterrupt={() => {}}
+        canInterrupt
+        interrupting
+        interruptingRunId="run_1"
+      />,
+    );
+    const b = getByText("Interrupting…").closest("button")!;
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    expect(b.disabled).toBe(true);
+    expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin:last-child")).not.toBeNull();
+  });
+
+  it("another request in flight leaves Interrupt waiting, claiming nothing", () => {
+    const { getByText } = render(
+      <LiveRunPanel
+        runtime={[mkRun({})]}
+        onViewLogs={() => {}}
+        onInterrupt={() => {}}
+        canInterrupt
+        interrupting
+        interruptingRunId={null}
+      />,
+    );
+    const b = getByText("Interrupt").closest("button")!;
+    expect(b.disabled).toBe(true);
+    expect(b.hasAttribute("aria-busy")).toBe(false);
+    expect(b.querySelector(".copy-glyph")!.hasAttribute("data-copied")).toBe(false);
+  });
+
+  it("Retry reads Retrying on Codex… when the shown agent's retry is in flight", () => {
+    const failed = mkRun({
+      state: "error",
+      lifecycle: "error",
+      failureKind: "quota",
+      failedBackendUnavailable: true,
+      altBackend: "codex",
+    });
+    const props = {
+      runtime: [failed],
+      sel: "primary",
+      onSel: () => {},
+      onRetryBackend: () => {},
+      retryBackends: ["claude", "codex"] as const,
+      linesByThread: { primary: [] },
+      retrying: true,
+    };
+    const { getByText, rerender } = render(<Logs {...props} retryingProfileId="developer" />);
+    const b = getByText("Retrying on Codex…").closest("button")!;
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin:last-child")).not.toBeNull();
+
+    // Another agent's retry (or any other run request): this one only waits.
+    rerender(<Logs {...props} retryingProfileId="reviewer" />);
+    const waiting = getByText("Retry on Codex").closest("button")!;
+    expect(waiting.disabled).toBe(true);
+    expect(waiting.hasAttribute("aria-busy")).toBe(false);
+    expect(waiting.querySelector(".copy-glyph")!.hasAttribute("data-copied")).toBe(false);
   });
 });

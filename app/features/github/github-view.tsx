@@ -1,7 +1,9 @@
 import { useFetcher, useNavigate } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
+import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useActionToast } from "~/ui/use-action-toast";
@@ -26,7 +28,7 @@ import type {
  * GitHub repository panel (connection + credential health incl. the
  * VIB-142 scope-violation banner), pull-request list, execution-branch
  * table. All governed data comes from the loader; the only mutations are
- * the Reconcile and Grant-scope route actions (POST + CSRF, toast copy from
+ * the Reconcile and Re-check scopes route actions (POST + CSRF, toast copy from
  * the server). Row clicks navigate to task detail.
  *
  * Panels are presentational (props + callbacks) so jsdom tests render them
@@ -166,9 +168,10 @@ export function RepositoryPanel({
         <div className="pol-note after last">
           <Icon name="lock" />
           <span>
-            Credential details need the <strong>Grant GitHub scope</strong>{" "}
-            grant (project admin or maintainer). The Connection row above still
-            shows whether this repository is reachable.
+            Credential details need the{" "}
+            <strong>Manage the GitHub credential</strong> grant (project admin
+            or maintainer). The Connection row above still shows whether this
+            repository is reachable.
           </span>
         </div>
       )}
@@ -330,7 +333,10 @@ export function BranchesPanel({
                   <span className="ttl">{row.title}</span>
                 </span>
                 <span className="live-branch">
-                  <span className="trace ok">
+                  {/* Interface review 2026-09-24 (colo-12): secondary ink, not
+                      the teal OK ink — the Sync pill carries the state, and a
+                      branch never compared or not pushed is not "ok". */}
+                  <span className="trace">
                     <Icon name="branch" />
                     {row.branch}
                   </span>
@@ -500,21 +506,24 @@ export function GithubViewPage({
   // the same `grant-github-scope` ACTION_ROLES entry the route's action guard
   // enforces for grant-scope, set-credential and clear-credential alike. It
   // decides all three things that ARE that action — whether the credential card
-  // is disclosed, whether Grant scope is offered, and whether the
+  // is disclosed, whether Re-check scopes is offered, and whether the
   // attach/rotate/remove row renders — so a role can never be shown a control
   // it may not use, nor hidden from one it may. The loader redacts the payload
   // on the same rule; a client-only gate would leave the token tail in the HTML.
   //
   // SAFETY: same loader-sourced `myRole` as `canReconcile` above.
   const canGrant = roleCan(myRole as ProjectRole | null, "grant-github-scope");
-  // Grant scope RE-CHECKS an existing PAT's scopes — meaningless when no
+  // Re-check scopes re-validates an existing PAT — meaningless when no
   // credential is configured (F6). Only offer it once a PAT is bound; the
   // no-credential card still shows "Fix in Settings" / "Attach credential".
   const hasCredential = data.credential.source === "pat";
-  const busy =
-    reconcileFetcher.state !== "idle" || grantFetcher.state !== "idle";
+  // Ruling 368: each request shows itself on the button that started it; the
+  // other one only waits at the disabled step.
+  const reconciling = reconcileFetcher.state !== "idle";
+  const rechecking = grantFetcher.state !== "idle";
+  const busy = reconciling || rechecking;
 
-  // The cred-warn action slot: Grant scope (re-check, lives here until the
+  // The cred-warn action slot: Re-check scopes (lives here until the
   // Phase-9 Settings card exists) + the mock's Fix in Settings navigation.
   const warnActions = (
     <span className="warn-acts">
@@ -524,10 +533,11 @@ export function GithubViewPage({
           className="btn sm"
           onClick={grantScope}
           disabled={busy}
+          aria-busy={rechecking || undefined}
           title="Re-check the credential's scopes against GitHub"
         >
-          <Icon name="check" />
-          Grant scope
+          <GlyphSwap rest="check" alt="loader" on={rechecking} spinAlt />
+          {rechecking ? "Checking…" : "Re-check scopes"}
         </button>
       )}
       <button
@@ -542,12 +552,12 @@ export function GithubViewPage({
   );
 
   // Attach / rotate / remove the project credential (finding #13) —
-  // admin|maintainer, same gate as Grant scope.
+  // admin|maintainer, same gate as Re-check scopes.
   const manageActions = canGrant ? (
     <CredentialManageActions
       configured={data.credential.source === "pat"}
       canManage={canGrant}
-      busy={credFetcher.state !== "idle"}
+      inFlight={inFlightIntent(credFetcher)}
       onSet={() =>
         credFetcher.submit(
           { intent: "set-credential", _csrf: csrf },
@@ -640,6 +650,9 @@ export function GithubViewPage({
           >
             <Icon name={staleCache ? "alert" : "clock"} />
             {freshnessText}
+            {/* The title is a mouse-only extra; this is the same sentence for
+                assistive tech (interface review 2026-09-24, acce-5). */}
+            <span className="vh"> · {freshnessTitle}</span>
           </span>
           {canReconcile && (
             <button
@@ -647,10 +660,11 @@ export function GithubViewPage({
               className="btn ghost sm"
               onClick={reconcile}
               disabled={busy}
+              aria-busy={reconciling || undefined}
               title="Update branch/PR status from GitHub now"
             >
-              <Icon name="refresh" />
-              Update status
+              <GlyphSwap rest="refresh" alt="loader" on={reconciling} spinAlt />
+              {reconciling ? "Updating…" : "Update status"}
             </button>
           )}
           {data.project.repo && (

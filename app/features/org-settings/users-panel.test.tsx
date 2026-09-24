@@ -527,3 +527,46 @@ describe("ruling 459: the Google mark is the icon set's glyph", () => {
     expect(isMark(tile.querySelector(".be-ic")!.firstElementChild)).toBe(true);
   });
 });
+
+/**
+ * Ruling 368: the password reset in flight shows itself on its button — busy,
+ * the loader spinning where the lock was, and a label naming the work — rather
+ * than dimming to the .45 refused step with its resting label.
+ * Canary: drop `aria-busy` from the reset button in `users-panel.tsx`.
+ */
+describe("ruling 368: the reset in flight", () => {
+  it("Reset password reads Resetting… and is busy until the server answers", async () => {
+    const user: OrgUserView = {
+      ...ME,
+      id: "u_new",
+      name: "Test Contributor",
+      email: "contributor@viberr.dev",
+      role: "member",
+    };
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <UsersPanel
+              users={[ME, user]}
+              domains={DOMAINS}
+              meId="u_arda"
+              providers={{ github: false, google: false }}
+            />
+          </ToastProvider>
+        ),
+        // Never answers: the test reads the wait itself.
+        action: () => new Promise(() => {}),
+      },
+    ]);
+    const { getByLabelText, getByText } = render(<Stub initialEntries={["/org/settings"]} />);
+    fireEvent.click(getByLabelText("Edit Test Contributor"));
+    const reset = getByText("Reset password").closest("button")!;
+    fireEvent.click(reset);
+    await waitFor(() => expect(reset.getAttribute("aria-busy")).toBe("true"));
+    expect(reset.textContent).toBe("Resetting…");
+    expect(reset.disabled).toBe(true);
+    expect(reset.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
+  });
+});

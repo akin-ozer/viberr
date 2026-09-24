@@ -3,6 +3,7 @@ import { useFetcher, useNavigate } from "react-router";
 import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon, storeIcon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { LocalDayDotTime } from "~/ui/local-time";
@@ -710,11 +711,15 @@ export function Guardrails({
   guardrails,
   canManage,
   busy,
+  inFlight = null,
   onSet,
 }: {
   guardrails: GuardrailView[];
   canManage: boolean;
   busy: boolean;
+  /** Ruling 368: the guardrail and op whose request is in flight, so the
+   *  button that sent it shows the work and every other control only waits. */
+  inFlight?: { id: string; op: string } | null;
   onSet: (id: string, op: GuardrailOp, value?: number) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -846,10 +851,17 @@ export function Guardrails({
                       type="button"
                       className="btn sm"
                       disabled={busy || !valueChanged}
-                      aria-busy={busy}
+                      aria-busy={(inFlight?.id === g.id && inFlight.op === "value") || undefined}
                       onClick={applyValue}
                     >
-                      Apply
+                      {inFlight?.id === g.id && inFlight.op === "value" ? (
+                        <>
+                          <Icon name="loader" className="spin" />
+                          Applying…
+                        </>
+                      ) : (
+                        "Apply"
+                      )}
                     </button>
                   </span>
                   {showRefusal && (
@@ -891,10 +903,18 @@ export function Guardrails({
                       type="button"
                       className="btn ghost sm danger"
                       disabled={busy}
+                      aria-busy={(inFlight?.id === g.id && inFlight.op === "remove") || undefined}
                       onClick={() => onSet(g.id, "remove")}
                     >
-                      <Icon name="x" />
-                      Remove
+                      {/* Ruling 459 over ruling 368: the ✕ trades for the
+                          spinning loader in place (GlyphSwap), not in one frame. */}
+                      <GlyphSwap
+                        rest="x"
+                        alt="loader"
+                        on={inFlight?.id === g.id && inFlight.op === "remove"}
+                        spinAlt
+                      />
+                      {inFlight?.id === g.id && inFlight.op === "remove" ? "Removing…" : "Remove"}
                     </button>
                   )}
                 </span>
@@ -1092,6 +1112,14 @@ export function PolicyPage({
               guardrails={data.guardrails}
               canManage={canEditPolicy}
               busy={busy}
+              inFlight={
+                guardFetcher.state !== "idle" && guardFetcher.formData
+                  ? {
+                      id: String(guardFetcher.formData.get("id") ?? ""),
+                      op: String(guardFetcher.formData.get("op") ?? ""),
+                    }
+                  : null
+              }
               onSet={onSetGuardrail}
             />
             {/* Ruling 178: the acceptance rule beside the other rules; the

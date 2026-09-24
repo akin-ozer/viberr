@@ -183,7 +183,11 @@ function AttachFile() {
   const error = fetcher.data && !fetcher.data.ok ? fetcher.data.error : null;
   return (
     <div className="attach-add">
-      <label className={`btn ghost sm${busy ? " busy" : ""}`}>
+      {/* Ruling 368: the upload in flight is `aria-busy` (the sheet's .7 busy
+          step) with the loader spinning, the same shape as every busy button.
+          Ruling 459: the file mark and the loader share one cell (GlyphSwap)
+          and trade in place. */}
+      <label className={`btn ghost sm${busy ? " busy" : ""}`} aria-busy={busy || undefined}>
         <GlyphSwap rest="file" alt="loader" on={busy} spinAlt />
         {busy ? "Attaching…" : "Attach a file"}
         <input

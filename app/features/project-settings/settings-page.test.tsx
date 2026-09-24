@@ -201,7 +201,10 @@ describe("ProjectPanel", () => {
   // U33-9: an identity write already in flight holds the control — the panel
   // still shows the OLD loader values until revalidation remounts it, so a
   // second press would resubmit the same governed rename.
-  it("U33-9: an in-flight save holds both controls", () => {
+  // Ruling 368: and Save shows it is saving (busy, the loader, "Saving…")
+  // instead of the .45 refused step; Discard only waits.
+  // Canary: drop `aria-busy` from Save in settings-page.tsx.
+  it("U33-9 / ruling 368: an in-flight save holds both controls and Save says it is saving", () => {
     const onSave = vi.fn();
     const { getByDisplayValue, getByText } = render(
       <ProjectPanel project={PROJECT} canManage busy onSave={onSave} />,
@@ -209,10 +212,14 @@ describe("ProjectPanel", () => {
     fireEvent.change(getByDisplayValue("Viberr Core"), {
       target: { value: "Viberr Core 2" },
     });
-    // SAFETY: the action row's Save control, per the contract asserted above.
-    expect((getByText("Save changes") as HTMLButtonElement).disabled).toBe(true);
+    const save = getByText("Saving…").closest("button")!;
+    expect(save.disabled).toBe(true);
+    expect(save.getAttribute("aria-busy")).toBe("true");
+    expect(save.querySelector("svg.ico.spin")).not.toBeNull();
     // SAFETY: the same row's Discard control, per that same contract.
-    expect((getByText("Discard") as HTMLButtonElement).disabled).toBe(true);
+    const discard = getByText("Discard") as HTMLButtonElement;
+    expect(discard.disabled).toBe(true);
+    expect(discard.hasAttribute("aria-busy")).toBe(false);
   });
 
   // U33-9: the "Task keys" row states what this project's keys ARE. While the
@@ -322,6 +329,27 @@ describe("StagesPanel", () => {
     const middle = getByLabelText("Remove Ready") as HTMLButtonElement;
     expect(middle.disabled).toBe(false);
     expect(container.querySelectorAll(".stg-x:disabled")).toHaveLength(2);
+  });
+
+  // acce-5 (interface review 2026-09-24): `title` never opens for keyboard,
+  // touch or a screen reader, and never on the disabled ✕ at all — so the lock
+  // reason is also real text: a `.vh` sentence in the locked row's handle, and
+  // a visible line in the manager's note.
+  it("says why the entry/terminal stages are locked, outside the title", () => {
+    const { container } = render(
+      <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
+    );
+    const reasons = Array.from(
+      container.querySelectorAll(".stg-handle .vh"),
+      (el) => el.textContent,
+    );
+    expect(reasons).toEqual([
+      "Triage is fixed: it's the entry point. It can't be moved or removed.",
+      "Done is fixed: human acceptance stays terminal. It can't be moved or removed.",
+    ]);
+    expect(container.querySelector(".pol-note")!.textContent).toContain(
+      "Triage (the entry point) and Done (human acceptance) are fixed.",
+    );
   });
 
   it("locked/non-empty removals stop client-side; empty unlocked ones dispatch", () => {
@@ -714,6 +742,26 @@ describe("MembersPanel", () => {
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 
+  it("only the row whose removal is in flight reads busy; the others wait (ruling 368 over 459)", () => {
+    // Canary: put `aria-busy={busy || undefined}` back on the row's ✕ and
+    // every row claims the removal.
+    const { container, rerender } = render(
+      <MembersPanel {...base} busy removing="u_elif" onInvite={() => {}} onRemove={() => {}} />,
+    );
+    const rows = [...container.querySelectorAll<HTMLButtonElement>(".member-row .stg-x")];
+    expect(rows).toHaveLength(MEMBERS.length);
+    const elif = MEMBERS.findIndex((m) => m.userId === "u_elif");
+    rows.forEach((b, i) => {
+      expect(b.disabled).toBe(true);
+      expect(b.getAttribute("aria-busy")).toBe(i === elif ? "true" : null);
+    });
+    // An invite in flight: every ✕ waits, none claims it.
+    rerender(<MembersPanel {...base} busy onInvite={() => {}} onRemove={() => {}} />);
+    for (const b of container.querySelectorAll(".member-row .stg-x")) {
+      expect(b.hasAttribute("aria-busy")).toBe(false);
+    }
+  });
+
   /**
    * Ruling 148(b): the invite form is no longer served under the member list —
    * "Add member" in the panel head opens the shared `MiniModal`. Ruling 147
@@ -925,7 +973,7 @@ describe("settings panels take count + note styling from the sheet (F19-33)", ()
 });
 
 describe("RepoPanel", () => {
-  it("renders repo facts and the shared CredentialCard with Grant scope", () => {
+  it("renders repo facts and the shared CredentialCard with Re-check scopes", () => {
     const onGrant = vi.fn();
     const onSet = vi.fn();
     const onOpenTask = vi.fn();
@@ -941,8 +989,8 @@ describe("RepoPanel", () => {
         repo="akin-ozer/viberr"
         credential={CREDENTIAL}
         canGrant
-        busy={false}
-        credBusy={false}
+        inFlight={null}
+        credInFlight={null}
         onGrantScope={onGrant}
         onSetCredential={onSet}
         onClearCredential={() => {}}
@@ -961,7 +1009,7 @@ describe("RepoPanel", () => {
     expect(container.querySelector(".cred-warn")).not.toBeNull();
     fireEvent.click(getByText("VIB-142"));
     expect(onOpenTask).toHaveBeenCalledWith("VIB-142");
-    fireEvent.click(getByText("Grant scope"));
+    fireEvent.click(getByText("Re-check scopes"));
     expect(onGrant).toHaveBeenCalled();
 
     // A bound PAT → Rotate (managed by `configured`, not the removed
@@ -986,8 +1034,8 @@ describe("RepoPanel", () => {
         repo="akin-ozer/viberr"
         credential={NO_CREDENTIAL}
         canGrant
-        busy={false}
-        credBusy={false}
+        inFlight={null}
+        credInFlight={null}
         onGrantScope={() => {}}
         onSetCredential={onSet}
         onClearCredential={() => {}}
@@ -1025,8 +1073,8 @@ describe("RepoPanel", () => {
         repo="akin-ozer/viberr"
         credential={CREDENTIAL}
         canGrant
-        busy={false}
-        credBusy={false}
+        inFlight={null}
+        credInFlight={null}
         onGrantScope={() => {}}
         onSetCredential={() => {}}
         onClearCredential={() => {}}
@@ -1057,8 +1105,8 @@ describe("RepoPanel", () => {
         repo="akin-ozer/viberr"
         credential={CREDENTIAL}
         canGrant={false}
-        busy={false}
-        credBusy={false}
+        inFlight={null}
+        credInFlight={null}
         onGrantScope={() => {}}
         onSetCredential={() => {}}
         onClearCredential={() => {}}
@@ -1093,8 +1141,8 @@ describe("RepoPanel", () => {
         repo="akin-ozer/viberr"
         credential={bound}
         canGrant
-        busy={false}
-        credBusy={false}
+        inFlight={null}
+        credInFlight={null}
         onGrantScope={() => {}}
         onSetCredential={onSet}
         onClearCredential={onClear}
@@ -1145,8 +1193,8 @@ describe("RepoPanel", () => {
           repo="akin-ozer/viberr"
           credential={allOk}
           canGrant={canGrant}
-          busy={false}
-          credBusy={false}
+          inFlight={null}
+          credInFlight={null}
           onGrantScope={() => {}}
           onSetCredential={() => {}}
           onClearCredential={() => {}}
@@ -1169,7 +1217,7 @@ describe("RepoPanel", () => {
     expect(withheld.container.querySelector(".scope-chip")).toBeNull();
     expect(withheld.container.textContent).not.toContain(CREDENTIAL.masked);
     expect(withheld.container.textContent).not.toContain(CREDENTIAL.label);
-    expect(withheld.container.textContent).toContain("Grant GitHub scope");
+    expect(withheld.container.textContent).toContain("Manage the GitHub credential");
     // …and the rest of the panel really did render, so the absences above are
     // the gate rather than a blank component.
   });
@@ -1401,7 +1449,7 @@ describe("SettingsPage — each panel gates on the action its own server guard c
       ),
       credential: Boolean(
         Array.from(container.querySelectorAll("button")).find(
-          (b) => b.textContent?.trim() === "Grant scope",
+          (b) => b.textContent?.trim() === "Re-check scopes",
         ),
       ),
       // Ruling 178: the required-reviewer table rides `edit-policy`
@@ -1569,7 +1617,7 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     expect(container.textContent).not.toContain(CREDENTIAL.masked);
     expect(container.textContent).not.toContain(CREDENTIAL.label);
     expect(container.querySelector(".scope-chip")).toBeNull();
-    expect(container.textContent).toContain("Grant GitHub scope");
+    expect(container.textContent).toContain("Manage the GitHub credential");
   });
 
   it("a contributor — full task authority, no project lifecycle — gets none either", () => {
@@ -1630,8 +1678,8 @@ describe("RepairRepoDialog refuses instead of disabling", () => {
         repo="akin-ozer/viberr"
         credential={CREDENTIAL}
         canGrant
-        busy={false}
-        credBusy={false}
+        inFlight={null}
+        credInFlight={null}
         onGrantScope={() => {}}
         onSetCredential={() => {}}
         onClearCredential={() => {}}
@@ -1893,5 +1941,83 @@ describe("FileLeasesPanel (ruling 396)", () => {
     const select = getByLabelText("Lease 1 holder") as HTMLSelectElement;
     expect(select.value).toBe("AX-404");
     expect(select.textContent).toContain("not on this board");
+  });
+});
+
+/**
+ * Ruling 368 on project Settings: the repository fetcher carries the repair,
+ * the branch-cleanup switch and the scope re-check, and the credential fetcher
+ * carries attach/rotate and remove, so every one of those buttons went to the
+ * .45 refused step for any of them with its resting label. The one that sent
+ * the request now shows it; the rest only wait.
+ * Canary: pass `inFlight={null}` to RepoPanel from SettingsPage and the page
+ * never says Checking… (this renders the panel, so drop `aria-busy` on
+ * Re-check scopes instead).
+ */
+describe("ruling 368: Settings' requests in flight", () => {
+  const repoPanel = (inFlight: string | null, credInFlight: string | null) =>
+    render(
+      <RepoPanel
+        canRepair
+        branchCleanup
+        onSetBranchCleanup={() => {}}
+        footprintTasks={0}
+        repairBusy={inFlight !== null}
+        repairResult={undefined}
+        onRepair={() => {}}
+        repo="akin-ozer/viberr"
+        credential={CREDENTIAL}
+        canGrant
+        inFlight={inFlight}
+        credInFlight={credInFlight}
+        onGrantScope={() => {}}
+        onSetCredential={() => {}}
+        onClearCredential={() => {}}
+        onOpenTask={() => {}}
+      />,
+    );
+
+  it("a scope re-check in flight reads Checking…, busy, the loader spinning", () => {
+    const { getByText } = repoPanel("grant-scope", null);
+    const b = getByText("Checking…").closest("button")!;
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    expect(b.disabled).toBe(true);
+    expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
+  });
+
+  it("a branch-cleanup write in flight leaves Re-check waiting, claiming nothing", () => {
+    const { getByText } = repoPanel("set-branch-cleanup", null);
+    const b = getByText("Re-check scopes").closest("button")!;
+    expect(b.disabled).toBe(true);
+    expect(b.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("a rotation in flight reads Rotating… on the credential row", () => {
+    const { getByText } = repoPanel(null, "set-credential");
+    const b = getByText("Rotating…").closest("button")!;
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    // Re-check rides the other fetcher and is untouched by this one.
+    expect(getByText("Re-check scopes").closest("button")!.disabled).toBe(false);
+  });
+
+  it("an archive in flight reads Archiving…, and Delete project only waits", () => {
+    const { container } = render(
+      <DangerZone
+        projectName="Viberr Core"
+        myRole="admin"
+        archived={false}
+        busy
+        inFlight="archive-project"
+        onArchive={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+    const archive = container.querySelector<HTMLButtonElement>(".dz-row .btn.ghost")!;
+    expect(archive.textContent).toBe("Archiving…");
+    expect(archive.getAttribute("aria-busy")).toBe("true");
+    const del = container.querySelector<HTMLButtonElement>(".dz-row .btn.danger:not(.ghost)")!;
+    expect(del.textContent).toBe("Delete project");
+    expect(del.disabled).toBe(true);
+    expect(del.hasAttribute("aria-busy")).toBe(false);
   });
 });

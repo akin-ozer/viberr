@@ -88,7 +88,7 @@ describe("grant-scope toast matrix", () => {
     ).toBe("GitHub is unreachable. Kept the last-known scope results.");
   });
 
-  it("resolution → the mock string with the task key interpolated", () => {
+  it("resolution → re-checked, with the task key interpolated (writ-6)", () => {
     expect(
       grantScopeToast({
         status: "revalidated",
@@ -96,7 +96,7 @@ describe("grant-scope toast matrix", () => {
         resolvedCount: 1,
         resolvedTaskKey: "VIB-142",
       }),
-    ).toBe("Scope granted · VIB-142 policy flag resolved");
+    ).toBe("Scopes re-checked · VIB-142 policy flag resolved");
   });
 
   it("revoked / expired / repo_not_found / org approval → honest failures", () => {

@@ -86,10 +86,13 @@ export function useMentionAutocomplete(
     lastText.current = text;
     const next = caret === null ? null : detectMentionToken(text, caret);
     const key = next ? `${next.start}:${next.query}` : null;
-    if (key !== tokenKeyRef.current) {
-      tokenKeyRef.current = key;
-      setActiveIndex(0);
-    }
+    // Ruling 457 (CS-7): the key fixes the whole token (its end is the start
+    // plus the query), so an unchanged key keeps the token already held. A new
+    // object on every update re-rendered the composer and re-ran the filter
+    // for a selection change that left the caret where it was.
+    if (key === tokenKeyRef.current) return;
+    tokenKeyRef.current = key;
+    setActiveIndex(0);
     setToken(next);
   }, []);
 

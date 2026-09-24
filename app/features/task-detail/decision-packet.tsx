@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { PACKET_NOTE_MAX, type PacketOptionKind } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -790,6 +791,7 @@ export function DecisionPacket({
   onResolve,
   onResolveCustom,
   onRequestMaintainer,
+  escalating = false,
   onAsk,
   onEditGoal,
 }: {
@@ -870,6 +872,9 @@ export function DecisionPacket({
    *  exists for. Absent hides the affordance (a maintainer/admin already holds
    *  every tier, and a non-owner has no standing to route another's task). */
   onRequestMaintainer?: () => void;
+  /** Ruling 368: the escalation {@link onRequestMaintainer} sent is in flight,
+   *  so its button says so instead of staying live and silent. */
+  escalating?: boolean;
   onAsk: () => void;
 }) {
   const p = packet;
@@ -1485,11 +1490,12 @@ export function DecisionPacket({
                   <button
                     type="button"
                     className="btn ghost sm"
-                    disabled={busy}
+                    disabled={busy || escalating}
+                    aria-busy={escalating || undefined}
                     onClick={onRequestMaintainer}
                   >
-                    <Icon name="message" />
-                    Send to a maintainer
+                    <GlyphSwap rest="message" alt="loader" on={escalating} spinAlt />
+                    {escalating ? "Sending…" : "Send to a maintainer"}
                   </button>
                 </>
               )}

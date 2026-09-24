@@ -3,6 +3,7 @@ import { z } from "zod";
 import { useNavigate, type FetcherWithComponents } from "react-router";
 import { Avatar } from "~/ui/avatar";
 import { initialsOf } from "~/ui/initials";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { TglP } from "~/ui/toggle";
@@ -709,9 +710,10 @@ function ProfileGithub({
               type="button"
               className="btn sm push"
               disabled={connectBusy}
+              aria-busy={connectBusy || undefined}
               onClick={startConnect}
             >
-              <Icon name="github" />
+              <GlyphSwap rest="github" alt="loader" on={connectBusy} spinAlt />
               {connectBusy ? "Connecting…" : "Connect"}
             </button>
           </div>

@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { useRef } from "react";
 import { pageTitle } from "~/shared/page-title";
 import {
@@ -240,6 +241,12 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const csrf = useCsrfToken();
   const push = useToast();
   const themeFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  // The segment the page is on: the choice a save is carrying, else `theme`,
+  // which the root loader confirms only once that save revalidates it (the
+  // account menu's item reads its theme the same way, `user-menu-panel.tsx`).
+  const inFlight = themeFetcher.formData?.get("theme");
+  const current: ThemePreference =
+    inFlight === "light" || inFlight === "dark" || inFlight === "system" ? inFlight : theme;
 
   const identityFetcher = useFetcher<ProfileActionData>();
   const prefsFetcher = useFetcher<ProfileActionData>();
@@ -290,7 +297,9 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
 
   const onTheme = (next: ThemePreference, label: string) => {
     // RU-1: re-selecting the active theme is a no-op — don't re-submit or toast.
-    if (next === theme) return;
+    // Active is the one on screen: while Dark is saving over a confirmed
+    // Light, pressing Light is a change back, not a repeat.
+    if (next === current) return;
     themePending.current = {
       toast: "Theme · " + label + (next === "system" ? " (follows your OS)" : ""),
       rollback: theme,
@@ -307,7 +316,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
       <ProfilePage
         key={profile.user.id}
         data={profile}
-        theme={theme}
+        theme={current}
         onTheme={onTheme}
         fetchers={{
           identity: identityFetcher,
@@ -322,3 +331,6 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
     </PageOverlay>
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/profile");
