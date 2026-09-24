@@ -71,10 +71,11 @@ import type { RequiredReviewerRule } from "~/schemas/project-file.schema";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 
 /**
- * The two `GET /repos/{owner}/{repo}` fields the repair reads. `request<T>`
- * names an expected payload, it does not check one, so it is decoded here.
- * Tolerant at every level — an unreadable field reads as "unknown" and the
- * repair falls back to the same behaviour it had before the probe existed.
+ * The two `GET /repos/{owner}/{repo}` fields the repair reads, decoded by the
+ * probe's `request`. Tolerant at every level — an unreadable field reads as
+ * "unknown" and the repair falls back to the same behaviour it had before the
+ * probe existed; the object-level catch means a 2xx never comes back as a
+ * `decode` failure, so a reachable repo always reaches the write check.
  * The `permissions` block (F20-15, the read-only proof of write access) is
  * decoded and judged by pat-validator.server.ts's `repoPermissionsSchema` /
  * `repoWritable`.
@@ -716,20 +717,19 @@ export async function repairProjectRepo(
   let probed = false;
   let defaultBranch: string | null = null;
   if (gh.status === "ok") {
-    const res = await gh.client.request("GET", `/repos/${repo}`);
+    const res = await gh.client.request("GET", `/repos/${repo}`, repoProbeSchema);
     if (res.ok) {
-      const probe = repoProbeSchema.parse(res.data);
       // F20-15: `res.ok` proves the credential can SEE the repo, not push to it.
       // Adopting a read-only-visible repo silently defers the failure to first
       // delivery (live: repairing to a foreign public repo succeeded). Refuse a
       // PROVEN read-only target; an unknown/absent permissions block still passes.
-      if (repoWritable(probe.permissions) === false) {
+      if (repoWritable(res.data.permissions) === false) {
         throw AppError.validation(
           `The attached credential can see ${repo} but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then repair again. Nothing was changed.`,
         );
       }
       probed = true;
-      defaultBranch = probe.default_branch;
+      defaultBranch = res.data.default_branch;
     } else if (res.kind === "network") {
       throw AppError.validation(
         `GitHub is unreachable (${res.message}). The repair was NOT applied. Try again when it is.`,

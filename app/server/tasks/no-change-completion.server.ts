@@ -80,9 +80,10 @@ export function noChangeCandidate(fm: Pick<TaskFrontmatter, "pr">): boolean {
   return !fm.pr;
 }
 
-/** `GET /git/ref/...` — the one field this module reads. Parsed, not asserted:
- *  the client hands back the decoded body untyped, so a sha is only a sha once
- *  something has checked it (an empty one is no sha at all). */
+/** `GET /git/ref/...` — the one field this module reads, decoded by the
+ *  request itself: a body without a sha (an empty one is no sha at all) comes
+ *  back a `decode` failure, which reads as "no base sha" exactly like an HTTP
+ *  failure does. */
 const refShaSchema = z.object({ object: z.object({ sha: z.string().min(1) }) });
 
 /** What the live probe needs from its caller: where the files are, and the
@@ -147,9 +148,12 @@ export async function probeNothingToDeliver(
     }
 
     const { encodeRefPath } = await import("~/server/github/github-client.server");
+    // Only the answer's status is read (does the branch exist?), so the body is
+    // taken as-is: any 2xx means the branch is there and the compare decides.
     const head = await gh.client.request(
       "GET",
       `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${branch}`)}`,
+      z.unknown(),
     );
 
     /** The default-branch head — the sha the outcome is pinned to. */
@@ -157,10 +161,9 @@ export async function probeNothingToDeliver(
       const baseRef = await gh.client.request(
         "GET",
         `/repos/${gh.repo}/git/ref/${encodeRefPath(`heads/${gh.defaultBranch}`)}`,
+        refShaSchema,
       );
-      if (!baseRef.ok) return null;
-      const parsed = refShaSchema.safeParse(baseRef.data);
-      return parsed.success ? parsed.data.object.sha : null;
+      return baseRef.ok ? baseRef.data.object.sha : null;
     };
 
     if (!head.ok) {
