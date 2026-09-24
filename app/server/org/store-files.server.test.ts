@@ -898,11 +898,18 @@ describe("writeStoreDoc", () => {
       appendedBytes: Buffer.byteLength(second),
       bytes: Buffer.byteLength(first + second),
     });
-    expect(listAuditEvents(db, { action: "org.store.doc_written" })[0]?.details).toMatchObject({
-      bytes: Buffer.byteLength(first + second),
-      appended: Buffer.byteLength(second),
-      replaced: false,
-    });
+    // Both appends land in the same millisecond often enough that `occurred_at`
+    // ties and the random id decides which row is newest, so the second append's
+    // row is found by what it wrote, not by position.
+    expect(
+      listAuditEvents(db, { action: "org.store.doc_written" }).map((row) => row.details),
+    ).toContainEqual(
+      expect.objectContaining({
+        bytes: Buffer.byteLength(first + second),
+        appended: Buffer.byteLength(second),
+        replaced: false,
+      }),
+    );
   });
 
   it("ruling 466: the editor's read cap is in bytes, so `truncated` and the text agree", async () => {
