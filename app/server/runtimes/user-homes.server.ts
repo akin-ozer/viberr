@@ -22,6 +22,7 @@ import { errnoSchema } from "~/server/files/atomic-file.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import type { RealBackend } from "./runtime-registry.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Per-person runtime homes (ruling 127).
@@ -261,7 +262,7 @@ export function finishCodexRunHome(home: CodexRunHome): void {
   } catch (error) {
     logger.warn("codex run home: the refreshed sign-in could not be written back", {
       runId: home.runId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   // Ruling 199: BEFORE the directory goes, re-point the CLI's own index at the
@@ -276,7 +277,7 @@ export function finishCodexRunHome(home: CodexRunHome): void {
   } catch (error) {
     logger.warn("codex run home could not be removed", {
       runId: home.runId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -349,7 +350,7 @@ function repointRunRollouts(home: CodexRunHome): void {
       logger.warn("codex rollout paths could not be re-pointed", {
         runId: home.runId,
         dbFile,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -409,7 +410,7 @@ export function repairCodexRolloutPaths(dataRoot?: string): number {
       } catch (error) {
         logger.warn("codex rollout paths could not be repaired at boot", {
           dbFile,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     }

@@ -34,6 +34,7 @@ import {
 } from "~/server/secrets/git-output-redact.server";
 import { startTemperature } from "./context-policy.server";
 import { noteRunCompaction } from "./run-context-events.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /** Terminal run states — reaching one is the run's final answer. */
 const TERMINAL_STATES: readonly RunState[] = ["finished", "error", "interrupted"];
@@ -403,7 +404,7 @@ export function createRunSink(
       source: "viberr",
       reason: "line_lost",
       message: text,
-      cause: cause instanceof Error ? cause.message : String(cause),
+      cause: errorMessage(cause),
     });
     try {
       appendRawLine(effectiveBackend, spec.runId, raw);
@@ -429,7 +430,7 @@ export function createRunSink(
     } catch (error) {
       logger.error("run divergence marker could not be persisted", {
         runId: spec.runId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   };
@@ -536,7 +537,7 @@ export function createRunSink(
           } catch (error) {
             logger.error("compaction audit failed", {
               runId: spec.runId,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
           }
         }
@@ -684,7 +685,7 @@ export function createRunSink(
         }
         logger.error("run line persist failed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
         markDivergent(error);
       }
@@ -717,7 +718,7 @@ export function createRunSink(
         } catch (error) {
           logger.error("compaction audit failed", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         }
       }

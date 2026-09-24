@@ -7,6 +7,7 @@ import { listProjects } from "~/server/projections/board-query.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { logger } from "~/server/logging/logger.server";
 import { baseAgentDeployments } from "./agent-catalog.server";
+import { toError } from "~/shared/errors";
 
 /** The system operator's profile id (never removable, always ensured). */
 const OPERATOR_PROFILE_ID = "operator";
@@ -81,7 +82,7 @@ export function ensureBaseAgentsDeployed(
     } catch (error) {
       logger.error("failed backfilling built-in agents", {
         project: project.slug,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

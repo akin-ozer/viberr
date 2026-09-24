@@ -104,6 +104,7 @@ import {
   writeStoreFiles,
   type UploadFileInput,
 } from "~/server/org/store-files.server";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * /org/settings — the instance-level admin surface (org-settings spec),
@@ -381,9 +382,7 @@ export async function action({ request }: Route.ActionArgs) {
           });
         } catch (error) {
           return fail(
-            `S3 upload failed: could not reach the bucket. ${
-              error instanceof Error ? error.message : String(error)
-            }`.slice(0, 240),
+            `S3 upload failed: could not reach the bucket. ${errorMessage(error)}`.slice(0, 240),
           );
         }
         if (!result.ok) {

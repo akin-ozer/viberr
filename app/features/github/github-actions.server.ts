@@ -31,6 +31,7 @@ import { listScopeViolations } from "~/server/projections/policy-violations.serv
 import { logger } from "~/server/logging/logger.server";
 import { grantScopeToast, reconcileToast } from "./github-copy";
 import { invalidateRepoAccess } from "./github-query.server";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * The two GitHub-view actions, as thin typed wrappers over the phase-7-core
@@ -72,7 +73,7 @@ export async function runReconcile(
   try {
     summary = await reconcileProject(db, projectSlug, actor, ctx);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     logger.error("project reconcile failed unexpectedly", {
       projectSlug,
       err: message,

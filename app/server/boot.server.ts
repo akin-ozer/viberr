@@ -63,6 +63,7 @@ import { startScheduleRunner } from "./tasks/schedule.server";
 import { startGoalRunner } from "./tasks/goal-actions.server";
 import { recoverControllerConversations } from "./controller/controller-run.server";
 import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.server";
+import { toError } from "~/shared/errors";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
 const BOOT_KEY = Symbol.for("viberr.booted");
@@ -107,13 +108,13 @@ export function installCrashVisibilityHandlers(): void {
   slot[CRASH_HANDLERS_KEY] = true;
   process.on("uncaughtException", (error) => {
     writeFatalSync("FATAL: uncaught exception — shutting down", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     process.exit(1);
   });
   process.on("unhandledRejection", (reason) => {
     writeFatalSync("FATAL: unhandled promise rejection — shutting down", {
-      err: reason instanceof Error ? reason : new Error(String(reason)),
+      err: toError(reason),
     });
     process.exit(1);
   });
@@ -428,14 +429,14 @@ export function startStoreMaintenance(
     }
   } catch (error) {
     logger.error("could not clear interrupted MCP installs", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   try {
     deps.runMaintenancePass(db, { reason: "boot", reclaimWorkspaces: false });
   } catch (error) {
     logger.error("boot maintenance pass failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   deps.startMaintenanceScheduler(db);
@@ -507,21 +508,21 @@ export async function reconcileRestartedWork(
     orphanTasks = finalization.claimedTasks;
   } catch (error) {
     logger.error("orphaned-run finalize failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   try {
     await deps.recoverUnreactedAgentRuns(db);
   } catch (error) {
     logger.error("agent-reply recovery failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   try {
     await deps.recoverStrandedOperatorPlans(db);
   } catch (error) {
     logger.error("codex operator plan recovery failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   try {
@@ -541,7 +542,7 @@ export async function reconcileRestartedWork(
     await deps.settleAbandonedWaits(db, {}, orphanTasks);
   } catch (error) {
     logger.error("abandoned-wait settle failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   await orphanReinvokes;
@@ -570,7 +571,7 @@ export async function reconcileRestartedWork(
     }
   } catch (error) {
     logger.error("task workspace reclamation failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -746,7 +747,7 @@ export async function bootServer(): Promise<void> {
     }
   } catch (error) {
     logger.error("boot rescan failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 
@@ -760,7 +761,7 @@ export async function bootServer(): Promise<void> {
     ensureBaseAgentsDeployed(db);
   } catch (error) {
     logger.error("built-in agent backfill failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 
@@ -822,7 +823,7 @@ export async function bootServer(): Promise<void> {
     recoverControllerConversations(db);
   } catch (error) {
     logger.warn("controller conversation recovery failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 

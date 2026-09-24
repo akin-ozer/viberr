@@ -11,6 +11,7 @@ import {
   splitMcpCommand,
   type McpSpawn,
 } from "~/server/org/resources.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Resolve a specialist profile's declared MCP names to portable runtime
@@ -195,7 +196,7 @@ export function resolveSpecialistMcpServersDetailed(
     // one the run's persona promised, and log it once.
     logger.warn("MCP registry unreadable — all declared MCP grants dropped", {
       mcps: mcpNames.filter((n) => !RESERVED_MCP_NAMES.has(n)),
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     for (const name of mcpNames) {
       if (RESERVED_MCP_NAMES.has(name)) continue;

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { isDatabaseShuttingDown } from "~/server/db/sqlite.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
+import { toError } from "~/shared/errors";
 
 /** What every Viberr MCP tool answers with, at the SDK's own definition of
  *  it, so this file never restates a contract it does not own. */
@@ -171,7 +172,7 @@ function guarded(
       }
       logger.error("mcp tool failed", {
         tool: name,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       return textResult(
         `[error] \`${name}\` failed unexpectedly and returned no answer. The details are ` +

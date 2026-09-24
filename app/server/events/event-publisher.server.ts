@@ -9,6 +9,7 @@ import {
   type ProjectionEvent,
 } from "./projection-events.server";
 import { publishSseEvent, type SseRoute } from "./sse-broker.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Event publisher: subscribes the SSE broker to the phase-3 projection
@@ -226,7 +227,7 @@ export function startEventPublisher(): void {
     } catch (error) {
       logger.error("sse publish failed", {
         eventType: e.type,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   });

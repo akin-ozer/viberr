@@ -10,6 +10,7 @@ import {
   type GithubActionContext,
   type ProjectReconcileSummary,
 } from "./github-reconciler.server";
+import { toError } from "~/shared/errors";
 
 /**
  * C7 (pass-24 fix): did this pass fail for a reason the "GitHub sync failing"
@@ -188,7 +189,7 @@ export function noteReconcileFailure(db: DatabaseSync, slug: string): void {
   } catch (error) {
     logger.error("could not raise github-sync-failing notification", {
       projectSlug: slug,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -247,7 +248,7 @@ export async function pollGithubReconcile(
     } catch (error) {
       logger.warn("github reconcile poll failed for a project", {
         projectSlug: slug,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       // C7: after enough consecutive failures, tell the people who can fix it
       // instead of failing silently into the log forever.
@@ -261,7 +262,7 @@ export async function pollGithubReconcile(
     nudged = await nudgeMergePendingTasks(db, ctx);
   } catch (error) {
     logger.warn("merge-pending nudge failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   if (changed > 0 || nudged > 0) {
@@ -306,7 +307,7 @@ export function startGithubReconcilePoller(db: DatabaseSync): void {
   // failure (e.g. a misconfigured PAT) is diagnosable instead of silent.
   void pollGithubReconcile(db).catch((error) => {
     logger.warn("github reconcile poller boot pass failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   });
   let running = false;
@@ -316,7 +317,7 @@ export function startGithubReconcilePoller(db: DatabaseSync): void {
     void pollGithubReconcile(db)
       .catch((error) => {
         logger.warn("github reconcile poller tick failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       .finally(() => {

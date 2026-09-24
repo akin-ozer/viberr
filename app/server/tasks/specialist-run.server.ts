@@ -531,7 +531,7 @@ async function freshRunAnchor(
     logger.warn("canonical anchor could not be built for a fresh run", {
       projectSlug,
       taskKey: parsed.frontmatter.key,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return null;
   }
@@ -556,6 +556,7 @@ import {
   type RunPrompt,
 } from "~/server/runtimes/prompt-prefix.server";
 import { specialistCompactAnchor } from "~/server/runtimes/context-policy.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 export {
   recordRunInputs,
@@ -1093,9 +1094,7 @@ export async function startAgentRun(
   try {
     return await dispatchAgentRun(db, input, actor, ctx, pending);
   } catch (error) {
-    pending.reservation?.abandon(
-      error instanceof Error ? error.message : String(error),
-    );
+    pending.reservation?.abandon(errorMessage(error));
     // A plugin no run adopted has no reader (ruling 180).
     removeSkillPlugin(pending.skillPlugin);
     throw error;
@@ -2536,7 +2535,7 @@ async function holdDispatch(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         profileId: input.profileId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -4035,7 +4034,7 @@ export async function pinSupportCheckout(
     logger.warn("support checkout: could not detach at the revision under review", {
       dir,
       revision: sha,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return `${what} could not be checked out; HEAD was left as it is`;
   }

@@ -12,6 +12,7 @@ import {
 import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
 import { textResult } from "~/server/runtimes/strict-tool.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The refusal machinery every controller-side MCP shares (ruling 107).
@@ -123,7 +124,7 @@ export function controllerToolGuards(
           return textResult(error.message);
         }
         logger.error("controller tool failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
         return textResult(
           "[error] That action failed unexpectedly. The details are in the server log; nothing was partially hidden from the audit trail.",

@@ -8,6 +8,7 @@ import {
 } from "~/server/files/file-store-root.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Shared skill → agent-context reader. The operator and every specialist resolve
@@ -148,7 +149,7 @@ export function readSkillBodyDetailed(
     // `skillDirPath` throws on a traversal-shaped name (resolveStoreSegment).
     logger.warn("declared agent skill name is unsafe — run proceeds WITHOUT it", {
       skill: name,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return {
       body: "",
@@ -169,7 +170,7 @@ export function readSkillBodyDetailed(
   } catch (error) {
     logger.warn("declared agent skill unreadable — run proceeds WITHOUT it", {
       skill: name,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return {
       body: "",

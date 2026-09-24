@@ -14,6 +14,7 @@ import {
   findMentionSpans,
   RESERVED_MENTION_HANDLES,
 } from "~/ui/mention-spans";
+import { toError } from "~/shared/errors";
 
 /**
  * @mention → `mention`-notification fan-out, shared by EVERY comment writer
@@ -566,7 +567,7 @@ export async function stampNotifiedRecipients(
   } catch (error) {
     logger.warn("could not record an event's notification recipients", {
       taskKey: ref.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   return reached;

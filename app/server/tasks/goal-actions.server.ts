@@ -48,6 +48,7 @@ import { formatDependencyRef, parseDependencyRef, type DependencyRender } from "
 import type { CreateTaskInput } from "./task-actions.server";
 import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
 import { countLabel } from "~/shared/text/plural";
+import { toError } from "~/shared/errors";
 
 /**
  * Chained goals (ruling 99): the lifecycle engine.
@@ -1015,7 +1016,7 @@ export async function updateGoal(
       logger.error("goal link retry task creation failed", {
         goalId: input.goalId,
         linkIndex: retryLinkIndex,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       await updateGoalFile(
         goalRef(ctx, input.projectSlug, input.goalId),
@@ -1084,7 +1085,7 @@ function notifyCreator(
   } catch (error) {
     logger.warn("goal creator notification failed", {
       goalId: fm.id,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -1249,7 +1250,7 @@ async function startLinkTaskLocked(
         goalId,
         linkIndex,
         taskKey: created.key,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     });
   }
@@ -1513,7 +1514,7 @@ export async function reconcileGoal(
         logger.error("goal link task creation failed", {
           goalId,
           linkIndex,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
         await updateGoalFile(ref, (goal) => {
           if (goal.frontmatter.status !== "active") return;
@@ -1555,14 +1556,14 @@ export function maybeReconcileGoalForTask(
       logger.error("goal reconcile failed", {
         projectSlug,
         goalId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     });
   } catch (error) {
     logger.warn("goal reconcile hook failed", {
       projectSlug,
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -1597,7 +1598,7 @@ export async function reconcileAllGoals(
       logger.error("goal reconcile failed", {
         projectSlug: row.project_slug,
         goalId: row.goal_id,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -1643,7 +1644,7 @@ export function startGoalRunner(db: DatabaseSync): void {
     void goalRunnerTick(db)
       .catch((error) => {
         logger.error("goal runner tick failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       .finally(() => {

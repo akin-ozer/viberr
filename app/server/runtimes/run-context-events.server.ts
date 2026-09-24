@@ -10,6 +10,7 @@ import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { wholeThousands } from "~/shared/text/thousands";
 import type { RunSpec } from "./adapter.server";
 import type { EnvelopeFacts } from "./wire-format.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Ruling 369: a context compaction is a governed fact about a run — the
@@ -107,7 +108,7 @@ export function noteRunCompaction(
       logger.error("compaction timeline note failed", {
         runId: spec.runId,
         taskKey: spec.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     });
 }

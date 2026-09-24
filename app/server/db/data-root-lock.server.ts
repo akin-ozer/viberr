@@ -15,6 +15,7 @@ import { z } from "zod";
 import { getEnv, type Env } from "../config/env.server";
 import { getDataRoot } from "../files/file-store-root.server";
 import { logger, writeFatalSync } from "../logging/logger.server";
+import { toError } from "../../shared/errors";
 
 /**
  * ONE app process per data root, EVER (B-FD1).
@@ -681,7 +682,7 @@ export function startDataRootLockGuard(options: DataRootLockGuardOptions = {}): 
     } catch (error) {
       // A single probe hiccup is not proof of a steal — log and retry next tick.
       logger.warn("data-root lock guard check failed (transient)", {
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       return;
     }

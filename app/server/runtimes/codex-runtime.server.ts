@@ -55,6 +55,7 @@ import {
   type ThreadResumeConfig,
 } from "./codex-app-server.server";
 import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
@@ -904,7 +905,7 @@ export function createCodexAdapter(
         void reapProcesses({ runIds: [spec.runId] }).catch((error) => {
           logger.warn("codex run reap failed", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         });
       };

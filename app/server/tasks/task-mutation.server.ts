@@ -28,6 +28,7 @@ import {
   resolveRequiredReviewers,
   type RequiredReviewerView,
 } from "./required-reviewers.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The task-mutation SUBSTRATE: the context shape every governed write threads,
@@ -381,7 +382,7 @@ export function notifyOwnerSeatChange(
       projectSlug: input.projectSlug,
       taskKey: input.change.taskKey,
       recipient: input.recipientUserId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return { skipped: "failed" };
   }
@@ -423,7 +424,7 @@ export function notifyTaskWatchers(
       projectSlug: notice.projectSlug,
       taskKey: notice.taskKey,
       kind: notice.kind,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return [];
   }

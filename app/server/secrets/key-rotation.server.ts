@@ -7,6 +7,7 @@ import {
   previousSecretKeys,
   sealSecret,
 } from "./secret-box.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Finishing a key rotation (A9, gap 21).
@@ -350,7 +351,7 @@ export function resealSecrets(
         logger.warn("could not re-seal a secret under the current key", {
           store: store.id,
           id: row.id,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
         failed.push(ref);
       }

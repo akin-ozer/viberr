@@ -15,6 +15,7 @@ import {
   storeRelativePath,
   taskFilePath,
 } from "./file-store-root.server";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * Store doctor: find canonical files the app can no longer trust, and say
@@ -164,7 +165,7 @@ function checkFile(
       findings: [],
       blocking: [],
       location: null,
-      readError: error instanceof Error ? error.message : String(error),
+      readError: errorMessage(error),
     };
   }
   const diagnostics =

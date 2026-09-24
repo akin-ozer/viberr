@@ -114,6 +114,7 @@ import { wholeThousands } from "~/shared/text/thousands";
 import { countLabel } from "~/shared/text/plural";
 
 import { newId } from "~/shared/ids/new-id.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The only module routes call
@@ -313,7 +314,7 @@ function fireIfAlreadyTerminal(
   } catch (error) {
     logger.error("run completion callback failed (immediate terminal fire)", {
       runId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     // C4: the effects (reply/verdict/reconcile/react + waiting flip) are lost —
     // surface it so the board doesn't show "agent working" until a restart.
@@ -663,7 +664,7 @@ export function reserveRun(
     if (conflict) throw conflict;
     logger.warn("run reservation could not be written — preparing invisibly", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return null;
   }
@@ -690,7 +691,7 @@ export function reserveRun(
       } catch (error) {
         logger.warn("run preparation phase could not be persisted", {
           runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     },
@@ -717,7 +718,7 @@ export function reserveRun(
         logger.error("reserved run could not be abandoned", {
           runId,
           reason,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       } finally {
         // A freed slot may let a run parked behind the cap start now.
@@ -1423,7 +1424,7 @@ function recordSessionMissing(
   } catch (error) {
     logger.error("session-missing marker persist failed", {
       runId: run.id,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -1549,7 +1550,7 @@ async function noteContinuityReset(
     logger.error("continuity-reset timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -1610,7 +1611,7 @@ export async function noteCompletionEffectsLost(
     // a person can always take.
     logger.warn("completion-replay predicate failed", {
       runId: run.id,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   const agent = run.agent_name ?? run.role;
@@ -1635,7 +1636,7 @@ export async function noteCompletionEffectsLost(
     logger.error("completion-effects-lost timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -2169,7 +2170,7 @@ function launch(
     } catch (error) {
       logger.error("run phase persist failed", {
         runId: spec.runId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   };
@@ -2201,7 +2202,7 @@ function launch(
       } catch (error) {
         logger.error("run phase persist failed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     },
@@ -2290,7 +2291,7 @@ function launch(
             } catch (error) {
               logger.error("run answered callback failed", {
                 runId: spec.runId,
-                err: error instanceof Error ? error : new Error(String(error)),
+                err: toError(error),
               });
             }
           }
@@ -2310,7 +2311,7 @@ function launch(
           void reapRunProcesses({ runIds: [compactionRunId(spec.runId)] }).catch((error) => {
             logger.warn("compaction epilogue reap failed", {
               runId: spec.runId,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
           });
           if (exit.effectiveBackend === "codex") {
@@ -2349,7 +2350,7 @@ function launch(
       } catch (error) {
         logger.error("run finalize persist failed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
       state.handles.delete(spec.runId);
@@ -2366,7 +2367,7 @@ function launch(
       } catch (error) {
         logger.error("run queue drain failed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
       // Fire a one-shot completion callback (opaque to run-service — the
@@ -2382,7 +2383,7 @@ function launch(
         } catch (error) {
           logger.error("run completion callback failed", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
           // C4: the completion effects are lost — stamp the task so it isn't
           // stuck on "agent working" with no live run until the next restart.
@@ -2627,7 +2628,7 @@ async function noteInterrupt(
     logger.error("interrupt timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -2673,7 +2674,7 @@ async function noteRunStarted(
     logger.error("run-started timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }

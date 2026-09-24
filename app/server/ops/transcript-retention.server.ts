@@ -11,6 +11,7 @@ import { getEnv } from "~/server/config/env.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { listUserRuntimeRoots } from "~/server/runtimes/user-homes.server";
+import { toError } from "~/shared/errors";
 
 /**
  * On-disk transcript retention (gap 20).
@@ -136,7 +137,7 @@ function pruneFile(file: string, cutoffMs: number): PrunedFile {
   } catch (error) {
     logger.warn("could not prune a runtime transcript", {
       file,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return { removed: false, bytes: 0 };
   }

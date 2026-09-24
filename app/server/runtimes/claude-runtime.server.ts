@@ -57,6 +57,7 @@ import {
   sortedRecord,
   staticPromptText,
 } from "./prompt-prefix.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
@@ -1363,7 +1364,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           cb.onLine({ raw: JSON.stringify(message), display: shown, facts: folded, occurredAt });
         }
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
+        const reason = errorMessage(error);
         outcome = { compacted: false, reason };
         const occurredAt = new Date().toISOString();
         cb.onLine({
@@ -1592,7 +1593,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         })().catch((error) => {
           logger.warn("claude run reap failed", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         });
       };
@@ -1866,14 +1867,12 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               runId: spec.runId,
               runOutcome: "finished",
             });
-            emitPostTurnTransport(
-              error instanceof Error ? error.message : String(error),
-            );
+            emitPostTurnTransport(errorMessage(error));
             return settle("finished");
           }
           logger.error("claude query error", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
           return settleError(error);
         }
@@ -1934,7 +1933,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       void run().catch((error) => {
         logger.error("claude run crashed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
         settleError(error);
       });

@@ -152,6 +152,7 @@ import {
   noteModelAvailabilityFromFailure,
   clearModelMark,
 } from "./model-availability.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * Runs the operator through Claude or Codex. The operator is given its persona
@@ -626,7 +627,7 @@ async function noteDroppedOperatorTurn(
   } catch (error) {
     logger.error("could not note a dropped @operator turn", {
       taskKey: dropped.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -738,13 +739,7 @@ function releaseOperatorLease(
     .then((result) =>
       result.refused ? noteQueuedTriggerRefused(db, queued, result.refused) : undefined,
     )
-    .catch((error) =>
-      noteQueuedTriggerFireFailed(
-        db,
-        queued,
-        error instanceof Error ? error : new Error(String(error)),
-      ),
-  );
+    .catch((error) => noteQueuedTriggerFireFailed(db, queued, toError(error)));
 }
 
 /** Drain the pending trigger after a CROSS-BOOT in-flight run finishes (a DB
@@ -771,13 +766,7 @@ function drainPendingAfterInFlight(db: DatabaseSync, key: string): void {
     .then((result) =>
       result.refused ? noteQueuedTriggerRefused(db, queued, result.refused) : undefined,
     )
-    .catch((error) =>
-      noteQueuedTriggerFireFailed(
-        db,
-        queued,
-        error instanceof Error ? error : new Error(String(error)),
-      ),
-  );
+    .catch((error) => noteQueuedTriggerFireFailed(db, queued, toError(error)));
 }
 
 /** Recover the task ref from a lease key (slugs are kebab-case — the first
@@ -919,7 +908,7 @@ async function noteQueuedTriggerRefused(
   } catch (noteErr) {
     logger.error("could not note the refused queued operator trigger", {
       key: `${queued.projectSlug}/${queued.taskKey}`,
-      err: noteErr instanceof Error ? noteErr : new Error(String(noteErr)),
+      err: toError(noteErr),
     });
   }
 }
@@ -960,7 +949,7 @@ async function noteQueuedTriggerFireFailed(
   } catch (noteErr) {
     logger.error("could not note queued operator trigger failure", {
       key: `${queued.projectSlug}/${queued.taskKey}`,
-      err: noteErr instanceof Error ? noteErr : new Error(String(noteErr)),
+      err: toError(noteErr),
     });
   }
   settleWaitingAfterOperator(db, ref);
@@ -1323,7 +1312,7 @@ export async function maybeResumeStrandedOperator(
   void runOperator(db, nudge).catch((error) => {
     logger.error("stranded-operator resume failed", {
       taskKey: ref.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   });
   return true;
@@ -1361,7 +1350,7 @@ function settleWaitingAfterOperator(
     } catch (error) {
       logger.warn("settleWaitingAfterOperator failed", {
         taskKey: ref.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   })();
@@ -1423,7 +1412,7 @@ function readStageAtStart(
         projectSlug: ref.projectSlug,
         taskKey: ref.taskKey,
         origin,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       },
     );
     return null;
@@ -2754,7 +2743,7 @@ async function startCodexOperatorRun(
       .catch((error) => {
         logger.error("codex operator completion handling failed", {
           taskKey: input.taskKey,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       .finally(() => releaseOperatorLease(db, leaseKey, leaseToken));
@@ -2907,7 +2896,7 @@ async function executeCodexPlan(
     ).catch((error) => {
       logger.error("codex no-plan escalation failed", {
         taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       return null;
     });
@@ -3196,7 +3185,7 @@ async function executeCodexPlan(
       logger.error("codex operator action failed — aborting the remaining plan", {
         taskKey: input.taskKey,
         tool: a.tool,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       // F28-O1: narrate the abort DIRECTLY, NOT through the gated
       // `operatorPostComment` — for the same reason `narrateRefusedActions`
@@ -3215,7 +3204,7 @@ async function executeCodexPlan(
               type: "note",
               actor: { kind: "operator" },
               title: null,
-              text: `**Coordination stopped:** the \`${a.tool}\` step failed (${error instanceof Error ? error.message : String(error)}). The remaining plan was not executed.`,
+              text: `**Coordination stopped:** the \`${a.tool}\` step failed (${errorMessage(error)}). The remaining plan was not executed.`,
               toAgent: false,
               evidence: null,
             });
@@ -3225,10 +3214,7 @@ async function executeCodexPlan(
       } catch (writeError) {
         logger.error("codex operator plan-abort narration failed", {
           taskKey: input.taskKey,
-          err:
-            writeError instanceof Error
-              ? writeError
-              : new Error(String(writeError)),
+          err: toError(writeError),
         });
       }
       break;
@@ -3300,7 +3286,7 @@ async function narratePausedPlan(
   } catch (error) {
     logger.error("codex operator plan-pause narration failed", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -3431,7 +3417,7 @@ async function narrateRefusedActions(
   } catch (error) {
     logger.error("codex operator refusal narration failed", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -3472,7 +3458,7 @@ async function writeOperatorNoPlanNote(
   } catch (error) {
     logger.error("codex no-plan note fallback failed", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -3642,7 +3628,7 @@ async function startRealOperatorRun(
       .catch((error) => {
         logger.error("real operator completion handling failed", {
           taskKey: input.taskKey,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       .finally(() => releaseOperatorLease(db, leaseKey, leaseToken));
@@ -3757,7 +3743,7 @@ async function escalateFailedOperatorRun(
     logger.error("operator-run failure escalation failed", {
       taskKey: input.taskKey,
       runId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }

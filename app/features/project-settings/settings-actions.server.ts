@@ -70,6 +70,7 @@ import {
 import type { RequiredReviewerRule } from "~/schemas/project-file.schema";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { countLabel } from "~/shared/text/plural";
+import { toError } from "~/shared/errors";
 
 /**
  * The two `GET /repos/{owner}/{repo}` fields the repair reads, decoded by the
@@ -1438,7 +1439,7 @@ export async function deleteProject(
       logger.warn("could not interrupt a run while deleting its project", {
         projectSlug: input.projectSlug,
         runId: run.id,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

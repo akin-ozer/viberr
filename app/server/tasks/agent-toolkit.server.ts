@@ -54,6 +54,7 @@ import {
   type OfferWithdrawalSlot,
   type OfferWithdrawalCause,
 } from "./task-mutation.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The generic agent's in-process collaboration TOOLS (generic-agents G3) — a
@@ -375,7 +376,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           } catch (error) {
             logger.warn("agent post_comment failed", {
               taskKey,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
             return textResult("[error] The comment could not be posted.");
           }
@@ -438,7 +439,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           } catch (error) {
             logger.warn("agent ask_human failed", {
               taskKey,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
             return textResult("[error] The question could not be raised.");
           }
@@ -669,7 +670,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           } catch (error) {
             logger.warn("agent read_board failed", {
               taskKey,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
             return textResult("[error] The board could not be read.");
           }
@@ -706,7 +707,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             logger.warn("agent read_knowledge_doc failed", {
               taskKey,
               kb: args.kb,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
             return textResult("[error] That knowledge-base document could not be read.");
           }

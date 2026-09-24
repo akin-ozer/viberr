@@ -211,6 +211,7 @@ import {
   NotVisibleError,
   notVisible,
 } from "./controller-tool-guards.server";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * The controller's in-process toolkit (ruling 99) — a Claude Agent SDK MCP
@@ -2545,7 +2546,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // scheduled with the directive on it, and the recorded comment
             // predates that later run too.
             if (args.prompt && !isDispatchHeld(error)) {
-              const message = error instanceof Error ? error.message : String(error);
+              const message = errorMessage(error);
               await appendComment(
                 db,
                 {

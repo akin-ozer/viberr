@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { newId } from "~/shared/ids/new-id.server";
 import { logger } from "../logging/logger.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Minimal audit recorder (phase 2). Every governed action calls recordAudit;
@@ -83,7 +84,7 @@ export function recordAudit(
   } catch (error) {
     logger.error("audit event could not be recorded", {
       action: event.action,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }

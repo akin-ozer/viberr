@@ -21,6 +21,7 @@ import {
   restoreStoreFile,
 } from "../app/server/db/backup.server";
 import { runWithDataRootWriterLock } from "../app/server/db/cli-lock.server";
+import { errorMessage } from "../app/shared/errors";
 
 function flagValue(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -72,7 +73,7 @@ try {
   }
 } catch (error) {
   console.error(
-    `viberr restore failed: ${error instanceof Error ? error.message : String(error)}`,
+    `viberr restore failed: ${errorMessage(error)}`,
   );
   process.exit(1);
 }

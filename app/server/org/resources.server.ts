@@ -49,6 +49,7 @@ import { looksLikeWriteTool, MCP_TOOL_NAME_RE, MCP_WRITE_TOOLS_MAX } from "~/sha
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
 import { updateResourceReferences } from "./resource-references.server";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
+import { toError } from "~/shared/errors";
 
 /**
  * Org agent resources: knowledge bases, MCP servers, skills (org-settings
@@ -909,7 +910,7 @@ function openMcpCredential(
       } catch (error) {
         logger.warn("could not re-seal an MCP credential — read still succeeded", {
           mcp: name,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     }
@@ -919,7 +920,7 @@ function openMcpCredential(
       "mcp credential failed to decrypt under every configured key — the server will NOT be mounted",
       {
         mcp: name,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       },
     );
     return {
@@ -963,7 +964,7 @@ function openedForNewRow(sealed: string, name: string): ProbeCredential {
   } catch (error) {
     logger.error("mcp credential failed to decrypt on save — probing no-auth", {
       mcp: name,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return { token: null, unreadable: true };
   }

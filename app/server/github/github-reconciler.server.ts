@@ -95,6 +95,7 @@ import {
   resolveScopeViolationWithEvent,
 } from "./scope-flag.server";
 import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * GitHub reconciler (Phase 7): given a task, fetches live GitHub facts
@@ -1465,7 +1466,7 @@ export function reconcileTask(
         // used to abort the whole project sweep (and 500 the Reconcile button),
         // taking every task after it with it — the poller's next tick then hit
         // the same task first and lost the board again.
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         logger.error("task reconcile failed unexpectedly", {
           projectSlug: input.projectSlug,
           taskKey: input.taskKey,

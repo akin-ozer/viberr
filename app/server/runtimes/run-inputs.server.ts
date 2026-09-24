@@ -16,6 +16,7 @@ import {
 } from "~/server/runtimes/run-store.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import { countLabel } from "~/shared/text/plural";
+import { toError } from "~/shared/errors";
 
 /**
  * Ruling 344 — what a run was GIVEN, recorded on the run. One home, because
@@ -245,7 +246,7 @@ export function recordRunInputs(
   } catch (error) {
     logger.error("run-inputs disclosure could not be persisted", {
       runId: input.runId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }

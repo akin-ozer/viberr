@@ -19,6 +19,7 @@ import {
   skillFrontmatterSchema,
 } from "~/server/files/skill-body.server";
 import { logger } from "~/server/logging/logger.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Viberr's granted skills reach a Claude run as a LOCAL PLUGIN beside the task
@@ -105,7 +106,7 @@ export async function stripUngovernedRepoCatalog(repoDir: string): Promise<void>
     // the delivery diff for a human to notice, never a silent catalog leak.
     logger.warn("could not skip-worktree repo .claude before stripping", {
       repoDir,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   rmSync(catalog, { recursive: true, force: true });
@@ -230,7 +231,7 @@ export async function mountGrantedSkills(input: {
   } catch (error) {
     logger.warn("could not build the run's skill plugin — injected as prompt text", {
       pluginRoot,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     rmSync(pluginRoot, { recursive: true, force: true });
     return {
@@ -286,7 +287,7 @@ export function removeSkillPlugin(plugin: SkillPlugin | null | undefined): void 
     // Inert residue: no session names this path once its run has settled.
     logger.warn("could not remove the run's skill plugin", {
       path: plugin.path,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -388,7 +389,7 @@ function mountOneSkill(
     rmSync(dest, { recursive: true, force: true });
     logger.warn("granted skill could not be mounted into the run's plugin", {
       skill: name,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return "its files could not be copied into the run's skill plugin";
   }

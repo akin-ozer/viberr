@@ -19,6 +19,7 @@ import {
   type LockHolder,
 } from "./data-root-lock.server";
 import { runMigrations } from "./migration-runner.server";
+import { toError } from "../../shared/errors";
 
 /**
  * Opens (creating parent directories as needed) a SQLite database
@@ -238,7 +239,7 @@ function sweepStaleReaderSnapshots(tmpRoot: string): void {
     } catch (error) {
       logger.warn("a dead reader's snapshot directory could not be removed", {
         dir: path.join(tmpRoot, entry),
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -336,7 +337,7 @@ export function ensureSingleFlightIndexes(db: DatabaseSync): void {
   } catch (error) {
     logger.warn(
       "single-flight index for supporting runs could not be ensured — duplicate live rows may exist; it will be retried next boot",
-      { err: error instanceof Error ? error : new Error(String(error)) },
+      { err: toError(error) },
     );
   }
 }
@@ -584,7 +585,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
               {
                 table,
                 column: column.name,
-                err: error instanceof Error ? error : new Error(String(error)),
+                err: toError(error),
               },
             );
           }
@@ -593,7 +594,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
     } catch (error) {
       logger.warn(
         "baseline columns could not be ensured — writers that name them will fail until the root is re-baselined",
-        { table, err: error instanceof Error ? error : new Error(String(error)) },
+        { table, err: toError(error) },
       );
     }
   }
@@ -603,7 +604,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
     } catch (error) {
       logger.warn(
         "a baseline table could not be ensured — readers that name it degrade until the root is re-baselined",
-        { err: error instanceof Error ? error : new Error(String(error)) },
+        { err: toError(error) },
       );
     }
   }
@@ -613,7 +614,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
     } catch (error) {
       logger.warn(
         "a baseline index could not be ensured — reads stay correct but unindexed; it is retried next boot",
-        { err: error instanceof Error ? error : new Error(String(error)) },
+        { err: toError(error) },
       );
     }
   }
@@ -661,7 +662,7 @@ export function shutdownDatabase(): void {
     db.exec(`PRAGMA wal_checkpoint(TRUNCATE);`);
   } catch (error) {
     logger.warn("wal checkpoint failed during shutdown", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   try {
@@ -669,7 +670,7 @@ export function shutdownDatabase(): void {
     logger.info("sqlite closed");
   } catch (error) {
     logger.error("sqlite close failed during shutdown", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   } finally {
     // F21-24: latch AFTER `closeDb` (which clears the flag for the test path),

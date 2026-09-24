@@ -91,6 +91,7 @@ import {
 import { controllerCompactAnchor } from "~/server/runtimes/context-policy.server";
 import { normalizeTimeZone } from "~/shared/dates/time-zone";
 import { countLabel } from "~/shared/text/plural";
+import { toError } from "~/shared/errors";
 
 /**
  * The controller conversation engine (ruling 99).
@@ -368,7 +369,7 @@ export async function runControllerTurn(
     if (error instanceof AppError) throw error;
     logger.error("controller turn start failed", {
       conversationId: conversation.id,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     throw AppError.internal("The controller turn could not start.");
   }
@@ -525,7 +526,7 @@ async function startTurnRun(
       logger.error("controller answer could not be posted early", {
         conversationId: conversation.id,
         runId: answeredRunId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   };
@@ -635,7 +636,7 @@ async function startTurnRun(
           logger.error("controller turn settle failed", {
             conversationId: conversation.id,
             runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
           leases().delete(conversation.id);
         },
@@ -808,7 +809,7 @@ async function settleTurn(
   } catch (error) {
     logger.error("queued controller turn failed to start", {
       conversationId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     // The lease dies here and the FIFO dies with it. Every message still in it
     // is ALREADY in the transcript and has no other scheduler that will ever

@@ -25,6 +25,7 @@ import {
   type GithubContextOptions,
 } from "./github-context.server";
 import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * Branch sync (Phase 7): task-key execution branches
@@ -412,7 +413,7 @@ export async function ensureTaskBranchBestEffort(
   } catch (error) {
     result = {
       status: "threw",
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     };
   }
   try {
@@ -420,7 +421,7 @@ export async function ensureTaskBranchBestEffort(
   } catch (error) {
     logger.warn("branch preparation failure could not be disclosed", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   return result;

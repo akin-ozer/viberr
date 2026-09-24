@@ -59,6 +59,7 @@ import { logger } from "~/server/logging/logger.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Projection rebuilder: files → SQLite.
@@ -468,7 +469,7 @@ function reprojectCascadedTask(
     if (!db.isTransaction) throw error;
     db.exec("ROLLBACK TO cascade_task");
     db.exec("RELEASE cascade_task");
-    reportRebuildFailure(db, rel, error instanceof Error ? error : new Error(String(error)));
+    reportRebuildFailure(db, rel, toError(error));
     return false;
   }
 }
@@ -1454,7 +1455,7 @@ export function rebuildPath(
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
-    reportRebuildFailure(db, rel, error instanceof Error ? error : new Error(String(error)));
+    reportRebuildFailure(db, rel, toError(error));
     return { action: "error", kind: "other" };
   }
 }
@@ -1490,10 +1491,7 @@ function reportRebuildFailure(db: DatabaseSync, rel: string, error: Error): void
   } catch (provenanceError) {
     logger.warn("could not record the rebuild failure's provenance row either", {
       sourcePath: rel,
-      err:
-        provenanceError instanceof Error
-          ? provenanceError
-          : new Error(String(provenanceError)),
+      err: toError(provenanceError),
     });
   }
 }

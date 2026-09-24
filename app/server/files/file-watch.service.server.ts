@@ -8,6 +8,7 @@ import { logger } from "~/server/logging/logger.server";
 import { rebuildGoalFile, rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
 import { errnoSchema } from "./atomic-file.server";
 import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-store-root.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Watches ${dataRoot}/projects and incrementally rebuilds projections.
@@ -222,7 +223,7 @@ export function startFileWatcher(
         });
       }
     } catch (error) {
-      failed(error instanceof Error ? error : new Error(String(error)));
+      failed(toError(error));
     }
   };
   function scheduleRetry(absPath: string): void {
@@ -324,7 +325,7 @@ export function startFileWatcher(
     } catch (error) {
       logger.error("watcher directory reconcile failed", {
         path: absDir,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   };
@@ -375,7 +376,7 @@ export function startFileWatcher(
     // isFileWatcherAlive() (and /resources/health) reports the truth instead
     // of a zombie watcher.
     logger.error("file watcher error — clearing watcher handle", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
       code,
     });
     const current = cache[WATCHER_KEY];
@@ -408,7 +409,7 @@ export function startFileWatcher(
           startFileWatcher(options);
         } catch (reErr) {
           logger.error("file watcher re-arm failed", {
-            err: reErr instanceof Error ? reErr : new Error(String(reErr)),
+            err: toError(reErr),
           });
         }
       }, 2_000);

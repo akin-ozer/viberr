@@ -4,6 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { withTransaction } from "./transaction.server";
 import { AppError } from "../errors/app-error.server";
 import { ERROR_CODES } from "../errors/error-codes";
+import { errorMessage } from "../../shared/errors";
 
 /** Repo-root-relative default location of SQL migrations. */
 export const DEFAULT_MIGRATIONS_DIR = path.resolve(
@@ -71,7 +72,7 @@ export function runMigrations(
       throw new AppError({
         code: ERROR_CODES.DB_MIGRATION_FAILED,
         status: 500,
-        message: `migration ${file} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+        message: `migration ${file} failed: ${errorMessage(cause)}`,
         details: { migration: file },
         cause,
       });

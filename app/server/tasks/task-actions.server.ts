@@ -245,6 +245,7 @@ import {
   stampNotifiedRecipients,
 } from "./mention-notify.server";
 import { userDisplayName } from "./user-display-name.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /** Task mutations write the canonical file before projections, audit, and notifications. */
 
@@ -1292,7 +1293,7 @@ async function answerAskingAgent(
     logger.warn("could not route a resolved question back to the asking agent", {
       taskKey: input.taskKey,
       profileId: input.profileId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return false;
   }
@@ -1472,7 +1473,7 @@ export async function autoInvokeOperator(
     logger.error("auto operator invocation failed", {
       taskKey,
       trigger,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     // C1 (pass 23): every caller is fire-and-forget, so a THROW here (before a
     // run row exists) left coordination silently stopped — the human created a
@@ -1501,7 +1502,7 @@ export async function autoInvokeOperator(
           // look again.
           text:
             `The operator could not be started automatically: ` +
-            `${endSentence(error instanceof AppError ? error.userMessage : error instanceof Error ? error.message : String(error))} ` +
+            `${endSentence(error instanceof AppError ? error.userMessage : errorMessage(error))} ` +
             `That was one attempt on a \`${trigger}\` trigger, not a decision to stop: anything ` +
             `that happens on this task invokes the operator again, and Viberr sweeps for tasks ` +
             `nothing is moving. Run the operator yourself if you would rather not wait.`,
@@ -1514,8 +1515,7 @@ export async function autoInvokeOperator(
       logger.error("auto operator failure note could not be written", {
         taskKey,
         trigger,
-        err:
-          noteError instanceof Error ? noteError : new Error(String(noteError)),
+        err: toError(noteError),
       });
     }
   }
@@ -1978,7 +1978,7 @@ async function noteMentionNotStarted(
   } catch (noteError) {
     logger.warn("could not record the mention-not-started note", {
       taskKey: input.taskKey,
-      err: noteError instanceof Error ? noteError : new Error(String(noteError)),
+      err: toError(noteError),
     });
   }
 }
@@ -2490,7 +2490,7 @@ export async function commentToAgent(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       profileId: target.profileId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     const reason =
       error instanceof AppError ? error.userMessage : "the run could not be started";
@@ -3057,7 +3057,7 @@ export async function postAgentReplyComment(
     logger.error("agent reply comment write failed — retrying once", {
       taskKey: input.taskKey,
       runId: input.runId,
-      err: cause instanceof Error ? cause : new Error(String(cause)),
+      err: toError(cause),
     });
     try {
       await writeReply();
@@ -3066,10 +3066,7 @@ export async function postAgentReplyComment(
       logger.error("agent reply comment write failed on retry", {
         taskKey: input.taskKey,
         runId: input.runId,
-        err:
-          retryCause instanceof Error
-            ? retryCause
-            : new Error(String(retryCause)),
+        err: toError(retryCause),
       });
     }
   }
@@ -3096,10 +3093,7 @@ export async function postAgentReplyComment(
       logger.error("agent reply fallback note could not be written", {
         taskKey: input.taskKey,
         runId: input.runId,
-        err:
-          fallbackCause instanceof Error
-            ? fallbackCause
-            : new Error(String(fallbackCause)),
+        err: toError(fallbackCause),
       });
     }
     return;
@@ -3114,10 +3108,7 @@ export async function postAgentReplyComment(
     logger.error("agent reply finalize failed — reply posted, audit/notify lost", {
       taskKey: input.taskKey,
       runId: input.runId,
-      err:
-        finalizeCause instanceof Error
-          ? finalizeCause
-          : new Error(String(finalizeCause)),
+      err: toError(finalizeCause),
     });
   }
 }
@@ -3342,11 +3333,11 @@ async function openStuckLoopPacket(
   } catch (error) {
     logger.warn("stuck-loop packet escalation failed", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     await noteStuckLoopEscalationFailed(db, ctx, input.projectSlug, input.taskKey, {
       kind: "failed",
-      reason: error instanceof Error ? error.message : String(error),
+      reason: errorMessage(error),
     });
     return { status: "failed" };
   }
@@ -3505,7 +3496,7 @@ async function withdrawSupersededStuckPacket(
   } catch (error) {
     logger.warn("superseded-packet withdrawal failed", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -3597,7 +3588,7 @@ async function withdrawSupersededDeliveryPacket(
   } catch (error) {
     logger.warn("superseded delivery-packet withdrawal failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -4470,7 +4461,7 @@ export async function recordAgentCompletion(
   } catch (error) {
     logger.warn("agent completion recording failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   // Ruling 237: when the write above threw, nothing was escalated and the
@@ -4619,7 +4610,7 @@ async function appendUndeliveredMentionNote(
   } catch (error) {
     logger.warn("undelivered-mention note failed", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -4699,7 +4690,7 @@ export async function registerAgentCompletion(
       logger.error("agent-run completion handler failed", {
         taskKey: input.taskKey,
         runId: finished.id,
-        err: cause instanceof Error ? cause : new Error(String(cause)),
+        err: toError(cause),
       });
       // C4 (pass-24 fix): THIS rejection is the real failure path. The callback
       // is `void applyAgentCompletionEffects(...).catch(...)`, so it never throws
@@ -4775,7 +4766,7 @@ async function warnStrayAttachmentsFolder(
     logger.warn("failed to post the stray attachments folder warning", {
       taskKey: input.taskKey,
       runId,
-      err: err instanceof Error ? err : new Error(String(err)),
+      err: toError(err),
     });
   }
 }
@@ -5244,10 +5235,7 @@ export async function applyAgentCompletionEffects(
         logger.error("could not write the no-verdict note", {
           taskKey: input.taskKey,
           runId: finished.id,
-          err:
-            noteError instanceof Error
-              ? noteError
-              : new Error(String(noteError)),
+          err: toError(noteError),
         });
       }
     }
@@ -5296,7 +5284,7 @@ export async function applyAgentCompletionEffects(
     logger.warn("deferred @mention delivery failed", {
       taskKey: input.taskKey,
       profileId: input.profileId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   // F37-66: ruling 211(b)'s withdrawal, written HERE — beside the attempt it
@@ -5587,7 +5575,7 @@ export async function applyAgentCompletionEffects(
       logger.warn("post-run delivery reconcile failed (best-effort)", {
         taskKey: input.taskKey,
         runId: finished.id,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     });
   }
@@ -5907,7 +5895,7 @@ export async function clearWaitingToHuman(
   } catch (error) {
     logger.warn("clearWaitingToHuman failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -5930,7 +5918,7 @@ export async function markWaitingAgent(
   } catch (error) {
     logger.warn("markWaitingAgent failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -6033,7 +6021,7 @@ export async function liftHoldForRun(
   } catch (error) {
     logger.warn("liftHoldForRun failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return false;
   }
@@ -6112,7 +6100,7 @@ export async function liftStageHoldForPerson(
   } catch (error) {
     logger.warn("liftStageHoldForPerson failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return false;
   }
@@ -6220,7 +6208,7 @@ export async function operatorPromptAgent(
     // is the record; the error still travels so the caller can read it as the
     // noop it is.
     if (isDispatchHeld(error)) throw error;
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     await updateTaskFile(
       taskRef(opCtx, input.projectSlug, input.taskKey),
       (parsed) => {
@@ -7157,7 +7145,7 @@ export async function transitionStage(
           } catch (error) {
             logger.warn("acceptance fold after a transition failed; re-invoking the operator", {
               taskKey: input.taskKey,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
           }
         }
@@ -7322,7 +7310,7 @@ async function resolveNoChangeBaseRevision(
   } catch (error) {
     logger.warn("no-change base revision could not be resolved", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return null;
   }
@@ -7931,10 +7919,7 @@ export async function performDelivery(
     } catch (reconcileErr) {
       logger.warn("post-push delivery reconcile failed (best-effort)", {
         taskKey,
-        err:
-          reconcileErr instanceof Error
-            ? reconcileErr
-            : new Error(String(reconcileErr)),
+        err: toError(reconcileErr),
       });
     }
 
@@ -8290,11 +8275,11 @@ export async function performDelivery(
   } catch (error) {
     logger.warn("delivery failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return {
       status: "failed",
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     };
   }
 }
@@ -8565,7 +8550,7 @@ async function surfaceDeliveryEvent(
     logger.warn("failed to surface delivery event", {
       taskKey,
       title,
-      err: surfaceErr instanceof Error ? surfaceErr : new Error(String(surfaceErr)),
+      err: toError(surfaceErr),
     });
   }
 }
@@ -8734,7 +8719,7 @@ async function recordDeliveredNextStep(
   } catch (error) {
     logger.warn("failed to record the delivered task's next step", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -9064,7 +9049,7 @@ export async function refreshAndReview(
       );
       started.push(name);
     } catch (error) {
-      failed.push(`${name} (${error instanceof Error ? error.message : String(error)})`);
+      failed.push(`${name} (${errorMessage(error)})`);
     }
   }
   const message =
@@ -9214,7 +9199,7 @@ async function attemptAcceptanceMerge(
     if (error instanceof AppError) throw error;
     logger.warn("PR merge on acceptance failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return { kind: "pending", cause: UNREACHABLE_MERGE_CAUSE };
   }
@@ -9477,7 +9462,7 @@ export async function setTaskArchived(
     } catch (error) {
       logger.warn("dead-dependency notice failed", {
         taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -9672,7 +9657,7 @@ export async function retryReviewDeadlockEscalation(
   } catch (error) {
     logger.warn("review-deadlock escalation retry failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -11710,10 +11695,10 @@ export async function resolvePacket(
         ctx,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.warn("block_on_dependencies resolution could not record the hold", {
         taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
         parsed.timeline.unshift({
@@ -11840,11 +11825,11 @@ export async function resolvePacket(
           });
           reprojectTask(db, ctx, input.projectSlug, other);
         } catch (error) {
-          const why = error instanceof Error ? error.message : String(error);
+          const why = errorMessage(error);
           logger.warn("create_task resolution could not record the reverse wait", {
             taskKey: input.taskKey,
             blocked: other,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
           await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
             parsed.timeline.unshift({
@@ -11864,10 +11849,10 @@ export async function resolvePacket(
         }
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.warn("create_task resolution could not create the task", {
         taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
         parsed.timeline.unshift({
@@ -11922,10 +11907,10 @@ export async function resolvePacket(
         ctx,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.warn("wait_for_window resolution could not schedule the resume", {
         taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
         parsed.timeline.unshift({
@@ -11977,10 +11962,10 @@ export async function resolvePacket(
           ctx,
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         logger.warn("move_stage resolution could not move the task", {
           taskKey: input.taskKey,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
         await updateTaskFile(
           taskRef(ctx, input.projectSlug, input.taskKey),
@@ -12040,10 +12025,10 @@ export async function resolvePacket(
         opCtx,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.warn("question_reviewer start failed", {
         taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
         // `waiting` goes back to a person: the decision promised a reviewer run
@@ -12084,10 +12069,10 @@ export async function resolvePacket(
       if (option.profileId) retry.profileId = option.profileId;
       await startAgentRun(db, retry, OPERATOR_TASK_ACTOR, opCtx);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.warn("retry_other_backend start failed", {
         taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
         parsed.timeline.unshift({
@@ -12189,7 +12174,7 @@ async function fanOutByCause(
   } catch (error) {
     logger.warn("packet cause fan-out could not be searched", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return;
   }
@@ -12249,10 +12234,10 @@ async function fanOutByCause(
       reprojectTask(db, ctx, sibling.projectSlug, sibling.taskKey);
       outcomes.push({ taskKey: sibling.taskKey, applied: true });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.warn("packet cause fan-out could not answer a sibling", {
         taskKey: sibling.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       outcomes.push({ taskKey: sibling.taskKey, applied: false, why: endSentence(message) });
     }
@@ -12276,7 +12261,7 @@ async function fanOutByCause(
   } catch (error) {
     logger.warn("packet cause fan-out outcome could not be recorded", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -12858,7 +12843,7 @@ async function recordUnpushedHeadRefusal(
     void autoInvokeOperator(db, ctx, projectSlug, taskKey, "head-unpushed").catch((error) => {
       logger.error("head-unpushed operator handoff failed", {
         taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     });
   } catch (error) {
@@ -12866,7 +12851,7 @@ async function recordUnpushedHeadRefusal(
     // acceptance into a thrown-away one.
     logger.warn("could not record the unpushed-head acceptance refusal", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -12972,7 +12957,7 @@ async function refuseUnverifiedHead(
       // merge into a thrown-away one. Log and refuse anyway.
       logger.warn("could not record the unverified-head decision packet", {
         taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -13181,7 +13166,7 @@ async function evaluateAcceptancePrHead(
   } catch (error) {
     logger.warn("PR-head verification failed (treated as unknown)", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return { refusal: null, verification: "unverifiable" };
   }
@@ -13884,7 +13869,7 @@ async function interruptLiveRunsOnClosure(
   } catch (error) {
     logger.warn("closure interrupt failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return [];
   }
@@ -14258,7 +14243,7 @@ async function cleanUpEmptyTaskBranch(
     } catch (error) {
       logger.warn("empty task branch cleanup failed after a no-change acceptance", {
         taskKey: input.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       // C10.3 (pass 25): `deleteTaskRemoteBranch` never throws, so a throw here is
       // the note-write / reproject failing — which would leave the empty branch

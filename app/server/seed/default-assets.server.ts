@@ -59,6 +59,7 @@ import {
   SEED_AGENT_PROFILES,
   type SeedAgentProfile,
 } from "./agent-catalog.server";
+import { toError } from "~/shared/errors";
 
 // F10-30: the built-in specialist PERSONA is the profile's own markdown body —
 // ONE authoring source. Previously the rich persona shipped as a SEPARATE
@@ -416,7 +417,7 @@ function writeShippedManifest(store: string, manifest: ShippedAssetManifest): vo
     // Bookkeeping only — a store that cannot record it simply falls back to the
     // historical hash list on the next boot.
     logger.warn("failed writing the shipped-asset manifest", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -551,7 +552,7 @@ export function seedDefaultAgentAssets(dataRoot?: string): void {
     } catch (error) {
       logger.error("failed seeding default agent asset", {
         asset: asset.rel,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

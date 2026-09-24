@@ -18,6 +18,7 @@ import {
 } from "~/server/secrets/pat-store.server";
 import { taskBranchName } from "./branch-sync.server";
 import { countLabel } from "~/shared/text/plural";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * Server-side workspace push (F-GH3 — closing the governed-delivery gap).
@@ -1125,7 +1126,7 @@ export async function pushWorkspaceBranch(
     const detail = redactGitOutput(gitErrorText(error), { token });
     const fields: GitLogFields = {
       taskKey,
-      err: error instanceof Error ? error.message : String(error),
+      err: errorMessage(error),
     };
     if (detail) fields.detail = detail;
     logger.info("workspace branch push errored — skipping", fields);
@@ -1301,7 +1302,7 @@ export async function discardLocalTaskBranch(input: {
     logger.info("discard local task branch errored", {
       taskKey,
       branch,
-      err: error instanceof Error ? error.message : String(error),
+      err: errorMessage(error),
     });
     return { status: "failed", branch, reason: oneLine(reason) };
   }

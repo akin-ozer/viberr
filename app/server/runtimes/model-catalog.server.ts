@@ -17,6 +17,7 @@ import type {
   ClaudeQueryFn,
   ClaudeQueryOptions,
 } from "./claude-runtime.server";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * Model + effort (reasoning) CATALOG for the agent create/edit UI.
@@ -761,7 +762,7 @@ export async function getModelCatalog(
   } catch (error) {
     logger.info("model catalog live fetch failed — using curated", {
       backend,
-      err: error instanceof Error ? error.message : String(error),
+      err: errorMessage(error),
     });
     return stamp(curatedCatalog("claude"));
   }

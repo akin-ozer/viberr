@@ -21,6 +21,7 @@ import {
   ensureUserBackendHome,
   userBackendHome,
 } from "./user-homes.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Personal agent-backend credentials (ruling 127) — the store, and the ONE
@@ -228,7 +229,7 @@ function openBackendSecret(db: DatabaseSync, credentialId: string): string {
       // fallback, so it never fails the caller.
       logger.warn("could not re-seal a backend credential", {
         credentialId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -334,7 +335,7 @@ function removeLoginCredentialFile(
   } catch (error) {
     logger.warn("could not remove a vendor credential file", {
       backend,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -978,7 +979,7 @@ function openStoredSecret(
     logger.error("a connected backend credential could not be opened", {
       backend,
       userId: row.userId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     throw new AppError({
       code: ERROR_CODES.RUN_UNAVAILABLE,

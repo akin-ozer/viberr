@@ -21,6 +21,7 @@
  */
 
 import { z } from "zod";
+import { errorMessage } from "../../shared/errors";
 
 export const GITHUB_API_BASE = "https://api.github.com";
 const API_VERSION = "2022-11-28";
@@ -264,7 +265,7 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
       return {
         ok: false,
         kind: "network",
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
       };
     }
 
@@ -288,7 +289,7 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
       return {
         ok: false,
         kind: "network",
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
       };
     }
 

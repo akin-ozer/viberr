@@ -11,6 +11,7 @@ import { logger } from "~/server/logging/logger.server";
 import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
 import { countLabel } from "~/shared/text/plural";
 import { kbDirPath } from "./file-store-root.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Shared knowledge-base → agent-context reader (F6).
@@ -308,7 +309,7 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
   } catch (error) {
     logger.warn("knowledge base unreadable — run proceeds WITHOUT it", {
       kb: name,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return miss("its store folder could not be read");
   }

@@ -17,6 +17,7 @@ import {
   type TranscriptReclamation,
   type TranscriptRetentionOptions,
 } from "./transcript-retention.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Periodic store maintenance (gaps 15, 20, 16).
@@ -149,7 +150,7 @@ export function runMaintenancePass(
     );
   } catch (error) {
     logger.error("retention pass failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 
@@ -167,7 +168,7 @@ export function runMaintenancePass(
     transcripts = pruneRuntimeTranscripts(transcriptOptions);
   } catch (error) {
     logger.error("runtime transcript retention failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 
@@ -185,7 +186,7 @@ export function runMaintenancePass(
       );
     } catch (error) {
       logger.error("task workspace reclamation failed", {
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -382,7 +383,7 @@ export function startMaintenanceScheduler(
       runMaintenancePass(db, { reason: "interval", ...rootOption });
     } catch (error) {
       logger.warn("maintenance tick failed", {
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     } finally {
       passRunning = false;
@@ -394,7 +395,7 @@ export function startMaintenanceScheduler(
       checkDiskPressure(db, options.dataRoot);
     } catch (error) {
       logger.warn("disk-space check failed", {
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }, diskMs);

@@ -133,6 +133,7 @@ import {
 import { roleCan } from "~/shared/rbac";
 import { stageName } from "~/shared/workflow/stage-roles";
 import { Icon } from "~/ui/icon";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * /projects/:slug/tasks/:key — the full task workspace (task-detail spec).
@@ -231,7 +232,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       logger.warn("R19-15 task-view read-marking failed", {
         projectSlug: params.slug,
         taskKey: params.key,
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: toError(error),
       });
     }
   }
@@ -365,7 +366,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       logger.warn("ruling 319 fan-out disclosure failed", {
         projectSlug: params.slug,
         taskKey: params.key,
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: toError(error),
       });
     }
   }
@@ -407,7 +408,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       logger.warn("ruling 324 similar-task disclosure failed", {
         projectSlug: params.slug,
         taskKey: params.key,
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: toError(error),
       });
     }
   }
@@ -1172,7 +1173,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             return { ok: true as const, intent, toast: error.userMessage };
           }
           if (prompt) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = errorMessage(error);
             await appendComment(
               db,
               {

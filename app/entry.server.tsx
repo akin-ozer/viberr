@@ -19,6 +19,7 @@ import {
   REQUEST_ID_HEADER,
   runWithRequestContext,
 } from "./server/logging/request-context.server";
+import { toError } from "./shared/errors";
 
 // One-time startup: validate env (fail fast) + open db and run migrations.
 await bootServer();
@@ -47,7 +48,7 @@ export const handleError: HandleErrorFunction = (error, { request }) => {
   const bound = currentCorrelation();
   const log = bound ? logger : logger.child(correlationFor(request));
   log.error("request handler error", {
-    err: error instanceof Error ? error : new Error(String(error)),
+    err: toError(error),
   });
 };
 
@@ -161,7 +162,7 @@ function renderDocument(
           // reject and get logged in handleDocumentRequest.
           if (shellRendered) {
             logger.error("streaming render error", {
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
           }
         },

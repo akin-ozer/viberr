@@ -25,6 +25,7 @@ import {
   type TaskFileEvent,
   type TaskSchedule,
 } from "~/schemas/task-file.schema";
+import { toError } from "~/shared/errors";
 
 /**
  * Governed SCHEDULED task actions (O-3). A maintainer schedules a future
@@ -522,7 +523,7 @@ export async function fireDueSchedules(
         logger.warn("scheduled action claim failed", {
           taskKey: row.task_key,
           projectSlug: row.project_slug,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     }
@@ -596,7 +597,7 @@ export async function fireDueSchedules(
           logger.warn("schedule claim lease refresh failed", {
             taskKey: t.taskKey,
             projectSlug: t.projectSlug,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         }
         try {
@@ -677,7 +678,7 @@ export async function fireDueSchedules(
             logger.warn("scheduled run failed", {
               taskKey: t.taskKey,
               action: t.action,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
           }
         }
@@ -813,7 +814,7 @@ export async function fireDueSchedules(
         } catch (error) {
           logger.warn("schedule finalize failed", {
             taskKey: t.taskKey,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         }
       }
@@ -855,7 +856,7 @@ export function startScheduleRunner(db: DatabaseSync): void {
   // like the interval tick does.
   void fireDueSchedules(db).catch((error) => {
     logger.warn("schedule runner boot pass failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   });
   let running = false;
@@ -865,7 +866,7 @@ export function startScheduleRunner(db: DatabaseSync): void {
     void fireDueSchedules(db)
       .catch((error) => {
         logger.warn("schedule runner tick failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       // Ruling 330: the stranded sweep rides this tick rather than standing up a
@@ -876,7 +877,7 @@ export function startScheduleRunner(db: DatabaseSync): void {
       .then(() => sweepStrandedTasks(db))
       .catch((error) => {
         logger.warn("stranded sweep tick failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       .finally(() => {

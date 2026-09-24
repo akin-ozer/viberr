@@ -12,6 +12,7 @@ import type {
   TaskFileEvent,
   TaskFrontmatter,
 } from "~/schemas/task-file.schema";
+import { toError } from "~/shared/errors";
 
 /**
  * R19-8 (ruling 62) — the whole "Completed — no changes" contract:
@@ -242,7 +243,7 @@ export async function probeNothingToDeliver(
     // never take a PASS from a throw either.
     logger.warn("no-change verification failed (treated as unverifiable)", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return {
       status: "unverifiable",
