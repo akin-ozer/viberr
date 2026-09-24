@@ -563,6 +563,40 @@ describe("F13: the home footer says what it is", () => {
     expect(dialog.textContent).toContain("never touched");
   });
 
+  // Ruling 368: the rebuild in flight shows itself on its trigger (busy, the
+  // loader spinning, "Rebuilding…") and cannot be pressed again: it used to
+  // stay live and reopen its confirm while the rebuild it had started ran.
+  // Canary: drop `disabled={rebuilding}` from the strip's Rebuild button.
+  it("ruling 368: a rebuild in flight is busy on its trigger and does not reopen the confirm", async () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <HomePage data={baseData([card()])} theme="system" />
+          </ToastProvider>
+        ),
+        // Never answers: the test reads the wait itself.
+        action: () => new Promise(() => {}),
+      },
+    ]);
+    const { container, getByText } = render(<Stub initialEntries={["/"]} />);
+    const trigger = getByText("Rebuild projections…").closest("button")!;
+    fireEvent.click(trigger);
+    fireEvent.click(
+      within(container.querySelector("dialog.confirm-card")!).getByText("Rebuild projections"),
+    );
+    await waitFor(() => expect(trigger.getAttribute("aria-busy")).toBe("true"));
+    expect(trigger.textContent).toBe("Rebuilding…");
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.querySelector("svg.ico.spin")).not.toBeNull();
+    fireEvent.click(trigger);
+    expect(container.querySelector("dialog.confirm-card")).toBeNull();
+    // Re-scan is its own request, at rest.
+    const rescan = getByText("Re-scan store").closest("button")!;
+    expect(rescan.hasAttribute("aria-busy")).toBe(false);
+  });
+
   it("hides both actions from a non-admin (they are 403 server-side)", () => {
     const data = baseData([card()]);
     const { container } = renderHome({

@@ -705,9 +705,10 @@ function ProfileGithub({
               type="button"
               className="btn sm push"
               disabled={connectBusy}
+              aria-busy={connectBusy || undefined}
               onClick={startConnect}
             >
-              <Icon name="github" />
+              <Icon name={connectBusy ? "loader" : "github"} className={connectBusy ? "spin" : ""} />
               {connectBusy ? "Connecting…" : "Connect"}
             </button>
           </div>

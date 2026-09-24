@@ -407,7 +407,7 @@ describe("CredentialManageActions (finding #13)", () => {
       <CredentialManageActions
         configured={false}
         canManage
-        busy={false}
+        inFlight={null}
         onSet={onSet}
         onClear={onClear}
       />,
@@ -421,7 +421,7 @@ describe("CredentialManageActions (finding #13)", () => {
       <CredentialManageActions
         configured
         canManage
-        busy={false}
+        inFlight={null}
         onSet={onSet}
         onClear={onClear}
       />,
@@ -459,7 +459,7 @@ describe("CredentialManageActions (finding #13)", () => {
       <CredentialManageActions
         configured
         canManage={false}
-        busy={false}
+        inFlight={null}
         onSet={() => {}}
         onClear={() => {}}
       />,
@@ -1341,5 +1341,136 @@ describe("F19-22: the chip renders the last CHECK beside the last change", () =>
     );
     expect(changeOnly.textContent).toContain("Last change 4m ago");
     expect(changeOnly.classList.contains("stale")).toBe(false);
+  });
+});
+
+/**
+ * Ruling 368 (and 147(a)): a request shows itself in flight on the button that
+ * started it. Update status, Re-check scopes and the credential row used to go
+ * `disabled` for the whole wait with their resting glyph and label, so they
+ * painted the .45 refused step with a not-allowed cursor and said nothing. Now
+ * the starter carries `aria-busy` (the sheet's .7 busy step), the loader spins
+ * where its glyph was, and the label names the work; the sibling that merely
+ * waits stays at the disabled step and claims nothing.
+ *
+ * Canary: drop `aria-busy` from Update status in `github-view.tsx` and the first
+ * test fails; pass `inFlight={null}` to `CredentialManageActions` there and the
+ * credential test does.
+ */
+describe("ruling 368: the GitHub page's requests in flight", () => {
+  /** An action the TEST answers, when it decides to. */
+  function heldAction() {
+    let answer: (reply: { ok: true; toast: string }) => void = () => {};
+    const reply = new Promise<{ ok: true; toast: string }>((resolve) => {
+      answer = resolve;
+    });
+    return { action: () => reply, answer: () => answer({ ok: true, toast: "Done" }) };
+  }
+  const renderHeld = (action: () => Promise<{ ok: true; toast: string }>) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage
+              data={viewData({ credential: violationCredential })}
+              reconcileCheck={NO_CHECK_ON_RECORD}
+              myRole="maintainer"
+            />
+          </ToastProvider>
+        ),
+        action,
+      },
+    ]);
+    return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
+  };
+  const button = (c: HTMLElement, text: string) =>
+    [...c.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
+      b.textContent?.includes(text),
+    )!;
+
+  it("Update status says it is updating while Re-check scopes only waits", async () => {
+    const held = heldAction();
+    const { container } = renderHeld(held.action);
+    fireEvent.click(button(container, "Update status"));
+    await waitFor(() =>
+      expect(button(container, "Updating…").getAttribute("aria-busy")).toBe("true"),
+    );
+    const update = button(container, "Updating…");
+    expect(update.disabled).toBe(true);
+    expect(update.querySelector("svg.ico.spin")).not.toBeNull();
+    const recheck = button(container, "Re-check scopes");
+    expect(recheck.disabled).toBe(true);
+    expect(recheck.hasAttribute("aria-busy")).toBe(false);
+    expect(recheck.querySelector(".spin")).toBeNull();
+
+    held.answer();
+    await waitFor(() => expect(button(container, "Update status")).toBeTruthy());
+    expect(button(container, "Update status").hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("Re-check scopes says it is checking while Update status only waits", async () => {
+    const held = heldAction();
+    const { container } = renderHeld(held.action);
+    fireEvent.click(button(container, "Re-check scopes"));
+    await waitFor(() =>
+      expect(button(container, "Checking…").getAttribute("aria-busy")).toBe("true"),
+    );
+    expect(button(container, "Checking…").querySelector("svg.ico.spin")).not.toBeNull();
+    const update = button(container, "Update status");
+    expect(update.disabled).toBe(true);
+    expect(update.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("a rotation says it is rotating while Remove only waits", async () => {
+    const held = heldAction();
+    const { container } = renderHeld(held.action);
+    fireEvent.click(button(container, "Rotate credential"));
+    await waitFor(() =>
+      expect(button(container, "Rotating…").getAttribute("aria-busy")).toBe("true"),
+    );
+    const remove = button(container, "Remove credential");
+    expect(remove.disabled).toBe(true);
+    expect(remove.hasAttribute("aria-busy")).toBe(false);
+  });
+});
+
+describe("ruling 368: CredentialManageActions names the request in flight", () => {
+  const renderRow = (configured: boolean, inFlight: string | null) =>
+    render(
+      <CredentialManageActions
+        configured={configured}
+        canManage
+        inFlight={inFlight}
+        onSet={() => {}}
+        onClear={() => {}}
+      />,
+    ).container;
+
+  it("an attach in flight: Attaching…, busy, the loader spinning", () => {
+    const c = renderRow(false, "set-credential");
+    const attach = c.querySelector<HTMLButtonElement>("button")!;
+    expect(attach.textContent).toBe("Attaching…");
+    expect(attach.getAttribute("aria-busy")).toBe("true");
+    expect(attach.disabled).toBe(true);
+    expect(attach.querySelector("svg.ico.spin")).not.toBeNull();
+  });
+
+  it("a removal in flight: Removing… on Remove, Rotate only waits", () => {
+    const c = renderRow(true, "clear-credential");
+    const [rotate, remove] = [...c.querySelectorAll<HTMLButtonElement>("button")];
+    expect(remove!.textContent).toBe("Removing…");
+    expect(remove!.getAttribute("aria-busy")).toBe("true");
+    expect(rotate!.textContent).toBe("Rotate credential");
+    expect(rotate!.disabled).toBe(true);
+    expect(rotate!.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("at rest: no busy mark anywhere", () => {
+    const c = renderRow(true, null);
+    for (const b of c.querySelectorAll<HTMLButtonElement>("button")) {
+      expect(b.hasAttribute("aria-busy")).toBe(false);
+      expect(b.disabled).toBe(false);
+    }
   });
 });

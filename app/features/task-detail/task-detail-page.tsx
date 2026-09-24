@@ -7,6 +7,7 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
+import { inFlightIntent } from "~/ui/in-flight";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { AcceptConfirm, type AcceptCeremonyMode } from "./accept-confirm";
 import { ArchiveConfirm } from "./archive-confirm";
@@ -431,6 +432,9 @@ export function TaskDetailPage({
 
   const {
     runBusy,
+    runIntent,
+    interruptingRunId,
+    retryingProfileId,
     canInterrupt,
     onInterrupt,
     onRetryBackend,
@@ -466,9 +470,19 @@ export function TaskDetailPage({
         {...(onRetryBackend ? { onRetryBackend } : {})}
         retryBackends={retryBackends}
         retrying={runBusy}
+        retryingProfileId={retryingProfileId}
       />
     ),
-    [runtime, shownLogSel, selectLog, runLog, onRetryBackend, retryBackends, runBusy],
+    [
+      runtime,
+      shownLogSel,
+      selectLog,
+      runLog,
+      onRetryBackend,
+      retryBackends,
+      runBusy,
+      retryingProfileId,
+    ],
   );
 
   const onOwner = (action: OwnerAction, member?: TaskMemberView) => {
@@ -831,7 +845,7 @@ export function TaskDetailPage({
             // F20-18: only the contributor-owner-who-cannot-resolve-directly
             // gets the escalation affordance (the card shows it only when EVERY
             // option is above their tier).
-            {...(canEscalatePacket ? { onRequestMaintainer } : {})}
+            {...(canEscalatePacket ? { onRequestMaintainer, escalating: escalateBusy } : {})}
             onAsk={() => setAsk((a) => a + 1)}
             onEditGoal={(draft) => {
               // Ruling 138: the reload path opens the editor with the SAME
@@ -858,7 +872,7 @@ export function TaskDetailPage({
             : {})}
           {...(canDeliver && !taskClosed ? { onDeliver } : {})}
           delivering={deliverBusy}
-          merging={runBusy}
+          runIntent={runIntent}
         />
         <CurrentStatePanel
           task={task}
@@ -874,7 +888,7 @@ export function TaskDetailPage({
           onAccept={() => setConfirmAccept({ mode: "accept" })}
           onTransition={onTransition}
           transitionBusy={transitionBusy}
-          acceptBusy={acceptBusy}
+          acceptInFlight={inFlightIntent(acceptFetcher)}
           dispositionBusy={archiveBusy}
         />
         <TaskDetailsPanel
@@ -894,6 +908,7 @@ export function TaskDetailPage({
             onInterrupt={setConfirmInterrupt}
             canInterrupt={canInterrupt}
             interrupting={runBusy}
+            interruptingRunId={interruptingRunId}
             consoleOpen={consoleOpen}
             console={runsVisible ? agentLogs : null}
             store={runLog}
@@ -915,7 +930,9 @@ export function TaskDetailPage({
           runtime={runtime}
           runsVisible={runsVisible}
           canRunAgents={canRunAgents}
-          {...(runsVisible ? { onOpenConsole: onViewLogs } : {})}
+          // Ruling 380: the run card's `onViewLogs` is a Show/Hide toggle; from
+          // this panel the console is elsewhere, so its door travels instead.
+          {...(runsVisible ? { onOpenConsole: onAgentLog } : {})}
           onAsk={() => setAsk((a) => a + 1)}
         />
 

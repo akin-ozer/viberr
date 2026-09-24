@@ -529,11 +529,20 @@ function EditUserModal({
                 resetAction.submit({ intent: "user-reset-password", userId: user.id })
               }
               disabled={resetAction.busy}
+              // Ruling 368: the reset in flight shows itself here.
+              aria-busy={resetAction.busy || undefined}
             >
-              <Icon name="lock" />
+              <Icon
+                name={resetAction.busy ? "loader" : "lock"}
+                className={resetAction.busy ? "spin" : ""}
+              />
               {user.pwreset || user.status === "invited"
-                ? "Generate a new temp password"
-                : "Reset password"}
+                ? resetAction.busy
+                  ? "Generating…"
+                  : "Generate a new temp password"
+                : resetAction.busy
+                  ? "Resetting…"
+                  : "Reset password"}
             </button>
             <div className="def-note after">
               <Icon name="lock" />

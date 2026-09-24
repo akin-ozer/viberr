@@ -153,7 +153,12 @@ Intents behind `project.task.tsx` are explained in
   page stays clickable throughout (ruling 453(c); a view transition would swallow the
   clicks of someone cycling the account menu's theme item). The menu, the profile page
   and the root effect's OS-follow listener all go through it; the boot script paints
-  once and registers no listener of its own.
+  once and registers no listener of its own. The page flips at the press, before the
+  root loader confirms the save, so the controls read the theme on screen, not the
+  loader's: while a save is out, the menu item's label, the step its next press cycles
+  from and the profile page's selected segment all follow the choice the save carries
+  (the fetcher's form data). Two quick presses from Light land on System, not on Dark
+  twice. A refused save puts the controls and the page back on the confirmed theme.
 - **Motion, materials and type** (ruling 453). The board's drop flight is a critically
   damped spring (`ui/spring.ts`) that leaves at the pointer's release velocity. A
   dialog, page overlay or the dock closed while its entrance is still playing leaves
@@ -222,6 +227,14 @@ Intents behind `project.task.tsx` are explained in
   on the all-projects live scope the moment the new project is projected, still
   mid-request, and the live list would already carry the key being created. It reads
   the live list again once a refused submit has settled.
+- **Requests in flight** (rulings 147(a) and 368): the button that started a request
+  carries `aria-busy` (the sheet's .7 busy step, which wins over `.btn:disabled`), the
+  `loader` glyph with `spin` in place of its icon, and a label naming the work
+  ("Checking…", "Updating…", "Attaching…", "Scheduling…"). A sibling that merely waits
+  keeps the .45 disabled step and its resting label. When one fetcher serves several
+  buttons, `inFlightIntent(fetcher)` (`app/ui/in-flight.ts`) reads the intent it carries
+  off its form data, which survives `submitting` and the revalidating `loading` after;
+  a dialog that closes on its click is never the starter, so its confirm only waits.
 
 ## 3. Instance settings intents
 

@@ -324,6 +324,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
   onInterrupt,
   canInterrupt,
   interrupting,
+  interruptingRunId = null,
   console: consoleSlot = null,
   consoleOpen = false,
   store = null,
@@ -332,7 +333,11 @@ export const LiveRunPanel = memo(function LiveRunPanel({
   onViewLogs: (id: string) => void;
   onInterrupt: (runId: string) => void;
   canInterrupt: boolean;
+  /** A request that Interrupt waits on is in flight. */
   interrupting: boolean;
+  /** Ruling 368: the server run id whose interrupt is in flight, so THAT run's
+   *  Interrupt shows the work (busy, the loader, "Interrupting…"). */
+  interruptingRunId?: string | null;
   /** F39 (owner decision): the streaming console for THIS run, rendered inside
    *  the card. A live run's output belongs with the strip that describes it —
    *  measured on the controller page, the panel it used to live in sat 886px
@@ -351,6 +356,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
   const [selId, setSelId] = useState<string | null>(running.length ? running[0]!.id : null);
   const run = running.find((r) => r.id === selId) || running[0];
   if (!run) return null;
+  const stoppingThis = interruptingRunId !== null && interruptingRunId === run.serverRunId;
 
   return (
     <div className="runbar" data-comment-anchor="live-run">
@@ -408,10 +414,11 @@ export const LiveRunPanel = memo(function LiveRunPanel({
               type="button"
               className="btn ghost sm danger"
               disabled={interrupting}
+              aria-busy={stoppingThis || undefined}
               onClick={() => onInterrupt(run.id)}
             >
-              <Icon name="hand" />
-              Interrupt
+              <Icon name={stoppingThis ? "loader" : "hand"} className={stoppingThis ? "spin" : ""} />
+              {stoppingThis ? "Interrupting…" : "Interrupt"}
             </button>
           )}
         </div>
@@ -1517,6 +1524,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
   onRetryBackend,
   retryBackends,
   retrying,
+  retryingProfileId = null,
 }: {
   runtime: RunView[];
   sel: string | null;
@@ -1537,7 +1545,11 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
    *  the question: then nothing is offered AND nothing is claimed about the
    *  owner, which is not the same as an empty list ("asked, nobody to bill"). */
   retryBackends?: readonly ("claude" | "codex")[] | undefined;
+  /** A request the retry waits on is in flight. */
   retrying?: boolean;
+  /** Ruling 368: the profile whose retry is in flight, so the shown run's
+   *  Retry says so when it is that agent's. */
+  retryingProfileId?: string | null;
 }) {
   const [follow, setFollow] = useState(true);
   const { streamError, rawView: raw } = useConsoleStatus(store);
@@ -1600,6 +1612,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
     (retryBackends?.includes(altBackend) ?? false);
   const canRetryBackend = retryPossible && !!onRetryBackend;
   const altLabel = altBackend === "codex" ? "Codex" : "Claude";
+  const retryingThis = retryingProfileId !== null && retryingProfileId === cur.profileId;
   // Ruling 127: the offer, and when there is none, WHY there is none. A run
   // that failed on quota with an owner who never connected the other backend
   // gets no button on any surface (the blocked packet withholds
@@ -1765,11 +1778,12 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
             type="button"
             className="btn sm"
             disabled={retrying}
+            aria-busy={retryingThis || undefined}
             onClick={() => onRetryBackend!(altBackend!, cur)}
             title={`Re-run the ${cur.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}
           >
-            <Icon name="refresh" />
-            Retry on {altLabel}
+            <Icon name={retryingThis ? "loader" : "refresh"} className={retryingThis ? "spin" : ""} />
+            {retryingThis ? `Retrying on ${altLabel}…` : `Retry on ${altLabel}`}
           </button>
         )}
         {/* UI-57: both toggles carry their state for assistive tech, not just

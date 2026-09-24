@@ -288,7 +288,9 @@ export function DockPanelBody({
               className="btn primary sm"
               onClick={() => onSubmit()}
               disabled={busy || disabled || !text.trim()}
+              aria-busy={busy || undefined}
             >
+              {busy && <Icon name="loader" className="spin" />}
               {busy ? "Sending…" : "Send"}
             </button>
           </div>

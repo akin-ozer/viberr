@@ -1460,3 +1460,75 @@ describe("ruling 451: the page's conversation motion", () => {
     expect(row.querySelector(".ctl-working-step")!.textContent).toBe("Read · app/app.css");
   });
 });
+
+/**
+ * Ruling 368: a controller request shows itself on the button that sent it.
+ * Send named its work but went to the .45 refused step with no busy mark; the
+ * goal controls share one fetcher, so every one of them dimmed to the refused
+ * step with its resting label, the pressed one included.
+ * Canary: drop the `opInFlight === "pause"` label in controller-page.tsx.
+ */
+describe("ruling 368: the controller's requests in flight", () => {
+  // Never answers: each test reads the wait itself.
+  const never = () => new Promise<never>(() => {});
+
+  it("Send reads Sending…, busy, the loader spinning", async () => {
+    const { container } = renderInstancePage(
+      view({ available: true, projectName: null, conversations: [], goals: null }),
+      never,
+    );
+    await screen.findByText("Managing this instance with your own permissions.");
+    fireEvent.change(composer(container), { target: { value: "short ask" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const sending = await screen.findByRole("button", { name: "Sending…" });
+    expect(sending.getAttribute("aria-busy")).toBe("true");
+    expect(sending.querySelector("svg.ico.spin")).not.toBeNull();
+  });
+
+  it("Pause reads Pausing…, and Cancel goal only waits", async () => {
+    renderPage(
+      view({
+        goals: [
+          goalOf({
+            id: "goal-4",
+            title: "CLI",
+            links: [linkOf({ index: 1, taskKey: "AX-4", status: "active" })],
+          }),
+        ],
+      }),
+      "",
+      never,
+    );
+    await screen.findByText("CLI");
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    const pausing = await screen.findByRole("button", { name: "Pausing…" });
+    expect(pausing.getAttribute("aria-busy")).toBe("true");
+    expect(pausing.querySelector("svg.ico.spin")).not.toBeNull();
+    const cancel = screen.getByRole("button", { name: "Cancel goal" });
+    expect(cancel.hasAttribute("disabled")).toBe(true);
+    expect(cancel.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("Retry on a failed link reads Retrying…, and Skip only waits", async () => {
+    renderPage(
+      view({
+        goals: [
+          goalOf({
+            id: "goal-5",
+            title: "Ops",
+            links: [linkOf({ index: 3, title: "Gateway data path", taskKey: "AX-22", status: "failed" })],
+          }),
+        ],
+      }),
+      "",
+      never,
+    );
+    await screen.findByText("Ops");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const retrying = await screen.findByRole("button", { name: "Retrying…" });
+    expect(retrying.getAttribute("aria-busy")).toBe("true");
+    const skip = screen.getByRole("button", { name: "Skip" });
+    expect(skip.hasAttribute("disabled")).toBe(true);
+    expect(skip.hasAttribute("aria-busy")).toBe(false);
+  });
+});

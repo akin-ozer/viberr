@@ -23,6 +23,7 @@ import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
+import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -240,13 +241,23 @@ export function ProjectPanel({
           >
             Discard
           </button>
+          {/* Ruling 147(d): `dirty` stays a gate; ruling 368: the save in
+              flight shows itself here, Discard only waits. */}
           <button
             type="button"
             className="btn primary sm"
             disabled={!dirty || busy}
+            aria-busy={busy || undefined}
             onClick={save}
           >
-            Save changes
+            {busy ? (
+              <>
+                <Icon name="loader" className="spin" />
+                Saving…
+              </>
+            ) : (
+              "Save changes"
+            )}
           </button>
         </div>
       )}
@@ -1966,8 +1977,8 @@ export function RepoPanel({
   repo,
   credential,
   canGrant,
-  busy,
-  credBusy,
+  inFlight,
+  credInFlight,
   canRepair,
   footprintTasks,
   branchCleanup,
@@ -1983,8 +1994,11 @@ export function RepoPanel({
   repo: string | null;
   credential: SettingsViewData["credential"];
   canGrant: boolean;
-  busy: boolean;
-  credBusy: boolean;
+  /** Ruling 368: the intent the repository fetcher is carrying (repair,
+   *  branch cleanup or the scope re-check), null while it is idle. */
+  inFlight: string | null;
+  /** The same for the credential fetcher (attach / rotate / remove). */
+  credInFlight: string | null;
   /** `edit-policy` (admin) — the repo is project identity, one tier above the
    *  credential actions. */
   canRepair: boolean;
@@ -2001,6 +2015,7 @@ export function RepoPanel({
   onOpenTask: (taskKey: string) => void;
 }) {
   const [repairing, setRepairing] = useState(false);
+  const rechecking = inFlight === "grant-scope";
   // Close the dialog only when a repair SUCCEEDS — a probe refusal keeps it
   // open with the typed reason so the owner can correct the input.
   const settled = useRef<unknown>(repairResult);
@@ -2116,11 +2131,12 @@ export function RepoPanel({
                 type="button"
                 className="btn sm push"
                 onClick={onGrantScope}
-                disabled={busy}
+                disabled={inFlight !== null}
+                aria-busy={rechecking || undefined}
                 title="Re-check the credential's scopes against GitHub"
               >
-                <Icon name="check" />
-                Re-check scopes
+                <Icon name={rechecking ? "loader" : "check"} className={rechecking ? "spin" : ""} />
+                {rechecking ? "Checking…" : "Re-check scopes"}
               </button>
             ) : undefined
           }
@@ -2128,7 +2144,7 @@ export function RepoPanel({
             <CredentialManageActions
               configured={credential.source === "pat"}
               canManage={canGrant}
-              busy={credBusy}
+              inFlight={credInFlight}
               onSet={onSetCredential}
               onClear={onClearCredential}
             />
@@ -2221,6 +2237,7 @@ export function DangerZone({
   myRole,
   archived,
   busy,
+  inFlight = null,
   onArchive,
   onDelete,
   gate = roleCan,
@@ -2229,6 +2246,10 @@ export function DangerZone({
   myRole: string | null;
   archived: boolean;
   busy: boolean;
+  /** Ruling 368: the intent in flight on the danger fetcher, so the control
+   *  that sent it (Archive/Restore, or Delete once its dialog has closed)
+   *  shows the work and the other only waits. */
+  inFlight?: string | null;
   onArchive: (archived: boolean) => void;
   onDelete: (confirmName: string) => void;
   /** See `ProjectActionGate`. Defaults to the shared `roleCan`. */
@@ -2243,6 +2264,8 @@ export function DangerZone({
   // through the shared helper. (`edit-policy` resolves to admin-only today, so
   // this is behavior-preserving; it stops being a hardcoded assumption.)
   const canManageLifecycle = gate(asProjectRole(myRole), "edit-policy");
+  const archiving = inFlight === "archive-project";
+  const deleting = inFlight === "delete-project";
 
   return (
     <div className="panel danger-panel">
@@ -2286,10 +2309,18 @@ export function DangerZone({
           // viewer/maintainer must not see an actionable control; the server
           // still enforces edit-policy.
           disabled={busy || !canManageLifecycle}
+          aria-busy={archiving || undefined}
           title={canManageLifecycle ? undefined : "Only a project admin can archive this project"}
           onClick={() => onArchive(!archived)}
         >
-          {archived ? "Restore" : "Archive"}
+          {archiving && <Icon name="loader" className="spin" />}
+          {archived
+            ? archiving
+              ? "Restoring…"
+              : "Restore"
+            : archiving
+              ? "Archiving…"
+              : "Archive"}
         </button>
       </div>
       <div className="dz-row">
@@ -2306,10 +2337,12 @@ export function DangerZone({
           // F10-34: project-admin only; disabled for everyone else so the
           // typed-confirm dialog can never be opened without authority.
           disabled={busy || !canManageLifecycle}
+          aria-busy={deleting || undefined}
           title={canManageLifecycle ? undefined : "Only a project admin can delete this project"}
           onClick={() => setConfirming(true)}
         >
-          Delete project
+          {deleting && <Icon name="loader" className="spin" />}
+          {deleting ? "Deleting…" : "Delete project"}
         </button>
       </div>
       {confirming && (
@@ -2525,8 +2558,8 @@ export function SettingsPage({
             repo={data.project.repo}
             credential={data.credential}
             canGrant={canGrant}
-            busy={repoFetcher.state !== "idle"}
-            credBusy={credFetcher.state !== "idle"}
+            inFlight={inFlightIntent(repoFetcher)}
+            credInFlight={inFlightIntent(credFetcher)}
             canRepair={canEditPolicy}
             footprintTasks={data.repoFootprintTasks}
             branchCleanup={data.branchCleanupOnMerge}
@@ -2591,6 +2624,7 @@ export function SettingsPage({
           gate={gate}
           archived={data.project.archived}
           busy={dangerFetcher.state !== "idle"}
+          inFlight={inFlightIntent(dangerFetcher)}
           onArchive={(archived) =>
             dangerFetcher.submit(
               { intent: "archive-project", _csrf: csrf, archived: String(archived) },

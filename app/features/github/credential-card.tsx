@@ -216,13 +216,16 @@ function RemoveCredentialDialog({
 export function CredentialManageActions({
   configured,
   canManage,
-  busy,
+  inFlight,
   onSet,
   onClear,
 }: {
   configured: boolean;
   canManage: boolean;
-  busy: boolean;
+  /** Ruling 368: the intent the credential fetcher is carrying
+   *  (`inFlightIntent`), null while it is idle. The button that started it
+   *  shows the work; the other one only waits at the disabled step. */
+  inFlight: string | null;
   /** Attach (unconfigured) or rotate (configured) → set-credential. */
   onSet: () => void;
   /** Remove → clear-credential (after the confirm). */
@@ -230,6 +233,9 @@ export function CredentialManageActions({
 }) {
   const [confirming, setConfirming] = useState(false);
   if (!canManage) return null;
+  const busy = inFlight !== null;
+  const setting = inFlight === "set-credential";
+  const clearing = inFlight === "clear-credential";
   return (
     <div className="cred-manage">
       <button
@@ -237,14 +243,24 @@ export function CredentialManageActions({
         className="btn ghost sm"
         onClick={onSet}
         disabled={busy}
+        aria-busy={setting || undefined}
         title={
           configured
             ? "Re-bind to the default connection's PAT"
             : "Bind the default connection's PAT to this project"
         }
       >
-        <Icon name={configured ? "refresh" : "lock"} />
-        {configured ? "Rotate credential" : "Attach credential"}
+        <Icon
+          name={setting ? "loader" : configured ? "refresh" : "lock"}
+          className={setting ? "spin" : ""}
+        />
+        {configured
+          ? setting
+            ? "Rotating…"
+            : "Rotate credential"
+          : setting
+            ? "Attaching…"
+            : "Attach credential"}
       </button>
       {configured && (
         <button
@@ -254,10 +270,11 @@ export function CredentialManageActions({
           className="btn ghost sm danger"
           onClick={() => setConfirming(true)}
           disabled={busy}
+          aria-busy={clearing || undefined}
           title="Unbind the credential from this project"
         >
-          <Icon name="x" />
-          Remove credential
+          <Icon name={clearing ? "loader" : "x"} className={clearing ? "spin" : ""} />
+          {clearing ? "Removing…" : "Remove credential"}
         </button>
       )}
       {confirming && (

@@ -8,6 +8,7 @@ import type { AuditBrowseRow } from "~/server/audit/audit-browse.server";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { countLabel } from "~/shared/text/plural";
 import { Icon, type IconName } from "~/ui/icon";
+import { inFlightIntent } from "~/ui/in-flight";
 import { useToast } from "~/ui/toast";
 import { ConnectionsPanel } from "./connections-panel";
 import { MiniModal } from "./mini-modal";
@@ -575,7 +576,12 @@ function AuditExportCard({
   events: AuditBrowseRow[];
   orgScopedEvents: AuditBrowseRow[];
 }) {
-  const { submit, busy } = useOrgAction();
+  const { submit, busy, fetcher } = useOrgAction();
+  // Ruling 368: the export and the removal share this fetcher; the one that
+  // started the request shows it, the other only waits.
+  const inFlight = inFlightIntent(fetcher);
+  const exporting = inFlight === "audit-export-s3";
+  const removing = inFlight === "s3-config-clear";
   const configured = s3Audit !== null;
   // D04-U7 (pass 32) + ruling 148(b): the target is ONE fact row in both states
   // — the summary with "Edit target", or "No S3 target" with "Set up S3 target"
@@ -661,6 +667,7 @@ function AuditExportCard({
             type="button"
             className="btn sm"
             disabled={busy || !configured}
+            aria-busy={exporting || undefined}
             onClick={() =>
               submit({ intent: "audit-export-s3", format: "json" })
             }
@@ -668,16 +675,19 @@ function AuditExportCard({
               configured ? "Upload the audit log to S3 now" : "Save a target first"
             }
           >
-            Export to S3 now
+            {exporting && <Icon name="loader" className="spin" />}
+            {exporting ? "Exporting…" : "Export to S3 now"}
           </button>
           {configured && (
             <button
               type="button"
               className="btn sm danger"
               disabled={busy}
+              aria-busy={removing || undefined}
               onClick={() => submit({ intent: "s3-config-clear" })}
             >
-              Remove
+              {removing && <Icon name="loader" className="spin" />}
+              {removing ? "Removing…" : "Remove"}
             </button>
           )}
         </div>
