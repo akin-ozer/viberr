@@ -4193,6 +4193,29 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
     expect(CODE).toMatch(/body:has\(\.ctl-wrap\.standalone\)\s*\{[^}]*overflow:\s*auto/);
   });
 
+  it("the credential card's green footer wraps like its warn box, so the re-check can take its own line", () => {
+    // The card puts its Re-check scopes slot in `.cred-ok` while an advisory is
+    // open. CANARY: drop `flex-wrap` and the button squeezes the sentence at
+    // 320px; drop the basis and the sentence falls under its own glyph.
+    expect(cascade(plain, ".cred-ok").get("flex-wrap")).toBe("wrap");
+    // Measured at 320px: a bare 12rem basis put the glyph on a line of its own
+    // (202px row on the card, 160px in the profile dialog). The cap is the row
+    // minus the glyph and the gap, so the pair always shares the first line.
+    for (const box of [".cred-ok", ".cred-warn"]) {
+      const sentence = cascade(plain, `${box} > span:not(.warn-acts)`);
+      expect(sentence.get("flex"), box).toBe("1 1 min(12rem, 100% - 14px - .5rem)");
+      expect(sentence.get("min-width"), box).toBe("0");
+      expect(cascade(plain, `${box} .ico`).get("width"), box).toBe("14px");
+      expect(cascade(plain, box).get("gap"), box).toBe(".5rem");
+    }
+    // A dismiss stays beside the sentence it dismisses, and the action pair may
+    // wrap its buttons rather than run past the card (266px in a 202px row).
+    expect(cascade(plain, ".cred-ok:has(> .modal-close)").get("flex-wrap")).toBe("nowrap");
+    const acts = cascade(plain, ".warn-acts");
+    expect(acts.get("flex-wrap")).toBe("wrap");
+    expect(acts.get("flex")).toBe("0 1 auto");
+  });
+
   it("layo-8 / ui-3: a flipped stage menu and the closing dock button have reduced-motion answers", () => {
     expect(cascade(plain, '.stage-menu-pop[data-side="top"]').get("animation-name")).toBe("menu-in-up");
     expect(cascade(plain, ".stage-menu-pop").get("overflow-y")).toBe("auto");

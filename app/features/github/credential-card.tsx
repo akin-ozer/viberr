@@ -38,7 +38,8 @@ export function CredentialCard({
   credential: CredentialCardData;
   /** Opens the flagged task (the cred-warn `.keybtn`). */
   onOpenTask: (taskKey: string) => void;
-  /** Right-aligned footer action slot (Fix in Settings / Re-check scopes). */
+  /** Right-aligned footer action slot (Fix in Settings / Re-check scopes).
+   * The green footer carries it only while an advisory is open. */
   warnActions?: ReactNode;
   /** Always-visible manage row (attach / rotate / remove the credential). */
   manageActions?: ReactNode;
@@ -161,9 +162,18 @@ export function CredentialCard({
       ) : (
         <div className="cred-ok">
           <Icon name="check" />
-          {unproven.length > 0
-            ? "Every provable scope verified. Secrets stay isolated from task records and timelines."
-            : "All required scopes proven. Secrets stay isolated from task records and timelines."}
+          <span>
+            {unproven.length > 0
+              ? "Every provable scope verified. Secrets stay isolated from task records and timelines."
+              : "All required scopes proven. Secrets stay isolated from task records and timelines."}
+          </span>
+          {/* An advisory's scope (`workflow`, `checks:read`) is never required,
+              so a card whose only problem is an advisory lands here. Its copy
+              and the delivery remedies send the person to Re-check, and the
+              pre-push refusal reads the cached header scopes: without the slot
+              here, granting the scope on GitHub changed nothing short of
+              rotating the credential. */}
+          {credential.advisories.length > 0 && warnActions}
         </div>
       )}
       {manageActions}
