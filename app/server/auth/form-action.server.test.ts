@@ -80,20 +80,36 @@ function formPost(options: FormPostOptions = {}): Request {
 }
 
 /**
- * Guards refuse by THROWING a Response, so a refusal is only observable in the
- * catch. A request that is ACCEPTED must fail the case loudly — an assertion
- * that merely never ran is how a dead guard passes for green.
+ * How the preamble refused: the status, and where a redirect points. A signed
+ * out post is THROWN (the /login redirect); a failed CSRF check is ANSWERED,
+ * as the `refused` result the action returns (ruling 454, RV-1). A request
+ * that is ACCEPTED must fail the case loudly — an assertion that merely never
+ * ran is how a dead guard passes for green.
  */
-async function refusalFor(request: Request): Promise<Response> {
+async function refusalFor(
+  request: Request,
+): Promise<{ status: number | undefined; location: string | null }> {
   try {
-    await requireFormAction(request);
+    const { refused } = await requireFormAction(request);
+    if (refused) return { status: refused.init?.status, location: null };
   } catch (thrown) {
-    if (thrown instanceof Response) return thrown;
+    if (thrown instanceof Response) {
+      return { status: thrown.status, location: thrown.headers.get("Location") };
+    }
     throw thrown;
   }
   throw new Error(
     "requireFormAction ACCEPTED a request that the CSRF contract must refuse",
   );
+}
+
+/** The preamble's answer to a post it must ACCEPT. */
+async function accepted(request: Request) {
+  const answer = await requireFormAction(request);
+  if (answer.refused) {
+    throw new Error("requireFormAction REFUSED a post the CSRF contract accepts");
+  }
+  return answer;
 }
 
 /** A seeded user plus the session material a form post needs to speak as them. */
@@ -166,8 +182,9 @@ describe("requireFormAction — what a route action is handed", () => {
       fields: { intent: "move_task", taskId: "VIB-7", to: "in_review" },
     });
 
-    const result = await requireFormAction(request);
+    const result = await accepted(request);
 
+    expect(result.refused).toBeNull();
     expect(result.actor).toEqual({
       userId: victim.id,
       label: victim.email,
@@ -197,7 +214,7 @@ describe("requireFormAction — what a route action is handed", () => {
       fields: { taskId: "VIB-7" },
     });
 
-    const { intent } = await requireFormAction(request);
+    const { intent } = await accepted(request);
 
     expect(intent).toBe("");
   });
@@ -220,7 +237,33 @@ describe("requireFormAction — refusals", () => {
     );
 
     expect(refusal.status).toBe(302);
-    expect(refusal.headers.get("Location")).toMatch(/^\/login/);
+    expect(refusal.location).toMatch(/^\/login/);
+  });
+
+  /**
+   * Ruling 454 (RV-1): the person signed in again in another tab, so the
+   * session has a new id and this tab's token (root's csrf, from the old one)
+   * is stale. The refusal used to be a THROWN 403: React Router rendered the
+   * route's error boundary in place of the page, which unmounted the composer
+   * and lost the comment typed into it, and root, which no longer re-runs on a
+   * navigation or a live event, never read the new token, so every later
+   * action in the tab failed the same way. Answered as a 403 result, the page
+   * stays up with the draft and an inline error, and the 403 re-runs root
+   * (`revalidation-policy.ts`), so trying again works.
+   */
+  it("answers a stale token (the session changed in another tab) with a 403 result, not a throw", async () => {
+    const signedInAgain = await app.cookieFor(victim.id);
+    const request = formPost({
+      cookie: signedInAgain.cookie,
+      token: await app.csrfFor(victim.sessionId),
+      fields: { intent: "comment", text: "a comment worth keeping" },
+    });
+
+    // CANARY: throw the refusal again and this call rejects.
+    const { refused } = await requireFormAction(request);
+
+    expect(refused?.init?.status).toBe(403);
+    expect(refused?.data).toEqual({ ok: false, error: expect.stringMatching(/expired/) });
   });
 
   /**
@@ -322,7 +365,7 @@ describe("requireFormAction — refusals", () => {
     expect(refusal.status).toBe(403);
     // And the same token IS accepted on its owner's own session, so the case
     // above failed for the binding and not because the token was malformed.
-    const own = await requireFormAction(
+    const own = await accepted(
       formPost({
         cookie: attacker.cookie,
         token: await app.csrfFor(attacker.sessionId),
@@ -338,7 +381,7 @@ describe("requireFormAction — refusals", () => {
    * alternative check.
    */
   it("accepts the token in the X-Csrf-Token header with no _csrf field", async () => {
-    const result = await requireFormAction(
+    const result = await accepted(
       formPost({
         cookie: victim.cookie,
         token: null,

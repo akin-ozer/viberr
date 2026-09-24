@@ -45,10 +45,13 @@ Two independent layers, both required (`app/server/auth/csrf.server.ts`):
    `_csrf` (or the `X-Csrf-Token` header), compared with `timingSafeEqual`.
 
 `requireFormAction(request)` is the preamble most route actions use: auth → db →
-formData → CSRF → `{ auth, db, formData, actor, intent }`. Document-form routes let
-the 403 hit the error boundary; fetcher routes (`/controller`, `/projects/:slug/controller`,
+formData → CSRF → `{ refused, auth, db, formData, actor, intent }`. A failed check is
+answered, not thrown: `refused` is the 403 `{ ok: false, error }` result the action
+returns first (`if (refused) return refused;`), so the page stays up with what the
+person typed, and the 403 re-runs root, which re-reads the token (ruling 454, RV-1).
+The routes that do not use the preamble (`/controller`, `/projects/:slug/controller`,
 `/profile`, `/notifications/read`, `/prefs/theme`, `/resources/controller`) call
-`csrfError` instead and return `{ ok: false, error }` so the UI stays up. `/api/auth/*`
+`csrfError`, which `refused` is built from, and return it the same way. `/api/auth/*`
 is exempt (better-auth's own `trustedOrigins` check); `/login`'s `login` intent runs the
 origin check only (`assertTrustedOrigin`, there is no session yet), and its
 `set-password` intent the full check.

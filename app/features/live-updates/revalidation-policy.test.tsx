@@ -13,8 +13,11 @@ import {
   markRead,
   mountHarness,
   notificationRead,
+  OTHER_SLUG,
   OTHER_TASK,
+  runLogAppended,
   runStateChanged,
+  savedComments,
   sendComment,
   settle,
   SLUG,
@@ -140,6 +143,32 @@ describe("the echo of one's own action (RF-5)", () => {
     // React Router does not revalidate after a 4xx; the live event does, once.
     expect(harness.calls["routes/project.task"]).toBe(1);
     expect(harness.calls.root).toBe(0);
+  });
+
+  /**
+   * RV-1: a stale CSRF token (the session changed in another tab) is answered
+   * with a 403 result (`requireFormAction`'s `refused`), through a real fetcher
+   * here: root re-reads the token, the page stays up (the composer keeps its
+   * draft), and the next try carries a good token. Root re-runs on nothing
+   * else a page does, so without this the tab failed every action until a
+   * reload.
+   */
+  it("a stale-token refusal re-reads root's csrf, and only root, and keeps the page (RV-1)", async () => {
+    const harness = await tab({ path: TASK_PAGE, taskActionStatus: 403 });
+    await act(async () => sendComment());
+    await settle();
+    await advance(1_000);
+    expect(harness.actions()).toBe(1);
+    // CANARY: drop the 403 rule and root keeps the stale token (0).
+    expect(harness.calls).toEqual({
+      root: 1,
+      "routes/project": 0,
+      "routes/project.board": 0,
+      "routes/project.task": 0,
+    });
+    // No route error: the task page (and a draft in its composer) is still up.
+    expect(harness.router.state.errors).toBeNull();
+    expect(harness.router.state.location.pathname).toBe(TASK_PAGE);
   });
 
   it("the bell's mark-read reloads the shell's counts, not the task page", async () => {
@@ -294,6 +323,81 @@ describe("reconnects replay what the tab missed (RF-1, ruling 301)", () => {
     expect(harness.calls["routes/project.task"]).toBe(2);
   });
 
+  /**
+   * RV-2: the new project's events are not on the old stream, so the tab's
+   * position says nothing about them. It moved past one published after the
+   * new board's loader read (a console line of the task being left), and the
+   * reopen named that position.
+   */
+  it("a slug change replays what the new project published after its load was sent (RV-2)", async () => {
+    const board = gate();
+    const harness = await tab({ path: TASK_PAGE, gate: { "routes/project.board": board.wait } });
+    board.close();
+    let navigated: Promise<void> = Promise.resolve();
+    await act(async () => {
+      navigated = harness.router.navigate(`/projects/${OTHER_SLUG}/board`);
+    });
+    await until(() => harness.calls["routes/project.board"] === 1);
+    // The new board's loader has read. A member moves a card there, then the
+    // task being left prints a line, which its still-open stream delivers.
+    taskUpdated("BIL-1", OTHER_SLUG);
+    runLogAppended(TASK, 1);
+    await act(async () => board.open());
+    await act(async () => navigated);
+    await settle();
+    await connect();
+    await advance(1_000);
+    expect(harness.router.state.location.pathname).toBe(`/projects/${OTHER_SLUG}/board`);
+    // CANARY: open the re-scoped stream from the newest id the old one saw
+    // and the move is never replayed: the board keeps its first answer.
+    expect(harness.calls["routes/project.board"]).toBe(2);
+    expect(harness.calls["routes/project"]).toBe(2);
+  });
+
+  it("a surface's first stream replays what its load could not have seen (RV-2)", async () => {
+    const board = gate();
+    const harness = await tab({ path: "/inbox", gate: { "routes/project.board": board.wait } });
+    board.close();
+    let navigated: Promise<void> = Promise.resolve();
+    await act(async () => {
+      navigated = harness.router.navigate(BOARD);
+    });
+    await until(() => harness.calls["routes/project.board"] === 1);
+    // After the board's loader read, a change on the board; then the inbox's
+    // stream (the user scope alone) moves the tab's position past it.
+    taskUpdated(OTHER_TASK);
+    notificationRead();
+    await act(async () => board.open());
+    await act(async () => navigated);
+    await settle();
+    await connect();
+    await advance(1_000);
+    // CANARY: start the layout's first stream at the tab's newest position
+    // and the change is lost.
+    expect(harness.calls["routes/project.board"]).toBe(2);
+  });
+
+  it("opening a task whose run printed 300 lines while the board watched reloads only the task (RV-3)", async () => {
+    const harness = await tab({ path: BOARD });
+    // The lines go to the task's scope only, so the board's stream never
+    // moves past them.
+    for (let seq = 1; seq <= 300; seq += 1) runLogAppended(TASK, seq);
+    await act(async () => {
+      await harness.router.navigate(TASK_PAGE);
+    });
+    await settle();
+    await connect();
+    await advance(1_000);
+    // CANARY: share one ring between console lines and data events and the
+    // reopen falls off it: stream.resync reloads the layout and the task again.
+    expect(harness.calls).toEqual({
+      root: 0,
+      "routes/project": 0,
+      "routes/project.board": 0,
+      "routes/project.task": 1,
+    });
+  });
+
   it("an event still inside the 300 ms window when the stream re-scopes still reaches the page", async () => {
     const task = gate();
     const harness = await tab({ path: BOARD, gate: { "routes/project.task": task.wait } });
@@ -354,6 +458,145 @@ describe("reconnects replay what the tab missed (RF-1, ruling 301)", () => {
   });
 });
 
+describe("an action still running (RV-4)", () => {
+  /**
+   * A load that started while the send was still running cannot hold its
+   * write, but it used to count as covering it (the send was recorded at
+   * submit), and the ledger dropped it. A later navigation that reads nothing
+   * then owed nothing, and still aborted the send's own revalidation.
+   */
+  it("a navigation during a slow send, then one that aborts its revalidation, still shows the write", async () => {
+    const action = gate();
+    const task = gate();
+    const harness = await tab({
+      path: TASK_PAGE,
+      taskActionGate: () => action.wait(),
+      gate: { "routes/project.task": task.wait },
+    });
+    action.close();
+    await act(async () => sendComment());
+    await settle();
+    // While the send runs, a click the task loader does not read.
+    await act(async () => {
+      await harness.router.navigate(`${TASK_PAGE}?panel=1`);
+    });
+    await settle();
+    // The send saves and answers; its revalidation is on its way.
+    task.close();
+    const before = harness.calls["routes/project.task"];
+    await act(async () => action.open());
+    await until(() => harness.calls["routes/project.task"] > before);
+    expect(savedComments()).toBe(1);
+    // Another such click supersedes that revalidation.
+    let navigated: Promise<void> = Promise.resolve();
+    await act(async () => {
+      navigated = harness.router.navigate(`${TASK_PAGE}?panel=2`);
+    });
+    await settle();
+    await act(async () => task.open());
+    await act(async () => navigated);
+    await settle();
+    await advance(1_000);
+    // CANARY: let a load that started before the send answered cover it, and
+    // the page keeps the answer from before the write (0).
+    expect(harness.savedOnPage()).toBe(1);
+  });
+
+  /**
+   * React Router asks every route twice whether to re-run after an answer, and
+   * a refused send withdrew the NEWEST send on its path each time: the send
+   * still running beside it went with it.
+   */
+  it("a refused send withdraws itself, not a second send still running", async () => {
+    const action = gate();
+    const task = gate();
+    const harness = await tab({
+      path: TASK_PAGE,
+      taskActionGate: (text) => (text === "slow" ? action.wait() : Promise.resolve()),
+      taskActionStatusFor: (text) => (text === "refused" ? 422 : 200),
+      gate: { "routes/project.task": task.wait },
+    });
+    action.close();
+    await act(async () => sendComment("slow", 0));
+    await act(async () => sendComment("refused", 1));
+    await settle();
+    expect(harness.actions()).toBe(2);
+    expect(savedComments()).toBe(0);
+    task.close();
+    const before = harness.calls["routes/project.task"];
+    await act(async () => action.open());
+    await until(() => harness.calls["routes/project.task"] > before);
+    let navigated: Promise<void> = Promise.resolve();
+    await act(async () => {
+      navigated = harness.router.navigate(`${TASK_PAGE}?panel=2`);
+    });
+    await settle();
+    await act(async () => task.open());
+    await act(async () => navigated);
+    await settle();
+    await advance(1_000);
+    // CANARY: withdraw the newest send on the path per call and this is 0.
+    expect(harness.savedOnPage()).toBe(1);
+  });
+});
+
+describe("a slow action of the person's own (RV-6)", () => {
+  it("does not hold another member's change until it answers", async () => {
+    const action = gate();
+    const harness = await tab({ path: TASK_PAGE, taskActionGate: () => action.wait() });
+    action.close();
+    // A send that takes seconds (an upload, a GitHub sync).
+    await act(async () => sendComment());
+    await settle();
+    // Meanwhile another member moves this task.
+    taskUpdated();
+    await advance(1_000);
+    expect(harness.submitting()).toBe(1);
+    // CANARY: let the flush wait for a submission and nothing loads until the
+    // send answers (0 and 0).
+    expect(harness.calls["routes/project.task"]).toBe(1);
+    expect(harness.calls["routes/project"]).toBe(1);
+    // The send answers, and its own revalidation still brings its write
+    // (that load started before the write committed: RV-4).
+    await act(async () => action.open());
+    await settle();
+    await advance(1_000);
+    expect(harness.submitting()).toBe(0);
+    expect(harness.savedOnPage()).toBe(1);
+    expect(harness.calls["routes/project.task"]).toBe(2);
+  });
+
+  it("still skips the echo of an action that answers inside the flush's 300 ms", async () => {
+    const task = gate();
+    const harness = await tab({
+      path: TASK_PAGE,
+      gate: { "routes/project.task": task.wait },
+      // The write publishes as it commits, and the answer follows 200 ms later.
+      taskActionGate: () => {
+        taskUpdated();
+        return new Promise((resolve) => setTimeout(resolve, 200));
+      },
+    });
+    task.close();
+    await act(async () => sendComment());
+    await settle();
+    // The send has answered; its revalidation is still in flight at the flush.
+    await advance(1_000);
+    expect(harness.submitting()).toBe(0);
+    await act(async () => task.open());
+    await settle();
+    await advance(1_000);
+    // CANARY: let the flush stop waiting for loads in flight too, and the echo
+    // reloads the layout and the task a second time.
+    expect(harness.calls).toEqual({
+      root: 0,
+      "routes/project": 1,
+      "routes/project.board": 0,
+      "routes/project.task": 1,
+    });
+  });
+});
+
 describe("the F22 net (RF-6)", () => {
   it("still revalidates a page showing an active run while its stream is down", async () => {
     const harness = await tab({ path: TASK_PAGE, activeRun: true });
@@ -388,19 +631,6 @@ describe("the rules", () => {
     expect(root(posted(`/projects/${SLUG}/tasks/${TASK}`))).toBe(false);
     expect(task(posted(`/projects/${SLUG}/tasks/${TASK}`))).toBe(true);
     expect(task(posted("/prefs/theme"))).toBe(false);
-  });
-
-  it("a 403 (a stale CSRF token) re-reads root's session, and only root", async () => {
-    await tab({ path: TASK_PAGE });
-    const refused = args({
-      formMethod: "POST",
-      formAction: `/projects/${SLUG}/tasks/${TASK}`,
-      actionStatus: 403,
-      defaultShouldRevalidate: false,
-    });
-    expect(revalidateWhen("root")(refused)).toBe(true);
-    expect(revalidateWhen("routes/project")(refused)).toBe(false);
-    expect(revalidateWhen("routes/project.task")(refused)).toBe(false);
   });
 
   it("every page route module with a loader exports its own rule, and every rule names a module", () => {

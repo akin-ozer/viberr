@@ -116,7 +116,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
   // R15-4 / E2: React Router runs this action WITHOUT the layout loader, so the
   // membership gate has to be repeated here. Without it `create-task` answered a
   // signed-in non-member with the inner guard's 403 ("Only project members can

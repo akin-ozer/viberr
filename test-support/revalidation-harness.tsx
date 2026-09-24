@@ -8,6 +8,7 @@ import {
   Outlet,
   RouterProvider,
   useFetcher,
+  useParams,
   useRouteLoaderData,
   useSearchParams,
   type DataStrategyFunction,
@@ -50,10 +51,13 @@ import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
  *   are the server's own.
  * - The routes are the workspace's shape (root > routes/project > board | task)
  *   with loaders that count their calls and return a fresh object each time,
- *   as a decoded single-fetch payload is.
+ *   as a decoded single-fetch payload is, plus `/inbox`, a surface streaming
+ *   the `user` scope alone.
  */
 
 export const SLUG = "viberr-core";
+/** A second project, for a navigation that changes the layout's slug. */
+export const OTHER_SLUG = "billing";
 export const TASK = "VIB-1";
 export const OTHER_TASK = "VIB-9";
 export const USER_ID = "u_harness";
@@ -168,15 +172,15 @@ export function publish(event: SseEvent, route: SseRoute): number {
   return publishSseEvent(event, route);
 }
 
-export function taskUpdated(taskKey = TASK): number {
+export function taskUpdated(taskKey = TASK, slug = SLUG): number {
   return publish(
     {
       type: "task.updated",
-      entityId: `${SLUG}/${taskKey}`,
+      entityId: `${slug}/${taskKey}`,
       occurredAt: OCCURRED_AT,
-      data: { projectSlug: SLUG, taskKey, stage: "impl", readiness: "ready" },
+      data: { projectSlug: slug, taskKey, stage: "impl", readiness: "ready" },
     },
-    { projectSlug: SLUG, taskKey },
+    { projectSlug: slug, taskKey },
   );
 }
 
@@ -192,6 +196,20 @@ export function runStateChanged(
       data: { projectSlug: SLUG, taskKey, runId: `run_${taskKey}`, threadId: "primary", state },
     },
     { projectSlug: SLUG, taskKey },
+  );
+}
+
+/** One console line of `taskKey`'s run, routed as `run-events.server.ts`
+ *  routes it: to that task's scope only (`taskOnly`). */
+export function runLogAppended(taskKey = TASK, seq = 1): number {
+  return publish(
+    {
+      type: "run.log-appended",
+      entityId: `${SLUG}/${taskKey}`,
+      occurredAt: OCCURRED_AT,
+      data: { projectSlug: SLUG, taskKey, runId: `run_${taskKey}`, threadId: "primary", seq },
+    },
+    { projectSlug: SLUG, taskKey, taskOnly: true },
   );
 }
 
@@ -240,7 +258,7 @@ export type HarnessRouteId = keyof typeof calls;
 
 /** The `?events` each task loader call read, in order. */
 const noEventsParams: (string | null)[] = [];
-const tally = { actions: 0, eventsParams: noEventsParams };
+const tally = { actions: 0, eventsParams: noEventsParams, saved: 0 };
 
 function resetCounts(): void {
   calls.root = 0;
@@ -261,9 +279,11 @@ async function taskLoader({ request, params }: LoaderFunctionArgs) {
   calls["routes/project.task"] += 1;
   tally.eventsParams.push(new URL(request.url).searchParams.get("events"));
   active.onTaskLoader?.();
+  // What the "server" has saved, read when the loader reads (before it answers).
+  const saved = tally.saved;
   await active.gate?.["routes/project.task"]?.();
   version += 1;
-  return { key: params.key ?? TASK, n: calls["routes/project.task"], version };
+  return { key: params.key ?? TASK, n: calls["routes/project.task"], version, saved };
 }
 
 export interface HarnessOptions {
@@ -279,6 +299,10 @@ export interface HarnessOptions {
   onTaskAction?: () => void;
   /** The status the task action answers with (a refusal is a 4xx). */
   taskActionStatus?: number;
+  /** The status for a comment with this text (overrides `taskActionStatus`). */
+  taskActionStatusFor?: (text: string) => number;
+  /** The task action awaits this before it writes and answers (a slow action). */
+  taskActionGate?: (text: string) => Promise<void>;
   /** Runs at the start of each task loader call (an event published while a
    *  load is on its way). */
   onTaskLoader?: () => void;
@@ -303,16 +327,28 @@ export interface Harness {
   /** Loader calls of every route since the last `resetCounts`. */
   total: () => number;
   resetCounts: () => void;
+  /** The comments saved when the task page on screen read its data. */
+  savedOnPage: () => number | undefined;
+  /** Fetchers still submitting (an action that has not answered). */
+  submitting: () => number;
 }
 
-let submitComment: (() => void) | null = null;
+type TaskData = Awaited<ReturnType<typeof taskLoader>>;
+
+let submitComment: ((text: string, fetcher: 0 | 1) => void) | null = null;
 let submitRead: (() => void) | null = null;
 let submitDrop: (() => void) | null = null;
 let typeFilter: ((value: string) => void) | null = null;
 
-/** Submits the task page's comment form (a fetcher, as the timeline's is). */
-export function sendComment(): void {
-  submitComment?.();
+/** Submits the task page's comment form (a fetcher, as the timeline's is).
+ *  The page has two comment fetchers, for two sends in flight at once. */
+export function sendComment(text = "hello", fetcher: 0 | 1 = 0): void {
+  submitComment?.(text, fetcher);
+}
+
+/** How many comments the task action has saved (the server's state). */
+export function savedComments(): number {
+  return tally.saved;
 }
 
 /** Marks the bell read from the task page (the bell's `/notifications/read`
@@ -332,14 +368,23 @@ export function typeInFilter(value: string): void {
 }
 
 function Layout() {
+  const slug = useParams().slug ?? SLUG;
   const task = useRouteLoaderData<typeof taskLoader>("routes/project.task");
-  // The scopes `routes/project.tsx` subscribes.
+  // The scopes `routes/project.tsx` subscribes. One instance across a slug
+  // change, as the route module's is.
   useLiveUpdates(
     task
-      ? [sseScopes.project(SLUG), sseScopes.task(SLUG, task.key), sseScopes.user()]
-      : [sseScopes.project(SLUG), sseScopes.user()],
+      ? [sseScopes.project(slug), sseScopes.task(slug, task.key), sseScopes.user()]
+      : [sseScopes.project(slug), sseScopes.user()],
   );
   return <Outlet />;
+}
+
+/** A surface that streams the `user` scope alone (the notifications page,
+ *  Instance settings, the profile): no project events reach its stream. */
+function UserSurface() {
+  useLiveUpdates([sseScopes.user()]);
+  return <Link to={`/projects/${SLUG}/board`}>board</Link>;
 }
 
 function Board() {
@@ -364,6 +409,7 @@ function Task({ activeRun }: { activeRun: boolean }) {
   const data = useRouteLoaderData<typeof taskLoader>("routes/project.task");
   const key = data?.key ?? TASK;
   const comment = useFetcher();
+  const secondComment = useFetcher();
   const read = useFetcher();
   const [threads] = useState(() => []);
   useRunLogStream({
@@ -371,9 +417,9 @@ function Task({ activeRun }: { activeRun: boolean }) {
     threads,
     hasActiveRun: activeRun,
   });
-  submitComment = () =>
-    void comment.submit(
-      { intent: "comment", text: "hello" },
+  submitComment = (text, which) =>
+    void (which === 0 ? comment : secondComment).submit(
+      { intent: "comment", text },
       { method: "post", action: `/projects/${SLUG}/tasks/${key}` },
     );
   submitRead = () =>
@@ -390,6 +436,7 @@ function RootShell({ children }: { children: ReactNode }) {
 
 export function mountHarness(options: HarnessOptions): Harness {
   resetCounts();
+  tally.saved = 0;
   active = options;
   const counted = (id: HarnessRouteId) => async () => {
     calls[id] += 1;
@@ -426,6 +473,12 @@ export function mountHarness(options: HarnessOptions): Harness {
           },
         },
         {
+          // No loader: only the stream matters here.
+          id: "user-surface",
+          path: "inbox",
+          element: <UserSurface />,
+        },
+        {
           id: "routes/project",
           path: "projects/:slug",
           loader: counted("routes/project"),
@@ -449,11 +502,21 @@ export function mountHarness(options: HarnessOptions): Harness {
               path: "tasks/:key",
               loader: taskLoader,
               shouldRevalidate: rule("routes/project.task"),
-              action: () => {
+              action: ({ request }) => {
                 tally.actions += 1;
-                options.onTaskAction?.();
-                const status = options.taskActionStatus ?? 200;
-                return data({ ok: status < 400 }, { status });
+                const answer = (text: string) => {
+                  options.onTaskAction?.();
+                  const status = options.taskActionStatusFor?.(text) ?? options.taskActionStatus ?? 200;
+                  if (status < 400) tally.saved += 1;
+                  return data({ ok: status < 400 }, { status });
+                };
+                // Answers at once unless a test asked for a slow or per-text answer.
+                if (!options.taskActionGate && !options.taskActionStatusFor) return answer("");
+                return request.formData().then(async (form) => {
+                  const text = String(form.get("text") ?? "");
+                  await options.taskActionGate?.(text);
+                  return answer(text);
+                });
               },
               element: <Task activeRun={options.activeRun ?? false} />,
             },
@@ -474,6 +537,12 @@ export function mountHarness(options: HarnessOptions): Harness {
     eventsParams: () => tally.eventsParams,
     total: () => Object.values(calls).reduce((sum, n) => sum + n, 0),
     resetCounts,
+    savedOnPage: () => {
+      const task: TaskData | undefined = router.state.loaderData["routes/project.task"];
+      return task?.saved;
+    },
+    submitting: () =>
+      [...router.state.fetchers.values()].filter((f) => f.state === "submitting").length,
   };
 }
 

@@ -26,7 +26,8 @@ import {
  *
  *   - a live event the stream delivered (recorded by `useLiveUpdates` the
  *     moment it arrives: `LiveLedger.recordLive`);
- *   - an action (recorded when React Router shows its submission);
+ *   - an action (recorded when React Router shows its submission, and again
+ *     when it answers: a load that started while it ran cannot hold it);
  *   - a `revalidate()` that is not the live hook's own (the F22 net, a
  *     settle, a panel's poll): an obligation on every route but root.
  *
@@ -202,9 +203,19 @@ interface Obligation {
   kind: "live" | "action" | "revalidate";
   /** A live event already handed to a revalidation; dropped when it settles. */
   flushed: boolean;
-  /** An action's path, so one React Router refused is withdrawn. */
+  /** An action's path (the fallback that names it when it has no form data). */
   path: string;
+  /** An action's submission, by identity: React Router hands the same
+   *  `FormData` to the fetcher (or navigation) and to every `shouldRevalidate`
+   *  of its answer, so the answer withdraws this one action, once. */
+  submission: FormData | null;
+  /** Who submitted an action (`navigation` or `fetcher:<key>`), while its
+   *  submission has not answered; null once it has. */
+  pending: string | null;
 }
+
+type NewObligation = Pick<Obligation, "kind" | "facts"> &
+  Partial<Pick<Obligation, "path" | "submission" | "pending">>;
 
 /** The loads whose answer can land: a navigation's, a `revalidate()`'s and
  *  each action's own revalidation (a fetcher showing `loading` after its
@@ -219,13 +230,17 @@ function loadsInFlight(state: RouterState): string[] {
   return keys;
 }
 
-/** A submission or a route load is in flight. */
+/**
+ * A route load is in flight, whose landing may cover what the live flush would
+ * load. Ruling 454 (RV-6): a submission still running is not one. The flush
+ * used to wait for those too, so another member's change reached the page only
+ * after the person's own slowest action answered (an upload, a GitHub sync),
+ * and a stalled request froze live updates in the tab. An action's echo is
+ * still skipped when the action answers inside the flush's 300 ms (a write
+ * publishes as it commits, then answers); a slower answer reloads once more.
+ */
 function busy(state: RouterState): boolean {
-  if (state.navigation.state !== "idle" || state.revalidation !== "idle") return true;
-  for (const fetcher of state.fetchers.values()) {
-    if (fetcher.state !== "idle" && isMutation(fetcher.formMethod)) return true;
-  }
-  return false;
+  return loadsInFlight(state).length > 0;
 }
 
 const RECENT_EVENTS = 256;
@@ -244,10 +259,21 @@ export class LiveLedger {
    * hello and events.
    */
   position: number | null = null;
+  /**
+   * Ruling 454 (RV-2): the tab's position when the loads that brought the
+   * latest data to land were SENT (the smallest, like coverage; null when one
+   * was sent before any position was known). A stream that takes on a scope
+   * the tab's streams did not carry opens from here: the tab's position says
+   * nothing about that scope's events, and one published after the loader
+   * read can sit below it.
+   */
+  positionAtLoad: number | null = null;
   private seq = 0;
   private obligations: Obligation[] = [];
   private readonly coverage = new Map<string, number>();
   private readonly loads = new Map<string, number>();
+  /** The tab's position when each load in flight was sent. */
+  private readonly loadPositions = new Map<string, number | null>();
   private readonly recent = new Set<string>();
   private last: RouterState;
   /** True while the live hook's own `revalidate()` call runs. */
@@ -257,7 +283,10 @@ export class LiveLedger {
   constructor(router: DataRouter) {
     this.router = router;
     this.last = router.state;
-    for (const key of loadsInFlight(router.state)) this.loads.set(key, 0);
+    for (const key of loadsInFlight(router.state)) {
+      this.loads.set(key, 0);
+      this.loadPositions.set(key, null);
+    }
     router.subscribe((state) => this.observe(state));
   }
 
@@ -265,8 +294,8 @@ export class LiveLedger {
    * A live data event arrived (before any load it could be in was sent).
    * Recorded once per tab: two streams whose scopes both carry an event (the
    * project controller page: the layout's and the page's own) both deliver it,
-   * with the same id and body. The id alone could match an event from before a
-   * server restart (the broker's ids start over); the id with the body cannot.
+   * with the same id and body (ids are unique across server processes, ruling
+   * 454, RV-5).
    */
   recordLive(name: string, event: MessageEvent<string>): void {
     if (event.lastEventId) {
@@ -278,12 +307,12 @@ export class LiveLedger {
         if (oldest !== undefined) this.recent.delete(oldest);
       }
     }
-    this.record({ kind: "live", facts: liveEventFacts(name), path: "" });
+    this.record({ kind: "live", facts: liveEventFacts(name) });
   }
 
   /** A stream could not be caught up by replay (`stream.resync`). */
   recordResync(): void {
-    this.record({ kind: "live", facts: EVENT_FACTS, path: "" });
+    this.record({ kind: "live", facts: EVENT_FACTS });
   }
 
   /** Does `routeId`, reading `reads`, owe a load? */
@@ -292,13 +321,24 @@ export class LiveLedger {
     return this.obligations.some((o) => o.seq > covered && overlaps(o.facts, reads));
   }
 
-  /** React Router declined to revalidate after this action (it failed, or its
-   *  caller opted out): it changed nothing a loader reads. The newest action
-   *  on that path is the one React Router just answered for. */
-  withdraw(formAction: string | undefined): void {
-    const path = pathOf(formAction);
-    const newest = this.obligations.findLast((o) => o.kind === "action" && o.path === path);
-    if (newest) this.obligations = this.obligations.filter((o) => o !== newest);
+  /**
+   * React Router declined to revalidate after this action (it failed, or its
+   * caller opted out): it changed nothing a loader reads. Ruling 454 (RV-4):
+   * found by its submission, so the two times React Router asks each route
+   * about one answer withdraw that action once, and never another send on the
+   * same path still running (the newest on the path used to go, per call).
+   * A submission with no form data (a JSON or text body; Viberr sends none)
+   * falls back to the newest on its path.
+   */
+  withdraw(args: Pick<ShouldRevalidateFunctionArgs, "formAction" | "formData">): void {
+    const submission = args.formData ?? null;
+    const path = pathOf(args.formAction);
+    const answered = submission
+      ? this.obligations.find((o) => o.kind === "action" && o.submission === submission)
+      : this.obligations.findLast(
+          (o) => o.kind === "action" && o.submission === null && o.path === path,
+        );
+    if (answered) this.obligations = this.obligations.filter((o) => o !== answered);
   }
 
   /** The routes on screen that owe `o`: they read what it changed, and their
@@ -322,8 +362,8 @@ export class LiveLedger {
   /**
    * The live hook's debounced flush: one `revalidate()` if a route on screen
    * owes a live event, none when every event is already covered (the echo of
-   * one's own action). Waits for any load or submission in flight, whose
-   * landing may cover the events, and decides when the router is idle.
+   * one's own action). Waits for any load in flight, whose landing may cover
+   * the events, and decides when none is (a submission does not hold it: RV-6).
    */
   flushLive(): void {
     if (busy(this.router.state)) {
@@ -349,7 +389,7 @@ export class LiveLedger {
     });
   }
 
-  private record(o: Omit<Obligation, "seq" | "flushed">): void {
+  private record(o: NewObligation): void {
     this.seq += 1;
     // A newer `revalidate()` subsumes an older one: a route owes the older only
     // if its coverage is below both. (Live events stay apart, each flushed
@@ -357,49 +397,111 @@ export class LiveLedger {
     if (o.kind === "revalidate") {
       this.obligations = this.obligations.filter((x) => x.kind !== "revalidate");
     }
-    this.obligations.push({ ...o, seq: this.seq, flushed: false });
+    this.obligations.push({
+      path: "",
+      submission: null,
+      pending: null,
+      ...o,
+      seq: this.seq,
+      flushed: false,
+    });
+  }
+
+  /** Records a submission the router now shows, once per submission. */
+  private recordAction(
+    submitter: string,
+    submission: { formAction?: string; formData?: FormData },
+  ): void {
+    const formData = submission.formData ?? null;
+    if (formData && this.obligations.some((o) => o.submission === formData)) return;
+    this.record({
+      kind: "action",
+      facts: actionFacts(submission.formAction),
+      path: pathOf(submission.formAction),
+      submission: formData,
+      pending: submitter,
+    });
+  }
+
+  /** The submission `o` came from is still running. */
+  private stillSubmitting(state: RouterState, o: Obligation): boolean {
+    const shown =
+      o.pending === "navigation"
+        ? state.navigation
+        : state.fetchers.get((o.pending ?? "").slice("fetcher:".length));
+    return shown?.state === "submitting" && (shown.formData ?? null) === o.submission;
   }
 
   private observe(state: RouterState): void {
     const prev = this.last;
     this.last = state;
 
+    // 0. Ruling 454 (RV-4): an action whose submission has answered (or was
+    //    abandoned) is recorded again, now: its write has committed, and a
+    //    load that started while it ran cannot hold it. Its own revalidation
+    //    starts in this same update and covers it; if a navigation aborts that
+    //    revalidation, the route still owes it and the navigation loads it.
+    //    It used to be recorded only at submit, so a load that started during
+    //    the action and landed covered it, and the ledger dropped it.
+    for (const o of this.obligations) {
+      if (o.pending === null || this.stillSubmitting(state, o)) continue;
+      o.pending = null;
+      this.seq += 1;
+      o.seq = this.seq;
+    }
+
     // 1. Data that landed was requested by a load already in flight: it
     //    covers what was recorded before the earliest of them started.
     if (this.loads.size > 0) {
       const start = Math.min(...this.loads.values());
+      let landed = false;
       for (const match of state.matches) {
         const id = match.route.id;
         if (!(id in state.loaderData) || state.loaderData[id] === prev.loaderData[id]) continue;
         this.coverage.set(id, Math.max(this.coverage.get(id) ?? 0, start));
+        landed = true;
       }
+      if (landed) this.positionAtLoad = this.earliestLoadPosition();
     }
 
     // 2. Obligations that start now, before any load they cause is sent.
     const nav = state.navigation;
-    if (nav.state === "submitting" && nav !== prev.navigation) {
-      this.record({ kind: "action", facts: actionFacts(nav.formAction), path: pathOf(nav.formAction) });
-    }
+    if (nav.state === "submitting" && nav !== prev.navigation) this.recordAction("navigation", nav);
     for (const [key, fetcher] of state.fetchers) {
       if (fetcher.state !== "submitting" || prev.fetchers.get(key) === fetcher) continue;
       if (!isMutation(fetcher.formMethod)) continue;
-      this.record({
-        kind: "action",
-        facts: actionFacts(fetcher.formAction),
-        path: pathOf(fetcher.formAction),
-      });
+      this.recordAction(`fetcher:${key}`, fetcher);
     }
     if (state.revalidation === "loading" && prev.revalidation !== "loading" && !this.ownCall) {
-      this.record({ kind: "revalidate", facts: EVENT_FACTS, path: "" });
+      this.record({ kind: "revalidate", facts: EVENT_FACTS });
     }
 
     // 3. Loads that start now cover everything recorded so far.
     const inFlight = new Set(loadsInFlight(state));
-    for (const key of this.loads.keys()) if (!inFlight.has(key)) this.loads.delete(key);
-    for (const key of inFlight) if (!this.loads.has(key)) this.loads.set(key, this.seq);
+    for (const key of this.loads.keys()) {
+      if (inFlight.has(key)) continue;
+      this.loads.delete(key);
+      this.loadPositions.delete(key);
+    }
+    for (const key of inFlight) {
+      if (this.loads.has(key)) continue;
+      this.loads.set(key, this.seq);
+      this.loadPositions.set(key, this.position);
+    }
 
     this.prune();
     if (this.flushWanted && !busy(state)) queueMicrotask(() => this.flushLive());
+  }
+
+  /** The smallest position a load in flight was sent at; null when one was
+   *  sent before any was known. */
+  private earliestLoadPosition(): number | null {
+    let earliest: number | null = null;
+    for (const at of this.loadPositions.values()) {
+      if (at === null) return null;
+      if (earliest === null || at < earliest) earliest = at;
+    }
+    return earliest;
   }
 
   /** Drops obligations every route on screen has loaded past, unless a load
@@ -408,6 +510,8 @@ export class LiveLedger {
     const earliestLoad = this.loads.size > 0 ? Math.min(...this.loads.values()) : Infinity;
     this.obligations = this.obligations.filter((o) => {
       if (o.kind === "live" && o.flushed) return true;
+      // An action still running is kept for when it answers (RV-4).
+      if (o.pending !== null) return true;
       if (earliestLoad < o.seq) return true;
       return this.routesOwing(o).length > 0;
     });
@@ -495,7 +599,7 @@ function decide(
     if (args.actionStatus === 403 && overlaps(["session"], rule.reads)) return true;
     // React Router says no after a failed action or when the caller opted out
     // (the dock's send): nothing a loader reads changed.
-    if (!args.defaultShouldRevalidate) ledger.withdraw(args.formAction);
+    if (!args.defaultShouldRevalidate) ledger.withdraw(args);
     else if (overlaps(actionFacts(args.formAction), rule.reads)) return true;
   } else if (
     samePlace(args.currentUrl, args.nextUrl) &&

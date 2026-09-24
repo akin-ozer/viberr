@@ -124,8 +124,8 @@ everything below a task dir except `task.md` ignored; goal files included) →
 
 **Live updates.** Projection events are emitted in-process (buffered inside
 transactional rebuilds until commit), translated to the zod-parsed wire shape `{ type,
-entityId, occurredAt, data }`, appended to a 256-event ring buffer and fanned out to
-the scope-matching connections on `GET /resources/events`. The client revalidates the
+entityId, occurredAt, data }`, appended to a 256-event replay ring (console lines have
+their own) and fanned out to the scope-matching connections on `GET /resources/events`. The client revalidates the
 loaders that read what an event changed (300 ms debounce; `revalidation-policy.ts`,
 ruling 454), and not those whose data was requested after the event arrived; run logs
 are fetched by reference from `/resources/run-log`. A hidden tab holds no stream (ruling

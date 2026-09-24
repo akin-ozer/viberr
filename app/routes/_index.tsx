@@ -75,12 +75,14 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const {
+    refused,
     auth: ctx,
     db,
     formData,
     actor,
     intent,
   } = await requireFormAction(request);
+  if (refused) return refused;
 
   try {
     // UI-06: both pref intents echo the intent back so the client can toast

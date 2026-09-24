@@ -93,7 +93,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
   const field = (name: string) => String(formData.get(name) ?? "");
   const slug = params.slug;
 

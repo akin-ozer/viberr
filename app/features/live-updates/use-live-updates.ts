@@ -23,8 +23,9 @@ import { useLiveLedger } from "./revalidation-policy";
  * state is not the workspace shell's, a notification is not a task page's),
  * and it is not owed by a route whose data was requested after the event
  * arrived: the echo of the person's own action, published while the action
- * ran, is already in the action's own revalidation, so the flush finds
- * nothing to do. Bursts — a rescan projecting ten tasks, a mutation emitting
+ * ran, is already in the action's own revalidation once the action answered
+ * inside the 300 ms, so the flush finds nothing to do (it waits for a load in
+ * flight, not for a slow submission: ruling 454, RV-6). Bursts — a rescan projecting ten tasks, a mutation emitting
  * task + project + notification — still coalesce into one loader round-trip.
  * Stream events (one per console line) revalidate nothing: they go to the
  * tab's run-log consoles through `onLiveFrame`. Conversation events only
@@ -105,8 +106,8 @@ export function onLiveFrame(name: SseEventName, handler: FrameHandler): () => vo
 function dispatchFrame(name: SseEventName, event: MessageEvent<string>): void {
   const handlers = frameHandlers.get(name);
   if (!handlers || handlers.size === 0) return;
-  // The broker's ids restart with the process, so an id alone could match a
-  // frame from before a restart; the id with the body cannot.
+  // Keyed by id and body. (The id alone would do: the broker's ids are unique
+  // across processes, ruling 454, RV-5.)
   if (event.lastEventId) {
     const seen = `${event.lastEventId}|${event.data}`;
     if (recentFrames.has(seen)) return;
@@ -256,6 +257,8 @@ export function useLiveUpdates(
   // the hello's head, then every event after it. A reopen asks the broker to
   // replay from here.
   const positionRef = useRef<number | null>(null);
+  // The scopes of this surface's last stream (null before its first).
+  const scopesRef = useRef<readonly string[] | null>(null);
   // A dock notice this surface's last stream had not handed over when it
   // closed: its conversation event will not be replayed to the next stream.
   const dockOwedRef = useRef(false);
@@ -359,15 +362,31 @@ export function useLiveUpdates(
     // A surface's first stream starts where the tab stands (the server
     // render's reading, or the stream of the surface before it); a reopen
     // starts where this surface's own streams stood.
-    const from = positionRef.current ?? ledger.position;
+    const standing = positionRef.current ?? ledger.position;
+    // Ruling 454 (RV-2): a stream that takes on a project, the firehose or the
+    // user scope (a slug change, a surface's first stream) cannot trust that
+    // position for them: it moved on the old scopes' events only, and can be
+    // past one the new scope published after the navigation's loaders read.
+    // It opens from the tab's position when those loads were sent instead;
+    // what the old scopes delivered since is replayed and recorded once. A
+    // task scope brings only its console lines, so opening a task keeps the
+    // surface's own position and replays nothing new.
+    const previous = scopesRef.current;
+    const gains =
+      previous === null ||
+      scopeList.some((scope) => !scope.startsWith("task:") && !previous.includes(scope));
+    scopesRef.current = scopeList;
+    const sent = gains ? ledger.positionAtLoad : null;
+    const from = standing !== null && sent !== null ? Math.min(standing, sent) : (standing ?? sent);
     const url = buildEventsUrl(scopeList, from);
     const source = new EventSource(url);
     source.addEventListener("stream.open", (event: MessageEvent<string>) => {
       if (!/^\d+$/.test(event.lastEventId)) return;
       const head = Number(event.lastEventId);
       sawId = true;
-      // A head below where the stream stood means the server restarted (its
-      // ids start over); the broker answered the replay with a resync.
+      // After a restart the head is above where the stream stood (ids are
+      // unique across processes, ruling 454, RV-5), and the broker answered
+      // the replay with a resync.
       positionRef.current = head;
       ledger.position = head;
     });

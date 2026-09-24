@@ -255,11 +255,16 @@ dropped and `projects` is expanded to their memberships; an empty result is a 40
 first message sets `retry: 5000` and sends `stream.open`. A 25-second heartbeat
 (`: hb`) also **re-authorizes** every connection, dropping ones whose scopes vanished (a
 throw keeps the existing scopes: a check that could not run must neither widen access
-nor tear down a healthy stream). A 256-event ring buffer replays, on the new
-connection's scopes, every event after the position a connection names: the browser's
+nor tear down a healthy stream). Two 256-event rings replay, on the new connection's
+scopes and in id order, every event after the position a connection names: the browser's
 own `Last-Event-ID` header when it retries a source, or the `lastEventId` query param a
-new `EventSource` carries (ruling 454; the header wins). An id older than the buffer, or
-a restart, sends `stream.resync` and the client revalidates once. Root's
+new `EventSource` carries (ruling 454; the header wins). One ring holds data events, the
+other stream events (console lines, `SSE_STREAM_EVENTS`), so a busy run cannot push a
+data event out of reach. A position below a data event the ring has let go of, or from
+an earlier process (ids are unique across processes: each starts at a thousand per
+millisecond of its boot clock), gets `stream.resync` and the client revalidates once;
+console lines the stream ring has let go of never resync, since the console reads past
+its own cursor. Root's
 `liveHeadMiddleware` reads the head before any loader of a request runs, and a document
 load hands it to the page as root's `liveHead`, so the page's first stream replays what
 was published between the server render and hydration. Queue backpressure caps at 1024
@@ -288,7 +293,9 @@ facts its data depends on (`domain`, `run`, `bell`, `conversation`, `theme`,
 arrives (a run's state is a `run` fact, a notification a `bell` fact, a conversation a
 `conversation` fact, anything else `domain`), every action as it is submitted (by the
 path it posts to: `/notifications/read` changes the bell, `/prefs/theme` the theme, sign-in,
-sign-out and `/profile` everything, a page's own action `domain` and `run`), and every
+sign-out and `/profile` everything, a page's own action `domain` and `run`) and again as
+it answers, since a load that started while it ran cannot hold its write (ruling 454,
+RV-4), and every
 `revalidate()` that is not the live hook's own (the F22 net, a settle, a panel's poll:
 everything but root). When a route's data lands, it covers what was recorded before the
 load that brought it started. That is the watermark: the server publishes an event after
@@ -296,7 +303,9 @@ its write commits, so a load the browser sent after receiving the event was answ
 data that holds it. A route re-runs when it owes something it reads, when a navigation
 changed a param or search param its loader reads, or on a navigation to the URL already
 on screen. The flush revalidates once, and only if a route on screen still owes a live
-event, and it waits for a load in flight to land first. So:
+event, and it waits for a load in flight to land first, but not for a submission: another
+member's change reaches the page while the person's own slow action (an upload, a GitHub
+sync) still runs (ruling 454, RV-6). So:
 
 | Trigger | Re-runs |
 |---|---|
@@ -305,7 +314,7 @@ event, and it waits for a load in flight to land first. So:
 | `?c=` / `?all=` on a controller page | that controller page |
 | Any search param on Activity | Activity |
 | A navigation inside a project | the new page; the workspace layout only when the slug changed; never root |
-| A page's own action (comment, drop, transition) | the workspace layout and that page; the action's own SSE echo, received before that load was sent, then re-runs nothing |
+| A page's own action (comment, drop, transition) | the workspace layout and that page; the action's own SSE echo, received before that load was sent, then re-runs nothing (when the action answered inside the flush's 300 ms) |
 | The bell's mark-read | what draws the bell's counts or list: the shells, Home and the notifications page |
 | A theme change | root and the profile page |
 | Sign-in, sign-out, a profile change | everything |
@@ -319,6 +328,9 @@ An action React Router does not revalidate after (a 4xx or 5xx answer, or a call
 opts out, like the dock's send) re-runs nothing; an event its write published still does.
 A 403 re-runs root alone: it is how a stale CSRF token answers (a sign-in in another tab
 gave the session a new id), and root no longer re-reads the session on every live event.
+Every action answers it as a result, never a throw (`requireFormAction`'s `refused`, or
+`csrfError`), because React Router sends a thrown fetcher error to the route's error
+boundary without revalidating anything (ruling 454, RV-1).
 A trigger that interrupts a load in flight finds that load's obligations still in the
 ledger and loads them itself, so nothing a person has not seen is skipped.
 
@@ -328,7 +340,14 @@ broker replays what the tab missed on the new scopes, which revalidates like any
 only a reconnect that could not say where it stood pulls every loader once. So a
 deliberate re-scope (opening, switching or closing a task) and a quiet return from a
 hidden tab reload nothing, and a return after events, or a failure recovered on the
-backoff, reloads what those events concern. An event the closing stream had delivered
+backoff, reloads what those events concern. A stream's position moves only on its own
+scopes' events, so a reopen after more than 256 data events elsewhere on the instance
+falls off the ring and resyncs. A stream that takes on a project, the `projects`
+firehose or the `user` scope (a slug change, a surface's first stream) opens from the
+tab's position when the navigation's loads were sent, not the newest id the old stream
+saw, since the old scopes say nothing about the new one's events (ruling 454, RV-2);
+it can replay an event its load already held, one redundant reload at most (entering a
+project from a `user`-only surface such as notifications, after that project changed). An event the closing stream had delivered
 but not yet flushed (a hide or a re-scope inside the 300 ms window) is still in the
 ledger, and the reopened stream flushes it. A hidden tab holds no stream: the hook
 closes on `visibilitychange` and reopens on return (ruling 301), and the replay is its
