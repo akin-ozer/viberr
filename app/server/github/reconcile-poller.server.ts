@@ -40,7 +40,7 @@ export function reconcileSummaryFailed(summary: ProjectReconcileSummary): boolea
  * status" button keeps its human audit.
  */
 
-export const RECONCILE_POLL_MS = 5 * 60_000; // 5 minutes
+const RECONCILE_POLL_MS = 5 * 60_000; // 5 minutes
 
 /**
  * Nudge for tasks accepted into Done whose PR is still OPEN on GitHub — the

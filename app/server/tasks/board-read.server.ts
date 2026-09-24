@@ -22,7 +22,7 @@ import type { TaskMutationContext } from "./task-actions.server";
 /** How much of ANOTHER task's goal a single-task read hands back. Enough to
  *  answer "is this the work I was told about", not enough to make a second
  *  task's whole contract compete with the reader's own prompt. */
-export const BOARD_READ_GOAL_CHARS = 2_000;
+const BOARD_READ_GOAL_CHARS = 2_000;
 
 export interface BoardReadContext {
   db: DatabaseSync;
@@ -141,7 +141,7 @@ function boardRows(deps: BoardReadContext) {
  * now somewhere to go, exactly as ruling 283 did for a knowledge base — index
  * in the prompt, document on demand.
  */
-export const TIMELINE_ENTRY_READ_CHARS = 40_000;
+const TIMELINE_ENTRY_READ_CHARS = 40_000;
 
 /** One timeline entry, whole, addressed by the `occurredAt` stamp `get_task`
  *  prints. */

@@ -42,7 +42,7 @@ export type CapabilityMode = (typeof CAPABILITY_MODES)[number];
 
 // ------------------------------------------------------------ sub-shapes
 
-export const stageSchema = z
+const stageSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -52,7 +52,7 @@ export const stageSchema = z
   .loose();
 export type StageDef = z.infer<typeof stageSchema>;
 
-export const workflowBoundarySchema = z
+const workflowBoundarySchema = z
   .object({
     from: z.string().min(1),
     to: z.string().min(1),
@@ -64,14 +64,14 @@ export const workflowBoundarySchema = z
   .loose();
 export type WorkflowBoundary = z.infer<typeof workflowBoundarySchema>;
 
-export const memberSchema = z
+const memberSchema = z
   .object({
     userId: z.string().min(1),
     role: z.enum(PROJECT_ROLES),
   })
   .loose();
 
-export const capabilityGrantSchema = z
+const capabilityGrantSchema = z
   .object({
     /** Id into the shared CAP_CATALOG (app/shared/capabilities.ts). */
     capabilityId: z.string().min(1),
@@ -87,7 +87,7 @@ export type CapabilityGrant = z.infer<typeof capabilityGrantSchema>;
  * threaded into a run alongside `model`. This is the SINGLE source of truth for
  * the deployment-definition shape — agents-query re-exports the inferred type
  * (no hand-mirrored interface). */
-export const agentDeploymentDefinitionSchema = z
+const agentDeploymentDefinitionSchema = z
   .object({
     kind: z.enum(["operator", "specialist"]).optional(),
     name: z.string().optional(),
@@ -130,7 +130,7 @@ export type AgentDeploymentDefinition = z.infer<
  * that have no catalog id (near-miss strings kept per contracts §7 #7).
  * `definition` is the optional loose per-field override (project-created
  * profiles carry their full definition here). */
-export const agentDeploymentSchema = z
+const agentDeploymentSchema = z
   .object({
     profileId: z.string().min(1),
     capabilities: z.array(capabilityGrantSchema).default([]),
@@ -148,7 +148,7 @@ export type AgentDeployment = z.infer<typeof agentDeploymentSchema>;
 
 /** Non-secret credential policy. The PAT itself lives AES-encrypted in
  * SQLite (Phase 7) — never in files. */
-export const credentialPolicySchema = z
+const credentialPolicySchema = z
   .object({
     credentialLabel: z.string().default(""),
     masked: z.string().default(""),
@@ -180,7 +180,7 @@ export type Guardrail = z.infer<typeof guardrailSchema>;
  * the parser keeps whatever the file says so a stale id is visible, never
  * silently dropped.
  */
-export const requiredReviewerSchema = z
+const requiredReviewerSchema = z
   .object({
     stageId: z.string().min(1),
     profileId: z.string().min(1),
@@ -268,7 +268,7 @@ const requiredReviewersSchema = z.array(requiredReviewerSchema);
  * Ruling 245: the lease rows, named so the tolerant parser can reach
  * `.element` — the same shape `requiredReviewersSchema` is extracted for.
  */
-export const fileLeasesSchema = z.array(
+const fileLeasesSchema = z.array(
   z
     .object({
       paths: z.array(z.string().min(1)).min(1),
@@ -282,7 +282,7 @@ export const fileLeasesSchema = z.array(
  *  later version's keys survive a read/write cycle. */
 export type FileLeaseRow = z.infer<typeof fileLeasesSchema>[number];
 
-export const projectFrontmatterSchema = z.object({
+const projectFrontmatterSchema = z.object({
   name: projectNameSchema,
   slug: projectSlugSchema,
   archived: archivedSchema,
@@ -329,7 +329,7 @@ export const projectFrontmatterSchema = z.object({
 });
 export type ProjectFrontmatter = z.infer<typeof projectFrontmatterSchema>;
 
-export const PROJECT_FRONTMATTER_KEYS: readonly (keyof ProjectFrontmatter)[] = [
+const PROJECT_FRONTMATTER_KEYS: readonly (keyof ProjectFrontmatter)[] = [
   "name",
   "slug",
   "archived",

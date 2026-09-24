@@ -33,7 +33,7 @@ import { toError } from "~/shared/errors";
 
 /** Owner ruling: 15 minutes covers the heavy real-world case without letting a
  *  wedged install sit forever. */
-export const WARMUP_CAP_MS = 15 * 60 * 1000;
+const WARMUP_CAP_MS = 15 * 60 * 1000;
 
 /** Server ids with a warm-up in flight IN THIS PROCESS. */
 const inFlight = new Set<string>();

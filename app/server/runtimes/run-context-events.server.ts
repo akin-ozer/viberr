@@ -23,7 +23,7 @@ import { toError } from "~/shared/errors";
  * Best-effort like the continuity notes in the run service: a task file that
  * cannot be written must never fail the line that reported the compaction.
  */
-export const RUN_COMPACTION_AUDIT_ACTION = "task.agent.compaction";
+const RUN_COMPACTION_AUDIT_ACTION = "task.agent.compaction";
 
 /** The sentence the timeline carries. */
 export function compactionNoteText(

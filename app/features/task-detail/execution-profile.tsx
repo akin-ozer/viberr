@@ -40,7 +40,7 @@ export interface LiveAgentRun {
  * live runs executes, "queued" when every one is still waiting for a slot,
  * null with no live run.
  */
-export function liveAgentRunLabel(
+function liveAgentRunLabel(
   liveAgentRuns: readonly LiveAgentRun[],
   profileId: string,
 ): "running…" | "queued" | null {
@@ -226,7 +226,7 @@ function DelayPicker({
 }
 
 /** Minutes a non-"now" delay stands for (the schedule intent's payload). */
-export function delayMinutes(delay: RunDelay): number | null {
+function delayMinutes(delay: RunDelay): number | null {
   return delay === "now" ? null : Number(delay);
 }
 

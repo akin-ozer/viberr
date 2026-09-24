@@ -29,7 +29,7 @@ import { z } from "zod";
  * leave the chain lying).
  */
 
-export const GOAL_STATUS_VALUES = [
+const GOAL_STATUS_VALUES = [
   "active",
   "paused",
   "attention",
@@ -37,7 +37,7 @@ export const GOAL_STATUS_VALUES = [
   "cancelled",
 ] as const;
 
-export const GOAL_LINK_STATUS_VALUES = [
+const GOAL_LINK_STATUS_VALUES = [
   "pending",
   "active",
   "done",

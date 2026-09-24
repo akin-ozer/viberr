@@ -79,7 +79,7 @@ export function AvatarGroup({
 
 /** The `+N` chip closing an AvatarGroup. Hidden from assistive tech: the
  *  group's own label already names every person, folded ones included. */
-export function AvatarGroupCount({
+function AvatarGroupCount({
   n,
   size = "sm",
 }: {

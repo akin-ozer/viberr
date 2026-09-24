@@ -31,7 +31,7 @@ export interface CommandHit {
 }
 
 /** Hits per KIND. The palette is a jump list, not a result page. */
-export const COMMAND_GROUP_LIMIT = 6;
+const COMMAND_GROUP_LIMIT = 6;
 
 /** SQL LIKE is the coarse filter; these are the rows we are willing to rank. */
 const TASK_SCAN_LIMIT = 60;

@@ -60,9 +60,9 @@ import { toError } from "~/shared/errors";
 const execFileAsync = promisify(execFile);
 
 /** The plugin name the CLI qualifies skills with: `viberr:<skill>`. */
-export const SKILL_PLUGIN_NAME = "viberr";
+const SKILL_PLUGIN_NAME = "viberr";
 /** The directory beside a checkout that holds every run's plugin. */
-export const SKILL_PLUGINS_DIR = ".viberr-plugins";
+const SKILL_PLUGINS_DIR = ".viberr-plugins";
 
 /**
  * R18-3 / F18-8 — remove the cloned repo's own `.claude` catalog from the run's

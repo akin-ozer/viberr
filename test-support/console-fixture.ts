@@ -30,7 +30,7 @@ export interface ConsoleFixtureGroup {
   runs: ConsoleFixtureRun[];
 }
 
-export const CONSOLE_FIXTURE: ConsoleFixtureGroup[] = [
+const CONSOLE_FIXTURE: ConsoleFixtureGroup[] = [
   {
     profileId: "operator",
     kind: "operator",
@@ -68,7 +68,7 @@ export interface FixtureLine {
 }
 
 /** The console lines a fixture run carries, oldest first. */
-export function fixtureLine(runId: string, seq: number): FixtureLine {
+function fixtureLine(runId: string, seq: number): FixtureLine {
   const text =
     `${runId} line ${seq}: ` +
     "Reading the repository layout and the failing test before changing anything. ".repeat(7);

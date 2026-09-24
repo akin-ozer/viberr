@@ -213,7 +213,7 @@ function ownRefusal(row: BackendQuotaRow | undefined, userId: string): ProfileBa
 }
 
 /** Both agent backends, in the order the panel renders them. */
-export const PROFILE_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
+const PROFILE_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
 
 /**
  * The viewer's own agent accounts. Re-derived per request (health re-probes the
@@ -221,7 +221,7 @@ export const PROFILE_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
  * `UserBackendHealth` carries a key's last four characters and never the key,
  * and a `LoginSessionView` carries only what the vendor showed the person.
  */
-export function getProfileBackends(
+function getProfileBackends(
   db: DatabaseSync,
   userId: string,
 ): ProfileBackend[] {
@@ -327,7 +327,7 @@ export function listUserMemberships(
  *  a missing/partial row reads as every category ON). Single reader of the
  *  `notifs` pref key — both the profile view and the notification-creation
  *  gate go through here. */
-export function getNotifPrefs(
+function getNotifPrefs(
   db: DatabaseSync,
   userId: string,
 ): NotifPrefs {
@@ -345,7 +345,7 @@ export function isNotifKindEnabled(
   return getNotifPrefs(db, userId)[notifCategoryForKind(kind)].app;
 }
 
-export function getTimelineDefaultPref(
+function getTimelineDefaultPref(
   db: DatabaseSync,
   userId: string,
 ): TimelineDefault {

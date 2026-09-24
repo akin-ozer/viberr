@@ -121,7 +121,7 @@ const EFFORT_LABEL = new Map<string, string>([
   ["max", "Maximum"],
 ]);
 
-export function effortLabel(id: string): string {
+function effortLabel(id: string): string {
   return EFFORT_LABEL.get(id) ?? id;
 }
 

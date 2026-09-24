@@ -51,7 +51,7 @@ const KINDS = ["skills", "mcps", "kb"] as const;
 type ResourceKind = (typeof KINDS)[number];
 
 /** The rendered noun for one grant, as the replies and the card spell it. */
-export function describeGrant(kind: ResourceKind, name: string): string {
+function describeGrant(kind: ResourceKind, name: string): string {
   const noun =
     kind === "skills" ? "skill" : kind === "mcps" ? "MCP server" : "knowledge base";
   return `${noun} ${name}`;

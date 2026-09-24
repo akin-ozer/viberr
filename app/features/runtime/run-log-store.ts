@@ -138,7 +138,7 @@ export type RunLogSource =
 /** One phrase for "this stream is not yours", per source: the task channel's
  *  logs are project-member material, a controller turn's are the conversation
  *  owner's (and org admins'). */
-export function forbiddenNote(kind: RunLogSource["kind"]): string {
+function forbiddenNote(kind: RunLogSource["kind"]): string {
   return kind === "task"
     ? "project-member only"
     : "for the conversation's owner and org admins only";
@@ -191,7 +191,7 @@ interface ThreadState {
 }
 
 /** Stored lines only — the synthetic run boundaries are not console history. */
-export function storedCount(lines: readonly { display: LogLine }[]): number {
+function storedCount(lines: readonly { display: LogLine }[]): number {
   return lines.reduce((n, l) => (isRunBoundary(l.display) ? n : n + 1), 0);
 }
 
@@ -221,7 +221,7 @@ function seedPageCursor(window: RunLogWindow): PageCursor {
 /** A window's lines with their keys; a boundary's envelope is the empty one
  *  the projection gives it. Lines without keys (a hand-built fixture) are
  *  keyed by position. */
-export function keyedLines(
+function keyedLines(
   lines: readonly LogLine[],
   keys: readonly string[] | undefined,
   raw: readonly string[],

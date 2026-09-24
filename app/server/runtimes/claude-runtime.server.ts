@@ -340,7 +340,7 @@ export function resolveClaudeEffort(effort?: string): string | undefined {
  * `resetEnvCacheForTests()`, because `getEnv()` caches per process.
  */
 const DEFAULT_CLAUDE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
-export function claudeIdleTimeoutMs(): number {
+function claudeIdleTimeoutMs(): number {
   const raw = getEnv().VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
   const n = raw ? Number(raw) : NaN;
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_CLAUDE_IDLE_TIMEOUT_MS;
@@ -517,7 +517,7 @@ const BASE_DENIED_BUILTINS = [
  * enable every skill — a form this adapter must never send, since "all" would
  * include the SDK's bundled set the filter exists to hide.
  */
-export function nativeSkillNames(skills?: readonly string[]): string[] {
+function nativeSkillNames(skills?: readonly string[]): string[] {
   if (!skills?.length) return [];
   return [...new Set(skills)].filter(isSdkSkillName);
 }
@@ -554,7 +554,7 @@ export interface NativeSkillsOutcome {
  * (`droppedSkillsNotice`). The agent then treats them as unavailable instead
  * of invoking a name that never loads.
  */
-export function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
+function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
   const granted = nativeSkillNames(spec.skills);
   if (granted.length === 0) return { native: [], dropped: [] };
   if (skillPluginInPlace(spec.skillPlugin)) return { native: granted, dropped: [] };
@@ -567,7 +567,7 @@ export function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
 
 /** The system-prompt correction for skills the persona announced as attached
  *  but the adapter could not enable (see `nativeSkillsOutcome`). */
-export function droppedSkillsNotice(dropped: readonly string[]): string {
+function droppedSkillsNotice(dropped: readonly string[]): string {
   return (
     "\n\n---\n# Attached skills could NOT be enabled on this run\n\n" +
     `The skills named above as attached to this run (${dropped.join(", ")}) ` +

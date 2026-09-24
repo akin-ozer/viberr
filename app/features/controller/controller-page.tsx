@@ -812,7 +812,7 @@ function waitStateWord(entry: DependencyRender): string {
  * the chain it belongs to. A reference like `goal-4 link 6` is an address;
  * a person reading the rail needs to know what it is.
  */
-export function waitEntryTitle(entry: DependencyRender, goals: readonly GoalView[]): string | null {
+function waitEntryTitle(entry: DependencyRender, goals: readonly GoalView[]): string | null {
   const ref = parseDependencyRef(entry.ref);
   if (ref?.kind === "goal") {
     return goals.find((g) => g.id === ref.goal)?.links.find((l) => l.index === ref.link)?.title ?? null;

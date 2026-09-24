@@ -101,7 +101,7 @@ function probeBaseEnv() {
 /** The real runner. A non-zero exit, a signal, a timeout and a missing
  *  program all become `{ ok: false, detail }`, the detail being the child's
  *  first stderr line (scrubbed) when it said anything, else the exit shape. */
-export const runCommand: CommandRunner = (command, args, options) => {
+const runCommand: CommandRunner = (command, args, options) => {
   try {
     const stdout = execFileSync(command, [...args], {
       encoding: "utf8",

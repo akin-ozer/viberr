@@ -79,7 +79,7 @@ const STORE_DIR = "store";
  *  writes the expiring audit rows there as the DURABLE record, and `npm run
  *  backup` silently dropped it. A directory that does not exist yet (a root
  *  that never purged) is skipped, as every entry here is. */
-export const BACKED_UP_STORE_DIRS = [
+const BACKED_UP_STORE_DIRS = [
   "projects",
   "agents",
   "kb",
@@ -93,7 +93,7 @@ export const BACKED_UP_STORE_DIRS = [
  * is out, and the manifest says so rather than leaving an operator to guess
  * whether their artefact contains a credential.
  */
-export const OPTIONAL_STORE_DIRS = ["runtimes"] as const;
+const OPTIONAL_STORE_DIRS = ["runtimes"] as const;
 
 /** Row counts recorded in the manifest — the tables no rescan can rebuild. */
 const COUNTED_TABLES = [
@@ -167,7 +167,7 @@ export function projectionPathIn(dataRoot: string): string {
 }
 
 /** Default artefact name — sortable, and unambiguous about which instant. */
-export function backupDirName(at: Date = new Date()): string {
+function backupDirName(at: Date = new Date()): string {
   return `viberr-backup-${at.toISOString().replace(/[:.]/g, "-")}`;
 }
 

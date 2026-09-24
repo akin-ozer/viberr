@@ -44,12 +44,12 @@ function at(base: Date, h: number, m: number): string {
 }
 
 /** Mock "today H:MM" → today at that LOCAL wall-clock time. */
-export function todayAt(h: number, m: number): string {
+function todayAt(h: number, m: number): string {
   return at(NOW, h, m);
 }
 
 /** Mock due date N days from now, as a plain calendar date (YYYY-MM-DD). */
-export function dueInDays(days: number): string {
+function dueInDays(days: number): string {
   const d = new Date(NOW.getTime() + days * 24 * 60 * 60 * 1000);
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -57,12 +57,12 @@ export function dueInDays(days: number): string {
 }
 
 /** Mock "Yesterday H:MM". */
-export function yesterdayAt(h: number, m: number): string {
+function yesterdayAt(h: number, m: number): string {
   return at(YESTERDAY, h, m);
 }
 
 /** Mock "Mar 30 H:MM" → March 30 of the current year. */
-export function mar30At(h: number, m: number): string {
+function mar30At(h: number, m: number): string {
   return at(new Date(NOW.getFullYear(), 2, 30), h, m);
 }
 

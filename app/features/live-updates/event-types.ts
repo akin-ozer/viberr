@@ -46,7 +46,7 @@ export const SSE_CONVERSATION_EVENTS: readonly SseEventName[] = ["controller.upd
  *  surface that does not render conversations: the dock's cue to reload. */
 export const CONTROLLER_UPDATED_EVENT = "viberr:controller-updated";
 
-export const SSE_ENDPOINT = "/resources/events";
+const SSE_ENDPOINT = "/resources/events";
 
 /** Scope strings as the endpoint expects them (`scope=` query params). */
 export const sseScopes = {

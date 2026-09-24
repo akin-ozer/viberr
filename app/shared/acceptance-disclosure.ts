@@ -45,7 +45,7 @@ export interface AcceptanceDisclosure {
 
 /** The form fields the ceremony posts the echo in. Named once so the writer and
  *  the reader cannot drift apart. */
-export const ACCEPT_DISCLOSURE_FIELDS = {
+const ACCEPT_DISCLOSURE_FIELDS = {
   pr: "ackPr",
   revision: "ackRevision",
   verdict: "ackVerdict",

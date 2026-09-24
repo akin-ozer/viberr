@@ -97,7 +97,10 @@ export const ALWAYS_HUMAN_ROWS: readonly {
 
 /** The capability whose `direct` grant, together with full autonomy, is the one
  *  policy that lets an operator accept completion into Done itself — the exact
- *  runtime combination checked in operator-actions.server.ts. */
+ *  runtime combination checked in operator-actions.server.ts. Exported with no
+ *  importer on purpose: exported, the build inlines it at its one use;
+ *  module-local, it ships as a variable, 4 B more on the budgeted profile
+ *  closure (ruling 457's ratchet; measured for ruling 458(g)). */
 export const DIRECT_ACCEPT_CAPABILITY_ID = "completion-for-acceptance";
 
 export interface OperatorAutonomyState {

@@ -521,7 +521,7 @@ function DeleteConfirm({
  * board, "the stages above" would name a scope that does not exist and
  * contradict the R14-1 note two lines below.
  */
-export function StageEligibility({
+function StageEligibility({
   a,
   stages,
   workflow,

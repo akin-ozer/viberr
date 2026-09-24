@@ -41,13 +41,13 @@ function viewerRole(myRole: string | null): ProjectRole | null {
 }
 
 /** Ruling 134(c): the push control's label, with its own busy text and tooltip. */
-export const PUSH_LABEL = (rev: string, prNumber: number): string =>
+const PUSH_LABEL = (rev: string, prNumber: number): string =>
   `Push ${rev} to PR #${prNumber}`;
 /** Ruling 160 (pass 35, F35-11): the refusal the server gives a delivery over a
  *  pull request a person closed without merging, said on the control rather than
  *  after the click. The server's own sentence is `closedByHumanDeliveryText`;
  *  this is its client half, so the card never offers a door that then 409s. */
-export const CLOSED_PR_DELIVERY_REFUSAL = (
+const CLOSED_PR_DELIVERY_REFUSAL = (
   prNumber: number,
   closedBy: string | null,
 ): string =>
@@ -55,7 +55,10 @@ export const CLOSED_PR_DELIVERY_REFUSAL = (
   `A closed pull request is a person's decision about the task, so Viberr opens no new ` +
   `pull request for this branch until the closed-PR decision is answered. Reopening PR ` +
   `#${prNumber} on GitHub lifts the block too.`;
-/** The refusal the server would give a plain push of a diverged branch. */
+/** The refusal the server would give a plain push of a diverged branch.
+ *  Exported with no importer on purpose: exported, the build inlines it at its
+ *  one use; module-local, it ships as a variable, 6 B more on the budgeted
+ *  project.task closure (ruling 457's ratchet; measured for ruling 458(g)). */
 export const DIVERGED_PUSH_REFUSAL =
   "Origin's copy of this branch holds commits the workspace does not, so a plain push would be refused as non-fast-forward. Resolve the branch history first; the operator can open a decision packet for it.";
 

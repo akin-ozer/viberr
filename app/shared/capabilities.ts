@@ -311,7 +311,7 @@ export function capabilityEnforcement(id: string): EnforcementScope {
  * `report-validation-verdict`, which the completion pipeline gates server-side
  * (the engage-time `verdictCapable` snapshot).
  */
-export const VERDICT_OUTCOME_CAPABILITY_IDS: readonly string[] = [
+const VERDICT_OUTCOME_CAPABILITY_IDS: readonly string[] = [
   "approve-review",
   "request-changes",
   "post-quality-flags",

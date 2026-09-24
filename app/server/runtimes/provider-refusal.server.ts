@@ -65,7 +65,7 @@ export interface RunEnd {
  * reported as a backend-availability failure. When the run carries a
  * classification, that classification decides.
  */
-export function classifyRunEnd(
+function classifyRunEnd(
   state: RunState,
   lines: readonly LogLine[],
   raw: readonly string[],

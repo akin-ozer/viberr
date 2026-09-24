@@ -41,7 +41,7 @@ export interface PacketStage {
  *  the decision and hand the task back to the agent side. Nothing they do can
  *  accept, move or reconfigure anything, so their titles are the ones the
  *  authoring guard reads. */
-export const SEND_BACK_OPTION_KINDS: readonly PacketOptionKind[] = [
+const SEND_BACK_OPTION_KINDS: readonly PacketOptionKind[] = [
   "request_edit",
   "redirect",
   "custom",

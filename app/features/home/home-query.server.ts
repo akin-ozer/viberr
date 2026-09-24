@@ -34,7 +34,7 @@ import { indexDecisionInbox } from "~/server/projections/notifications.server";
  *   index-based accents shift when projects are created — spec §8 note 6).
  */
 
-export const HOME_ACCENTS = [
+const HOME_ACCENTS = [
   "#5b76fe",
   "#187574",
   "#e8a800",
@@ -43,7 +43,7 @@ export const HOME_ACCENTS = [
   "#00b473",
 ] as const;
 
-export function accentForSlug(slug: string): string {
+function accentForSlug(slug: string): string {
   let h = 5381;
   for (let i = 0; i < slug.length; i++) h = (h * 33) ^ slug.charCodeAt(i);
   return HOME_ACCENTS[Math.abs(h) % HOME_ACCENTS.length]!;

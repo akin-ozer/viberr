@@ -14,7 +14,7 @@
 export const AUTH_BASE_PATH = "/api/auth";
 
 /** Where a provider sends the browser back — must match the OAuth app's entry. */
-export function oauthCallbackPath(provider: string): string {
+function oauthCallbackPath(provider: string): string {
   return `${AUTH_BASE_PATH}/callback/${provider}`;
 }
 

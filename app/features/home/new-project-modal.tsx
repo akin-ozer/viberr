@@ -242,7 +242,7 @@ function NewProjectConnectionField({
  * user's value and is never selected out from under them again. (The derive
  * itself already stopped on first edit — the pass-8 P1 `*Touched` rule.)
  */
-export function selectDerivedOnFocus(derived: boolean) {
+function selectDerivedOnFocus(derived: boolean) {
   return (e: React.FocusEvent<HTMLInputElement>) => {
     if (derived) e.currentTarget.select();
   };

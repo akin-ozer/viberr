@@ -80,7 +80,7 @@ export function runStatePill(run: RunView): RunStateBadge {
  * person's first name, "a restart" for boot recovery, nothing when the run
  * carries neither (a stored row from before either was recorded).
  */
-export function interruptedByClause(run: RunView): string {
+function interruptedByClause(run: RunView): string {
   if (run.interruptedBy) return ` · by ${run.interruptedBy.label.split(" ")[0]}`;
   if (run.interruptedReason === "restart") return " · by a restart";
   return "";

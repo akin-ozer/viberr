@@ -537,7 +537,7 @@ export function isAtAcceptanceBoundary(
   );
 }
 
-export function mapAgentRef(ref: AgentRef | null): AgentRender | null {
+function mapAgentRef(ref: AgentRef | null): AgentRender | null {
   if (!ref) return null;
   return {
     kind: "agent",
@@ -671,7 +671,7 @@ export function mapOperatorRef(
  * The STORED readiness, the acceptance gate and the board attention filter all
  * read `readiness`, never `displayReadiness`, and are untouched.
  */
-export function deriveDisplayReadiness(
+function deriveDisplayReadiness(
   readiness: Readiness,
   waiting: Waiting,
   packet: TaskPacket | null,
@@ -700,7 +700,7 @@ export function deriveDisplayReadiness(
   return readiness;
 }
 
-export function mapPacket(packet: TaskPacket | null): PacketRender | null {
+function mapPacket(packet: TaskPacket | null): PacketRender | null {
   if (!packet) return null;
   const { from, ...rest } = packet;
   // Spread, not a field list: the packet's own extra keys (`id`, `askedBy`, and

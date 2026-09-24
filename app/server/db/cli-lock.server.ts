@@ -85,7 +85,7 @@ export function cliLockRefusalMessage(
  * `releaseOnExit` is on: the lock file is removed when the command finishes,
  * however it finishes.
  */
-export function acquireCliWriterLock(
+function acquireCliWriterLock(
   options: Pick<CliLockOptions, "dataRoot" | "force"> = {},
 ): DataRootLock {
   const request: AcquireDataRootLockOptions = {

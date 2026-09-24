@@ -40,7 +40,7 @@ export interface DockContext {
  * backdrop and closed the overlay instead. A control that cannot work is worse
  * than no control, so the dock stays off those two surfaces.
  */
-export const DOCK_HIDDEN_ROUTE_IDS: readonly string[] = [
+const DOCK_HIDDEN_ROUTE_IDS: readonly string[] = [
   "routes/login",
   "routes/controller",
   "routes/project.controller",

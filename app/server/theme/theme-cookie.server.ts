@@ -7,14 +7,14 @@
 
 import { z } from "zod";
 
-export const THEME_COOKIE_NAME = "viberr_theme";
+const THEME_COOKIE_NAME = "viberr_theme";
 
-export const THEME_PREFERENCES = ["light", "dark", "system"] as const;
+const THEME_PREFERENCES = ["light", "dark", "system"] as const;
 export type ThemePreference = (typeof THEME_PREFERENCES)[number];
 
 /** The cookie value and the `theme` form field are both untrusted text; this
  *  is the one decoder both boundaries run before the value is a preference. */
-export const themePreferenceSchema = z.enum(THEME_PREFERENCES);
+const themePreferenceSchema = z.enum(THEME_PREFERENCES);
 
 export function isThemePreference(value: string): value is ThemePreference {
   return themePreferenceSchema.safeParse(value).success;

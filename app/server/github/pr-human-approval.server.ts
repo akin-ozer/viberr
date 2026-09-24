@@ -45,7 +45,7 @@ import type { PrApproval } from "./pr-linker.server";
  */
 
 /** Why a GitHub approval does — or does not — count as the verdict. */
-export const PR_APPROVAL_STATUSES = [
+const PR_APPROVAL_STATUSES = [
   /** A project member approved the delivered revision. This IS the verdict. */
   "counted",
   /** No Viberr user carries that GitHub handle. */
@@ -59,7 +59,7 @@ export const PR_APPROVAL_STATUSES = [
 ] as const;
 export type PrApprovalStatus = (typeof PR_APPROVAL_STATUSES)[number];
 
-export const prHumanApprovalSchema = z
+const prHumanApprovalSchema = z
   .object({
     /** The approver's GitHub login, as GitHub reported it. */
     login: z.string().min(1),

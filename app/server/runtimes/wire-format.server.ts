@@ -15,7 +15,7 @@ import { countLabel } from "~/shared/text/plural";
 // ------------------------------------------------------------ helpers
 
 /** `HH:MM:SS` in the local wall clock from an ISO instant (or now). */
-export function clockOf(iso?: string): string {
+function clockOf(iso?: string): string {
   const d = iso ? new Date(iso) : new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;

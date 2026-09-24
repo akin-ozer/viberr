@@ -53,7 +53,7 @@ export type SyncState =
   | "unknown"
   | "no_branch";
 
-export const SYNC_PILL = {
+const SYNC_PILL = {
   merged: { kind: "done", label: "merged", quiet: true },
   behind_main: { kind: "risk", label: "behind main" },
   synced: { kind: "ready", label: "synced", quiet: true },

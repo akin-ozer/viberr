@@ -70,7 +70,7 @@ export const AUDIT_RETENTION_DAYS = 90;
  * `run.recovery.reply_replayed`) are deliberately NOT here: they are counted
  * inside a 30-minute window, so a 90-day-old row can never affect a budget.
  */
-export const IDEMPOTENCY_AUDIT_ACTIONS = [
+const IDEMPOTENCY_AUDIT_ACTIONS = [
   "task.agent.replied",
   "runtime.operator.plan_executed",
 ] as const;

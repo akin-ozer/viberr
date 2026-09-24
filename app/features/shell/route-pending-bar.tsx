@@ -26,7 +26,10 @@ import { useNavigation } from "react-router";
  *     navigations that make up almost every click never flash a bar.
  */
 
-/** Long enough that an ordinary client navigation completes unannounced. */
+/** Long enough that an ordinary client navigation completes unannounced.
+ *  Exported with no importer on purpose: exported, the build inlines it at its
+ *  one use; module-local, it ships as a variable, 8 B more on every route
+ *  closure the ruling-457 ratchet budgets (measured for ruling 458(g)). */
 export const ROUTE_PENDING_DELAY_MS = 220;
 
 export function RoutePendingBar({

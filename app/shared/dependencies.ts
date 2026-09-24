@@ -60,7 +60,7 @@ export const DEPENDENCY_GRAMMAR_HINT =
  * never appear in anyone's `blockedBy`. Every writer of `taskPrefix` refuses
  * it by name instead of shipping a project whose tasks cannot be waited on.
  */
-export const RESERVED_TASK_PREFIX = "GOAL";
+const RESERVED_TASK_PREFIX = "GOAL";
 
 /** Is this prefix the reserved one? Case-insensitive: the writers upper-case
  *  before storing, so `goal` and `Goal` are the same refusal. */
