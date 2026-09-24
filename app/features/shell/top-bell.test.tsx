@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { createRoutesStub, useRevalidator, type LoaderFunctionArgs } from "react-router";
+import { createRoutesStub, redirect, useRevalidator, type LoaderFunctionArgs } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { NotificationListItem } from "~/server/projections/notifications.server";
 import * as listRoute from "~/routes/resources.notifications";
@@ -180,6 +180,11 @@ describe("a failed list load stays in the bell (ruling 454)", () => {
   for (const [failure, reject] of [
     ["a 503 during a restart", () => Promise.reject(new Response("down", { status: 503 }))],
     ["a network rejection", () => Promise.reject(new TypeError("Failed to fetch"))],
+    // Review finding bell-hover-login-returnto-resource: a dead session's
+    // login redirect, as the route answered it before its 401, is not
+    // followed from a hover either (the stub has no /login: a navigation
+    // would lose the page).
+    ["a login redirect", () => Promise.reject(redirect("/login?returnTo=%2Fresources%2Fnotifications"))],
   ] as const) {
     it(`a hover that meets ${failure} keeps the page, and the open says so and retries`, async () => {
       let calls = 0;

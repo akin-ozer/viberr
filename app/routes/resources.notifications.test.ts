@@ -56,8 +56,25 @@ describe("/resources/notifications (ruling 454)", () => {
     expect(notifications).toHaveLength(BELL_LIST_CAP);
   });
 
-  it("asks a signed-out request to sign in", async () => {
-    await expect(load()).rejects.toMatchObject({ status: 302 });
+  // Review finding bell-hover-login-returnto-resource: the bell loads this on
+  // hover, and a login redirect from here named THIS route as the returnTo, so
+  // a stale tab's hover sent the person to /login and, once signed in, to a
+  // page of raw JSON. A signed-out bell gets a 401 its own failure row shows;
+  // the page's next real navigation asks for the sign-in, with its own path.
+  it("answers a signed-out request 401, never a login redirect that names itself", async () => {
+    const answer = load();
+    await expect(answer).rejects.not.toBeInstanceOf(Response);
+    await expect(answer).rejects.toMatchObject({ init: { status: 401 } });
+  });
+
+  it("answers 401 while a forced password reset is pending", async () => {
+    const { cookie } = await app.cookieFor(deniz);
+    app.db.prepare(`UPDATE users SET pwreset_required = 1 WHERE id = ?`).run(deniz);
+    try {
+      await expect(load(cookie)).rejects.toMatchObject({ init: { status: 401 } });
+    } finally {
+      app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(deniz);
+    }
   });
 
   it("is never reloaded by a page's revalidation", async () => {

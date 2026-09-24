@@ -97,7 +97,7 @@ export function TopBell({
   const notifications: NotificationView[] = list.data?.notifications ?? [];
   const loading = list.data === undefined;
   // Ruling 454: the list route's `clientLoader` answers a failed load (an
-  // outage, a 5xx) with `notifications: null`.
+  // outage, a 5xx, a signed-out 401) with `notifications: null`.
   const failed = list.data !== undefined && list.data.notifications === null;
   useEffect(() => {
     if (failed) fetchedFor.current = null;
