@@ -12,7 +12,7 @@ import { setupAppTest, type AppTestContext } from "../test-support/test-app";
 
 /**
  * Ruling 458(d): every response carries its request's id as `X-Request-Id`, the
- * id the request's log records carry.
+ * id the request's log records carry, and the document error page shows it.
  *
  * React Router's own request handler, over the REAL entry module and the REAL
  * root route (its middleware, loader, Layout and ErrorBoundary), with a few
@@ -186,6 +186,8 @@ describe("X-Request-Id on every response (ruling 458(d))", () => {
     }
     // Five requests, five ids.
     expect(new Set(answers.map((r) => r.headers.get("X-Request-Id"))).size).toBe(5);
+    // A page that did not fail shows no id.
+    expect(await answers[0]!.text()).not.toContain("Request id");
   });
 
   it("reuses an upstream proxy's id", async () => {
@@ -202,14 +204,6 @@ describe("X-Request-Id on every response (ruling 458(d))", () => {
     for (const response of answers) {
       expect(response.headers.get("X-Request-Id")).toMatch(REQUEST_ID);
     }
-  });
-
-  it("a failing loader's page carries the id its log record names", async () => {
-    const { result: response, records } = await capturingLog(() => get("/boom"));
-    expect(response.status).toBe(500);
-    const id = response.headers.get("X-Request-Id");
-    expect(id).toMatch(REQUEST_ID);
-    expect(records.find((r) => r.msg === "request handler error")?.requestId).toBe(id);
   });
 
   it("the id on a response the middleware never saw is the one its log record carries", async () => {
@@ -234,5 +228,22 @@ describe("X-Request-Id on every response (ruling 458(d))", () => {
         notAllowed.headers.get("X-Request-Id"),
       ]),
     );
+  });
+});
+
+describe("the document error page shows the request id (ruling 458(d))", () => {
+  it("a loader failure's page names the id its header and its log record carry", async () => {
+    const { result: response, records } = await capturingLog(() => get("/boom"));
+    const html = await response.text();
+    expect(response.status).toBe(500);
+    const id = response.headers.get("X-Request-Id");
+    expect(id).toMatch(REQUEST_ID);
+    expect(html).toContain(`Request id: <code class="mono">${id}</code>`);
+    expect(records.find((r) => r.msg === "request handler error")?.requestId).toBe(id);
+  });
+
+  it("an unmatched URL's page shows none: root's loader never ran for it", async () => {
+    const response = await get("/nope");
+    expect(await response.text()).not.toContain("Request id");
   });
 });

@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { FolderIco } from "~/features/kb-browser/icons";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { slugify } from "~/shared/ids/slugify";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE } from "~/shared/mcp-tools";
 import { Icon } from "~/ui/icon";
 import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
-import { EditIco, MiniModal } from "./mini-modal";
+import { MiniModal } from "./mini-modal";
 import { useModalAction } from "./resource-helpers";
 
 /**
@@ -108,7 +107,7 @@ export function KBModal({
               value="files"
               className={"btn sm" + (mode === "files" ? "" : " ghost")}
             >
-              <FolderIco />
+              <Icon name="folder" />
               Start from files
             </RadioSegOption>
           </RadioSeg>
@@ -547,14 +546,14 @@ export function SkillModal({
               value="write"
               className={"btn sm" + (mode === "write" ? "" : " ghost")}
             >
-              <EditIco />
+              <Icon name="edit" />
               Write SKILL.md
             </RadioSegOption>
             <RadioSegOption
               value="files"
               className={"btn sm" + (mode === "files" ? "" : " ghost")}
             >
-              <FolderIco />
+              <Icon name="folder" />
               Start from files
             </RadioSegOption>
           </RadioSeg>

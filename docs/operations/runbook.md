@@ -185,9 +185,10 @@ Every response the app answers carries its request's id as `X-Request-Id` (rulin
 458(d)): the browser's devtools show it under the request's response headers. For a
 failure met while moving around the app, it is the failing `.data` request's. An inbound
 `X-Request-Id`, from a proxy in front, is reused, so the proxy's access log and the app's
-records share one id. The error page does not show the id yet: that part of 458(d) waits
-on ruling 457's root budget (ruling 458's 2026-09-24 note), so a person reporting a
-failure reads it from devtools.
+records share one id. The error page shows it too, as "Request id: …", when the failure
+arrived with the document itself (a server render, or the hydration that reuses it); an
+error met on a later navigation shows none rather than an earlier request's, so read that
+one from devtools (ruling 458(n) raised the ruling-457 ceilings for the error page's id).
 
 The app logs JSON lines on stdout. To find one request's records:
 

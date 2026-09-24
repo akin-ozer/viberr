@@ -11,12 +11,7 @@ import { TopBell } from "~/features/shell/top-bell";
 import { LivePausedStrip } from "~/features/shell/topbar";
 import { UserMenu } from "~/features/shell/user-menu";
 import type { HomeOrgSummary, HomeProjectCard } from "./home-query.server";
-import {
-  MemberStack,
-  ProjectCard,
-  ProjectRow,
-  StarIco,
-} from "./project-cards";
+import { MemberStack, ProjectCard, ProjectRow } from "./project-cards";
 
 /**
  * The home page's own sections, top to bottom: header, hero, empty state, the
@@ -345,7 +340,7 @@ export function ProjectSections({
       {pinned.length > 0 && (
         <section data-screen-label="Pinned projects">
           <div className="sec-h">
-            <StarIco on />
+            <Icon name="starfilled" />
             <h2>Pinned</h2>
             <span className="ct">{pinned.length}</span>
           </div>

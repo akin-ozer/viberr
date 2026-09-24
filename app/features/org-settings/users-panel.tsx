@@ -8,7 +8,7 @@ import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { ConfirmDelete } from "./confirm-delete";
-import { EditIco, MiniModal } from "./mini-modal";
+import { MiniModal } from "./mini-modal";
 import { useOrgAction, type OrgActionData } from "./use-org-action";
 
 /**
@@ -768,7 +768,7 @@ export function UsersPanel({
                 aria-label={"Edit " + u.name}
                 onClick={() => setEditingId(u.id)}
               >
-                <EditIco />
+                <Icon name="edit" />
               </button>
               {u.disabled ? (
                 <button

@@ -7,7 +7,7 @@
  * side (app/server/org/store-files.server.ts) — dirs first, then files.
  *
  * Exported for org-settings rows per the spec: countKbFiles, prettySize
- * (FolderIco lives in ./icons).
+ * (the folder glyph is `Icon`'s `folder`, ruling 458(f)).
  */
 
 export type StoreNode =

@@ -1,10 +1,8 @@
-import { FolderIco } from "~/features/kb-browser/icons";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
-import { EditIco } from "./mini-modal";
 import { rel, updatedLabel } from "./resource-helpers";
 import { isMcpHealthStale } from "~/shared/freshness";
 import { looksLikeWriteTool } from "~/shared/mcp-tools";
@@ -110,7 +108,7 @@ export function KbPanel({
                 aria-label={"Browse files in " + kb.name}
                 onClick={() => onBrowse(kb)}
               >
-                <FolderIco />
+                <Icon name="folder" />
               </button>
               {/* Ruling 368: the probe in flight shows itself here — busy, the
                   loader spinning, a name that says the work — and a second
@@ -136,7 +134,7 @@ export function KbPanel({
                 aria-label={"Edit " + kb.name}
                 onClick={() => onEdit(kb)}
               >
-                <EditIco />
+                <Icon name="edit" />
               </button>
               <button
                 type="button"
@@ -356,7 +354,7 @@ export function McpPanel({
                 aria-label={"Edit " + m.name}
                 onClick={() => onEdit(m)}
               >
-                <EditIco />
+                <Icon name="edit" />
               </button>
               <button
                 type="button"
@@ -445,7 +443,7 @@ export function SkillPanel({
                 aria-label={"Browse files in " + s.name}
                 onClick={() => onBrowse(s)}
               >
-                <FolderIco />
+                <Icon name="folder" />
               </button>
               <button
                 type="button"
@@ -454,7 +452,7 @@ export function SkillPanel({
                 aria-label={"Edit " + s.name}
                 onClick={() => onEdit(s)}
               >
-                <EditIco />
+                <Icon name="edit" />
               </button>
               <button
                 type="button"
@@ -545,7 +543,7 @@ export function AgentPanel({
                   aria-label={"Edit " + a.name}
                   onClick={() => onEdit(a)}
                 >
-                  <EditIco />
+                  <Icon name="edit" />
                 </button>
                 <button
                   type="button"

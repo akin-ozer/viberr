@@ -133,23 +133,3 @@ export function MiniModal({
   );
 }
 
-/** Local pencil SVG (org-settings.jsx). Ruling 458(f) moves it onto the shared
- *  `Icon` / `ICON_PATHS`; the move waits on ruling 457, since `ICON_PATHS`
- *  ships in the shell chunk every page loads (ruling 458's 2026-09-24 note). */
-export function EditIco() {
-  return (
-    <svg
-      className="ico"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z" />
-      <path d="M13.5 7.5l3 3" />
-    </svg>
-  );
-}

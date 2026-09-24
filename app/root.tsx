@@ -12,7 +12,7 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "./app.css";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { z } from "zod";
 import {
   isRouteErrorResponse,
@@ -32,7 +32,10 @@ import { SHELL_FONT_PRELOADS } from "./features/shell/font-preloads";
 import { ToastProvider } from "./ui/toast";
 import { revalidateWhen, useLiveLedger } from "./features/live-updates/revalidation-policy";
 import { getCsrfToken } from "./server/auth/csrf.server";
-import { requestContextMiddleware } from "./server/logging/request-context.server";
+import {
+  currentRequestId,
+  requestContextMiddleware,
+} from "./server/logging/request-context.server";
 import {
   authenticate,
   sessionRenewalMiddleware,
@@ -56,8 +59,8 @@ export const links: Route.LinksFunction = () => [
  * call-site work. `entry.server.tsx` reuses the id bound here rather than
  * minting a second one, so the render and the data phase share it. Ruling
  * 458(d): it also stamps the id on every response it wraps, as `X-Request-Id`.
- * The error page below does not show the id yet: that costs 139 B gzip on this
- * route's ruling-457 budget (ruling 458's 2026-09-24 note).
+ * The error page below shows it too, for the error the document arrived with
+ * (ruling 458(n) raised the ruling-457 ceilings by those bytes).
  *
  * The architecture doc promised "structured JSON logs with request/job
  * correlation identifiers" from the start. The affordance shipped once as an
@@ -86,7 +89,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // document load seeds it; a `.data` answer would find the tab's streams
   // already under way.
   if (!isDocumentNavigation(request)) return payload;
-  return { ...payload, liveHead: context.get(liveHeadContext) };
+  return {
+    ...payload,
+    liveHead: context.get(liveHeadContext),
+    // Ruling 458(d): the id the error page shows. Only the document's own
+    // error can use it (see ErrorBoundary), so a `.data` answer carries none.
+    requestId: currentRequestId(),
+  };
 }
 
 /**
@@ -207,7 +216,36 @@ const thrownMessage = z
   ])
   .catch("");
 
-export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
+/** Hydration is the only change `useSyncExternalStore` watches for here, and
+ *  React observes it without a store. The same three as `useHydrated` in
+ *  `ui/local-time.tsx`, which root does not import: its date formatters would
+ *  join the root bundle (ruling 457). */
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+function clientSnapshot(): boolean {
+  return true;
+}
+function serverSnapshot(): boolean {
+  return false;
+}
+
+export function ErrorBoundary({ error, loaderData }: Route.ErrorBoundaryProps) {
+  // Ruling 458(d): the id of the request that failed, so a person can quote it
+  // and its log line can be found. Root's data carries the document request's
+  // id, which is the failed request's only for the error the document arrived
+  // with: the server render, and the hydration render that reuses its markup
+  // (both read the server snapshot). An error met after that sits beside root
+  // data from an EARLIER request (root does not re-run on a navigation), so it
+  // shows no id rather than a wrong one; a root loader that failed on the
+  // server leaves no data, so no id either.
+  const hydrated = useSyncExternalStore(subscribeToNothing, clientSnapshot, serverSnapshot);
+  const [documentError] = useState(() => (hydrated ? null : { error }));
+  const requestId =
+    documentError?.error === error && loaderData && "requestId" in loaderData
+      ? loaderData.requestId
+      : null;
+
   // Interface review 2026-09-24 (writ-1): the page is titled by what happened
   // to the reader, never by an HTTP status, and the detail says what to do.
   let title = "Unable to load this page";
@@ -248,6 +286,11 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
           </span>
         </div>
         <p className="detail-line">{detail}</p>
+        {requestId ? (
+          <p className="detail-line">
+            Request id: <code className="mono">{requestId}</code>
+          </p>
+        ) : null}
         {stack ? (
           <pre className="mono">
             <code>{stack}</code>

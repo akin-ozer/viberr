@@ -1838,7 +1838,7 @@ const GLYPH_NOT_TEXT = new Map(Object.entries({
  * WCAG's own terms; an entry nobody hits fails the rot guard below.
  */
 const BELOW_AA_BY_DESIGN = {
-  ".pj-star.on": "the pinned-project star. --pin-star is a decorative accent on a glyph whose IDENTITY and STATE are carried elsewhere: `StarIco` swaps outline for filled, and the button's accessible name flips between `Pin <project>` and `Unpin <project>`. 1.4.11 exempts a graphic that is not required to understand the content, which is exactly the case when shape and name already carry it.",
+  ".pj-star.on": "the pinned-project star. --pin-star is a decorative accent on a glyph whose IDENTITY and STATE are carried elsewhere: the glyph swaps outline (`star`) for filled (`starfilled`), and the button's accessible name flips between `Pin <project>` and `Unpin <project>`. 1.4.11 exempts a graphic that is not required to understand the content, which is exactly the case when shape and name already carry it.",
   ".log-more:disabled": "`load older lines` while a fetch is in flight. WCAG 1.4.3 exempts text in an INACTIVE user-interface component by name, and the button also swaps its label to `loading older lines…`, so the state is not carried by contrast.",
 } satisfies Record<string, string>;
 

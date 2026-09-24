@@ -17,27 +17,6 @@ import type { HomeMember, HomeProjectCard } from "./home-query.server";
  * copy change).
  */
 
-/* ---------- local icon ----------------------------------------------------
-   Ruling 458(f) moves it onto the shared `Icon` / `ICON_PATHS`; the move
-   waits on ruling 457, since `ICON_PATHS` ships in the shell chunk every page
-   loads (ruling 458's 2026-09-24 note). */
-export function StarIco({ on }: { on?: boolean }) {
-  return (
-    <svg
-      className="ico"
-      viewBox="0 0 24 24"
-      fill={on ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" />
-    </svg>
-  );
-}
-
 /* ---------- small pieces ---------- */
 
 export function StageMeter({
@@ -285,7 +264,7 @@ export function ProjectCard({
         aria-label={(starred ? "Unpin " : "Pin ") + p.name}
         title={starred ? "Unpin" : "Pin"}
       >
-        <StarIco on={starred} />
+        <Icon name={starred ? "starfilled" : "star"} />
       </button>
     </article>
   );
@@ -335,7 +314,7 @@ export function ProjectRow({
         aria-label={(starred ? "Unpin " : "Pin ") + p.name}
         title={starred ? "Unpin" : "Pin"}
       >
-        <StarIco on={starred} />
+        <Icon name={starred ? "starfilled" : "star"} />
       </button>
     </article>
   );

@@ -16,7 +16,6 @@ import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useRelativeTime } from "~/ui/use-relative-time";
-import { FolderIco, FolderUpIco, UploadIco } from "./icons";
 import {
   entriesFromDataTransfer,
   entriesFromFileList,
@@ -139,11 +138,11 @@ function BrowserToolbar({
             primary; Done below is a plain exit. Five equal-weight secondaries
             gave the toolbar no ranking. */}
         <button type="button" className="btn primary sm" onClick={onUploadFiles}>
-          <UploadIco />
+          <Icon name="upload" />
           Upload files
         </button>
         <button type="button" className="btn sm" onClick={onUploadFolder}>
-          <FolderUpIco />
+          <Icon name="folderup" />
           Upload folder
         </button>
         <button
@@ -162,7 +161,7 @@ function BrowserToolbar({
           New document
         </button>
         <button type="button" className="btn ghost sm" onClick={onNewFolder}>
-          <FolderIco />
+          <Icon name="folder" />
           New folder
         </button>
         {/* P14-KM-08 (owner ruling R14-4): every toolbar action wrote to the
@@ -330,7 +329,7 @@ function StoreTree({
       style={{ paddingLeft: `${0.6 + depth * 1.3}rem` }}
     >
       <span className="twist"></span>
-      <FolderIco />
+      <Icon name="folder" />
       <input
         ref={newRef}
         className="fm-newinp mono"
@@ -392,7 +391,7 @@ function StoreTree({
               )}
             </span>
             {r.node.type === "dir" ? (
-              <FolderIco open={r.open} />
+              <Icon name={r.open ? "folderopen" : "folder"} />
             ) : (
               <Icon name="file" />
             )}
@@ -471,7 +470,7 @@ function StoreTree({
                       aria-label={"Upload into " + r.node.name}
                       onClick={() => onStartUpload([...r.path, r.node.name])}
                     >
-                      <UploadIco />
+                      <Icon name="upload" />
                     </button>
                     <button
                       type="button"
