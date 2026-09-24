@@ -3763,3 +3763,19 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     }
   });
 });
+
+/**
+ * Ruling 454 (CSS-6): the console lays out only the rows near its viewport. A
+ * 400-row console showed about 14 and styled, laid out and painted all 400 on
+ * every pass (mount, a thread switch, load older, the width query). The rows
+ * keep their real height once seen (`auto`), which the console's follow-tail
+ * and load-older anchoring read back through `scrollHeight`.
+ */
+describe("app.css console rows skip off-screen work (ruling 454, CSS-6)", () => {
+  it("declares content-visibility and a remembered intrinsic size on the console's rows", () => {
+    // CANARY: drop the `.console > .log-line` rule.
+    const row = RULES.find((r) => r.at.length === 0 && r.selector === ".console > .log-line");
+    expect(row?.decls.get("content-visibility")).toBe("auto");
+    expect(row?.decls.get("contain-intrinsic-size")).toMatch(/^auto \d+px$/);
+  });
+});

@@ -3758,6 +3758,13 @@ dialog[data-closing]::backdrop {
 }
 .log-line { display: grid; grid-template-columns: 60px 126px minmax(0, 1fr); gap: .5rem; padding: .125rem .75rem; font-size: .75rem; line-height: 1.45; }
 .log-line:hover { background: rgba(255, 255, 255, .03); }
+/* Ruling 454 (CSS-6): a console holds up to 400 rows, more after "load older",
+   and about fourteen are in view, so the browser skips style, layout and paint
+   for the rest until they scroll near. `auto` keeps a row's real height once it
+   has been laid out, so the scrollbar settles rather than guessing again; 21px
+   is a one-line row (.75rem at 1.45, plus .25rem of padding). A row's content
+   never draws outside it, which the paint containment this implies requires. */
+.console > .log-line { content-visibility: auto; contain-intrinsic-size: auto 21px; }
 /* Dim ladder lifted to AA on the fixed #0e1117/#0b0d12 console fills while
    keeping the terminal look and the brightness ordering (lx > out > think >
    ltag > meta > lt): timestamps 2.57:1 -> 5.26:1, tags 4.11:1 -> 6.31:1. */
