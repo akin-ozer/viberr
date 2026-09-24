@@ -13,6 +13,10 @@ import {
   roleSatisfies,
 } from "./require-user.server";
 import { insertUser } from "./user-store.server";
+import {
+  currentCorrelation,
+  runWithRequestContext,
+} from "../logging/request-context.server";
 
 describe("roleSatisfies (RBAC matrix)", () => {
   const matrix: Array<[UserRole, UserRole, boolean]> = [
@@ -96,6 +100,26 @@ describe("authenticate (better-auth session)", () => {
       .prepare(`SELECT count(*) AS c FROM session WHERE userId = ?`)
       .get(user.id) as { c: number };
     expect(count.c).toBe(0);
+  });
+
+  it("ruling 458(d): binds the user's id on the request's correlation, and nothing from the session", async () => {
+    const { user, cookie } = await seedUser();
+    const correlation = await runWithRequestContext({ requestId: "req_auth" }, async () => {
+      await authenticate(app.request("/some/where", { cookie }));
+      return { ...currentCorrelation() };
+    });
+    // The whole correlation: no session id, no token.
+    expect(correlation).toEqual({ requestId: "req_auth", userId: user.id });
+  });
+
+  it("ruling 458(d): a disabled user's request binds no user id", async () => {
+    const { user, cookie } = await seedUser();
+    app.db.prepare(`UPDATE users SET disabled = 1 WHERE id = ?`).run(user.id);
+    const correlation = await runWithRequestContext({ requestId: "req_off" }, async () => {
+      await authenticate(app.request("/x", { cookie }));
+      return { ...currentCorrelation() };
+    });
+    expect(correlation).toEqual({ requestId: "req_off" });
   });
 
   it("writ-1: requireRole refuses a member with the org-admin sentence", async () => {

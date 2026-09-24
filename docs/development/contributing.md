@@ -88,7 +88,11 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
 - **Logging** is the JSON logger (`app/server/logging/logger.server.ts`); never
   `console.log` in server code. Nothing credential-shaped may be logged
   (`CREDENTIAL_ENV_RE` in `runtime-registry.server.ts`, the token patterns in
-  `git-output-redact.server.ts`).
+  `git-output-redact.server.ts`). Records inside a request carry its correlation
+  (`request-context.server.ts`) with no call-site work; an id a request learns later
+  goes on with `bindCorrelation` (identifiers only: the session guard binds `userId`,
+  a run's launch binds `runId` and `taskKey` in its own `forkCorrelation`), and every
+  response echoes the request id as `X-Request-Id` (ruling 458(d)).
 
 ## 4. Data and schema changes while pre-prod
 

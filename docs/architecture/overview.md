@@ -33,7 +33,7 @@ is vertical; run one instance per data root.
 | Auth | better-auth 1.6.25 behind `app/lib/auth.server.ts`; no plugins |
 | Agents | `@anthropic-ai/claude-agent-sdk` ^0.3.280, `@openai/codex-sdk` ^0.156.0, `@playwright/mcp` 0.0.79 with Debian chromium; in the image, `uv`/`uvx` 0.12.3 for Python stdio MCP servers and `git`, `make`, `curl` and `pnpm` 12.4.1 for agent shells (ruling 196) |
 | UI | one stylesheet `app/app.css` (no Tailwind), Inter / JetBrains Mono from `@fontsource` (ruling 365), lexical (comment composer), dnd-kit (board), Shiki (the attachment code reader, ruling 363), `radix-ui` for unstyled behaviour only (the user menu and `radio-seg`, ruling 166), thinking-orbs + @number-flow/react (the run console's wait row and rolling counts, rulings 366 and 451), react-markdown + remark-gfm |
-| Logging | dependency-free JSON lines on stdout with `AsyncLocalStorage` request correlation; a fatal crash writes one synchronous stderr line first |
+| Logging | dependency-free JSON lines on stdout with `AsyncLocalStorage` request correlation (`requestId`, method, path, the signed-in `userId`, and `runId`/`taskKey` on a run's own work); every response carries the id as `X-Request-Id` (ruling 458(d)); a fatal crash writes one synchronous stderr line first |
 
 ## 3. Layers and the rules between them
 
@@ -84,7 +84,12 @@ Rules that hold in the tree (verified by grep, restated from
 finishes before the first request (§5). `root.tsx` mounts three middlewares: request
 correlation, the SSE broker's head read before any loader (a document load hands it to
 the page's first stream, ruling 457) and the rolling-session renewal, which forwards
-better-auth's refreshed cookie on whichever GET resolved the session (F10-17). The root
+better-auth's refreshed cookie on whichever GET resolved the session (F10-17). The
+correlation middleware binds one id per request (an inbound `X-Request-Id` is reused) and
+answers with it as `X-Request-Id`; `entry.server.tsx` stamps the responses React Router
+answers without route middleware (an unmatched URL, a 405, a refused `.data` mutation).
+The session guard binds the user's id once the session resolves, and a run started in the
+request logs its own work under its `runId` and `taskKey` (ruling 458(d)). The root
 loader authenticates, reads the theme cookie and mints the CSRF token; it re-runs only
 after a sign-in, a sign-out, a theme or profile change and on a document load (ruling
 457). A signed-in page also mounts the controller dock (ruling 121).

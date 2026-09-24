@@ -54,7 +54,8 @@ export const links: Route.LinksFunction = () => [
  * P13-D-30: binds one correlation id for the whole request, so every
  * `logger.*` call from any loader, action or nested route carries it with no
  * call-site work. `entry.server.tsx` reuses the id bound here rather than
- * minting a second one, so the render and the data phase share it.
+ * minting a second one, so the render and the data phase share it. Ruling
+ * 458(d): it also answers every response with the id as `X-Request-Id`.
  *
  * The architecture doc promised "structured JSON logs with request/job
  * correlation identifiers" from the start. The affordance shipped once as an

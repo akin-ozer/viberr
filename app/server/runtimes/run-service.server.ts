@@ -18,6 +18,11 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
+import {
+  bindCorrelation,
+  carryCorrelation,
+  forkCorrelation,
+} from "~/server/logging/request-context.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
 import {
   canInterruptControllerRun,
@@ -30,6 +35,7 @@ import {
 } from "~/server/settings/instance-settings.server";
 import {
   RUN_PHASE,
+  type RunCallbacks,
   type RunHandle,
   type RunMcpServers,
   type RunSpec,
@@ -1982,7 +1988,10 @@ function admitRun(
     return true;
   }
   const queue = state.pending[lane];
-  queue.push({ runId, launch: launchThunk, dataRoot });
+  // Ruling 458(d): a parked run is launched later by whichever run frees the
+  // slot, inside that run's correlation. It carries the correlation of the
+  // request that started it instead, so its records name that request and user.
+  queue.push({ runId, launch: carryCorrelation(launchThunk), dataRoot });
   logger.info("run queued behind the concurrency cap", {
     runId,
     lane,
@@ -2170,7 +2179,7 @@ function launch(
   // (crashing the process in prod, failing the suite when a test's DB closes
   // before an in-flight run settles). sink.line self-catches; guard the
   // phase/finalize paths the same way.
-  const handle = adapter.start(spec, {
+  const callbacks: RunCallbacks = {
     onLine: (line) => sink.line(line),
     onPhase: (phase, step) => {
       try {
@@ -2211,6 +2220,20 @@ function launch(
       // starts under a compaction still in flight.
       void settleRun(exit);
     },
+  };
+  // Ruling 458(d): the run's own work (its adapter stream, the sink, the settle
+  // and the completion callbacks) logs under its runId and taskKey, plus the
+  // request and user behind it. It gets its OWN copy of the correlation: every
+  // continuation of a request shares one object, and a run's completion can
+  // start the next run in the same lineage (operator → specialist → reviewer),
+  // so binding in place would re-stamp the earlier run's later records with
+  // the newest id. A run started from another run's completion logs under that
+  // run's ids until its own launch binds its own. Outside a request (boot
+  // recovery, a watcher- or timer-started run) nothing is bound; those records
+  // carry their own ids.
+  const handle = forkCorrelation(() => {
+    bindCorrelation({ runId: spec.runId, taskKey: spec.taskKey });
+    return adapter.start(spec, callbacks);
   });
   // Only track the handle if the run is still in flight. A synchronously-exiting
   // adapter (or a spawn-time crash) fires onExit DURING adapter.start(), which

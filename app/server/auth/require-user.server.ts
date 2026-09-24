@@ -6,6 +6,7 @@ import type {
   UserRole,
 } from "~/shared/mapping/user.server";
 import { getDb } from "../db/sqlite.server";
+import { bindCorrelation } from "../logging/request-context.server";
 import { findUserById } from "./user-store.server";
 
 /**
@@ -126,6 +127,10 @@ async function resolveSession(request: Request): Promise<AuthResolution> {
     db.prepare(`DELETE FROM session WHERE id = ?`).run(result.session.id);
     return { ctx: null, renewalHeaders };
   }
+  // Ruling 458(d): every later log record of this request names who made it.
+  // Every guard resolves the session here, so this is the one place. The user
+  // id only: nothing from the session itself (its token is a credential).
+  bindCorrelation({ userId: user.id });
   return {
     ctx: {
       user: toSessionUser(user),
