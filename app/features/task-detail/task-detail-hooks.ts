@@ -120,7 +120,7 @@ export function useRunControls({
   // so the two surfaces on one task disagreed. An unowned task (null principal)
   // has nobody to bill on either backend.
   //
-  // Ruling 454 (TASK-4): kept as one array while the answer is the same, so the
+  // Ruling 457 (TASK-4): kept as one array while the answer is the same, so the
   // memoised console does not re-render on a revalidation that changed nothing.
   const claudeAvailable = runPrincipal?.claude.available ?? false;
   const codexAvailable = runPrincipal?.codex.available ?? false;
@@ -244,7 +244,7 @@ export function useLogSelection(runtime: RunView[]) {
   const pendingLogReady =
     pendingLogSel !== null && runtime.some((r) => r.id === pendingLogSel);
   const shownLogSel = pendingLogReady ? pendingLogSel : logSel;
-  // Ruling 454 (TASK-4): stable while `pendingLogReady` holds, so the memoised
+  // Ruling 457 (TASK-4): stable while `pendingLogReady` holds, so the memoised
   // console and run card do not re-render on a revalidation that changed
   // nothing they draw.
   const selectLog = useCallback(

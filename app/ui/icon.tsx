@@ -74,7 +74,7 @@ export function storeIcon(name: string): IconName {
 }
 
 /**
- * Ruling 454: one `{__html}` object per glyph, made once. React 19 compares
+ * Ruling 457: one `{__html}` object per glyph, made once. React 19 compares
  * `dangerouslySetInnerHTML` by the object's identity, so a fresh object on each
  * render re-parsed the markup and replaced the SVG's children every time an
  * icon re-rendered (60 per task-page render, 133 per board revalidation).

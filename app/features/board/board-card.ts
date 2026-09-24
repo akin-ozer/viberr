@@ -1,7 +1,7 @@
 import type { TaskSummary } from "~/shared/mapping/task.server";
 
 /**
- * Ruling 454 (BOARD-3): what the board ships for one card. The board route
+ * Ruling 457 (BOARD-3): what the board ships for one card. The board route
  * used to hand every card the whole 49-field `TaskSummary` (the full decision
  * packet, the goal, commits, file path, timestamps and counts), of which the
  * card face (ruling 365), `card-status.ts`, `board-filters.ts`, the list view

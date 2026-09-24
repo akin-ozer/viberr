@@ -3024,7 +3024,7 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
         : [],
     );
     const selectors = looping.map((l) => l.selector);
-    // Ruling 454 moved the `pulse-a` loop onto each dot's `::after`, where it
+    // Ruling 457 moved the `pulse-a` loop onto each dot's `::after`, where it
     // scales and fades a copy of the dot instead of animating box-shadow.
     expect(selectors).toEqual(
       expect.arrayContaining([".chip .working::after", ".rdot.running::after", ".lcaret"]),
@@ -3590,7 +3590,7 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     const played = RULES.flatMap((r) =>
       animationNames(r.decls.get("animation") ?? r.decls.get("animation-name") ?? "").map((n) => `${r.selector} → ${n}`),
     );
-    // A floor against a vacuous scan (it counts rules, and ruling 454 folded
+    // A floor against a vacuous scan (it counts rules, and ruling 457 folded
     // the five `pulse-a` rules into one).
     expect(played.length).toBeGreaterThan(35);
     expect(played.filter((p) => !declared.has(p.split(" → ")[1]!))).toEqual([]);
@@ -3765,13 +3765,13 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
 });
 
 /**
- * Ruling 454 (CSS-6): the console lays out only the rows near its viewport. A
+ * Ruling 457 (CSS-6): the console lays out only the rows near its viewport. A
  * 400-row console showed about 14 and styled, laid out and painted all 400 on
  * every pass (mount, a thread switch, load older, the width query). The rows
  * keep their real height once seen (`auto`), which the console's follow-tail
  * and load-older anchoring read back through `scrollHeight`.
  */
-describe("app.css console rows skip off-screen work (ruling 454, CSS-6)", () => {
+describe("app.css console rows skip off-screen work (ruling 457, CSS-6)", () => {
   it("declares content-visibility and a remembered intrinsic size on the console's rows", () => {
     // CANARY: drop the `.console > .log-line` rule.
     const row = RULES.find((r) => r.at.length === 0 && r.selector === ".console > .log-line");

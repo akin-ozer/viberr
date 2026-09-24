@@ -94,7 +94,7 @@ export function getControllerSurface(
     conversationId?: string | null;
     all?: boolean;
     dataRoot?: string;
-    /** Ruling 454 (owner decision 2): how much of the open thread's console
+    /** Ruling 457 (owner decision 2): how much of the open thread's console
      *  window to carry. The routes pass `shown` for a document load and
      *  `none` for a `.data` request; omitted, every window is carried. */
     console?: ConsoleShipping;

@@ -72,7 +72,7 @@ const WHO_NAME = {
  * that walks backwards through it via `/resources/run-log?before=`.
  *
  * The line budget is declared in runtime-types.ts, because the console reads
- * it too (ruling 454, CON-2: a tail further behind than one window re-windows).
+ * it too (ruling 457, CON-2: a tail further behind than one window re-windows).
  */
 export const RUN_LOG_WINDOW_BYTES = 384 * 1024;
 
@@ -124,7 +124,7 @@ function renderStateOf(lifecycle: RunState, finished: string | null): RunView["s
 }
 
 /**
- * Ruling 454 (LIVE-1): the facts of a run row that move while it streams —
+ * Ruling 457 (LIVE-1): the facts of a run row that move while it streams —
  * the Live run strip's phase, step, turns and tokens and the console's cache
  * row. One mapping for the loader's `RunView` and the `/resources/run-log`
  * answer the console tails with, so the two can never read a row differently.
@@ -170,7 +170,7 @@ export function runLiveFacts(row: AgentRunRow): RunLiveFacts {
       compactions: row.compactions,
     },
   };
-  // Ruling 454 (CON-7): the row's version (`patchRun` moves `updated_at` on
+  // Ruling 457 (CON-7): the row's version (`patchRun` moves `updated_at` on
   // every fact write), so the console keeps the newer of a revalidation's
   // read and a tail read, whichever lands last.
   const factsAt = Date.parse(row.updated_at);
@@ -328,7 +328,7 @@ function pickRepresentative(rows: AgentRunRow[]): AgentRunRow {
 }
 
 /**
- * Ruling 454 (owner decision 2, 2026-09-24): how much of each agent group's
+ * Ruling 457 (owner decision 2, 2026-09-24): how much of each agent group's
  * console a projection carries.
  *
  *   - `all`: every group's window, display lines and stored envelopes. The
@@ -372,7 +372,7 @@ export function projectRunsForTask(
   const groups = groupRuns(listRunsForTaskRows(db, projectSlug, taskKey));
   if (groups.length === 0) return [];
   const representatives = groups.map(pickRepresentative);
-  // Ruling 454 (TASK-1): one COUNT/MAX for the task, not one per run.
+  // Ruling 457 (TASK-1): one COUNT/MAX for the task, not one per run.
   const stats =
     shipping === "withheld" ? new Map<string, RunLineStats>() : runLineStatsForTask(db, projectSlug, taskKey);
   const shown = shipping === "shown" ? shownGroupIndex(representatives) : -1;
@@ -413,7 +413,7 @@ function groupRuns(rows: AgentRunRow[]): AgentRunRow[][] {
 }
 
 /**
- * Ruling 454 (TASK-1, owner decision 2): the console window of the agent group
+ * Ruling 457 (TASK-1, owner decision 2): the console window of the agent group
  * `run` belongs to, as the task loader would ship it for the shown group:
  * display lines, their keys and the window facts, plus the representative's
  * live facts. The console fills a thread with this one request when the page
@@ -468,7 +468,7 @@ interface GroupConsoleSlice {
 }
 
 /**
- * How much of each line a window reads (ruling 454): `full` bodies and
+ * How much of each line a window reads (ruling 457): `full` bodies and
  * envelopes, `display` bodies only, `sizes` neither (only the facts that
  * bound the window and find the continuity marker), `withheld` nothing.
  */
@@ -488,7 +488,7 @@ interface WindowLine {
  * first: drop from the OLDEST end of the run's tail until the byte budget
  * fits — one 300 KB tool output must not evict the whole rest of the window —
  * but keep at least `budget.keep` of the newest (see `windowForGroup`). The
- * two ruling-454 reads apply that rule inside their query, so a line outside
+ * two ruling-457 reads apply that rule inside their query, so a line outside
  * the window is neither returned nor parsed.
  */
 function readTail(db: DatabaseSync, runId: string, budget: TailBudget, read: WindowRead): WindowLine[] {
@@ -560,7 +560,7 @@ function deadSessionId(raw: string | null): string | null {
  * always survives the budget, then re-assembles chronologically with the same
  * explicit `run N of M` boundary UI-53 introduced.
  *
- * Ruling 454: the window is bounded the same way whatever `read` carries, so a
+ * Ruling 457: the window is bounded the same way whatever `read` carries, so a
  * thread the console fills later gets exactly the window a document load
  * would have shipped, and the continuity marker (P13-D-2) counts only while it
  * is inside that window (the panel's retirement rule, continuity-recovery.tsx).

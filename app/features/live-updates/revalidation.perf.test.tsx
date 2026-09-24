@@ -22,7 +22,7 @@ import {
 } from "../../../test-support/revalidation-harness";
 
 /**
- * Ruling 454, journeys `board-live`, `compose-send`, `task-open` and
+ * Ruling 457, journeys `board-live`, `compose-send`, `task-open` and
  * `live-run`: how many loaders one trigger re-runs in a tab, counted on the
  * harness in `test-support/revalidation-harness.tsx` (React Router with single
  * fetch's revalidation choice, the real broker in-process, the workspace's
@@ -57,7 +57,7 @@ async function tab(options: HarnessOptions) {
   return harness;
 }
 
-describe("loaders re-run per trigger (ruling 454)", () => {
+describe("loaders re-run per trigger (ruling 457)", () => {
   it("BOARD-1 / RF-3: five keystrokes in the board filter", async () => {
     const harness = await tab({ path: BOARD });
     for (const value of ["l", "lo", "log", "logi", "login"]) {

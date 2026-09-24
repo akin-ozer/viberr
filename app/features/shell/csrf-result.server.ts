@@ -15,7 +15,7 @@ import { assertCsrf } from "~/server/auth/csrf.server";
  *
  * Returns `null` when the token is valid, or the 403 result the client toast
  * handlers already know how to read. `requireFormAction` answers with it too
- * (ruling 454, RV-1).
+ * (ruling 457, RV-1).
  */
 export async function csrfError(
   request: Request,

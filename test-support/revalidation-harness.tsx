@@ -35,7 +35,7 @@ import {
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
 /**
- * Ruling 454: a browser tab's revalidation behaviour, measured in jsdom the way
+ * Ruling 457: a browser tab's revalidation behaviour, measured in jsdom the way
  * the app runs it (`revalidation.perf.test.tsx` and the live-update policy
  * tests).
  *
@@ -291,8 +291,8 @@ export interface HarnessOptions {
   path: string;
   /**
    * Replaces a route's `shouldRevalidate` (each defaults to the one its route
-   * module exports: `revalidateWhen(<id>)`, ruling 454). `null` leaves the
-   * route on React Router's default, as it was before ruling 454.
+   * module exports: `revalidateWhen(<id>)`, ruling 457). `null` leaves the
+   * route on React Router's default, as it was before ruling 457.
    */
   shouldRevalidate?: Partial<Record<HarnessRouteId, ShouldRevalidateFunction | null>>;
   /** Runs inside the task action, before it answers (its writes' events). */

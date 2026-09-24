@@ -13,7 +13,7 @@ import { initialsOf } from "~/ui/initials";
 import { useDismiss } from "~/ui/use-dismiss";
 
 /**
- * The account menu as pages ship it. Ruling 454: the menu itself
+ * The account menu as pages ship it. Ruling 457: the menu itself
  * (`user-menu-panel.tsx`, a Radix DropdownMenu per ruling 166) and the Radix
  * primitives under it were about 32 KB gzip on every signed-in page, for a
  * menu that opens a few times a session. So pages render only its trigger,
@@ -120,7 +120,7 @@ export function UserMenu({
     setMenu(false);
   };
 
-  // Review finding UM-PENDING-OPEN (ruling 454): a press that beat the fetch
+  // Review finding UM-PENDING-OPEN (ruling 457): a press that beat the fetch
   // opens the menu when it lands, and the menu then takes the focus. So the
   // pending press is dismissed the way Radix dismisses the open menu: Escape,
   // or a press or the focus outside the trigger. Otherwise the menu opened

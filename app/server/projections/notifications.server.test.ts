@@ -95,7 +95,7 @@ describe("notifications", () => {
     createNotification(db, { id: "gone", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: "wiped-proj", taskKey: "WIP-9" });
     // The orphan ("gone") does not inflate the badge — only org + live count.
     expect(countUnreadNotifications(db, "u_1")).toBe(2);
-    // Ruling 454 / F19-25: the bell's head counts the orphan beside the badge,
+    // Ruling 457 / F19-25: the bell's head counts the orphan beside the badge,
     // from the server now that pages no longer ship the list; read rows and
     // other people's rows count in neither.
     createNotification(db, { id: "gone-read", userId: "u_1", kind: "packet", text: "t", projectSlug: "wiped-proj", readAt: "2026-07-04T00:00:00Z" });

@@ -36,7 +36,7 @@ export function PageTopbar({
   title: string;
   user: MenuUser;
   theme: ThemePreference;
-  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 454). */
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 457). */
   unread: number;
   orphanUnread: number;
   /** The palette lives in the layout (one mount per surface), so the trigger

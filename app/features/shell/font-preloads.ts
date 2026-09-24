@@ -4,7 +4,7 @@ import interLatin500 from "@fontsource/inter/files/inter-latin-500-normal.woff2?
 import interLatin700 from "@fontsource/inter/files/inter-latin-700-normal.woff2?url";
 
 /**
- * Ruling 454: the Inter faces a first paint needs are preloaded, so the
+ * Ruling 457: the Inter faces a first paint needs are preloaded, so the
  * browser fetches them while it parses the HTML instead of discovering them
  * only after the root stylesheet has been downloaded, parsed and matched.
  *

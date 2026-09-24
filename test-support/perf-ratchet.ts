@@ -3,7 +3,7 @@ import { PERF_BUDGETS } from "./perf-budgets";
 import { budgetVerdict } from "./perf-verdict";
 
 /**
- * Ruling 454: asserts one measured figure against its ratchet ceiling
+ * Ruling 457: asserts one measured figure against its ratchet ceiling
  * (`test-support/perf-budgets/`). Fails on a regression AND on an unrecorded
  * improvement; the failure message says which number to write.
  */

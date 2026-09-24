@@ -237,7 +237,7 @@ export interface RunCallbacks {
 }
 
 /** The phase vocabulary both adapters emit; declared with the client-safe run
- *  types, because the controller page names the phase too (ruling 454). */
+ *  types, because the controller page names the phase too (ruling 457). */
 export { RUN_PHASE } from "~/features/runtime/runtime-types";
 
 /** Longest `step` we persist — the strip truncates at ~44ch and the column is

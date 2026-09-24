@@ -184,7 +184,7 @@
      the one sanctioned non-step.) */
   /* Ruling 365: ONE UI typeface. Inter carries the body and the display
      token alike (Manrope and Noto Sans are gone); the mono face stays for
-     code and for identifiers that are code. "Inter Fallback" (ruling 454,
+     code and for identifiers that are code. "Inter Fallback" (ruling 457,
      the last section of this file) is what text draws in until Inter arrives. */
   --font-display: "Inter", "Inter Fallback", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-body: "Inter", "Inter Fallback", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -1384,7 +1384,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .wait-tag .ico { width: 13px; height: 13px; }
 .wait-tag .working { position: relative; width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); }
 /* The "agent working" pulse (R21-8, ruling 365(b)): a ring that swells about
-   5px past the dot and fades. Ruling 454: drawn as a copy of the dot that only
+   5px past the dot and fades. Ruling 457: drawn as a copy of the dot that only
    scales and fades, so the compositor runs it; it animated box-shadow, which
    repainted every working dot on the main thread every frame and stalled on
    each revalidation. At rest the copy sits exactly on the dot, in its colour. */
@@ -3291,7 +3291,7 @@ dialog[data-closing]::backdrop {
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-track { background: transparent; }
-/* Ruling 454 (owner, 2026-09-24): the scrollers whose content changes while
+/* Ruling 457 (owner, 2026-09-24): the scrollers whose content changes while
    someone watches keep the scrollbar's gutter, so a lane, the task page, the
    run console or a transcript does not narrow and rewrap its content the
    moment a live update makes it overflow (or stop overflowing). */
@@ -3758,7 +3758,7 @@ dialog[data-closing]::backdrop {
 }
 .log-line { display: grid; grid-template-columns: 60px 126px minmax(0, 1fr); gap: .5rem; padding: .125rem .75rem; font-size: .75rem; line-height: 1.45; }
 .log-line:hover { background: rgba(255, 255, 255, .03); }
-/* Ruling 454 (CSS-6): a console holds up to 400 rows, more after "load older",
+/* Ruling 457 (CSS-6): a console holds up to 400 rows, more after "load older",
    and about fourteen are in view, so the browser skips style, layout and paint
    for the rest until they scroll near. `auto` keeps a row's real height once it
    has been laid out, so the scrollbar settles rather than guessing again; 21px
@@ -5840,7 +5840,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   background: var(--surface); overflow: hidden; text-decoration: none; color: var(--fg);
 }
 .tl-attach-thumb:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
-/* Ruling 454: the frame has its final size before the lazy picture arrives,
+/* Ruling 457: the frame has its final size before the lazy picture arrives,
    as the panel's tile does, so the feed does not jump when it loads. */
 .tl-attach-thumb img { display: block; width: 100%; height: 150px; object-fit: cover; object-position: top; background: var(--tint-hover); }
 .tl-attach-thumb .nm {
@@ -7018,7 +7018,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   .refused { animation: none; }
 }
 
-/* ---------- Ruling 454: the metric-matched Inter fallback ----------
+/* ---------- Ruling 457: the metric-matched Inter fallback ----------
    Every Inter face is `font-display: swap`, so a first visit paints in the
    next family of the stack until the woff2 arrives. That used to be the
    system face, whose different widths re-wrapped every line when Inter

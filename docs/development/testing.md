@@ -14,7 +14,7 @@ npm run lint        # oxlint + vendored anti-slop plugin; must exit 0
 npm run typecheck   # react-router typegen + tsc
 npm test            # vitest run, app/**/*.test.{ts,tsx}
 npm run build       # react-router build (production build)
-node scripts/measure-routes.mjs --check   # bundle ratchet over build/client (ruling 454)
+node scripts/measure-routes.mjs --check   # bundle ratchet over build/client (ruling 457)
 npm run e2e         # playwright against the production Docker image (Docker required)
 ```
 

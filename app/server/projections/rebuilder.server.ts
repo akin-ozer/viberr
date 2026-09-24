@@ -135,7 +135,7 @@ function nowIso(): string {
 }
 
 /**
- * Ruling 454 (SRV-4): one file's re-projection is ONE transaction. It used to
+ * Ruling 457 (SRV-4): one file's re-projection is ONE transaction. It used to
  * run as N+5 autocommit writes (one WAL sync per timeline event: 305 commits
  * for a 300-event task), and with the project cascade below that multiplied by
  * every task in the project. The projection events the body raises are held
@@ -219,7 +219,7 @@ interface TaskProjectContext {
  * acceptance boundary, the resolved required reviewers, the repo, the member
  * ids behind guest flags). `rebuildTaskFile` reads its context here, and
  * `rebuildProjectFile` compares this digest before and after it writes the row
- * to decide whether the tasks must follow (ruling 454, SRV-3), so the cascade
+ * to decide whether the tasks must follow (ruling 457, SRV-3), so the cascade
  * test can never drift from what a task actually reads.
  */
 function projectContextForTasks(
@@ -400,7 +400,7 @@ function rebuildProjectFileNow(
   // rebuildAll suppresses the cascade and forces its own task walk instead
   // (see skipTaskCascade), reading `taskFacingChanged` for the same answer.
   //
-  // Ruling 454 (SRV-3): "the project file changed" was the test here, and
+  // Ruling 457 (SRV-3): "the project file changed" was the test here, and
   // every task creation changes it — `allocateTaskKey` bumps nextTaskNumber —
   // so creating one task re-projected all of them and sent one task.updated per
   // task to every open board and task page (30 tasks: 30 events, 279 commits).
@@ -438,7 +438,7 @@ function rebuildProjectFileNow(
 }
 
 /**
- * Ruling 454: one task of the project cascade, in a SAVEPOINT of the project's
+ * Ruling 457: one task of the project cascade, in a SAVEPOINT of the project's
  * transaction. Since the project row became one transaction (SRV-4), a task
  * that threw here rolled back the project row and its members too: an admin's
  * member add never landed, and every later write of project.md (a task-key
@@ -981,7 +981,7 @@ function rebuildTaskFileNow(
   });
   // F28-D3: commit marker — flip the sentinel to the true content_hash only now
   // that the projection row, the task_events rows and the diagnostics have all
-  // landed. Everything above runs in one transaction (ruling 454), so this row
+  // landed. Everything above runs in one transaction (ruling 457), so this row
   // is consistent by the time the hash lets a later rebuild skip it.
   db.prepare(
     `UPDATE task_projections SET content_hash = ? WHERE project_slug = ? AND task_key = ?`,
@@ -1087,7 +1087,7 @@ function sameTaskEventContent(a: TaskEventColumns, b: TaskEventColumns): boolean
 }
 
 /**
- * Ruling 454 (CS-6, CS-1): write a task's timeline rows (`fresh`, newest
+ * Ruling 457 (CS-6, CS-1): write a task's timeline rows (`fresh`, newest
  * first, position 0 = newest) without re-issuing the rows that did not change.
  *
  * The rebuilder used to DELETE every row and INSERT them all again, so one

@@ -365,11 +365,11 @@ describe("every project-scoped route carries a membership gate", () => {
     "project.task.tsx",
     "project.tsx",
   ];
-  /** Every project route: since ruling 454 (BOARD-6) the board serves its own
+  /** Every project route: since ruling 457 (BOARD-6) the board serves its own
    *  columns instead of the layout serving them. */
   const EXPECTED_LOADER_ROUTES = EXPECTED_PROJECT_ROUTES;
 
-  /** Ruling 454 (BOARD-6): the layout and the board read the project through
+  /** Ruling 457 (BOARD-6): the layout and the board read the project through
    *  ONE gated read, `readWorkspace` (routes/project-workspace.server.ts). */
   const WORKSPACE_READ = "readWorkspace(request, db, params.slug, user)";
 
@@ -411,7 +411,7 @@ describe("every project-scoped route carries a membership gate", () => {
     const taskLoader = body("project.task.tsx", "loader")!;
     expect(taskLoader.split("\n").length).toBeGreaterThan(5);
     expect(taskLoader).toContain("requireVisibleProject(");
-    // Ruling 454 (BOARD-6): the board has its own loader, gated by the
+    // Ruling 457 (BOARD-6): the board has its own loader, gated by the
     // layout's own read.
     expect(body("project.board.tsx", "loader")).toContain(WORKSPACE_READ);
     // …and it has to extract the NON-async form too — the exact shape BS-1 hid.
@@ -447,7 +447,7 @@ describe("every project-scoped route carries a membership gate", () => {
     // `?_routes=` filter and needs its own gate.
     const withLoader = files.filter((f) => body(f, "loader") !== null);
     expect(withLoader).toEqual(EXPECTED_LOADER_ROUTES);
-    // Ruling 454 (BOARD-6): the layout's inlined members-only 404 moved into
+    // Ruling 457 (BOARD-6): the layout's inlined members-only 404 moved into
     // the one read the layout and the board share, which refuses an unknown
     // slug and a non-member with the same bytes before any viewer-scoped read.
     const workspaceRead = readFileSync(path.join(routesDir, "project-workspace.server.ts"), "utf8");

@@ -442,7 +442,7 @@ function linkOf(links: TaskLinks | undefined, key: string): string | undefined {
 }
 
 /**
- * Ruling 454 (CTL-7): the links THIS text can render. A transcript hands every
+ * Ruling 457 (CTL-7): the links THIS text can render. A transcript hands every
  * message one conversation-wide map, so a reply that names a new key changed
  * the map under all thirty messages above it and re-parsed each one. Only a key
  * the text names can change its output, so the maps are compared on those.

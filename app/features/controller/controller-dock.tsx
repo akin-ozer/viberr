@@ -39,7 +39,7 @@ import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/eve
  * open/closed state for the life of the tab, and shows one line naming what
  * the controller knows here.
  *
- * Live (ruling 454): the dock's two resources, the open panel's view and the
+ * Live (ruling 457): the dock's two resources, the open panel's view and the
  * status every page's button reads (unseen replies, turns working), ride no
  * page revalidation. The dock loads them on the moments that change them: its
  * own opening, selection and sends, a `controller.updated` that the page's
@@ -47,7 +47,7 @@ import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/eve
  * works, a 5 s poll of the small status. While open, the dock also holds its
  * own stream for the surfaces that have none.
  *
- * Ruling 454 (FL-1): this module is the CLOSED dock - the button, the panel's
+ * Ruling 457 (FL-1): this module is the CLOSED dock - the button, the panel's
  * frame and header, and all of the dock's state - and root puts it in every
  * route's first download. What the open panel draws (the transcript through
  * the markdown pipeline, the thread list, the composer) is
@@ -62,7 +62,7 @@ const WORKING_POLL_MS = 5_000;
 const NEW_THREAD = "new";
 const USER_SCOPES = [sseScopes.user()];
 
-/** The open panel's body, on demand (ruling 454, FL-1). */
+/** The open panel's body, on demand (ruling 457, FL-1). */
 const loadPanelBody = () => import("./controller-dock-panel");
 const DockPanelBody = lazy(() =>
   loadPanelBody().then((m) => ({ default: m.DockPanelBody })),
@@ -208,7 +208,7 @@ function DockShell({ context }: { context: DockContext }) {
 
   const selectedId = selected[context.key] ?? null;
   // O39-d: `seen` only while the panel is open: the view is loaded only then
-  // (ruling 454), and every such load reads the transcript it shows.
+  // (ruling 457), and every such load reads the transcript it shows.
   const url = dockViewUrl(context, selectedId, open);
   const load = view.load;
   // Load whenever the panel is open and the target changes: a new scope
@@ -241,7 +241,7 @@ function DockShell({ context }: { context: DockContext }) {
 
   // O39-d: replies the viewer has not seen, whatever scope they were asked
   // in. A turn runs one to five minutes, and a person who moved to another
-  // page learned nothing when its answer landed. Ruling 454: the same small
+  // page learned nothing when its answer landed. Ruling 457: the same small
   // status also names the viewer's turns working right now, which is what the
   // button's working dot and the open panel's step line read.
   //
@@ -272,7 +272,7 @@ function DockShell({ context }: { context: DockContext }) {
       : current.turn
     : null;
 
-  // Ruling 454 (CTL-4): a conversation changed somewhere (the page's stream
+  // Ruling 457 (CTL-4): a conversation changed somewhere (the page's stream
   // says so). Refresh the button, and the transcript when it is on screen.
   const viewUrl = useRef(url);
   useEffect(() => {
@@ -289,7 +289,7 @@ function DockShell({ context }: { context: DockContext }) {
 
   // Poll while a turn is working — open or not, so the working dot on the
   // button stays honest after the panel is closed, and the settle a paused
-  // stream missed still lands. Ruling 454 (CTL-2): the poll reads the small
+  // stream missed still lands. Ruling 457 (CTL-2): the poll reads the small
   // status, not the whole transcript: the step line moves from it, and the
   // view is reloaded only when the status and the view disagree about whether
   // the shown turn works (it started elsewhere, or it settled).
@@ -342,7 +342,7 @@ function DockShell({ context }: { context: DockContext }) {
     const key = sentUnder.current;
     // A thread the selection does not name yet (a new one, or the scope's
     // newest with nothing selected) is selected, and the load effect above
-    // fetches it. Ruling 454 (CTL-4): that is the ONE load, so the thread
+    // fetches it. Ruling 457 (CTL-4): that is the ONE load, so the thread
     // already selected is reloaded here only when nothing else will. Only
     // while the panel is open and still stands where the send was made: the
     // context is the CURRENT one, so after a navigation this would ask for a
@@ -445,7 +445,7 @@ function DockShell({ context }: { context: DockContext }) {
     }
     wasOpen.current = open;
   }, [open, focusInside]);
-  // Ruling 454 (FL-1): the body can land after the open that asked for it (its
+  // Ruling 457 (FL-1): the body can land after the open that asked for it (its
   // module loads on demand), and the open above could then only focus the
   // panel itself. Move in once it is there, only while focus still rests on
   // the panel - the same rule the re-aim below keeps.
@@ -512,7 +512,7 @@ function DockShell({ context }: { context: DockContext }) {
     // Four of the five longest messages on the live board are 1,800 to 2,200
     // characters, typed into a two-row textarea.
     pending.current = value;
-    // Ruling 454 (CTL-4): a send changes the conversation and nothing the page
+    // Ruling 457 (CTL-4): a send changes the conversation and nothing the page
     // under the dock renders, so it does not re-run the page's loaders; what
     // the turn then does to a board or a task arrives on that page's stream.
     send.submit(body, {
@@ -643,7 +643,7 @@ function DockShell({ context }: { context: DockContext }) {
         // decided this in command-palette.tsx and create-profile-modal.tsx):
         // the panel only exists while open.
         aria-controls={open ? "controller-dock-panel" : undefined}
-        // Ruling 454 (FL-1): the open panel's body loads on demand; a pointer
+        // Ruling 457 (FL-1): the open panel's body loads on demand; a pointer
         // or focus on the button is the moment to fetch it, so a click finds
         // it there.
         onPointerEnter={preloadPanelBody}

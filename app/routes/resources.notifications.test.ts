@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 454 (owner, 2026-09-24; FL-4 / SRV-6): the bell's list is its own
+ * Ruling 457 (owner, 2026-09-24; FL-4 / SRV-6): the bell's list is its own
  * resource. It answers the viewer's own rows, newest first, capped where the
  * popover discloses the cap; a page revalidation never reloads it.
  */
@@ -34,7 +34,7 @@ async function load(cookie?: string) {
   });
 }
 
-describe("/resources/notifications (ruling 454)", () => {
+describe("/resources/notifications (ruling 457)", () => {
   it("lists the viewer's own rows, newest first, as the popover draws them", async () => {
     const { listNotifications } = await import("~/server/projections/notifications.server");
     const { notifications } = await load((await app.cookieFor(arda)).cookie);

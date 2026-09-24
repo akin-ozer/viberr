@@ -190,7 +190,7 @@ const eventKeyOf = (ev: TimelineEventRender) => String(ev.id);
 const NO_NAMES: string[] = [];
 
 /**
- * Ruling 454 (CS-3 / TASK-4): memoised. Its props hold still while its event
+ * Ruling 457 (CS-3 / TASK-4): memoised. Its props hold still while its event
  * does (the timeline shares the rows and the lookups it passes across
  * revalidations), so a send's fetcher states and a live event that brings
  * the same rows back re-render none of the items; each used to re-run its
@@ -444,7 +444,7 @@ export function Timeline({
   const sendHint = useModifierHint("↵");
   const composerRef = useRef<CommentComposerHandle>(null);
   const composerBoxRef = useRef<HTMLDivElement>(null);
-  // Ruling 454 (CS-3 / TASK-4): every revalidation decodes new objects for
+  // Ruling 457 (CS-3 / TASK-4): every revalidation decodes new objects for
   // all of these; kept while their content is the same, so the memoised items
   // below re-render only for an event that changed.
   const rows = useStableRows(events, eventKeyOf);
@@ -522,7 +522,7 @@ export function Timeline({
     fd.set("text", text);
     fetcher.submit(fd, { method: "post" });
   };
-  // Ruling 454 (CS-7): the composer is memoised, so what it is handed holds
+  // Ruling 457 (CS-7): the composer is memoised, so what it is handed holds
   // still while nothing it draws changed: a revalidation or a fetcher state
   // re-renders this timeline, not the editor. ⌘↵ reaches the latest `send`
   // through a ref kept current in an effect.
@@ -580,7 +580,7 @@ export function Timeline({
             {/* Lexical plain-text editor: known @mentions highlight live as
                 character-editable text (no backdrop mirroring); the posted
                 value stays exactly the trimmed plain draft. Loaded lazily
-                behind a same-size stand-in (ruling 454). */}
+                behind a same-size stand-in (ruling 457). */}
             <CommentComposer
               ref={composerRef}
               mentionables={directory}

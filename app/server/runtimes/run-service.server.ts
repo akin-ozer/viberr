@@ -2673,7 +2673,7 @@ async function noteRunStarted(
 // ---------------------------------------------- reads
 
 /** All runs for a task as RunView[] + their D-11 log windows (task loader).
- *  `console` says how much of each window to carry (ruling 454). */
+ *  `console` says how much of each window to carry (ruling 457). */
 export function listRunsForTask(
   db: DatabaseSync,
   projectSlug: string,
@@ -2693,7 +2693,7 @@ export interface RunLog {
   oldestSeq: number;
   /** P13-D-11: lines older than `oldestSeq` exist for this run. */
   hasMore: boolean;
-  /** Ruling 454 (LIVE-1): the run row's moving facts as of this read, so the
+  /** Ruling 457 (LIVE-1): the run row's moving facts as of this read, so the
    *  Live run strip follows the console's tail instead of a revalidation. */
   facts: RunLiveFacts;
 }
@@ -2740,7 +2740,7 @@ export function getRunLog(
 /**
  * `getRunLog` for a caller that already read the run row — the run-log route
  * reads it for its membership gate, and the live tail calls that route once
- * per streamed line per viewer (ruling 454, LIVE-9).
+ * per streamed line per viewer (ruling 457, LIVE-9).
  */
 export function runLogPage(db: DatabaseSync, run: AgentRunRow, query: RunLogQuery): RunLog {
   const runId = run.id;
@@ -2763,7 +2763,7 @@ export function runLogPage(db: DatabaseSync, run: AgentRunRow, query: RunLogQuer
     // Older lines exist below this page. An EMPTY backward page means we
     // reached the start of this run (the console then steps to the previous
     // run id in the group's `logWindow.runIds`). One index probe, not a count
-    // of the run's lines (ruling 454).
+    // of the run's lines (ruling 457).
     hasMore: lines.length > 0 && hasRunLinesBefore(db, runId, oldestSeq),
     facts: runLiveFacts(run),
   };

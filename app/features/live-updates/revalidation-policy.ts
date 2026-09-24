@@ -8,7 +8,7 @@ import {
 } from "react-router";
 
 /**
- * Ruling 454: WHEN a loader re-runs, in one home. Every route with a loader
+ * Ruling 457: WHEN a loader re-runs, in one home. Every route with a loader
  * exports `shouldRevalidate = revalidateWhen("<its route id>")`, and the rule
  * table below says what that loader reads.
  *
@@ -232,7 +232,7 @@ function loadsInFlight(state: RouterState): string[] {
 
 /**
  * A route load is in flight, whose landing may cover what the live flush would
- * load. Ruling 454 (RV-6): a submission still running is not one. The flush
+ * load. Ruling 457 (RV-6): a submission still running is not one. The flush
  * used to wait for those too, so another member's change reached the page only
  * after the person's own slowest action answered (an upload, a GitHub sync),
  * and a stalled request froze live updates in the tab. An action's echo is
@@ -253,14 +253,14 @@ const RECENT_EVENTS = 256;
 export class LiveLedger {
   readonly router: DataRouter;
   /**
-   * Ruling 454 (RF-1): the broker event id this tab stands at, for the first
+   * Ruling 457 (RF-1): the broker event id this tab stands at, for the first
    * stream a surface opens (a surface's reopens use their own position). Seeded
    * from root's `liveHead` on the document load, then moved by every stream's
    * hello and events.
    */
   position: number | null = null;
   /**
-   * Ruling 454 (RV-2): the tab's position when the loads that brought the
+   * Ruling 457 (RV-2): the tab's position when the loads that brought the
    * latest data to land were SENT (the smallest, like coverage; null when one
    * was sent before any position was known). A stream that takes on a scope
    * the tab's streams did not carry opens from here: the tab's position says
@@ -323,7 +323,7 @@ export class LiveLedger {
 
   /**
    * React Router declined to revalidate after this action (it failed, or its
-   * caller opted out): it changed nothing a loader reads. Ruling 454 (RV-4):
+   * caller opted out): it changed nothing a loader reads. Ruling 457 (RV-4):
    * found by its submission, so the two times React Router asks each route
    * about one answer withdraw that action once, and never another send on the
    * same path still running (the newest on the path used to go, per call).
@@ -436,7 +436,7 @@ export class LiveLedger {
     const prev = this.last;
     this.last = state;
 
-    // 0. Ruling 454 (RV-4): an action whose submission has answered (or was
+    // 0. Ruling 457 (RV-4): an action whose submission has answered (or was
     //    abandoned) is recorded again, now: its write has committed, and a
     //    load that started while it ran cannot hold it. Its own revalidation
     //    starts in this same update and covers it; if a navigation aborts that
@@ -613,7 +613,7 @@ function decide(
   return urlConcerns(rule, args);
 }
 
-/** The `shouldRevalidate` of the route `routeId` (ruling 454). */
+/** The `shouldRevalidate` of the route `routeId` (ruling 457). */
 export function revalidateWhen(routeId: RevalidationRouteId): ShouldRevalidateFunction {
   return (args) => decide(routeId, args);
 }

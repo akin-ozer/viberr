@@ -6,7 +6,7 @@ import { setupAppTest, type AppTestContext } from "../../../test-support/test-ap
 import type { EmittedLine } from "./adapter.server";
 
 /**
- * Ruling 454 (LIVE-10, SRV-8): the run sink's work per console line, paid on
+ * Ruling 457 (LIVE-10, SRV-8): the run sink's work per console line, paid on
  * the event loop every agent and every page share, once per streamed line.
  */
 
@@ -32,7 +32,7 @@ function line(n: number, facts: EmittedLine["facts"] = {}): EmittedLine {
   };
 }
 
-describe("run sink cost per line (ruling 454)", () => {
+describe("run sink cost per line (ruling 457)", () => {
   it("LIVE-10/SRV-8: a line with no facts is one statement and no mkdir", async () => {
     const { upsertRun, listRunLines, getRun } = await import("./run-store.server");
     const { createRunSink } = await import("./run-sink.server");

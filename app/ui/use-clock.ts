@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Ruling 454 (RF-9): one wall clock per cadence, shared by every component
+ * Ruling 457 (RF-9): one wall clock per cadence, shared by every component
  * that reads it. Each relative stamp ("2m ago") and each elapsed counter used
  * to run its own `setInterval`: a KB browser with forty files ran forty
  * thirty-second intervals, each re-rendering one row in its own commit. Here

@@ -48,7 +48,7 @@ function boundaryAfter(ch: string | undefined): boolean {
 }
 
 export function findMentionSpans(text: string, names: string[]): MentionSpan[] {
-  // Ruling 454 (CS-5): every span starts at an `@`, so a text without one has
+  // Ruling 457 (CS-5): every span starts at an `@`, so a text without one has
   // none — answered before the name list is built and sorted, which the
   // composer's per-keystroke transform and every server resolver pay for.
   if (!text.includes("@")) return [];

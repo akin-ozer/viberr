@@ -386,11 +386,11 @@ describe("F35-1: tokens are marked estimated until the provider's total lands", 
 });
 
 /**
- * Ruling 454 (CON-7): a revalidation's projection and the console's tail
+ * Ruling 457 (CON-7): a revalidation's projection and the console's tail
  * reads race, so every read of a run's live facts carries the row's version,
  * and the console keeps the newer one (`run-log-store.test.ts` "CON-7").
  */
-describe("ruling 454 (CON-7): the live facts carry the row's version", () => {
+describe("ruling 457 (CON-7): the live facts carry the row's version", () => {
   afterEach(() => vi.useRealTimers());
 
   it("stamps factsAt with agent_runs.updated_at, which every fact write moves", () => {
@@ -685,7 +685,7 @@ describe("ruling 369: the cache record on the run view", () => {
   });
 });
 
-/* ------------- ruling 454: how much of the console a payload carries ------------- */
+/* ------------- ruling 457: how much of the console a payload carries ------------- */
 
 /**
  * Owner decision 2 (2026-09-24): a hard refresh carries the shown agent's
@@ -695,7 +695,7 @@ describe("ruling 369: the cache record on the run view", () => {
  * same keys, so a thread filled later is exactly the one a hard refresh would
  * have shipped.
  */
-describe("ruling 454: console shipping", () => {
+describe("ruling 457: console shipping", () => {
   /** `count` lines of ~`bytes` on `runId`, from `from`. */
   function fill(runId: string, count: number, bytes = 40, from = 0): void {
     for (let i = from; i < from + count; i++) {
@@ -802,14 +802,14 @@ describe("ruling 454: console shipping", () => {
 });
 
 /**
- * Ruling 454 (TASK-1) moved the Continuity Recovery Panel's marker search to
+ * Ruling 457 (TASK-1) moved the Continuity Recovery Panel's marker search to
  * the projection: the panel scanned `lines` and `raw`, which a payload now
  * carries on a hard load only. P13-D-2's contract is unchanged: the marker is
  * found by its tag's shared suffix, the dead session is read out of the STORED
  * envelope (never display text), and only while the marker is inside the
  * group's window (the panel's retirement rule).
  */
-describe("ruling 454: the continuity marker (sessionMissing)", () => {
+describe("ruling 457: the continuity marker (sessionMissing)", () => {
   /** The envelope `recordSessionMissing` stores; `session_id` is ABSENT (not
    *  null) when the writer never learned one. */
   interface MarkerEnvelope {

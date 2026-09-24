@@ -5,7 +5,7 @@ import { expectWithinBudget } from "../test-support/perf-ratchet";
 import { balanced, cssRules, type CssRule } from "../test-support/css-rules";
 
 /**
- * Ruling 454: the stylesheet's share of the main thread and of layout shift,
+ * Ruling 457: the stylesheet's share of the main thread and of layout shift,
  * counted off `app/app.css` itself (the one sheet the app has).
  *
  *   - An endless animation of anything but transform and opacity repaints on
@@ -68,7 +68,7 @@ function declares(selector: string, prop: string, value: RegExp): boolean {
   );
 }
 
-describe("app.css main-thread and layout-shift costs (ruling 454)", () => {
+describe("app.css main-thread and layout-shift costs (ruling 457)", () => {
   it("animates only transform and opacity in an endless loop, but the controller's shimmer", () => {
     const loops = mainThreadLoops();
     // Ruling 451(a): the "Controller is working…" band animates its gradient's

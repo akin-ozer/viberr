@@ -2405,7 +2405,7 @@ describe("ruling 172: a held task's card says `blocked`, not what it waits on", 
       readiness: "blocked",
       displayReadiness: "blocked",
       waiting: "none",
-      // Ruling 454 (BOARD-3): the card no longer even carries the entries the
+      // Ruling 457 (BOARD-3): the card no longer even carries the entries the
       // task waits on; the readiness word is the whole hold.
     });
   const waitChipOf = (root: Element) =>

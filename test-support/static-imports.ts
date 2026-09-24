@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /**
- * Ruling 454: what a client module pulls in STATICALLY, found without a
+ * Ruling 457: what a client module pulls in STATICALLY, found without a
  * build. The one walk for that question: a route's packages
  * (`staticPackagesOf`) and a module's whole closure (`staticModulesOf`, the
  * controller dock's budget) read the same edges.

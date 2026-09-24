@@ -3,7 +3,7 @@ import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { staticModulesOf } from "../../../test-support/static-imports";
 
 /**
- * Ruling 454, FL-1 / CTL-1: root mounts the controller dock on every signed-in
+ * Ruling 457, FL-1 / CTL-1: root mounts the controller dock on every signed-in
  * page, so whatever the dock imports STATICALLY is in every route's first
  * download, closed or not. The figure is the dock module's static import
  * closure from source (client modules plus npm packages, `import type` and
@@ -12,7 +12,7 @@ import { staticModulesOf } from "../../../test-support/static-imports";
  * `node scripts/measure-routes.mjs` gives the gzip bytes after one.
  */
 
-describe("the closed controller dock's static import closure (ruling 454, FL-1)", () => {
+describe("the closed controller dock's static import closure (ruling 457, FL-1)", () => {
   it("stays small, because root ships it to every page", () => {
     const closure = staticModulesOf("app/features/controller/controller-dock.tsx");
     expectWithinBudget("controller:closed-dock.static-modules", closure.size);

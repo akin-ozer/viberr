@@ -243,7 +243,7 @@ export function TaskDetailPage({
   /** R15-2 safety net (b): the viewer may deliver by hand (maintainer+ or owner). */
   canDeliver?: boolean;
 }) {
-  // Ruling 454 (TASK-4): the run projection keeps its objects while their
+  // Ruling 457 (TASK-4): the run projection keeps its objects while their
   // content is unchanged, so a revalidation that moved nothing in it leaves
   // the memoised run card and console alone.
   const runtime = useStableRows(loadedRuntime, runThreadKey);
@@ -412,7 +412,7 @@ export function TaskDetailPage({
     deliverFetcher.submit(fd, { method: "post" });
   };
 
-  // The run-log console's store (ruling 454): it follows the task's runs
+  // The run-log console's store (ruling 457): it follows the task's runs
   // line by line on the layout's live stream, fills a thread the payload did
   // not carry, and keeps its lines OUTSIDE this page's state, so a console
   // line re-renders the console and not the page.

@@ -74,7 +74,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       projectSlug: null,
       conversationId: selectedConversationId(db, url, user.id),
       all: url.searchParams.get("all") === "1",
-      // Ruling 454 (owner decision 2): console lines on a document load only.
+      // Ruling 457 (owner decision 2): console lines on a document load only.
       console: isDocumentNavigation(request) ? "shown" : "none",
     },
   );
@@ -164,5 +164,5 @@ export default function ControllerRoute({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/controller");

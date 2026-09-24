@@ -63,7 +63,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         avatarTone: user.avatarTone,
       },
       // The same counts the workspace topbar and Home read, so the bell says
-      // the same thing on every surface. Ruling 454 (FL-4): the bell loads its
+      // the same thing on every surface. Ruling 457 (FL-4): the bell loads its
       // own list, and its popover discloses the cap.
       ...bellCounts(db, user.id),
     },
@@ -125,5 +125,5 @@ export default function PaletteShell({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/palette-shell");

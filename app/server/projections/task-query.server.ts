@@ -126,7 +126,7 @@ export function getTaskSummary(
 }
 
 /** Whether the task has a projection row — exactly when {@link getTaskSummary}
- *  answers non-null, without building the summary (ruling 454: the dock asks
+ *  answers non-null, without building the summary (ruling 457: the dock asks
  *  this yes/no question on every load). */
 export function taskExists(db: DatabaseSync, slug: string, key: string): boolean {
   return (
@@ -140,7 +140,7 @@ export function listTaskEvents(
   db: DatabaseSync,
   slug: string,
   key: string,
-  /** Ruling 454: only the newest `limit` events (the task page's window). */
+  /** Ruling 457: only the newest `limit` events (the task page's window). */
   opts: { limit?: number } = {},
 ): TimelineEventRender[] {
   const sql = `SELECT * FROM task_events WHERE project_slug = ? AND task_key = ?
@@ -246,7 +246,7 @@ export function getTaskDetail(
   key: string,
   /** Gap-10: the instant "has this gone quiet?" is asked against (tests only).
    *  `dataRoot` feeds the live-backend overlay (tests only — production
-   *  defaults to the env root). `timelineLimit` (ruling 454): read only the
+   *  defaults to the env root). `timelineLimit` (ruling 457): read only the
    *  newest N events, the window the task page ships; the summary's
    *  `eventCount` is the total. */
   opts: { now?: Date; dataRoot?: string; timelineLimit?: number } = {},

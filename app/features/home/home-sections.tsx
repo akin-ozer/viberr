@@ -41,7 +41,7 @@ export function HomeTopBar({
   searchRef: RefObject<HTMLInputElement | null>;
   query: string;
   onQuery: (q: string) => void;
-  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 454). */
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 457). */
   unread: number;
   orphanUnread: number;
   user: SessionUser;

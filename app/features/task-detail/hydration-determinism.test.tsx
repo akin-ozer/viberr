@@ -48,7 +48,7 @@ import type { RecommendationView } from "./operator-recommendations";
  * answers it by hydrating synchronously, ahead of the transition), and then a
  * `run.log-appended` update of the shape `useRunLogStream` produces, delivered
  * through the workspace layout's live stream (the tab's one EventSource,
- * ruling 454) and the console's `/resources/run-log` tail fetch.
+ * ruling 457) and the console's `/resources/run-log` tail fetch.
  */
 
 type PageProps = ComponentProps<typeof TaskDetailPage>;
@@ -404,7 +404,7 @@ async function pageIn(zone: string): Promise<(props: PageProps) => ReactElement>
   const toast: ToastModule = await import("~/ui/toast");
   const live: LiveModule = await import("~/features/live-updates/use-live-updates");
   // The workspace layout's stream (`routes/project.tsx`): it carries the
-  // console's frames to the page (ruling 454).
+  // console's frames to the page (ruling 457).
   const LayoutStream = ({ slug, taskKey }: { slug: string; taskKey: string }) => {
     live.useLiveUpdates([`project:${slug}`, `task:${slug}/${taskKey}`]);
     return null;

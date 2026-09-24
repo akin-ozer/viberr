@@ -71,7 +71,7 @@ describe("/resources/controller-unseen (O39-d)", () => {
     expect(ids).not.toContain(stranded.id);
   });
 
-  it("rides no page revalidation, and neither does the dock's view (ruling 454)", async () => {
+  it("rides no page revalidation, and neither does the dock's view (ruling 457)", async () => {
     // CTL-3 / RF-8. CANARY: drop `shouldRevalidate` from either route and
     // React Router reloads it on every navigation, action and revalidation of
     // every page; the view with the last `seen=1` it was loaded with.

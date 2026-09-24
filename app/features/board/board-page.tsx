@@ -120,7 +120,7 @@ const SR_ONLY: CSSProperties = {
 };
 
 /**
- * A board card's task: the board card projection (ruling 454, BOARD-3,
+ * A board card's task: the board card projection (ruling 457, BOARD-3,
  * `board-card.ts`), which carries the Gap-10 `quiet` annotation and the
  * loader's viewer annotations beside the fields the card, its filters and the
  * acceptance ceremony read.
@@ -270,7 +270,7 @@ const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, plac
  * Deliberately no dependency array: `StageMenu` re-renders its trigger on
  * open/busy/stage change, and React never writes `tabIndex` on that button, so
  * re-applying on every render is both necessary and free of any tug-of-war with
- * React's own attribute reconciliation. Ruling 454: it writes only a value
+ * React's own attribute reconciliation. Ruling 457: it writes only a value
  * that differs, because an unconditional write is a DOM mutation on every
  * card each time the board renders (40 per revalidation).
  */
@@ -447,7 +447,7 @@ function OwnerSeat({ task, label }: { task: BoardTask; label?: boolean }) {
 }
 
 /**
- * The card's sortable plugins, made once (ruling 454). dnd-kit compares the
+ * The card's sortable plugins, made once (ruling 457). dnd-kit compares the
  * option by reference and re-resolves it whenever it changes, so an inline
  * function rebuilt the card's plugins on every render of every card.
  */
@@ -461,7 +461,7 @@ const taskKeyOf = (task: BoardTask) => task.key;
 const stageIdOf = (stage: BoardStage) => stage.id;
 
 /**
- * Ruling 454: memoised, so a revalidation or a drag renders only the cards
+ * Ruling 457: memoised, so a revalidation or a drag renders only the cards
  * whose props changed. Its lanes hand it the task object the page already held
  * when the task is unchanged (`useStableRows`), and the board keeps the stage
  * list and the move callback stable; before this every live update rendered
@@ -725,7 +725,7 @@ function Column({
     id: `stage:${stage.id}`,
     collisionPriority: 1,
   });
-  // Ruling 454: the task objects this lane already drew, wherever a
+  // Ruling 457: the task objects this lane already drew, wherever a
   // revalidation brought the same task back, so the memoised cards skip.
   const tasks = useStableRows(laneTasks, taskKeyOf);
   const showPreview = dropTarget && previewTask !== null;
@@ -830,7 +830,7 @@ function Column({
 }
 
 /** D19: extracted from `ListView`'s map so the row can hold the roving-tab-stop
- *  hook — a hook cannot be called inside a `.map` callback. Ruling 454:
+ *  hook — a hook cannot be called inside a `.map` callback. Ruling 457:
  *  memoised like the card, for the same reason. */
 const ListRow = memo(function ListRow({
   task,
@@ -928,7 +928,7 @@ function ListView({
   rovingKey: string | null;
   onCardKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
 }) {
-  // Ruling 454: unchanged tasks keep the objects the rows already drew.
+  // Ruling 457: unchanged tasks keep the objects the rows already drew.
   const tasks = useStableRows(visibleTasks, taskKeyOf);
   return (
     <div className="board list">
@@ -1793,7 +1793,7 @@ export function StageBoard({
   onMoveTask: (taskKey: string, toStageId: string) => void;
 }) {
   // All stages, for the per-card keyboard "Move to stage" menu (F10-25). The
-  // same array while the stages are unchanged (ruling 454): every card takes it.
+  // same array while the stages are unchanged (ruling 457): every card takes it.
   const allStages = useStableRows(
     columns.map((c) => c.stage),
     stageIdOf,
@@ -2197,7 +2197,7 @@ export function BoardPage({
     }
     submitReorder(taskKey, toStageId, "");
   };
-  // Ruling 454: every card and list row takes the move callback, so it keeps
+  // Ruling 457: every card and list row takes the move callback, so it keeps
   // one identity and runs the latest render's `onMoveTask` (which reads the
   // current columns); a fresh closure per render re-rendered every card.
   const latestMoveTask = useRef(onMoveTask);
@@ -2240,7 +2240,7 @@ export function BoardPage({
     return () => window.clearTimeout(t);
   }, [arrivedKey]);
 
-  // One array while the stages are unchanged (ruling 454): every list row takes it.
+  // One array while the stages are unchanged (ruling 457): every list row takes it.
   const stages = useStableRows(
     columns.map((c) => c.stage),
     stageIdOf,

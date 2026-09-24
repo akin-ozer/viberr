@@ -25,7 +25,7 @@ import type { clientLoader as bellListLoader } from "~/routes/resources.notifica
  *
  * Additions over the mock (sanctioned): Escape closes the popover.
  *
- * Ruling 454 (owner decision 2026-09-24, FL-4 / SRV-6): pages carry only the
+ * Ruling 457 (owner decision 2026-09-24, FL-4 / SRV-6): pages carry only the
  * bell's counts. The list is this component's own fetch
  * (`/resources/notifications`): it starts when the pointer or the focus
  * reaches the bell, or on open, so a first open without either may show one
@@ -67,7 +67,7 @@ export function TopBell({
   // Those orphan rows are still rendered in the list, still wearing their
   // unread dot — so the popover said "caught up" and withdrew Mark all read
   // while unread rows were on screen. The two sets are disjoint by
-  // construction, so adding them cannot double-count. Ruling 454: the server
+  // construction, so adding them cannot double-count. Ruling 457: the server
   // counts the orphans (the list is no longer here to count them from).
   const shownUnread = unread + orphanUnread;
 
@@ -96,7 +96,7 @@ export function TopBell({
   };
   const notifications: NotificationView[] = list.data?.notifications ?? [];
   const loading = list.data === undefined;
-  // Ruling 454: the list route's `clientLoader` answers a failed load (an
+  // Ruling 457: the list route's `clientLoader` answers a failed load (an
   // outage, a 5xx, a signed-out 401) with `notifications: null`.
   const failed = list.data !== undefined && list.data.notifications === null;
   useEffect(() => {

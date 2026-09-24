@@ -42,7 +42,7 @@ export function Topbar({
   openTask: { key: string; title: string } | null;
   user: MenuUser;
   theme: ThemePreference;
-  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 454). */
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 457). */
   unread: number;
   orphanUnread: number;
   /** UI-03: the SSE stream is down — everything on screen is a stale snapshot. */

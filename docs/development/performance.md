@@ -1,13 +1,13 @@
 # Performance: journeys, measurements and the ratchet
 
-> How Viberr measures and protects its speed (ruling 454). Modelled on the method in
+> How Viberr measures and protects its speed (ruling 457). Modelled on the method in
 > claude.ai's "How we made Claude.ai faster" post: pick the journeys people spend their
 > time in, give each one a deterministic benchmark, remove the redundant work, and pin
 > every win with a ceiling that can only move down. Source of truth:
 > `test-support/perf-verdict.ts`, `test-support/perf-budgets.ts` and
 > `test-support/perf-budgets/`, the `*.perf.test.ts(x)` files under `app/`,
 > `scripts/measure-routes.mjs`, `app/shared/docs/perf-budgets-sync.test.ts`.
-> Written 2026-09-24 with the first pass (ruling 454), from `main` @ `2169f940`.
+> Written 2026-09-24 with the first pass (ruling 457), from `main` @ `2169f940`.
 
 ## 1. The journeys
 
@@ -111,7 +111,7 @@ The harnesses, one home each:
 
 ## 5. What the first pass measured
 
-Ruling 454 records the pass. From `main` @ `2169f940` to the merged pass, on the fixtures
+Ruling 457 records the pass. From `main` @ `2169f940` to the merged pass, on the fixtures
 the budgets name (103 budgets in 27 perf test files, plus 8 bundle closures):
 
 | Journey | Figure | Before | After |

@@ -320,7 +320,7 @@ function resolveIn(
   text: string,
   projectSlug: string | undefined,
 ): MentionResolution {
-  // Ruling 454 (CS-5): every mention starts at an `@` (findMentionSpans), so a
+  // Ruling 457 (CS-5): every mention starts at an `@` (findMentionSpans), so a
   // text without one resolves to nobody — answered here, before the user and
   // member reads the ladder needs. The same answer the ladder gives, sooner.
   if (!text.includes("@")) {
@@ -557,7 +557,7 @@ export function mentionedUserIdsOf(
  * of comments. Never throws: the notification and the comment are both already
  * real, and failing to annotate one is not worth losing either.
  *
- * Ruling 454 (CS-4): the stamp is re-projected right here, like every other
+ * Ruling 457 (CS-4): the stamp is re-projected right here, like every other
  * task write. It used to be the one write nothing re-projected, so the file
  * watcher did it ~250 ms later: a second `task.updated` to every open board and
  * task page of the project, outside the page's own revalidation window, for a

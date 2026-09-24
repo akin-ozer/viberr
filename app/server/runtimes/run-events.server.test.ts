@@ -134,7 +134,7 @@ describe("publishRunLogAppended", () => {
     // the project revalidating its logs on every line of somebody else's run.
     expect(own.names()).toContain("run.log-appended");
     expect(sibling.names()).not.toContain("run.log-appended");
-    // Ruling 454 (LIVE-5): a project-scoped subscriber (the board) no longer
+    // Ruling 457 (LIVE-5): a project-scoped subscriber (the board) no longer
     // receives a console line: nothing it renders changes per line, and the
     // one reader, the console of the task's own page, holds the task scope.
     // CANARY: drop `taskOnly` from publishRunLogAppended.

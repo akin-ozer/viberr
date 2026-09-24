@@ -60,7 +60,7 @@ describe("sliceTimeline", () => {
   });
 });
 
-describe("timelineSlice over a fetched window (ruling 454)", () => {
+describe("timelineSlice over a fetched window (ruling 457)", () => {
   it("equals slicing the whole history, for every limit and length", () => {
     const history = Array.from({ length: 75 }, (_, i) => `e${i}`);
     for (const total of [0, 1, 9, 30, 31, 75]) {

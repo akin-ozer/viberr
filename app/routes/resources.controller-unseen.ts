@@ -23,7 +23,7 @@ export interface UnseenReplyView {
 }
 
 /**
- * Ruling 454 (CTL-2): one of the viewer's own conversations with a turn
+ * Ruling 457 (CTL-2): one of the viewer's own conversations with a turn
  * working right now, and what it is doing (ruling 250's phase and step). The
  * dock's working dot and its step line read this, polled every 5 s while a
  * turn works, instead of reloading the whole transcript to move one line.
@@ -41,13 +41,13 @@ export interface DockStatus {
   working: LiveTurnView[];
 }
 
-/** Ruling 454: the dock loads this itself; a page revalidation never reloads
+/** Ruling 457: the dock loads this itself; a page revalidation never reloads
  *  it (see `dockResourceShouldRevalidate`). */
 export const shouldRevalidate = dockResourceShouldRevalidate;
 
 /**
  * The dock's status on every page: O39-d's replies the viewer has not seen,
- * and (ruling 454) the viewer's turns working right now.
+ * and (ruling 457) the viewer's turns working right now.
  *
  * O39-d: a turn runs one to five minutes, and its answer reached only the
  * surfaces still open on it: a person who had moved on learned nothing until

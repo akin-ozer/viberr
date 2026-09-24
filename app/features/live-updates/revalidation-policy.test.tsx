@@ -29,7 +29,7 @@ import {
 import { REVALIDATION_RULES, revalidateWhen } from "./revalidation-policy";
 
 /**
- * Ruling 454: the revalidation policy's behaviour, on the harness in
+ * Ruling 457: the revalidation policy's behaviour, on the harness in
  * `test-support/revalidation-harness.tsx` (React Router with single fetch's
  * revalidation choice, the real broker in-process). The perf ratchet counts
  * the loads it saves; these pin that every change still reaches the page.

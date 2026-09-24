@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import config, { inlineAsset, shellChunkOf } from "../../../vite.config";
 
 /**
- * Ruling 454: no font file is inlined into the render-blocking root
+ * Ruling 457: no font file is inlined into the render-blocking root
  * stylesheet. Vite's 4 KB default had put 9 base64 JetBrains Mono subsets
  * (20 KB gzip, 37% of the sheet) into `root-*.css`; the bundle ratchet
  * (`bundle:root.css`, `node scripts/measure-routes.mjs --check`) holds the
  * bytes, and this holds the reason they went away.
  */
-describe("vite.config.ts never inlines a font (ruling 454)", () => {
+describe("vite.config.ts never inlines a font (ruling 457)", () => {
   it("refuses every woff and woff2 file, whatever its size", () => {
     expect(inlineAsset("/x/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-vietnamese-400-normal.woff2")).toBe(false);
     expect(inlineAsset("/x/jetbrains-mono-cyrillic-ext-500-normal.woff")).toBe(false);
@@ -27,13 +27,13 @@ describe("vite.config.ts never inlines a font (ruling 454)", () => {
 });
 
 /**
- * Ruling 454: what every page loads anyway (the client entry's and the root
+ * Ruling 457: what every page loads anyway (the client entry's and the root
  * route's static closures) ships as two chunks, npm code and app code, not
  * ~30 slices cut by which routes import each piece. The bytes are held by the
  * bundle ratchet; this holds which modules may join those chunks, on a small
  * module graph.
  */
-describe("the shell chunks (ruling 454)", () => {
+describe("the shell chunks (ruling 457)", () => {
   const app = (file: string) => path.resolve("app", file);
   const npm = (file: string) => path.resolve("node_modules", file);
   const ENTRY = app("entry.client.tsx");

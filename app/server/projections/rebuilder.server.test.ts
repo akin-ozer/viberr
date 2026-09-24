@@ -1687,7 +1687,7 @@ describe("ruling 225: a task resting on a clock", () => {
   });
 });
 
-describe("ruling 454: projection write cost, behaviour kept", () => {
+describe("ruling 457: projection write cost, behaviour kept", () => {
   const comment = (userId: string, at: string, text: string) => ({
     occurredAt: at,
     type: "comment" as const,

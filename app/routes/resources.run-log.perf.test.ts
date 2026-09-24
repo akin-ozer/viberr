@@ -6,7 +6,7 @@ import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 454 (LIVE-9): every console line a viewer watches costs one
+ * Ruling 457 (LIVE-9): every console line a viewer watches costs one
  * `/resources/run-log?since=` tail fetch, so its run-table work is paid per
  * line per viewer on the event loop the agents share. The session lookups the
  * route also makes are the server-read cluster's (a per-request memo) and are
@@ -53,7 +53,7 @@ afterAll(() => {
   app.cleanup();
 });
 
-describe("run-log tail cost (ruling 454)", () => {
+describe("run-log tail cost (ruling 457)", () => {
   it("LIVE-9: a one-line tail reads the run once and scans no line count", async () => {
     const { loader } = await import("~/routes/resources.run-log");
     const { cookie } = await app.cookieFor(ardaId);

@@ -5,7 +5,7 @@ import { foldWaits, groupThoughts, hoistRunInputs, type ConsoleBlock } from "./r
 import { runBoundaryLine, RUN_INPUTS_TAG, TOOL_PROGRESS_TAG, type LogLine } from "./runtime-types";
 
 /**
- * Ruling 454 (LIVE-4): the incremental fold draws exactly what the batch chain
+ * Ruling 457 (LIVE-4): the incremental fold draws exactly what the batch chain
  * the console used to run on every render draws, however the lines arrive.
  */
 
@@ -86,7 +86,7 @@ function batch(lines: FoldLine[], raw: boolean) {
   return foldWaits(groupThoughts(collapseTelemetry(hoistRunInputs(lines), raw), raw), raw);
 }
 
-describe("createConsoleFolder (ruling 454, LIVE-4)", () => {
+describe("createConsoleFolder (ruling 457, LIVE-4)", () => {
   it("draws what the batch chain draws, line by line and in bursts, on 300 random consoles", () => {
     for (let seed = 1; seed <= 300; seed++) {
       const next = random(seed);

@@ -8,7 +8,7 @@ import { publishRunLogAppended } from "./run-events.server";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 
 /**
- * Ruling 454, journey `live-run` (LIVE-5): which open tabs a console line
+ * Ruling 457, journey `live-run` (LIVE-5): which open tabs a console line
  * reaches. The sink publishes one `run.log-appended` reference per line; the
  * only thing that reads it is the console of the page showing THAT task.
  *
@@ -31,7 +31,7 @@ function connect(scopes: SseScope[]) {
 beforeEach(() => resetSseBrokerForTests());
 afterEach(() => resetSseBrokerForTests());
 
-describe("run-line frames per open tab (ruling 454)", () => {
+describe("run-line frames per open tab (ruling 457)", () => {
   it("reaches the task's own page and no board", () => {
     const board = connect([{ kind: "project", slug: "viberr-core" }, { kind: "user" }]);
     const taskTab = connect([

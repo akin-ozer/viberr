@@ -82,7 +82,7 @@ const BASE_60 = { 1: { max: 5 } } as const;
 /**
  * One rolling field of a clock, memoised on its props (all primitives or
  * module constants): a tick re-renders the seconds and leaves the minutes and
- * hours alone until they move (ruling 454, LIVE-11; the digits still roll,
+ * hours alone until they move (ruling 457, LIVE-11; the digits still roll,
  * ruling 366(e) and 451(e)).
  */
 const Roll = memo(NumberFlow);
@@ -139,7 +139,7 @@ function WaitClock({ seconds, title }: { seconds: number; title: string }) {
 
 /** Ruling 451(e): the strip's Turns cell rolls as Elapsed and Tokens beside
  *  it do; it used to be the one figure in the row that jumped. Memoised on
- *  its figure (ruling 454, LIVE-11): the number-flow element resets its
+ *  its figure (ruling 457, LIVE-11): the number-flow element resets its
  *  markup on every render. */
 const TurnCount = memo(function TurnCount({ n }: { n: number }) {
   return (
@@ -150,7 +150,7 @@ const TurnCount = memo(function TurnCount({ n }: { n: number }) {
 });
 
 /** `TokenCount`'s two digit formats, made once: a new format object per render
- *  reset the number-flow element's markup (ruling 454, LIVE-11). */
+ *  reset the number-flow element's markup (ruling 457, LIVE-11). */
 const ONE_FRACTION_DIGIT = { minimumFractionDigits: 1, maximumFractionDigits: 1 } as const;
 const NO_FRACTION_DIGITS = { minimumFractionDigits: 0, maximumFractionDigits: 0 } as const;
 
@@ -178,7 +178,7 @@ const TokenCount = memo(function TokenCount({ n, estimated }: { n: number; estim
   );
 });
 
-/** Ruling 454 (LIVE-11): the strip's Elapsed cell owns its one-second clock,
+/** Ruling 457 (LIVE-11): the strip's Elapsed cell owns its one-second clock,
  *  so a tick re-renders the clock and nothing else of the Live run card. */
 function LiveElapsed({ startedAt }: { startedAt: string | null }) {
   return <RunClock seconds={useElapsed(startedAt, true)} />;
@@ -339,7 +339,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
   console?: ReactNode;
   /** Whether {@link console} is showing, so the trigger can name what it does. */
   consoleOpen?: boolean;
-  /** Ruling 454 (LIVE-1): the console's store, whose tail reads carry the
+  /** Ruling 457 (LIVE-1): the console's store, whose tail reads carry the
    *  run's phase, step, turns and tokens as each line lands. Without one the
    *  strip shows what the page loaded. */
   store?: RunLogStore | null;
@@ -421,7 +421,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
 });
 
 /**
- * The strip's phase, step and figures. Ruling 454 (LIVE-1): read from the
+ * The strip's phase, step and figures. Ruling 457 (LIVE-1): read from the
  * console's store, whose every tail read carries the run's current facts, over
  * what the page loaded; the page used to revalidate root, layout and task
  * every 2 s during a run only to move these. The clock is its own leaf
@@ -535,7 +535,7 @@ function missLabel(reason: string): string {
  * when it sent one), the TTL bucket, the run's writes and reads, the peak
  * prompt and the compactions. Every chip carries its figure on a `data-`
  * attribute, so the DOM reads without the words. A run that has reported
- * nothing says so instead of printing zeros as facts. Ruling 454 (LIVE-1): the
+ * nothing says so instead of printing zeros as facts. Ruling 457 (LIVE-1): the
  * figures follow the console's tail reads, over what the page loaded.
  */
 const RunFactsRow = memo(function RunFactsRow({
@@ -988,7 +988,7 @@ function ThoughtRow({ rowKey, lines, startedAt, hydrated, open, onToggle }: Fold
 }
 
 /** What the raw view prints for a line whose stored envelope has not arrived
- *  yet (ruling 454: the envelopes load when the raw view opens). */
+ *  yet (ruling 457: the envelopes load when the raw view opens). */
 const RAW_PENDING = "loading the stored envelope…";
 
 /** One console line as the console draws it: the raw envelope, or the shapes
@@ -1159,7 +1159,7 @@ function disclosureOf(row: ConsoleRow<StreamedLine>, raw: boolean): Disclosure |
 }
 
 /**
- * Ruling 454 (LIVE-4): one drawn row of the console, memoised. The fold keeps a
+ * Ruling 457 (LIVE-4): one drawn row of the console, memoised. The fold keeps a
  * row's object for as long as its content is unchanged and every other prop is
  * a primitive or stable, so an appended line renders the row it adds (or the
  * one fold it grows) and no other.
@@ -1248,7 +1248,7 @@ const NO_LINES: readonly StreamedLine[] = [];
 const NONE_OPEN: ReadonlySet<string> = new Set();
 
 /**
- * UI-03 for the tab's one live stream (ruling 454): it FAILED and is
+ * UI-03 for the tab's one live stream (ruling 457): it FAILED and is
  * reconnecting on its backoff, so the console is not following. The reconnect
  * revalidates the page, and the console fetches whatever it missed.
  */
@@ -1256,7 +1256,7 @@ const LIVE_TAIL_DOWN =
   "Live tail disconnected: reconnecting, and the console catches up once it is back.";
 
 /**
- * Ruling 454 (LIVE-2 / LIVE-4): the console box and its footer, for one thread
+ * Ruling 457 (LIVE-2 / LIVE-4): the console box and its footer, for one thread
  * of the store. It reads the thread itself (`useSyncExternalStore`), so a line
  * re-renders this and the row it adds, and nothing of the page around it; its
  * other props are primitives, so a revalidation that changed nothing it draws
@@ -1310,7 +1310,7 @@ const ConsoleView = memo(function ConsoleView({
    * `thread|kind|row key`. A row's key is its first line's `consoleLineKey`,
    * which survives streaming, folding and backward paging; it used to be the
    * stored envelope, which a console now holds only while its raw view is
-   * open. Ruling 454 (CON-6): every thread's first line is `0:0`, and this
+   * open. Ruling 457 (CON-6): every thread's first line is `0:0`, and this
    * view outlives an agent switch, so the thread is part of the key; a
    * disclosure the reader opened stays with its own agent.
    */
@@ -1356,7 +1356,7 @@ const ConsoleView = memo(function ConsoleView({
       topRef.current = el.scrollTop;
     };
     pin();
-    // Ruling 454 (CON-4): the rows skip layout until they are near the view
+    // Ruling 457 (CON-4): the rows skip layout until they are near the view
     // (`content-visibility: auto`, CSS-6), so the rows this jump brings into
     // view still count at their 21px placeholder here and reach their real
     // height in the frames after it; a row's first relevance check runs after
@@ -1382,7 +1382,7 @@ const ConsoleView = memo(function ConsoleView({
   // the rows on screen: the window withholds older lines, and UI-53's
   // `── resumed ──` rows are not stored lines. `lineCount` is the loader's
   // snapshot and `total` the store's own count, which the live tail moves
-  // (ruling 454: the page no longer revalidates per line to move it). Take the
+  // (ruling 457: the page no longer revalidates per line to move it). Take the
   // larger, so the count never goes backwards.
   const eventCount = Math.max(lineCount, thread?.total ?? 0);
   return (
@@ -1396,7 +1396,7 @@ const ConsoleView = memo(function ConsoleView({
         onScroll={(e) => {
           const el = e.currentTarget;
           const top = el.scrollTop;
-          // Ruling 454 (CON-4): only a scroll UP stops following. Rows growing
+          // Ruling 457 (CON-4): only a scroll UP stops following. Rows growing
           // as they come into view (and scroll anchoring making room for
           // rows that grew above it) send scroll events too, with the view
           // short of the end until the next pin; those used to turn `follow`
@@ -1406,7 +1406,7 @@ const ConsoleView = memo(function ConsoleView({
           topRef.current = top;
         }}
       >
-        {/* Ruling 454 (owner decision 2): a thread the page did not carry
+        {/* Ruling 457 (owner decision 2): a thread the page did not carry
             lines for fills itself with one request when it is shown. */}
         {thread === null || thread.status === "unloaded" || thread.status === "loading" ? (
           <div className="log-line meta">
@@ -1504,7 +1504,7 @@ const ConsoleView = memo(function ConsoleView({
  * (`useRunLogStream`): the live tail, the backward pages and the window a
  * thread loads when the page did not carry it — NOT loader revalidation. The
  * raw toggle renders the stored wire envelope verbatim (runs.md §5.4), loaded
- * when the toggle opens (ruling 454).
+ * when the toggle opens (ruling 457).
  */
 export const AgentLogsPanel = memo(function AgentLogsPanel({
   runtime,
@@ -1518,7 +1518,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
   runtime: RunView[];
   sel: string | null;
   onSel: (id: string | null) => void;
-  /** Ruling 454: the lines, their backward pages and the live tail's state
+  /** Ruling 457: the lines, their backward pages and the live tail's state
    *  (`useRunLogStream`, or `staticRunLogStore` for a console fed by hand). */
   store: RunLogStore;
   /** Retry the failed run's agent on the other backend (D4). Receives the
@@ -1538,7 +1538,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
 }) {
   const [follow, setFollow] = useState(true);
   const { streamError, rawView: raw } = useConsoleStatus(store);
-  // UI-03: the tab's live stream (the layout's, ruling 454) is down.
+  // UI-03: the tab's live stream (the layout's, ruling 457) is down.
   const liveDown = useLiveStreamFailed();
   const hydrated = useHydrated();
   const boxRef = useRef<HTMLDivElement>(null);
@@ -1549,7 +1549,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
     runtime[0];
   const curId = cur?.id ?? null;
 
-  // Ruling 454 (owner decision 2): the thread on screen is the one whose lines
+  // Ruling 457 (owner decision 2): the thread on screen is the one whose lines
   // the console asks for, when the page did not carry them.
   useEffect(() => {
     if (curId !== null) store.show(curId);
@@ -1770,7 +1770,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
           </button>
         )}
         {/* UI-57: both toggles carry their state for assistive tech, not just
-            via the `on` class. Ruling 454: opening the raw view loads the
+            via the `on` class. Ruling 457: opening the raw view loads the
             shown thread's stored envelopes, which no page payload carries. */}
         <button
           type="button"

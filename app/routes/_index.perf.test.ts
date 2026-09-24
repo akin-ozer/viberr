@@ -6,7 +6,7 @@ import { rowsMatching, tallyServerReads } from "../../test-support/perf-counters
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 454, journey `fresh-load` (FL-4): what Home's loader ships. The bell's
+ * Ruling 457, journey `fresh-load` (FL-4): what Home's loader ships. The bell's
  * notification list used to ride every Home document and revalidation, closed
  * at first paint: 62 % of Home's payload on the demo seed. The owner decision
  * of 2026-09-24 moves it to the bell, which loads it on intent.
@@ -32,7 +32,7 @@ afterAll(() => {
   app.cleanup();
 });
 
-describe("Home payload (ruling 454)", () => {
+describe("Home payload (ruling 457)", () => {
   it("ships the bell's counts, not its list", async () => {
     const { loader } = await import("~/routes/_index");
     const { cookie } = await app.cookieFor(ardaId);

@@ -19,7 +19,7 @@ import { $setParagraphPlainText } from "./lexical-mention-plugin";
 import { Timeline } from "./timeline";
 
 /**
- * Ruling 454 (CS-7): what typing costs. The draft lives in a ref, so a plain
+ * Ruling 457 (CS-7): what typing costs. The draft lives in a ref, so a plain
  * keystroke renders nothing above the editor, and that is the property pinned
  * here: a draft lifted into page state would re-render the whole timeline on
  * every key. Inside an @token the menu re-renders (its filter changed), but the
@@ -127,7 +127,7 @@ async function type(editor: LexicalEditor, text: string) {
   });
 }
 
-describe("composer renders per keystroke (ruling 454)", () => {
+describe("composer renders per keystroke (ruling 457)", () => {
   it("a plain keystroke renders nothing", async () => {
     const view = await mountComposer();
     await type(view.editor, "Looks good");

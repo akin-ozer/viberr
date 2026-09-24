@@ -16,7 +16,7 @@ import { READINESS_VALUES } from "./task-file.schema";
  *   from the right position after a reconnect.
  * - stream.resync: sent when a reconnect's Last-Event-ID predates the
  *   ring buffer window (or an earlier server process: ids are unique across
- *   processes, ruling 454) — the client cannot be caught up by replay and
+ *   processes, ruling 457) — the client cannot be caught up by replay and
  *   should revalidate once.
  */
 

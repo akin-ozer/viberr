@@ -19,7 +19,7 @@ import { createLiveRunLogStore, staticRunLogStore, type OlderLogState } from "./
 type StreamedLine = { display: LogLine; raw: string | null; key?: string };
 
 /**
- * The console fed by hand (ruling 454): the lines, backward-paging state and
+ * The console fed by hand (ruling 457): the lines, backward-paging state and
  * stream error a live store would hold, in a `staticRunLogStore`.
  */
 function Logs({
@@ -1685,10 +1685,10 @@ describe("ruling 451(c): copy controls trade their glyph in place", () => {
 });
 
 /**
- * Ruling 454: the console reads a live store (`createLiveRunLogStore`, the one
+ * Ruling 457: the console reads a live store (`createLiveRunLogStore`, the one
  * `useRunLogStream` holds) rather than lines handed down by the page.
  */
-describe("the console on a live store (ruling 454)", () => {
+describe("the console on a live store (ruling 457)", () => {
   const text = (seq: number): LogLine => ({ t: "10:00:00", ev: "text", tag: "assistant", text: `line ${seq}` });
   const running = () =>
     mkRun({
@@ -1772,7 +1772,7 @@ describe("the console on a live store (ruling 454)", () => {
 
   /**
    * CON-4: the console's rows skip layout until they are near the view
-   * (`content-visibility: auto`, ruling 454 CSS-6), so a row the follow jump
+   * (`content-visibility: auto`, ruling 457 CSS-6), so a row the follow jump
    * brings into view counts at its 21px placeholder when `scrollHeight` is read
    * and reaches its real height in a later frame. Nothing re-pinned, so the
    * newest line sat below the fold with `follow` still on; and the scroll
@@ -1951,7 +1951,7 @@ describe("the console on a live store (ruling 454)", () => {
   });
 
   it("UI-03: says the live tail is down while the tab's stream reconnects", () => {
-    // The tab's one stream is the layout's (`useLiveUpdates`, ruling 454); its
+    // The tab's one stream is the layout's (`useLiveUpdates`, ruling 457); its
     // failure is what the console reads. It used to watch its own.
     class FailingEventSource {
       static CONNECTING = 0;

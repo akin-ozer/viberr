@@ -307,7 +307,7 @@ export function runBoundaryLine(runNumber: number, runTotal: number): LogLine {
 /**
  * The window's line budget (the server's byte budget is its other bound,
  * `RUN_LOG_WINDOW_BYTES`). Declared here, where the client can read it, and
- * applied by `run-projection.server.ts`: ruling 454 (CON-2) re-windows a
+ * applied by `run-projection.server.ts`: ruling 457 (CON-2) re-windows a
  * console whose live tail fell further behind than one window, rather than
  * reading every missed line forward in one request.
  */
@@ -331,7 +331,7 @@ export interface RunLogWindow {
    */
   headSeq: number;
   /**
-   * Ruling 454 (owner decision 2, 2026-09-24): false when this payload does
+   * Ruling 457 (owner decision 2, 2026-09-24): false when this payload does
    * NOT carry the group's window — every group on a revalidation or a client
    * navigation, every group but the shown one on a document load. The console
    * fills such a thread with one `/resources/run-log?window=1` request when it
@@ -341,7 +341,7 @@ export interface RunLogWindow {
 }
 
 /**
- * Ruling 454: a console line's identity within its agent group, stable across
+ * Ruling 457: a console line's identity within its agent group, stable across
  * appends, backward pages and revalidations — the React key of its row and the
  * key of its open disclosures. `run` is the line's index in
  * `logWindow.runIds`; a UI-53 boundary is keyed by the run it opens.
@@ -393,7 +393,7 @@ export function namedTurnPhase(phase: string | null): string | null {
 }
 
 /**
- * Ruling 454 (LIVE-1): what the Live run strip and the console's facts row
+ * Ruling 457 (LIVE-1): what the Live run strip and the console's facts row
  * read off a run row that moves while it streams. Every `/resources/run-log`
  * answer carries the run's current set, so the strip follows the console's
  * own tail instead of a loader revalidation every two seconds.
@@ -406,7 +406,7 @@ export interface RunLiveFacts {
   tokensEstimated: boolean;
   cache: RunCacheView;
   /**
-   * Ruling 454 (CON-7): when the row these facts were read from last changed
+   * Ruling 457 (CON-7): when the row these facts were read from last changed
    * (`agent_runs.updated_at`, epoch ms; every write of a fact bumps it). A
    * revalidation's projection and a tail read land in any order, so the store
    * keeps the newer read, not the last one to arrive. Absent on a hand-built
@@ -538,7 +538,7 @@ export interface RunView {
   /** Ruling 369: the prompt-cache record (write vs read, the first call's
    *  temperature, the TTL bucket, the peak and last prompt, compactions). */
   cache: RunCacheView;
-  /** Ruling 454 (CON-7): `RunLiveFacts.factsAt`, the row's last change. */
+  /** Ruling 457 (CON-7): `RunLiveFacts.factsAt`, the row's last change. */
   factsAt?: number;
   /** The projected log lines for the group's bounded window (newest last),
    * with UI-53's synthetic `── resumed · run N of M ──` boundaries between
@@ -546,14 +546,14 @@ export interface RunView {
   lines: LogLine[];
   /** The exact stored wire envelope per line (index-aligned with `lines`) —
    * what the `{ } raw` toggle renders verbatim (runs.md §5.4). Boundary rows
-   * carry an empty envelope. Ruling 454: the task and controller pages ship
+   * carry an empty envelope. Ruling 457: the task and controller pages ship
    * none (`[]`); the console loads the envelopes when the raw view opens. */
   raw: string[];
-  /** Ruling 454: each line's `consoleLineKey` (index-aligned with `lines`),
+  /** Ruling 457: each line's `consoleLineKey` (index-aligned with `lines`),
    *  so a row keeps its identity when lines are appended or paged in. */
   lineKeys?: string[];
   /**
-   * Ruling 454 (TASK-1): the group's console holds a dead-session marker
+   * Ruling 457 (TASK-1): the group's console holds a dead-session marker
    * (P13-D-2) inside its window, with the session the marker names. The
    * Continuity Recovery Panel reads this; it used to scan `lines` and `raw`
    * for it, which only worked while the loader shipped every window.

@@ -155,7 +155,7 @@ export function getControllerDock(
     /**
      * O39-d: the panel is OPEN and shows this transcript, so its owner has
      * seen it. A load without it reads nothing: a load nobody looked at must
-     * not mark the reply it fetched as read. (Since ruling 454 the dock loads
+     * not mark the reply it fetched as read. (Since ruling 457 the dock loads
      * this view only while the panel is open; the closed button reads the
      * dock's status instead.)
      */

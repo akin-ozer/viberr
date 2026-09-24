@@ -1594,7 +1594,7 @@ export async function appendComment(
   requireProjectMutable(loadProjectContext(ctx, input.projectSlug), "comment on this task");
 
   // Existence only: the locked write below reads and parses the file itself
-  // (ruling 454, CS-5 — this used to parse it a second time just to ask).
+  // (ruling 457, CS-5 — this used to parse it a second time just to ask).
   if (!existsSync(resolveTaskFilePath(taskRef(ctx, input.projectSlug, input.taskKey)))) {
     throw AppError.notFound(`Task ${input.taskKey} not found.`);
   }
@@ -1672,7 +1672,7 @@ export async function appendComment(
 
   // Mention fan-out (notification kind `mention`, contracts §4) — the shared
   // helper every comment writer (human AND agent) funnels through (NEW-4).
-  // Ruling 454 (CS-5): a comment with no `@` can mention nobody (every mention
+  // Ruling 457 (CS-5): a comment with no `@` can mention nobody (every mention
   // starts at one), so the author's name and tone the notification would carry
   // are not even looked up.
   let mentionedUserIds: string[] = [];
@@ -1699,7 +1699,7 @@ export async function appendComment(
     );
   }
 
-  // Ruling 454 (CS-5): no task summary here — every caller renders from its
+  // Ruling 457 (CS-5): no task summary here — every caller renders from its
   // own revalidation, and building one cost four statements and four file
   // reads per comment.
   return { toAgent, mentionedUserIds };
@@ -2037,7 +2037,7 @@ export async function commentToAgent(
     resolveMentionedAgent,
     resumeWorkdir,
   } = await import("./agent-reply.server");
-  // Ruling 454 (CS-5): an agent is engaged only by an @handle, so a comment
+  // Ruling 457 (CS-5): an agent is engaged only by an @handle, so a comment
   // without an `@` skips both agent resolvers (each reads the project file and
   // every deployed profile) — the answer they would give, without the reads.
   const mayMention = input.text.includes("@");

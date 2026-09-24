@@ -74,7 +74,7 @@ the ruling and says so.
 | NFR1 | Board usable for the full task set; unbounded, not virtualized | IMPLEMENTED as amended (R19-9) | `server/projections/board-query.server.ts` has no LIMIT |
 | NFR2 | Decision-relevant truth first; depth loads progressively | IMPLEMENTED | `features/task-detail/task-detail-page.tsx`, `features/task-detail/timeline-slice.ts` |
 | NFR3 | Every state-changing action acknowledges itself | IMPLEMENTED | fetcher pending states, `features/toast-honesty.test.ts` source scan |
-| NFR4 | Shared updates converge without refresh | IMPLEMENTED | SSE + watcher + 5-min GitHub poller + boot rescan; a hidden tab closes its streams and, on return, the broker replays what it missed (ruling 301; ruling 454) |
+| NFR4 | Shared updates converge without refresh | IMPLEMENTED | SSE + watcher + 5-min GitHub poller + boot rescan; a hidden tab closes its streams and, on return, the broker replays what it missed (ruling 301; ruling 457) |
 | NFR5 | Timeline usable without the full raw history | IMPLEMENTED | `features/task-detail/timeline-slice.ts`, run-log paging (`routes/resources.run-log.ts`) |
 | NFR6 | All traffic encrypted in transit | **PARTIAL** | The app speaks plain HTTP and delegates TLS to the proxy; boot warns on an `http://` production origin (`server/config/env.server.ts`) |
 | NFR7 | No credentials in timelines, comments, audit, logs | IMPLEMENTED | redaction in `server/runtimes/run-sink.server.ts` (per run: `createRunSink(db, spec, { secrets })` carries the principal's own value into `createLineRedactor`), `server/secrets/git-output-redact.server.ts`; `user_backend_credentials.secret_box` is never selected by a reader, so a loader cannot spread it out |

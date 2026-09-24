@@ -6,7 +6,7 @@ import { useRelativeTime } from "./use-relative-time";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 
 /**
- * Ruling 454 (RF-9): the page's clocks. Every relative stamp and every
+ * Ruling 457 (RF-9): the page's clocks. Every relative stamp and every
  * elapsed counter ran its own interval, so a KB browser's file rows, Home's
  * project cards and a console's waiting rows each added one, and each tick
  * re-rendered its one row in a commit of its own.
@@ -52,7 +52,7 @@ function Page() {
   );
 }
 
-describe("shared clocks (ruling 454)", () => {
+describe("shared clocks (ruling 457)", () => {
   it("one interval per cadence, whatever the number of readers", () => {
     const view = render(<Page />);
     const stamps = () =>

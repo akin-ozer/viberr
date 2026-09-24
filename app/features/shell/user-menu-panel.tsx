@@ -21,7 +21,7 @@ import {
  * the Home header (the mock duplicates it). Real session identity, real logout
  * POST, theme cycling persisted to the user row + cookie via /prefs/theme.
  *
- * Ruling 454: this module is the menu itself and is loaded lazily. Pages ship
+ * Ruling 457: this module is the menu itself and is loaded lazily. Pages ship
  * `user-menu.tsx`, a trigger that looks the same and fetches this module on
  * intent (pointer over it, focus) or on the first press; see there.
  *
@@ -111,7 +111,7 @@ export function UserMenuPanel({
     // Toast fires on the server result (effect above), not on submit.
   };
 
-  // Ruling 454: this trigger replaced the plain one in `UserMenu`. If a Tab
+  // Ruling 457: this trigger replaced the plain one in `UserMenu`. If a Tab
   // had put the focus there, it moves here; an open menu takes it instead.
   useLayoutEffect(() => {
     const hadFocus = handOver.current.focused;

@@ -32,7 +32,7 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Bundle ratchet (ruling 454)
+      - name: Bundle ratchet (ruling 457)
         run: node scripts/measure-routes.mjs --check
 
   e2e:

@@ -248,7 +248,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
   });
 
   /**
-   * Ruling 454: the task page's freshness reads got composite indexes after
+   * Ruling 457: the task page's freshness reads got composite indexes after
    * roots had applied the baseline; boot adds them to an older root.
    */
   it("adds the freshness indexes a pre-454 root lacks", () => {

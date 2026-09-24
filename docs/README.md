@@ -71,7 +71,7 @@ undated.
 | [development/contributing.md](development/contributing.md) | Setup, gates, where code goes, invariants, schema changes while pre-prod, pinned docs, definition of done |
 | [development/testing.md](development/testing.md) | Vitest config and harnesses, how state is built, doc-pinning tests, lint rules, the e2e flow and spec table, CI |
 | [development/scripts.md](development/scripts.md) | Every npm script and CLI, which ones take the writer lock, seed/backup/restore internals |
-| [development/performance.md](development/performance.md) | The journeys, the deterministic metrics, the ratchet that only moves down (ruling 454), the measuring harnesses, and what the first pass measured |
+| [development/performance.md](development/performance.md) | The journeys, the deterministic metrics, the ratchet that only moves down (ruling 457), the measuring harnesses, and what the first pass measured |
 
 ### UI
 

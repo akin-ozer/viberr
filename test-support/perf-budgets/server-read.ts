@@ -1,6 +1,6 @@
 import type { PerfBudgetTable } from "../perf-verdict";
 
-/** Ruling 454 ratchet ceilings: server read path (file parses, auth, SQL per request). */
+/** Ruling 457 ratchet ceilings: server read path (file parses, auth, SQL per request). */
 
 const TASK_REVALIDATION =
   "demo seed, arda, VIB-142 + 60 comments (69 events): root + layout + task loaders on one .data Request, second (warm) revalidation";

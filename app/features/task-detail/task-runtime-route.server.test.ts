@@ -173,7 +173,7 @@ describe("loader — runtime projection shape", () => {
     const run = runtime.find((r) => r.serverRunId === finishedRunId)!;
     expect(run).toMatchObject({ backend: "codex", state: "done" });
     expect(run.lines.length).toBeGreaterThan(0);
-    // Ruling 454 (owner decision 2, 2026-09-24): a document load carries the
+    // Ruling 457 (owner decision 2, 2026-09-24): a document load carries the
     // shown agent's display lines, each with its key, and no stored envelope;
     // the console loads the envelopes when its raw view opens.
     expect(run.lineKeys).toHaveLength(run.lines.length);

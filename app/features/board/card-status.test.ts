@@ -9,7 +9,7 @@ import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
  * problem order the fold counts against.
  */
 
-/** A board card (ruling 454, BOARD-3: the board ships these, not the whole
+/** A board card (ruling 457, BOARD-3: the board ships these, not the whole
  *  task summary). */
 function task(patch: Partial<BoardCard> = {}): BoardCard {
   return {

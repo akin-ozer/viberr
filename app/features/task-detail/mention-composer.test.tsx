@@ -105,7 +105,7 @@ async function renderComposer(opts: ComposerOptions = {}) {
     },
   ]);
   const utils = render(<Stub initialEntries={["/t"]} />);
-  // Ruling 454: the editor is lazy and every mount starts as its stand-in.
+  // Ruling 457: the editor is lazy and every mount starts as its stand-in.
   // Pressing the stand-in fetches it at once instead of on the idle callback.
   const standIn = utils.container.querySelector(".composer-ce");
   if (!standIn) throw new Error("renderComposer: no composer rendered");
@@ -180,7 +180,7 @@ describe("ruling 127: the backend handles name whose account they would bill", (
     });
     await setText(editor, "@c");
     // Wait for the rows this test reads, not just the listbox: the list can
-    // mount a render before its "@c" options do (the lazy editor, ruling 454,
+    // mount a render before its "@c" options do (the lazy editor, ruling 457,
     // moves that render later under a loaded suite).
     await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).toContain(
@@ -195,7 +195,7 @@ describe("ruling 127: the backend handles name whose account they would bill", (
     const { editor } = await renderComposer({ runPrincipal: null });
     await setText(editor, "@c");
     // Wait for the rows this test reads, not just the listbox: the list can
-    // mount a render before its "@c" options do (the lazy editor, ruling 454,
+    // mount a render before its "@c" options do (the lazy editor, ruling 457,
     // moves that render later under a loaded suite).
     await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).toContain("no task owner");
@@ -206,7 +206,7 @@ describe("ruling 127: the backend handles name whose account they would bill", (
     const { editor } = await renderComposer();
     await setText(editor, "@c");
     // Wait for the rows this test reads, not just the listbox: the list can
-    // mount a render before its "@c" options do (the lazy editor, ruling 454,
+    // mount a render before its "@c" options do (the lazy editor, ruling 457,
     // moves that render later under a loaded suite).
     await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).not.toContain("not connected");

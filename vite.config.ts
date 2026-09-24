@@ -33,7 +33,7 @@ const resolvedNodeModules = path.join(
 );
 
 /**
- * Ruling 454: a font file is never inlined. Vite inlines any asset under 4 KB
+ * Ruling 457: a font file is never inlined. Vite inlines any asset under 4 KB
  * as a base64 `data:` URI by default, which put JetBrains Mono's cyrillic-ext
  * and vietnamese subsets (woff2 and woff, three weights) into the root
  * stylesheet that blocks every first paint: 20 KB of its 55.6 KB gzip, fetched
@@ -51,7 +51,7 @@ const ROOT_ROUTE = path.resolve("app/root.tsx");
 const ROOT_ROUTE_ENTRY = `${ROOT_ROUTE}?__react-router-build-client-route`;
 
 /**
- * Ruling 454: every page loads the client entry and the root route, so every
+ * Ruling 457: every page loads the client entry and the root route, so every
  * route's closure already holds everything those two import statically.
  * Rolldown cannot know that (to it, route modules are unrelated entries), so
  * it cut that shared code into ~30 chunks by which routes import each piece,

@@ -301,7 +301,7 @@ describe("a failed rebuild is retried (ruling 218)", () => {
   }, 30_000);
 
   /**
-   * Ruling 454: a project's cascade isolates each task (a SAVEPOINT apiece), so
+   * Ruling 457: a project's cascade isolates each task (a SAVEPOINT apiece), so
    * a task that cannot re-project no longer fails project.md's rebuild. The
    * project row lands and keeps the F28-D3 sentinel, and the result names the
    * task: without a retry on that, nothing would ever re-run the cascade, since

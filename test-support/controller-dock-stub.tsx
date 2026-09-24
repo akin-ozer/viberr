@@ -12,7 +12,7 @@ import type { LiveTurnView, UnseenReplyView } from "~/routes/resources.controlle
  * Ruling 121: the controller dock under a routed stub shaped like the app —
  * root (which mounts the dock), the workspace layout, a board, a task and the
  * project controller page, and the dock's two resource routes. Shared by the
- * dock's behaviour tests and its ruling-454 perf test, so both drive the same
+ * dock's behaviour tests and its ruling-457 perf test, so both drive the same
  * routes and count the same requests.
  *
  * Each page offers the two moves a person makes under the dock: links to the
@@ -29,7 +29,7 @@ export interface DockStubOptions {
   view: (request: Request) => ControllerDockView;
   /** O39-d: the viewer's unseen replies (none by default). */
   unseen?: () => UnseenReplyView[];
-  /** Ruling 454: the viewer's turns working right now (none by default). */
+  /** Ruling 457: the viewer's turns working right now (none by default). */
   working?: () => LiveTurnView[];
   action?: (form: FormData) => { ok: true; conversationId: string } | { ok: false; error: string };
   /** The pages hold the `user` stream, as the workspace layout does. */

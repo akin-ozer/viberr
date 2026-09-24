@@ -138,7 +138,7 @@ after 2 s. A rebuild that FAILS is retried on its own (ruling 218): the watcher 
 that path after 2 s, 5 s, 15 s, 45 s and 120 s (`RETRY_BACKOFF_MS`), resets on the first
 success, and after the last step leaves the file in `projectionStore` on health, which
 marks the instance degraded until the file projects again. A `project.md` whose cascade
-could not re-project one of its tasks counts as failed (ruling 454): its own row and
+could not re-project one of its tasks counts as failed (ruling 457): its own row and
 members land, and the fault names the task's file.
 
 ## Diagnostics (a task looks wrong / stuck)
@@ -418,7 +418,7 @@ recommendation is open. Nothing is owed by anyone while it waits.
 - Sessions live in better-auth's own `session` table (singular, better-auth's schema).
   **Expiry is 30-day rolling**, slid at most once a day on an active session; the
   refreshed cookie is forwarded by root's `sessionRenewalMiddleware` on whichever GET
-  resolved the session (ruling 454). **Nothing prunes expired rows**; an
+  resolved the session (ruling 457). **Nothing prunes expired rows**; an
   expired row is simply never honoured. Rows are deleted only by an explicit act: sign-out
   (`routes/logout.tsx`), a self-serve password change (deletes every OTHER session), the
   auth guard (deletes the session of a disabled or deleted user on sight), and admin

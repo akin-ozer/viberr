@@ -114,7 +114,7 @@ const NOT_FAILED: RunEnd = {
  * (every field is empty otherwise). The one reading the run card and the
  * review-round counter share (ruling 416). The card used to classify the whole
  * console window the loader shipped, every earlier run of the agent included,
- * and that was one of the two reasons the window had to ship (ruling 454,
+ * and that was one of the two reasons the window had to ship (ruling 457,
  * TASK-1).
  */
 export function classifyRunEndOf(

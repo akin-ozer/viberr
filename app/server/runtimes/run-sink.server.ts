@@ -275,7 +275,7 @@ export function createRunSink(
   // off the provider's split of each write; compactions count the boundary
   // facts. Everything lands on the row with the token counters below.
   let cacheWriteTokens = 0;
-  /** The folded facts as last written to the run row (ruling 454: a line
+  /** The folded facts as last written to the run row (ruling 457: a line
    *  that moves none of them writes no UPDATE). Null until the first write. */
   let persistedFold: string | null = null;
   let firstCall: RunPatch | null = null;
@@ -638,7 +638,7 @@ export function createRunSink(
 
         // 2. DB projection row, and 3. the facts folded into the run row.
         //
-        // Ruling 454 (LIVE-10, SRV-8): the fold is written only when a folded
+        // Ruling 457 (LIVE-10, SRV-8): the fold is written only when a folded
         // value moved since the last write — most streamed lines carry no fact
         // at all, and each used to rewrite ~20 unchanged columns (and bump
         // `updated_at`, which nothing reads as liveness). When a line has both

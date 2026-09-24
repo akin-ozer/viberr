@@ -67,7 +67,7 @@ Identity facts:
 | Instance settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). |
 | `/resources/controller` | any signed-in user; project and task scopes require membership | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected). |
-| `/resources/controller-unseen` | any signed-in user | The dock's status: the viewer's unseen controller replies in every scope, each with the page that opens it (§3, ruling 448), and the viewer's turns working right now with their scope, phase and step (ruling 454). |
+| `/resources/controller-unseen` | any signed-in user | The dock's status: the viewer's unseen controller replies in every scope, each with the page that opens it (§3, ruling 448), and the viewer's turns working right now with their scope, phase and step (ruling 457). |
 
 Entry points: the dock (everywhere), the workspace rail item, the Home hero link (once a
 project exists), the org-settings tab's "Open the controller", and the goal chip on a
@@ -75,7 +75,7 @@ task page (it lands on the chain's own card, `#goal-N`). There is no command-pal
 The page subscribes to the user SSE scope (and the project scope on the project surface)
 and, while a turn is working, reads the turn's console tail every 5 seconds: the fallback
 for a settle the stream missed, which revalidates the page once the tail says the run
-ended (ruling 454, CTL-2; it used to revalidate root, the workspace layout and the page
+ended (ruling 457, CTL-2; it used to revalidate root, the workspace layout and the page
 every 5 s to move one step line). New conversation sits in the page head;
 the rail lists conversations first and goal chains after, is `position: sticky` and scrolls
 itself, and below the two-column breakpoint the head carries a native thread picker
@@ -111,7 +111,7 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   the name comes from the workspace loader, so it reads the same before the first open and
   after it, `aria-haspopup="dialog"` / `aria-expanded`. It wears the pulsing `.live-dot`
   while a turn of the viewer's is working in the dock's scope, open or closed and from the
-  first page load, read from the dock's status (ruling 454; the dock polls it every 5 s
+  first page load, read from the dock's status (ruling 457; the dock polls it every 5 s
   until the turn settles), and a still blue dot plus "a new reply" in its name when any
   conversation of the viewer's holds a reply they have not seen (ruling 448).
 - **Panel**: `role="dialog" aria-modal="false"`, `data-screen-label="Controller dock"`,
@@ -123,7 +123,7 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   from other scopes and opens one of its own scope in place. Everything below the header
   (`controller-dock-panel.tsx`: the context line, the transcript through the markdown
   pipeline, the thread list and the composer) loads on demand, so root ships only the
-  button, the frame, the header and the dock's state to every page (ruling 454); the
+  button, the frame, the header and the dock's state to every page (ruling 457); the
   button preloads it when a pointer or focus reaches it, and until it lands the frame
   shows the same "Reading where you are…" and "Loading…" the body shows before its view
   arrives. The shared not-connected note lives in `not-connected.tsx` for the same
@@ -143,7 +143,7 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   thread per scope and the open/closed state survive a reload for the life of the tab
   (`sessionStorage`, wrapped, absent in SSR). Navigating swaps the scope and keeps the
   panel open; a working turn keeps working.
-- **Live** (ruling 454): the dock has two resources, the open panel's view
+- **Live** (ruling 457): the dock has two resources, the open panel's view
   (`/resources/controller`) and the status every page's button reads
   (`/resources/controller-unseen`: unseen replies and the viewer's live turns). Both are
   root-owned fetchers whose routes answer `shouldRevalidate` false
@@ -157,7 +157,7 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   `controller.updated`. Any surface streaming the `user` scope hands that event to the
   dock, debounced 300 ms, as the window event `CONTROLLER_UPDATED_EVENT` instead of
   revalidating its own loaders (only the two controller pages, which render the
-  conversation, revalidate on it); a reconnect replays a missed one (ruling 454), and a
+  conversation, revalidate on it); a reconnect replays a missed one (ruling 457), and a
   `stream.resync` hands it one too.
   While a turn works the dock polls the STATUS every 5 s, open or closed: the working dot
   and the open panel's step line move from it, and the view reloads only when the status
@@ -227,7 +227,7 @@ M` boundaries between turns.
   userId, runId, threadId, seq}` to the OWNER's `user` stream for every stored line
   (`controllerRunRoute` resolves the owner once per run), the console fetches the lines
   since its cursor, and the frame is a stream event that revalidates nothing
-  (`SSE_STREAM_EVENTS`; `useLiveUpdates` hands it to the console, ruling 454), so one
+  (`SSE_STREAM_EVENTS`; `useLiveUpdates` hands it to the console, ruling 457), so one
   turn's tool calls never revalidate every surface the person has open. A supervising org
   admin reading someone else's thread sees the same console off the 5-second tail read;
   the frames are the owner's. The streaming footer says

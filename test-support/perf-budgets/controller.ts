@@ -1,12 +1,12 @@
 import type { PerfBudgetTable } from "../perf-verdict";
 
-/** Ruling 454 ratchet ceilings: controller dock and page. */
+/** Ruling 457 ratchet ceilings: controller dock and page. */
 export const CONTROLLER_BUDGETS: PerfBudgetTable = {
   // FL-1 / CTL-1: root mounts the dock on every page, and the dock imported the
   // controller page (runs panels, run console, NumberFlow, thinking-orbs) and
   // the markdown pipeline for a panel that starts closed (48). The note moved
   // to not-connected.tsx and the open panel's body loads on demand.
-  // Raised 18 -> 19 by ruling 454 (RF-1/RF-5): the dock's live hook records
+  // Raised 18 -> 19 by ruling 457 (RF-1/RF-5): the dock's live hook records
   // into the tab's revalidation ledger (`live-updates/revalidation-policy.ts`),
   // a module root imports itself, so no byte is added to the first download.
   "controller:closed-dock.static-modules": {

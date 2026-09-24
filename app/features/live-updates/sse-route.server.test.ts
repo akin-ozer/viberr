@@ -251,7 +251,7 @@ describe("/resources/events", () => {
     );
   }
 
-  it("replays from the lastEventId a new EventSource names on its URL (ruling 454, RF-1)", async () => {
+  it("replays from the lastEventId a new EventSource names on its URL (ruling 457, RF-1)", async () => {
     const { getSseBrokerStats } = await import("~/server/events/sse-broker.server");
     const head = getSseBrokerStats().headId;
     await publishTaskUpdated("VIB-7");

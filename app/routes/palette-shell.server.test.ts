@@ -49,7 +49,7 @@ describe("palette-shell loader (ruling 145)", () => {
     expect(result.header!.user.name).toBeTruthy();
     expect(result.header!.unread).toBeGreaterThanOrEqual(0);
     expect(result.header!.orphanUnread).toBe(0);
-    // Ruling 454 (owner, 2026-09-24): the bell loads its own list.
+    // Ruling 457 (owner, 2026-09-24): the bell loads its own list.
     expect(result.header).not.toHaveProperty("notifications");
   });
 

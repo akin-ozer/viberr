@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 /**
  * Ruling 301's diagnosis, as the operations pages state it, counts the SSE
  * streams a visible page holds against HTTP/1.1's six connections per origin.
- * Ruling 454 (TASK-6 / LIVE-5) took the task page from two streams to one: the
+ * Ruling 457 (TASK-6 / LIVE-5) took the task page from two streams to one: the
  * run console reads its frames off the layout's stream (`onLiveFrame`) instead
  * of opening its own. The runbook and the deployment page kept saying "two",
  * which sends an operator closing twice the tabs the pool needs.
@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 const root = process.cwd();
 const PAGES = ["docs/operations/runbook.md", "docs/operations/deployment.md"];
 
-describe("the operations pages count the SSE streams a page holds (ruling 454)", () => {
+describe("the operations pages count the SSE streams a page holds (ruling 457)", () => {
   it("one module opens an EventSource: the live-updates hook", () => {
     const openers = readdirSync(path.join(root, "app"), { recursive: true })
       .map(String)

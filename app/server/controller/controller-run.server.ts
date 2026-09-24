@@ -889,7 +889,7 @@ const IDLE_TURN: ConversationTurnState = {
 };
 
 /**
- * Ruling 454 (CTL-2): the conversations holding a turn right now, read off the
+ * Ruling 457 (CTL-2): the conversations holding a turn right now, read off the
  * in-process lease table (no query). The dock's status asks this every 5 s
  * while a turn works instead of reloading a whole transcript.
  */

@@ -274,7 +274,7 @@ export function deleteMemberProjectNotifications(
   );
 }
 
-/** What the bell draws without its list (ruling 454): the badge and the
+/** What the bell draws without its list (ruling 457): the badge and the
  *  popover head. */
 export interface BellCounts {
   /** The badge: unread rows that lead somewhere (see below). */
@@ -286,7 +286,7 @@ export interface BellCounts {
 }
 
 /**
- * Ruling 454 (FL-4 / SRV-6): the bell's two counts in one statement. Pages
+ * Ruling 457 (FL-4 / SRV-6): the bell's two counts in one statement. Pages
  * ship these instead of the bell's list, which the bell loads itself
  * (`routes/resources.notifications.ts`).
  *

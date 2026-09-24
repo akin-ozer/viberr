@@ -24,7 +24,7 @@ import {
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { dockResourceShouldRevalidate } from "~/features/controller/controller-dock-context";
 
-/** Ruling 454: the dock loads its view itself; a page revalidation never
+/** Ruling 457: the dock loads its view itself; a page revalidation never
  *  reloads it (see `dockResourceShouldRevalidate`). */
 export const shouldRevalidate = dockResourceShouldRevalidate;
 

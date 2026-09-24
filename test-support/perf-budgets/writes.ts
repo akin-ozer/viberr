@@ -1,6 +1,6 @@
 import type { PerfBudgetTable } from "../perf-verdict";
 
-/** Ruling 454 ratchet ceilings: write path and projection (reprojection, comments, run sink). */
+/** Ruling 457 ratchet ceilings: write path and projection (reprojection, comments, run sink). */
 export const WRITES_BUDGETS: PerfBudgetTable = {
   // SRV-3: the watcher's project.md rebuild after allocateTaskKey bumped only
   // nextTaskNumber force-re-projected every task, one task.updated each

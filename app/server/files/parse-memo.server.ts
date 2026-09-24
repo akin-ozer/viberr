@@ -1,5 +1,5 @@
 /**
- * Ruling 454: a CONTENT-keyed parse memo for the store readers (project.md,
+ * Ruling 457: a CONTENT-keyed parse memo for the store readers (project.md,
  * task.md, agent profile templates).
  *
  * The problem it removes: one task-page revalidation called readers that each

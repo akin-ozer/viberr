@@ -20,12 +20,12 @@ import { runLogWindowFor } from "~/server/runtimes/run-projection.server";
  *                           is fetched on demand (docs/architecture/decisions.md forbids fat SSE
  *                           objects).
  *   ?window=1               the console window of the run's agent group
- *                           (ruling 454): display lines with their keys,
+ *                           (ruling 457): display lines with their keys,
  *                           the window facts and the representative's live
  *                           facts, as a hard refresh ships the shown group.
  *                           No envelopes.
  *   ?raw=0                  (with `since` or `before`) leaves each line's
- *                           stored envelope out (ruling 454).
+ *                           stored envelope out (ruling 457).
  *   ?before=<seq>&limit=<n> backward page (P13-D-11): the newest `n` lines
  *                           OLDER than `seq`. The task loader now ships a
  *                           bounded window of each agent group's console
@@ -100,7 +100,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     await requireProjectMember(request, run.project_slug, "view raw run logs");
   }
 
-  // Ruling 454 (owner decision 2): the whole console window of the run's
+  // Ruling 457 (owner decision 2): the whole console window of the run's
   // agent group, exactly as a hard refresh would ship it. Pages carry no
   // console lines on a revalidation or a client navigation, so the console
   // fills the thread it shows with this one request.
@@ -119,9 +119,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     query = { since };
   }
   // The row read above, not a second read: the live tail calls this once per
-  // streamed line per viewer (ruling 454).
+  // streamed line per viewer (ruling 457).
   const page = runLogPage(db, run, query);
-  // Ruling 454: `raw=0` leaves the stored envelopes out; the console asks for
+  // Ruling 457: `raw=0` leaves the stored envelopes out; the console asks for
   // them only while its raw view is open, and they are most of a line's bytes.
   if (url.searchParams.get("raw") === "0") {
     return Response.json({

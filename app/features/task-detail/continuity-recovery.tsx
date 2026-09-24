@@ -54,7 +54,7 @@ import { Pill, type PillKind } from "~/ui/pill";
  *    stored WIRE envelope (`{reason:"session_missing", session_id}`), never
  *    parsed out of display text (`run-projection.server.ts`). This panel used
  *    to scan `lines` and `raw` for it, which only worked while the page
- *    carried every group's window; ruling 454 ships console lines on a hard
+ *    carried every group's window; ruling 457 ships console lines on a hard
  *    load only, so the server finds the marker for it.
  *
  * Bounded by construction, and that is the retirement rule rather than a bug:

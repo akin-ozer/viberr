@@ -201,7 +201,7 @@ CREATE TABLE task_events (
   project_slug TEXT NOT NULL,
   task_key TEXT NOT NULL,
   -- 0 = newest (file order, newest-first). A re-project keeps the rows of
-  -- unchanged events (their id survives, position shifts; ruling 454).
+  -- unchanged events (their id survives, position shifts; ruling 457).
   position INTEGER NOT NULL,
   occurred_at TEXT NOT NULL,
   type TEXT NOT NULL,
@@ -723,7 +723,7 @@ CREATE UNIQUE INDEX idx_users__email ON users (email);
 CREATE INDEX idx_audit_events__occurred_at ON audit_events (occurred_at);
 CREATE INDEX idx_audit_events__actor_user_id ON audit_events (actor_user_id);
 CREATE INDEX idx_audit_events__action ON audit_events (action);
--- Ruling 454: the task page's "last checked" read (MAX(occurred_at) of one
+-- Ruling 457: the task page's "last checked" read (MAX(occurred_at) of one
 -- task's github.reconcile.task rows, ~288 a day per delivered task) walks one
 -- task's rows in this index instead of every task's under the action index.
 CREATE INDEX idx_audit_events__task_action ON audit_events (project_slug, task_key, action, occurred_at);
@@ -734,7 +734,7 @@ CREATE INDEX idx_task_events__occurred_at ON task_events (occurred_at);
 CREATE INDEX idx_diagnostics__source_path ON diagnostics (source_path);
 CREATE INDEX idx_diagnostics__task ON diagnostics (project_slug, task_key);
 CREATE INDEX idx_provenance__source_path ON provenance (source_path);
--- Ruling 454: the per-task reconcile reads filter one path AND one action.
+-- Ruling 457: the per-task reconcile reads filter one path AND one action.
 CREATE INDEX idx_provenance__path_action ON provenance (source_path, action);
 CREATE INDEX idx_provenance__observed_at ON provenance (observed_at);
 CREATE INDEX idx_notifications__user ON notifications (user_id, occurred_at DESC);

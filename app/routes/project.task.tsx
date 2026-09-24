@@ -199,7 +199,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const limit = clampTimelineLimit(
     new URL(request.url).searchParams.get("events"),
   );
-  // Ruling 454: the query reads only the window the page ships; the event
+  // Ruling 457: the query reads only the window the page ships; the event
   // count below keeps "Show older" exact.
   const detail = getTaskDetail(db, params.slug, params.key, {
     timelineLimit: timelineWindowSize(limit),
@@ -264,7 +264,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // raw execution history — NFR5. `logWindow` carries the cursor the console
   // pages backwards with via `/resources/run-log?before=`.
   //
-  // Ruling 454 (owner decision 2, 2026-09-24): and only where a person is
+  // Ruling 457 (owner decision 2, 2026-09-24): and only where a person is
   // arriving. A hard refresh ships the shown agent's window (display lines;
   // the envelopes load when the raw view opens); a revalidation or a client
   // navigation (`.data`) ships no console line at all, and the console fills
@@ -1546,5 +1546,5 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   );
 }
 
-/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.task");

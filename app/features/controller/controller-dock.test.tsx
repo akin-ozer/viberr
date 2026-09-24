@@ -118,7 +118,7 @@ describe("the dock tells a person a reply is waiting (O39-d)", () => {
   });
 
   /**
-   * Ruling 448, and ruling 454 (CTL-3): only the OPEN dock reads the transcript
+   * Ruling 448, and ruling 457 (CTL-3): only the OPEN dock reads the transcript
    * it shows. The view was a root-owned fetcher, so once the dock had been
    * opened, every page revalidation reloaded its last URL, `seen=1` and all:
    * the reply's own `controller.updated` revalidated the page, which marked the
@@ -483,7 +483,7 @@ describe("the controller dock (ruling 121)", () => {
   });
 
   /**
-   * Finding 32, and ruling 454 (CTL-2): while a turn works the dock polls every
+   * Finding 32, and ruling 457 (CTL-2): while a turn works the dock polls every
    * 5 s, open or closed. It polls the small status (unseen replies, turns
    * working), not the transcript: the step line moves from the status, and
    * the transcript reloads once, when the status says the turn settled.
@@ -562,7 +562,7 @@ describe("the controller dock (ruling 121)", () => {
   /**
    * O39-d: the working poll runs with the panel closed too, and a load nobody
    * is reading must not mark the reply it fetches as seen. Only the open
-   * panel's loads say `seen`, and since ruling 454 the closed dock loads no
+   * panel's loads say `seen`, and since ruling 457 the closed dock loads no
    * transcript at all.
    */
   it("O39-d: only an OPEN panel's load marks its transcript seen", async () => {
@@ -637,7 +637,7 @@ describe("the controller dock (ruling 121)", () => {
     // History never wears the marker…
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
     // …but the reply that lands while the panel is up does. It arrives the way
-    // replies arrive (ruling 454): the page's stream hands the dock the
+    // replies arrive (ruling 457): the page's stream hands the dock the
     // `controller.updated` its conversation published.
     messages = [first, second];
     act(() => {
@@ -794,7 +794,7 @@ describe("the controller dock (ruling 121)", () => {
           threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
           viewerOwnsActive: true,
         }),
-      // Ruling 454: the button's dot reads the dock's status.
+      // Ruling 457: the button's dot reads the dock's status.
       working: () => [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }],
     });
     const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });

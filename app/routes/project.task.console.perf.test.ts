@@ -8,7 +8,7 @@ import { DEAD_SESSION_ID, seedConsoleFixture } from "../../test-support/console-
 import type { RunLogWindowPage } from "~/server/runtimes/run-projection.server";
 
 /**
- * Ruling 454, journey `task-open`: what the task loader ships of the agent
+ * Ruling 457, journey `task-open`: what the task loader ships of the agent
  * console. Owner decision 2 (2026-09-24): a hard refresh arrives with the
  * shown agent's console filled; a revalidation or a client navigation (a
  * `.data` request) carries no console lines, and the console fills itself with
@@ -56,7 +56,7 @@ type TaskData = Awaited<ReturnType<typeof import("~/routes/project.task").loader
 
 const bytes = (data: TaskData) => Buffer.byteLength(JSON.stringify(data));
 
-describe("the task loader's console payload (ruling 454, owner decision 2)", () => {
+describe("the task loader's console payload (ruling 457, owner decision 2)", () => {
   it("a revalidation ships the console's window facts and no lines", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     await loadTask(cookie, ".data");
@@ -110,7 +110,7 @@ describe("the task loader's console payload (ruling 454, owner decision 2)", () 
   });
 });
 
-describe("the console's own window request (ruling 454, owner decision 2)", () => {
+describe("the console's own window request (ruling 457, owner decision 2)", () => {
   it("fills a thread with the window a hard refresh would have shipped", async () => {
     const { loader } = await import("~/routes/resources.run-log");
     const { cookie } = await app.cookieFor(ardaId);

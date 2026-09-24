@@ -7,7 +7,7 @@ import { staticPackagesOf } from "../../../test-support/static-imports";
 import { UserMenu } from "./user-menu";
 
 /**
- * Ruling 454: pages ship the account menu's trigger only; the Radix menu
+ * Ruling 457: pages ship the account menu's trigger only; the Radix menu
  * (ruling 166) is fetched on intent or on the first press. The trigger must
  * look and read the same as the one it stands in for, a press that beats the
  * fetch must still open the menu, and the keyboard contract Radix gives
@@ -65,7 +65,7 @@ function triggerMarkup(trigger: HTMLElement) {
   };
 }
 
-describe("the account menu's trigger (ruling 454)", () => {
+describe("the account menu's trigger (ruling 457)", () => {
   it("is the Radix trigger's twin, and hovering it brings the menu in closed", async () => {
     const { container, plain } = mount();
     const before = triggerMarkup(plain);
@@ -121,7 +121,7 @@ describe("the account menu's trigger (ruling 454)", () => {
  * chunk is really still on the way: nothing below awaits before the pending
  * press is cancelled, and an `import()` cannot settle inside synchronous code.
  */
-describe("a press before the menu arrives can be taken back (ruling 454)", () => {
+describe("a press before the menu arrives can be taken back (ruling 457)", () => {
   async function mountFresh() {
     vi.resetModules();
     const { UserMenu: FreshMenu } = await import("./user-menu");
@@ -224,7 +224,7 @@ describe("a press before the menu arrives can be taken back (ruling 454)", () =>
   });
 });
 
-describe("Home and the workspace ship without Radix (ruling 454)", () => {
+describe("Home and the workspace ship without Radix (ruling 457)", () => {
   it("reaches no radix-ui through a static import", () => {
     for (const route of ["app/routes/_index.tsx", "app/routes/project.tsx"]) {
       expect(staticPackagesOf(route).has("radix-ui"), route).toBe(false);

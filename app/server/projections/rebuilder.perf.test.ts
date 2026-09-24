@@ -19,7 +19,7 @@ import {
 import { rebuildAll, rebuildPath, rebuildTaskFile } from "./rebuilder.server";
 
 /**
- * Ruling 454: the write path's projection cost, counted in SQL statements,
+ * Ruling 457: the write path's projection cost, counted in SQL statements,
  * WAL commits and projection events (findings SRV-3, SRV-4, CS-6/CS-1).
  */
 
@@ -74,7 +74,7 @@ function eventIds(store: TestStore, key: string): number[] {
   ).map((row) => row.id);
 }
 
-describe("projection write cost (ruling 454)", () => {
+describe("projection write cost (ruling 457)", () => {
   it("SRV-3: a task-key allocation re-projects no task", async () => {
     const store = setupTestStore(ctx);
     for (let n = 1; n <= 30; n += 1) {

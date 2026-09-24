@@ -40,7 +40,7 @@ export interface HomePageData {
   projects: HomeProjectCard[];
   prefs: HomePrefs;
   org: HomeOrgSummary;
-  /** The bell's counts; the bell loads its own list (ruling 454). */
+  /** The bell's counts; the bell loads its own list (ruling 457). */
   unread: number;
   orphanUnread: number;
   /** B-FD4: the host data root, org admins only (null otherwise). */

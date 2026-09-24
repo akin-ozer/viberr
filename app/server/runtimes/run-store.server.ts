@@ -574,7 +574,7 @@ export function runLineStats(db: DatabaseSync, runId: string): RunLineStats {
 }
 
 /**
- * Ruling 454 (TASK-1): `runLineStats` for every run of a task in ONE query,
+ * Ruling 457 (TASK-1): `runLineStats` for every run of a task in ONE query,
  * keyed by run id. A run with no lines has no entry. The task loader used to
  * ask once per run, on every load.
  */
@@ -596,7 +596,7 @@ export function runLineStatsForTask(
   return new Map(rows.map((r) => [r.id, { count: r.c, minSeq: r.lo, maxSeq: r.hi }]));
 }
 
-/** What a window needs to know about a line without shipping it (ruling 454). */
+/** What a window needs to know about a line without shipping it (ruling 457). */
 export interface RunLineSize {
   seq: number;
   /** `raw_json` + `display_json` length: what the line costs a payload. */
@@ -622,7 +622,7 @@ const BUDGETED_TAIL = `(
   ) WHERE cum <= ? OR n <= ?
 ) w`;
 
-/** What a window read is bounded by (ruling 454): the lines and bytes left in
+/** What a window read is bounded by (ruling 457): the lines and bytes left in
  *  the window, and how many of the newest lines to keep regardless. */
 export interface TailBudget {
   lines: number;
@@ -631,7 +631,7 @@ export interface TailBudget {
 }
 
 /**
- * Ruling 454 (TASK-1): the newest lines of a run that fit `budget`, as sizes
+ * Ruling 457 (TASK-1): the newest lines of a run that fit `budget`, as sizes
  * and tags only, oldest-first. The loader bounds a console window it does not
  * ship with this, so a revalidation parses no line and carries none.
  */
@@ -661,7 +661,7 @@ export interface RunLineDisplay {
 }
 
 /**
- * Ruling 454 (TASK-1): the newest lines of a run that fit `budget`, display
+ * Ruling 457 (TASK-1): the newest lines of a run that fit `budget`, display
  * only — a console the reader has not asked to see raw needs no stored
  * envelope, and the envelope is most of a line's bytes. `bytes` still counts
  * both, so the window it bounds is the same window.
@@ -691,7 +691,7 @@ export function listRunLineDisplays(db: DatabaseSync, runId: string, budget: Tai
   }));
 }
 
-/** The stored envelope of one line, or null (ruling 454: the continuity
+/** The stored envelope of one line, or null (ruling 457: the continuity
  *  marker's dead session id is read out of it). */
 export function runLineRaw(db: DatabaseSync, runId: string, seq: number): string | null {
   // SAFETY: `raw_json` is NOT NULL TEXT.
@@ -774,7 +774,7 @@ const missingPath = z.object({ code: z.literal("ENOENT") });
 /**
  * Append one raw envelope line to the run's canonical .jsonl (creates dirs).
  *
- * Ruling 454 (LIVE-10): the directory is created only when the append finds it
+ * Ruling 457 (LIVE-10): the directory is created only when the append finds it
  * missing. It exists for every line after a run's first, and a recursive
  * mkdir on every streamed line was a syscall chain per line on the shared
  * event loop (on the Docker bind mount, a host round trip).
@@ -799,7 +799,7 @@ export function appendRawLine(
 /**
  * Insert one projected log line as the run's next line and return its seq —
  * `nextSeq`'s numbering (max + 1, or 0), taken inside the INSERT itself so a
- * streamed line costs one statement instead of two (ruling 454, LIVE-10).
+ * streamed line costs one statement instead of two (ruling 457, LIVE-10).
  */
 export function appendRunLine(
   db: DatabaseSync,

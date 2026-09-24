@@ -243,14 +243,14 @@ export function getReviewQueue(
     /** Gap-10: the instant "has this gone quiet?" is asked against (tests only). */
     now?: Date;
     /**
-     * Ruling 454: the project's LIVE tasks (archived ones dropped) in
+     * Ruling 457: the project's LIVE tasks (archived ones dropped) in
      * `listProjectTasks` order, when the caller already built them — the
      * workspace layout passes the board's list, so each load maps every task
      * once. Omitted, the queue lists them itself. Same rows either way, so the
      * rail badge and this queue stay one number (U35-5).
      */
     tasks?: readonly TaskActivitySummary[];
-    /** Ruling 454: the project row, when the caller already read it. */
+    /** Ruling 457: the project row, when the caller already read it. */
     project?: ProjectRecord | null;
   },
 ): ReviewQueueData {

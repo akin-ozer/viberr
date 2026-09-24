@@ -137,8 +137,8 @@ describe("listActivityStream", () => {
     expect(stream).toEqual(["newer", "older"]);
   });
 
-  it("F28-D1 + ruling 454: a newer event appended later still wins the tie", () => {
-    // Ruling 454 keeps the ids of rows that did not change, so the event
+  it("F28-D1 + ruling 457: a newer event appended later still wins the tie", () => {
+    // Ruling 457 keeps the ids of rows that did not change, so the event
     // appended SECOND carries the larger id — the old `id ASC` tie-break would
     // have listed it after the older one. The task page orders by position.
     const store = setupTestStore(ctx);

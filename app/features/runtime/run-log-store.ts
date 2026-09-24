@@ -11,7 +11,7 @@ import {
 } from "./runtime-types";
 
 /**
- * Ruling 454 (LIVE-2 / TASK-1 / LIVE-3): the run-log console's line buffer,
+ * Ruling 457 (LIVE-2 / TASK-1 / LIVE-3): the run-log console's line buffer,
  * held OUTSIDE React state.
  *
  * The buffer used to be the task page's own state (`useRunLogStream` ran in
@@ -70,7 +70,7 @@ export interface ThreadView {
   /**
    * The stored lines that EXIST for the thread (the console's "N events"),
    * UI-53 boundaries excluded: the window's `totalLines` plus every line the
-   * tail appended since. Ruling 454 (LIVE-1): the page no longer revalidates
+   * tail appended since. Ruling 457 (LIVE-1): the page no longer revalidates
    * per line, so the count follows the tail rather than the loader.
    */
   total: number;
@@ -116,7 +116,7 @@ export interface RunLogStore {
   subscribe(listener: () => void): () => void;
   /** The thread, or null when the store does not know it (yet). */
   thread(threadId: string): ThreadView | null;
-  /** A run's live facts as its newest tail read them (ruling 454, LIVE-1). */
+  /** A run's live facts as its newest tail read them (ruling 457, LIVE-1). */
   facts(runId: string): RunLiveFacts | null;
   /** UI-03/UI-30: why the live tail stopped, or null while it follows. */
   streamError(): string | null;
@@ -352,7 +352,7 @@ export function createLiveRunLogStore(
   };
 
   /**
-   * Ruling 454 (CON-7): the NEWEST read of a run's facts wins, not the last
+   * Ruling 457 (CON-7): the NEWEST read of a run's facts wins, not the last
    * to arrive. A revalidation's projection and a tail read race, and taking
    * whichever landed last stepped the strip's turns back (5, 4, 5), or left a
    * settled run on a late pre-finalization tail answer for good. Each read is
@@ -435,7 +435,7 @@ export function createLiveRunLogStore(
   };
 
   /**
-   * Ruling 454 (CON-2): a thread the tail fell more than one window behind
+   * Ruling 457 (CON-2): a thread the tail fell more than one window behind
    * (a tab back from hidden, a resync, a revalidation after a long gap) is
    * re-windowed, the bounded read a fresh load makes, instead of reading every
    * missed line forward in one request and holding them all. A shown console
@@ -493,7 +493,7 @@ export function createLiveRunLogStore(
   };
 
   /**
-   * Ruling 454 (CON-1): the Live run strip reads a run's facts from this
+   * Ruling 457 (CON-1): the Live run strip reads a run's facts from this
    * store, and only a `ready` thread tails, so a running agent whose console
    * was never shown (the strip's picker is its own, and a hard load carries
    * one group's lines) kept the loader's phase, step, turns and tokens for
@@ -553,7 +553,7 @@ export function createLiveRunLogStore(
       const seeded = keyedLines(lines, lineKeys, []);
       t.runIds = logWindow.runIds;
       t.page = seedPageCursor(logWindow);
-      // Ruling 454 (CON-5): the window answers for the group's representative
+      // Ruling 457 (CON-5): the window answers for the group's representative
       // NOW, which may be a newer run than the page projected (a resume
       // before the state-change revalidation landed). Follow that run: kept on
       // the old one, the tail re-read its lines past a stale cursor and
@@ -587,7 +587,7 @@ export function createLiveRunLogStore(
    * holds without one, a backward page per run (`before` its newest missing
    * seq, as many as it misses, at most 500 at a time).
    *
-   * Ruling 454 (CON-8): lines can arrive without their envelope after the
+   * Ruling 457 (CON-8): lines can arrive without their envelope after the
    * view opened (a `raw=0` tail read or an older page already in flight at
    * the toggle). Those appends ask for a fill too, and one asked for while a
    * fill is in flight runs once it ends, so no row reads "loading the stored
@@ -797,7 +797,7 @@ export function createLiveRunLogStore(
         const fresh = fromInput(input);
         if (held?.shown) {
           fresh.shown = true;
-          // Ruling 454 (CON-3): a revalidation carries no lines, and swapping
+          // Ruling 457 (CON-3): a revalidation carries no lines, and swapping
           // in the empty thread blanked a console the reader was looking at
           // ("loading this console…") for the window's round trip. It keeps
           // drawing what it holds until the new run's window replaces it.

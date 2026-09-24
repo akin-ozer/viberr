@@ -43,7 +43,7 @@ function renderIn(node: React.ReactNode, list: NotificationView[] = []) {
     // fetcher 404s and React Router's default ErrorBoundary replaces the whole
     // tree — which reads in a test exactly like the menu having closed.
     { path: "/prefs/theme", action: () => ({ ok: true, theme: "light" }) },
-    // Ruling 454: the bell's own list (`routes/resources.notifications.ts`).
+    // Ruling 457: the bell's own list (`routes/resources.notifications.ts`).
     {
       path: BELL_LIST_URL,
       loader: ({ request }) => {
@@ -82,11 +82,11 @@ describe("UI-14: the bell popover discloses its own cap", () => {
 });
 
 /**
- * Ruling 454 (owner, 2026-09-24; FL-4 / SRV-6): pages carry the bell's counts,
+ * Ruling 457 (owner, 2026-09-24; FL-4 / SRV-6): pages carry the bell's counts,
  * not its list. The bell fetches the list when the pointer or the focus reaches
  * it and on open, and while open whenever the counts move.
  */
-describe("ruling 454: the bell loads its own list", () => {
+describe("ruling 457: the bell loads its own list", () => {
   it("fetches on the pointer's arrival, so the open that follows needs no second fetch", async () => {
     const view = renderIn(<TopBell unread={1} orphanUnread={0} />, [notification(1)]);
     // Nothing is fetched for a bell nobody reached for.
@@ -166,7 +166,7 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
     // Ruling 166: the menu roles are BACK, and this time they are honoured.
     // UI-45 had dropped them because they were declared with no arrow-key
     // handling — a contract that promises Up/Down navigation that does not
-    // exist. Radix implements the widget, so the promise is kept. (Ruling 454:
+    // exist. Radix implements the widget, so the promise is kept. (Ruling 457:
     // the menu module is lazy, so the press opens it once it has arrived.)
     const menu = await waitFor(() => {
       const found = container.querySelector('[role="menu"]');
@@ -631,7 +631,7 @@ describe("ruling 145: the standalone-page header", () => {
         ),
       },
       { path: "/", Component: () => <p>home</p> },
-      // Ruling 454: the bell loads its own list.
+      // Ruling 457: the bell loads its own list.
       { path: BELL_LIST_URL, loader: () => ({ notifications: [notification(1)] }) },
     ]);
     return {

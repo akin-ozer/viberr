@@ -34,7 +34,7 @@ export function sliceTimeline<T>(events: T[], limit: number): TimelineSlice<T> {
 }
 
 /** How many events a slice for `limit` shows — the SQL `LIMIT` a reader that
- *  fetches only the shipped window uses (ruling 454). */
+ *  fetches only the shipped window uses (ruling 457). */
 export function timelineWindowSize(limit: number): number {
   return Math.max(1, limit);
 }

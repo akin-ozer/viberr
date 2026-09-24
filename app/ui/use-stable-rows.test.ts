@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { sameRow, shareRows, useStableValue } from "./use-stable-rows";
 
 /**
- * Ruling 454: structural sharing must never hand a page stale data. A row is
+ * Ruling 457: structural sharing must never hand a page stale data. A row is
  * kept only when its content is equal in full, at any depth; anything else is
  * the new row, and the array is kept only when every row was.
  */
@@ -23,7 +23,7 @@ function row(key: string, patch: Partial<Row> = {}): Row {
   return { key, title: `Task ${key}`, labels: ["api"], pr: { number: 1, state: "open" }, ...patch };
 }
 
-describe("shareRows (ruling 454)", () => {
+describe("shareRows (ruling 457)", () => {
   it("keeps every object, and the array, when a fresh decode changed nothing", () => {
     const prev = [row("A"), row("B"), row("C")];
     const next = shareRows(prev, structuredClone(prev), keyOf);
@@ -73,7 +73,7 @@ describe("shareRows (ruling 454)", () => {
   });
 });
 
-describe("sameRow (ruling 454)", () => {
+describe("sameRow (ruling 457)", () => {
   it("compares loader data by content", () => {
     expect(sameRow({ a: [1, { b: "x" }], c: null }, { a: [1, { b: "x" }], c: null })).toBe(true);
     expect(sameRow({ a: [1, { b: "x" }] }, { a: [1, { b: "y" }] })).toBe(false);
@@ -88,7 +88,7 @@ interface Directory {
   users: string[];
 }
 
-describe("useStableValue (ruling 454)", () => {
+describe("useStableValue (ruling 457)", () => {
   it("keeps the object it holds while the content is the same, takes a changed one", () => {
     const first: Directory = { agents: [{ handle: "dev" }], users: [] };
     const view = renderHook(({ value }) => useStableValue(value), {

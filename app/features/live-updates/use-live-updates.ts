@@ -16,7 +16,7 @@ import { useLiveLedger } from "./revalidation-policy";
  * changes. No optimistic state, no client caches — revalidation IS the
  * update mechanism (docs/architecture/decisions.md "no optimistic UI for governed state").
  *
- * Ruling 454: each data event is recorded, the moment it arrives, in the
+ * Ruling 457: each data event is recorded, the moment it arrives, in the
  * tab's revalidation ledger (`revalidation-policy.ts`), and a debounced flush
  * (300 ms, trailing) revalidates once if a route on screen still owes one of
  * them. An event is owed by the routes that read what it changes (a run's
@@ -25,14 +25,14 @@ import { useLiveLedger } from "./revalidation-policy";
  * arrived: the echo of the person's own action, published while the action
  * ran, is already in the action's own revalidation once the action answered
  * inside the 300 ms, so the flush finds nothing to do (it waits for a load in
- * flight, not for a slow submission: ruling 454, RV-6). Bursts — a rescan projecting ten tasks, a mutation emitting
+ * flight, not for a slow submission: ruling 457, RV-6). Bursts — a rescan projecting ten tasks, a mutation emitting
  * task + project + notification — still coalesce into one loader round-trip.
  * Stream events (one per console line) revalidate nothing: they go to the
  * tab's run-log consoles through `onLiveFrame`. Conversation events only
  * revalidate a surface that renders a conversation; elsewhere they go,
  * debounced the same way, to the controller dock as `CONTROLLER_UPDATED_EVENT`.
  *
- * Ruling 454 (RF-1): every (re)connect asks the broker to replay what this
+ * Ruling 457 (RF-1): every (re)connect asks the broker to replay what this
  * tab missed since the last event id it saw (`lastEventId` on the URL; the
  * browser's own retry sends the header), so a reconnect revalidates only for
  * events it actually missed, and a deliberate re-scope (opening a task)
@@ -68,7 +68,7 @@ import { useLiveLedger } from "./revalidation-policy";
 export const REVALIDATE_DEBOUNCE_MS = 300;
 
 /**
- * Ruling 454 (TASK-6 / LIVE-5): ONE live connection per tab. The run-log
+ * Ruling 457 (TASK-6 / LIVE-5): ONE live connection per tab. The run-log
  * console used to open an EventSource of its own on the task scope the
  * layout's stream already held, so a task tab took two of HTTP/1.1's six
  * connections per origin (ruling 301 named merging them "the next cut") and
@@ -107,7 +107,7 @@ function dispatchFrame(name: SseEventName, event: MessageEvent<string>): void {
   const handlers = frameHandlers.get(name);
   if (!handlers || handlers.size === 0) return;
   // Keyed by id and body. (The id alone would do: the broker's ids are unique
-  // across processes, ruling 454, RV-5.)
+  // across processes, ruling 457, RV-5.)
   if (event.lastEventId) {
     const seen = `${event.lastEventId}|${event.data}`;
     if (recentFrames.has(seen)) return;
@@ -218,7 +218,7 @@ export interface LiveUpdatesOptions {
    * This surface renders a controller conversation (the two controller
    * pages), so a conversation event revalidates it. Everywhere else the
    * event goes to the dock as `CONTROLLER_UPDATED_EVENT` and the page's own
-   * loaders stay put (ruling 454, CTL-4).
+   * loaders stay put (ruling 457, CTL-4).
    */
   conversations?: boolean;
 }
@@ -248,12 +248,12 @@ export function useLiveUpdates(
   // six connections per origin — so four open tabs deadlock the whole app for
   // every tab at once, with no error anywhere. A hidden tab does not need a
   // push; it needs to be correct when you come back, and the reopen below
-  // asks the broker for every event it missed meanwhile (ruling 454).
+  // asks the broker for every event it missed meanwhile (ruling 457).
   const [hidden, setHidden] = useState(false);
   // True once ANY stream of this surface's life has opened — the marker that a
   // later `onopen` is a REconnect (scope change or recovery), not the first.
   const everOpenedRef = useRef(false);
-  // Ruling 454 (RF-1): the broker event id this surface's streams stand at —
+  // Ruling 457 (RF-1): the broker event id this surface's streams stand at —
   // the hello's head, then every event after it. A reopen asks the broker to
   // replay from here.
   const positionRef = useRef<number | null>(null);
@@ -266,7 +266,7 @@ export function useLiveUpdates(
   // state: a successful open must reset the backoff without re-running the
   // effect (whose deps would tear down the stream that just opened).
   const failuresRef = useRef(0);
-  // Ruling 454: this surface's marker in the tab's failed-stream set.
+  // Ruling 457: this surface's marker in the tab's failed-stream set.
   const streamTokenRef = useRef(Symbol("live-stream"));
   useEffect(() => {
     const token = streamTokenRef.current;
@@ -314,7 +314,7 @@ export function useLiveUpdates(
     // This surface's entry in the tab's failed-stream set (`useLiveStreamFailed`),
     // held across the reopens of one outage the way `paused` is.
     const token = streamTokenRef.current;
-    // Ruling 454: the event is in the ledger already (`recordLive` below); the
+    // Ruling 457: the event is in the ledger already (`recordLive` below); the
     // trailing flush revalidates once if a route on screen still owes it.
     const flushNow = () => {
       timer = null;
@@ -329,7 +329,7 @@ export function useLiveUpdates(
       ledger.recordLive(name, event);
       scheduleFlush();
     };
-    // Ruling 454 (CTL-4): a conversation event on a surface that renders no
+    // Ruling 457 (CTL-4): a conversation event on a surface that renders no
     // conversation is the dock's, debounced the same way (a send publishes
     // five). Where the surface does render one, it revalidates like any other.
     const scheduleDockNotice = () => {
@@ -363,7 +363,7 @@ export function useLiveUpdates(
     // render's reading, or the stream of the surface before it); a reopen
     // starts where this surface's own streams stood.
     const standing = positionRef.current ?? ledger.position;
-    // Ruling 454 (RV-2): a stream that takes on a project, the firehose or the
+    // Ruling 457 (RV-2): a stream that takes on a project, the firehose or the
     // user scope (a slug change, a surface's first stream) cannot trust that
     // position for them: it moved on the old scopes' events only, and can be
     // past one the new scope published after the navigation's loaders read.
@@ -385,7 +385,7 @@ export function useLiveUpdates(
       const head = Number(event.lastEventId);
       sawId = true;
       // After a restart the head is above where the stream stood (ids are
-      // unique across processes, ruling 454, RV-5), and the broker answered
+      // unique across processes, ruling 457, RV-5), and the broker answered
       // the replay with a resync.
       positionRef.current = head;
       ledger.position = head;
@@ -394,7 +394,7 @@ export function useLiveUpdates(
       if (SSE_CONTROL_EVENTS.includes(name)) continue;
       // A stream event (one per console line) revalidates nothing: revalidating
       // on each would turn one run into a loader storm. The tab's consoles take
-      // it from here (`onLiveFrame`, ruling 454). A task page used to
+      // it from here (`onLiveFrame`, ruling 457). A task page used to
       // revalidate root, layout and task every 2 s during a run only to move
       // the Live run strip; the strip now reads the console's own tail.
       if (SSE_STREAM_EVENTS.includes(name)) {
@@ -405,7 +405,7 @@ export function useLiveUpdates(
         continue;
       }
       if (SSE_CONVERSATION_EVENTS.includes(name) && !conversations) {
-        // Ruling 454 (CTL-4): a conversation event on a surface that renders
+        // Ruling 457 (CTL-4): a conversation event on a surface that renders
         // no conversation is the dock's, debounced the same way (a send
         // publishes five).
         source.addEventListener(name, (event: MessageEvent<string>) => {

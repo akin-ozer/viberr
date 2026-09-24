@@ -6,7 +6,7 @@ import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { DOCK_STATUS_URL } from "~/features/controller/controller-dock-context";
 
 /**
- * Ruling 454, CTL-2: what the controller dock fetches every 5 s while a turn
+ * Ruling 457, CTL-2: what the controller dock fetches every 5 s while a turn
  * works, open or closed. It used to be the whole view of the thread (every
  * message, the threads, the task links) to move one step line; it is the
  * dock's status (`DOCK_STATUS_URL`): the unseen replies and the live turns.
@@ -77,7 +77,7 @@ afterAll(async () => {
   app.cleanup();
 });
 
-describe("the dock's working poll (ruling 454, CTL-2)", () => {
+describe("the dock's working poll (ruling 457, CTL-2)", () => {
   it("fetches the small status, not the transcript", async () => {
     const { loader } = await import("~/routes/resources.controller-unseen");
     const { cookie } = await app.cookieFor(arda);

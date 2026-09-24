@@ -9,7 +9,7 @@ import { staticPackagesOf } from "../../../test-support/static-imports";
 import { Timeline } from "./timeline";
 
 /**
- * Ruling 454 (owner, 2026-09-24): the Lexical comment editor is lazy. Until
+ * Ruling 457 (owner, 2026-09-24): the Lexical comment editor is lazy. Until
  * it arrives the timeline shows a stand-in with the editor's own markup, and
  * whatever was typed there moves into the editor with the caret at the end.
  */
@@ -89,7 +89,7 @@ function composerMarkup(container: HTMLElement) {
   }));
 }
 
-describe("the comment composer's stand-in (ruling 454)", () => {
+describe("the comment composer's stand-in (ruling 457)", () => {
   it("wears the editor's own markup, so nothing moves when the editor arrives", async () => {
     const { container, standIn } = mount();
     const before = composerMarkup(container);
@@ -156,7 +156,7 @@ describe("the comment composer's stand-in (ruling 454)", () => {
  * their swaps come due in the same moment, so the idle one's arrival is the
  * sign the composing one would have been swapped too.
  */
-describe("a composition is never cut by the editor's arrival (ruling 454)", () => {
+describe("a composition is never cut by the editor's arrival (ruling 457)", () => {
   it("waits for compositionend, then carries the committed text", async () => {
     vi.resetModules();
     const { CommentComposer } = await import("./comment-composer-slot");
@@ -192,7 +192,7 @@ describe("a composition is never cut by the editor's arrival (ruling 454)", () =
   });
 });
 
-describe("the task route ships without Lexical (ruling 454)", () => {
+describe("the task route ships without Lexical (ruling 457)", () => {
   it("reaches no Lexical package through a static import", () => {
     const packages = [...staticPackagesOf("app/routes/project.task.tsx")];
     expect(packages.filter((p) => p === "lexical" || p.startsWith("@lexical/"))).toEqual([]);

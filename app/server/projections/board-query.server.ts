@@ -78,7 +78,7 @@ export function compareBoardOrder(a: TaskSummary, b: TaskSummary): number {
  * make it differ between the two renders. The board revalidates on every project
  * domain event (a transition, a comment, a run starting or stopping) and on
  * navigation, but not on runs' console lines (a board never receives them,
- * ruling 454), and the shortest threshold is an hour. A task that crosses into
+ * ruling 457), and the shortest threshold is an hour. A task that crosses into
  * quiet therefore shows it at the project's next event or the next navigation,
  * not the minute it crosses.
  * The RELATIVE TEXT beside it is a different problem and is solved the way this
@@ -327,7 +327,7 @@ export function getBoard(db: DatabaseSync, slug: string): BoardData | null {
 
 /**
  * {@link getBoard} plus the flat task list the columns were built from, in
- * {@link listProjectTasks} order and archived tasks included. Ruling 454: the
+ * {@link listProjectTasks} order and archived tasks included. Ruling 457: the
  * workspace layout also needs the review queue, which reads the same rows, so
  * it hands this list on instead of mapping every task a second time.
  */

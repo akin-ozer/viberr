@@ -42,7 +42,7 @@ export default [
 
   // Resource actions (fetcher targets, no UI).
   route("notifications/read", "routes/notifications.read.tsx"),
-  // Ruling 454: the bell popover's list, loaded by the bell on intent (pages
+  // Ruling 457: the bell popover's list, loaded by the bell on intent (pages
   // carry only its counts).
   route("resources/notifications", "routes/resources.notifications.ts"),
   route("prefs/theme", "routes/prefs.theme.tsx"),

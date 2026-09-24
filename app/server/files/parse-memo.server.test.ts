@@ -14,7 +14,7 @@ import { readProjectFile, resolveProjectFilePath, updateProjectFile } from "./pr
 import { appendTimelineEvent, readTaskFile } from "./task-writer.server";
 
 /**
- * Ruling 454: the store readers skip the YAML parse only when the bytes on
+ * Ruling 457: the store readers skip the YAML parse only when the bytes on
  * disk are the bytes they last parsed. Files stay truth: every read still
  * reads, and whatever changed the file — a writer, an editor, a same-length
  * rewrite inside one mtime tick — is seen by the very next read.
@@ -33,7 +33,7 @@ function demoTaskKeys(dataRoot: string): string[] {
   return keys;
 }
 
-describe("store-file parse memo (ruling 454)", () => {
+describe("store-file parse memo (ruling 457)", () => {
   it("parses unchanged bytes once and hands every caller its own copy", () => {
     const store = setupTestStore(ctx);
     const ref = { projectSlug: store.slug, dataRoot: store.dataRoot };

@@ -3,7 +3,7 @@ import { isThoughtLine } from "./runs-helpers";
 import { isRunBoundary, isRunInputsLine, isWaitLine, type LogLine } from "./runtime-types";
 
 /**
- * Ruling 454 (LIVE-4): the console's four folds, applied incrementally.
+ * Ruling 457 (LIVE-4): the console's four folds, applied incrementally.
  *
  * What the console draws is `foldWaits(groupThoughts(collapseTelemetry(
  * hoistRunInputs(lines))))` (runs-helpers.ts, log-noise.ts): telemetry runs

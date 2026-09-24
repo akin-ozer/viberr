@@ -58,7 +58,7 @@ export function NumberTicker({
     }
     let frame = 0;
     let began: number | null = null;
-    // Ruling 454 (LIVE-7): the float moves every frame, the text only when a
+    // Ruling 457 (LIVE-7): the float moves every frame, the text only when a
     // digit does. `drawn` keeps the float, so a retarget still eases on from
     // where the count really is; React hears only the frames that change the
     // text, which draws the same pixels with one commit per figure instead of

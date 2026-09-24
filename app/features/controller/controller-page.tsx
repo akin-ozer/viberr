@@ -145,7 +145,7 @@ export function ControllerPage({
           : [sseScopes.user()],
       [projectSlug],
     ),
-    // Ruling 454: this page renders the conversation, so `controller.updated`
+    // Ruling 457: this page renders the conversation, so `controller.updated`
     // revalidates it; every other surface hands that event to the dock.
     { conversations: true },
   );
@@ -274,7 +274,7 @@ export function ControllerPage({
   );
 }
 
-/** Ruling 454 (CTL-2): how often a working turn's tail is read when no line
+/** Ruling 457 (CTL-2): how often a working turn's tail is read when no line
  *  arrives, the cadence the page's revalidation poll had (ruling 250). */
 const TURN_POLL_MS = 5_000;
 
@@ -309,7 +309,7 @@ function LiveTurnStep({ turn, runtime }: { turn: ConversationTurnState; runtime:
  *   doing (its phase and last tool step), elapsed from the run's own start,
  *   turns and tokens off the run row (refreshed by each tail read of the
  *   console, a line or the 5 s status read, and by the `controller.updated`
- *   reference a lifecycle flip publishes; ruling 454), the model,
+ *   reference a lifecycle flip publishes; ruling 457), the model,
  *   View logs, and Interrupt for the conversation's owner or an org admin
  *   (`canInterruptTurn`; the engine re-checks). Interrupt confirms first (D6):
  *   a stopped turn settles with "This turn was stopped before I could answer."
@@ -352,7 +352,7 @@ function ConversationRuntime({
     source: { kind: "controller", conversationId },
     threads: runtime,
     hasActiveRun: runtime.some((r) => r.state === "running"),
-    // Ruling 454 (CTL-2): the fallback for a settle the stream missed (a
+    // Ruling 457 (CTL-2): the fallback for a settle the stream missed (a
     // paused stream drops the `controller.updated` that shows the reply). It
     // used to revalidate root, the layout and this page every 5 s of a turn,
     // transcript, goals and console included, to move one step line; now it

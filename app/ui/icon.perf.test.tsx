@@ -7,7 +7,7 @@ import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { observeMutations } from "../../test-support/render-counter";
 
 /**
- * Ruling 454 (TASK-8 / LIVE-6 / BOARD-4 / CTL-5): an icon that re-renders with
+ * Ruling 457 (TASK-8 / LIVE-6 / BOARD-4 / CTL-5): an icon that re-renders with
  * the same name must not touch the DOM. React 19 compares
  * `dangerouslySetInnerHTML` by the identity of its `{__html}` object, and a new
  * object on each render made every re-render re-parse the SVG's markup and
@@ -42,7 +42,7 @@ function renderIcons() {
   return { ...utils, rerender: () => act(() => rerender()) };
 }
 
-describe("Icon re-renders (ruling 454)", () => {
+describe("Icon re-renders (ruling 457)", () => {
   it("draws each glyph's markup, and the dot for a name it does not know", () => {
     // SAFETY: a bad cast from free-form data is exactly the case the runtime
     // fallback exists for.

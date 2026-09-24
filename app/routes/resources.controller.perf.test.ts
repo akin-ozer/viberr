@@ -7,7 +7,7 @@ import { tallyServerReads } from "../../test-support/perf-counters";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 454, journey `controller`: the dock's two data routes run on every
+ * Ruling 457, journey `controller`: the dock's two data routes run on every
  * page (the unseen check on every navigation and revalidation, the view when
  * the panel is open), so what they read to answer yes/no questions is paid
  * everywhere.
@@ -55,7 +55,7 @@ function args(request: Request, pattern: string) {
   };
 }
 
-describe("controller dock routes (ruling 454)", () => {
+describe("controller dock routes (ruling 457)", () => {
   it("the unseen check stays within its server-read budgets", async () => {
     const { loader } = await import("~/routes/resources.controller-unseen");
     const { cookie } = await app.cookieFor(arda);

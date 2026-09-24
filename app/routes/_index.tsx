@@ -50,7 +50,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     projects: listHomeProjectsForUser(db, { id: user.id, role: user.role }),
     prefs: getHomePrefs(db, user.id),
     org: getHomeOrgSummary(db),
-    // Ruling 454 (FL-4): the bell's counts; the bell loads its own list.
+    // Ruling 457 (FL-4): the bell's counts; the bell loads its own list.
     ...bellCounts(db, user.id),
     // B-FD4: `VIBERR_DATA_ROOT` is a HOST filesystem path. It exists here only
     // for the New-project modal's "creates …/projects/<slug>/" hint, and every
@@ -224,5 +224,5 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/_index");

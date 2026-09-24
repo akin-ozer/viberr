@@ -184,7 +184,7 @@ export function listActivityStream(
       // reversed the two relative to the task page whenever timestamps
       // collided (e.g. the up-to-4 events one reconcile pass stamps in a
       // single tick). The tie-break used to be `id ASC`, which only agreed
-      // while every write re-inserted a task's rows newest first; ruling 454
+      // while every write re-inserted a task's rows newest first; ruling 457
       // keeps the ids of unchanged rows (CS-1), so a newer event appended
       // later carries the LARGER id and only `position` still says which is
       // newer. `id` stays last so ties across tasks remain deterministic.

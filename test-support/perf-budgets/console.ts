@@ -12,7 +12,7 @@ const TASK_PAGE =
 const TABS =
   "connectSseClient: a board tab (project + user) and a task tab (project + task + user); ten lines of one run on that task";
 
-/** Ruling 454 ratchet ceilings: live run console, task page render and its SSE streams. */
+/** Ruling 457 ratchet ceilings: live run console, task page render and its SSE streams. */
 export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // TASK-1: 1,048,869 while every group's window (display and raw) rode every
   // revalidation; now window facts only (owner decision 2). Raised 13001 to

@@ -61,7 +61,7 @@ import {
  * the same bytes the textarea composer produced. No rich text, Markdown,
  * HTML, or editor state ever persists.
  *
- * Ruling 454: nothing imports this module statically. `comment-composer-slot`
+ * Ruling 457: nothing imports this module statically. `comment-composer-slot`
  * loads it on idle or on the first focus, shows a same-size stand-in until
  * then, and hands over what was typed there through `carry`.
  */
@@ -277,7 +277,7 @@ export const CommentEditor = forwardRef<
       [],
     );
 
-    // Ruling 454 (CS-7): stable, since it reads only refs. OnChangePlugin
+    // Ruling 457 (CS-7): stable, since it reads only refs. OnChangePlugin
     // registers its update listener in an effect keyed on this function, so a
     // new one on each render (every keystroke inside an @token, every render
     // the page made) tore the listener down and registered it again.

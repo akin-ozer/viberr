@@ -667,7 +667,7 @@ append finds it missing) → insert `run_log_lines` (display only; the next `seq
 inside the INSERT) → patch run facts, only when a folded value moved since the last patch,
 in the same transaction as the line → publish `run.log-appended {runId, seq}` (reference
 only). A line with no facts is therefore one statement and one commit, and
-`agent_runs.updated_at` moves with the facts, not with every line (ruling 454). The sink also
+`agent_runs.updated_at` moves with the facts, not with every line (ruling 457). The sink also
 writes the compaction audit and timeline note (ruling 369(d), `task.agent.compaction`, a
 "Context compacted" note by `system:runtime-continuity`). The `wire-format` projector maps
 provider envelopes to display lines with `ev ∈ init | text | tool | out | err | result |
@@ -683,7 +683,7 @@ window is written when it closes, never onto a settled row.
 Consumers: `GET /resources/run-log?runId=&since=|before=&limit=` (1..500, member-gated;
 controller runs by conversation ownership) returns `{ runId, threadId, state, lines,
 headSeq, oldestSeq, hasMore, facts }`, `facts` being the run row's `RunLiveFacts` (phase,
-step, turns, tokens, the cache record; ruling 454, one mapping with the task loader's
+step, turns, tokens, the cache record; ruling 457, one mapping with the task loader's
 `RunView`, `runLiveFacts`); `raw=0` leaves each line's stored envelope out, and
 `window=1` answers the run's agent group's console window instead (`RunLogWindowPage`:
 display lines, their `consoleLineKey`s, the window facts and the representative's facts),
@@ -700,7 +700,7 @@ own), fetches since the thread's cursor on each reference, fills a thread the pa
 not carry with one `window=1` request when the console shows it, pages backwards 200
 lines at a time, and revalidates every 20 s while a run is active and the tab's live
 stream is down (F22; with the stream up the terminal event arrives or is replayed,
-ruling 454). Its controller channel
+ruling 457). Its controller channel
 (`source: { kind: "controller", conversationId }`) tails `controller.log-appended` frames
 for the open conversation only, off the `user` stream the page holds: a controller run
 has no task scope, so the sink resolves the conversation owner once per run

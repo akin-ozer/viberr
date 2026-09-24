@@ -5,7 +5,7 @@ import type { LinkDescriptor } from "react-router";
 import { links as rootLinks } from "~/root";
 
 /**
- * Ruling 454: the Inter faces a first paint draws are preloaded, and the
+ * Ruling 457: the Inter faces a first paint draws are preloaded, and the
  * system face that stands in until they arrive is metric-matched to Inter so
  * the swap does not re-wrap the page. Before this, `links()` returned only the
  * favicon (0 font preloads) and the stack fell straight through to the system
@@ -27,7 +27,7 @@ function weights(links: LinkDescriptor[]): string[] {
   return links.map(preloadedInterWeight).filter((w): w is string => w !== null);
 }
 
-describe("font preloads (ruling 454)", () => {
+describe("font preloads (ruling 457)", () => {
   it("every page preloads Inter 400 and 700, and no other face", () => {
     expect(weights(rootLinks())).toEqual(["400", "700"]);
   });
@@ -46,7 +46,7 @@ describe("font preloads (ruling 454)", () => {
   });
 });
 
-describe("the metric-matched Inter fallback (ruling 454)", () => {
+describe("the metric-matched Inter fallback (ruling 457)", () => {
   const css = readFileSync(path.join(APP, "app.css"), "utf8");
   const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map((m) => m[1]!);
   const fallback = faces.filter((body) => /font-family:\s*"Inter Fallback"/.test(body));

@@ -46,7 +46,7 @@ import {
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
-  // Ruling 454: the faces every first paint draws, fetched alongside the CSS.
+  // Ruling 457: the faces every first paint draws, fetched alongside the CSS.
   ...SHELL_FONT_PRELOADS,
 ];
 
@@ -62,7 +62,7 @@ export const links: Route.LinksFunction = () => [
  * deleted as dead code — which is what happens to an opt-in nobody opts into.
  * This one is not optional.
  *
- * Ruling 454: `liveHeadMiddleware` reads the SSE broker's head before any
+ * Ruling 457: `liveHeadMiddleware` reads the SSE broker's head before any
  * loader runs (the page's first stream replays from it), and
  * `sessionRenewalMiddleware` forwards the rolling-session renewal (F10-17) on
  * every GET, which this loader used to do only when it ran.
@@ -79,7 +79,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     theme,
     csrf: auth ? getCsrfToken(auth.sessionId) : null,
   };
-  // Ruling 454 (RF-1): where the page's first live stream starts. Only a
+  // Ruling 457 (RF-1): where the page's first live stream starts. Only a
   // document load seeds it; a `.data` answer would find the tab's streams
   // already under way.
   if (!isDocumentNavigation(request)) return payload;
@@ -87,7 +87,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 }
 
 /**
- * Ruling 454 (RF-7): root re-runs after a sign-in, a sign-out, a theme or
+ * Ruling 457 (RF-7): root re-runs after a sign-in, a sign-out, a theme or
  * profile change and on a document load, and not for a live event, a
  * navigation or a `revalidate()`, none of which changes its theme or csrf.
  */
@@ -127,7 +127,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // SSR renders the explicit preference; "system" starts light and is
   // corrected pre-paint by the inline script (hence suppressHydrationWarning).
   const ssrTheme = theme === "dark" ? "dark" : "light";
-  // Ruling 454: one `{__html}` object per preference. React compares it by
+  // Ruling 457: one `{__html}` object per preference. React compares it by
   // identity, and a fresh object rewrote the script's text on every root
   // reload (the icon cost, in <head>).
   const bootScript = useMemo(() => ({ __html: themeBootScript(theme) }), [theme]);
@@ -152,7 +152,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   const rootData = useRouteLoaderData<typeof loader>("root");
   const theme: ThemePreference = rootData?.theme ?? "system";
-  // Ruling 454: the tab's live ledger (what its loaders owe), for every
+  // Ruling 457: the tab's live ledger (what its loaders owe), for every
   // surface, seeded with the server render's stream position. In render,
   // because the first stream opens in a child's effect and children's effects
   // run before root's; the seed takes only the first value.

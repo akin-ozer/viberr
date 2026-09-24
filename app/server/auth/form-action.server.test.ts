@@ -82,7 +82,7 @@ function formPost(options: FormPostOptions = {}): Request {
 /**
  * How the preamble refused: the status, and where a redirect points. A signed
  * out post is THROWN (the /login redirect); a failed CSRF check is ANSWERED,
- * as the `refused` result the action returns (ruling 454, RV-1). A request
+ * as the `refused` result the action returns (ruling 457, RV-1). A request
  * that is ACCEPTED must fail the case loudly — an assertion that merely never
  * ran is how a dead guard passes for green.
  */
@@ -241,7 +241,7 @@ describe("requireFormAction — refusals", () => {
   });
 
   /**
-   * Ruling 454 (RV-1): the person signed in again in another tab, so the
+   * Ruling 457 (RV-1): the person signed in again in another tab, so the
    * session has a new id and this tab's token (root's csrf, from the old one)
    * is stale. The refusal used to be a THROWN 403: React Router rendered the
    * route's error boundary in place of the page, which unmounted the composer

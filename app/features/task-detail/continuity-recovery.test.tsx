@@ -104,7 +104,7 @@ function run(patch: Partial<RunView> = {}): RunView {
 
 /**
  * A run group whose console window holds the dead-session marker (dead run +
- * fresh run). Ruling 454: the projection reports the marker as `sessionMissing`
+ * fresh run). Ruling 457: the projection reports the marker as `sessionMissing`
  * (the page no longer carries every window's lines to scan); how it finds it
  * is pinned in `run-projection.server.test.ts`.
  */
@@ -178,7 +178,7 @@ describe("deriveContinuityLoss", () => {
     expect(noId!.agents[0]!.name).toBe("Dana");
   });
 
-  it("reads the projection's report, not the lines a payload may not carry (ruling 454)", () => {
+  it("reads the projection's report, not the lines a payload may not carry (ruling 457)", () => {
     // A `.data` revalidation carries no console lines; the marker is still
     // reported. CANARY: scan `run.lines` again and this returns null.
     const loss = deriveContinuityLoss({

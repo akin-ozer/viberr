@@ -172,7 +172,7 @@ export interface AgentProfileReadResult extends AgentProfileParseResult {
 }
 
 /** Reads + parses one profile file; null when it is absent. The parse goes
- *  through the store readers' parse memo (ruling 454). */
+ *  through the store readers' parse memo (ruling 457). */
 export function readAgentProfileFile(
   absPath: string,
   fallbackId: string,

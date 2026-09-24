@@ -185,7 +185,7 @@ describe("workspace layout loader (seeded)", () => {
       );
     });
 
-    it("ruling 454: the board's own loader refuses a non-member the same way", async () => {
+    it("ruling 457: the board's own loader refuses a non-member the same way", async () => {
       // Single fetch honors `?_routes=`, so the board loader can run without
       // the layout's (F19-28): it carries the layout's refusal, byte for byte.
       const { loader } = await import("~/routes/project.board");
@@ -342,7 +342,7 @@ describe("workspace layout loader (seeded)", () => {
       import("~/routes/project.board"),
     ]);
     const { cookie } = await app.cookieFor(seedIds.arda);
-    // One board request: the layout and the board's own loader (ruling 454,
+    // One board request: the layout and the board's own loader (ruling 457,
     // BOARD-6) on one Request.
     const args = loaderArgs(
       "/projects/viberr-core/board",
@@ -374,7 +374,7 @@ describe("workspace layout loader (seeded)", () => {
     expect(result.reviewCount).toBe(3);
     expect(result.violations).toBe(1); // seeded VIB-142 PAT-scope violation
     expect(result.myRole).toBe("admin");
-    // Ruling 454 (owner, 2026-09-24): the bell's counts, not its list.
+    // Ruling 457 (owner, 2026-09-24): the bell's counts, not its list.
     expect(result.unread).toBe(6);
     expect(result.orphanUnread).toBe(0);
     expect(result).not.toHaveProperty("notifications");

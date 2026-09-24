@@ -9,7 +9,7 @@ import { NO_RUN_CACHE, type RunView } from "~/features/runtime/runtime-types";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 
 /**
- * Ruling 454, journey `controller` (CTL-2, the page half): what a working turn
+ * Ruling 457, journey `controller` (CTL-2, the page half): what a working turn
  * costs the project controller page while nothing but its step moves. The page
  * used to revalidate every 5 s of a turn (plus the F22 20 s safety tick), and
  * every revalidation re-ran root, the workspace layout and the page loader,
@@ -150,7 +150,7 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 }
 
-describe("the controller page during a working turn (ruling 454, CTL-2)", () => {
+describe("the controller page during a working turn (ruling 457, CTL-2)", () => {
   it("re-runs no loader while only the turn's step moves", async () => {
     const { container } = mount();
     await act(async () => {

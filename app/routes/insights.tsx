@@ -24,5 +24,5 @@ export default function Insights({ loaderData }: Route.ComponentProps) {
   return <InsightsPage summary={loaderData.summary} />;
 }
 
-/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/insights");

@@ -7,7 +7,7 @@ const WORKSPACE =
 /** The same, with thirty clones of the demo's task files (40 tasks). */
 const BOARD_40 = `${WORKSPACE}; viberr-core enlarged to 40 tasks by cloning the demo's task files`;
 
-/** Ruling 454 ratchet ceilings: loader payloads (bell, board columns, board task shape). */
+/** Ruling 457 ratchet ceilings: loader payloads (bell, board columns, board task shape). */
 export const PAYLOAD_BUDGETS: PerfBudgetTable = {
   // FL-4: 8,505 before the bell's list left the pages (owner, 2026-09-24):
   // 62 % of Home's payload was a popover closed at first paint. 3,251 was

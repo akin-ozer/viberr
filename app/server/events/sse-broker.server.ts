@@ -27,7 +27,7 @@ import { logger } from "~/server/logging/logger.server";
  *   route) drops and closes that connection. A slow client can never block
  *   or crash the publisher.
  * - Ring buffers of the last published events with a monotonically
- *   increasing id (`id:` SSE field), unique across processes (ruling 454,
+ *   increasing id (`id:` SSE field), unique across processes (ruling 457,
  *   RV-5): 256 data events, and 256 stream events (console lines) in a ring
  *   of their own (RV-3). A reconnect presenting Last-Event-ID replays the
  *   missed events of both (scope-filtered, in id order); when a data event it
@@ -48,7 +48,7 @@ import { logger } from "~/server/logging/logger.server";
 export const HEARTBEAT_INTERVAL_MS = 25_000;
 export const RING_BUFFER_SIZE = 256;
 /**
- * Ruling 454 (RV-3): the stream events' own ring (`SSE_STREAM_EVENTS`: one
+ * Ruling 457 (RV-3): the stream events' own ring (`SSE_STREAM_EVENTS`: one
  * `run.log-appended` or `controller.log-appended` per console line). They used
  * to share the data ring, and a connection's position moves only on events in
  * its own scopes: a board open while an agent printed 300 lines stood at a
@@ -106,7 +106,7 @@ export interface SseRoute {
    *  showing that task IS a legitimate recipient (pinned in
    *  run-events.server.test.ts) and still gets it. */
   skipFirehose?: boolean;
-  /** Ruling 454 (LIVE-5): deliver to connections holding THIS task's scope
+  /** Ruling 457 (LIVE-5): deliver to connections holding THIS task's scope
    *  only. For a reference whose one reader is the console of the page
    *  showing that task: one `run.log-appended` per console line reached every
    *  board of the project, which parsed and dropped it. Implies
@@ -164,7 +164,7 @@ interface BrokerState {
   nextConnectionId: number;
   /** Data events: every name but the stream events. */
   buffer: BufferedEvent[];
-  /** Stream events (console lines), ruling 454 (RV-3). */
+  /** Stream events (console lines), ruling 457 (RV-3). */
   streamBuffer: BufferedEvent[];
   /** The newest data event id the data ring has let go of (this process's
    *  base until it lets one go): a position below it missed one for good. */
@@ -176,7 +176,7 @@ interface BrokerState {
 const BROKER_KEY = Symbol.for("viberr.sseBroker");
 
 /**
- * Ruling 454 (RV-5): where this process's event ids start, a thousand per
+ * Ruling 457 (RV-5): where this process's event ids start, a thousand per
  * millisecond of the clock at boot, so they are unique across processes and
  * grow from one to the next. A tab's position from before a restart is below
  * every id this process hands out, so it reads as uncovered and gets
@@ -371,7 +371,7 @@ export function connectSseClient(input: ConnectSseInput): SseConnectionHandle {
   // Reconnect catch-up: replay everything the client missed (scope-filtered)
   // when the data ring still holds every data event after its position;
   // otherwise tell it to resync. The stream ring replays what it still holds
-  // and never resyncs (ruling 454, RV-3).
+  // and never resyncs (ruling 457, RV-3).
   const last = input.lastEventId;
   if (!conn.closed && last !== null && last !== undefined && last !== headId) {
     const covered = last <= headId && last >= state.replayFloor;
@@ -446,7 +446,7 @@ export function publishSseEvent(event: SseEvent, route: SseRoute): number {
 // ------------------------------------------------------------- live head
 
 /**
- * Ruling 454 (RF-1): the broker's head when a request began, before any of
+ * Ruling 457 (RF-1): the broker's head when a request began, before any of
  * its loaders read anything. Every event at or below it was published, and
  * its write committed, before those reads, so the data the request renders
  * holds them; the page's first stream asks the broker to replay from here and
@@ -514,7 +514,7 @@ export function closeAllSseConnections(): void {
   }
 }
 
-/** Test-only: a restart. Ids start again from the clock (ruling 454, RV-5),
+/** Test-only: a restart. Ids start again from the clock (ruling 457, RV-5),
  *  the buffer is empty and no connection is left. */
 export function resetSseBrokerForTests(): void {
   closeAllSseConnections();

@@ -103,7 +103,7 @@ export function dockScopeKey(scope: {
 }
 
 /**
- * Ruling 454 (CTL-3, RF-8): the `shouldRevalidate` of the dock's two resource
+ * Ruling 457 (CTL-3, RF-8): the `shouldRevalidate` of the dock's two resource
  * routes. Their fetchers are root-owned, so React Router re-ran both on every
  * navigation, action and revalidation of every page: a request per page event
  * for the unseen list, and once the dock had been opened, a reload of the last
@@ -118,7 +118,7 @@ export function dockResourceShouldRevalidate(): boolean {
 }
 
 /** The dock's status on every page (`resources.controller-unseen.ts`): O39-d's
- *  unseen replies and, since ruling 454, the viewer's turns working right now.
+ *  unseen replies and, since ruling 457, the viewer's turns working right now.
  *  What the button reads, and all its working poll loads. */
 export const DOCK_STATUS_URL = "/resources/controller-unseen";
 

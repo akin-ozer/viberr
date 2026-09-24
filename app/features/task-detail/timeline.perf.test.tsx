@@ -20,7 +20,7 @@ import {
 import { Timeline } from "./timeline";
 
 /**
- * Ruling 454 (CS-1): after a comment, the timeline re-renders with the rows
+ * Ruling 457 (CS-1): after a comment, the timeline re-renders with the rows
  * the server re-projected. The items keyed on those rows' ids, and every write
  * used to re-issue every id, so all of them remounted (re-parsed Markdown,
  * lost Show-more state). Measured end to end: the real rebuilder feeds the
@@ -35,7 +35,7 @@ afterEach(() => {
 
 const MENTIONABLES: Mentionables = { agents: [], users: [], reserved: [] };
 
-describe("timeline identity across a comment (ruling 454)", () => {
+describe("timeline identity across a comment (ruling 457)", () => {
   it("CS-1: appending one comment rewrites one timeline item", async () => {
     const store = setupTestStore(ctx);
     const timeline: TaskFileEvent[] = [];
@@ -114,7 +114,7 @@ describe("timeline identity across a comment (ruling 454)", () => {
 });
 
 /**
- * Ruling 454 (CS-3 / TASK-4): what the timeline's rows cost while nothing in
+ * Ruling 457 (CS-3 / TASK-4): what the timeline's rows cost while nothing in
  * them changes. A send moves the comment fetcher through submitting and
  * loading, and every live event on the task revalidates the page, which hands
  * the timeline brand-new event objects (and a new mentionables directory,
@@ -209,7 +209,7 @@ function mountTimeline() {
   };
 }
 
-describe("timeline rows while nothing in them changes (ruling 454)", () => {
+describe("timeline rows while nothing in them changes (ruling 457)", () => {
   it("CS-3: a send re-renders no timeline item", async () => {
     const view = mountTimeline();
     await act(async () => {});

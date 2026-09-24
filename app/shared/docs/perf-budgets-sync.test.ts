@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { PERF_BUDGETS } from "../../../test-support/perf-budgets";
 
 /**
- * Ruling 454: the performance ratchet stays honest. A ceiling no test measures
+ * Ruling 457: the performance ratchet stays honest. A ceiling no test measures
  * would pass forever, so every budget id must be asserted by some
  * `*.perf.test.ts(x)` under app/, every such file must assert at least one
  * budget, and every bundle budget must name a route the build has.
@@ -16,7 +16,7 @@ const perfTests = readdirSync(path.join(root, "app"), { recursive: true })
   .filter((f) => /\.perf\.test\.tsx?$/.test(f))
   .map((f) => ({ file: f, text: readFileSync(path.join(root, "app", f), "utf8") }));
 
-describe("perf budgets are measured (ruling 454)", () => {
+describe("perf budgets are measured (ruling 457)", () => {
   it("every budget id is asserted by a *.perf.test file", () => {
     const orphans = Object.keys(PERF_BUDGETS).filter(
       (id) => !perfTests.some((t) => t.text.includes(`"${id}"`)),

@@ -1,6 +1,6 @@
 /**
  * The stylesheet parser the `app/app.css` gates share: `app.css.test.ts` (the
- * integrity gate) and `app.css.perf.test.ts` (ruling 454's CSS ratchets). It
+ * integrity gate) and `app.css.perf.test.ts` (ruling 457's CSS ratchets). It
  * reads the one sheet the app has, comments already stripped by the caller.
  */
 

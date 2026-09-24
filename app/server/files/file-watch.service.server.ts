@@ -206,7 +206,7 @@ export function startFileWatcher(
       const result = rebuildPath(resolveDb(), absPath, { dataRoot: root });
       // `rebuildPath` catches its own throw and reports `error` rather than
       // raising — both outcomes leave the row stale, so both retry. So does a
-      // project.md whose cascade left tasks behind (ruling 454): its row keeps
+      // project.md whose cascade left tasks behind (ruling 457): its row keeps
       // the sentinel, so rebuilding it again re-runs the cascade.
       if (result.action === "error" || result.failedTasks) {
         scheduleRetry(absPath);

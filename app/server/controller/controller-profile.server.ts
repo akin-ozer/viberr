@@ -144,7 +144,7 @@ function readControllerProfile(dataRoot?: string): ParsedProfile | null {
   // hand-edited junk value (`effort: 3`, a blank) into "backend default", and
   // the next save writes that back — erasing the junk without a word. Say so
   // at the read, once, so the erasure is announced rather than silent.
-  // Ruling 454: that check parses the frontmatter a second time, so it runs
+  // Ruling 457: that check parses the frontmatter a second time, so it runs
   // only when the typed read found no effort and the file names one at all.
   if (parsed.frontmatter.effort === undefined && raw.includes("effort")) {
     const rawEffort = z
@@ -185,7 +185,7 @@ function controllerNameOf(fm: AgentProfileFrontmatter | undefined): string {
 /**
  * Just {@link resolveControllerConfig}'s `name`, for the surfaces that show
  * only the name (the dock, on every load): it reads the profile and never the
- * definition doc (ruling 454).
+ * definition doc (ruling 457).
  */
 export function resolveControllerName(dataRoot?: string): string {
   return controllerNameOf(readControllerProfile(dataRoot)?.frontmatter);

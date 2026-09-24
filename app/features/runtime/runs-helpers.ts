@@ -803,7 +803,7 @@ export function agentMessageProse(line: LogLine): string | null {
  * mount, when the effect installs the real client `Date.now()`. Never call
  * `Date.now()` during render.
  *
- * Ruling 454 (RF-9): the ticking is the shared one-second clock
+ * Ruling 457 (RF-9): the ticking is the shared one-second clock
  * (`~/ui/use-clock`), one interval for every counter on the page instead of
  * one per counter, and a counter mounted after hydration reads the client
  * clock on its first render.

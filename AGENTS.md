@@ -19,7 +19,7 @@ projections plus app-owned rows. It is **pre-production**: schemas change withou
 cp .env.example .env   # two required secrets, see docs/operations/configuration.md
 npm ci && npm run seed && npm run dev
 npm run lint && npm run typecheck && npm test && npm run build   # CI's verify job
-node scripts/measure-routes.mjs --check   # ...then the bundle ratchet (ruling 454)
+node scripts/measure-routes.mjs --check   # ...then the bundle ratchet (ruling 457)
 npm run e2e            # CI's e2e job: production image in Docker, the only gate that boots it
 npm run deploy         # Docker deployment: stamp the build from git, build, up, read it back
 ```

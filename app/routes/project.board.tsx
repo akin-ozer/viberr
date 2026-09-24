@@ -95,7 +95,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // Ruling 349: a card says "agent queued" for a run the cap parked; the fact
   // is on the run row, read once for the project.
   const liveRuns = liveRunStateByTask(db, params.slug);
-  // Ruling 454 (BOARD-3): each card ships the fields the board reads
+  // Ruling 457 (BOARD-3): each card ships the fields the board reads
   // (`toBoardCard`), not the whole summary. Gap-10's `quiet` rides along.
   const card = (t: TaskActivitySummary) =>
     toBoardCard(
@@ -251,5 +251,5 @@ export default function Board({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 454: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.board");

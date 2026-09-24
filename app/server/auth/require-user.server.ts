@@ -64,7 +64,7 @@ interface AuthResolution {
 }
 
 /**
- * Ruling 454 (FL-8 / SRV-7): the session is resolved ONCE per request. React
+ * Ruling 457 (FL-8 / SRV-7): the session is resolved ONCE per request. React
  * Router hands every loader of one request the same Request object (single
  * fetch runs root, the layout and the leaf with it: react-router router.js
  * `loadRouteData`), and a resource route's guards pass theirs along
@@ -138,7 +138,7 @@ async function resolveSession(request: Request): Promise<AuthResolution> {
 }
 
 /**
- * F10-17, ruling 454: forwards the rolling-session renewal onto the response
+ * F10-17, ruling 457: forwards the rolling-session renewal onto the response
  * of any GET whose loaders resolved the session, whichever loader asked. The
  * root loader used to forward it, which tied the slide to root running; root
  * no longer re-runs on live events and navigations (RF-7), and a day's one

@@ -16,7 +16,7 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
  * The OPEN controller dock's body (ruling 121): the context line, the replies
  * waiting elsewhere, the transcript or the thread list, and the composer.
  *
- * Loaded on demand (ruling 454, FL-1). Root mounts the dock on every page, and
+ * Loaded on demand (ruling 457, FL-1). Root mounts the dock on every page, and
  * the transcript renders through the markdown pipeline, the heaviest thing the
  * dock needs, for a panel that starts closed. `controller-dock.tsx` keeps the
  * button, the panel's frame and header, and every piece of state, so closing
@@ -50,7 +50,7 @@ export interface DockPanelBodyProps {
   /** The view for the CURRENT scope, or null while it loads. */
   current: ControllerDockView | null;
   /** The shown thread's turn: the view's, with the step the dock's status
-   *  polled since (ruling 454, CTL-2). */
+   *  polled since (ruling 457, CTL-2). */
   turn: ConversationTurnState | null;
   /** Replies waiting in other threads (the one on screen is left out). */
   unseen: readonly UnseenReplyView[];

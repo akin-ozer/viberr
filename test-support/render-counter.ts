@@ -1,7 +1,7 @@
 import { act } from "@testing-library/react";
 
 /**
- * Ruling 454: counts which components rendered in each React commit, for the
+ * Ruling 457: counts which components rendered in each React commit, for the
  * render ratchets (`*.perf.test.tsx`). React's `<Profiler onRender>` says THAT
  * a subtree committed, not WHICH components inside it ran; this reads the
  * answer off the committed fiber tree the way React DevTools' profiler does:
@@ -142,7 +142,7 @@ export async function settle(counter: RenderCounter, quietMs = 25): Promise<void
 }
 
 /**
- * Ruling 454: the DOM writes a change makes under `target`, as MutationObserver
+ * Ruling 457: the DOM writes a change makes under `target`, as MutationObserver
  * records. The ones still queued are drained synchronously (`takeRecords`) so a
  * test reads them right after its `act`; the ones a microtask checkpoint
  * already delivered (an `async` act that awaits a fetch) are kept by the

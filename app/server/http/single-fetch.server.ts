@@ -4,7 +4,7 @@
  * request for a revalidation or a client-side navigation?
  *
  * Two readers: R19-15's task-view read-marking (F20-11, a background tab's
- * revalidation must not eat notifications) and ruling 454's console shipping
+ * revalidation must not eat notifications) and ruling 457's console shipping
  * (owner decision 2, 2026-09-24: a hard refresh arrives with the shown agent's
  * console filled; a `.data` request carries no console lines).
  */

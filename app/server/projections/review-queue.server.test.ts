@@ -133,7 +133,7 @@ describe("getReviewQueue", () => {
     );
   });
 
-  it("ruling 454: the board's own list gives the same queue, without a second task query", async () => {
+  it("ruling 457: the board's own list gives the same queue, without a second task query", async () => {
     const store = setup();
     // An archived review task: on the board's list, never in the queue.
     writeTask(store.dataRoot, store.slug, {

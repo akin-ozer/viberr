@@ -22,7 +22,7 @@ export const SSE_CONTROL_EVENTS: readonly SseEventName[] = ["stream.open"];
  * `run.log-appended` reaches only a connection holding its task's scope (ruling
  * 454, LIVE-5). The task page used to revalidate root, layout and task on its
  * own run's lines every 2 s to move the Live run strip; the strip now reads the
- * facts each tail fetch returns (ruling 454, LIVE-1).
+ * facts each tail fetch returns (ruling 457, LIVE-1).
  */
 export const SSE_STREAM_EVENTS: readonly SseEventName[] = [
   "controller.log-appended",
@@ -30,7 +30,7 @@ export const SSE_STREAM_EVENTS: readonly SseEventName[] = [
 ];
 
 /**
- * Conversation events (ruling 454, CTL-4): a controller conversation changed —
+ * Conversation events (ruling 457, CTL-4): a controller conversation changed —
  * a message landed, a turn started or settled. Only the two controller pages
  * render a conversation, so only they revalidate on it (`useLiveUpdates`'s
  * `conversations` option). Everywhere else the one thing that shows a
@@ -61,7 +61,7 @@ export const sseScopes = {
  * Builds the stream URL for a set of scopes. `lastEventId` is where this tab
  * stands in the broker's event ids: the broker replays what the tab missed
  * since then, on the new connection's scopes, or answers `stream.resync` when
- * its buffer no longer reaches back that far (ruling 454). A new EventSource
+ * its buffer no longer reaches back that far (ruling 457). A new EventSource
  * cannot send the `Last-Event-ID` header itself; the browser's own retry of
  * the same source does, and the header wins.
  */

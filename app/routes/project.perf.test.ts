@@ -10,9 +10,9 @@ import {
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 454, journey `board-live` / `server`: what one board revalidation
+ * Ruling 457, journey `board-live` / `server`: what one board revalidation
  * costs the shared event loop. React Router re-runs root + the workspace
- * layout + the board's own loader (ruling 454, BOARD-6) on every live event
+ * layout + the board's own loader (ruling 457, BOARD-6) on every live event
  * the board hears, all handed ONE Request.
  *
  * Fixture: the demo seed's viberr-core board, viewed by arda (org admin,
@@ -50,12 +50,12 @@ async function revalidateBoard(cookie: string) {
     pattern: "/projects/:slug/board",
     context: new RouterContextProvider(),
   };
-  // Ruling 454 (BOARD-6): the columns are the board route's own loader, run
+  // Ruling 457 (BOARD-6): the columns are the board route's own loader, run
   // beside the layout's on the same Request.
   return Promise.all([root.loader(args), layout.loader(args), board.loader(args)]);
 }
 
-describe("board revalidation (ruling 454)", () => {
+describe("board revalidation (ruling 457)", () => {
   it("stays within its server-read budgets", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const [, cold] = await revalidateBoard(cookie);

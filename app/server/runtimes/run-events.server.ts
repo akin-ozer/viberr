@@ -70,7 +70,7 @@ export function publishRunLogAppended(input: {
     // line of output. `run.state-changed` stays on the firehose: that one is a
     // real project fact and fires a handful of times per run.
     //
-    // Ruling 454 (LIVE-5): and off the `project:` scope too. That fix kept the
+    // Ruling 457 (LIVE-5): and off the `project:` scope too. That fix kept the
     // board as a recipient because the board revalidated on a line then; since
     // 2026-09-23 nothing but the console of the page showing THIS task reads
     // the frame, and that page holds the task's scope. Every open board of the
