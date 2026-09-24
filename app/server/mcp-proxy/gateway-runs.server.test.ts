@@ -11,11 +11,14 @@ import {
 } from "../../../test-support/test-store";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import {
+  compactedRunSpecs,
   drainRunCompletions,
   installFakeRuntime,
   lastRunSpec,
+  queueFakeCompaction,
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
+import { waitFor } from "../../../test-support/polling";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -26,6 +29,7 @@ import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { errorMessage } from "~/shared/errors";
 import { mcpGatewayStatus, startMcpGateway, stopMcpGateway } from "./gateway.server";
 
 /**
@@ -179,7 +183,7 @@ describe("every path that ends a run revokes its token (ruling 461)", () => {
     await startWithMounts("claude");
     const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
     expect(getRun(store.db, lastRunSpec()!.runId)?.state).toBe("finished");
-    // CANARY: drop the revoke at the top of `settleRun` and a token outlives its run.
+    // CANARY: drop the settle's revoke (before the finalize) and a token outlives its run.
     expect(mcpGatewayStatus().liveTokens).toBe(0);
     expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
   });
@@ -200,6 +204,75 @@ describe("every path that ends a run revokes its token (ruling 461)", () => {
     await interrupt(runId);
     await settle();
     expect(mcpGatewayStatus().liveTokens).toBe(0);
+    expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
+  });
+
+  it("R-gateway-4: the completion compaction still lists the run's gateway servers, calls none, and the token dies after it", async () => {
+    // Ruling 376: the compaction replays the session with the run's own MCP
+    // servers, or its prefix misses the cache it exists to read. CANARY:
+    // revoke first thing in `settleRun` again, and the compaction's listing
+    // is refused 401.
+    let during: { listed: string[]; call: string } | null = null;
+    queueFakeRun(
+      {
+        sessionId: "sess-big",
+        lines: [
+          { t: "1", ev: "text", tag: "assistant", text: "read a lot" },
+          { t: "2", ev: "result", tag: "result", text: "done", stats: { dur: 100, api: 90, turns: 2, cost: 4, in: 120_000, cached: 0, out: 500 } },
+        ],
+        extraFacts: [
+          {
+            cache: {
+              messageId: "m1",
+              promptTokens: 120_000,
+              cacheWrite: 2_000,
+              cacheRead: 118_000,
+              perCall: true,
+              ttl: { fiveMinute: 0, oneHour: 2_000 },
+              missReason: null,
+            },
+          },
+          undefined,
+        ],
+      },
+      "claude",
+    );
+    queueFakeCompaction("claude", { compacted: true, preTokens: 120_000, postTokens: 18_000 }, async () => {
+      const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
+      const client = new Client({ name: "agent-cli-compaction", version: "1.0.0" });
+      try {
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(cloudflare.url), { requestInit: { headers: cloudflare.headers } }),
+        );
+        const listed = (await client.listTools()).tools.map((tool) => tool.name);
+        const [called] = await Promise.allSettled([client.callTool({ name: "whoami", arguments: {} })]);
+        during = { listed, call: called.status === "fulfilled" ? "called" : errorMessage(called.reason) };
+      } catch (error) {
+        during = { listed: [], call: `the compaction could not reach the gateway: ${errorMessage(error)}` };
+      } finally {
+        await client.close();
+      }
+    });
+    const { servers } = resolveSpecialistMcpServersDetailed(store.db, ["cloudflare"]);
+    await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Developer",
+      kind: "primary",
+      backend: "claude",
+      model: defaultModelFor("claude"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      mcpServers: servers,
+      agentProfileId: "developer",
+      credentialUserId: store.users.arda.id,
+    });
+    await waitFor(() => during !== null && mcpGatewayStatus().liveTokens === 0, "the compaction and the revoke");
+    expect(compactedRunSpecs()).toHaveLength(1);
+    expect(during).toEqual({ listed: ["whoami", "delete_zone", "slow", "fail"], call: expect.stringContaining("has ended") });
+    // Nothing was called upstream for a run that was over.
+    expect(upstream.calls).toEqual([]);
+    const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
     expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
   });
 

@@ -133,6 +133,10 @@ interface RunGrant {
    *  paths' braces: a token whose run has ended is refused even if a path
    *  forgot to revoke it. */
   isLive: () => boolean;
+  /** The run's process has exited (`closeRunMcpGatewayCalls`): the token
+   *  still opens `initialize` and the listings for its completion compaction,
+   *  and refuses every call. */
+  callsClosed: boolean;
 }
 
 interface Upstream {
@@ -388,6 +392,7 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     isLive: input.isLive,
+    callsClosed: false,
   });
   state.byRun.set(input.runId, hash);
   logger.info("mcp gateway token minted", {
@@ -395,6 +400,22 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
     mcps: [...servers.keys()],
   });
   return out;
+}
+
+/**
+ * The run's process has exited, and its completion compaction may be about to
+ * replay the session (ruling 376). That request must carry the run's MCP
+ * servers with the same tools, or it is a different prefix and misses the
+ * cache it exists to read — so the token keeps opening `initialize` and the
+ * listings (on the upstreams the run already holds), and from now on refuses
+ * every call, resource read and prompt: nothing acts for a run that is over.
+ * `revokeRunMcpGateway` ends it once the compaction is done (R-gateway-4,
+ * 2026-09-25). A no-op for a run that holds no token.
+ */
+export function closeRunMcpGatewayCalls(runId: string): void {
+  const state = getState();
+  const grant = state.grants.get(state.byRun.get(runId) ?? "");
+  if (grant) grant.callsClosed = true;
 }
 
 /**
@@ -873,6 +894,20 @@ function namedError(server: string, cause: unknown, connection: UpstreamConnecti
   );
 }
 
+/** R-gateway-4: a run whose process has exited lists, and calls nothing. */
+function assertCallsOpen(grant: RunGrant, server: string, method: string): void {
+  if (!grant.callsClosed) return;
+  logger.info("mcp gateway refused a call from a run that has ended", {
+    runId: grant.runId,
+    mcp: server,
+    method,
+  });
+  throw new GatewayRpcError(
+    UNAUTHORIZED_CODE,
+    `Viberr's MCP gateway refused this ${method}: the run has ended. Its completion compaction may list what "${server}" offers, but nothing is called for a run that is over.`,
+  );
+}
+
 /** The run's `_meta` without its progress token: the upstream client mints
  *  its own and relays progress back under the run's. */
 function upstreamMeta(meta: RequestMeta | undefined): RequestMeta | undefined {
@@ -914,6 +949,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
       return { ...result, tools: result.tools.filter((tool) => !withheld.has(tool.name)) };
     });
     mcp.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+      assertCallsOpen(grant, server, "tools/call");
       const tool = request.params.name;
       const started = Date.now();
       const marked = upstream.writeTools.has(tool);
@@ -989,14 +1025,15 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
         ),
       ),
     );
-    mcp.setRequestHandler(ReadResourceRequestSchema, (request, extra) =>
-      forward(grant, upstream, (client) =>
+    mcp.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+      assertCallsOpen(grant, server, "resources/read");
+      return forward(grant, upstream, (client) =>
         client.request({ method: "resources/read", params: request.params }, ReadResourceResultSchema, {
           signal: extra.signal,
           timeout: callMs,
         }),
-      ),
-    );
+      );
+    });
   }
   if (capabilities.prompts) {
     mcp.setRequestHandler(ListPromptsRequestSchema, (request, extra) =>
@@ -1007,14 +1044,15 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
         }),
       ),
     );
-    mcp.setRequestHandler(GetPromptRequestSchema, (request, extra) =>
-      forward(grant, upstream, (client) =>
+    mcp.setRequestHandler(GetPromptRequestSchema, async (request, extra) => {
+      assertCallsOpen(grant, server, "prompts/get");
+      return forward(grant, upstream, (client) =>
         client.request({ method: "prompts/get", params: request.params }, GetPromptResultSchema, {
           signal: extra.signal,
           timeout: listMs,
         }),
-      ),
-    );
+      );
+    });
   }
 
   const port = state.port ?? 0;

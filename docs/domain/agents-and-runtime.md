@@ -1487,7 +1487,9 @@ runtime's answer for a missing grant.
   256-bit token for the run (`bindRunToMcpGateway`) and adds `headers: {Authorization:
   "Bearer <token>"}` to each such mount. The token is bound to the run id, the exact
   server names the run mounts and the write tools it withholds on each; it is revoked on
-  every path that ends the run (the settle, an interrupt with or without a live handle,
+  every path that ends the run (the settle — which stops its calls when the process exits
+  and revokes it once a completion compaction, which lists the same servers to keep the
+  cached prefix, is done — an interrupt with or without a live handle,
   a queued run the drain drops, a launch that throws) and dies with the process, and the
   gateway also refuses it once the run's row is no longer running or queued. An unknown,
   revoked or wrong-server token gets a 401 with a JSON-RPC error and nothing is
