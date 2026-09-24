@@ -15,9 +15,12 @@ const TABS =
 /** Ruling 454 ratchet ceilings: live run console, task page render and its SSE streams. */
 export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // TASK-1: 1,048,869 while every group's window (display and raw) rode every
-  // revalidation; now window facts only (owner decision 2).
+  // revalidation; now window facts only (owner decision 2). Raised 13001 to
+  // 13073 by CON-7: each of the three groups carries its facts' version
+  // (`"factsAt":<ms>,`, 24 bytes), so the strip keeps the newer of a
+  // revalidation's read and a tail read instead of stepping back.
   "console:task-data.json-bytes": {
-    ceiling: 13001,
+    ceiling: 13073,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a .data request`,
@@ -32,16 +35,18 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
     fixture: `${TASK_CONSOLE}, a .data request; run_log_lines rows read`,
   },
   // TASK-1: 1,048,869 (the same payload as a revalidation); now the shown
-  // agent's window, display lines only.
+  // agent's window, display lines only. Raised 136574 to 136646 by CON-7:
+  // the three groups' `factsAt` (24 bytes each).
   "console:task-document.json-bytes": {
-    ceiling: 136574,
+    ceiling: 136646,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a document request`,
   },
   // TASK-1: the one request that fills a thread a .data payload left empty.
+  // Raised 124054 to 124078 by CON-7: the facts' `factsAt` (24 bytes).
   "console:run-log-window.json-bytes": {
-    ceiling: 124054,
+    ceiling: 124078,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}; /resources/run-log?runId=run_dev_3&window=1, the response body`,

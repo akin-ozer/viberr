@@ -353,7 +353,9 @@ not the page. Per frame it fetches the lines since its cursor from `/resources/r
 (one read in flight per thread, read again when a frame announced a line the read did not
 bring), and every answer carries the run row's live facts (`RunLiveFacts`: phase, step,
 turns, tokens, cache), which the Live run strip and the controller's working row read, so
-nothing revalidates per line. Owner decision 2 (2026-09-24): a page's payload carries
+nothing revalidates per line. Each read of the facts, a tail's or a revalidation's, is
+stamped with the row's `updated_at` (`factsAt`), and the console keeps the newer one
+whichever lands last. Owner decision 2 (2026-09-24): a page's payload carries
 console lines only on a document load, and only the shown agent's display lines; a
 revalidation or a client navigation carries each thread's window facts
 (`logWindow.loaded: false`), the console fills the thread it shows with ONE

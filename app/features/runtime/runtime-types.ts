@@ -405,6 +405,14 @@ export interface RunLiveFacts {
   tokens: number | null;
   tokensEstimated: boolean;
   cache: RunCacheView;
+  /**
+   * Ruling 454 (CON-7): when the row these facts were read from last changed
+   * (`agent_runs.updated_at`, epoch ms; every write of a fact bumps it). A
+   * revalidation's projection and a tail read land in any order, so the store
+   * keeps the newer read, not the last one to arrive. Absent on a hand-built
+   * fixture, which then always wins.
+   */
+  factsAt?: number;
 }
 
 /**
@@ -530,6 +538,8 @@ export interface RunView {
   /** Ruling 369: the prompt-cache record (write vs read, the first call's
    *  temperature, the TTL bucket, the peak and last prompt, compactions). */
   cache: RunCacheView;
+  /** Ruling 454 (CON-7): `RunLiveFacts.factsAt`, the row's last change. */
+  factsAt?: number;
   /** The projected log lines for the group's bounded window (newest last),
    * with UI-53's synthetic `── resumed · run N of M ──` boundaries between
    * runs. NOT the whole history since P13-D-11 — see `logWindow`. */

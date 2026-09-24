@@ -131,7 +131,11 @@ function renderStateOf(lifecycle: RunState, finished: string | null): RunView["s
  */
 export function runLiveFacts(row: AgentRunRow): RunLiveFacts {
   const finished = finishedLabel(row.finished_at);
+  // CON-7: the row's version, so the console keeps the newer of a
+  // revalidation's read and a tail read, whichever lands last.
+  const factsAt = Date.parse(row.updated_at);
   return {
+    ...(Number.isFinite(factsAt) ? { factsAt } : {}),
     phase: row.phase,
     step: row.step,
     turns: row.turns,

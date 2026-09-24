@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RUN_LOG_WINDOW_LINES, type LogLine } from "~/features/runtime/runtime-types";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertRunLine, patchRun, upsertRun, type InsertRunInput } from "./run-store.server";
@@ -382,6 +382,31 @@ describe("F35-1: tokens are marked estimated until the provider's total lands", 
   it("an interrupted row that never got a provider total keeps its figure AND its estimate mark", () => {
     insert({ id: "run_cut", threadId: "primary", state: "interrupted", finishedAt: "2026-09-06T10:00:00.000Z", inputTokens: 300, outputTokens: 40 });
     expect(projectRunsForTask(db, SLUG, TASK)[0]).toMatchObject({ tokens: 340, tokensEstimated: true });
+  });
+});
+
+/**
+ * Ruling 454 (CON-7): a revalidation's projection and the console's tail
+ * reads race, so every read of a run's live facts carries the row's version,
+ * and the console keeps the newer one (`run-log-store.test.ts` "CON-7").
+ */
+describe("ruling 454 (CON-7): the live facts carry the row's version", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("stamps factsAt with agent_runs.updated_at, which every fact write moves", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
+    insert({ id: "run_v", threadId: "primary", state: "running" });
+    const first = projectRunsForTask(db, SLUG, TASK)[0]!.factsAt;
+    // CANARY: drop the stamp from `runLiveFacts` and every read carries none.
+    expect(first).toBe(Date.parse("2026-09-24T10:00:00.000Z"));
+
+    vi.setSystemTime(new Date("2026-09-24T10:00:02.000Z"));
+    patchRun(db, "run_v", { turns: 3 });
+    const [view] = projectRunsForTask(db, SLUG, TASK);
+    expect(view!.factsAt).toBe(Date.parse("2026-09-24T10:00:02.000Z"));
+    // The console's window read stamps the same row the same way.
+    expect(runLogWindowFor(db, getRun(db, "run_v")!).facts.factsAt).toBe(view!.factsAt);
   });
 });
 

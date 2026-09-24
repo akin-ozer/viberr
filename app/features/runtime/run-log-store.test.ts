@@ -276,3 +276,34 @@ describe("CON-5: a window that answers for a newer run is followed on that run",
     expect(store.thread("primary")?.lines.at(-1)?.key).toBe("1:1");
   });
 });
+
+describe("CON-7: the newest read of a run's facts wins, whichever arrives last", () => {
+  const at = (iso: string) => Date.parse(iso);
+
+  it("a revalidation read before a tail read does not step the strip back", async () => {
+    const store = createLiveRunLogStore(TASK, [loaded(1, { factsAt: at("2026-09-24T10:00:00.000Z") })]);
+    route("since=0", tailPage("run_1", [1], { facts: { ...FACTS, turns: 5, factsAt: at("2026-09-24T10:00:02.000Z") } }));
+    store.onFrame("run_1", 1);
+    await flush();
+    expect(store.facts("run_1")?.turns).toBe(5);
+    // CANARY: let `setFacts` take whatever it is handed and this reads 4.
+    store.reconcile([loaded(1, { turns: 4, factsAt: at("2026-09-24T10:00:01.000Z") })]);
+    expect(store.facts("run_1")?.turns).toBe(5);
+    // A projection read after the tail's wins.
+    store.reconcile([loaded(1, { turns: 6, factsAt: at("2026-09-24T10:00:03.000Z") })]);
+    expect(store.facts("run_1")?.turns).toBe(6);
+  });
+
+  it("a late tail answer read before the run's final revalidation does not undo it", async () => {
+    const store = createLiveRunLogStore(TASK, [loaded(1, { factsAt: at("2026-09-24T10:00:00.000Z") })]);
+    const release = held("since=0");
+    store.onFrame("run_1", 1);
+    await flush();
+    store.reconcile([
+      loaded(1, { tokens: 5_000, tokensEstimated: false, factsAt: at("2026-09-24T10:00:05.000Z") }),
+    ]);
+    release(tailPage("run_1", [1], { facts: { ...FACTS, tokens: 4_200, factsAt: at("2026-09-24T10:00:04.000Z") } }));
+    await flush();
+    expect(store.facts("run_1")).toMatchObject({ tokens: 5_000, tokensEstimated: false });
+  });
+});

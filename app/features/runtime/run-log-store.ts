@@ -94,6 +94,7 @@ export type ConsoleThreadInput = Pick<
   | "tokens"
   | "tokensEstimated"
   | "cache"
+  | "factsAt"
 >;
 
 /** The live facts a page's projection carries for its representative run. */
@@ -105,6 +106,7 @@ function factsOf(input: ConsoleThreadInput): RunLiveFacts {
     tokens: input.tokens,
     tokensEstimated: input.tokensEstimated,
     cache: input.cache,
+    ...(input.factsAt === undefined ? {} : { factsAt: input.factsAt }),
   };
 }
 
@@ -345,10 +347,26 @@ export function createLiveRunLogStore(
     notify();
   };
 
+  /**
+   * Ruling 454 (CON-7): the NEWEST read of a run's facts wins, not the last
+   * to arrive. A revalidation's projection and a tail read race, and taking
+   * whichever landed last stepped the strip's turns back (5, 4, 5), or left a
+   * settled run on a late pre-finalization tail answer for good. Each read is
+   * stamped with the row's `updated_at` (`factsAt`); an older stamp is
+   * dropped, and equal facts under a newer stamp only move the stamp.
+   */
   const setFacts = (runId: string, facts: RunLiveFacts | undefined) => {
     if (!facts) return;
     const held = factsByRun.get(runId);
-    if (held && sameFacts(held, facts)) return;
+    if (held) {
+      if (held.factsAt !== undefined && facts.factsAt !== undefined && facts.factsAt < held.factsAt) return;
+      if (sameFacts(held, facts)) {
+        // Nothing drawn changed, so nothing re-renders; the stamp still moves,
+        // so a read older than this one cannot land after it.
+        if (facts.factsAt !== undefined) held.factsAt = facts.factsAt;
+        return;
+      }
+    }
     factsByRun.set(runId, facts);
     notify();
   };

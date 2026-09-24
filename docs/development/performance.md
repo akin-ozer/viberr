@@ -114,7 +114,7 @@ the budgets name (103 budgets in 27 perf test files, plus 8 bundle closures):
 | fresh-load | board closure, gzip | 368,729 B | 237,090 B |
 | fresh-load | render-blocking stylesheet, gzip | 55,592 B | 35,669 B |
 | task-open | task closure, gzip | 422,641 B | 304,870 B |
-| task-open | a big task's `.data` | 1,048,869 B | 13,001 B |
+| task-open | a big task's `.data` | 1,048,869 B | 13,073 B |
 | server | YAML parses per task revalidation | 35 | 0 |
 | server | SQL statements per task revalidation | 86 | 49 |
 | server | session lookups per task revalidation | 3 | 1 |
