@@ -16,8 +16,8 @@ import {
   stageIneligibilitySentence,
 } from "~/shared/workflow/stage-eligibility";
 import { stageName } from "~/shared/workflow/stage-roles";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
-  backendLabelOf,
   backendRunRefusal,
   type TaskRunPrincipalView,
 } from "./run-principal-view";
@@ -441,7 +441,7 @@ function OperatorRunControl({
 }) {
   const [steer, setSteer] = useState("");
   const [delay, setDelay] = useState<RunDelay>("now");
-  const backendLabel = backendLabelOf(defaultBackend);
+  const backendLabel = BACKEND_LABEL[defaultBackend];
   // Hunt 2026-08-29: two different kinds of "off". `busy`/`disabled` (closed
   // task) kill the whole control; the open-packet refusal (F20-5) and a backend
   // the owner cannot run (P11-41, ruling 127) refuse a run NOW — but
@@ -821,7 +821,7 @@ function AgentRunControl({
           <Icon name="alert" />
           <span>
             <strong>
-              {selected.backend === "claude" ? "Claude" : "Codex"} reported this
+              {BACKEND_LABEL[selected.backend]} reported this
               model unavailable.
             </strong>{" "}
             Switch the profile&rsquo;s backend, or expect the run to fail.
@@ -900,7 +900,7 @@ function EngagedAgents({
             <span>
               <div className="nm">{deployed ? deployed.name : GHOST_NAME}</div>
               <div className="sub">
-                {agent.role} · {agent.backend === "claude" ? "Claude" : "Codex"}
+                {agent.role} · {BACKEND_LABEL[agent.backend]}
                 {delivers ? " · delivers" : ""}
                 {/* UC-13/F21-6: "gates acceptance" is a claim about verdict
                     authority — mark it only where it is true. */}
@@ -921,7 +921,7 @@ function EngagedAgents({
                   <Icon name="alert" />
                   <span>
                     <strong>
-                      {agent.backend === "claude" ? "Claude" : "Codex"} reported
+                      {BACKEND_LABEL[agent.backend]} reported
                       this model unavailable.
                     </strong>{" "}
                     Provider said: {unavailable}

@@ -9,6 +9,7 @@ import { rel, updatedLabel } from "./resource-helpers";
 import { isMcpHealthStale } from "~/shared/freshness";
 import { looksLikeWriteTool } from "~/shared/mcp-tools";
 import { countLabel } from "~/shared/text/plural";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 
 /**
  * The four resource list panels (knowledge bases, MCP servers, skills, global
@@ -517,7 +518,7 @@ export function AgentPanel({
                   {a.summary}
                 </span>
                 <span className="sub mono">
-                  {a.backend === "claude" ? "Claude" : "Codex"} ·{" "}
+                  {BACKEND_LABEL[a.backend]} ·{" "}
                   {/* P14-WL-06: the row right below already pluralizes
                       ("project"/"projects"); this one always said "resources". */}
                   {stageNames || "no stages"} · {res} context resource

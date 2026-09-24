@@ -14,6 +14,7 @@ import {
 } from "react-router";
 import { pageTitle } from "~/shared/page-title";
 import { countLabel } from "~/shared/text/plural";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import type { Route } from "./+types/project.task";
 import type { loader as projectLoader } from "./project";
 import {
@@ -1193,7 +1194,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `${result.backend === "claude" ? "Claude" : "Codex"} run started for ${result.name} · streaming to agent logs`,
+          toast: `${BACKEND_LABEL[result.backend]} run started for ${result.name} · streaming to agent logs`,
         };
       }
       case "release-agent": {
@@ -1310,7 +1311,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             actor,
           );
         }
-        const backendLabel = started.backend === "claude" ? "Claude" : "Codex";
+        const backendLabel = BACKEND_LABEL[started.backend];
         return {
           ok: true as const,
           intent,

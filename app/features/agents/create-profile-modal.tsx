@@ -9,6 +9,7 @@ import {
   WEB_EGRESS_CAP_ID,
 } from "~/shared/capabilities";
 import { claudeModelRunsVerbatim } from "~/shared/model-ids";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   CODEX_REPO_WRITE_ADVISORY_NOTE,
   codexRepoWriteAdvisory,
@@ -87,8 +88,8 @@ export interface ProfileFormPayload {
 }
 
 const BACKENDS: { id: "codex" | "claude"; label: string }[] = [
-  { id: "codex", label: "Codex" },
-  { id: "claude", label: "Claude" },
+  { id: "codex", label: BACKEND_LABEL.codex },
+  { id: "claude", label: BACKEND_LABEL.claude },
 ];
 
 /** Client mirror of the /resources/model-catalog payload shape. Exported for
@@ -521,10 +522,8 @@ function BackendField({
           <span>
             <strong>Saving pins this profile to one backend.</strong> It
             currently declares{" "}
-            {(seededBackends ?? [])
-              .map((b) => (b === "claude" ? "Claude" : "Codex"))
-              .join(" and ")}
-            ; {dropping.map((b) => (b === "claude" ? "Claude" : "Codex")).join(" and ")}{" "}
+            {(seededBackends ?? []).map((b) => BACKEND_LABEL[b]).join(" and ")}
+            ; {dropping.map((b) => BACKEND_LABEL[b]).join(" and ")}{" "}
             will be dropped.
           </span>
         </p>

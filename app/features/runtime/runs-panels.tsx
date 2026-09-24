@@ -15,6 +15,7 @@ import { Icon } from "~/ui/icon";
 import { NumberTicker } from "~/ui/number-ticker";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { countLabel } from "~/shared/text/plural";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { useHydrated } from "~/ui/local-time";
 import { useDismiss } from "~/ui/use-dismiss";
 
@@ -1152,17 +1153,17 @@ export function AgentLogsPanel({
               ? // Ruling 130(a): the SENTENCE follows the classified failure
                 // for every run kind; the retry clause follows the OFFER.
                 cur!.failureKind === "quota"
-                ? `${cur!.backend === "codex" ? "Codex" : "Claude"} refused this run: the account's usage window is spent (the error line names the reset and the account remedy)${retryClause}`
+                ? `${BACKEND_LABEL[cur!.backend]} refused this run: the account's usage window is spent (the error line names the reset and the account remedy)${retryClause}`
                 : cur!.failureKind === "auth"
-                  ? `${cur!.backend === "codex" ? "Codex" : "Claude"} refused this run: the account was rejected by the provider (an organization restriction or a rejected credential; the error line names the remedy)${retryClause}`
+                  ? `${BACKEND_LABEL[cur!.backend]} refused this run: the account was rejected by the provider (an organization restriction or a rejected credential; the error line names the remedy)${retryClause}`
                   : cur!.failureKind === "overloaded"
                   ? // The provider's side, not the account's: the sentence
                     // must not send the reader to a quota or account remedy.
                     // U35-11: unless the request never reached the provider,
                     // which is this deployment's network path, not its side.
                     cur!.failureOrigin === "local"
-                    ? `${cur!.backend === "codex" ? "Codex" : "Claude"} could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes${retryClause}`
-                    : `${cur!.backend === "codex" ? "Codex" : "Claude"} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`
+                    ? `${BACKEND_LABEL[cur!.backend]} could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes${retryClause}`
+                    : `${BACKEND_LABEL[cur!.backend]} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`
                   : cur!.failureKind === "max_budget"
                     ? // Ruling 175 / ruling 350: the pill above already says "cut off ·
                       // spending cap"; the footer said "continuity error" beneath it.
@@ -1185,7 +1186,7 @@ export function AgentLogsPanel({
                   // no retry to advertise, and the run's own error line
                   // carries the real remedy (own the task, connect the
                   // account).
-                  `${cur!.backend === "codex" ? "Codex" : "Claude"} could not run this (quota, rate limit, or an account that cannot run it)${retryClause}`
+                  `${BACKEND_LABEL[cur!.backend]} could not run this (quota, rate limit, or an account that cannot run it)${retryClause}`
                 : // Ruling 350: only a specialist's failure raises the packet the
                   // old sentence pointed at; an operator drive or a controller
                   // turn is sent to the record it does have.

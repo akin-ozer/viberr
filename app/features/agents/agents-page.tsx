@@ -8,6 +8,7 @@ import {
 } from "~/server/tasks/specialist-tool-policy";
 import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
 import { countLabel } from "~/shared/text/plural";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   BOUNDARIES,
   TRANSITION_TO_DONE_CAPABILITY_ID,
@@ -166,7 +167,7 @@ function notConnectedNote(backend: string): string {
  * Codex is a project where this profile runs on that person's tasks.
  */
 function runsUseOwnerNote(health: BackendConnectionSummary): string {
-  const label = health.backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[health.backend];
   return (
     `Runs use the task owner's ${label} account · ` +
     `${health.membersConnected} of ${health.membersTotal} members connected`

@@ -8,6 +8,7 @@ import { Pill } from "~/ui/pill";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 import { utcDayKey } from "~/shared/dates/format";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import type { BackendLoginPollData } from "~/routes/resources.backend-login";
 import type { ProfileBackend,
   ProfileBackendRefusal,
@@ -41,9 +42,6 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * URL appeared or that the sign-in finished. Every toast settles on a fetcher
  * RESULT, never at submit time.
  */
-
-/** Ruling 92: the backends are called "Claude" and "Codex". */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 /** How each vendor's own sign-in flow is named to the person starting it. */
 const SIGN_IN_LABEL = {
