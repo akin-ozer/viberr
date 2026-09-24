@@ -484,7 +484,7 @@ function OperatorRunControl({
           primary is the decision-stakes commit of the current state. */}
       <button
         type="button"
-        className="btn sm"
+        className="btn sm run-go"
         disabled={off}
         onClick={run}
         title={
@@ -778,7 +778,7 @@ function AgentRunControl({
       />
       <button
         type="button"
-        className="btn sm"
+        className="btn sm run-go"
         disabled={off}
         onClick={run}
         title={

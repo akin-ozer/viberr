@@ -934,6 +934,10 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     fireEvent.click(getByRole("menuitemradio", { name: "Triage" }));
     expect(submitted).toHaveLength(0);
     expect(getByText("Move back to Triage?")).toBeTruthy();
+    // The head glyph points back, the way the move goes (better-ui review
+    // 2026-09-24): it was the forward arrow. Canary: drop `r180`.
+    const glyph = container.ownerDocument.querySelector("dialog .modal-head .agent-glyph .ico")!;
+    expect(glyph.classList.contains("r180")).toBe(true);
     // It does not move until the reason exists.
     const confirm = findButton(container, "Move back")!;
     expect(confirm.hasAttribute("disabled")).toBe(true);
