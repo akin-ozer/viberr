@@ -1,7 +1,7 @@
 # Binding decisions & conventions
 
 This is the normative contract that code comments across the tree cite as **CONVENTIONS**
-and as **"orchestrator ruling N"**: the working conventions, then the numbered rulings 1–450 in
+and as **"orchestrator ruling N"**: the working conventions, then the numbered rulings 1–458 in
 numeric order, then the owner decisions still unnumbered and the route map. It condenses
 [`planning/planning-artifacts/architecture.md`](../../planning/planning-artifacts/architecture.md),
 which has not been re-validated against the tree for many passes and is stale in places: where

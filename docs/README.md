@@ -102,8 +102,9 @@ undated.
 - `design/`: the HTML mock and design system (structural source for the UI), plus
   `better-auth-migration.md` (its status banner says what was never built) and
   `CONVERSATION-SUMMARY.md`, a design-conversation digest.
-- `.env.example`: the documented environment template, pinned to the code's raw
-  `VIBERR_*` reads by `env.server.test.ts`; `configuration.md` is the superset.
+- `.env.example`: the documented environment template, pinned to the env schema's keys
+  and the code's raw `VIBERR_*` reads by `env.server.test.ts`; `configuration.md` is the
+  superset.
 - `app/server/seed/assets/*.md`: the seeded agents' definitions, profiles and skills. They
   are product prompts, not documentation, and are pinned by the seed tests.
 

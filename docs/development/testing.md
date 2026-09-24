@@ -191,9 +191,10 @@ Every test under `app/shared/docs/`, and the two elsewhere that read a doc:
   append contract never says "display sorts by timestamp" and keeps "it does not undo
   it".
 - `app/server/config/env.server.test.ts`: every raw `process.env.VIBERR_*` read under
-  `app/` is declared in the env schema and appears in `.env.example` (as `NAME=` or
-  `#NAME=`), except three named test-only hooks and the runbook-only
-  `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`.
+  `app/` is declared in the env schema, and every raw read and every key the schema
+  declares appears in `.env.example` (as `NAME=` or `#NAME=`; the declared keys because
+  ruling 458(c)'s knobs have no raw read left), except three named test-only hooks and
+  the runbook-only `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`.
 
 ### Source-scan gates
 

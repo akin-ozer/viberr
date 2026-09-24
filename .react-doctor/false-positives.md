@@ -138,10 +138,10 @@ against stale copies — `design/support.js` alone accounted for 45 phantom
   `dispatchGh({ type: "err", err: d.error })`. `dispatchGh` is a `useReducer` dispatch
   surfaced through the `useStoreOps` hook (NOT a parent callback prop), and its argument
   `d.error` is `ghFetcher.data` (a fetcher result), NOT this component's own state — so
-  the rule's "lift state up" refactor is inapplicable. Guarded once-per-result by the
-  `handledGh` ref, same fetcher-result idiom as the entries above. Verify the called
-  function is a reducer dispatch / hook setter and the argument is fetcher data, not local
-  `useState`.
+  the rule's "lift state up" refactor is inapplicable. Guarded once-per-result by
+  `useFetcherResult(ghFetcher, …)`, the shared form of the fetcher-result idiom above.
+  Verify the called function is a reducer dispatch / hook setter and the argument is
+  fetcher data, not local `useState`.
 
 - `react-doctor/no-unsafe-json-parse` — `JSON.parse(row.*_json)` / `JSON.parse(
   project.*_json)` read straight off the app's OWN SQLite projection columns

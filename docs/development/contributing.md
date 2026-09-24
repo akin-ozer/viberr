@@ -124,7 +124,7 @@ into the env schema and `.env.example` (`env.server.test.ts`).
 | `docs/architecture/decisions.md` | `rulings-supersession.test.ts` | states its supersession convention, and every ruling a later one changes carries an inline marker (ruling 341) |
 | `docs/operations/runbook.md`, `docs/operations/deployment.md`, `docs/development/scripts.md` | `runbook-db-read.test.ts` | copy first, never a second connection to a live projection; in-container backups use an absolute `--out` outside `/data` (ruling 158) |
 | `docs/architecture/codebase-map.md` | `app/features/shell/nav.test.ts` | contains `` `nav.ts` order: `` and the rail labels in order |
-| `.env.example` | `env.server.test.ts` | lists every raw `process.env.VIBERR_*` read under `app/` |
+| `.env.example` | `env.server.test.ts` | lists every key the env schema declares and every raw `process.env.VIBERR_*` read under `app/` (ruling 458(c)) |
 | `vitest.config.ts` | `vitest-config.test.ts` | `testTimeout: 20_000` |
 | `tools/oxlint/anti-slop/` | `anti-slop-vendor-sync.test.ts` | matches `tools/oxlint/anti-slop.manifest.json`; re-pin with `node scripts/anti-slop-manifest.mjs` |
 
