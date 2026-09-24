@@ -862,6 +862,41 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // Ruling 464: the controller's `remove_agent_deployment` reaches the
+        // Agents page's own removal, with its reason and the open-engagement
+        // refusal, and records the page's own audit action.
+        name: "deleteAgentProfile (the controller's removal, with a reason)",
+        action: "project.agent_profile.deleted",
+        run: async () => {
+          seedDefaultAgentAssets(store.dataRoot);
+          writeFileSync(
+            path.join(store.dataRoot, "agents", "profiles", "audit-removal.md"),
+            "---\nid: audit-removal\nkind: specialist\nname: Audit Removal\nrole: Docs\nbackends:\n  - claude\nmodel: sonnet\nstages:\n  - impl\n---\n\nA probe.\n",
+            "utf8",
+          );
+          await deployAgentProfileFromLibrary(
+            store.db,
+            { projectSlug: store.slug, profileId: "audit-removal" },
+            actorArda(),
+            fileCtx,
+          );
+          const { deleteAgentProfile } = await import(
+            "~/features/agents/agent-profile-actions.server"
+          );
+          await deleteAgentProfile(
+            store.db,
+            {
+              projectSlug: store.slug,
+              profileId: "audit-removal",
+              reason: "Not in the designed roster.",
+              refuseOpenEngagements: true,
+            },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
+      {
         // Ruling 156 (pass 35): a template's grants copied onto a project's
         // deployment, one row per project.
         name: "propagateTemplateResources",
@@ -929,6 +964,8 @@ describe("governed actions record audit rows (table-driven)", () => {
         "project.repository.created",
         // Ruling 463: a GitHub connection belongs to the instance.
         "org.connection.rechecked",
+        // Ruling 464: a deployment taken off a project's roster.
+        "project.agent_profile.deleted",
       ].includes(row.action);
       if (!taskless) {
         expect(

@@ -425,7 +425,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 - Every tool refuses an argument it does not declare (`strictTool`, ruling 296).
 
-**53 tools**: 52 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
+**54 tools**: 53 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
 counts them) plus `read_knowledge_doc`, registered (indented, inside a condition) only when
 the turn holds at least one knowledge base, which is every turn while the controller keeps
 its `controller-handbook` grant. `projectSlug` defaults to the bound project and, on a
@@ -469,7 +469,7 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | Tool | What it does | Gate |
 |---|---|---|
 | `list_github_connections` | Every GitHub connection: `owner`, `default`, token kind, validation (`valid` / `failed` with the validator's reason / `unvalidated`) and `lastValidatedAt`, expiry, `missingScopes`, bound project count, and `reach`: the repositories the TOKEN reaches, each with `private` and `canPush`, read when the token was last validated (`read` with a summary and counts, `unknown` with GitHub's reason, or `not_read` for a connection saved before the read existed). No token material, not even the masked suffix (ruling 463) | signed-in |
-| `create_project` | A project with any shape in one request (stages, boundaries, members, description); needs a GitHub connection for the repo owner, and its description sends the model to `list_github_connections` first (ruling 463); the asker is seeded project admin (FR5). `createRepository` (`{ private, description? }`, ruling 462) creates the repository on GitHub with the connection's token when the probe finds none, before the project is written: a refusal names what the token lacks and writes nothing, an existing repository is used as it is, and the reply says which happened. Audit `project.repository.created` | signed-in |
+| `create_project` | A project with any shape in one request (stages, boundaries, members, description); needs a GitHub connection for the repo owner, and its description sends the model to `list_github_connections` first (ruling 463); the asker is seeded project admin (FR5). `createRepository` (`{ private, description? }`, ruling 462) creates the repository on GitHub with the connection's token when the probe finds none, before the project is written: a refusal names what the token lacks and writes nothing, an existing repository is used as it is, and the reply says which happened. Audit `project.repository.created`. `agents` (`[{ profileId, model?, effort? }]`, ruling 464) writes the operator plus exactly that roster and no base Developer or Reviewer, each entry the deployment `deploy_agent` would write; `operator` (`{ model?, effort? }`) sets the operator's own. Every entry is judged before anything is written, GitHub included: an unknown or non-specialist template, a model or effort its backend does not offer, a duplicate or an empty list is refused by name. Without `agents` the base roster is written, as from the New project dialog. The reply lists every deployment written with its model and effort, and `project.created` records the roster's ids | signed-in |
 
 **Board reads** (all `requireVisible`, archived projects included)
 
@@ -508,7 +508,8 @@ matrix the human surfaces use; the tier in brackets is the floor)
 | `set_transition_boundary` | `auto`, `approval` or `human` for one move; the move into the final stage stays human [`edit-policy`] |
 | `invite_member` | Add a member by email (an unknown email gets an account and a relayed one-time password), seated in the given `role` in one write (default viewer; an unknown role refused by name) [`manage-members`] |
 | `set_member_role` | Change a member's role; the last project admin cannot be demoted [`manage-members`] |
-| `deploy_agent` | Deploy a global template; `model` / `effort` overrides checked before the write; the reply says whether the copy can write the repo [`manage-agents`] |
+| `deploy_agent` | Deploy a global template; `model` / `effort` overrides checked before the write; the reply says whether the copy can write the repo; its description names `remove_agent_deployment` as the way back [`manage-agents`] |
+| `remove_agent_deployment` | Take a specialist's deployment off the project (ruling 464): `deleteAgentProfile`, the Agents page's Delete, under its gate and its audit row `project.agent_profile.deleted`, with the required `reason` in the details. Refuses the Operator by name and a profile that is the delivering or an engaged agent on an open task (not archived, not in the final stage), naming the tasks; the global template is untouched; a project left with no specialist is told the base Developer and Reviewer come back at the next restart [`manage-agents`] |
 | `update_agent_deployment` | A deployment's capability modes, backend, model, effort, stages, operator autonomy and its own `skills` / `mcps` / `kbs` for every kind, the operator included (G36-1); merge semantics; checked before the write (§4.2) [`manage-agents`] |
 
 **Goals** (`requireVisible`, then the goal gate, §7)
@@ -521,9 +522,10 @@ matrix the human surfaces use; the tier in brackets is the floor)
 Invariants pinned by tests: there is **no** tool for merge, acceptance,
 force-accept, packet resolution or a move into the terminal stage (ruling 88's
 disclosure ceremony is what chat cannot impersonate), and no tool deletes an entity
-(`update_stages op: remove`, `update_goal op: remove_pending_link` and an empty
-`set_file_leases` edit a file's list; they do not delete a project, task, user or
-resource). Policy edits **are** offered, gated on the asker's `edit-policy`, because the
+(`update_stages op: remove`, `update_goal op: remove_pending_link`, an empty
+`set_file_leases` and, since ruling 464, `remove_agent_deployment` edit a file's list;
+they do not delete a project, task, user, template or resource). The toolkit test pins
+`remove_agent_deployment` as the only `remove_*` tool. Policy edits **are** offered, gated on the asker's `edit-policy`, because the
 controller never initiates: it executes an explicit human directive with the same
 authorization a settings form carries (ruling 100 confirmed the missing confirm ceremony
 as intended).
@@ -561,6 +563,15 @@ as intended).
   keys resolved before anything is written, an unknown key refused by name, an omitted
   list left alone, `[]` clearing it. They merge into the deployment's own copy, the
   operator included. `get_project` shows the copy; the reply lists each list old → new.
+- **A controller-built project's roster is the one it designed** (ruling 464).
+  `create_project`'s `agents` goes through the same two steps as `deploy_agent`:
+  `readLibraryTemplate` (a store key the store answers to, a specialist template) and
+  `buildLibraryDeployment` (the template's grants copied, its model and effort unless the
+  entry overrides them, an override judged against the template's backend), for every
+  entry before the repository probe, so a refused entry leaves nothing on GitHub or on
+  disk. The base Developer and Reviewer are written only when `agents` is absent. Taking an
+  agent off later is `remove_agent_deployment`, the Agents page's own removal, which refuses
+  a profile still engaged on an open task.
 - **A create reply is re-enterable** (U36-4). `save_knowledge_base` and `save_skill`
   answer with the id the next save takes and the grantKey a grant takes: `[done] X
   created. Folder ready at store://kb/x/ (id kb_…, grantKey x).` A `disk:<dir>` (or

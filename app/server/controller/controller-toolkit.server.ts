@@ -118,11 +118,14 @@ import {
   type CreateProjectInput,
   type CreateRepositoryRequest,
   type CustomProjectBlueprint,
+  type RosterEntry,
 } from "~/features/home/project-create.server";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import {
+  deleteAgentProfile,
   deployAgentProfileFromLibrary,
   updateAgentProfile,
+  type DeployOverrides,
   type SubmittedProfileForm,
   deploymentFingerprint,
 } from "~/features/agents/agent-profile-actions.server";
@@ -233,7 +236,11 @@ import { errorMessage } from "~/shared/errors";
  * not-visible sentence for missing AND forbidden alike (R15-4's 404 posture:
  * a probe must not learn that a project exists).
  *
- * NO DELETES: no tool destroys anything, in either scope. The always-human
+ * NO DELETES: no tool destroys a project, task, user, template or resource, in
+ * either scope. Ruling 464 amends the older "nothing is deleted" wording by
+ * one edit: `remove_agent_deployment` takes a specialist off a project's
+ * roster, the way `update_stages op: remove` takes a stage off its board, and
+ * the global template stays. The always-human
  * decisions (merge, acceptance, force-accept, packet resolution, a move into
  * the terminal stage) have no tool here at all — the move tool refuses a
  * terminal target and points at the task page's own ceremony (ruling 88).
@@ -278,7 +285,9 @@ const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "Viberr controller tools. Every action runs under the ASKING PERSON's own permissions, " +
   "checked by the server per call: instance tools follow their org role, board tools follow " +
   "their role in that project. A [denied] answer is final — relay it with its reason. Reads " +
-  "are your ground truth; call them before asserting state. Nothing here deletes, merges, " +
+  "are your ground truth; call them before asserting state. Nothing here deletes a project, " +
+  "task, user, template or resource (taking a deployment off a project's roster edits the " +
+  "roster, ruling 464), merges, " +
   "accepts completions, resolves decision packets, or moves a task into its final stage \u2014 " +
   "ruling 251: those stay with the person, and `list_decisions` is how you put each one in " +
   "front of them, with its options and the link that opens it. " +
@@ -1528,7 +1537,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_project",
-      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Requires a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 463), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). The move into the final stage stays a human decision whatever is asked. Deploy extra agents afterward with deploy_agent.",
+      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Requires a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 463), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). The move into the final stage stays a human decision whatever is asked. When you have designed the project's agents, pass them as `agents` (ruling 464), each with its model and effort: the project then gets the operator plus exactly that roster, not the generic Developer and Reviewer beside it. The reply lists every deployment written. deploy_agent adds one later; remove_agent_deployment takes one off.",
       {
         name: z.string(),
         key: z.string().describe("Task key prefix, 2 to 4 letters."),
@@ -1581,6 +1590,36 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             }),
           )
           .optional(),
+        agents: z
+          .array(
+            z.strictObject({
+              profileId: z
+                .string()
+                .describe("A global template's store key from list_global_agents, as deploy_agent takes it."),
+              model: z
+                .string()
+                .optional()
+                .describe("Model id for the template's backend; omit for the template's own."),
+              effort: z
+                .string()
+                .optional()
+                .describe(`Effort tier the backend offers (${EFFORT_TIERS_SENTENCE}); omit for the template's own.`),
+            }),
+          )
+          .optional()
+          .describe(
+            "Ruling 464: the roster you designed. Pass it when you have one: the project is then written with the operator plus EXACTLY these deployments and no generic Developer or Reviewer; leave it out and the base roster (operator, Developer, Reviewer) is written. Every entry is checked before anything is written, the repository included: an unknown template, a model or effort its backend does not offer, or an entry listed twice is refused by name. At least one entry.",
+          ),
+        operator: z
+          .strictObject({
+            model: z.string().optional(),
+            effort: z
+              .string()
+              .optional()
+              .describe(`Effort tier (${EFFORT_TIERS_SENTENCE}).`),
+          })
+          .optional()
+          .describe("The operator's own model and effort, checked the same way; omit to keep its defaults."),
       },
       runWith(
         async (args: {
@@ -1594,6 +1633,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           stages?: { name: string; color?: StageColor }[];
           boundaries?: { from: string; to: string; boundary: "auto" | "approval" | "human" }[];
           members?: { email: string; role: (typeof PROJECT_ROLES)[number] }[];
+          agents?: RosterEntry[];
+          operator?: DeployOverrides;
         }) => {
           const input: CreateProjectInput = {
             name: args.name,
@@ -1603,6 +1644,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             policy: args.policy,
           };
           if (args.createRepository) input.createRepository = args.createRepository;
+          if (args.agents) input.agents = args.agents;
+          if (args.operator) input.operator = args.operator;
           if (args.description || args.stages || args.boundaries || args.members) {
             const custom: CustomProjectBlueprint = {};
             if (args.description) custom.description = args.description;
@@ -1615,11 +1658,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             dataRoot,
             fetchImpl: ctx.fetchImpl,
           });
+          // Ruling 464: the reply lists what was deployed, read off the write.
+          const deployed = created.agents
+            .map((a) => `${a.name} (${a.profileId}, ${a.model || "default model"}, effort ${a.effort || "default"})`)
+            .join("; ");
           return (
             `[done] Project ${created.name} created at ${created.storePath} (slug ${created.slug}, keys ${created.key}-n). ` +
             `You are its admin.` +
             (created.repoNote ? ` ${created.repoNote}` : "") +
-            (created.repoWarning ? ` Warning: ${created.repoWarning}` : "")
+            (created.repoWarning ? ` Warning: ${created.repoWarning}` : "") +
+            ` Deployed: ${deployed}.`
           );
         },
       ),
@@ -3252,7 +3300,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "deploy_agent",
-      "Deploy a global agent template into the project (from list_global_agents). Project admin. This toolkit does not remove a deployment - the product does: a project admin deletes one on that project's Agents page (the Operator is a system profile and is never deletable). Say that rather than offering to neuter a live deployment's grants, which leaves it selectable and is a workaround, not a removal. A deploy COPIES the template's own capability grants, so whether the profile can write the repo depends on the template: the reply says which, read off what was written. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 153; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
+      "Deploy a global agent template into the project (from list_global_agents). Project admin. remove_agent_deployment takes a deployment off again, the same removal as Delete on the project's Agents page (the Operator is a system profile and is never removable); use it rather than neutering a live deployment's grants, which leaves it selectable and is a workaround, not a removal. A deploy COPIES the template's own capability grants, so whether the profile can write the repo depends on the template: the reply says which, read off what was written. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 153; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -3493,6 +3541,50 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       ),
     ),
     "update_agent_deployment",
+  );
+
+  add(
+    tool(
+      "remove_agent_deployment",
+      "Take one specialist's deployment off a project (ruling 464): the same removal as Delete on the project's Agents page, under the same gate (project admin, `manage-agents`) and the same audit row, with your `reason` recorded in it. It edits the project's roster; the global template is untouched and can be deployed again with deploy_agent. Refused by name: the Operator (a system profile, never removable), and a profile that is the delivering or an engaged agent on any open task (the refusal names the tasks; finish, archive or re-engage that work first, so no task is left mid-work with an agent that can no longer deliver). A project left with no specialist at all gets the base Developer and Reviewer back at the next restart, and the reply says so.",
+      {
+        projectSlug: z.string().optional(),
+        profileId: z.string().describe("The deployment's profile id, as get_project lists it."),
+        reason: z
+          .string()
+          .min(1)
+          .describe("Why it is coming off, in the person's words; recorded in the audit row."),
+      },
+      runWith(async (args: { projectSlug?: string; profileId: string; reason: string }) => {
+        const slug = slugOf(args.projectSlug);
+        requireVisible(slug, "manage this project's agents");
+        const reason = args.reason.trim();
+        if (!reason) {
+          throw AppError.validation("Say why the deployment is coming off; the reason is recorded. Nothing was removed.");
+        }
+        const removed = await deleteAgentProfile(
+          db,
+          {
+            projectSlug: slug,
+            profileId: args.profileId.trim(),
+            reason,
+            refuseOpenEngagements: true,
+          },
+          actor,
+          { dataRoot },
+        );
+        const left = readProjectFile({ projectSlug: slug, dataRoot })?.parsed.frontmatter.agents ?? [];
+        const specialists = left.filter(
+          (a) => effectiveProfileView(a, dataRoot, VIEW_WITHOUT_POLICY).kind !== "operator",
+        );
+        const tail =
+          specialists.length === 0
+            ? " The project has no specialist left, so the next restart deploys the base Developer and Reviewer again; deploy the one you want now to keep it that way."
+            : ` Deployed now: ${specialists.map((a) => a.profileId).join(", ")}.`;
+        return `[done] ${removed.name} (${removed.profileId}) removed from ${slug}. The global template is untouched.${tail}`;
+      }),
+    ),
+    "remove_agent_deployment",
   );
 
 

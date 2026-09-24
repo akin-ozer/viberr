@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { effortsFor } from "~/server/runtimes/model-catalog.server";
+import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -780,5 +782,144 @@ describe("ruling 462: createRepository creates the repository before the project
       }),
     ).rejects.toThrow(/GitHub repository names use letters, digits/);
     expect(gh.calls).toHaveLength(0);
+  });
+});
+
+/**
+ * Ruling 464 (pass 40, F40-7): a controller that designed six specialists got
+ * the template's generic Developer and Reviewer written beside them, both
+ * dispatchable, and no tool to take them off. `agents` names the roster; the
+ * base one is written only when it is absent.
+ */
+describe("ruling 464: a designed roster replaces the base specialists", () => {
+  /** A claude specialist template in the store, the way a shipped one reads. */
+  function writeTemplate(dataRoot: string, id: string, name: string) {
+    writeFileSync(
+      join(dataRoot, "agents", "profiles", `${id}.md`),
+      [
+        "---",
+        `id: ${id}`,
+        "kind: specialist",
+        `name: ${name}`,
+        "role: Implementation",
+        "backends:",
+        "  - claude",
+        "model: sonnet",
+        "stages:",
+        "  - impl",
+        "resources:",
+        "  skills: []",
+        "  mcps: []",
+        "  kb: []",
+        "capabilities:",
+        "  - capabilityId: execute-code-or-write-repo",
+        "    mode: direct",
+        "---",
+        "",
+        `You are the ${name}.`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+  }
+
+  function setup() {
+    const store = setupTestStore(ctx);
+    seedConnection(store.db, store.users.arda.id);
+    seedDefaultAgentAssets(store.dataRoot);
+    mkdirSync(join(store.dataRoot, "agents", "profiles"), { recursive: true });
+    writeTemplate(store.dataRoot, "site-builder", "Site Builder");
+    writeTemplate(store.dataRoot, "content-editor", "Content Editor");
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/site": { body: { default_branch: "main", permissions: { push: true } } },
+    });
+    return { store, gh };
+  }
+
+  const TOP = effortsFor("claude").at(-1)!;
+  const LOW = effortsFor("claude")[0]!;
+
+  const site = (extra: Partial<CreateProjectInput> = {}): CreateProjectInput => ({
+    name: "Site",
+    key: "SITE",
+    owner: "akin-ozer",
+    repoName: "site",
+    policy: "balanced",
+    ...extra,
+  });
+
+  it("writes the operator plus exactly the listed deployments, each with its model and effort, and no base Developer or Reviewer", async () => {
+    // CANARY: ignore `agents` in resolveRoster (return the base roster) and
+    // developer and reviewer are written; drop the overrides and the models
+    // read the template's own sonnet.
+    const { store, gh } = setup();
+    const result = await createProject(
+      store.db,
+      site({
+        agents: [
+          { profileId: "site-builder", model: "opus", effort: TOP },
+          { profileId: "content-editor", effort: LOW },
+        ],
+        operator: { model: "opus", effort: TOP },
+      }),
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+    const agents = readProjectFile({ projectSlug: result.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.agents;
+    expect(agents.map((a) => a.profileId)).toEqual(["operator", "site-builder", "content-editor"]);
+    const byId = new Map(agents.map((a) => [a.profileId, a]));
+    expect(byId.get("site-builder")!.definition).toMatchObject({ model: "opus", effort: TOP, name: "Site Builder" });
+    // An omitted model keeps the template's own.
+    expect(byId.get("content-editor")!.definition).toMatchObject({ model: "sonnet", effort: LOW });
+    // The template's own grants are copied, as deploy_agent copies them.
+    expect(byId.get("site-builder")!.capabilities).toContainEqual({
+      capabilityId: "execute-code-or-write-repo",
+      mode: "direct",
+    });
+    expect(byId.get("operator")!.definition).toMatchObject({ model: "opus", effort: TOP });
+    expect(result.agents.map((a) => [a.profileId, a.model, a.effort])).toEqual([
+      ["operator", "opus", TOP],
+      ["site-builder", "opus", TOP],
+      ["content-editor", "sonnet", LOW],
+    ]);
+    const audit = listAuditEvents(store.db, { action: "project.created" })[0]!;
+    expect(audit.details).toMatchObject({ agents: ["operator", "site-builder", "content-editor"] });
+  });
+
+  it("without `agents` the base roster is still written (the New project modal is unchanged)", async () => {
+    // CANARY: write only the operator when `agents` is absent.
+    const { store, gh } = setup();
+    const result = await createProject(store.db, site(), ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+    });
+    const agents = readProjectFile({ projectSlug: result.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.agents;
+    expect(agents.map((a) => a.profileId)).toEqual(["operator", "developer", "reviewer"]);
+  });
+
+  // CANARY: resolve the roster after the repository probe and the refusals
+  // below spend a GitHub call; drop the effort check from
+  // buildLibraryDeployment and the bad tier is written.
+  it.each<[string, Partial<CreateProjectInput>, RegExp]>([
+    ["an unknown template", { agents: [{ profileId: "no-such-agent" }] }, /No global agent profile `no-such-agent`/],
+    ["the operator as a roster entry", { agents: [{ profileId: "operator" }] }, /`operator` is not a specialist template/],
+    ["a bad effort", { agents: [{ profileId: "site-builder", effort: "ludicrous" }] }, /"ludicrous" is not an effort tier Claude offers/],
+    ["a foreign model", { agents: [{ profileId: "site-builder", model: "gpt-5.6-terra" }] }, /Claude cannot run it/],
+    ["a bad operator effort", { operator: { effort: "ludicrous" } }, /"ludicrous" is not an effort tier Claude offers/],
+    ["an entry listed twice", { agents: [{ profileId: "site-builder" }, { profileId: "site-builder" }] }, /`site-builder` is listed twice/],
+    ["an empty roster", { agents: [] }, /Name at least one agent/],
+  ])("refuses %s by name with nothing written, GitHub included", async (_label, extra, message) => {
+    const { store, gh } = setup();
+    await expect(
+      createProject(store.db, site({ ...extra, createRepository: { private: true } }), ACTOR, {
+        dataRoot: store.dataRoot,
+        fetchImpl: gh.fetchImpl,
+      }),
+    ).rejects.toThrow(message);
+    expect(existsSync(join(store.dataRoot, "projects", "site"))).toBe(false);
+    expect(gh.calls).toHaveLength(0);
+    expect(listAuditEvents(store.db, { action: "project.created" })).toHaveLength(0);
   });
 });

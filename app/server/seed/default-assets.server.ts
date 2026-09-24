@@ -202,6 +202,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 464 (pass 40, F40-7): before "Bringing up a new project" said to
+    // pass the designed roster as `agents`, and before "No deletes" named
+    // `remove_agent_deployment`. The controller deployed its six specialists
+    // beside the generic Developer and Reviewer and could not take them off.
+    "df3a250cbd5fbbaccdd7843199a1d9e23e836250119db2f87a7693e57b6a17d8",
     // Ruling 463 (pass 40, F40-6): before "Bringing up a new project" said to
     // read `list_github_connections` first. The controller could not see the
     // connection its own `create_project` needs and wrote that it could not.

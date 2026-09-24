@@ -419,6 +419,31 @@ describe("the controller playbook learns list_github_connections (ruling 463)", 
 });
 
 /**
+ * Ruling 464 (pass 40, F40-7): the controller's playbook says to pass the
+ * designed roster as `agents` and names the one removal it holds. The
+ * outgoing version is listed so an unedited store copy upgrades at boot.
+ *
+ * Canary: drop the bullet, the removal sentence, or the outgoing hash, and the
+ * matching assertion fails.
+ */
+describe("the controller playbook learns `agents` and remove_agent_deployment (ruling 464)", () => {
+  const assetsDir = path.join(import.meta.dirname, "assets");
+  it("names both and lists its outgoing version", async () => {
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
+      "./default-assets.server"
+    );
+    const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
+    expect(skill).toContain("Pass the roster you designed as `agents` to `create_project`");
+    expect(skill).toContain("The one removal you hold is `remove_agent_deployment`");
+    expect(skill).not.toMatch(/[–—]/);
+    const rel = path.join("skills", "controller-guide", "SKILL.md");
+    const outgoing = "df3a250cbd5fbbaccdd7843199a1d9e23e836250119db2f87a7693e57b6a17d8";
+    expect(shippedCopyIsUnedited(rel, outgoing, {})).toBe(true);
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+  });
+});
+
+/**
  * Ruling 134 (pass 34, F34-11): the shipped operator doctrine says that
  * rework on an open PR is delivered with `deliver_for_review`, and that
  * pushing is never a person's or an agent's job. The outgoing sha256 is
