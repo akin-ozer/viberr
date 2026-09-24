@@ -11,6 +11,7 @@ import {
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
 import { Pill } from "~/ui/pill";
@@ -1140,7 +1141,7 @@ export function CurrentStatePanel({
             disabled={dispositionBusy}
             onClick={onArchive}
           >
-            <Icon name={archived ? "refresh" : "lock"} />
+            <GlyphSwap rest="lock" alt="refresh" on={archived} />
             {archived ? "Restore from archive" : "Archive task"}
           </button>
           <p className="hint archive-hint">

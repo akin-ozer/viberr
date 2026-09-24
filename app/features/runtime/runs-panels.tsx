@@ -16,6 +16,7 @@ import { NumberTicker } from "~/ui/number-ticker";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { useHydrated } from "~/ui/local-time";
 import { useDismiss } from "~/ui/use-dismiss";
+import { useFreshLine } from "~/ui/use-fresh-line";
 
 /** P13-UI-57: the projection ships the ISO so the CLIENT renders the clock in
  *  the viewer's zone. During SSR + hydration the UTC form is rendered instead
@@ -285,6 +286,45 @@ function AgentPicker({
 // ----------------------------------------------------------- LiveRunPanel
 
 /**
+ * The live strip's phase and step. Its own component so its hooks mount with
+ * the strip that shows a run, after LiveRunPanel's no-run early return.
+ */
+function RunStatusLine({ run }: { run: RunView }): ReactNode {
+  // R21-4 / FR28: the phase and step are real now (both adapters emit them,
+  // and the run pipeline emits "Preparing workspace" before the provider
+  // starts). A run can still be between updates — a resumed row before its
+  // first message, a legacy row — so the heading falls back to the one thing
+  // that IS known from the row's state rather than rendering an empty bold
+  // line, and the step row is omitted entirely when there is no step.
+  const phase = run.phase ?? "Working";
+  // Ruling 451(a): phase and step are keyed on their text, so a new one is a
+  // new line that rises in (the sheet's `swap-in`) rather than words changing
+  // under the reader. Ruling 459: only a line that REPLACES the first one
+  // rises (`data-fresh`); the words on screen when the strip opens stand still.
+  const phaseFresh = useFreshLine(phase);
+  const stepFresh = useFreshLine(run.step ?? "");
+  return (
+    <span>
+      <div key={"ph:" + phase} className="ph" data-fresh={phaseFresh ? "true" : undefined}>
+        {phase}
+      </div>
+      {/* U39-26: read as words, as the conversation's working row reads it;
+          the stored step stays on hover. */}
+      {run.step ? (
+        <div
+          key={"step:" + run.step}
+          className="step mono"
+          title={run.step}
+          data-fresh={stepFresh ? "true" : undefined}
+        >
+          {readableStep(run.step)}
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+/**
  * The "Live run" strip — shown only while at least one run is `running`.
  * Elapsed derives from startedAt (client clock); the token counter is real
  * cumulative usage (NO fabricated growth). Interrupt is a real governed
@@ -352,28 +392,7 @@ export function LiveRunPanel({
       <div className="runbar-body">
         <div className="run-phase">
           <span className="run-spin" aria-hidden="true" />
-          <span>
-            {/* R21-4 / FR28: the phase and step are real now (both adapters
-                emit them, and the run pipeline emits "Preparing workspace"
-                before the provider starts). A run can still be between
-                updates — a resumed row before its first message, a legacy row
-                — so the heading falls back to the one thing that IS known from
-                the row's state rather than rendering an empty bold line, and
-                the step row is omitted entirely when there is no step. */}
-            {/* Ruling 451(a): phase and step are keyed on their text, so a
-                new one is a new line that rises in (the sheet's `swap-in`)
-                rather than words changing under the reader. */}
-            <div key={"ph:" + (run.phase ?? "Working")} className="ph">
-              {run.phase ?? "Working"}
-            </div>
-            {/* U39-26: read as words, as the conversation's working row
-                reads it; the stored step stays on hover. */}
-            {run.step ? (
-              <div key={"step:" + run.step} className="step mono" title={run.step}>
-                {readableStep(run.step)}
-              </div>
-            ) : null}
-          </span>
+          <RunStatusLine run={run} />
         </div>
         <div className="run-stats">
           <div className="run-cell">
@@ -747,6 +766,12 @@ function WaitRow({
   const ticking = live && reported !== null && at !== null;
   const clock = (t: string) => (hydrated ? localLogClock(t, run.startedAt) : t);
   const n = lines.length;
+  // Ruling 459: a row seen live keeps its orb once the wait ends, paused and
+  // hidden, so the sheet can trade it for the clock in place instead of
+  // swapping a 20px canvas for a 14px glyph in one frame. A row first drawn
+  // ended never mounts one. Same set-state-in-render latch as `useFreshLine`.
+  const [seenLive, setSeenLive] = useState(live);
+  if (live && !seenLive) setSeenLive(true);
   return (
     <>
       <div className={"log-line meta wait" + (live ? " lw-live" : "")}>
@@ -754,22 +779,25 @@ function WaitRow({
         <span className="ltag">{last.tag}</span>
         <span className="lx">
           <span className="log-wait">
-            {live ? (
-              // Pinned to its dark ink: the console paints its own near-black
-              // fill in BOTH app themes, and `auto` would read the light
-              // theme's `data-theme` off `:root` and draw dark dots on it.
-              // Decorative — the words beside it carry the state, so it is
-              // hidden from assistive tech.
-              <ThinkingOrb
-                state={who.kind === "viberr" ? "connecting" : "working"}
-                size={20}
-                theme="dark"
-                className="log-orb"
-                aria-hidden="true"
-              />
-            ) : (
+            <span className="lw-glyph" data-live={live ? "true" : undefined} aria-hidden="true">
+              {seenLive && (
+                // Pinned to its dark ink: the console paints its own near-black
+                // fill in BOTH app themes, and `auto` would read the light
+                // theme's `data-theme` off `:root` and draw dark dots on it.
+                // Decorative — the words beside it carry the state, so it is
+                // hidden from assistive tech. Paused once the wait ends, so a
+                // hidden orb draws no more frames.
+                <ThinkingOrb
+                  state={who.kind === "viberr" ? "connecting" : "working"}
+                  size={20}
+                  theme="dark"
+                  paused={!live}
+                  className="log-orb"
+                  aria-hidden="true"
+                />
+              )}
               <Icon name="clock" />
-            )}
+            </span>
             <span className={"log-chip" + (who.kind === "viberr" ? " vb" : "")}>
               <ToolName who={who} />
             </span>

@@ -35,7 +35,8 @@ export function MoveBackConfirm({
   onConfirm: (reason: string) => void;
 }) {
   const [reason, setReason] = useState("");
-  const { ref, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  const { ref, close, commit } = useDialog(onCancel);
   const ready = reason.trim().length > 0;
   return (
     <dialog
@@ -88,7 +89,7 @@ export function MoveBackConfirm({
             type="button"
             className="btn primary"
             disabled={!ready || busy}
-            onClick={() => onConfirm(reason.trim())}
+            onClick={() => commit(() => onConfirm(reason.trim()))}
           >
             {busy ? "Moving…" : "Move back"}
           </button>

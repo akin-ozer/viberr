@@ -58,12 +58,14 @@ function ProviderModal({
   const [clientId, setClientId] = useState(existing.clientId ?? "");
   const [secret, setSecret] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  const [done, setDone] = useState(false);
   const push = useToast();
   const action = useOrgAction({
     onResult: (d: OrgActionData) => {
       if (d.ok) {
         if (d.toast) push(d.toast);
-        onClose();
+        setDone(true);
         return;
       }
       setErr(d.error);
@@ -91,6 +93,7 @@ function ProviderModal({
       icon={<Icon name={meta.icon} />}
       title={`${meta.label} sign-in`}
       busy={action.busy}
+      done={done}
       sub={`Create an OAuth app under ${meta.where}, then paste its credentials`}
       onClose={onClose}
       canSave={canSave}
@@ -358,7 +361,6 @@ export function SsoPanel({
               intent: "oauth-remove",
               provider: confirm.provider,
             });
-            setConfirm(null);
           }}
         />
       )}

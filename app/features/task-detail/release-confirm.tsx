@@ -40,7 +40,9 @@ export function ReleaseConfirm({
   onConfirm: () => void;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
 }) {
-  const { ref: panelRef, close } = useDialog(onCancel);
+  // Ruling 459: a release or a hand-off leaves the way Cancel does
+  // (`commit`); onCancel unmounts it after the exit.
+  const { ref: panelRef, close, commit } = useDialog(onCancel);
   // Defensive: the dialog should only open when owned (mock guard kept).
   const owner = task.owner && task.owner.kind === "human" ? task.owner : null;
   const o = owner ?? {
@@ -151,10 +153,9 @@ export function ReleaseConfirm({
                     // UI-41: chips stayed clickable while a hand-off was in
                     // flight, so a double-click fired two owner mutations.
                     disabled={busy}
-                    onClick={() => {
-                      onCancel();
-                      onOwner(isMe ? "take" : "assign", m);
-                    }}
+                    onClick={() =>
+                      commit(() => onOwner(isMe ? "take" : "assign", m))
+                    }
                   >
                     <Avatar person={m.user} size="xs" />
                     <span className="nm">
@@ -183,7 +184,7 @@ export function ReleaseConfirm({
             type="button"
             className="btn danger"
             disabled={busy}
-            onClick={onConfirm}
+            onClick={() => commit(onConfirm)}
           >
             <Icon name="x" />
             {mine ? "Release" : "Release " + o.name.split(" ")[0]}

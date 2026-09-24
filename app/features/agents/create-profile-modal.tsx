@@ -1193,7 +1193,10 @@ function ResourcePicker({
                         aria-pressed={selSet.has(it.id)}
                         onClick={() => toggleRes(g.key, it.id)}
                       >
-                        {selSet.has(it.id) && <Icon name="check" />}
+                        {/* Ruling 459: always drawn, and faded in by the
+                            sheet on `.on`, so a toggle never resizes the chip
+                            and re-wraps the row under the pointer. */}
+                        <Icon name="check" className="pc-check" />
                         {it.label ?? it.id}
                       </button>
                     ))}
@@ -1296,6 +1299,7 @@ export function CreateProfileModal({
   stages,
   projectName,
   busy,
+  done = false,
   error,
   onClose,
   onSubmit,
@@ -1307,6 +1311,9 @@ export function CreateProfileModal({
   stages: { id: string; name: string; color: string }[];
   projectName: string;
   busy: boolean;
+  /** The save landed: the modal plays its exit, then onClose unmounts it
+   *  (ruling 459). */
+  done?: boolean;
   /** Server-side failure copy — renders in the foot hint, modal stays open. */
   error: string | null;
   onClose: () => void;
@@ -1330,6 +1337,9 @@ export function CreateProfileModal({
   // so the note below claims nothing; it never gates the form either way.
   const connected = viewerConnected ?? { codex: true, claude: true };
   const { ref: dialogRef, close } = useDialog(onClose);
+  useEffect(() => {
+    if (done) close();
+  }, [done, close]);
   const uid = useId();
   const [name, setName] = useState(initial ? initial.name : "");
   const [role, setRole] = useState(initial ? initial.role : "");
@@ -1456,7 +1466,7 @@ export function CreateProfileModal({
   const flaggedField = attempted && (missing === "name" || missing === "role") ? missing : null;
 
   const submit = () => {
-    if (busy) return;
+    if (busy || done) return;
     // `valid` already requires a picked backend; naming it in the guard is what
     // rules out the picker's initial "" for the payload below.
     if (!valid || !backend) {

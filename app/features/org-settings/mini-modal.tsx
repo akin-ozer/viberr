@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
@@ -38,6 +38,7 @@ export function MiniModal({
   busy = false,
   saveLabel,
   onSave,
+  done = false,
   footHint,
   unmetHint,
   focusUnmet,
@@ -54,6 +55,10 @@ export function MiniModal({
   busy?: boolean;
   saveLabel: string;
   onSave: () => void;
+  /** The caller's save succeeded (ruling 459): the modal plays the exit Cancel
+   *  plays, then `onClose` unmounts it. A caller that unmounted it on success
+   *  took it away in one frame, with no exit. */
+  done?: boolean;
   footHint?: string;
   /** UXA-9: what is still missing while `canSave` is false. */
   unmetHint?: string;
@@ -63,13 +68,18 @@ export function MiniModal({
   screen?: string;
 }) {
   const { ref, close } = useDialog(onClose);
+  useEffect(() => {
+    if (done) close();
+  }, [done, close]);
   // Counted, not boolean: each refusal re-inserts the alert, because readers
   // announce an alert's insertion, not a role flip on unchanged text.
   const [refused, setRefused] = useState(0);
   // Ruling 451(g): the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const save = () => {
-    if (busy) return;
+    // A save that landed is leaving: an Enter during the exit must not send
+    // the form again.
+    if (busy || done) return;
     if (!canSave) {
       setRefused((n) => n + 1);
       if (focusUnmet) focusUnmet();

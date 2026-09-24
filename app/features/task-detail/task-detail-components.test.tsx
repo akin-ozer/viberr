@@ -23,6 +23,8 @@ import { GithubTrace } from "./task-side-panels";
 import { DiagnosticsPanel, TaskHero } from "./task-main-sections";
 import type { DiagnosticRecord } from "~/server/projections/task-query.server";
 import { ReleaseConfirm } from "./release-confirm";
+import { ArchiveConfirm } from "./archive-confirm";
+import { MoveBackConfirm } from "./move-back-confirm";
 import type { ActionResult } from "./task-detail-hooks";
 import { TimelineItem } from "./timeline";
 import {
@@ -2385,6 +2387,34 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(onResolve).not.toHaveBeenCalled();
   });
 
+  it("leaves the refusal's dim to the sheet, which also stills its hover and press (ruling 459)", () => {
+    // The blocked option and the refused Confirm each carried an inline .55
+    // of their own, off the house .45 step, and the sheet's `:not(:disabled)`
+    // hover and press still matched both. The attribute is now the whole
+    // contract: `.opt[aria-disabled="true"]` and `.btn[aria-disabled="true"]`
+    // dim them in app.css, which pins those rules.
+    const { container } = render(
+      <DecisionPacket
+        packet={goalPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive
+        onResolveCustom={() => {}} onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const blocked = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    for (const el of [blocked, confirm]) {
+      expect(el.getAttribute("aria-disabled")).toBe("true");
+      expect(el.getAttribute("style")).toBeNull();
+    }
+  });
+
   it("offers edit_goal normally to a maintainer", () => {
     const { container } = render(
       <DecisionPacket
@@ -2742,6 +2772,7 @@ describe("E4: the blocked Confirm button gives its reason to everybody", () => {
     fireEvent.click(confirm);
     expect(onResolve).not.toHaveBeenCalled();
   });
+
 
   it("drops the reason — and resolves — the moment an allowed option is selected", () => {
     const onResolve = vi.fn();
@@ -4198,5 +4229,142 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
       />,
     );
     expect(queryByText("Write your own directive")).toBeNull();
+  });
+});
+
+/* ------------------------------------------ ruling 459: primary-action exits */
+
+/**
+ * Ruling 459: a dialog's primary action leaves the way Cancel does, through
+ * `useDialog`'s `commit`: the action runs, the dialog plays its exit, and only
+ * then its onCancel unmounts it. jsdom reads no stylesheet, so each test gives
+ * the dialog the sheet's closing clock itself; the exit then waits for the
+ * dialog's own transitionend, as it does in a browser.
+ */
+describe("ruling 459: a confirm's primary action plays the same exit as Cancel", () => {
+  const slow = (dialog: HTMLElement) => {
+    dialog.style.transitionDuration = "0.15s";
+  };
+
+  it("the hand-written confirms commit, then leave, then unmount", () => {
+    // CANARY: put any of these primaries back on the raw `onConfirm` (or the
+    // hand-off chip back on `onCancel(); onOwner(...)`): nothing is marked
+    // closing, and the order below breaks.
+    const task = taskFixture("u-arda", "Arda Kaya");
+    const cases: { name: string; primary: string; ui: (log: string[]) => ReactNode }[] = [
+      {
+        name: "ArchiveConfirm",
+        primary: "Archive VIB-151",
+        ui: (log) => (
+          <ArchiveConfirm
+            task={heroTask()}
+            pendingRecommendations={0}
+            busy={false}
+            onCancel={() => log.push("cancel")}
+            onConfirm={() => log.push("confirm")}
+          />
+        ),
+      },
+      {
+        name: "ReleaseConfirm",
+        primary: "Release",
+        ui: (log) => (
+          <ReleaseConfirm
+            task={task}
+            me={{ id: "u-arda", name: "Arda Kaya" }}
+            members={membersFixture}
+            busy={false}
+            onCancel={() => log.push("cancel")}
+            onConfirm={() => log.push("confirm")}
+            onOwner={() => log.push("owner")}
+          />
+        ),
+      },
+    ];
+    for (const c of cases) {
+      const log: string[] = [];
+      const { container, unmount } = render(<>{c.ui(log)}</>);
+      const dialog = container.querySelector("dialog")!;
+      slow(dialog);
+      const button = [...dialog.querySelectorAll("button")].find(
+        (b) => b.textContent?.trim() === c.primary,
+      )!;
+      expect(button, c.name).toBeTruthy();
+      fireEvent.click(button);
+      expect(log, c.name).toEqual(["confirm"]);
+      expect(dialog.hasAttribute("data-closing"), c.name).toBe(true);
+      fireEvent.transitionEnd(dialog);
+      expect(log, c.name).toEqual(["confirm", "cancel"]);
+      unmount();
+    }
+  });
+
+  it("the release dialog's hand-off chip hands off, then leaves the same way", () => {
+    const log: string[] = [];
+    const { container } = render(
+      <ReleaseConfirm
+        task={taskFixture("u-selin", "Selin Aksoy")}
+        me={{ id: "u-arda", name: "Arda Kaya" }}
+        members={membersFixture}
+        busy={false}
+        onCancel={() => log.push("cancel")}
+        onConfirm={() => log.push("confirm")}
+        onOwner={(action) => log.push("owner:" + action)}
+      />,
+    );
+    const dialog = container.querySelector("dialog")!;
+    slow(dialog);
+    fireEvent.click(container.querySelector(".handoff-chip")!);
+    expect(log).toEqual(["owner:take"]);
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    fireEvent.transitionEnd(dialog);
+    expect(log).toEqual(["owner:take", "cancel"]);
+  });
+
+  it("the move-back confirm sends its reason once, even on a second click during the exit", () => {
+    const log: string[] = [];
+    const { container, getByText } = render(
+      <MoveBackConfirm
+        taskKey="VIB-151"
+        taskTitle="Compress long-running task timelines"
+        fromStageName="Review"
+        toStageName="Build"
+        busy={false}
+        onCancel={() => log.push("cancel")}
+        onConfirm={(reason) => log.push("confirm:" + reason)}
+      />,
+    );
+    const dialog = container.querySelector("dialog")!;
+    slow(dialog);
+    fireEvent.change(container.querySelector("textarea")!, {
+      target: { value: "  add the race test  " },
+    });
+    fireEvent.click(getByText("Move back"));
+    fireEvent.click(getByText("Move back"));
+    expect(log).toEqual(["confirm:add the race test"]);
+    fireEvent.transitionEnd(dialog);
+    expect(log).toEqual(["confirm:add the race test", "cancel"]);
+  });
+
+  it("a caller leaves the unmount to the dialog: the schedule confirm stays up through its exit", () => {
+    // CANARY: put `setConfirmCancel(null)` back in execution-profile's
+    // onConfirm, and the card is gone in the same commit as the click.
+    const { container, onCancelSchedule } = renderExec(execTask(), {
+      schedules: [
+        schedule({ id: "sch-ag", action: "run-agent", profileId: "developer", prompt: "polish the diff" }),
+      ],
+    });
+    fireEvent.click(container.querySelector<HTMLButtonElement>(".agent-run .sched-cancel")!);
+    const dialog = container.querySelector<HTMLDialogElement>('dialog[aria-label="Cancel this scheduled run?"]')!;
+    slow(dialog);
+    fireEvent.click(
+      [...dialog.querySelectorAll("button")].find((b) => b.textContent?.includes("Cancel run"))!,
+    );
+    expect(onCancelSchedule).toHaveBeenCalledWith("sch-ag");
+    expect(dialog.isConnected).toBe(true);
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    fireEvent.transitionEnd(dialog);
+    expect(dialog.isConnected).toBe(false);
+    expect(onCancelSchedule).toHaveBeenCalledTimes(1);
   });
 });

@@ -12,7 +12,7 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "./app.css";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 import {
   data,
@@ -115,11 +115,27 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // Layout also renders for ErrorBoundary, where loader data may be missing.
   const data = useRouteLoaderData<typeof loader>("root");
   const theme: ThemePreference = data?.theme ?? "system";
-  // SSR renders the explicit preference; "system" starts light and is
-  // corrected pre-paint by the inline script (hence suppressHydrationWarning).
-  const ssrTheme = theme === "dark" ? "dark" : "light";
+  // Seeded once, then frozen (ruling 459): after first paint
+  // `setDocumentTheme` is the one writer of data-theme, so a revalidated
+  // preference must not reach <html> through React. A live value here wrote
+  // the loader's raw preference past the one-clock fade: Dark -> System on a
+  // dark OS painted "light" until the App effect put "dark" back, and a pick
+  // saved in another tab landed with every rule on its own clock.
+  // The server renders the explicit preference ("system" starts light) and the
+  // boot script corrects it before paint. The browser takes the theme <html>
+  // already carries, which is what the boot script or setDocumentTheme last
+  // wrote: hydration then matches the DOM, and a remount (the ErrorBoundary
+  // swap strips and re-acquires <html>) puts back the theme on screen instead
+  // of the loader's. suppressHydrationWarning stays for attributes something
+  // other than React puts on <html> before hydration.
+  const [htmlTheme] = useState(() => {
+    const onScreen =
+      "document" in globalThis ? document.documentElement.dataset.theme : undefined;
+    if (onScreen === "dark" || onScreen === "light") return onScreen;
+    return theme === "dark" ? "dark" : "light";
+  });
   return (
-    <html lang="en" data-theme={ssrTheme} suppressHydrationWarning>
+    <html lang="en" data-theme={htmlTheme} suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

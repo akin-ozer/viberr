@@ -40,10 +40,6 @@ const CUSTOM_ERR_ID = "pkt-custom-err";
  * cannot drift apart into a note pointing at a control nobody can find.
  */
 export const DELIVER_LABEL = "Deliver branch & open PR";
-/** `.btn:disabled` in the sheet is what dims a refused control; an
- *  `aria-disabled` button is not `:disabled`, so it carries the dim itself —
- *  the same inline treatment the blocked option radios below already use. */
-const BLOCKED_BTN_STYLE = { opacity: 0.55, cursor: "not-allowed" } as const;
 
 /** Render a string with `inline code` spans; everything else stays plain text. */
 function renderInlineCode(text: string): ReactNode[] {
@@ -191,7 +187,9 @@ function PacketDestructiveConfirm({
   /** The `.obs` rows stating what this resolution does and does not touch. */
   children: ReactNode;
 }) {
-  const { ref: panelRef, close } = useDialog(onCancel);
+  // Ruling 459: the commit leaves the way Cancel does (`commit`); onCancel
+  // unmounts it after the exit.
+  const { ref: panelRef, close, commit } = useDialog(onCancel);
   return (
     <dialog
       className="modal-card release-card"
@@ -230,7 +228,7 @@ function PacketDestructiveConfirm({
             type="button"
             className="btn danger"
             disabled={busy}
-            onClick={onConfirm}
+            onClick={() => commit(onConfirm)}
           >
             <Icon name={icon} />
             {confirmLabel}
@@ -1016,9 +1014,9 @@ export function DecisionPacket({
   const cancelConfirm = () => setPendingConfirm(null);
   const commitConfirm = () => {
     if (pendingConfirm === null) return;
-    const index = pendingConfirm;
-    setPendingConfirm(null);
-    onResolve(index, note);
+    // No setPendingConfirm(null): the dialog plays its exit, then
+    // cancelConfirm clears it (ruling 459).
+    onResolve(pendingConfirm, note);
   };
 
   // UI-44: roving tabindex + real focus movement. Every `role="radio"` used to
@@ -1217,12 +1215,14 @@ export function DecisionPacket({
                   optionRefs.current[i] = el;
                 }}
                 aria-checked={sel === i}
+                // Ruling 459: `aria-disabled` alone dims a blocked option and
+                // stills its hover and press (`.opt[aria-disabled="true"]`
+                // in app.css); the inline .55 it wore is gone.
                 aria-disabled={blocked || undefined}
                 tabIndex={sel === i ? 0 : -1}
                 className={
                   "opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")
                 }
-                style={blocked ? { opacity: 0.55 } : undefined}
                 title={refusal?.title}
                 onClick={() => {
                   if (blocked) return;
@@ -1519,7 +1519,9 @@ export function DecisionPacket({
               className="btn primary"
               // Ruling 147: only a request in flight is a real `disabled` here.
               // An empty directive is REFUSED below instead, in a sentence; a
-              // ROLE refusal stays focusable so its reason is reachable.
+              // ROLE refusal stays focusable so its reason is reachable. The
+              // sheet dims it (`.btn[aria-disabled="true"]`, ruling 459) and
+              // keeps it from hovering or pressing like a live button.
               disabled={busy}
               aria-disabled={blockReason !== null || undefined}
               aria-describedby={blockReason ? BLOCK_REASON_ID : undefined}
@@ -1535,7 +1537,6 @@ export function DecisionPacket({
                     ? "Confirm decision: your custom directive"
                     : "Confirm decision"
               }
-              style={blockReason ? BLOCKED_BTN_STYLE : undefined}
               onClick={() => {
                 if (blockReason) return;
                 // The custom choice resolves with the typed directive — it

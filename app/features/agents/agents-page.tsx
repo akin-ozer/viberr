@@ -436,9 +436,9 @@ function ResGroup({
  *    if a human goes and does it, so the dialog names it as their next step.
  */
 function DeleteConfirm({
-  a,
+  a: current,
   projectName,
-  activeCount,
+  activeCount: currentCount,
   onCancel,
   onConfirm,
 }: {
@@ -448,7 +448,11 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref: dialogRef, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does (`commit`). The delete
+  // lands while it fades, and the page then selects another profile, so the
+  // words are the ones it opened with; the exit never names the next profile.
+  const [{ a, activeCount }] = useState(() => ({ a: current, activeCount: currentCount }));
+  const { ref: dialogRef, close, commit } = useDialog(onCancel);
   // Native <dialog>: backdrop click and Escape dismiss are handled by
   // useDialog; the ::backdrop pseudo-element renders the scrim.
   return (
@@ -485,7 +489,7 @@ function DeleteConfirm({
         <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
+        <button type="button" className="btn danger" onClick={() => commit(onConfirm)}>
           <Icon name="x" />
           Delete profile
         </button>
@@ -625,6 +629,7 @@ export function LibraryPicker({
   workflow,
   projectName,
   busy,
+  done = false,
   onClose,
   onAdd,
 }: {
@@ -639,10 +644,16 @@ export function LibraryPicker({
   workflow: WorkflowEdgeView[];
   projectName: string;
   busy: boolean;
+  /** The deploy landed: the picker plays its exit, then onClose unmounts it
+   *  (ruling 459). */
+  done?: boolean;
   onClose: () => void;
   onAdd: (profileId: string) => void;
 }) {
   const { ref: dialogRef, close } = useDialog(onClose);
+  useEffect(() => {
+    if (done) close();
+  }, [done, close]);
   return (
     <dialog className="modal-card" aria-label="Add from library" ref={dialogRef}>
       <div className="modal-head">
@@ -684,7 +695,7 @@ export function LibraryPicker({
                   type="button"
                   className="deploy-row"
                   key={t.id}
-                  disabled={busy}
+                  disabled={busy || done}
                   onClick={() => onAdd(t.id)}
                 >
                   <span className="deploy-eng">
@@ -861,10 +872,7 @@ export function ProfileDetail({
           projectName={projectName}
           activeCount={activeKeys.length}
           onCancel={() => setConfirm(false)}
-          onConfirm={() => {
-            setConfirm(false);
-            onDelete(a.id);
-          }}
+          onConfirm={() => onDelete(a.id)}
         />
       )}
       <div className="ag-hero">
@@ -993,6 +1001,7 @@ export function ProfileDetail({
                 Advisory only · {countLabel(advisory.length, "line")} the runtime
                 does not read
               </span>
+              <Icon name="chevron" className="disc-chev" />
             </summary>
             <div className="cap-advisory-body">
               <p>
@@ -1541,6 +1550,9 @@ export function AgentsPage({
   const [creating, setCreating] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [editing, setEditing] = useState<AgentProfileView | null>(null);
+  // Ruling 459: a save or deploy that lands plays the open modal's exit; the
+  // modal's onClose then unmounts it and clears this.
+  const [modalDone, setModalDone] = useState(false);
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -1613,9 +1625,7 @@ export function AgentsPage({
       if (d.governanceNotice) {
         push(d.governanceNotice.message);
       }
-      setCreating(false);
-      setLibraryOpen(false);
-      setEditing(null);
+      if (creating || editing || libraryOpen) setModalDone(true);
       setFormError(null);
       if (d.profileId) setSel(d.profileId);
     } else if (creating || editing) {
@@ -1625,7 +1635,7 @@ export function AgentsPage({
       // rendered under a green tick.
       push(d.error, "error");
     }
-  }, [fetcher.state, fetcher.data, push, creating, editing]);
+  }, [fetcher.state, fetcher.data, push, creating, editing, libraryOpen]);
 
   const submitProfile = (payload: ProfileFormPayload) => {
     setFormError(null);
@@ -1855,11 +1865,13 @@ export function AgentsPage({
           stages={stages}
           projectName={projectName}
           busy={fetcher.state !== "idle"}
+          done={modalDone}
           error={formError}
           {...(resourceCatalog ? { resourceCatalog } : {})}
           {...(viewerConnected ? { viewerConnected } : {})}
           onClose={() => {
             setCreating(false);
+            setModalDone(false);
             setFormError(null);
           }}
           onSubmit={submitProfile}
@@ -1872,11 +1884,13 @@ export function AgentsPage({
           stages={stages}
           projectName={projectName}
           busy={fetcher.state !== "idle"}
+          done={modalDone}
           error={formError}
           {...(resourceCatalog ? { resourceCatalog } : {})}
           {...(viewerConnected ? { viewerConnected } : {})}
           onClose={() => {
             setEditing(null);
+            setModalDone(false);
             setFormError(null);
           }}
           onSubmit={submitProfile}
@@ -1889,7 +1903,11 @@ export function AgentsPage({
           workflow={workflow}
           projectName={projectName}
           busy={fetcher.state !== "idle"}
-          onClose={() => setLibraryOpen(false)}
+          done={modalDone}
+          onClose={() => {
+            setLibraryOpen(false);
+            setModalDone(false);
+          }}
           onAdd={deployFromLibrary}
         />
       )}

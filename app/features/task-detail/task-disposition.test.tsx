@@ -2813,15 +2813,20 @@ describe("ruling 368: a recommendation's request in flight", () => {
       held,
     });
     const apply = findButton(container, "Apply")!;
-    expect(apply.querySelector("svg.ico.spin")).toBeNull();
+    // Ruling 459: the check and the loader share one cell (GlyphSwap) and
+    // trade on `data-copied`; at rest the check shows.
+    const cell = apply.querySelector(".copy-glyph")!;
+    expect(cell.hasAttribute("data-copied")).toBe(false);
     fireEvent.click(apply);
     fireEvent.click(findButton(container, "Apply → Done")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     const busy = findButton(container, "Accepting…")!;
     await waitFor(() => expect(busy.getAttribute("aria-busy")).toBe("true"));
     expect(busy.disabled).toBe(true);
-    expect(busy.querySelectorAll("svg.ico")).toHaveLength(1);
-    expect(busy.querySelector("svg.ico.spin")).not.toBeNull();
+    // The same button and cell: the spinning loader traded in for the check.
+    expect(busy).toBe(apply);
+    expect(cell.getAttribute("data-copied")).toBe("true");
+    expect(cell.lastElementChild!.matches("svg.ico.spin")).toBe(true);
     expect(busy.getAttribute("title")).toBe("Accepting the completion; the merge follows when GitHub is reachable");
     // The sibling waits without claiming to be the one working.
     const dismiss = findButton(container, "Dismiss")!;
@@ -2834,7 +2839,7 @@ describe("ruling 368: a recommendation's request in flight", () => {
     });
     await waitFor(() => expect(findButton(container, "Apply")!.getAttribute("aria-busy")).not.toBe("true"));
     expect(findButton(container, "Accepting…")).toBeUndefined();
-    expect(findButton(container, "Apply")!.querySelector("svg.ico.spin")).toBeNull();
+    expect(findButton(container, "Apply")!.querySelector(".copy-glyph")!.hasAttribute("data-copied")).toBe(false);
   });
 
   it("a plain recommendation reads 'Applying…', and a dismissal 'Dismissing…' on its own button", async () => {

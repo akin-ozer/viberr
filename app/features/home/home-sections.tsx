@@ -4,6 +4,7 @@ import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import type { SessionUser } from "~/server/auth/require-user.server";
 import { countLabel } from "~/shared/text/plural";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { useDialog } from "~/ui/use-dialog";
@@ -659,7 +660,7 @@ export function StoreStrip({
           onClick={onRebuild}
           title="Recovery: drop every projection row and re-project the whole store from files"
         >
-          <Icon name="memory" className={rebuilding ? "spin" : ""} />
+          <GlyphSwap rest="memory" alt="loader" on={rebuilding} spinAlt />
           {rebuilding ? "Rebuilding…" : "Rebuild projections…"}
         </button>
       </span>
@@ -675,7 +676,8 @@ export function RebuildConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  const { ref, close, commit } = useDialog(onCancel);
   return (
     // Native <dialog>; role="alertdialog" kept for the stronger semantics.
     // Escape + backdrop-click close come from showModal() + useDialog.
@@ -705,7 +707,7 @@ export function RebuildConfirm({
         {/* The trigger is tertiary-destructive; inside the confirmation the
             commit IS the primary action, so it carries the danger tone here —
             not out on the page (skill: destructive placement). */}
-        <button type="button" className="btn danger" onClick={onConfirm}>
+        <button type="button" className="btn danger" onClick={() => commit(onConfirm)}>
           Rebuild projections
         </button>
       </div>

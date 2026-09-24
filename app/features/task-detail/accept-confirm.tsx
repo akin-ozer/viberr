@@ -238,7 +238,9 @@ export function AcceptConfirm({
    *  simply ignore the argument. */
   onConfirm: (disclosure: AcceptanceDisclosure) => void;
 }) {
-  const { ref: panelRef, close } = useDialog(onCancel);
+  // Ruling 459: both commits leave the way Cancel does (`commit`), and the
+  // callers leave the unmount to onCancel.
+  const { ref: panelRef, close, commit } = useDialog(onCancel);
   const mode = ceremony.mode;
   const force = mode === "force";
   // Ruling 162's interlock, and only where the quoted refusal is the one the
@@ -649,7 +651,7 @@ export function AcceptConfirm({
           {onRefreshFirst && !force && !mergeOnly && baseBehindBy !== null && baseBehindBy > 0 && (
             // Ruling 449 (O39-c): the head that merges would be one no review
             // ran on. This runs the review on it first; acceptance comes after.
-            <button type="button" className="btn" disabled={busy} onClick={onRefreshFirst}>
+            <button type="button" className="btn" disabled={busy} onClick={() => commit(onRefreshFirst)}>
               <Icon name="refresh" />
               Update the branch and re-review first
             </button>
@@ -666,7 +668,7 @@ export function AcceptConfirm({
             // needs the refusal to BE the server's own (`blockedReasonAuthoritative`).
             disabled={busy || (interlocked && !force)}
             aria-describedby={blockedReason && !force ? BLOCKED_ROW_ID : undefined}
-            onClick={() => onConfirm(disclosure)}
+            onClick={() => commit(() => onConfirm(disclosure))}
           >
             <Icon name={force ? "shield" : mergeOnly ? "github" : "check"} />
             {force

@@ -1166,13 +1166,16 @@ function NewTaskModal({
           fetcher.data.stageName +
           ". Its task.md is in the store",
       );
-      onClose();
+      // Ruling 459: the same exit Cancel plays; close() then calls onClose.
+      close();
     }
-  }, [fetcher.data, onClose, push]);
+  }, [fetcher.data, close, push]);
 
   const submit = () => {
     setTitleTouched(true);
-    if (busy) return;
+    // A created task's modal is leaving: an Enter in the title during the
+    // exit must not create a second one.
+    if (busy || closedRef.current) return;
     if (!valid) {
       // The primary is no longer hard-disabled while the form is invalid (a
       // disabled submit gave a click no feedback and dropped out of the tab
@@ -2668,11 +2671,15 @@ export function BoardPage({
           }
           busy={transitionFetcher.state !== "idle"}
           onCancel={() => setPendingMoveBack(null)}
-          onConfirm={(reason) => {
-            const move = pendingMoveBack;
-            setPendingMoveBack(null);
-            submitReorder(move.taskKey, move.to, move.beforeKey, undefined, reason);
-          }}
+          onConfirm={(reason) =>
+            submitReorder(
+              pendingMoveBack.taskKey,
+              pendingMoveBack.to,
+              pendingMoveBack.beforeKey,
+              undefined,
+              reason,
+            )
+          }
         />
       )}
       {pendingAccept && pendingAcceptTask && (
@@ -2688,7 +2695,6 @@ export function BoardPage({
           onCancel={() => setPendingAccept(null)}
           onConfirm={(disclosure) => {
             const p = pendingAccept;
-            setPendingAccept(null);
             // Ruling 88: the drop commits with the ceremony's own echo of what
             // it disclosed — the same acknowledgment the task page's stage move
             // sends, on the same server contract.

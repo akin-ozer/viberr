@@ -13,6 +13,12 @@ const ICON_PATHS = {
     '<rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 8V4M9 4h6M9 13h.01M15 13h.01M9 16h6"/>',
   github:
     '<path d="M9 19c-4 1.5-4-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.3 4.3 0 0 0-.1-3.2s-1-.3-3.4 1.3a11.5 11.5 0 0 0-6 0C6.3 3.3 5.3 3.6 5.3 3.6a4.3 4.3 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 10c0 4.6 2.7 5.7 5.5 6-.4.4-.5.9-.5 1.8V21"/>',
+  // Ruling 459: the Google mark drawn in the set's own stroke, one colour
+  // (currentColor, never the brand four), so a sign-in control pairs outline
+  // with outline instead of a typed ExtraBold "G" beside the GitHub glyph. An
+  // open ring on the clock's r 8.5, from half past one round to three, and the
+  // bar in to the centre.
+  google: '<path d="M18 6A8.5 8.5 0 1 0 20.5 12H12.5"/>',
   activity: '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/>',
   filter: '<path d="M3 5h18l-7 8v6l-4-2v-4z"/>',
@@ -31,13 +37,22 @@ const ICON_PATHS = {
   cpu: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M9 1.5v3M15 1.5v3M9 19.5v3M15 19.5v3M1.5 9h3M1.5 15h3M19.5 9h3M19.5 15h3"/>',
   message:
     '<path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.8A8 8 0 1 1 21 12z"/>',
+  // Ruling 459, a departure from the mock (design/html-app/app/ui.jsx): sparkle,
+  // hand and flag are recentred on the 24px box. The mock drew the sparkle 2
+  // units high, the hand 2 left and 1 high and the flag 2 left, so each sat off
+  // centre in every round badge, tile and icon-only button that shows it alone.
+  // Same strokes, translated: only the absolute commands moved. app.css.test.ts
+  // measures every glyph's box against the centre.
   sparkle:
-    '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+    '<path d="M12 5l1.8 5.2L19 12l-5.2 1.8L12 19l-1.8-5.2L5 12l5.2-1.8z"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/>',
   // The busy-state glyph: a three-quarter arc with no arrowhead (lucide's
   // `loader-circle`, the glyph shadcn/reui's Spinner draws), meant to be
   // rendered with the `spin` class. `refresh` keeps its arrowhead for the
-  // re-scan / re-index buttons, where the arrow IS the meaning.
+  // re-scan / re-index / test-connection buttons, where the arrow IS the
+  // meaning and is already the glyph at rest. Every other busy state swaps
+  // its glyph for this one (ruling 459): sign-in, attach, import and rebuild
+  // spun `refresh` or the memory chip. app.css.test.ts holds the line.
   loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   bolt: '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
@@ -45,8 +60,9 @@ const ICON_PATHS = {
     '<rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 6V3M12 6V3M16 6V3M8 18v3M12 18v3M16 18v3"/>',
   dot: '<circle cx="12" cy="12" r="4"/>',
   send: '<path d="M4 12l16-8-6 16-3-6z"/>',
-  hand: '<path d="M7 11V6a1.5 1.5 0 0 1 3 0v4M10 10V4.5a1.5 1.5 0 0 1 3 0V10M13 10V6a1.5 1.5 0 0 1 3 0v6c0 4-2.5 7-6 7s-6-2.5-6-6v-1l1.5-1.5"/>',
-  flag: '<path d="M5 21V4M5 4h10l-1.5 3L15 10H5"/>',
+  // Recentred against the mock (ruling 459); see the note above `sparkle`.
+  hand: '<path d="M9 12V7a1.5 1.5 0 0 1 3 0v4M12 11V5.5a1.5 1.5 0 0 1 3 0V11M15 11V7a1.5 1.5 0 0 1 3 0v6c0 4-2.5 7-6 7s-6-2.5-6-6v-1l1.5-1.5"/>',
+  flag: '<path d="M7 21V4M7 4h10l-1.5 3L17 10H7"/>',
   bell: '<path d="M18 9a6 6 0 1 0-12 0c0 6-2 7.5-2 7.5h16S18 15 18 9"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
   sliders:

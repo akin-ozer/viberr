@@ -602,6 +602,13 @@ describe("AgentLogsPanel", () => {
     expect(past.className).not.toContain("lw-live");
     expect(past.querySelector("canvas")).toBeNull();
     expect(past.querySelector(".ico")).not.toBeNull();
+    // Ruling 459: the sheet sizes and greys the ended row's clock as
+    // `.lw-glyph > .ico`, so the clock must stay a direct child of the row's
+    // glyph cell. That the rule never reaches the Viberr chip's V mark is the
+    // sheet's side, pinned in app.css.test.ts by "(F47) the wait row's rule
+    // reaches its own clock, never the Viberr chip's mark".
+    // Canary: wrap the clock in a span and this line goes red.
+    expect(past.querySelectorAll(".lw-glyph > .ico")).toHaveLength(1);
     expect(past.textContent).toContain("ran past 1m");
 
     // `raw` is authoritative: every heartbeat verbatim, no fold, no chip.
@@ -1629,5 +1636,105 @@ describe("ruling 451(c): copy controls trade their glyph in place", () => {
     expect(container.querySelector(".copy-glyph")!.getAttribute("data-copied")).toBe("true");
     // The same element carries the change: nothing remounted.
     expect(container.querySelector(".copy-glyph")).toBe(glyph);
+  });
+});
+
+/**
+ * Ruling 459 (amending 451(a)): the status line on screen when the strip opens
+ * is not news, so it stands still; only a line that replaces it carries
+ * `data-fresh`, the mark the sheet's `swap-in` reads. A latch, so a line that
+ * repeats the first words later (Working, Compacting context, Working) still
+ * rises.
+ */
+describe("ruling 459: the live strip's first line stands still", () => {
+  const panel = (run: RunView) => (
+    <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />
+  );
+  const fresh = (container: HTMLElement, part: "ph" | "step") =>
+    container.querySelector(`.run-phase .${part}`)?.getAttribute("data-fresh") ?? null;
+
+  it("paints the phase and step it opens on without the mark", () => {
+    // CANARY: set `data-fresh` unconditionally and the step on screen when a
+    // task opens mid-run rises as if it had just changed.
+    const { container } = render(panel(mkRun({})));
+    expect(fresh(container, "ph")).toBeNull();
+    expect(fresh(container, "step")).toBeNull();
+  });
+
+  it("marks each line that replaces the first, and keeps marking after a return to the first words", () => {
+    // CANARY: compare with the first words instead of latching
+    // (`return line !== first` with no setFirst) and the return below stands still.
+    const { container, rerender } = render(panel(mkRun({})));
+    rerender(panel(mkRun({ step: "Read · app/app.css" })));
+    expect(fresh(container, "step")).toBe("true");
+    // The phase did not change: its node still stands, unmarked.
+    expect(fresh(container, "ph")).toBeNull();
+    rerender(panel(mkRun({ step: "Bash · npm test" })));
+    expect(container.querySelector(".run-phase .step")!.textContent).toBe("Bash · npm test");
+    expect(fresh(container, "step")).toBe("true");
+    rerender(panel(mkRun({ phase: "Compacting context" })));
+    expect(fresh(container, "ph")).toBe("true");
+  });
+
+  it("a step that appears where there was none is news", () => {
+    const { container, rerender } = render(panel(mkRun({ step: null })));
+    expect(container.querySelector(".run-phase .step")).toBeNull();
+    rerender(panel(mkRun({ step: "Bash · npm test" })));
+    expect(fresh(container, "step")).toBe("true");
+  });
+});
+
+/**
+ * Ruling 459: a wait row's orb and clock share one cell and trade in place
+ * as the wait ends. React swapped the 20px canvas for the 14px clock in one
+ * frame, so the tool chip beside it jumped 6px left.
+ */
+describe("ruling 459: the wait row's orb trades for the clock in place", () => {
+  const beat = (n: number, elapsed: number): StreamedLine => ({
+    display: {
+      t: `10:0${n}:00`, ev: "meta", tag: "tool_progress", name: "Bash",
+      text: `Bash still running · ${elapsed}s`,
+      progress: { call: "toolu_1", elapsed, heartbeat: true, at: null },
+    },
+    raw: `{"type":"tool_progress","elapsed_time_seconds":${elapsed}}`,
+  });
+  const call: StreamedLine = {
+    display: { t: "10:00:00", ev: "tool", tag: "tool_use", name: "Bash", text: "npm test" },
+    raw: '{"type":"assistant"}',
+  };
+  const done: StreamedLine = {
+    display: { t: "10:03:00", ev: "out", tag: "tool_result", text: "ok" },
+    raw: '{"type":"user"}',
+  };
+  const panel = (lines: StreamedLine[]) => (
+    <AgentLogsPanel runtime={[mkRun({ lineCount: lines.length })]} sel="primary" onSel={() => {}} linesByThread={{ primary: lines }} />
+  );
+
+  it("keeps the orb it watched live, marked ended, so the sheet fades it out as the clock comes in", () => {
+    // CANARY: render `{live ? <ThinkingOrb … /> : <Icon name="clock" />}`
+    // again and the canvas is gone the moment the wait ends.
+    const { container, rerender } = render(panel([call, beat(1, 30), beat(2, 60)]));
+    const cell = container.querySelector(".log-line.wait .lw-glyph")!;
+    expect(cell.getAttribute("aria-hidden")).toBe("true");
+    expect(cell.getAttribute("data-live")).toBe("true");
+    const orb = cell.querySelector(":scope > canvas.log-orb")!;
+    const clock = cell.querySelector(":scope > svg.ico")!;
+    expect(orb).not.toBeNull();
+    expect(clock).not.toBeNull();
+
+    rerender(panel([call, beat(1, 30), beat(2, 60), done]));
+    // The same cell and the same two glyphs; only the mark moved.
+    expect(container.querySelector(".log-line.wait .lw-glyph")).toBe(cell);
+    expect(cell.hasAttribute("data-live")).toBe(false);
+    expect(cell.querySelector(":scope > canvas.log-orb")).toBe(orb);
+    expect(cell.querySelector(":scope > svg.ico")).toBe(clock);
+  });
+
+  it("a row first drawn ended mounts no orb at all", () => {
+    const { container } = render(panel([call, beat(1, 30), beat(2, 60), done]));
+    const cell = container.querySelector(".log-line.wait .lw-glyph")!;
+    expect(cell.hasAttribute("data-live")).toBe(false);
+    expect(cell.querySelector("canvas")).toBeNull();
+    expect(cell.querySelectorAll(":scope > svg.ico")).toHaveLength(1);
   });
 });

@@ -203,12 +203,27 @@
   /* Elevation scale — four resting steps + one interaction step, chosen by
      z-position: card (resting surfaces) < menu (anchored popovers, calendar,
      stage menu) < pop (modals, the toast, page overlays). --shadow-lift is the
-     hover-raise every lifting surface shares. */
-  --shadow-ring: 0 0 0 1px var(--ring);
+     hover-raise every lifting surface shares.
+     --shadow-ring is the edge of everything that floats (ruling 459): a ring of
+     pure black at 6% (white at 8% on dark), not an opaque border. It was the
+     opaque --ring, and only --shadow-pop carried it, painted OUTSIDE each
+     surface's own opaque --border: every modal, the palette, the toast, the
+     page overlay and the dock panel wore a two-tone 2px rim, while a menu
+     (--shadow-menu alone) had only its opaque border for an edge, the one
+     edge it showed on dark. Menus now add the ring themselves (see
+     .user-menu). A translucent ring adapts to the scrim, the page or the run
+     console under it. The floating surfaces keep a transparent 1px border so
+     their box, and the frame forced-colors mode draws, do not move. */
+  --shadow-ring: 0 0 0 1px oklch(0 0 0 / 0.06);
   --shadow-card: 0 1px 2px color-mix(in srgb, var(--fg), transparent 92%), 0 8px 24px color-mix(in srgb, var(--fg), transparent 94%);
   --shadow-menu: 0 12px 34px color-mix(in srgb, var(--fg), transparent 84%);
   --shadow-pop: 0 18px 50px color-mix(in srgb, var(--fg), transparent 84%), var(--shadow-ring);
   --shadow-lift: 0 10px 28px color-mix(in srgb, var(--fg), transparent 90%);
+  /* The edge of a picture (ruling 459): 1px of pure black at 10% (white on
+     dark), drawn just inside the image. Never --ring, --hairline or an ink
+     mix: a tinted edge picks up the surface under it and reads as dirt on
+     a screenshot's rim. A white page shot on a white card had no edge at all. */
+  --image-outline: oklch(0 0 0 / 0.1);
 
   /* Motion: strong ease-out for entrances/presses (built-in `ease-out` is too
      weak); ease-in-out reserved for on-screen moves. */
@@ -218,13 +233,17 @@
      small: sub-28px icon buttons, chips, kbd, calendar days.
      button: inputs, buttons, menu rows.  box: nested sub-cards, popovers,
      the console, toast.  card: top-level cards.  panel: modals and page
-     panels.  chip: full pills.  (2-3px micro radii on meters, progress bars
-     and inline text highlights, and 4px on 16px boxes — the checkbox, the tag
-     remove button — stay literal: they are proportional to a tiny box, not
-     steps. `50%` for a true circle, `0` and `inherit` are the other sanctioned
-     non-steps.)  The six values, the micro set and every `border-radius` in
-     this sheet are locked in app.css.test.ts — a seventh radius is a
-     deliberate widening of the scale, made there. */
+     panels.  chip: full pills.  A layer nested at an even inset takes the
+     step concentric with its container, whatever its kind (ruling 459: the
+     palette's rows take card, the lightbox's picture takes box).  (2-3px
+     micro radii on meters, progress bars, inline text highlights and the
+     bottom corners of a code block closing a message, and 4px on 16px boxes
+     — the checkbox, the tag remove button — stay literal: they are
+     proportional to a tiny box, or to what a card's inset leaves of its
+     corner, not steps. `50%` for a true circle, `0` and `inherit` are the
+     other sanctioned non-steps.)  The six values, the micro set and every
+     `border-radius` in this sheet are locked in app.css.test.ts — a seventh
+     radius is a deliberate widening of the scale, made there. */
   --radius-small: 6px;
   --radius-button: 8px;
   --radius-box: 12px;
@@ -297,6 +316,30 @@ input, textarea { font: inherit; }
    .field inputs fell back to UA grey (~2.35:1); the token is AA-locked. */
 input::placeholder, textarea::placeholder { color: var(--placeholder); }
 svg.ico { width: 16px; height: 16px; flex: none; }
+/* A glyph carries its label's weight (ruling 459, better-ui icons.md): on the
+   24 grid, 2 beside a 500–600 label and 2.5 beside a 700–800 one. The set
+   draws at 1.7 (ui/icon.tsx and the local SVGs), which stays beside 400 text,
+   on icon-only controls and in tile glyphs; a 1.7 line on the 15px .btn glyph
+   rendered about 1px against Inter Bold stems, the hairline-beside-bold case.
+   Author CSS outranks the svg's presentation attribute and the paths inherit
+   it, so no markup changes. `.kv-row .v .ico` is left out on purpose: every
+   glyph there sits beside `.kv-row .v .mono`, which is 400. The heavier group
+   comes second, so where a bold control sits inside a medium one (the .btn in
+   a decision card's .deny-note) the equal-specificity tie goes to the bold
+   label's weight. The
+   board card's icon-only stage trigger takes the .sm-caret weight too, so
+   every stage trigger draws one caret. The pick-chip glyphs are scoped to the
+   chip's own child, so the agent tile a backend chip leads with keeps its 1.7
+   like every other tile; the run selector's caret (not its agent tile) and
+   the lock beside a 700 field label take the heavier stroke. */
+.nav-item .ico, .seg .ico, .fchip .ico, .chip .ico, .card-head .trace .ico, .pick-chip.mono > .ico,
+.menu-item .ico, .toast .ico, .deny-note .ico, .pill.quiet .ico, .sched-when .ico,
+.stage-menu-btn .sm-caret, .rq-row .wait-tag.human .ico, .gh-freshness .ico, .ctl-msg-who .ico { stroke-width: 2; }
+.btn .ico, .pill .ico, .wait-tag .ico, .op-rec-kind .ico, .model-sub .ico, .cmdk-row .ico,
+.rev-add .ico, .own-btn .ico, .rsel-btn .caret, .pick-chip:not(.mono) > .ico, .go-hint .ico, .ag-newbtn .ico,
+.trans-lock .ico, .trans-path .ico, .guard-name .ico, .cred-top .ico, .org-tile .lbl .ico,
+.cap-col-head .ico, .md-collapse-toggle .ico, .rq-go .ico, .session-id-export .ico,
+.panel-head > .ico, .sec-h > .ico, .flabel .lbl-lock, .ctx-lbl .lbl-lock { stroke-width: 2.5; }
 
 /* ---------------------------------------------------------------------------
    <select> — the one treatment (P16-UI-05).
@@ -521,13 +564,18 @@ h1, h2, h3, h4 {
   justify-content: space-between;
   gap: .5rem;
   width: 100%;
-  padding: .5rem .75rem;
+  /* Optical (ruling 459): the trailing chevron is drawn 6 units wide in a 24
+     box, so its own blank bearing already widens that side; the icon side
+     takes the text side less 2px, the .btn recipe. */
+  padding: .5rem .625rem .5rem .75rem;
   margin-bottom: 1.5rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-button);
   background: var(--surface);
   text-align: left;
-  transition: background .15s ease;
+  /* The transform leg carries the .99 press (ruling 459): the switcher sat
+     outside the press block while the nav rows under it pressed. */
+  transition: background-color .15s ease, transform .15s var(--ease-out);
 }
 /* One hover language in the rail: the fill the nav rows take. The old
    border-colour shift was a change nobody could see. */
@@ -552,7 +600,9 @@ h1, h2, h3, h4 {
   font-size: .88rem;
   font-weight: 500;
   border: 1px solid transparent;
-  transition: background .14s ease, color .14s ease;
+  /* The press block scales this row to .96; without a transform leg the
+     press jumped in one frame (ruling 459). */
+  transition: background-color .14s ease, color .14s ease, transform .15s var(--ease-out);
 }
 .nav-item:hover { background: var(--tint-hover); color: var(--fg); }
 /* "You are here" was the faintest mark in the shell. --surface and --bg are the
@@ -596,10 +646,18 @@ h1, h2, h3, h4 {
   z-index: 50;
   width: 250px;
   background: var(--surface);
-  border: 1px solid var(--border);
+  /* A menu floats, so its edge is the translucent ring, not an opaque border
+     (ruling 459); on dark, --shadow-menu is black only and the border was the
+     menu's one edge. The ring is added here, not folded into --shadow-menu,
+     so the round dock trigger that also wears that token gets no second rim. */
+  border: 1px solid transparent;
   border-radius: var(--radius-box);
-  box-shadow: var(--shadow-menu);
-  padding: .375rem;
+  box-shadow: var(--shadow-ring), var(--shadow-menu);
+  /* Concentric (ruling 459): an 8px .menu-item (--radius-button) + .25rem = 12,
+     the menu's --radius-box — the recipe .own-menu and .rsel-menu already use
+     for the same row. At .375rem it was 14 in a 12 box, and Sign out, the last
+     row, filled the bottom corners with a curve that did not follow the menu's. */
+  padding: .25rem;
   transform-origin: top right;
   animation: menu-in .16s var(--ease-out);
 }
@@ -687,7 +745,9 @@ h1, h2, h3, h4 {
 button.top-search {
   text-align: left; cursor: pointer;
   background: var(--tint-hover);
-  transition: border-color .14s ease, background .14s ease;
+  /* Only what changes (ruling 459): the hover moves the fill, never the
+     border (below), and the press scales it (the press block). */
+  transition: background-color .14s ease, transform .15s var(--ease-out);
 }
 button.top-search:hover {
   /* No border-color swap: resting is --border-control now, and hovering to
@@ -704,7 +764,7 @@ button.kbd {
      `buttonface` background with it — the contrast pair axe then measured was
      the chip's text against THAT, not against the field it sits in. */
   background: transparent;
-  transition: border-color .14s ease, color .14s ease;
+  transition: border-color .14s ease, color .14s ease, transform .15s var(--ease-out);
 }
 button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .kbd {
@@ -737,10 +797,16 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   white-space: nowrap;
   transition: transform .15s var(--ease-out), border-color .15s ease, background .15s ease, box-shadow .15s ease;
 }
-.btn:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--fg); }
-.btn:active:not(:disabled) { transform: translateY(0) scale(.96); }
+/* Ruling 459. The hover is the border and nothing moves: a button is hovered
+   all day, and a 1px lift under the pointer charged its motion on every pass
+   (the board card and .icon-btn already hovered in place). The transform leg
+   above is the press's. A refusal that stays focusable (`aria-disabled`,
+   ruling 147) is not `:disabled`, so it is named beside it: it neither
+   answers the hover nor presses, as if it had taken the click. */
+.btn:hover:not(:disabled, [aria-disabled="true"]) { border-color: var(--fg); }
+.btn:active:not(:disabled, [aria-disabled="true"]) { transform: scale(.96); }
 .btn.primary { background: var(--cta-bg); border-color: var(--cta-bg); color: var(--cta-fg); }
-.btn.primary:hover:not(:disabled) { background: var(--blue-pressed); border-color: var(--blue-pressed); color: var(--cta-fg); }
+.btn.primary:hover:not(:disabled, [aria-disabled="true"]) { background: var(--blue-pressed); border-color: var(--blue-pressed); color: var(--cta-fg); }
 .btn.ghost { background: transparent; border-color: var(--hairline); color: var(--muted); }
 .btn.ghost:hover:not(:disabled) { color: var(--fg); border-color: var(--border); }
 /* GitHub's danger button (owner, 2026-09-06): a neutral button whose label is
@@ -754,14 +820,29 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .btn.danger:hover:not(:disabled) { background: var(--danger-fill); border-color: var(--danger-fill); color: var(--on-danger); }
 .btn.sm { min-height: 30px; padding: .375rem .5rem; font-size: .75rem; }
 .btn .ico { width: 15px; height: 15px; }
+/* Optical alignment (ruling 459): a glyph on the 24 grid carries 2-3px of
+   blank bearing at 15px, so with even padding the icon side of a button read
+   wider than the text side and the label looked pushed. The icon side takes
+   the text side less 2px (.chip's recipe). `:first-child` skips text nodes, so
+   a glyph that FOLLOWS the label says so with `.ico-end`; the `:not()` keeps
+   it from reading as a leading one. One selector per shape, no commas inside
+   `:has()`. */
+.btn:has(> .ico:first-child:not(.ico-end)), .btn:has(> .copy-glyph:first-child) { padding-left: .625rem; }
+.btn:has(> .ico-end:last-child) { padding-right: .625rem; }
+.btn.sm:has(> .ico:first-child:not(.ico-end)), .btn.sm:has(> .copy-glyph:first-child) { padding-left: .375rem; }
+.btn.sm:has(> .ico-end:last-child) { padding-right: .375rem; }
 /* P14-LV-08: `disabled` had NO visual expression anywhere in this sheet, so a
    control the viewer's role can't use rendered pixel-identical to a live one and
    still lifted under the pointer — live, a contributor clicked "Archive" and
    "Delete project" and got no dialog, no toast, no error and no audit row,
    because the request never left the client. Every disabled control now READS
    disabled; the REASON is copy the owning surface renders, because `title`
-   never opens on a disabled element (no pointer events reach it). */
+   never opens on a disabled element (no pointer events reach it).
+   Ruling 459: a refused `aria-disabled` .btn takes the same step here, where
+   it carried an inline .55 of its own (the decision packet's Confirm). The
+   busy step still wins (`.btn[aria-busy="true"]:disabled`, appended). */
 .btn:disabled,
+.btn[aria-disabled="true"],
 .icon-btn:disabled,
 .seg button:disabled,
 .mini-seg button:disabled,
@@ -783,6 +864,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    (was an inline style at three call sites). */
 .deny-note.spaced { margin-top: .75rem; }
 .deny-note .ico { width: 13px; height: 13px; flex: none; margin-top: .125rem; }
+/* Ruling 459: a hint or field hint that LEADS with a glyph takes the same
+   recipe. Inline, the 16px svg sat on the baseline beside 12px text, about
+   3.6px above the cap centre, and stretched its line. Both halves share one
+   guard, so a glyph that is not the first child is never sized or nudged
+   without the flex row. */
+.hint:has(> .ico:first-child), .fhint:has(> .ico:first-child) { display: flex; align-items: flex-start; gap: .375rem; line-height: 1.45; }
+.hint > .ico:first-child, .fhint > .ico:first-child { width: 13px; height: 13px; flex: none; margin-top: .125rem; }
 .deny-note strong { color: var(--muted); }
 .icon-btn {
   display: grid; place-items: center;
@@ -829,6 +917,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .pill.done    { background: var(--success-soft); color: var(--success-dark); }
 .pill.sm { font-size: .69rem; padding: .125rem .375rem; gap: .25rem; }
 .pill.sm .ico { width: 11px; height: 11px; }
+/* Optical inset (ruling 459): a pill that LEADS with its mark (the state dot,
+   a glyph, the task hero's stage dot) takes 2px less on that side, so the mark
+   sits concentric with the round end instead of pushed into it; .chip does the
+   same on the board card. Text-only pills stay even. */
+.pill:has(> .pdot:first-child), .pill:has(> .ico:first-child), .pill:has(> .col-stage-dot:first-child) { padding-left: .375rem; }
+.pill.sm:has(> .pdot:first-child), .pill.sm:has(> .ico:first-child), .pill.sm:has(> .col-stage-dot:first-child) { padding-left: .25rem; }
 /* THE SECOND PILL TIER (design pass, 2026-09-08).
    Every pill was a filled tint at weight 700, so a board card carrying six of
    them — readiness, priority, two labels, a due date, a verdict — gave all six
@@ -936,7 +1030,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 
 .seg {
   display: inline-flex;
-  padding: .25rem;
+  /* Concentric (ruling 459): a 6px segment (ruling 365(g)) + a .125rem inset +
+     the 1px border is 9 against the 8px well, the step .cap-seg and .mini-seg
+     take; the old .25rem inset made it 11, so the selected fill read rounder
+     than its well. The segments' .5rem block padding keeps the control 37px. */
+  padding: .125rem;
   gap: .125rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-button);
@@ -946,7 +1044,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .seg button {
   display: inline-flex; align-items: center; gap: .375rem;
-  padding: .375rem .5rem;
+  padding: .5rem;
   border: 0; border-radius: var(--radius-small);
   background: transparent; color: var(--muted);
   font-size: .75rem; font-weight: 500;
@@ -955,7 +1053,16 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Ruling 365: the selected segment is a subtle fill in the row's own ink, not
    an inverted block — the one loud thing on the board is the primary button. */
 .seg button.on { background: var(--tint-press); color: var(--fg); }
+/* Ruling 459: the unselected option brightens to --fg under the pointer, as
+   .mini-seg, .cap-seg and the filter chips beside it do; it had no hover at
+   all, so Grid/List and Board/List changed nothing but the cursor. The glyph
+   takes it through currentColor. The hover outranks the one-class `.on` (the
+   `:not()` argument counts), so the selected colour is restated (D32-5). */
+.seg button:hover:not(:disabled) { color: var(--fg); }
+.seg button.on:hover:not(:disabled) { color: var(--fg); }
 .seg .ico { width: 15px; height: 15px; }
+/* The icon side less 2px, as .btn (ruling 459). */
+.seg button:has(> .ico:first-child) { padding-left: .375rem; }
 
 .filter-bar {
   display: flex; align-items: center; gap: .5rem;
@@ -973,6 +1080,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .fchip:hover:not(:disabled) { border-color: var(--border); color: var(--fg); }
 .fchip.on { background: var(--tint-press); color: var(--fg); border-color: transparent; }
 .fchip .ico { width: 14px; height: 14px; }
+/* The icon side less 2px, as .btn (ruling 459); the label chips lead with
+   text and keep the even inset. The board's filter field is not a button: its
+   glyph faces an empty input, so there is no text side to balance. */
+.fchip:has(> .ico:first-child) { padding-left: .375rem; }
 /* F26-12 / R26-2: label-filter chips — the project's own tags, used as board
    filters. They wear the row's face and weight (ruling 365: the mono face
    marked them as code, and a label is a word); the missing icon is what tells
@@ -1069,6 +1180,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .125rem .5rem; border-radius: var(--radius-chip);
   border: 1px solid color-mix(in srgb, var(--coral-dark), transparent 55%);
   color: var(--coral-dark); text-decoration: none;
+  transition: transform .15s var(--ease-out);
 }
 .board-orphan-key:hover { background: color-mix(in srgb, var(--coral-dark), transparent 86%); }
 
@@ -1082,10 +1194,14 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: flex; flex-direction: column; min-height: 0;
   background: var(--tint-well);
   /* Concentric: the outer radius wants to be the inner radius plus the padding
-     between them. Cards are --radius-card (16) and sit in .col-body's .5rem (8)
-     gutter, so the lane wants 24 and takes --radius-panel (22) — the scale's
-     nearest step. Matching the card's own 16 here made the lane corner sit
-     inside the card's, which is the specific thing that reads as "off". */
+     between them. Cards are --radius-box (12, ruling 365(f)) and sit in
+     .col-body's .5rem (8) gutter, so the lane wants 20 and takes --radius-panel
+     (22), the scale's nearest step. Matching a card's own radius here made the
+     lane corner sit inside the card's, which is the specific thing that reads
+     as "off". `.drop-over` states no radius of its own (ruling 459): the
+     radius is not in the lane's transition, so its old 16 snapped the corners
+     of every lane a drag crossed and left the sticky head's 22px corners
+     standing inside a smaller lane. */
   border-radius: var(--radius-panel);
 }
 .col-head {
@@ -1103,7 +1219,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Ruling 365: the count in plain secondary ink beside the name, no capsule. */
 .col-head .ct { font-size: .88rem; font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; }
 .col-stage-dot { width: .56rem; height: .56rem; border-radius: 50%; flex: none; }
-.col-head .add { margin-left: auto; color: var(--placeholder); display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-small); background: none; border: 0; }
+.col-head .add { margin-left: auto; color: var(--placeholder); display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-small); background: none; border: 0; transition: transform .15s var(--ease-out); }
 .col-head .add:hover { background: var(--tint-press); color: var(--fg); }
 
 .col-body {
@@ -1198,7 +1314,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .column { transition: background .15s ease, box-shadow .15s ease; }
 .column.drop-over {
   background: color-mix(in srgb, var(--blue), transparent 92%);
-  border-radius: var(--radius-card);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--blue), transparent 55%);
 }
 /* The requested slot: the card's own face, faded, in a blue dashed frame —
@@ -1226,7 +1341,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: inline-flex; align-items: center; gap: .375rem;
   border: 1px solid var(--hairline);
   background: var(--tint-hover);
-  border-radius: var(--radius-button); padding: .25rem .5rem;
+  /* The trailing caret's side is the text side less 2px (ruling 459, the .btn
+     recipe); the leading stage dot is a filled disc with no bearing to offset.
+     The board card's square trigger (`.card-move`) still zeroes it. */
+  border-radius: var(--radius-button); padding: .25rem .375rem .25rem .5rem;
   color: var(--fg); font: inherit; font-size: .75rem; font-weight: 600;
   /* One line, bounded: a stage name has no length cap, so the name ellipsizes
      inside the trigger instead of pushing the task page's side column past
@@ -1236,9 +1354,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   cursor: pointer;
   transition: border-color .14s ease, background .14s ease, transform .1s var(--ease-out);
 }
-.stage-menu-btn:hover { border-color: var(--border); background: var(--tint-press); }
+/* Ruling 459: the trigger is disabled only while its own move is in flight
+   (stage-menu.tsx `busy`), so it takes the sheet's busy step, .7, not a
+   one-off .6, and does not answer the pointer meanwhile. `:where()` keeps the
+   hover at `.open`'s weight, so the open trigger's blue edge still wins. */
+.stage-menu-btn:hover:where(:not(:disabled)) { border-color: var(--border); background: var(--tint-press); }
 .stage-menu-btn.open { border-color: var(--blue); }
-.stage-menu-btn:disabled { opacity: .6; cursor: default; }
+.stage-menu-btn:disabled { opacity: .7; cursor: default; }
 .stage-menu-btn .col-stage-dot { width: .5rem; height: .5rem; border-radius: 50%; flex: none; }
 .stage-menu-btn .sm-current { display: inline-flex; align-items: center; gap: .375rem; transform-origin: left center; min-width: 0; }
 .stage-menu-btn .sm-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -1255,9 +1377,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .stage-menu-pop {
   z-index: 1000;
   background: var(--surface);
-  border: 1px solid var(--border);
+  /* The ring is the edge (ruling 459), as .user-menu. */
+  border: 1px solid transparent;
   border-radius: var(--radius-box);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-ring), var(--shadow-menu);
   padding: .375rem;
   display: flex; flex-direction: column; gap: 1px;
   transform-origin: top right;
@@ -1288,7 +1411,6 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 @media (prefers-reduced-motion: reduce) {
   .stage-menu-pop,
   .stage-menu-btn .sm-current.changed,
-  .bell-badge,
   .card-drop-preview,
   .card-wrap.just-arrived .card { animation: none; }
 }
@@ -1342,7 +1464,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .chip.st.ready .ico { color: var(--teal-dark); }
 .chip.pb { color: var(--coral-dark); }
 .chip.pb.amber { color: var(--amber-dark); }
-.chip.more { font-variant-numeric: tabular-nums; }
+/* The "+N" fold is the one .chip with no leading mark, so it takes back the
+   2px the mark side gives up (ruling 459) and the count sits centred. */
+.chip.more { font-variant-numeric: tabular-nums; padding-left: .375rem; }
 /* The list row's agent: the tile and the name — the row has the room. */
 .list-agent { display: inline-flex; align-items: center; gap: .375rem; font-size: .75rem; font-weight: 500; color: var(--muted); }
 .list-agent .agent-glyph { width: 22px; height: 22px; }
@@ -1516,7 +1640,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .task-hero .key { font-family: var(--font-mono); font-size: .75rem; color: var(--faint); }
 .task-hero h1 { font-size: 1.75rem; line-height: 1.08; letter-spacing: var(--track-page); }
 .task-hero .goal { color: var(--muted); font-size: 1rem; line-height: 1.5; max-width: 70ch; }
-.goal-edit-btn { margin-left: .5rem; padding: .05rem .375rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-small); cursor: pointer; vertical-align: middle; }
+.goal-edit-btn { margin-left: .5rem; padding: .05rem .375rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-small); cursor: pointer; vertical-align: middle; transition: transform .15s var(--ease-out); }
 .goal-edit-btn:hover { border-color: var(--blue); }
 .goal-edit { max-width: 70ch; display: flex; flex-direction: column; gap: .5rem; margin-top: .25rem; }
 .goal-textarea { width: 100%; resize: vertical; font: inherit; font-size: 1rem; line-height: 1.5; color: var(--fg); background: var(--surface); border: 1px solid var(--border-control); border-radius: var(--radius-button); padding: .5rem .5rem; }
@@ -1525,9 +1649,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 
 /* Lightweight metadata editor (priority / labels / due date) under the goal.
    Mirrors the goal-edit vocabulary so the two editors read as siblings. */
-.meta-edit-btn { display: inline-flex; align-items: center; gap: .375rem; margin-top: .5rem; padding: .125rem .5rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-small); cursor: pointer; }
+.meta-edit-btn { display: inline-flex; align-items: center; gap: .375rem; margin-top: .5rem; padding: .125rem .5rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-small); cursor: pointer; transition: transform .15s var(--ease-out); }
 .meta-edit-btn:hover { border-color: var(--blue); }
 .meta-edit-btn .ico { width: 13px; height: 13px; }
+/* The icon side less 2px, as .btn (ruling 459). */
+.meta-edit-btn:has(> .ico:first-child) { padding-left: .375rem; }
 /* F26-13: shown in place of the Edit-details button on an archived task, whose
    planning metadata is frozen until it is restored. */
 .meta-archived-note { margin-top: .5rem; font-size: .75rem; color: var(--muted); }
@@ -1572,13 +1698,22 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   position: absolute; top: 50%; right: .5rem; transform: translateY(-50%);
   display: inline-flex; padding: .25rem; border: 0; border-radius: var(--radius-small); color: var(--muted);
   background: transparent; cursor: pointer;
+  /* The press keeps the centring translate (the press block). */
+  transition: transform .15s var(--ease-out);
 }
 .datepick-clear:hover { color: var(--fg); background: var(--tint-press); }
 .datepick-clear .ico { width: 13px; height: 13px; }
+/* Concentric (ruling 459): the month arrows sit in the top corners and a
+   6x7 grid always puts a day cell in each bottom corner, both 6px
+   (--radius-small). At .375rem that is 6 + 6 = 12, the popover's --radius-box
+   (a corner day is a pixel more, for the cell's 1px padding): the
+   .stage-menu-pop recipe. At .5rem their hover, today and selected shapes read
+   rounder than the popover around them. */
 .datepick-pop {
   margin-top: .375rem; width: max-content; max-width: 100%;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-box); box-shadow: var(--shadow-menu); padding: .5rem;
+  /* The ring is the edge (ruling 459), as .user-menu. */
+  background: var(--surface); border: 1px solid transparent;
+  border-radius: var(--radius-box); box-shadow: var(--shadow-ring), var(--shadow-menu); padding: .375rem;
   transform-origin: top left;
   animation: menu-in .16s var(--ease-out);
 }
@@ -1590,14 +1725,14 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* border: 0 on the calendar controls is load-bearing: the global button reset
    clears background but NOT the UA border, so every un-declared button ships
    a box — 42 bordered day cells read as a cage. */
-.cal-nav { display: inline-flex; padding: .25rem; border: 0; border-radius: var(--radius-small); color: var(--muted); background: transparent; cursor: pointer; }
+.cal-nav { display: inline-flex; padding: .25rem; border: 0; border-radius: var(--radius-small); color: var(--muted); background: transparent; cursor: pointer; transition: transform .15s var(--ease-out); }
 .cal-nav:hover { color: var(--fg); background: var(--tint-press); }
 .cal-nav .ico { width: 15px; height: 15px; }
 .cal-prev { transform: rotate(180deg); }
 .cal-grid { border-collapse: collapse; }
 .cal-grid th { padding: .25rem 0; font-size: .69rem; font-weight: 700; color: var(--muted); }
 .cal-grid td { padding: 1px; text-align: center; }
-.cal-day { width: 34px; height: 32px; border: 0; border-radius: var(--radius-small); font-size: .75rem; color: var(--fg); background: transparent; cursor: pointer; }
+.cal-day { width: 34px; height: 32px; border: 0; border-radius: var(--radius-small); font-size: .75rem; color: var(--fg); background: transparent; cursor: pointer; transition: transform .15s var(--ease-out); }
 .cal-day:hover { background: var(--tint-press); }
 .cal-day:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--blue); }
 .cal-day.out { color: var(--muted); }
@@ -1627,8 +1762,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 
 .label-select {
   margin-top: .375rem; padding: .25rem; list-style: none;
-  border: 1px solid var(--border); border-radius: var(--radius-box);
-  background: var(--surface); box-shadow: var(--shadow-menu);
+  /* The ring is the edge (ruling 459), as .user-menu. */
+  border: 1px solid transparent; border-radius: var(--radius-box);
+  background: var(--surface); box-shadow: var(--shadow-ring), var(--shadow-menu);
   max-height: 232px; overflow-y: auto;
   display: flex; flex-direction: column; gap: 1px;
 }
@@ -1766,9 +1902,18 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border: 1px solid var(--hairline);
   background: var(--surface);
   text-align: left; width: 100%;
-  transition: border-color .14s ease, background .14s ease;
+  transition: border-color .14s ease, background-color .14s ease, transform .15s var(--ease-out);
 }
-.opt:hover { border-color: var(--border); }
+/* Ruling 459: only an option that can be chosen answers the pointer. A
+   refused one (`aria-disabled`, focusable so its reason is reachable) and a
+   decided packet's record (natively disabled) neither hover nor press;
+   `:where()` keeps the hover at `.opt.sel`'s weight. The refused option dims
+   at the house disabled step, which was an inline .55 in decision-packet.tsx.
+   The decided record stays at full ink with its chosen option (ruling 138):
+   it is a record, not a refusal, so it only drops the pointer cursor. */
+.opt:hover:where(:not(:disabled, [aria-disabled="true"])) { border-color: var(--border); }
+.opt[aria-disabled="true"]:not(:disabled) { opacity: .45; cursor: not-allowed; }
+.opt:disabled { cursor: default; }
 .opt.recommend { border-color: color-mix(in srgb, var(--blue), transparent 55%); }
 .opt.sel { border-color: var(--blue); background: var(--blue-soft); }
 /* Same 3:1 control-edge treatment the .lc-check checkbox already uses —
@@ -1877,6 +2022,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; border: 0; border-radius: var(--radius-small);
   background: transparent; color: var(--placeholder); cursor: pointer;
+  transition: transform .15s var(--ease-out);
 }
 /* P13-D-18: was var(--coral) — undefined, so the hover background never
    rendered. Ruling 149: releasing an engagement is destructive, so this hover
@@ -1884,7 +2030,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    it held is the ERROR vocabulary and read brown beside them. The rest fill is
    declared above, so the sweep pairs the resting label with `transparent`. */
 .rev-x:hover:not(:disabled) { background: color-mix(in srgb, var(--danger), transparent 92%); color: var(--danger); }
-.rev-x:disabled { opacity: .5; cursor: default; }
+/* Disabled only while its release is in flight (execution-profile.tsx
+   `releaseBusy`): the sheet's busy step, not a one-off .5 (ruling 459). */
+.rev-x:disabled { opacity: .7; cursor: default; }
 .rev-x svg { width: 14px; height: 14px; }
 
 /* operator recommendations — highlighted cards a human applies or dismisses */
@@ -2072,9 +2220,15 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    P13-D-18: this panel referenced var(--line) and var(--panel), neither of
    which exists, so every declaration was dropped and the rows rendered with no
    border in both themes. --line -> --hairline (the app's divider token, cf.
-   .kv-row/.stg-row). */
-.sched-list { list-style: none; margin: 0 0 .5rem; padding: 0; display: flex; flex-direction: column; gap: .375rem; }
-.sched-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .5rem .75rem; padding: .5rem .5rem; border: 1px solid var(--hairline); border-radius: var(--radius-button); }
+   .kv-row/.stg-row).
+   Ruling 459: a divided list, not a stack of boxes. Each row was a third
+   hairline box (cell > row > the bordered Cancel), and no radius nests both of
+   its corners: the Cancel button's 8 wants the row at 16, the 12px cell's even
+   12px inset wants it at 0. Square, ruled rows are concentric with the cell,
+   and the rule on every row (the first included) parts the entries from the
+   run controls above them. */
+.sched-list { list-style: none; margin: 0 0 .5rem; padding: 0; display: flex; flex-direction: column; }
+.sched-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .5rem .75rem; padding: .5rem .125rem; border-top: 1px solid var(--hairline); }
 .sched-when { display: inline-flex; align-items: center; gap: .375rem; font-family: var(--font-mono); font-size: .75rem; font-weight: 600; }
 .sched-when .ico, .sched-when svg { width: 13px; height: 13px; color: var(--agent-dark); }
 .sched-meta { grid-column: 1 / -1; font-size: .75rem; color: var(--placeholder); }
@@ -2255,7 +2409,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: var(--surface);
   transition: border-color .14s ease, transform .14s var(--ease-out), box-shadow .14s ease;
 }
-.ag-item:hover { border-color: var(--border); transform: translateY(-1px); }
+/* Hover is the border, not a lift (ruling 459): the roster is a list hovered
+   on every pass; the transform leg above is the press's. */
+.ag-item:hover { border-color: var(--border); }
 .ag-item.on { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .ag-item-main { flex: 1; min-width: 0; }
 .ag-item-main .nm { display: block; font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
@@ -2280,6 +2436,12 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   display: inline-flex; align-items: center; gap: .375rem;
   font-size: .75rem; font-weight: 700; color: var(--agent-dark);
 }
+/* The roster's count and the hero's "running on N tasks" lead with the violet
+   working dot every other agent-at-work surface carries (.wait-tag,
+   .pj-stats), ruling 459. With no rule here the span was an empty 0x0 box
+   that still took the row's gap. Above the reduced-motion block, which stills
+   it. */
+.ag-active .working, .ag-running .working { width: .42rem; height: .42rem; border-radius: 50%; background: var(--agent); flex: none; animation: pulse-a 1.6s ease-out infinite; }
 /* Bound to its hero: half a step above (inside the group), the column's full
    step and a half below (around it). */
 .ag-desc { color: var(--muted); font-size: 1rem; line-height: 1.55; margin: -.5rem 0 .5rem; max-width: 70ch; }
@@ -2381,7 +2543,13 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border: 1px solid var(--hairline); border-radius: var(--radius-box); background: var(--surface);
   transition: border-color .14s ease, transform .14s var(--ease-out);
 }
-.deploy-row:hover { border-color: var(--blue); transform: translateX(2px); }
+/* Ruling 459: the hover is the blue edge, not a 2px slide (a list row is
+   hovered on every pass). Only the library picker disables its rows, all of
+   them together, while its fetcher is busy and while the modal plays its exit
+   (agents-page.tsx `busy || done`). The picker is in flight, not refused, so
+   the rows take the busy step and neither hover nor press meanwhile. */
+.deploy-row:hover:not(:disabled) { border-color: var(--blue); }
+.deploy-row:disabled { opacity: .7; cursor: default; }
 .deploy-eng {
   flex: none; width: 84px;
   font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
@@ -2410,7 +2578,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder);
   border-bottom: 1px solid var(--hairline); background: var(--tint-well);
 }
-.live-row { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--hairline); background: var(--surface); font-size: .88rem; }
+.live-row { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--hairline); background: var(--surface); font-size: .88rem; transition: transform .15s var(--ease-out); }
 .live-row:last-child { border-bottom: 0; }
 .live-row:hover { background: var(--tint-well); }
 .live-agent { display: flex; align-items: center; gap: .5rem; min-width: 0; }
@@ -2435,24 +2603,31 @@ dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); a
   top: 50%; left: 50%;
   width: min(420px, calc(100vw - 2rem));
   background: var(--surface);
-  border: 1px solid var(--border);
+  /* Elevated, so its edge is --shadow-pop's translucent ring (ruling 459); the
+     border stays 1px, transparent, so nothing inside moves. */
+  border: 1px solid transparent;
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-pop);
   padding: 1.5rem 1.5rem 1rem;
   animation: pop-center .18s var(--ease-out);
   transform: translate(-50%, -50%);
 }
+/* A fixed 8px rise (ruling 459): a percentage resolves against the card's own
+   height, so -46% travelled 9px on a confirm and 31px or more on the page
+   overlay and a tall modal. */
 @keyframes pop-center {
-  from { opacity: 0; transform: translate(-50%, -46%) scale(.97); }
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(.97); }
   to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
-/* Animated close — useDialog sets [data-closing], plays the reverse of
-   pop-center faster than the enter, then unmounts on transitionend. */
+/* Animated close — useDialog sets [data-closing], plays a softer, shorter
+   pop-center in reverse, then unmounts on transitionend. Softer: a fixed
+   6px/.98 against the enter's 8px/.97, the dock's dock-in /
+   .dock-panel[data-closing] pair (ruling 459); shorter: .15s against .18s. */
 dialog[data-closing] {
   animation: none;
   pointer-events: none;
   opacity: 0;
-  transform: translate(-50%, -46%) scale(.97);
+  transform: translate(-50%, calc(-50% + 6px)) scale(.98);
   transition: opacity .15s var(--ease-out), transform .15s var(--ease-out);
 }
 dialog[data-closing]::backdrop {
@@ -2478,7 +2653,7 @@ dialog[data-closing]::backdrop {
   width: 100%; margin-top: .5rem;
   padding: .5rem; border: 1px dashed var(--border); border-radius: var(--radius-card);
   background: none; color: var(--muted); font-family: var(--font-display); font-weight: 700; font-size: .88rem;
-  transition: border-color .14s ease, color .14s ease, background .14s ease;
+  transition: border-color .14s ease, color .14s ease, background-color .14s ease, transform .15s var(--ease-out);
 }
 .ag-newbtn:hover { border-color: var(--blue); color: var(--blue-pressed); background: color-mix(in srgb, var(--blue-soft), transparent 50%); }
 .ag-newbtn .ico { width: 15px; height: 15px; }
@@ -2489,7 +2664,8 @@ dialog[data-closing]::backdrop {
   top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: min(660px, calc(100vw - 2rem)); max-height: 88vh;
   display: flex; flex-direction: column;
-  background: var(--surface); border: 1px solid var(--border);
+  /* The ring is the edge (ruling 459), as .confirm-card. */
+  background: var(--surface); border: 1px solid transparent;
   border-radius: var(--radius-panel); box-shadow: var(--shadow-pop);
   overflow: hidden; animation: pop-center .18s var(--ease-out);
 }
@@ -2507,7 +2683,8 @@ dialog[data-closing]::backdrop {
   top: 12vh; left: 50%; transform: translate(-50%, 0);
   width: min(620px, calc(100vw - 2rem)); max-height: 70vh;
   display: flex; flex-direction: column;
-  background: var(--surface); border: 1px solid var(--border);
+  /* The ring is the edge (ruling 459), as .confirm-card. */
+  background: var(--surface); border: 1px solid transparent;
   border-radius: var(--radius-panel); box-shadow: var(--shadow-pop);
   overflow: hidden;
 }
@@ -2534,7 +2711,13 @@ dialog[data-closing]::backdrop {
 .cmdk-row {
   display: flex; align-items: center; gap: .5rem;
   width: 100%; padding: .5rem .5rem;
-  border: 1px solid transparent; border-radius: var(--radius-button);
+  /* Concentric with .cmdk-card (ruling 459): its 22 (--radius-panel) less the
+     card's 1px border and .cmdk-list's .375rem (6px) padding wants 15, and
+     --radius-card (16) is the scale's nearest step, the same rounding .column
+     takes. The list is the card's last child, so with the menu-row 8 the last
+     row's active wash pinched the gap at the bottom corners to ~4px against
+     7px along the sides. */
+  border: 1px solid transparent; border-radius: var(--radius-card);
   background: none; text-align: left; color: var(--fg);
 }
 .cmdk-row .ico { width: 16px; height: 16px; flex: none; color: var(--placeholder); }
@@ -2608,11 +2791,17 @@ dialog[data-closing]::backdrop {
 .pick-chips { display: flex; flex-wrap: wrap; gap: .5rem; }
 .pick-chip {
   display: inline-flex; align-items: center; gap: .375rem;
-  padding: .375rem .75rem .375rem .5rem; border-radius: var(--radius-chip);
+  padding: .375rem .75rem; border-radius: var(--radius-chip);
   border: 1px solid var(--hairline); background: var(--surface);
   font-family: var(--font-display); font-weight: 700; font-size: .75rem; color: var(--muted);
   transition: border-color .14s ease, background .14s ease, color .14s ease, transform .1s var(--ease-out);
 }
+/* Ruling 459: the short start side is an optical trim for a LEADING glyph
+   (an icon, a stage dot, an agent tile). It sat on every chip, so a text-only
+   one (a skill, an MCP, a tool) held its label 2px left of centre. A grant
+   chip always holds its check's slot, granted or not (below), so it always
+   takes the trim. */
+.pick-chip:has(> .ico:first-child), .pick-chip:has(> .sdot:first-child), .pick-chip:has(> .agent-glyph:first-child) { padding-left: .5rem; }
 .pick-chip:hover { border-color: var(--border); color: var(--fg); }
 .pick-chip.on { border-color: var(--blue); background: var(--blue-soft); color: var(--blue-pressed); }
 /* A granted resource the live store no longer offers (deleted KB/skill/MCP a
@@ -2626,6 +2815,19 @@ dialog[data-closing]::backdrop {
 .pick-chip .sdot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--placeholder); flex: none; }
 .pick-chip.mono { font-family: var(--font-mono); font-weight: 500; font-size: .75rem; }
 .pick-chip .ico { width: 13px; height: 13px; }
+/* A grant chip's check stays mounted and trades in place on `.on` (ruling
+   459, ruling 451(c)'s icon swap for a 13px glyph: scale .25 behind a 2px
+   blur over .2s). It mounted and unmounted, so it popped in and the chip grew
+   by the glyph and the gap, 19px, re-wrapping every later chip in the row
+   while an admin toggled several. The cost of never reflowing: an ungranted
+   chip carries the empty slot, its label 27px from the start edge and 12px
+   from the end, the trade .be-opt .bcheck already makes. */
+.pick-chip .pc-check { opacity: 0; transform: scale(.25); filter: blur(2px); transition: opacity .2s var(--ease-out), transform .2s var(--ease-out), filter .2s var(--ease-out); }
+.pick-chip.on .pc-check { opacity: 1; transform: none; filter: none; }
+@media (prefers-reduced-motion: reduce) {
+  .pick-chip .pc-check,
+  .pick-chip.on .pc-check { transform: none; filter: none; transition: opacity .12s ease; }
+}
 
 /* capability catalog matrix */
 .cap-matrix { display: flex; flex-direction: column; gap: .375rem; }
@@ -2695,20 +2897,23 @@ dialog[data-closing]::backdrop {
   border-radius: var(--radius-chip);
 }
 .cap-advisory > summary::-webkit-details-marker { display: none; }
-.cap-advisory > summary::after {
-  content: ""; width: 7px; height: 7px; margin-left: .125rem;
-  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg) translate(-2px, -2px);
-  transition: transform .14s var(--ease-out);
-}
-.cap-advisory[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
 .cap-advisory > summary:hover { color: var(--fg); }
-.cap-advisory > summary .ico { width: 13px; height: 13px; flex: none; color: var(--placeholder); }
+.cap-advisory > summary > .ico:not(.disc-chev) { width: 13px; height: 13px; flex: none; color: var(--placeholder); }
+/* Every <details> caret is the set's chevron (ruling 459), one rule for the
+   four disclosures (this one, the controller's chain head, "About this chain"
+   and "waits on"). They drew a 1.5px mitred V in CSS borders beside the set's
+   round-capped 1.7 glyphs, two at 7px that turned and two at 6px that flipped
+   in one frame. Down when folded, up when open, as .own-btn. `.ico` in the
+   selector outranks svg.ico's 16px default; `details[open] > summary` turns
+   only its own caret, never a nested disclosure's. The glyph takes the
+   summary's colour, so it follows the hover to --fg. */
+.ico.disc-chev { width: 12px; height: 12px; transform: rotate(90deg); transition: transform .15s var(--ease-out); }
+details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .cap-advisory-body { font-size: .75rem; line-height: 1.5; color: var(--faint); padding: .125rem 0 .25rem 1rem; }
 .cap-advisory-body ul { margin: .375rem 0 0; padding-left: 1rem; list-style: disc; }
 .cap-advisory-body li { margin-top: .125rem; }
 @media (prefers-reduced-motion: reduce) {
-  .cap-advisory > summary::after { transition: none; }
+  .ico.disc-chev { transition: none; }
 }
 .tag {
   display: inline-flex; align-items: center; gap: .125rem;
@@ -2920,10 +3125,17 @@ dialog[data-closing]::backdrop {
   position: absolute; top: 2px; left: 2px;
   width: 15px; height: 15px; border-radius: 50%;
   background: var(--surface);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--fg), transparent 70%);
+  /* A contact shadow is black (ruling 459, as .card's under ruling 365(f)).
+     Mixed from --fg it turned near-white on dark and lit the knob from below;
+     in light, 30% black is within a shade of the 30% --fg it replaces. */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .3);
   /* transform, not `left` — compositor-only, retargetable mid-flight */
   transition: transform .15s var(--ease-out);
 }
+/* On dark a dark knob on a dark track wants the white edge ring every dark
+   floating surface wears (ruling 459); the black drop still reads on the blue
+   on-track. Light is unchanged. */
+:root[data-theme="dark"] .tgl .knob { box-shadow: var(--shadow-ring), 0 1px 2px rgba(0, 0, 0, .3); }
 .tgl.on { background: var(--blue); border-color: var(--blue); }
 .tgl.on .knob { transform: translateX(15px); }
 
@@ -2936,7 +3148,8 @@ dialog[data-closing]::backdrop {
   border: 1px solid var(--hairline); border-radius: var(--radius-box); background: var(--surface);
   transition: border-color .14s ease, transform .14s var(--ease-out);
 }
-.pcap-row:hover { border-color: var(--border); transform: translateY(-1px); }
+/* The border is the hover, not a lift (ruling 459, as .ag-item). */
+.pcap-row:hover { border-color: var(--border); }
 /* U33-10 (pass 33): the name kept a floor. `.pcap-counts` was `flex: none`, so a
    row whose counts carry the extra "advisory on Codex" badge (ruling 109) grew
    past the row, squeezed this box to ZERO width, and the profile name painted
@@ -3023,6 +3236,12 @@ dialog[data-closing]::backdrop {
 .scope-chip .ico { width: 12px; height: 12px; color: var(--teal-dark); }
 .scope-chip.miss { border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); background: color-mix(in srgb, var(--red-light), var(--surface) 45%); color: var(--coral-dark); }
 .scope-chip.miss .ico { color: var(--coral-dark); }
+/* A ruling 144(a) advisory (ruling 459): its flag led the sentence inline, on
+   the baseline and hard against the first word. The text inherits the 16px
+   body size, so the glyph keeps the 16px svg.ico default (1em) and only needs
+   the row, a gap and the nudge onto the first line ((19.4px - 16px) / 2). */
+.cred-card > .sub:has(> .ico:first-child) { display: flex; align-items: flex-start; gap: .375rem; }
+.cred-card > .sub > .ico:first-child { margin-top: .125rem; }
 .cred-warn {
   display: flex; align-items: flex-start; gap: .5rem; flex-wrap: wrap;
   margin-top: .75rem; padding: .5rem .75rem;
@@ -3059,6 +3278,15 @@ dialog[data-closing]::backdrop {
   font-size: .75rem; color: var(--teal-dark); line-height: 1.4;
 }
 .cred-ok .ico { width: 14px; height: 14px; flex: none; }
+/* Ruling 459: the check leads its sentence, so it sits on the FIRST line the
+   way .cred-warn's alert does, with the same .125rem nudge on the same
+   .75rem/1.4 line. Centred, it straddled the break of a wrapped sentence and
+   jumped as an account's health flipped the slot between the two. The notice
+   that carries the ruling 148 close keeps its centred row: the 28px circle
+   sets the row height, and a top-aligned one-line sentence would sit 3.6px
+   above it. The child combinator keeps the nudge off the close's own glyph. */
+.cred-ok:not(:has(> .modal-close)) { align-items: flex-start; }
+.cred-ok:not(:has(> .modal-close)) > .ico { margin-top: .125rem; }
 /* P16-UI-02: the credential card's manage-actions slot (Set/Update/Clear
    credential). It had no rule; its layout was an inline style object in
    credential-card.tsx, which is also the only thing the component test can name
@@ -3077,7 +3305,7 @@ dialog[data-closing]::backdrop {
   box-shadow: inset 0 0 0 1px var(--border-control);
   border: 0; border-radius: var(--radius-small); padding: .125rem .375rem;
   cursor: pointer;
-  transition: background .12s ease, color .12s ease, box-shadow .12s ease;
+  transition: background-color .12s ease, color .12s ease, box-shadow .12s ease, transform .15s var(--ease-out);
 }
 .keybtn:hover {
   background: var(--blue-soft); color: var(--blue-pressed);
@@ -3254,11 +3482,24 @@ dialog[data-closing]::backdrop {
   width: 24px; height: 24px; flex: none;
   border: 0; background: none; border-radius: var(--radius-small);
   color: var(--placeholder);
-  transition: background .12s ease, color .12s ease;
+  transition: background-color .12s ease, color .12s ease, transform .15s var(--ease-out);
 }
 .stg-x:hover { background: var(--tint-press); color: var(--fg); }
 .stg-x.off { opacity: .35; }
 .stg-x.off:hover { background: none; color: var(--placeholder); }
+/* Ruling 459: a disabled ✕ (a viewer's stage row, a member row mid-remove)
+   rendered at full ink and still took the row's destructive red hover. With
+   no pointer events it answers nothing, and the rename beside it with it; the
+   lock's reason stays on the row's `.stg-handle`, and a disabled row never
+   drags (settings-page.tsx `canDrag`). A refused ✕ (a viewer's stage row)
+   takes the disabled step, .45. A ✕ disabled only while its own request is in
+   flight says so with `aria-busy` (the member row's `busy`) and takes the busy
+   step, .7, like `.rev-x` and `.deploy-row`: in flight is not refused. The
+   busy rule has the refusal rule's weight (0,3,0), so it stays after it.
+   `.off` keeps its own dimmer step. */
+.stg-x:disabled, .stg-name:disabled { pointer-events: none; }
+.stg-x:disabled:not(.off) { opacity: .45; }
+.stg-x[aria-busy="true"]:disabled { opacity: .7; cursor: default; }
 .stg-x .ico { width: 13px; height: 13px; }
 /* Destructive row actions — the row's last control where that IS the remove,
    plus anything that names itself `.destructive` (ruling 149: Disable signs the
@@ -3307,7 +3548,7 @@ dialog[data-closing]::backdrop {
   padding: .75rem .5rem;
   border: 0; border-radius: var(--radius-box);
   background: transparent;
-  transition: background .14s ease;
+  transition: background-color .14s ease, transform .15s var(--ease-out);
 }
 .rq-row:hover { background: var(--tint-hover); }
 .rq-key { font-family: var(--font-mono); font-size: .75rem; color: var(--faint); flex: none; width: 62px; }
@@ -3407,9 +3648,17 @@ dialog[data-closing]::backdrop {
   background: var(--cta-bg); color: var(--cta-fg);
   font-family: var(--font-mono); font-size: .69rem; font-weight: 600; line-height: 1;
   border: 2px solid var(--bg);
-  /* Passive state change (SSE) — the pulse is the only signal something
-     arrived; keyed on the unread count so each change re-triggers it. */
-  animation: stagePulse .45s ease;
+}
+/* Passive state change (SSE): the pulse says a notification arrived, so it
+   plays only on a rise (`data-arrived`, set by TopBell), never on first paint,
+   on a remount or when reading lowers the count (ruling 459); the digit is the
+   static cue. */
+.bell-badge[data-arrived] { animation: stagePulse .45s ease; }
+@media (prefers-reduced-motion: reduce) {
+  /* After the rule it answers: the plain `.bell-badge` in the stage menu's
+     block above lost to the base rule on source order, so the pulse played
+     for everyone. */
+  .bell-badge[data-arrived] { animation: none; }
 }
 
 .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); flex: none; margin-top: .5rem; }
@@ -3522,6 +3771,9 @@ dialog[data-closing]::backdrop {
   --shadow-menu: 0 12px 34px rgba(0, 0, 0, .5);
   --shadow-pop: 0 18px 50px rgba(0, 0, 0, .6), var(--shadow-ring);
   --shadow-lift: 0 10px 28px rgba(0, 0, 0, .5);
+  /* Ruling 459: black depth is invisible on dark, so the ring is white. */
+  --shadow-ring: 0 0 0 1px oklch(1 0 0 / 0.08);
+  --image-outline: oklch(1 0 0 / 0.1);
 }
 /* inverted-chrome + hardcoded-color fixups. The gh-bar/toast/tl-node.github
    trio now writes color: var(--surface) at the source rule, which resolves
@@ -3545,6 +3797,7 @@ dialog[data-closing]::backdrop {
   display: inline-flex; align-items: center; gap: .5rem;
   background: none; border: 0; padding: .25rem;
   border-radius: var(--radius-chip);
+  transition: transform .15s var(--ease-out);
 }
 .home-user:hover .avatar, .home-user.open .avatar { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue), transparent 78%); }
 
@@ -3556,9 +3809,10 @@ dialog[data-closing]::backdrop {
   width: min(400px, calc(100vw - 2rem));
   z-index: 50;
   background: var(--surface);
-  border: 1px solid var(--border);
+  /* The ring is the edge (ruling 459), as .user-menu. */
+  border: 1px solid transparent;
   border-radius: var(--radius-box);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-ring), var(--shadow-menu);
   transform-origin: top right;
   animation: menu-in .16s var(--ease-out);
   overflow: hidden;
@@ -3568,7 +3822,7 @@ dialog[data-closing]::backdrop {
 .ntf-pop-head .ct { font-size: .69rem; color: var(--faint); }
 .ntf-pop-head .btn { margin-left: auto; }
 .ntf-pop-list { max-height: 420px; overflow-y: auto; padding: .25rem .375rem; }
-.ntf-item { display: flex; gap: .5rem; width: 100%; text-align: left; background: none; border: 0; padding: .5rem .5rem; border-radius: var(--radius-button); align-items: flex-start; transition: background .12s ease; }
+.ntf-item { display: flex; gap: .5rem; width: 100%; text-align: left; background: none; border: 0; padding: .5rem .5rem; border-radius: var(--radius-button); align-items: flex-start; transition: background-color .12s ease, transform .15s var(--ease-out); }
 .ntf-item:hover { background: var(--tint-hover); }
 .ntf-item .pev-ico { flex: none; margin-top: .125rem; }
 .ntf-item-main { flex: 1; min-width: 0; }
@@ -3591,7 +3845,8 @@ dialog[data-closing]::backdrop {
   width: min(1080px, calc(100vw - 2.5rem));
   height: min(780px, calc(100vh - 3rem));
   background: var(--bg);
-  border: 1px solid var(--border);
+  /* The ring is the edge (ruling 459), as .confirm-card. */
+  border: 1px solid transparent;
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-pop);
   overflow: hidden;
@@ -3666,11 +3921,13 @@ dialog[data-closing]::backdrop {
 .rsel { position: relative; }
 .rsel-btn {
   display: flex; align-items: center; gap: .5rem;
-  padding: .375rem .5rem; max-width: 320px;
+  /* The agent tile leads as a filled square with no bearing; the trailing
+     caret's side is the text side less 2px (ruling 459, the .btn recipe). */
+  padding: .375rem .375rem .375rem .5rem; max-width: 320px;
   border: 1px solid var(--hairline); border-radius: var(--radius-button);
   background: var(--surface); color: var(--fg);
   font-family: var(--font-display); font-weight: 700; font-size: .75rem;
-  transition: border-color .14s ease;
+  transition: border-color .14s ease, transform .15s var(--ease-out);
 }
 .rsel-btn:hover, .rsel-btn.open { border-color: var(--border); }
 .rsel-btn .caret { width: 13px; height: 13px; color: var(--placeholder); transform: rotate(90deg); transition: transform .15s var(--ease-out); flex: none; }
@@ -3680,8 +3937,9 @@ dialog[data-closing]::backdrop {
 .rsel-menu {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
   min-width: 300px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-box);
-  box-shadow: var(--shadow-menu);
+  /* The ring is the edge (ruling 459), as .user-menu. */
+  background: var(--surface); border: 1px solid transparent; border-radius: var(--radius-box);
+  box-shadow: var(--shadow-ring), var(--shadow-menu);
   padding: .25rem;
   transform-origin: top right;
   animation: menu-in .16s var(--ease-out);
@@ -3690,15 +3948,20 @@ dialog[data-closing]::backdrop {
    anchors to the LEFT of the composer instead of the right of a trigger — the
    only difference, and the whole reason for the modifier. It rendered unstyled
    (no rule at all) with the geometry carried by an inline style object in
-   mention-menu.tsx; the values below are that object, moved into the sheet.
-   `transform-origin` follows the anchor so the menu-in entrance still grows
-   from the edge that touches the editor (§4.1). */
+   mention-menu.tsx; the values below are that object, moved into the sheet. */
 .mention-menu {
   position: absolute;
   left: 0; right: auto; top: calc(100% + 6px);
   min-width: 260px; max-width: 360px;
-  transform-origin: top left;
 }
+/* The two typed listboxes (the composer's @-mention menu, the agent picker)
+   are opened by the keyboard: a typed '@', a focus, a keystroke after Escape,
+   and every keystroke that takes the mention list from no match back to some
+   mounts it again. By the frequency rule they appear at once, like
+   .label-select and the ⌘K palette (ruling 459); the click-opened run selector
+   keeps menu-in. Two classes, so this also beats the reduced-motion block's
+   `.rsel-menu` fade. */
+.rsel-menu.mention-menu { animation: none; }
 /* The matched substring of a suggestion's name/handle. A <mark>, so the UA ships
    its own yellow highlight — that has to be replaced, not merely tinted. The
    wash is the same accent-at-low-alpha as `::selection`, which is the closest
@@ -3814,7 +4077,7 @@ dialog[data-closing]::backdrop {
   border: 1.5px dashed var(--border); border-radius: var(--radius-chip);
   background: none; color: var(--muted);
   font-family: var(--font-display); font-weight: 700; font-size: .75rem;
-  transition: border-color .14s ease, color .14s ease, background .14s ease;
+  transition: border-color .14s ease, color .14s ease, background-color .14s ease, transform .15s var(--ease-out);
 }
 .rev-add .ico { width: 13px; height: 13px; }
 .rev-add:hover { border-color: var(--blue); border-style: solid; color: var(--blue-pressed); background: color-mix(in srgb, var(--blue), transparent 93%); }
@@ -3832,16 +4095,21 @@ dialog[data-closing]::backdrop {
 .rev-stack .rs-names { margin-left: .5rem; font-family: var(--font-display); font-weight: 700; font-size: .75rem; color: var(--fg); }
 .rev-add.sm { padding: .125rem .5rem; font-size: .75rem; }
 .rev-add.sm .ico { width: 11px; height: 11px; }
+/* The icon side less 2px, as .btn (ruling 459). */
+.rev-add:has(> .ico:first-child) { padding-left: .625rem; }
+.rev-add.sm:has(> .ico:first-child) { padding-left: .375rem; }
 
 /* owner management — manage menu, hand-off, release */
 .own-wrap { position: relative; }
 .own-btn {
   display: inline-flex; align-items: center; gap: .25rem;
-  padding: .25rem .75rem;
+  /* "Move" and a trailing chevron: that side is the text side less 2px
+     (ruling 459, the .btn recipe). */
+  padding: .25rem .625rem .25rem .75rem;
   border: 1px solid var(--hairline); border-radius: var(--radius-chip);
   background: var(--surface); color: var(--muted);
   font-family: var(--font-display); font-weight: 700; font-size: .75rem;
-  transition: border-color .14s ease, color .14s ease;
+  transition: border-color .14s ease, color .14s ease, transform .15s var(--ease-out);
 }
 .own-btn:hover, .own-btn.open { border-color: var(--border); color: var(--fg); }
 .own-btn .ico { width: 12px; height: 12px; transform: rotate(90deg); transition: transform .15s var(--ease-out); }
@@ -3849,8 +4117,9 @@ dialog[data-closing]::backdrop {
 .own-menu {
   position: absolute; left: 0; top: calc(100% + 6px); z-index: 60;
   min-width: 258px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-box);
-  box-shadow: var(--shadow-menu);
+  /* The ring is the edge (ruling 459), as .user-menu. */
+  background: var(--surface); border: 1px solid transparent; border-radius: var(--radius-box);
+  box-shadow: var(--shadow-ring), var(--shadow-menu);
   padding: .25rem;
   transform-origin: top left;
   animation: menu-in .16s var(--ease-out);
@@ -3868,7 +4137,7 @@ dialog[data-closing]::backdrop {
   display: grid; place-items: center;
   width: 20px; height: 20px; margin-left: .25rem;
   border: 0; border-radius: 50%; background: none; color: var(--placeholder);
-  transition: background .12s ease, color .12s ease;
+  transition: background-color .12s ease, color .12s ease, transform .15s var(--ease-out);
 }
 /* Ruling 149: releasing the owner is destructive, so the hover takes the
    danger pair rather than the rose/coral error vocabulary. */
@@ -3889,7 +4158,7 @@ dialog[data-closing]::backdrop {
   border: 1px solid var(--hairline); border-radius: var(--radius-chip);
   background: var(--surface); color: var(--fg);
   font-family: var(--font-display); font-weight: 700; font-size: .75rem;
-  transition: border-color .14s ease, background .14s ease;
+  transition: border-color .14s ease, background-color .14s ease, transform .15s var(--ease-out);
 }
 .handoff-chip:hover { border-color: var(--blue); background: color-mix(in srgb, var(--blue), transparent 92%); }
 .handoff-chip .rl { font-size: .69rem; font-weight: 600; color: var(--faint); }
@@ -3927,7 +4196,18 @@ dialog[data-closing]::backdrop {
    so the rail becomes an overlay behind a topbar toggle. `.app` drops to a
    single column, which is what stops the page scrolling sideways. */
 .rail-toggle { display: none; }
-.rail-scrim { display: none; }
+/* The scrim's closed state (ruling 459): laid out only under the breakpoint
+   (below), and there invisible and click-through until the drawer opens, so
+   it can fade the way every other veil does (dialog::backdrop) instead of
+   switching on and off in one frame. It says so here, outside the width
+   query, because R19-12's sweep reads a width-scoped visibility, opacity 0 or
+   pointer-events on this onClick div as a removed control. On close the veil
+   fades in .15s and only then leaves the hit-testing tree. */
+.rail-scrim {
+  display: none;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity .15s var(--ease-out), visibility 0s linear .15s;
+}
 @media (max-width: 720px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .rail {
@@ -3936,32 +4216,56 @@ dialog[data-closing]::backdrop {
     top: 0; bottom: 0; left: 0;
     width: min(var(--rail-w), 84vw);
     transform: translateX(-101%);
-    transition: transform .2s var(--ease-out);
+    /* The close (.15s) is shorter than the open (.2s, below), ruling 459. */
+    transition: transform .15s var(--ease-out);
+    /* A drawer over a scrim floats: the ring is its edge (ruling 459), and
+       the base rule's hairline divider would draw a second, opaque rim
+       inside it. */
     box-shadow: var(--shadow-pop);
+    border-right-color: transparent;
     background: var(--surface);
   }
-  .app[data-rail-open="true"] .rail { transform: none; }
-  /* P16-UI-04: `border: 0` used to sit here — a leftover reset from when the
-     scrim was a <button>. It is a <div> now, and divs have no border to reset. */
-  .app[data-rail-open="true"] .rail-scrim {
+  .app[data-rail-open="true"] .rail { transform: none; transition-duration: .2s; }
+  /* Always laid out under the breakpoint so it can fade; the base rule keeps
+     it invisible and click-through until the drawer opens (ruling 459). */
+  .rail-scrim {
     display: block;
     position: fixed; inset: 0; z-index: 44;
     background: color-mix(in srgb, var(--fg), transparent 70%);
+  }
+  /* P16-UI-04: `border: 0` used to sit here — a leftover reset from when the
+     scrim was a <button>. It is a <div> now, and divs have no border to reset. */
+  .app[data-rail-open="true"] .rail-scrim {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transition: opacity .2s var(--ease-out);
   }
   .rail-toggle {
     display: inline-grid; place-items: center;
     width: 34px; height: 34px; flex: none;
     border: 1px solid var(--hairline); border-radius: var(--radius-button);
     background: var(--surface); color: var(--muted);
+    transition: transform .15s var(--ease-out);
   }
+  /* Ruling 459: the hamburger presses at the control step, as the bell beside
+     it does. Here only: the global rule stays `display: none` alone. */
+  .rail-toggle:active { transform: scale(.96); }
   .rail-toggle .ico { width: 17px; height: 17px; }
   /* The crumb trail is already reduced to the current view at this width; the
-     palette trigger keeps its icon + shortcut chip and drops the label. */
-  .topbar { gap: .5rem; padding: 0 .75rem; }
+     palette trigger keeps its icon + shortcut chip and drops the label.
+     The topbar drops under the veil at once when the drawer opens and climbs
+     back only once the veil has faded (ruling 459): z-index is discrete, so
+     the delay holds the old value. It used to jump over the veil and the
+     drawer's head in the first frame of the close. */
+  .topbar { gap: .5rem; padding: 0 .75rem; transition: z-index 0s linear .15s; }
+  .app[data-rail-open="true"] .topbar { transition: none; }
   /* P16-G3: icon-only from here down, so it needs a target a finger can hit
      (WCAG 2.5.8) — the same 34px square as `.rail-toggle` beside it. */
   .top-search { flex: 0 0 auto; min-width: 0; padding: .375rem .5rem; min-height: 34px; }
   .top-search-label { display: none; }
+  /* Ruling 459: collapsed to a 34px icon box, the palette trigger is a control
+     and presses at .96; at full width (up to 360px) it is a surface and takes
+     .99 (the press block). The extra `:not()` outranks that later rule. */
+  button.top-search:active:not(:disabled) { transform: scale(.96); }
   .filter-bar, .board { padding-left: .75rem; padding-right: .75rem; }
   .board-filter-input { flex-basis: 100%; }
   /* F18-12: the execution-profile 2-up cells (operator/delivering/reviewing/owner)
@@ -4036,6 +4340,11 @@ dialog[data-closing]::backdrop {
     transition: opacity .15s var(--ease-out), transform .15s var(--ease-out);
   }
   .dock .dock-panel[data-closing] { opacity: 1; transform: translateY(100%); }
+  /* Ruling 459: the sheet's bottom corners are square and it spans the
+     viewport, so there is no panel corner for the composer to be concentric
+     with: it keeps the transcript's 12px gutter off the screen edge. Two
+     classes: the base rule is declared later in this sheet. */
+  .dock .dock-composer { padding: .5rem .75rem .75rem; }
   /* The trigger is position: relative inside the fixed .dock (itself 20px up),
      so this offset is measured from its resting spot: the sheet's top edge is
      at min(80dvh, 640px) from the viewport bottom, and the button lands 8px
@@ -4055,8 +4364,13 @@ dialog[data-closing]::backdrop {
     transform: translate(-8px, calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px))) scale(.77);
     transition: transform .22s var(--ease-out);
   }
+  /* Ruling 459: the press is .96 of the perched .77 (.74), where .72 was .935,
+     under the .95 floor. It runs on the button's own .1s press clock, not the
+     perch's .22s flight. Under reduced motion the dock block's
+     `transition: none` still holds: this sets a duration, not a property. */
   .dock[data-open="true"] .dock-fab:active {
-    transform: translate(-8px, calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px))) scale(.72);
+    transform: translate(-8px, calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px))) scale(.74);
+    transition-duration: .1s;
   }
   /* The return is keyed off the CLOSING state, not data-open, which is still
      "true" until the panel unmounts. */
@@ -4066,6 +4380,9 @@ dialog[data-closing]::backdrop {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  /* The drawer stops sliding. Its scrim keeps the opacity fade, because a
+     veil does not move (dialog::backdrop has no override either), so the
+     topbar and dock hand-off still waits for it (ruling 459). */
   .rail { transition: none; }
 }
 
@@ -4090,6 +4407,7 @@ dialog[data-closing]::backdrop {
   display: inline-flex; align-items: center; justify-content: center;
   background: none; border: none; padding: 1px; margin: 0; cursor: pointer;
   color: var(--faint); border-radius: var(--radius-small);
+  transition: transform .15s var(--ease-out);
 }
 .session-id-copy:hover { color: var(--fg); background: var(--tint-press); }
 .session-id-copy .ico { width: 13px; height: 13px; }
@@ -4155,6 +4473,22 @@ a.task-ref { white-space: nowrap; }
   overflow-x: auto;
 }
 .md-body pre code.mono { background: none; padding: 0; border-radius: 0; }
+/* Concentric (ruling 459): a code block that closes a message sits at its
+   card's even inset (1px border + .75rem padding = 13px) on three sides, so
+   its bottom corners take the card's radius less that inset. In a controller
+   message (--radius-card, 16) that is 3, both bottom corners: the body is full
+   width there. The top corners stay independent of the card. */
+.ctl-msg > .md-body > pre:last-child {
+  border-radius: var(--radius-button) var(--radius-button) 3px 3px;
+}
+/* In a comment card (--radius-box, 12) the inset outruns the radius, so the
+   corner is square. Bottom-left only: .tl-text caps the body at 70ch, so on a
+   desktop column the block's right edge stands well inside the card and that
+   corner nests in nothing. Not while the Show more/less toggle follows the
+   body (`.md-body:last-child`). */
+.comment-card .md-collapse > .md-body:last-child > pre:last-child {
+  border-radius: var(--radius-button) var(--radius-button) var(--radius-button) 0;
+}
 .md-body blockquote {
   margin: .5rem 0;
   padding: .125rem .75rem;
@@ -4162,6 +4496,11 @@ a.task-ref { white-space: nowrap; }
   color: var(--faint);
 }
 .md-body hr { border: none; border-top: 1px solid var(--hairline); margin: .75rem 0; }
+/* A picture in a comment, a goal or a controller message takes the image edge
+   (ruling 459): an agent's screenshot of a white page sat on the white card
+   with no boundary. An outline, inset a pixel, so it costs no layout and
+   stays inside the .md-img-btn focus ring. */
+.md-body img { outline: 1px solid var(--image-outline); outline-offset: -1px; }
 /* Wide tables scroll inside their own container — the page body never scrolls. */
 .md-table-wrap { overflow-x: auto; margin: .5rem 0; }
 .md-body table { border-collapse: collapse; font-size: .75rem; }
@@ -4242,8 +4581,15 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
     flex-direction: column;
     gap: 1rem;
     max-width: 380px;
-    animation: rise .3s var(--ease-out);
   }
+  /* Split and staggered, primary first (ruling 459): the sign-in card lands
+     at 0, then the pitch reads in order, ~100ms apart: the mark and heading,
+     the paragraph, the points. The aside rose as one block, in step with the
+     card. `backwards` holds each chunk at the keyframe's start through its
+     delay, so nothing shows before it rises. */
+  .login-aside > * { animation: rise .3s var(--ease-out) 100ms backwards; }
+  .login-aside > p { animation-delay: 200ms; }
+  .login-aside > .login-aside-points { animation-delay: 300ms; }
   .login-aside-mark {
     display: inline-grid; place-items: center;
     width: 44px; height: 44px; border-radius: var(--radius-box);
@@ -4257,8 +4603,13 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   .login-aside h2 { font-size: 1.25rem; line-height: 1.2; color: var(--fg); margin: 0; letter-spacing: var(--track-section); }
   .login-aside p { font-size: .88rem; line-height: 1.6; color: var(--muted); margin: 0; }
   .login-aside-points { list-style: none; margin: .25rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
-  .login-aside-points li { position: relative; padding-left: 1.5rem; font-size: .88rem; color: var(--muted); line-height: 1.4; }
-  .login-aside-points li::before { content: "→"; position: absolute; left: 0; color: var(--teal-dark); font-weight: 700; }
+  /* Each point leads with the set's arrow (ruling 459), not a bold Inter "→"
+     drawn by ::before: one icon library on the page, and a 1.7 stroke beside
+     400 text where the font glyph was 700. The 16px glyph (svg.ico) and the
+     .5rem gap put the text at 24px, where the 1.5rem indent put it, and the
+     .125rem nudge centres the glyph on a wrapped point's first line. */
+  .login-aside-points li { display: flex; align-items: flex-start; gap: .5rem; font-size: .88rem; color: var(--muted); line-height: 1.4; }
+  .login-aside-points .ico { margin-top: .125rem; color: var(--teal-dark); }
 }
 .login-card {
   width: min(430px, 100%);
@@ -4277,7 +4628,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .login-providers { display: flex; flex-direction: column; gap: .5rem; }
 .btn.provider { width: 100%; min-height: 44px; justify-content: center; gap: .5rem; font-size: .88rem; }
 .btn.provider.github { background: var(--fg); border-color: var(--fg); color: var(--surface); }
-.btn.provider .gmark.lg { font-size: 1rem; }
+/* Ruling 459: the base .btn hover is the border, and this face already rests at
+   a --fg border, so without the old 1px lift it had no hover at all. It moves
+   its fill toward the surface instead (the label stays near 10:1 in both themes). */
+.btn.provider.github:hover:not(:disabled, [aria-disabled="true"]) { background: color-mix(in srgb, var(--fg), var(--surface) 16%); border-color: color-mix(in srgb, var(--fg), var(--surface) 16%); }
 .login-div { display: flex; align-items: center; gap: .75rem; color: var(--placeholder); font-size: .75rem; white-space: nowrap; }
 .login-div::before, .login-div::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
 .login-form { display: flex; flex-direction: column; gap: 1rem; }
@@ -4297,8 +4651,6 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
    diagnose-table failure). */
 .login-tag { text-align: left; font-size: .75rem; color: var(--placeholder); line-height: 1.6; }
 
-.gmark { font-family: var(--font-display); font-weight: 800; font-size: .75rem; line-height: 1; color: var(--muted); }
-.gmark.lg { font-size: 1rem; }
 .idp-chip { display: inline-flex; align-items: center; gap: .375rem; padding: .125rem .5rem; border: 1px solid var(--hairline); border-radius: var(--radius-small); font-family: var(--font-mono); font-size: .69rem; color: var(--faint); flex: none; }
 .idp-chip .ico { width: 11px; height: 11px; }
 /* The affordance used to live only in :hover, so at rest the sign-in page's one
@@ -4501,7 +4853,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   color: var(--placeholder);
   transition: color .14s ease, background .14s ease, transform .14s var(--ease-out);
 }
-.pj-star:hover { background: var(--tint-press); color: var(--fg); transform: scale(1.08); }
+/* The fill is the hover, not a 1.08 grow (ruling 459): the pin is hovered on
+   every pass over the Home list, and the grow made the press a 17% swing. */
+.pj-star:hover { background: var(--tint-press); color: var(--fg); }
 .pj-star.on { color: var(--pin-star); }
 .pj-star .ico { width: 16px; height: 16px; }
 
@@ -4514,7 +4868,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   background: none;
   color: var(--muted);
   font-family: var(--font-display); font-weight: 700; font-size: .88rem;
-  transition: border-color .15s ease, color .15s ease, background .15s ease;
+  transition: border-color .15s ease, color .15s ease, background-color .15s ease, transform .15s var(--ease-out);
 }
 .pj-new:hover { border-color: var(--blue); color: var(--blue-pressed); background: color-mix(in srgb, var(--blue-soft), transparent 55%); }
 .pj-new .plus {
@@ -4522,6 +4876,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   width: 34px; height: 34px;
   border-radius: var(--radius-button);
   background: var(--tint-hover);
+  /* On the tile's own clock (ruling 459): the tile's fill eased while the
+     plus box inside it snapped. */
+  transition: background-color .15s ease;
 }
 .pj-new:hover .plus { background: color-mix(in srgb, var(--blue-soft), transparent 20%); }
 /* P13-D-19: `.hint` is now a global utility (declared next to `.mono`); the
@@ -4538,7 +4895,11 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   box-shadow: var(--shadow-card);
   transition: transform .14s var(--ease-out), border-color .14s ease;
 }
-.pj-row:hover { transform: translateX(2px); border-color: var(--border); }
+/* Ruling 459: the border is the hover. The row slid 2px right under the
+   pointer on every pass down the list, and carried the pin's hit area with it;
+   the transform leg above is the press's. The grid view's .pj-card keeps its
+   lift: a tile, not a row. */
+.pj-row:hover { border-color: var(--border); }
 .pj-row .pj-link {
   flex-direction: row; align-items: center; gap: .75rem;
   padding: .5rem 1rem;
@@ -4551,11 +4912,13 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .pj-row .pj-stats { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; }
 .pj-row .stack { flex: none; }
 .pj-row .pj-star { top: 50%; transform: translateY(-50%); right: 2.9rem; }
-.pj-row .pj-star:hover { transform: translateY(-50%) scale(1.08); }
+/* The chevron brightens with the row and stays put (ruling 459): colour is
+   the instant cue a list-row hover gets. */
 .pj-row .go {
   position: absolute; right: .8rem; top: 50%; transform: translateY(-50%);
   color: var(--placeholder);
   display: grid; place-items: center;
+  transition: color .14s ease;
 }
 .pj-row:hover .go { color: var(--fg); }
 
@@ -4736,19 +5099,34 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   text-align: left;
   transition: border-color .14s ease, box-shadow .14s ease, transform .14s var(--ease-out), background .14s ease;
 }
-.be-opt:hover { border-color: var(--border); transform: translateY(-1px); }
+/* An option that cannot be chosen (a sign-in method not configured on this
+   deployment, users-panel.tsx) lifted like a live one and read at full ink
+   (ruling 459): it now holds still at the house disabled step. `:where()`
+   keeps the hover at `.on`'s weight, so the selected option's blue edge
+   survives the pointer. The lift stays: the picker is chosen once, not
+   hovered all day. */
+.be-opt:hover:where(:not(:disabled)) { border-color: var(--border); transform: translateY(-1px); }
 .be-opt.on { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); background: color-mix(in srgb, var(--blue-soft), transparent 68%); }
+.be-opt:disabled { opacity: .45; cursor: not-allowed; }
 .be-opt .agent-glyph { width: 32px; height: 32px; }
 .be-opt .agent-glyph .ico { width: 16px; height: 16px; }
 .be-opt .bnm { display: block; font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
-.be-opt .bcheck { margin-left: auto; display: grid; place-items: center; color: var(--blue-pressed); opacity: 0; transform: scale(.8); transition: opacity .14s ease, transform .14s var(--ease-out); }
-.be-opt.on .bcheck { opacity: 1; transform: scale(1); }
+/* The picked option's check trades in as the copy glyph's does (ruling 459,
+   ruling 451(c)'s icon swap for a 15px glyph): from scale .25 behind a 2px
+   blur over .2s. It grew from .8 with no blur on plain ease, so the same
+   check moved one way here and another on a copy control. */
+.be-opt .bcheck { margin-left: auto; display: grid; place-items: center; color: var(--blue-pressed); opacity: 0; transform: scale(.25); filter: blur(2px); transition: opacity .2s var(--ease-out), transform .2s var(--ease-out), filter .2s var(--ease-out); }
+.be-opt.on .bcheck { opacity: 1; transform: none; filter: none; }
 .be-opt .bcheck .ico { width: 15px; height: 15px; }
 .be-pick.three .be-opt { min-width: 140px; padding: .5rem .75rem; }
 .be-ic { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: var(--radius-button); background: var(--tint-hover); color: var(--muted); }
 .be-ic .ico { width: 15px; height: 15px; }
 
-.dom-ic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--radius-button); background: var(--tint-hover); border: 1px solid var(--hairline); }
+/* The domain row's Google mark is the set's glyph (ruling 459), so its box
+   names the colour and size the typed "G" carried: --muted, as .be-ic, and a
+   14px glyph in the 26px box, as .agent-glyph. */
+.dom-ic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--radius-button); background: var(--tint-hover); border: 1px solid var(--hairline); color: var(--muted); }
+.dom-ic .ico { width: 14px; height: 14px; }
 
 /* ---------- KB file browser ---------- */
 /* P14-KM-08: a text doc row opens the in-place editor. */
@@ -4790,11 +5168,16 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   border-radius: var(--radius-small);
   background: var(--surface);
   color: var(--muted);
-  box-shadow: 0 1px 2px var(--tint-press);
+  /* Black, not --tint-press (ruling 459): an ink mix is a white glow under
+     the button on dark. The same 8% in light; on dark it fades into the
+     ground and the border keeps the edge. */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
   transition: border-color .12s ease, color .12s ease, background .12s ease, transform .12s var(--ease-out);
 }
 .fm-act .ico { width: 13px; height: 13px; }
-.fm-act:hover { border-color: var(--blue); color: var(--blue-pressed); background: color-mix(in srgb, var(--blue-soft), transparent 40%); transform: translateY(-1px); }
+/* The colour is the hover, not a 1px lift (ruling 459): the KB rows' actions
+   are always drawn and hovered on every pass. */
+.fm-act:hover { border-color: var(--blue); color: var(--blue-pressed); background: color-mix(in srgb, var(--blue-soft), transparent 40%); }
 .fm-act.del { color: var(--danger); border-color: color-mix(in srgb, var(--danger), transparent 70%); }
 .fm-act.del:hover { border-color: var(--danger); background: color-mix(in srgb, var(--danger), transparent 92%); color: var(--danger); }
 .fm-newinp { border: 1px solid var(--blue); border-radius: var(--radius-small); padding: .25rem .5rem; font-size: .75rem; background: var(--surface); color: var(--fg); outline: none; box-shadow: 0 0 0 3px var(--focus-wash); width: 200px; font-family: var(--font-mono); }
@@ -4907,17 +5290,44 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
      .99  SURFACES — cards, rows, tiles. The same 4% on a 340px card would move
           it 13px, which reads as the card jumping rather than depressing.
    Two steps because perceived travel, not the ratio, is what should be
-   constant. Anything below .95 feels exaggerated at control size. */
-.card:active, .pj-new:active { transform: scale(.99); }
-.opt:active, .ag-item:active, .rq-row:active, .pcap-row:active,
-.be-opt:active, .org-tile.go:active, .pj-card:active { transform: translateY(0) scale(.99); }
-.deploy-row:active, .pj-row:active { transform: translateX(0) scale(.99); }
-.seg button:active:not(:disabled), .fchip:active:not(:disabled), .pick-chip:active, .tl-filter button:active, .cap-seg button:active:not(:disabled), .mini-seg button:active:not(:disabled), .stage-menu-btn:active:not(:disabled), .own-btn:active, .rev-add:active, .handoff-chip:active, .keybtn:active, .goal-edit-btn:active { transform: scale(.96); }
+   constant. Anything below .95 feels exaggerated at control size.
+   Ruling 459 holds the rest of the rule:
+   - A press is a transition, so a release mid-press eases back. Every
+     selector here has a `transform` leg in its own transition list; fourteen
+     of them had none and snapped to the step in one frame.
+   - Every control that presses is in this block. Twenty had been missed (the
+     hamburger beside the bell that pressed, "Edit details" beside "Edit goal",
+     the run selector beside the stage trigger, the calendar, the rail's
+     project switcher, the controller's examples and threads).
+   - No press goes deeper than .96: the KB row action (.94), the pin (.9,
+     a 17% swing from its old hover grow) and the dock button (.94) had
+     drifted back below the floor.
+   - The press belongs to the element pressed. `:active` also matches every
+     ancestor, so a container whose action is a child link dips only when THAT
+     link is pressed: not the board's list row (a div holding two links and
+     the Move button), not a project card or row whose pin was pressed.
+   - Only a control that can act presses. A refused (`aria-disabled`) or
+     disabled one holds still, and a locked grant chip is a <span>, not a
+     control (`button.pick-chip`).
+   - "Show more" opts out (`static`, in the skill's terms): it is a link-styled
+     .keybtn inside a sentence, and a sentence does not press.
+   - Reduced motion keeps the press: a 1-4% scale in place is brief feedback
+     at the pointer, not travel, and snapping to it would be the harsher of
+     the two (better-accessibility, "what to disable vs reduce"). */
+a.card:active, .pj-new:active { transform: scale(.99); }
+.opt:active:where(:not(:disabled, [aria-disabled="true"])), .ag-item:active, .rq-row:active, .pcap-row:active,
+.be-opt:active:not(:disabled), .org-tile.go:active, .pj-card:has(> .pj-link:active) { transform: translateY(0) scale(.99); }
+.deploy-row:active:not(:disabled), .pj-row:has(> .pj-link:active) { transform: scale(.99); }
+.ag-newbtn:active, .live-row:active, .ctl-example:active:not(:disabled), .ctl-conv:active, .project-switch:active, .ntf-item:active:not([aria-disabled="true"]), .attach-file:active, .attach-thumb:active, .tl-attach-thumb:active, button.top-search:active { transform: scale(.99); }
+.seg button:active:not(:disabled), .fchip:active:not(:disabled), button.pick-chip:active:not(:disabled), .tl-filter button:active, .cap-seg button:active:not(:disabled), .mini-seg button:active:not(:disabled), .stage-menu-btn:active:not(:disabled), .own-btn:active, .rev-add:active:not(:disabled), .handoff-chip:active:not(:disabled), .keybtn:active, .goal-edit-btn:active, .meta-edit-btn:active { transform: scale(.96); }
 .nav-item:active { transform: scale(.96); }
-.rev-x:active, .stg-x:active, .own-x:active, .tag button:active, .col-head .add:active, .session-id-copy:active { transform: scale(.96); }
-.fm-act:active { transform: translateY(0) scale(.94); }
-.pj-star:active { transform: scale(.9); }
-.pj-row .pj-star:active { transform: translateY(-50%) scale(.9); }
+.rev-x:active:not(:disabled), .stg-x:active:not(:disabled), .own-x:active, .col-head .add:active, .session-id-copy:active { transform: scale(.96); }
+.rsel-btn:active, .cal-nav:active, .cal-day:active, button.kbd:active, .home-user:active, .tl-attach-chip:active, .board-orphan-key:active { transform: scale(.96); }
+.datepick-clear:active { transform: translateY(-50%) scale(.96); }
+.fm-act:active { transform: scale(.96); }
+.pj-star:active { transform: scale(.96); }
+.pj-row .pj-star:active { transform: translateY(-50%) scale(.96); }
+.keybtn.act-toggle:active { transform: none; }
 
 /* OS-level reduced motion: entrances collapse to a quick fade (movement is
    what nauseates; opacity still aids comprehension). Ruling 148(c): this OS
@@ -4926,14 +5336,21 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .user-menu, .user-menu[data-side="top"], .ntf-pop, .rsel-menu, .own-menu, .stage-menu-pop, .datepick-pop,
   .confirm-card, .modal-card, .page-overlay, .toast, .login-card,
   .cap-mbody { animation: fade-in .12s ease; }
+  /* The login pitch fades with the card, all at once (ruling 459): it rose
+     10px for everyone. The p and points selectors are repeated so the
+     shorthand's zero delay beats their animation-delay, or those chunks would
+     show, blank and fade in. */
+  .login-aside > *, .login-aside > p, .login-aside > .login-aside-points { animation: fade-in .12s ease; }
   .toast.leaving { transform: none; transition: opacity .12s ease; }
   /* the "agent working" dots pulse forever; under the OS preference they hold
      still — the adjacent text keeps carrying the state (same treatment as
      .stat-dot.warming). */
   .wait-tag .working, .home-hero .sub .working, .pj-stats .running .working,
-  .chip .working, .rdot.running { animation: none; }
+  .chip .working, .ag-active .working, .ag-running .working, .rdot.running { animation: none; }
   /* keep centered dialogs centered while they fade out */
   dialog[data-closing] { transform: translate(-50%, -50%); transition: opacity .12s ease; }
+  /* the picker's check trades by fade alone, as the copy glyph does (ruling 459) */
+  .be-opt .bcheck, .be-opt.on .bcheck { transform: none; filter: none; transition: opacity .12s ease; }
 }
 
 /* Reduced transparency: frost the translucent chrome solid. */
@@ -5207,6 +5624,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   background: var(--surface); color: var(--fg);
   border: 1px solid var(--border-control); border-radius: var(--radius-button);
   padding: .35rem .5rem; font: inherit; font-size: .75rem;
+  /* A click sends the example at once, so the .99 press is the only answer
+     before the transcript changes (ruling 459). */
+  transition: transform .15s var(--ease-out);
 }
 .ctl-example:hover:not(:disabled) { border-color: var(--blue); }
 .ctl-example:disabled { opacity: .5; cursor: default; }
@@ -5592,8 +6012,26 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .log-line.wait .lx { white-space: normal; }
 .log-line.wait.lw-live .lx { color: #c9d1e3; }
 .log-wait { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .375rem; max-width: 100%; }
-.log-wait .log-orb { flex: none; }
-.log-line.wait .ico { flex: none; width: 14px; height: 14px; color: #8a95b1; }
+/* The orb and the clock share one 20px cell and trade in place as the wait
+   ends (ruling 459, ruling 451(c)'s icon swap: scale .25 behind a 2px blur
+   over .2s). React swapped the 20px canvas for the 14px clock in one frame,
+   so the tool chip beside it jumped 6px left just as the reader watched it.
+   The cell is 20px on every row, live or never, so the chips line up down
+   the column. Only the row's own clock is sized here, a direct child of the
+   cell (ruling 459): a bare descendant `.ico` also reached the Viberr chip's
+   V mark, at the same specificity as `.log-chip .lc-mark .ico` and later, so
+   a wait row drew the mark 14px and grey on its lavender tile (about 2:1)
+   where the tool_use row above drew it 9px in the tile's dark ink. */
+.lw-glyph { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; }
+.lw-glyph > * { grid-area: 1 / 1; transition: opacity .2s var(--ease-out), transform .2s var(--ease-out), filter .2s var(--ease-out); }
+.lw-glyph > .ico { width: 14px; height: 14px; color: #8a95b1; }
+.lw-glyph[data-live] > .ico,
+.lw-glyph:not([data-live]) > .log-orb { opacity: 0; transform: scale(.25); filter: blur(2px); }
+@media (prefers-reduced-motion: reduce) {
+  .lw-glyph > *,
+  .lw-glyph[data-live] > .ico,
+  .lw-glyph:not([data-live]) > .log-orb { transform: none; filter: none; transition: opacity .12s ease; }
+}
 /* Ruling 366(e): the counts that climb while a run waits roll their digits
    (`@number-flow/react`). Tabular, so a tick never shifts the words beside it;
    the digit mask trimmed to the row's line height. */
@@ -5711,15 +6149,24 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: .5rem;
 }
+/* The picture is inset .25rem in its tile and wears its own edge (ruling 459).
+   Flush, the tile's tinted hairline stood in for the image's edge on three
+   sides and the fourth had none, so a white page ran straight into the white
+   caption; an outline on the flush image would have doubled the hairline and
+   been clipped at the rounded corners. 8px inside 12 at a 4px inset is
+   concentric; the caption keeps its old distances (the inset plus its own
+   padding). */
 .attach-thumb {
   display: flex;
   flex-direction: column;
+  padding: .25rem;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-box);
   overflow: hidden;
   background: var(--surface);
   text-decoration: none;
   color: var(--fg);
+  transition: transform .15s var(--ease-out);
 }
 .attach-thumb:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
 .attach-thumb img {
@@ -5729,13 +6176,16 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   object-fit: cover;
   object-position: top;
   background: var(--tint-hover);
+  border-radius: var(--radius-button);
+  outline: 1px solid var(--image-outline);
+  outline-offset: -1px;
 }
 .attach-meta {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: .5rem;
-  padding: .375rem .5rem;
+  padding: .375rem .25rem .125rem;
   min-width: 0;
 }
 .attach-name {
@@ -5798,13 +6248,14 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   background: var(--surface);
   text-decoration: none;
   color: var(--fg);
+  transition: transform .15s var(--ease-out);
 }
 .attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
 .attach-file svg { width: 15px; height: 15px; color: var(--muted); flex: none; }
 .attach-file .attach-name { flex: 1; }
 /* Who put the file there, from the producing event (attachments panel). */
 .attach-by { font-size: .69rem; color: var(--muted); }
-.attach-thumb .attach-by { padding: 0 .5rem .375rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-thumb .attach-by { padding: .25rem .25rem .125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attach-file .attach-by { flex: none; }
 /* Files an event produced, as chips under the message (timeline). */
 .tl-attach { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: .5rem; }
@@ -5813,22 +6264,33 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   padding: .25rem .5rem; border: 1px solid var(--hairline); border-radius: var(--radius-chip);
   background: var(--surface); text-decoration: none; color: var(--fg);
   font-family: var(--font-mono); font-size: .75rem;
+  transition: transform .15s var(--ease-out);
 }
 .tl-attach-chip:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
 .tl-attach-chip svg { width: 13px; height: 13px; color: var(--muted); flex: none; }
+/* The file glyph leads: its side is the text side less 2px (ruling 459, the
+   .btn recipe). */
+.tl-attach-chip:has(> .ico:first-child) { padding-left: .375rem; }
 .tl-attach-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* An image the run captured renders as the picture on the producing message
    (owner ask 2026-08-20) — the panel's .attach-thumb treatment at timeline
-   scale. Capped small: the timeline is a feed, the panel is the gallery. */
+   scale. Capped small: the timeline is a feed, the panel is the gallery.
+   The same inset picture with its own edge (ruling 459), so the tile takes the
+   panel tile's 12 for the 8px picture inside it. */
 .tl-attach-thumb {
   display: inline-flex; flex-direction: column; max-width: 240px;
-  border: 1px solid var(--hairline); border-radius: var(--radius-button);
+  padding: .25rem;
+  border: 1px solid var(--hairline); border-radius: var(--radius-box);
   background: var(--surface); overflow: hidden; text-decoration: none; color: var(--fg);
+  transition: transform .15s var(--ease-out);
 }
 .tl-attach-thumb:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
-.tl-attach-thumb img { display: block; width: 100%; max-height: 150px; object-fit: cover; object-position: top; }
+.tl-attach-thumb img {
+  display: block; width: 100%; max-height: 150px; object-fit: cover; object-position: top;
+  border-radius: var(--radius-button); outline: 1px solid var(--image-outline); outline-offset: -1px;
+}
 .tl-attach-thumb .nm {
-  padding: .25rem .5rem; font-family: var(--font-mono); font-size: .69rem; color: var(--muted);
+  padding: .25rem .25rem 0; font-family: var(--font-mono); font-size: .69rem; color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -5856,6 +6318,10 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 }
 .attach-broken svg { width: 20px; height: 20px; color: var(--muted); }
 .attach-broken-note { font-size: .69rem; }
+/* In a tile the placeholder fills the inset picture's slot, so it takes the
+   picture's corner (ruling 459). The inline markdown one keeps its own box. */
+.attach-thumb .attach-broken,
+.tl-attach-thumb .attach-broken { border-radius: var(--radius-button); }
 /* The lightbox counterpart: a full-size "could not load" panel in place of the
    image, keeping the foot's name + "Open original" + Close. */
 .lightbox-card .lightbox-broken {
@@ -5886,9 +6352,17 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   width: auto; max-width: min(1200px, calc(100vw - 2rem));
   padding: .5rem;
 }
+/* Concentric with the dialog (ruling 459): the picture, or the code reader
+   below, is the card's first child at its even .5rem inset, so its corner is
+   the card's 22 (--radius-panel) less the 1px border and the 8px padding, 13;
+   --radius-box (12) is the scale's nearest step. At --radius-button (8) the
+   gap at the top corners narrowed from 8px on the edges to ~6px.
+   The image edge (ruling 459): in light --bg and --surface are both white, so
+   a white screenshot met the dialog with no boundary. */
 .lightbox-card .lightbox-img {
   display: block; max-width: 100%; max-height: 76vh; object-fit: contain;
-  border-radius: var(--radius-button); background: var(--bg);
+  border-radius: var(--radius-box); background: var(--bg);
+  outline: 1px solid var(--image-outline); outline-offset: -1px;
 }
 .lightbox-card .lightbox-foot {
   display: flex; align-items: center; gap: .5rem;
@@ -5908,7 +6382,8 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   font-family: var(--font-mono); font-size: .75rem; line-height: 1.55;
   white-space: pre-wrap; overflow-wrap: anywhere;
   color: var(--fg); background: var(--bg);
-  border: 1px solid var(--hairline); border-radius: var(--radius-button);
+  /* The same inset as .lightbox-img, so the same concentric step (ruling 459). */
+  border: 1px solid var(--hairline); border-radius: var(--radius-box);
 }
 .lightbox-card .lightbox-text-status {
   padding: .5rem .25rem 0; font-size: .75rem; color: var(--muted);
@@ -6150,6 +6625,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   text-decoration: none;
   color: var(--fg);
   border: 1px solid transparent;
+  transition: transform .15s var(--ease-out);
 }
 .ctl-conv:hover { background: var(--tint-hover); }
 .ctl-conv.on {
@@ -6188,18 +6664,9 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   font-size: .75rem;
 }
 .ctl-goal-progress { margin-left: auto; color: var(--muted); white-space: nowrap; }
-/* The same chevron the capability disclosure draws (`.cap-advisory`). */
-.ctl-goal-line::after {
-  content: "";
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-right: 1.5px solid var(--muted);
-  border-bottom: 1.5px solid var(--muted);
-  transform: rotate(45deg) translate(-2px, -2px);
-  transition: transform .14s var(--ease-out);
-}
-.ctl-goal[open] .ctl-goal-line::after { transform: rotate(225deg) translate(-1px, -1px); }
+/* The chain head's caret is the shared disclosure chevron (`.disc-chev`,
+   ruling 459), in the head line's quiet colour. */
+.ctl-goal-line .disc-chev { color: var(--muted); }
 .ctl-goal-title { font-size: .88rem; line-height: 1.35; }
 .ctl-goal-id { color: var(--muted); font-size: .75rem; }
 .ctl-links {
@@ -6240,12 +6707,6 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   border-radius: var(--radius-small);
 }
 .ctl-goal-more > summary::-webkit-details-marker { display: none; }
-.ctl-goal-more > summary::after {
-  content: ""; width: 6px; height: 6px;
-  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg) translate(-2px, -2px);
-}
-.ctl-goal-more[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
 .ctl-goal-more > summary:hover { color: var(--fg); }
 .ctl-goal-desc { margin: .375rem 0 0; font-size: .75rem; }
 .ctl-goal-history {
@@ -6269,12 +6730,6 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   border-radius: var(--radius-small);
 }
 .ctl-link-waits > summary::-webkit-details-marker { display: none; }
-.ctl-link-waits > summary::after {
-  content: ""; width: 6px; height: 6px;
-  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg) translate(-2px, -2px);
-}
-.ctl-link-waits[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
 .ctl-link-waits > summary:hover { color: var(--fg); }
 .ctl-wait-dead { color: var(--danger); }
 /* One grid for the list and a subgrid per row, so the keys and titles line up
@@ -6311,9 +6766,6 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 }
 /* Ruling 419(c): the reason a cancel or a skip records, under its consequence. */
 .ctl-confirm-reason { margin-top: 1rem; }
-@media (prefers-reduced-motion: reduce) {
-  .ctl-goal-line::after { transition: none; }
-}
 /* Ruling 419(d): a touch screen has no key to name. */
 @media (pointer: coarse) {
   .kbd-hint { display: none; }
@@ -6357,6 +6809,10 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   right: 20px;
   bottom: max(20px, env(safe-area-inset-bottom));
   z-index: 55;
+  /* Back only once the drawer's veil has faded (ruling 459): at 55 it sits
+     above the scrim (44), so returning in the close's first frame showed it
+     un-veiled over the fading page. */
+  transition: visibility 0s linear .15s;
 }
 /* Review G6: at ≤720px the rail is an overlay (45) behind a scrim (44). The
    dock is not removed there — R19-12 — it simply drops below the scrim, so a
@@ -6366,7 +6822,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    re-stacked: the trigger also leaves the tab order, which `inert` on the
    page cannot do for it, and a tap in that corner reaches the scrim. A state
    selector, not a width query, so R19-12 is untouched. */
-body[data-rail-open="true"] .dock { visibility: hidden; }
+body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 /* The topbar is a 60 so its popovers beat the dock, which also put it above
    the mobile drawer's scrim (44). The page behind an open drawer is inert, so
    the topbar has no business painting over the drawer's head either. */
@@ -6386,7 +6842,8 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 @media (hover: hover) and (pointer: fine) {
   .dock-fab:hover { box-shadow: var(--shadow-lift); border-color: var(--agent); }
 }
-.dock-fab:active { transform: scale(.94); }
+/* The control step (ruling 459); .94 was under the .95 floor. */
+.dock-fab:active { transform: scale(.96); }
 /* The working dot rides the button's top-right edge while a turn is in flight. */
 .dock-fab .live-dot { position: absolute; top: 0; right: 0; }
 /* O39-d: a controller reply the viewer has not seen. Still, where the working
@@ -6405,7 +6862,8 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   height: min(640px, calc(100dvh - 96px));
   display: flex; flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--border);
+  /* The ring is the edge (ruling 459), as .confirm-card. */
+  border: 1px solid transparent;
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-pop);
   overflow: hidden;
@@ -6475,7 +6933,16 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 }
 .dock-threads .ctl-conv { width: 100%; text-align: left; }
 .dock-threads .ctl-conv-list { max-height: none; }
-.dock-composer { flex: none; border-top: 1px solid var(--hairline); padding: .5rem .75rem .75rem; }
+/* Concentric with the panel's bottom corners (ruling 459): the composer box is
+   the panel's last child, so at an even .375rem inset its 16 (--radius-card)
+   + 6 + the panel's 1px border = 23, a pixel off --radius-panel (22), the
+   nearest step (the board lane rounds 20 to 22 the same way). The old .75rem
+   made it 29 and the gap swelled at both corners. The composer keeps its own
+   inner step: the 8px Send button sits 8px from its bottom edge. The strip
+   stands 6px wider than the replies above it; its full-width hairline makes it
+   a footer, not a misaligned column. The phone sheet has square bottom corners
+   and keeps the 12px gutter (the 720px block). */
+.dock-composer { flex: none; border-top: 1px solid var(--hairline); padding: .5rem .375rem .375rem; }
 .dock-composer .ctl-composer textarea { min-height: 44px; font-size: .88rem; }
 /* The full page's two ruling-121 chips: where a message came from, and the
    task a thread is anchored to. */
@@ -6887,6 +7354,12 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 .own-menu.swatch-menu {
   min-width: 0; display: grid; grid-template-columns: repeat(5, 22px); gap: 8px;
   padding: .625rem;
+  /* Concentric (ruling 459): 11 (the 22px round swatch) + 10 (the .625rem
+     inset) + 1 (the border) = 22, --radius-panel exactly, so a corner swatch
+     sits the same 10px from the arc as from the sides; at the menu's 12 it
+     stood ~14px off on the diagonal. The generic .own-menu keeps --radius-box:
+     only this even-inset grid of circles wants the wider corner. */
+  border-radius: var(--radius-panel);
 }
 .swatch {
   width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%;
@@ -6932,8 +7405,10 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    holds. The live-run panel takes the swap only, because its spinner and dot
    already say it is alive. The band is a copy of the words on ::before,
    clipped to the glyphs, so the real text keeps its colour and selection. The
-   `/ ""` alt text stops a screen reader reading the sentence twice. */
-.run-phase .ph, .run-phase .step, .ctl-working-step { animation: swap-in .15s var(--ease-out); }
+   `/ ""` alt text stops a screen reader reading the sentence twice.
+   Ruling 459: the words on screen when the page, dock or strip opens stand
+   still (`data-fresh`, useFreshLine); only a line that replaces them rises. */
+.run-phase .ph[data-fresh], .run-phase .step[data-fresh], .ctl-working-step[data-fresh] { animation: swap-in .15s var(--ease-out); }
 .ctl-working-text { position: relative; }
 .ctl-working-text::before {
   content: attr(data-text) / "";
@@ -6951,12 +7426,22 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    .2s where the recipe says .25s, for a 13-15px glyph). The word "Copied"
    rises in with the check (alone, on the console's word-only control); the
    resting word returns at once. An inline-block takes no underline from its
-   parent, so it inherits the console control's hover underline itself. */
-.copy-glyph { display: inline-grid; flex: none; }
-.copy-glyph > .ico { grid-area: 1 / 1; transition: opacity .2s var(--ease-out), transform .2s var(--ease-out), filter .2s var(--ease-out); }
-.copy-glyph > .ico + .ico,
-.copy-glyph[data-copied] > .ico:first-child { opacity: 0; transform: scale(.25); filter: blur(2px); }
-.copy-glyph[data-copied] > .ico + .ico { opacity: 1; transform: none; filter: none; }
+   parent, so it inherits the console control's hover underline itself.
+   Ruling 459: the same cell (GlyphSwap) now serves every glyph that trades
+   with its control's state: a busy button's mark for the spinning loader,
+   Run's shield or bolt for Schedule's clock, Archive's lock for Restore's
+   arrow. Those swapped in one frame. The trade moves on the individual
+   `scale` property, not `transform`, because `.ico.spin` rotates the loader
+   through `transform` and an animation outranks any declaration: on
+   `transform` the loader would neither shrink nor grow. `scale` composes with
+   the turn. A spinner resting hidden holds still (0,3,0 over .ico.spin's
+   0,2,0), so one that leaves freezes where it stands. */
+.copy-glyph { display: inline-grid; place-items: center; flex: none; }
+.copy-glyph > * { grid-area: 1 / 1; transition: opacity .2s var(--ease-out), scale .2s var(--ease-out), filter .2s var(--ease-out); }
+.copy-glyph > :last-child,
+.copy-glyph[data-copied] > :first-child { opacity: 0; scale: .25; filter: blur(2px); }
+.copy-glyph[data-copied] > :last-child { opacity: 1; scale: 1; filter: none; }
+.copy-glyph:not([data-copied]) > .spin { animation-play-state: paused; }
 .copy-done { display: inline-block; text-decoration: inherit; animation: swap-in .15s var(--ease-out); }
 
 /* (f) A sign-in step that completes draws its check ("Success check", sized to
@@ -6992,13 +7477,13 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    blurs, sweeps, draws or shakes. The check is drawn whole, and the refusal's
    own sentence carries the news. */
 @media (prefers-reduced-motion: reduce) {
-  .run-phase .ph, .run-phase .step, .ctl-working-step, .copy-done,
+  .run-phase .ph[data-fresh], .run-phase .step[data-fresh], .ctl-working-step[data-fresh], .copy-done,
   .signin-step[data-state="done"] .signin-mark .ico { animation: fade-in .12s ease; }
   .ctl-working-text::before { display: none; }
-  .copy-glyph > .ico,
-  .copy-glyph > .ico + .ico,
-  .copy-glyph[data-copied] > .ico:first-child,
-  .copy-glyph[data-copied] > .ico + .ico { transform: none; filter: none; transition: opacity .12s ease; }
+  .copy-glyph > *,
+  .copy-glyph > :last-child,
+  .copy-glyph[data-copied] > :first-child,
+  .copy-glyph[data-copied] > :last-child { scale: 1; filter: none; transition: opacity .12s ease; }
   .signin-step[data-state="done"] .signin-mark .ico path { animation: none; }
   .refused { animation: none; }
 }
@@ -7044,6 +7529,9 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
     --border: var(--border-control);
     --hairline: var(--border-control);
     --ring: var(--border-control);
+    /* Ruling 459: the floating surfaces' only edge is this ring, so it takes
+       the control border too, or modals and menus lose their frame here. */
+    --shadow-ring: 0 0 0 1px var(--border-control);
     --faint: var(--muted);
     --placeholder: var(--muted);
   }

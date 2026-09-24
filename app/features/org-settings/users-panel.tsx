@@ -40,7 +40,8 @@ function IdpChip({ idp }: { idp: string }) {
   if (idp === "google") {
     return (
       <span className="idp-chip">
-        <span className="gmark">G</span>Google
+        <Icon name="google" />
+        Google
       </span>
     );
   }
@@ -82,6 +83,8 @@ function InviteModal({
   const [name, setName] = useState("");
   const [role, setRole] = useState<"admin" | "member">("member");
   const [err, setErr] = useState<string | null>(null);
+  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  const [done, setDone] = useState(false);
   const push = useToast();
   const action = useOrgAction({
     onResult: (d: OrgActionData) => {
@@ -96,7 +99,7 @@ function InviteModal({
           tempPassword: d.tempPassword,
         });
       }
-      onClose();
+      setDone(true);
     },
   });
 
@@ -111,8 +114,9 @@ function InviteModal({
         : name.trim().length > 1 && email.includes("@"));
 
   const submit = () => {
-    // Enter in a field reaches this directly, so the busy guard lives here too.
-    if (!canSave || action.busy) return;
+    // Enter in a field reaches this directly, so the busy guard lives here
+    // too, and so does the one for a save that landed and is leaving.
+    if (!canSave || action.busy || done) return;
     setErr(null);
     if (idp === "github") {
       action.submit({
@@ -144,6 +148,7 @@ function InviteModal({
       icon={<Icon name="user" />}
       title="Allow access"
       busy={action.busy}
+      done={done}
       sub="Whitelist who can sign in: no invite emails, access on first login"
       onClose={onClose}
       canSave={canSave}
@@ -203,7 +208,7 @@ function InviteModal({
             }
           >
             <span className="be-ic">
-              <span className="gmark lg">G</span>
+              <Icon name="google" />
             </span>
             <span className="bnm">
               Google{providers.google ? "" : " · off"}
@@ -346,6 +351,8 @@ function EditUserModal({
   const [githubHandle, setGithubHandle] = useState(user.githubHandle ?? "");
   const [err, setErr] = useState<string | null>(null);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
+  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  const [done, setDone] = useState(false);
   const push = useToast();
 
   const saveAction = useOrgAction({
@@ -355,7 +362,7 @@ function EditUserModal({
         return;
       }
       if (d.toast) push(d.toast);
-      onClose();
+      setDone(true);
     },
   });
   const resetAction = useOrgAction({
@@ -403,6 +410,7 @@ function EditUserModal({
       icon={<Icon name="user" />}
       title={"Edit " + user.name}
       busy={saveAction.busy}
+      done={done}
       sub={
         isLocal
           ? "Local account"
@@ -578,7 +586,8 @@ function DisableUserDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  const { ref, close, commit } = useDialog(onCancel);
   return (
     <dialog
       ref={ref}
@@ -598,7 +607,7 @@ function DisableUserDialog({
         <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
+        <button type="button" className="btn danger" onClick={() => commit(onConfirm)}>
           Disable
         </button>
       </div>
@@ -685,7 +694,7 @@ export function UsersPanel({
           {domains.map((d) => (
             <div className="member-row" key={d.id}>
               <span className="dom-ic">
-                <span className="gmark">G</span>
+                <Icon name="google" />
               </span>
               <span className="member-main">
                 <div className="nm">{d.domain}</div>
@@ -843,7 +852,6 @@ export function UsersPanel({
           onCancel={() => setDisabling(null)}
           onConfirm={() => {
             rowAction.submit({ intent: "user-disable", userId: disabling.id });
-            setDisabling(null);
           }}
         />
       )}
@@ -855,7 +863,6 @@ export function UsersPanel({
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             rowAction.submit({ intent: "user-remove", userId: confirm.item.id });
-            setConfirm(null);
           }}
         />
       )}
@@ -867,7 +874,6 @@ export function UsersPanel({
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             rowAction.submit({ intent: "domain-remove", domainId: confirm.item.id });
-            setConfirm(null);
           }}
         />
       )}

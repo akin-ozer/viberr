@@ -371,7 +371,7 @@ function SignInSteps({
                 <>
                   <a className="btn sm" href={url} target="_blank" rel="noreferrer">
                     Open sign-in page
-                    <Icon name="ext" />
+                    <Icon name="ext" className="ico-end" />
                   </a>
                   {/* Ruling 294 (owner's ask): the LINK, copyable. Opening it
                       here only works when the browser reading this page is the
@@ -398,7 +398,7 @@ function SignInSteps({
               ) : (
                 <button type="button" className="btn sm" disabled>
                   Open sign-in page
-                  <Icon name="ext" />
+                  <Icon name="ext" className="ico-end" />
                 </button>
               )}
               {host ? <span className="fine mono signin-host">{host}</span> : null}

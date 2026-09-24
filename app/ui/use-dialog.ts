@@ -10,12 +10,19 @@ import { pinLivePose } from "./live-pose";
  * restore on unmount, keeping React's imperative autoFocus (showModal
  * would otherwise move focus off it), and an animated close — `close()`
  * marks the dialog with [data-closing] so CSS can play the exit transition
- * (reverse of pop-center), then invokes onClose to unmount.
+ * (a softer, shorter pop-center in reverse), then invokes onClose to unmount.
  *
- * Usage: const { ref, close } = useDialog(onClose);
+ * Usage: const { ref, close, commit } = useDialog(onClose);
  *        <dialog className="modal-card" ref={ref}> … <button onClick={close}>
- * Escape and backdrop clicks route through the same animated close. A caller
- * with an inner layer (store-browser's new-folder row) passes
+ *        … <button onClick={() => commit(onConfirm)}>
+ * Escape and backdrop clicks route through the same animated close, and so
+ * does a primary action (ruling 459): `commit(fn)` runs fn once, then plays
+ * the exit Cancel plays, which calls onClose. So onClose runs after a confirm
+ * too and must stay a pure state reset (`setX(null)`), never a revert or a
+ * recorded cancellation; and the caller's fn must not unmount the dialog
+ * itself, or the card vanishes in one frame. A close that navigates away or
+ * hands off to another dialog stays instant on purpose (the caller unmounts
+ * it). A caller with an inner layer (store-browser's new-folder row) passes
  * onDismissRequest: return true to consume the Escape/backdrop dismiss
  * without closing (no exit animation plays); explicit close() always closes.
  */
@@ -79,6 +86,19 @@ export function useDialog(
     const fallback = setTimeout(finish, seconds * 1000 + 50);
   }, []);
 
+  // The primary's close (ruling 459): run the commit once, then play the same
+  // exit Cancel plays. [data-closing]'s pointer-events: none stops only the
+  // pointer, so a second Enter on the still-focused button during the exit
+  // would commit twice; it is dropped here.
+  const commit = useCallback(
+    (action: () => void) => {
+      if (dialogRef.current?.dataset.closing !== undefined) return;
+      action();
+      close();
+    },
+    [close],
+  );
+
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -135,5 +155,5 @@ export function useDialog(
     };
   }, [close]);
 
-  return { ref: dialogRef, close };
+  return { ref: dialogRef, close, commit };
 }

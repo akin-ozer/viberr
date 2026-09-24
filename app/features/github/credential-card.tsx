@@ -178,7 +178,8 @@ function RemoveCredentialDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  const { ref, close, commit } = useDialog(onCancel);
   return (
     <dialog
       ref={ref}
@@ -199,7 +200,7 @@ function RemoveCredentialDialog({
         <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
+        <button type="button" className="btn danger" onClick={() => commit(onConfirm)}>
           Remove credential
         </button>
       </div>
@@ -263,10 +264,7 @@ export function CredentialManageActions({
       {confirming && (
         <RemoveCredentialDialog
           onCancel={() => setConfirming(false)}
-          onConfirm={() => {
-            setConfirming(false);
-            onClear();
-          }}
+          onConfirm={onClear}
         />
       )}
     </div>

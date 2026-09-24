@@ -19,6 +19,7 @@ import { resolveOAuthProvider } from "~/server/auth/oauth-providers.server";
 import { serializeThemePreference } from "~/server/theme/theme-cookie.server";
 import { MIN_PASSWORD_LENGTH } from "~/shared/auth/password-policy";
 import { CsrfInput } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 
 /**
@@ -358,10 +359,7 @@ function ProviderButtons({
             : "GitHub OAuth isn't configured on this deployment"
         }
       >
-        <Icon
-          name={busy === "github" ? "refresh" : "github"}
-          className={busy === "github" ? "spin" : ""}
-        />
+        <GlyphSwap rest="github" alt="loader" on={busy === "github"} spinAlt />
         {busy === "github"
           ? "Checking whitelist…"
           : providers.github
@@ -380,11 +378,7 @@ function ProviderButtons({
             : "Google OAuth isn't configured on this deployment"
         }
       >
-        {busy === "google" ? (
-          <Icon name="refresh" className="spin" />
-        ) : (
-          <span className="gmark lg">G</span>
-        )}
+        <GlyphSwap rest="google" alt="loader" on={busy === "google"} spinAlt />
         {busy === "google"
           ? "Checking whitelist…"
           : providers.google
@@ -507,9 +501,18 @@ export default function Login({
           recoverable, and reviewed before anything ships.
         </p>
         <ul className="login-aside-points">
-          <li>Task-centered board with a managed operator</li>
-          <li>Every agent run is real, attributed, and auditable</li>
-          <li>Server-owned delivery: branches, pull requests, merges</li>
+          <li>
+            <Icon name="arrow" />
+            Task-centered board with a managed operator
+          </li>
+          <li>
+            <Icon name="arrow" />
+            Every agent run is real, attributed, and auditable
+          </li>
+          <li>
+            <Icon name="arrow" />
+            Server-owned delivery: branches, pull requests, merges
+          </li>
         </ul>
       </aside>
       <div className="login-card">

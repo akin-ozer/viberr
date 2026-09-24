@@ -764,10 +764,13 @@ type PwField = "current" | "next" | "confirm";
 function ChangePasswordModal({
   fetcher,
   submit,
+  done,
   onClose,
 }: {
   fetcher: ProfileFetcher;
   submit: (fields: Record<string, string>) => void;
+  /** The change landed: the modal plays its exit (ruling 459). */
+  done: boolean;
   onClose: () => void;
 }) {
   const [current, setCurrent] = useState("");
@@ -821,6 +824,7 @@ function ChangePasswordModal({
       onClose={onClose}
       canSave={canSave}
       busy={busy}
+      done={done}
       saveLabel="Change password"
       unmetHint="Fill in all three fields to continue."
       focusUnmet={() => {
@@ -897,16 +901,18 @@ function ProfilePassword({
   submit: (fields: Record<string, string>) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [done, setDone] = useState(false);
   useServerToast(fetcher);
 
   // Close on the server's success result: the toast says what happened, and a
   // modal that stayed open over "Password changed" would read as unfinished.
+  // Ruling 459: through the modal's exit (`done`), then onClose unmounts it.
   const doneRef = useRef<ProfileActionData | null>(null);
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data) return;
     if (doneRef.current === fetcher.data) return;
     doneRef.current = fetcher.data;
-    if (fetcher.data.ok) setOpen(false);
+    if (fetcher.data.ok) setDone(true);
   }, [fetcher.state, fetcher.data]);
 
   return (
@@ -917,7 +923,12 @@ function ProfilePassword({
           <button
             type="button"
             className="btn ghost sm"
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              // A change that landed after a Cancel must not close the next
+              // opening at once.
+              setDone(false);
+              setOpen(true);
+            }}
           >
             <Icon name="lock" />
             Change password
@@ -928,7 +939,11 @@ function ProfilePassword({
         <ChangePasswordModal
           fetcher={fetcher}
           submit={submit}
-          onClose={() => setOpen(false)}
+          done={done}
+          onClose={() => {
+            setOpen(false);
+            setDone(false);
+          }}
         />
       )}
     </>

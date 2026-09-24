@@ -4,6 +4,7 @@ import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server
 import { UPLOADABLE_EXTENSIONS } from "~/shared/attachment-kinds";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { prettySize } from "~/features/kb-browser/tree";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { AttachmentThumb } from "./attachment-image";
@@ -183,7 +184,7 @@ function AttachFile() {
   return (
     <div className="attach-add">
       <label className={`btn ghost sm${busy ? " busy" : ""}`}>
-        <Icon name={busy ? "refresh" : "file"} className={busy ? "spin" : ""} />
+        <GlyphSwap rest="file" alt="loader" on={busy} spinAlt />
         {busy ? "Attaching…" : "Attach a file"}
         <input
           ref={input}

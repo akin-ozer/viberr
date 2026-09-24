@@ -1861,6 +1861,10 @@ const RENDERED_INSIDE = new Map(Object.entries({
     container: ".console",
     why: "the withheld-line count sits next to `.log-more` in the same console row.",
   },
+  "lw-glyph": {
+    container: ".console",
+    why: "ruling 459: a wait row's orb-and-clock cell sits in a `.log-line`'s `.lx` inside `div.console` (runs-panels.tsx), so its clock is measured on the console's fixed dark fill.",
+  },
 }));
 
 /** Rules whose `color` paints a GLYPH, not text. WCAG 1.4.11 asks 3:1 of a
@@ -3654,8 +3658,10 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
   });
 
   it("(a) a status line's new words rise in, and the working sentence carries a band over its own words", () => {
-    // CANARY: drop `.ctl-working-step` from the swap-in rule.
-    for (const selector of [".run-phase .ph", ".run-phase .step", ".ctl-working-step"]) {
+    // CANARY: drop `.ctl-working-step[data-fresh]` from the swap-in rule.
+    // Ruling 459: only a line that replaced the first words carries
+    // `data-fresh`, so the line on screen at first paint stands still.
+    for (const selector of [".run-phase .ph[data-fresh]", ".run-phase .step[data-fresh]", ".ctl-working-step[data-fresh]"]) {
       expect(rule(plain, selector).get("animation"), selector).toMatch(/^swap-in \.15s var\(--ease-out\)$/);
     }
     expect(CODE).toMatch(/@keyframes swap-in \{ from \{ opacity: 0; transform: translateY\(4px\); filter: blur\(2px\); \}/);
@@ -3672,13 +3678,16 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
 
   it("(c) a copy control's two glyphs share one cell and trade places on data-copied", () => {
     // CANARY: drop `grid-area: 1 / 1` and the check draws beside the copy mark.
+    // Ruling 459: the cell serves every state-driven glyph (GlyphSwap) and
+    // trades on the individual `scale` property, which composes with a
+    // loader's spin; the contextual-icon block below holds the rest.
     expect(rule(plain, ".copy-glyph").get("display")).toBe("inline-grid");
-    expect(rule(plain, ".copy-glyph > .ico").get("grid-area")).toBe("1 / 1");
-    const hidden = rule(plain, ".copy-glyph[data-copied] > .ico:first-child");
+    expect(rule(plain, ".copy-glyph > *").get("grid-area")).toBe("1 / 1");
+    const hidden = rule(plain, ".copy-glyph[data-copied] > :first-child");
     expect(hidden.get("opacity")).toBe("0");
-    expect(hidden.get("transform")).toBe("scale(.25)");
-    expect(rule(plain, ".copy-glyph > .ico + .ico").get("opacity")).toBe("0");
-    expect(rule(plain, ".copy-glyph[data-copied] > .ico + .ico").get("opacity")).toBe("1");
+    expect(hidden.get("scale")).toBe(".25");
+    expect(rule(plain, ".copy-glyph > :last-child").get("opacity")).toBe("0");
+    expect(rule(plain, ".copy-glyph[data-copied] > :last-child").get("opacity")).toBe("1");
     expect(rule(plain, ".copy-done").get("animation")).toMatch(/^swap-in\b/);
   });
 
@@ -3800,7 +3809,7 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
       return rule(reduced, selector);
     };
     for (const selector of [
-      ".run-phase .ph", ".run-phase .step", ".ctl-working-step", ".copy-done",
+      ".run-phase .ph[data-fresh]", ".run-phase .step[data-fresh]", ".ctl-working-step[data-fresh]", ".copy-done",
       '.signin-step[data-state="done"] .signin-mark .ico', ".cap-mbody", ".ctl-msg[data-fresh]",
     ]) {
       expect(answer(selector).get("animation"), selector).toMatch(/^fade-in \.12s ease$/);
@@ -3809,11 +3818,11 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     expect(answer('.signin-step[data-state="done"] .signin-mark .ico path').get("animation")).toBe("none");
     expect(answer(".refused").get("animation")).toBe("none");
     for (const selector of [
-      ".copy-glyph > .ico", ".copy-glyph > .ico + .ico",
-      ".copy-glyph[data-copied] > .ico:first-child", ".copy-glyph[data-copied] > .ico + .ico",
+      ".copy-glyph > *", ".copy-glyph > :last-child",
+      ".copy-glyph[data-copied] > :first-child", ".copy-glyph[data-copied] > :last-child",
     ]) {
       const decls = answer(selector);
-      expect(decls.get("transform"), selector).toBe("none");
+      expect(decls.get("scale"), selector).toBe("1");
       expect(decls.get("filter"), selector).toBe("none");
       expect(decls.get("transition"), selector).toBe("opacity .12s ease");
     }
@@ -3937,5 +3946,1565 @@ describe("app.css ruling 453: the Apple design pass", () => {
       expect(decls(rules, ".home-top").get("backdrop-filter")).toBe("none");
       expect(decls(rules, ".topbar").get("background")).toBe("var(--surface)");
     }
+  });
+});
+
+describe("app.css ruling 459: the better-ui pass — concentric radius", () => {
+  // Outer radius = inner radius + the inset between them (better-ui,
+  // surfaces.md), wherever the layers share a visible, even inset. The scale
+  // is locked, so the answer is the nearest step or a changed inset, and the
+  // house counts the container's border as part of the inset.
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decls = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  const root = decls(plain, ":root");
+  /** A length in px: a `var(--radius-*)` through the token block, rem at 16px. */
+  const px = (value: string): number => {
+    const token = /^var\((--[\w-]+)\)$/.exec(value);
+    if (token) return px(root.get(token[1]!) ?? "");
+    if (value === "0") return 0;
+    const m = /^(-?[\d.]+)(px|rem)$/.exec(value);
+    expect(m, `${value} must be a px or rem length`).toBeTruthy();
+    return Number(m![1]) * (m![2] === "rem" ? 16 : 1);
+  };
+  /** A 1-4 value shorthand, expanded clockwise from the top (from the
+   *  top-left corner for a radius). */
+  const four = (value: string): [string, string, string, string] => {
+    const [a, b = a, c = a, d = b] = value.trim().split(/\s+/);
+    return [a!, b!, c!, d!];
+  };
+  const TL = 0, BR = 2, BL = 3;
+  const radius = (selector: string, corner = TL) =>
+    px(four(decls(plain, selector).get("border-radius") ?? "")[corner]);
+  const pad = (selector: string, side = 0) => px(four(decls(plain, selector).get("padding") ?? "")[side]);
+  const border = (selector: string) => px((decls(plain, selector).get("border") ?? "").split(/\s+/)[0]!);
+  const STEPS = ["--radius-small", "--radius-button", "--radius-box", "--radius-card", "--radius-panel"]
+    .map((t) => px(`var(${t})`));
+  const nearestStep = (want: number) =>
+    STEPS.reduce((best, s) => (Math.abs(s - want) < Math.abs(best - want) ? s : best));
+
+  it("(a) a board lane keeps one radius while a card is dragged over it", () => {
+    // CANARY: put `border-radius: var(--radius-card)` back on
+    // `.column.drop-over`. The radius is not in the lane's transition, so every
+    // lane a drag crossed snapped its corners from 22 to 16 and back, with the
+    // sticky head's 22px corners left standing inside the smaller lane.
+    const lane = plain
+      .filter((r) => parts(r).some((s) => /^\.column\b/.test(s)) && r.decls.has("border-radius"))
+      .map((r) => r.selector);
+    expect(lane).toEqual([".column"]);
+    const own = decls(plain, ".column").get("border-radius")!;
+    expect(four(decls(plain, ".col-head").get("border-radius")!).slice(0, 2)).toEqual([own, own]);
+    // The lane's step is the nearest to a card's radius plus .col-body's gutter.
+    expect(px(own)).toBe(nearestStep(radius(".card") + pad(".col-body", 1)));
+  });
+
+  const NESTS: [string, () => { outer: number; edge: number; inset: number; inner: number }][] = [
+    // CANARY (each): put the old inset or radius back — .cmdk-row on
+    // --radius-button, .user-menu at .375rem, the lightbox bodies on
+    // --radius-button, .dock-composer at .75rem, .seg at .25rem, .datepick-pop
+    // at .5rem, the swatch menu on .own-menu's --radius-box, the closing code
+    // block on its own 8px.
+    ["the palette's last row in .cmdk-card", () => ({
+      outer: radius(".cmdk-card", BL), edge: border(".cmdk-card"),
+      inset: pad(".cmdk-list", 2), inner: radius(".cmdk-row", BL),
+    })],
+    ["Sign out, the account menu's last row", () => ({
+      outer: radius(".user-menu", BL), edge: border(".user-menu"),
+      inset: pad(".user-menu", 2), inner: radius(".menu-item", BL),
+    })],
+    ["the lightbox picture in its dialog", () => ({
+      outer: radius(".modal-card"), edge: border(".modal-card"),
+      inset: pad(".modal-card.lightbox-card"), inner: radius(".lightbox-card .lightbox-img"),
+    })],
+    ["the lightbox code reader in its dialog", () => ({
+      outer: radius(".modal-card"), edge: border(".modal-card"),
+      inset: pad(".modal-card.lightbox-card"), inner: radius(".lightbox-card .lightbox-text"),
+    })],
+    ["the dock composer in the panel's bottom corners", () => ({
+      outer: radius(".dock-panel", BL), edge: border(".dock-panel"),
+      inset: pad(".dock-composer", 2), inner: radius(".ctl-composer", BL),
+    })],
+    ["a selected segment in the .seg well", () => ({
+      outer: radius(".seg"), edge: border(".seg"),
+      inset: pad(".seg"), inner: radius(".seg button"),
+    })],
+    ["a month arrow in the date picker's top corner", () => ({
+      outer: radius(".datepick-pop"), edge: border(".datepick-pop"),
+      inset: pad(".datepick-pop"), inner: radius(".cal-nav"),
+    })],
+    ["a corner swatch in the colour menu", () => {
+      const swatch = decls(plain, ".swatch");
+      expect(swatch.get("border-radius")).toBe("50%");
+      return {
+        outer: radius(".own-menu.swatch-menu"), edge: border(".own-menu"),
+        inset: pad(".own-menu.swatch-menu"), inner: px(swatch.get("width")!) / 2,
+      };
+    }],
+    ["a code block closing a controller message", () => ({
+      outer: radius(".ctl-msg", BL), edge: border(".ctl-msg"),
+      inset: pad(".ctl-msg", 2), inner: radius(".ctl-msg > .md-body > pre:last-child", BL),
+    })],
+    ["a code block closing a comment, bottom-left", () => ({
+      outer: radius(".comment-card", BL), edge: border(".comment-card"),
+      inset: pad(".comment-card", 2),
+      inner: radius(".comment-card .md-collapse > .md-body:last-child > pre:last-child", BL),
+    })],
+  ];
+  it.each(NESTS)("(b) %s nests concentrically, within a pixel", (_, measure) => {
+    const { outer, edge, inset, inner } = measure();
+    expect(Math.abs(inner + inset + edge - outer), `${inner} + ${inset} + ${edge} against ${outer}`)
+      .toBeLessThanOrEqual(1);
+  });
+
+  it("(c) the dock composer's inset is even on the desktop panel, and the phone sheet keeps the gutter", () => {
+    // CANARY: drop `.dock .dock-composer` from the 720px block — the phone
+    // sheet has square bottom corners, so nothing there wants the 6px inset.
+    const [, right, bottom, left] = four(decls(plain, ".dock-composer").get("padding")!);
+    expect(new Set([right, bottom, left]).size).toBe(1);
+    expect(four(decls(phone, ".dock .dock-panel").get("border-radius")!).slice(2)).toEqual(["0", "0"]);
+    const sheet = four(decls(phone, ".dock .dock-composer").get("padding")!);
+    expect(sheet.slice(1).map(px)).toEqual([1, 2, 3].map(() => pad(".dock-body")));
+  });
+
+  it("(d) the .seg well trades inset for segment padding, so the control keeps its height", () => {
+    // CANARY: set `.seg button` back to `.375rem .5rem` — the toggle shrinks
+    // to 33px beside Home's 38px button. The well's inset is its family's.
+    expect(decls(plain, ".seg").get("padding")).toBe(decls(plain, ".cap-seg").get("padding"));
+    expect(decls(plain, ".seg").get("padding")).toBe(decls(plain, ".mini-seg").get("padding"));
+    // Block padding, well + segment: the 4px + 6px the 37px control was built on.
+    expect(pad(".seg") + pad(".seg button")).toBe(10);
+  });
+
+  it("(e) pending schedules are a divided list, not boxes in a box", () => {
+    // CANARY: put `border: 1px solid var(--hairline); border-radius:
+    // var(--radius-button)` back on `.sched-row`. No step nests both of a boxed
+    // row's corners: the Cancel button's 8 wants 16, the cell's inset wants 0.
+    const row = decls(plain, ".sched-row");
+    expect(row.has("border-radius")).toBe(false);
+    expect(row.has("border")).toBe(false);
+    expect(row.get("border-top")).toBe("1px solid var(--hairline)");
+    expect(row.get("padding")).toBe(decls(plain, ".kv-row").get("padding"));
+    expect(decls(plain, ".sched-list").has("gap")).toBe(false);
+  });
+
+  it("(f) a closing code block rounds only the corners it shares with its card", () => {
+    // CANARY: square the comment block's bottom-RIGHT corner too — .tl-text
+    // caps the body at 70ch, so on a desktop column that corner stands well
+    // inside the card and nests in nothing.
+    const closing = decls(plain, ".md-body > :last-child");
+    expect(closing.get("margin-bottom")).toBe("0");
+    const button = "var(--radius-button)";
+    const msg = four(decls(plain, ".ctl-msg > .md-body > pre:last-child").get("border-radius")!);
+    expect(msg.slice(0, 2)).toEqual([button, button]);
+    expect(msg[BR]).toBe(msg[BL]);
+    const comment = four(
+      decls(plain, ".comment-card .md-collapse > .md-body:last-child > pre:last-child").get("border-radius")!,
+    );
+    expect(decls(plain, ".tl-text").get("max-width")).toBe("70ch");
+    expect(comment.slice(0, 3)).toEqual([button, button, button]);
+  });
+});
+
+describe("app.css ruling 459: the better-ui pass — optical alignment", () => {
+  // better-ui: when geometric centring looks off, align optically. A glyph on
+  // the 24 grid carries its own blank bearing, so the side it sits on takes
+  // the text side less 2px (surfaces.md); a glyph drawn off the centre of its
+  // box is fixed in the SVG, so no component has to nudge it.
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decls = (selector: string) => {
+    const hit = plain.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  /** A length in px, rem at 16px. */
+  const px = (value: string | undefined): number => {
+    if (value === "0") return 0;
+    const m = /^(-?[\d.]+)(px|rem)$/.exec(value ?? "");
+    expect(m, `${value} must be a px or rem length`).toBeTruthy();
+    return Number(m![1]) * (m![2] === "rem" ? 16 : 1);
+  };
+  /** A padding shorthand's four sides. */
+  const sides = (selector: string) => {
+    const [top, right = top, bottom = top, left = right] = (decls(selector).get("padding") ?? "").trim().split(/\s+/);
+    return { top: px(top), right: px(right), bottom: px(bottom), left: px(left) };
+  };
+
+  const LEADING: [string, string[]][] = [
+    [".btn", [".btn:has(> .ico:first-child:not(.ico-end))", ".btn:has(> .copy-glyph:first-child)"]],
+    [".btn.sm", [".btn.sm:has(> .ico:first-child:not(.ico-end))", ".btn.sm:has(> .copy-glyph:first-child)"]],
+    [".seg button", [".seg button:has(> .ico:first-child)"]],
+    [".fchip", [".fchip:has(> .ico:first-child)"]],
+    [".meta-edit-btn", [".meta-edit-btn:has(> .ico:first-child)"]],
+    [".tl-attach-chip", [".tl-attach-chip:has(> .ico:first-child)"]],
+    [".rev-add", [".rev-add:has(> .ico:first-child)"]],
+    [".rev-add.sm", [".rev-add.sm:has(> .ico:first-child)"]],
+  ];
+  it.each(LEADING)("(a) %s gives a leading glyph's side the text side less 2px", (base, trims) => {
+    // CANARY: drop `.seg button:has(> .ico:first-child)` — Grid/List and
+    // Board/List read pushed toward their labels again.
+    const { right } = sides(base);
+    for (const trim of trims) expect(px(decls(trim).get("padding-left")), trim).toBe(right - 2);
+  });
+
+  it("(a) a trailing glyph's side is the text side less 2px, on a .btn and on every caret control", () => {
+    // CANARY: put `.own-btn` back on `.25rem .75rem`.
+    for (const base of [".btn", ".btn.sm"]) {
+      expect(px(decls(`${base}:has(> .ico-end:last-child)`).get("padding-right")), base).toBe(sides(base).left - 2);
+    }
+    for (const caret of [".own-btn", ".rsel-btn", ".stage-menu-btn", ".project-switch"]) {
+      const { left, right } = sides(caret);
+      expect(right, caret).toBe(left - 2);
+    }
+    // The board card's square stage trigger still has no padding at all.
+    expect(decls(".card-move .stage-menu-btn").get("padding")).toBe("0");
+  });
+
+  it("(b) a .btn whose glyph FOLLOWS its label marks it .ico-end", () => {
+    // `:first-child` skips text nodes, so "See all <Icon/>" is the button's
+    // first ELEMENT and would take the leading trim on the wrong side.
+    // CANARY: drop className="ico-end" from the bell's "See all" arrow.
+    const trailing: string[] = [];
+    const unmarked: string[] = [];
+    for (const file of markupFiles()) {
+      const src = readFileSync(file, "utf8");
+      const rel = path.relative(path.dirname(APP_DIR), file);
+      for (const m of src.matchAll(/className\s*=\s*/g)) {
+        const at = m.index + m[0].length;
+        const open = src[at]!;
+        const chunks = open === "{"
+          ? literalChunks(balanced(src, at).body)
+          : [src.slice(at + 1, src.indexOf(open, at + 1))];
+        if (!chunks.some((c) => /(?:^|\s)btn(?:\s|$)/.test(c))) continue;
+        const start = src.lastIndexOf("<", m.index);
+        const tag = /^<([\w.]+)/.exec(src.slice(start))?.[1];
+        if (!tag) continue;
+        // The end of the opening tag: the first `>` outside a `{…}`.
+        let i = start;
+        for (let depth = 0; i < src.length; i++) {
+          if (src[i] === "{") depth++;
+          else if (src[i] === "}") depth--;
+          else if (src[i] === ">" && depth === 0) break;
+        }
+        if (src[i - 1] === "/") continue;
+        const body = src
+          .slice(i + 1, src.indexOf(`</${tag}>`, i))
+          .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+          .trim();
+        const last = /<Icon\b([^>]*)\/>$/.exec(body);
+        if (!last || last.index === 0) continue;
+        trailing.push(`${rel}:${lineAt(src, start)}`);
+        if (!/className="[^"]*\bico-end\b/.test(last[1]!)) unmarked.push(`${rel}:${lineAt(src, start)}`);
+      }
+    }
+    expect(trailing.length).toBeGreaterThanOrEqual(3);
+    expect(unmarked).toEqual([]);
+  });
+
+  /** The drawn extent of an icon's markup, [x0, y0, x1, y1]: path commands
+   *  walked (curves and arcs sampled), circles and rects taken whole. */
+  const glyphBox = (markup: string): [number, number, number, number] => {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    const add = (x: number, y: number) => {
+      xs.push(x);
+      ys.push(y);
+    };
+    for (const [, tag, attrs] of markup.matchAll(/<(\w+)([^>]*)\/>/g)) {
+      const a = new Map([...attrs!.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1]!, m[2]!]));
+      const n = (k: string) => Number(a.get(k));
+      if (tag === "circle") {
+        add(n("cx") - n("r"), n("cy") - n("r"));
+        add(n("cx") + n("r"), n("cy") + n("r"));
+        continue;
+      }
+      if (tag === "rect") {
+        add(n("x"), n("y"));
+        add(n("x") + n("width"), n("y") + n("height"));
+        continue;
+      }
+      expect(tag).toBe("path");
+      const d = a.get("d")!;
+      const tokens = [...d.matchAll(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)/g)].map((m) => m[0]);
+      let i = 0;
+      let cmd = "";
+      let [x, y, sx, sy] = [0, 0, 0, 0];
+      let ctrl: [number, number] | null = null;
+      const num = () => Number(tokens[i++]);
+      while (i < tokens.length) {
+        if (/[A-Za-z]/.test(tokens[i]!)) cmd = tokens[i++]!;
+        const C = cmd.toUpperCase();
+        const [ox, oy] = cmd === C ? [0, 0] : [x, y];
+        if (C === "Z") {
+          [x, y, ctrl, cmd] = [sx, sy, null, "?"];
+        } else if (C === "M" || C === "L") {
+          [x, y, ctrl] = [ox + num(), oy + num(), null];
+          if (C === "M") [sx, sy, cmd] = [x, y, cmd === "M" ? "L" : "l"];
+          add(x, y);
+        } else if (C === "H" || C === "V") {
+          if (C === "H") x = ox + num();
+          else y = oy + num();
+          ctrl = null;
+          add(x, y);
+        } else if (C === "C" || C === "S") {
+          const [x1, y1] = C === "C" ? [ox + num(), oy + num()] : ctrl ? [2 * x - ctrl[0], 2 * y - ctrl[1]] : [x, y];
+          const [x2, y2, ex, ey] = [ox + num(), oy + num(), ox + num(), oy + num()];
+          for (let s = 0; s <= 64; s++) {
+            const t = s / 64;
+            const u = 1 - t;
+            add(
+              u * u * u * x + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * ex,
+              u * u * u * y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * ey,
+            );
+          }
+          [x, y, ctrl] = [ex, ey, [x2, y2]];
+        } else if (C === "A") {
+          // The endpoint form converted to a centre (SVG 2, appendix B.2.4);
+          // every arc in the set is unrotated, so the rotation must be 0.
+          let [rx, ry] = [Math.abs(num()), Math.abs(num())];
+          expect(num(), `${d} rotates an arc`).toBe(0);
+          const [large, sweep, ex, ey] = [num(), num(), ox + num(), oy + num()];
+          const [hx, hy] = [(x - ex) / 2, (y - ey) / 2];
+          const scale = Math.max(1, Math.sqrt((hx * hx) / (rx * rx) + (hy * hy) / (ry * ry)));
+          [rx, ry] = [rx * scale, ry * scale];
+          const k = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0,
+            (rx * rx * ry * ry - rx * rx * hy * hy - ry * ry * hx * hx) / (rx * rx * hy * hy + ry * ry * hx * hx)));
+          const [cx, cy] = [(k * rx * hy) / ry + (x + ex) / 2, (-k * ry * hx) / rx + (y + ey) / 2];
+          const from = Math.atan2((y - cy) / ry, (x - cx) / rx);
+          let turn = Math.atan2((ey - cy) / ry, (ex - cx) / rx) - from;
+          if (sweep && turn < 0) turn += 2 * Math.PI;
+          if (!sweep && turn > 0) turn -= 2 * Math.PI;
+          for (let s = 0; s <= 64; s++) {
+            const t = from + (turn * s) / 64;
+            add(cx + rx * Math.cos(t), cy + ry * Math.sin(t));
+          }
+          [x, y, ctrl] = [ex, ey, null];
+        } else {
+          throw new Error(`unhandled path command "${cmd}" in ${d}`);
+        }
+      }
+    }
+    return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  };
+
+  it("(c) every glyph in the icon set is drawn on the centre of its 24px box", () => {
+    // Measured off the icon set itself, as ruling 451(f) measures the check.
+    // CANARY: put the mock's sparkle back (`M12 3l1.8 5.2L19 10…`), 2 units
+    // high in every round agent badge on the board.
+    const src = readFileSync(fileURLToPath(new URL("./ui/icon.tsx", import.meta.url)), "utf8");
+    const glyphs = [...src.matchAll(/\n\s*(\w+):\s*'([^']+)',/g)].map((m) => [m[1]!, m[2]!] as const);
+    expect(glyphs.length).toBeGreaterThan(40);
+    const offset = new Map(glyphs.map(([name, markup]) => {
+      const [x0, y0, x1, y1] = glyphBox(markup);
+      return [name, [(x0 + x1) / 2 - 12, (y0 + y1) / 2 - 12]] as const;
+    }));
+    // A unit of drift is under a pixel at any size the app draws a glyph; the
+    // mock's sparkle, hand and flag were two.
+    const off = [...offset].filter(([, [dx, dy]]) => Math.max(Math.abs(dx), Math.abs(dy)) > 1);
+    expect(off.map(([name, [dx, dy]]) => `${name} (${dx.toFixed(2)}, ${dy.toFixed(2)})`)).toEqual([]);
+    for (const name of ["sparkle", "hand", "flag"]) {
+      for (const drift of offset.get(name)!) expect(Math.abs(drift), name).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("(d) a hint that leads with a glyph is a row, with the glyph on its first line", () => {
+    // The .deny-note recipe: a 13px glyph, top-aligned, nudged .125rem onto
+    // the first line of .75rem text. CANARY: drop `display: flex` from the
+    // icon-led hint rule — the 16px svg falls back onto the baseline.
+    const note = decls(".deny-note");
+    const noteGlyph = decls(".deny-note .ico");
+    for (const hint of [".hint", ".fhint"]) {
+      const row = decls(`${hint}:has(> .ico:first-child)`);
+      expect(row.get("display"), hint).toBe("flex");
+      for (const p of ["align-items", "gap", "line-height"]) expect(row.get(p), `${hint} ${p}`).toBe(note.get(p));
+      const glyph = decls(`${hint} > .ico:first-child`);
+      for (const p of ["width", "height", "flex", "margin-top"]) expect(glyph.get(p), `${hint} ${p}`).toBe(noteGlyph.get(p));
+    }
+    // The ruling 144(a) advisory is 16px body text: its glyph stays the 16px
+    // svg.ico default (1em) and only takes the row and the nudge.
+    const advisory = decls(".cred-card > .sub:has(> .ico:first-child)");
+    expect(advisory.get("display")).toBe("flex");
+    expect(advisory.get("align-items")).toBe("flex-start");
+    const flag = decls(".cred-card > .sub > .ico:first-child");
+    expect(flag.get("margin-top")).toBe(".125rem");
+    expect(flag.has("width")).toBe(false);
+  });
+
+  it("(e) a text-only chip is centred; only a glyph-led one keeps the short start side", () => {
+    // CANARY: put `.pick-chip` back on `.375rem .75rem .375rem .5rem`.
+    const pick = sides(".pick-chip");
+    expect(pick.left).toBe(pick.right);
+    for (const lead of [".ico", ".sdot", ".agent-glyph"]) {
+      expect(px(decls(`.pick-chip:has(> ${lead}:first-child)`).get("padding-left")), lead).toBeLessThan(pick.right);
+    }
+    const board = sides(".chip");
+    expect(board.left).toBeLessThan(board.right);
+    expect(px(decls(".chip.more").get("padding-left"))).toBe(board.right);
+  });
+
+  it("(f) a pill that leads with its mark takes 2px less on that side", () => {
+    // CANARY: drop `.pill:has(> .col-stage-dot:first-child)` — the task hero's
+    // stage pill stands 2px wider at the start than the status pill beside it.
+    for (const base of [".pill", ".pill.sm"]) {
+      const { left, right } = sides(base);
+      expect(left, base).toBe(right);
+      for (const mark of [".pdot", ".ico", ".col-stage-dot"]) {
+        expect(px(decls(`${base}:has(> ${mark}:first-child)`).get("padding-left")), `${base} ${mark}`).toBe(right - 2);
+      }
+    }
+  });
+
+  it("(g) a credential notice's check sits on the first line, as its warning twin's alert does", () => {
+    // CANARY: drop `align-items: flex-start` from the .cred-ok first-line rule.
+    const warn = decls(".cred-warn");
+    const ok = decls(".cred-ok");
+    for (const p of ["font-size", "line-height"]) expect(ok.get(p), p).toBe(warn.get(p));
+    const firstLine = ".cred-ok:not(:has(> .modal-close))";
+    expect(decls(firstLine).get("align-items")).toBe(warn.get("align-items"));
+    expect(decls(`${firstLine} > .ico`).get("margin-top")).toBe(decls(".cred-warn .ico").get("margin-top"));
+    // The notice with the ruling 148 close keeps its centred row.
+    expect(ok.get("align-items")).toBe("center");
+  });
+});
+
+describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image outlines", () => {
+  // Shadows for elevation, borders for structure; images wear a neutral
+  // 1px outline, pure black at 10% on light and pure white at 10% on dark
+  // (better-ui, surfaces.md). The values are the skill's, exactly.
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
+  const more = RULES.filter((r) => r.at.some((a) => /prefers-contrast:\s*more/.test(a)));
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decls = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  const light = decls(plain, ":root");
+  const dark = decls(plain, ':root[data-theme="dark"]');
+  /** A length in px, rem at 16px, a `var(--radius-*)` through the token block. */
+  const px = (value: string | undefined): number => {
+    const token = /^var\((--[\w-]+)\)$/.exec(value ?? "");
+    if (token) return px(light.get(token[1]!));
+    if (value === "0") return 0;
+    const m = /^(-?[\d.]+)(px|rem)$/.exec(value ?? "");
+    expect(m, `${value} must be a px or rem length`).toBeTruthy();
+    return Number(m![1]) * (m![2] === "rem" ? 16 : 1);
+  };
+  /** A padding shorthand's four sides, in px. */
+  const sides = (rules: CssRule[], selector: string) => {
+    const [top, right = top, bottom = top, left = right] = (decls(rules, selector).get("padding") ?? "").trim().split(/\s+/);
+    return { top: px(top), right: px(right), bottom: px(bottom), left: px(left) };
+  };
+
+  const POP = [".confirm-card", ".modal-card", ".cmdk-card", ".page-overlay", ".dock-panel"];
+  const MENUS = [".user-menu", ".stage-menu-pop", ".datepick-pop", ".label-select", ".ntf-pop", ".rsel-menu", ".own-menu"];
+
+  it("(a) a floating surface's edge is a translucent ring, not an opaque border outside which the ring drew a second rim", () => {
+    // CANARY: put `.modal-card` back on `border: 1px solid var(--border)`, or
+    // `.user-menu` back on a bare `var(--shadow-menu)`.
+    expect(light.get("--shadow-ring")).toBe("0 0 0 1px oklch(0 0 0 / 0.06)");
+    expect(dark.get("--shadow-ring")).toBe("0 0 0 1px oklch(1 0 0 / 0.08)");
+    for (const theme of [light, dark]) expect(theme.get("--shadow-pop")).toMatch(/, var\(--shadow-ring\)$/);
+    // Not folded into --shadow-menu: the round dock trigger wears that token
+    // with its own agent-tinted border and must not gain a second rim.
+    for (const theme of [light, dark]) expect(theme.get("--shadow-menu")).not.toMatch(/shadow-ring/);
+    for (const surface of POP) {
+      const d = decls(plain, surface);
+      expect(d.get("border"), surface).toBe("1px solid transparent");
+      expect(d.get("box-shadow"), surface).toBe("var(--shadow-pop)");
+    }
+    for (const menu of MENUS) {
+      const d = decls(plain, menu);
+      expect(d.get("border"), menu).toBe("1px solid transparent");
+      expect(d.get("box-shadow"), menu).toBe("var(--shadow-ring), var(--shadow-menu)");
+    }
+    // The sweep, so the next floating surface is in scope when it is written:
+    // nothing that wears an elevation token draws its edge with a decorative
+    // opaque border.
+    const elevated = [...new Set(plain
+      .filter((r) => /var\(--shadow-(?:pop|menu)\)/.test(r.decls.get("box-shadow") ?? ""))
+      .flatMap(parts))];
+    expect(elevated).toEqual(expect.arrayContaining([...POP, ...MENUS, ".toast", ".dock-fab"]));
+    const opaque = elevated.filter((s) => /var\(--(?:border|hairline)\)/.test(decls(plain, s).get("border") ?? ""));
+    expect(opaque).toEqual([]);
+  });
+
+  it("(a) the phone drawer floats too, while the desktop rail keeps its divider", () => {
+    // CANARY: drop `border-right-color: transparent` from the 720px `.rail`.
+    const drawer = decls(phone, ".rail");
+    expect(drawer.get("box-shadow")).toBe("var(--shadow-pop)");
+    expect(drawer.get("border-right-color")).toBe("transparent");
+    // A divider between the rail and the page is structure; it stays a border.
+    expect(decls(plain, ".rail").get("border-right")).toBe("1px solid var(--hairline)");
+  });
+
+  it("(a) increased contrast still reaches the ring, now the floating surfaces' only edge (ruling 453(d))", () => {
+    // CANARY: delete `--shadow-ring` from the `prefers-contrast: more` block —
+    // every modal, menu and the dock is left with a 6-8% ring there.
+    expect(decls(more, ":root[data-theme]").get("--shadow-ring")).toBe("0 0 0 1px var(--border-control)");
+  });
+
+  it("(b) an image's edge is pure black or white at 10%, in both themes", () => {
+    // CANARY: set the dark --image-outline to `var(--ring)`, a tinted neutral.
+    expect(light.get("--image-outline")).toBe("oklch(0 0 0 / 0.1)");
+    expect(dark.get("--image-outline")).toBe("oklch(1 0 0 / 0.1)");
+  });
+
+  // Every rule that targets an emitted <img>: the markdown embed, the
+  // lightbox picture and the two attachment tiles.
+  const IMAGES = [".md-body img", ".lightbox-card .lightbox-img", ".attach-thumb img", ".tl-attach-thumb img"];
+  it.each(IMAGES)("(b) %s draws the image edge just inside the picture", (selector) => {
+    // CANARY: drop the outline from `.md-body img`.
+    const d = decls(plain, selector);
+    expect(d.get("outline"), selector).toBe("1px solid var(--image-outline)");
+    expect(d.get("outline-offset"), selector).toBe("-1px");
+  });
+
+  it("(b) no other rule targets an image without the edge", () => {
+    // `.md-img-btn` is only ever emitted inside a `.md-body`, so `.md-body img`
+    // reaches its picture. Anything else aimed at an <img> must be listed.
+    const COVERED_BY = { ".md-img-btn > img": ".md-body img" } satisfies Record<string, string>;
+    const aimed = [...new Set(plain.flatMap(parts).filter((s) => /(?:^|[\s>])img$|\.lightbox-img$/.test(s)))];
+    expect(aimed.filter((s) => !IMAGES.includes(s) && !(s in COVERED_BY))).toEqual([]);
+    for (const [s, by] of Object.entries(COVERED_BY)) {
+      expect(aimed, s).toContain(s);
+      expect(IMAGES).toContain(by);
+    }
+  });
+
+  it("(c) an attachment tile insets its picture concentrically, so the image has an edge on all four sides", () => {
+    // CANARY: take `padding: .25rem` off `.attach-thumb` — the picture runs
+    // flush again and its bottom edge meets the caption with no line.
+    for (const [tile, img] of [[".attach-thumb", ".attach-thumb img"], [".tl-attach-thumb", ".tl-attach-thumb img"]] as const) {
+      const inset = sides(plain, tile);
+      expect(new Set(Object.values(inset)).size, tile).toBe(1);
+      expect(inset.top, tile).toBeGreaterThan(0);
+      const outer = px(decls(plain, tile).get("border-radius"));
+      const inner = px(decls(plain, img).get("border-radius"));
+      const edge = px((decls(plain, tile).get("border") ?? "").split(/\s+/)[0]);
+      expect(Math.abs(inner + inset.top + edge - outer), `${tile}: ${inner} + ${inset.top} + ${edge} against ${outer}`)
+        .toBeLessThanOrEqual(1);
+      // A failed load fills the picture's slot, so it takes the picture's corner.
+      expect(decls(plain, `${tile} .attach-broken`).get("border-radius"), tile).toBe(decls(plain, img).get("border-radius"));
+    }
+  });
+
+  it("(c) the captions keep the distances they had before the inset", () => {
+    // CANARY: put `.tl-attach-thumb .nm` back on `.25rem .5rem` — the name
+    // stands 4px further in than the picture's edge rhythm allows.
+    const panel = sides(plain, ".attach-thumb");
+    const meta = sides(plain, ".attach-meta");
+    const by = sides(plain, ".attach-thumb .attach-by");
+    expect(panel.left + meta.left).toBe(8);
+    expect(panel.right + meta.right).toBe(8);
+    expect(meta.top).toBe(6);
+    expect(meta.bottom + panel.bottom).toBe(6); // a tile with no producer line
+    expect(meta.bottom + by.top).toBe(6);
+    expect(by.bottom + panel.bottom).toBe(6);
+    expect(panel.left + by.left).toBe(8);
+    const feed = sides(plain, ".tl-attach-thumb");
+    const nm = sides(plain, ".tl-attach-thumb .nm");
+    expect(feed.left + nm.left).toBe(8);
+    expect(nm.top).toBe(4);
+    expect(nm.bottom + feed.bottom).toBe(4);
+  });
+
+  /** A shadow layer with its colour functions removed, so the lengths remain. */
+  const bare = (layer: string) => {
+    let out = "";
+    let depth = 0;
+    for (const ch of layer) {
+      if (ch === "(") depth++;
+      if (depth === 0) out += ch;
+      if (ch === ")") depth--;
+    }
+    return out;
+  };
+
+  it("(d) no drop shadow is mixed from the ink, which turns into a light glow on dark", () => {
+    // CANARY: put `.tgl .knob` back on `0 1px 2px color-mix(in srgb,
+    // var(--fg), transparent 70%)`, or `.fm-act` on `var(--tint-press)`.
+    const drops = RULES.flatMap((r) =>
+      splitArgs(r.decls.get("box-shadow") ?? "").map((layer) => ({ at: r.selector, layer })),
+    ).filter(({ layer }) => {
+      const words = bare(layer).trim().split(/\s+/);
+      if (words.includes("inset")) return false;
+      const [, y = "0", blur = "0"] = words.filter((w) => /^-?[\d.]+(?:px|rem|em)?$/.test(w));
+      return y !== "0" || blur !== "0";
+    });
+    // The board card's two contact shadows, the knob (both themes) and .fm-act.
+    expect(drops.length).toBeGreaterThanOrEqual(5);
+    const inked = drops.filter(({ layer }) => /var\(--(?:fg|tint-[\w-]+)\)/.test(layer));
+    expect(inked.map(({ at, layer }) => `${at} → ${layer}`)).toEqual([]);
+    // The elevation tokens mix the ink in light and so must each be
+    // redeclared, in black, on dark.
+    const tokens = [...light].filter(([k, v]) => k.startsWith("--shadow-") && /var\(--fg\)/.test(v));
+    expect(tokens.length).toBeGreaterThanOrEqual(4);
+    for (const [k] of tokens) {
+      expect(dark.has(k), k).toBe(true);
+      expect(dark.get(k), k).not.toMatch(/var\(--fg\)/);
+    }
+  });
+
+  it("(d) the dark toggle knob takes the white edge ring; light keeps a plain contact shadow", () => {
+    // CANARY: delete the `:root[data-theme="dark"] .tgl .knob` rule.
+    const drop = decls(plain, ".tgl .knob").get("box-shadow")!;
+    expect(drop).toBe("0 1px 2px rgba(0, 0, 0, .3)");
+    expect(decls(plain, ':root[data-theme="dark"] .tgl .knob').get("box-shadow")).toBe(`var(--shadow-ring), ${drop}`);
+    expect(decls(plain, ".fm-act").get("box-shadow")).toBe("0 1px 2px rgba(0, 0, 0, .08)");
+  });
+});
+
+describe("app.css ruling 459: the better-ui pass — press and hover feedback", () => {
+  // Scale on press: always .96 for a control (the sheet's .99 for a surface),
+  // never below .95, and a CSS transition so a release mid-press eases back.
+  // High-frequency hovers change colour, not position (better-ui, SKILL.md and
+  // animations.md). The press block states the rest: the press belongs to the
+  // element pressed, and only a control that can act presses.
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
+  // Top-level commas only: `:not(:disabled, [aria-disabled="true"])` is one part.
+  const parts = (r: CssRule) => splitArgs(r.selector);
+  const decls = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  /** The declarations of the rules that name exactly this selector, later
+   *  ones winning; empty when none does (no assertion, unlike `decls`). */
+  const own = (rules: CssRule[], selector: string) => {
+    const out = new Map<string, string>();
+    for (const r of rules) if (parts(r).includes(selector)) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  /** A state selector with its states taken off: `:active`, `:hover`, and the
+   *  `:not()` / `:where()` guards on them. */
+  const stateless = (part: string) =>
+    part
+      .replace(/:(?:not|where)\((?:[^()]|\([^()]*\))*\)/g, "")
+      .replace(/:(?:active|hover)\b/g, "")
+      .trim();
+  /** The element a press rule scales, and the element that is pressed. They
+   *  differ for a container that dips only when a child is pressed. */
+  const pressOf = (part: string) => {
+    const child = /:has\(>\s*([^()]*?):active\)/.exec(part);
+    const scaled = stateless(part.replace(/:has\([^()]*\)/g, ""));
+    return { scaled, pressed: child ? `${scaled} > ${child[1]!.trim()}` : scaled };
+  };
+  /** A selector, then the same with its last compound's tag dropped, then that
+   *  compound alone: where an element's own transition or transform lives. */
+  const lookups = (selector: string) => {
+    const last = selector.split(/\s+/).pop()!;
+    return [...new Set([selector, selector.replace(/(^|\s)[a-z]+(?=\.)/g, "$1"), last, last.replace(/^[a-z]+(?=\.)/, "")])];
+  };
+  const firstOwn = (rules: CssRule[][], selector: string, prop: string) => {
+    for (const s of lookups(selector)) {
+      for (const set of rules) {
+        const v = own(set, s).get(prop);
+        if (v !== undefined) return v;
+      }
+    }
+    return undefined;
+  };
+  const scaleOf = (transform: string | undefined) => {
+    const m = /scale\(([\d.]+)\)/.exec(transform ?? "");
+    return m ? Number(m[1]) : 1;
+  };
+  /** Everything a transform does besides scale, with no-op offsets dropped. */
+  const moves = (transform: string | undefined) =>
+    (transform === undefined || transform === "none" ? "" : transform)
+      .replace(/scale\([^)]*\)/g, "")
+      .replace(/translate[XY]?\(0\)/g, "")
+      .trim();
+
+  type Press = { at: "plain" | "phone"; part: string; transform: string; scaled: string; pressed: string };
+  const PRESSES: Press[] = [
+    ...plain.map((r) => ["plain", r] as const),
+    ...phone.map((r) => ["phone", r] as const),
+  ].flatMap(([at, r]) => {
+    const transform = r.decls.get("transform");
+    if (transform === undefined || transform === "none") return [];
+    return parts(r)
+      .filter((p) => /:active\b/.test(p))
+      .map((part) => ({ at, part, transform, ...pressOf(part) }));
+  });
+  const contexts = (p: Press) => (p.at === "phone" ? [phone, plain] : [plain]);
+
+  it("(F22, F32) found the press block, not an empty list", () => {
+    expect(PRESSES.length).toBeGreaterThan(50);
+  });
+
+  it("(F22) every press eases in on a transform leg of its element's own transition", () => {
+    // CANARY: take `transform` back out of `.nav-item`'s transition, or delete
+    // `.cal-day`'s. Fourteen press-scaled controls had a list without it, or
+    // no transition at all, so the scale jumped in one frame and snapped back.
+    const snaps = PRESSES.filter((p) => {
+      const transition = firstOwn(contexts(p), p.scaled, "transition") ?? "";
+      return !splitArgs(transition).some((layer) => /^transform\b.* var\(--ease-out\)$/.test(layer));
+    }).map((p) => `${p.at} ${p.part}`);
+    expect(snaps).toEqual([]);
+  });
+
+  it("(F30) every press is the control step or the surface step of its element's resting size, never under .95", () => {
+    // CANARY: put `.fm-act:active` back on scale(.94), `.pj-star:active` on
+    // .9, or the perched dock button's press on .72 (.935 of its .77 rest).
+    const off = PRESSES.flatMap((p) => {
+      const rest = firstOwn(contexts(p), p.scaled, "transform");
+      const ratio = scaleOf(p.transform) / scaleOf(rest);
+      const step = [0.96, 0.99].find((s) => Math.abs(ratio - s) < 0.005);
+      // The press keeps whatever else the element's resting transform does
+      // (the date picker's clear and the row pin stay centred, the perched
+      // dock button stays perched).
+      const kept = moves(p.transform) === moves(rest);
+      return step !== undefined && kept ? [] : [`${p.at} ${p.part} → ${ratio.toFixed(3)} ${kept ? "" : "(moved)"}`];
+    });
+    expect(off).toEqual([]);
+    expect(own(phone, '.dock[data-open="true"] .dock-fab:active').get("transform")).toMatch(/\) scale\(\.74\)$/);
+    expect(own(phone, '.dock[data-open="true"] .dock-fab:active').get("transition-duration")).toBe(".1s");
+    expect(own(plain, ".dock-fab:active").get("transform")).toBe("scale(.96)");
+  });
+
+  it("(F31) the press belongs to the element pressed, never to a container that holds it", () => {
+    // CANARY: put `.card:active` back (the board's list row is a div holding
+    // two links and the Move button, and dipped ~9px for a press on any of
+    // them), or `.pj-card:active` (a press on the pin dipped the whole card).
+    // `:active` matches every ancestor of what is pressed, so a pressed
+    // element must be a control and hold no DOM control of its own (a
+    // component child is opaque to this file-local scan).
+    const NOT_A_CONTAINER = {
+      '.btn:active:not(:disabled, [aria-disabled="true"]) → <label> app/features/task-detail/attachments-panel.tsx holds <input>':
+        "the attach button is a <label> wrapping its own hidden file input: pressing the label is pressing that input, one control.",
+      ".keybtn:active → <span> app/features/notifications/notifications-page.tsx is not a control":
+        "`.keybtn.dead`, an orphan row's project note, is an inline <span>; a transform does not apply to a non-replaced inline box, so no press draws on it.",
+    } satisfies Record<string, string>;
+    const offenders = new Set<string>();
+    let judged = 0;
+    for (const p of PRESSES) {
+      const matched = ELEMENTS.filter((el) => matchesSelector(el, p.pressed));
+      if (matched.length) judged++;
+      for (const el of matched) {
+        const where = `${p.part} → <${el.tag}> ${el.file}`;
+        if (!el.interactive) offenders.add(`${where} is not a control`);
+        const inner = ELEMENTS.find(
+          (d) => d.interactive && /^[a-z]/.test(d.tag) && d.chain.some((f) => f.id === el.id),
+        );
+        if (inner) offenders.add(`${where} holds <${inner.tag}>`);
+      }
+    }
+    expect(judged).toBeGreaterThan(30);
+    expect([...offenders].filter((o) => !(o in NOT_A_CONTAINER))).toEqual([]);
+    // Every exemption is still load-bearing.
+    expect(Object.keys(NOT_A_CONTAINER).filter((k) => !offenders.has(k))).toEqual([]);
+    for (const container of [".pj-card", ".pj-row"]) {
+      expect(PRESSES.some((p) => p.part === `${container}:has(> .pj-link:active)`), container).toBe(true);
+    }
+    expect(PRESSES.some((p) => p.part === "a.card:active")).toBe(true);
+  });
+
+  it("(F32) the controls the block had missed press at their step, as their neighbours do", () => {
+    // CANARY: drop `.rsel-btn:active` (the run selector beside the stage
+    // trigger that presses), or `.rail-toggle:active` from the 720px block
+    // (the hamburger beside the bell that presses).
+    const stepOf = (part: string, rules: "plain" | "phone" = "plain") =>
+      PRESSES.find((p) => p.at === rules && p.part === part)?.transform;
+    for (const part of [
+      ".meta-edit-btn:active", ".rsel-btn:active", ".cal-nav:active", ".cal-day:active", "button.kbd:active",
+      ".home-user:active", ".tl-attach-chip:active", ".board-orphan-key:active",
+    ]) {
+      expect(stepOf(part), part).toBe("scale(.96)");
+    }
+    expect(stepOf(".datepick-clear:active")).toBe("translateY(-50%) scale(.96)");
+    for (const part of [
+      ".ag-newbtn:active", ".live-row:active", ".ctl-example:active:not(:disabled)", ".ctl-conv:active",
+      ".project-switch:active", '.ntf-item:active:not([aria-disabled="true"])', ".attach-file:active",
+      ".attach-thumb:active", ".tl-attach-thumb:active", "button.top-search:active",
+    ]) {
+      expect(stepOf(part), part).toBe("scale(.99)");
+    }
+    // The hamburger exists only at 720px, so its press lives there too; the
+    // global rule stays `display: none` alone (F19-33 pins that). The palette
+    // trigger is a 360px surface above it and a 34px icon box below it.
+    expect(stepOf(".rail-toggle:active", "phone")).toBe("scale(.96)");
+    expect(stepOf("button.top-search:active:not(:disabled)", "phone")).toBe("scale(.96)");
+    // Transition only what changes: its hover moves the fill, not the border.
+    expect(decls(plain, "button.top-search").get("transition")).toBe(
+      "background-color .14s ease, transform .15s var(--ease-out)",
+    );
+    // A link-styled "Show more" inside a sentence opts out of its .keybtn's press.
+    expect(own(plain, ".keybtn.act-toggle:active").get("transform")).toBe("none");
+    // The dead `.tag button` press is gone with the markup it pressed.
+    expect(PRESSES.some((p) => /\.tag button/.test(p.part))).toBe(false);
+  });
+
+  it("(F33) a refused or disabled control neither hovers nor presses, and dims at the house step", () => {
+    // CANARY: put `.btn:hover` back on `:not(:disabled)` (the refused Confirm
+    // lifted and turned blue-pressed), or drop `.stg-x:disabled`'s
+    // `pointer-events: none` (a viewer's disabled stage ✕ turned destructive
+    // red under the pointer).
+    const refusedToo = ':not(:disabled, [aria-disabled="true"])';
+    expect(own(plain, `.btn:hover${refusedToo}`).get("border-color")).toBe("var(--fg)");
+    expect(own(plain, `.btn:active${refusedToo}`).get("transform")).toBe("scale(.96)");
+    expect(own(plain, `.btn.primary:hover${refusedToo}`).get("background")).toBe("var(--blue-pressed)");
+    expect(plain.some((r) => parts(r).includes(".btn:hover:not(:disabled)"))).toBe(false);
+    // The refusal dims at the disabled step, in the P14-LV-08 group.
+    const refused = decls(plain, '.btn[aria-disabled="true"]');
+    expect(refused.get("opacity")).toBe(".45");
+    expect(refused.get("cursor")).toBe("not-allowed");
+    expect(refused.get("transform")).toBe("none");
+    // A refused option dims; the decided record's options (natively disabled,
+    // ruling 138) stay at full ink and only drop the pointer.
+    expect(own(plain, `.opt:hover:where(${refusedToo})`).get("border-color")).toBe("var(--border)");
+    expect(own(plain, '.opt[aria-disabled="true"]:not(:disabled)').get("opacity")).toBe(".45");
+    expect(own(plain, ".opt:disabled").get("opacity")).toBeUndefined();
+    expect(PRESSES.some((p) => p.part === `.opt:active:where(${refusedToo})`)).toBe(true);
+    // A disabled ✕ answers nothing and reads disabled; the pinned destructive
+    // hovers keep their exact selectors (P16-UI-04).
+    expect(own(plain, ".stg-x:disabled").get("pointer-events")).toBe("none");
+    expect(own(plain, ".stg-name:disabled").get("pointer-events")).toBe("none");
+    expect(own(plain, ".stg-x:disabled:not(.off)").get("opacity")).toBe(".45");
+    // A backend option that is not configured holds still, and the selected
+    // one keeps its blue edge on hover (`:where()` keeps the hover's weight).
+    expect(own(plain, ".be-opt:disabled").get("opacity")).toBe(".45");
+    expect(own(plain, ".be-opt:hover:where(:not(:disabled))").get("border-color")).toBe("var(--border)");
+    expect(own(plain, ".stage-menu-btn:hover:where(:not(:disabled))").get("background")).toBe("var(--tint-press)");
+    // Disabled only while their own request is in flight: the busy step.
+    for (const busy of [".deploy-row:disabled", ".rev-x:disabled", ".stage-menu-btn:disabled", '.stg-x[aria-busy="true"]:disabled']) {
+      expect(own(plain, busy).get("opacity"), busy).toBe(".7");
+      expect(own(plain, busy).get("cursor"), busy).toBe("default");
+    }
+    // Every press on a class that renders disabled or refused is guarded, and
+    // a locked grant chip (a <span>) is not a control.
+    for (const part of [
+      ".be-opt:active:not(:disabled)", ".deploy-row:active:not(:disabled)", "button.pick-chip:active:not(:disabled)",
+      ".rev-add:active:not(:disabled)", ".handoff-chip:active:not(:disabled)", ".rev-x:active:not(:disabled)",
+      ".stg-x:active:not(:disabled)",
+    ]) {
+      expect(PRESSES.some((p) => p.part === part), part).toBe(true);
+    }
+    expect(PRESSES.some((p) => p.part.startsWith(".pick-chip:active"))).toBe(false);
+  });
+
+  it("(F43) a control or row hovered all day changes colour, not position; the infrequent tiles keep their lift", () => {
+    // CANARY: put `.btn:hover`'s translateY(-1px) back, or `.pj-row:hover`'s
+    // translateX(2px) (which also slid the pin's hit area under the pointer).
+    const FREQUENT = [".btn", ".ag-item", ".pcap-row", ".deploy-row", ".pj-row", ".fm-act", ".pj-star", ".pj-row .pj-star"];
+    const moving = plain
+      .filter((r) => r.decls.has("transform"))
+      .flatMap((r) => parts(r).filter((p) => /:hover\b/.test(p)).map((p) => ({ p, base: stateless(p) })))
+      .filter(({ base }) => FREQUENT.includes(base))
+      .map(({ p }) => p);
+    expect(moving).toEqual([]);
+    // Each keeps a static hover cue.
+    for (const [hover, prop] of [
+      [".ag-item:hover", "border-color"],
+      [".pcap-row:hover", "border-color"],
+      [".deploy-row:hover:not(:disabled)", "border-color"],
+      [".pj-row:hover", "border-color"],
+      [".fm-act:hover", "border-color"],
+      [".pj-star:hover", "background"],
+      // Its resting border is already --fg, so the base border hover is no
+      // cue on it; the fill moves instead (review, same pass).
+      ['.btn.provider.github:hover:not(:disabled, [aria-disabled="true"])', "background"],
+    ] as const) {
+      expect(own(plain, hover).get(prop), hover).toBeTruthy();
+    }
+    expect(own(plain, ".btn.provider.github").get("border-color")).toBe(own(plain, ".btn:hover:not(:disabled, [aria-disabled=\"true\"])").get("border-color"));
+    // The row's chevron brightens in place, on a colour transition.
+    expect(own(plain, ".pj-row .go").get("transition")).toBe("color .14s ease");
+    expect(own(plain, ".pj-row:hover .go").get("transform")).toBeUndefined();
+    // A tile chosen once, not hovered all day, keeps its lift.
+    for (const tile of [".pj-card:hover", ".org-tile.go:hover", ".be-opt:hover:where(:not(:disabled))"]) {
+      expect(own(plain, tile).get("transform"), tile).toMatch(/^translateY\(-\dpx\)$/);
+    }
+  });
+
+  it("(F50) the unselected .seg option brightens on hover like its sibling families, and the selected one keeps its colour", () => {
+    // CANARY: delete `.seg button:hover:not(:disabled)` (Grid/List changed
+    // nothing but the cursor), or its `.on` restore (D32-5 then fails too).
+    for (const family of [".seg button", ".mini-seg button", ".cap-seg button"]) {
+      expect(own(plain, `${family}:hover:not(:disabled)`).get("color"), family).toBe("var(--fg)");
+    }
+    expect(own(plain, ".fchip:hover:not(:disabled)").get("color")).toBe("var(--fg)");
+    expect(own(plain, ".seg button.on:hover:not(:disabled)").get("color")).toBe(own(plain, ".seg button.on").get("color"));
+    // On the high-frequency clock: colour at 150ms or less.
+    const color = splitArgs(own(plain, ".seg button").get("transition") ?? "").find((l) => /^color\b/.test(l));
+    expect(color).toBe("color .14s ease");
+  });
+});
+
+describe("app.css ruling 459: the better-ui pass — enter and exit", () => {
+  // Enter and exit (better-ui, enter-exit.md and animations.md): a small fixed
+  // translate, exits softer and shorter than enters, every veil fades, what is
+  // already on screen at first paint moves only on a later change, and UI the
+  // keyboard opens appears at once. Every motion keeps a reduced-motion answer
+  // that the cascade actually reaches.
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+  const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
+  const wide = RULES.filter((r) => r.at.some((a) => /min-width:\s*900px/.test(a)));
+  const parts = (r: CssRule) => splitArgs(r.selector);
+  /** The declarations of the rules that name exactly this selector, later
+   *  ones winning; empty when none does. */
+  const own = (rules: CssRule[], selector: string) => {
+    const out = new Map<string, string>();
+    for (const r of rules) if (parts(r).includes(selector)) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  const source = (file: string) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
+
+  it("(F23) the bell badge pulses only when a notification arrives, and reduced motion stills it", () => {
+    // CANARY: put `animation: stagePulse .45s ease` back on the bare
+    // `.bell-badge` (it pulsed on every first paint, every Home / workspace /
+    // standalone remount and every fall), or move the reduced-motion answer
+    // above the rule it answers (the old one lost on source order).
+    expect(own(plain, ".bell-badge").has("animation")).toBe(false);
+    expect(own(plain, ".bell-badge[data-arrived]").get("animation")).toBe("stagePulse .45s ease");
+    expect(own(reduced, ".bell-badge[data-arrived]").get("animation")).toBe("none");
+    // A bare `.bell-badge` answer is dead weight: nothing it could still is left.
+    expect(reduced.some((r) => parts(r).includes(".bell-badge"))).toBe(false);
+    // Equal specificity, so the answer must come later in the sheet.
+    const rule = CODE.indexOf(".bell-badge[data-arrived] { animation: stagePulse");
+    const answer = CODE.indexOf(".bell-badge[data-arrived] { animation: none");
+    expect(rule).toBeGreaterThan(-1);
+    expect(answer).toBeGreaterThan(rule);
+  });
+
+  it("(F25) the drawer's veil fades in and out, and the drawer closes faster than it opens", () => {
+    // CANARY: put the scrim back on `display: none` / `display: block` alone
+    // (the 30% veil switched on and off in one frame), or the rail's close
+    // back on .2s.
+    const closed = own(plain, ".rail-scrim");
+    expect(closed.get("display")).toBe("none");
+    expect(closed.get("opacity")).toBe("0");
+    expect(closed.get("visibility")).toBe("hidden");
+    expect(closed.get("pointer-events")).toBe("none");
+    expect(closed.get("transition")).toBe("opacity .15s var(--ease-out), visibility 0s linear .15s");
+    // Under the breakpoint it is laid out, so it has a box to fade; what hides
+    // it stays outside the width query (R19-12 reads a width-scoped
+    // visibility / opacity / pointer-events as a removed control).
+    const laidOut = own(phone, ".rail-scrim");
+    expect(laidOut.get("display")).toBe("block");
+    for (const prop of ["opacity", "visibility", "pointer-events"]) expect(laidOut.has(prop), prop).toBe(false);
+    const open = own(phone, '.app[data-rail-open="true"] .rail-scrim');
+    expect(open.get("opacity")).toBe("1");
+    expect(open.get("visibility")).toBe("visible");
+    expect(open.get("pointer-events")).toBe("auto");
+    expect(open.get("transition")).toBe("opacity .2s var(--ease-out)");
+    // The drawer: out in .15s, in over .2s, both on --ease-out. The open rule
+    // names only a duration, so reduced motion's `transition: none` keeps the
+    // slide off in both directions.
+    expect(own(phone, ".rail").get("transition")).toBe("transform .15s var(--ease-out)");
+    const opening = own(phone, '.app[data-rail-open="true"] .rail');
+    expect(opening.get("transition-duration")).toBe(".2s");
+    expect(opening.has("transition")).toBe(false);
+    expect(opening.has("transition-property")).toBe(false);
+    expect(own(reduced, ".rail").get("transition")).toBe("none");
+    // The layers that sit above the veil (the topbar at 60, the dock at 55)
+    // drop under it at once and come back only once it has faded.
+    expect(own(phone, ".topbar").get("transition")).toBe("z-index 0s linear .15s");
+    expect(own(phone, '.app[data-rail-open="true"] .topbar').get("transition")).toBe("none");
+    expect(own(plain, ".dock").get("transition")).toBe("visibility 0s linear .15s");
+    expect(own(plain, 'body[data-rail-open="true"] .dock').get("transition")).toBe("none");
+  });
+
+  it("(F26) a centred dialog rises a fixed 8px and leaves by a softer, shorter 6px", () => {
+    // CANARY: put pop-center back on translate(-50%, -46%): a percentage is 4%
+    // of the card's own height, 9px on a confirm and 31px on the overlay.
+    const frames =
+      /@keyframes pop-center \{\s*from \{ opacity: 0; transform: translate\(-50%, calc\(-50% \+ (\d+)px\)\) scale\(([\d.]+)\); \}\s*to \{ opacity: 1; transform: translate\(-50%, -50%\) scale\(1\); \}\s*\}/.exec(
+        CODE,
+      );
+    expect(frames, "pop-center travels a fixed px offset").not.toBeNull();
+    const enter = { px: Number(frames![1]), scale: Number(frames![2]) };
+    expect(enter.px).toBeLessThanOrEqual(12);
+    const closing = own(plain, "dialog[data-closing]");
+    const exit = /^translate\(-50%, calc\(-50% \+ (\d+)px\)\) scale\(([\d.]+)\)$/.exec(closing.get("transform") ?? "");
+    expect(exit, "the close travels a fixed px offset").not.toBeNull();
+    // Softer: less travel and less shrink than the enter, the same direction.
+    expect(Number(exit![1])).toBeGreaterThan(0);
+    expect(Number(exit![1])).toBeLessThan(enter.px);
+    expect(Number(exit![2])).toBeGreaterThan(enter.scale);
+    // Shorter: .15s against the enter's .18s, both on --ease-out.
+    for (const card of [".confirm-card", ".modal-card", ".page-overlay"]) {
+      expect(own(plain, card).get("animation"), card).toBe("pop-center .18s var(--ease-out)");
+    }
+    expect(closing.get("transition")).toBe("opacity .15s var(--ease-out), transform .15s var(--ease-out)");
+    // Reduced motion still re-centres the close and only fades it.
+    expect(own(reduced, "dialog[data-closing]").get("transform")).toBe("translate(-50%, -50%)");
+    expect(CODE).not.toMatch(/translate\(-50%, -4\d%\)/);
+  });
+
+  it("(F28) the login pitch reads in after the card, ~100ms a chunk, and reduced motion fades it at once", () => {
+    // CANARY: put `animation: rise .3s var(--ease-out)` back on `.login-aside`
+    // (the pitch rose as one block, in step with the card), or drop
+    // `.login-aside > p` from the reduced-motion list (its 200ms delay then
+    // survives the fade: the paragraph shows, blanks and fades in).
+    expect(own(plain, ".login-card").get("animation")).toBe("rise .3s var(--ease-out)");
+    expect(own(wide, ".login-aside").has("animation")).toBe(false);
+    expect(own(wide, ".login-aside > *").get("animation")).toBe("rise .3s var(--ease-out) 100ms backwards");
+    expect(own(wide, ".login-aside > p").get("animation-delay")).toBe("200ms");
+    expect(own(wide, ".login-aside > .login-aside-points").get("animation-delay")).toBe("300ms");
+    // Those are the aside's own chunks, in reading order.
+    const aside = /<aside className="login-aside">([\s\S]*?)<\/aside>/.exec(source("./routes/login.tsx"))![1]!;
+    const chunks = [...aside.matchAll(/\n {8}<(\w+)(?: className="([\w-]+)")?/g)].map((m) => m[2] ?? m[1]);
+    expect(chunks).toEqual(["login-aside-mark", "h2", "p", "login-aside-points"]);
+    // Reduced motion: one quick fade, every delay reset by the shorthand.
+    for (const selector of [".login-aside > *", ".login-aside > p", ".login-aside > .login-aside-points"]) {
+      expect(own(reduced, selector).get("animation"), selector).toBe("fade-in .12s ease");
+    }
+  });
+
+  it("(F44) the listboxes typing opens appear at once; the click-opened run selector keeps its entrance", () => {
+    // CANARY: delete `.rsel-menu.mention-menu { animation: none; }` (the
+    // mention list rose in on every '@' and every 0 -> n keystroke).
+    expect(own(plain, ".rsel-menu.mention-menu").get("animation")).toBe("none");
+    expect(own(plain, ".rsel-menu").get("animation")).toBe("menu-in .16s var(--ease-out)");
+    // Two classes against the reduced-motion block's one, so it wins there too.
+    expect(own(reduced, ".rsel-menu").get("animation")).toBe("fade-in .12s ease");
+    expect(own(reduced, ".rsel-menu.mention-menu").has("animation")).toBe(false);
+    // Nothing grows any more, so no origin to grow from.
+    expect(own(plain, ".mention-menu").has("transform-origin")).toBe(false);
+    for (const file of ["./features/task-detail/mention-menu.tsx", "./features/task-detail/agent-select.tsx"]) {
+      expect(source(file), file).toContain("rsel-menu mention-menu");
+    }
+  });
+
+  it("(F64) the status line on screen at first paint stands still; only a line that replaces it rises", () => {
+    // CANARY: put `swap-in` back on the bare `.run-phase .step` (opening a
+    // task mid-run made its current step rise as if it had just changed).
+    for (const selector of [".run-phase .ph", ".run-phase .step", ".ctl-working-step"]) {
+      expect(own(plain, selector).has("animation"), selector).toBe(false);
+      expect(own(reduced, selector).has("animation"), selector).toBe(false);
+      expect(own(plain, `${selector}[data-fresh]`).get("animation"), selector).toMatch(/^swap-in \.15s var\(--ease-out\)$/);
+      expect(own(reduced, `${selector}[data-fresh]`).get("animation"), selector).toBe("fade-in .12s ease");
+    }
+    // Both lines take the mark from the one latch.
+    for (const file of ["./features/runtime/runs-panels.tsx", "./features/controller/turn-step.tsx"]) {
+      expect(source(file), file).toMatch(/useFreshLine\(/);
+    }
+  });
+});
+
+describe("app.css ruling 459: the better-ui pass — icons", () => {
+  // better-ui icons.md: a glyph carries its label's weight; one icon library
+  // per surface, so no typed letter, font arrow or CSS-border caret stands in
+  // for a glyph; one SVG recoloured per state, never by an unrelated rule; and
+  // one glyph per meaning.
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const isReduced = (r: CssRule) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a));
+  const reduced = RULES.filter(isReduced);
+  const wide = RULES.filter((r) => r.at.some((a) => /min-width:\s*900px/.test(a)));
+  const parts = (r: CssRule) => splitArgs(r.selector);
+  /** The declarations of the rules that name exactly this selector, later
+   *  ones winning; empty when none does. */
+  const own = (rules: CssRule[], selector: string) => {
+    const out = new Map<string, string>();
+    for (const r of rules) if (parts(r).includes(selector)) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  /** A base rule's index and the index of the reduced-motion rule that
+   *  answers it; at equal specificity the answer must come later. */
+  const order = (selector: string) => ({
+    base: RULES.findIndex((r) => r.at.length === 0 && parts(r).includes(selector)),
+    answer: RULES.findLastIndex((r) => isReduced(r) && parts(r).includes(selector)),
+  });
+  const source = (file: string) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
+  /** Every `<Icon … />` in the markup, with its name and className expressions. */
+  /** A `<GlyphSwap rest="a" alt="b" … spinAlt />` (ruling 459) draws both of
+   *  its glyphs where it is written, the alternate spinning under `spinAlt`,
+   *  so it counts as those two Icons there; the component's own two
+   *  prop-named Icons are counted at every call site instead. */
+  const GLYPH_SWAP_SOURCE = path.join("ui", "copy-glyph.tsx");
+  const icons = () =>
+    markupFiles().flatMap((file) => {
+      const src = readFileSync(file, "utf8");
+      const rel = path.relative(APP_DIR, file);
+      const drawn = rel === GLYPH_SWAP_SOURCE ? [] : [...src.matchAll(/<Icon\b([\s\S]*?)\/>/g)].map((m) => {
+        const name = /name=(?:"(\w+)"|\{([^}]*)\})/.exec(m[1]!);
+        const cls = /className=(?:"([^"]*)"|\{([^}]*)\})/.exec(m[1]!);
+        return {
+          rel,
+          at: `${rel}:${lineAt(src, m.index)}`,
+          literal: name?.[1],
+          name: (name?.[1] ?? name?.[2] ?? "").trim(),
+          cls: (cls?.[1] ?? cls?.[2] ?? "").trim(),
+        };
+      });
+      const swapped = [...src.matchAll(/<GlyphSwap\b([\s\S]*?)\/>/g)].flatMap((m) => {
+        const at = `${rel}:${lineAt(src, m.index)}`;
+        const rest = /\brest="(\w+)"/.exec(m[1]!)![1]!;
+        const alt = /\balt="(\w+)"/.exec(m[1]!)![1]!;
+        const spin = /\bspinAlt\b/.test(m[1]!) ? "spin" : "";
+        return [
+          { rel, at, literal: rest, name: rest, cls: "" },
+          { rel, at, literal: alt, name: alt, cls: spin },
+        ];
+      });
+      return [...drawn, ...swapped];
+    });
+
+  it("(F35) a glyph's stroke follows its label's weight: 2 beside 500–600, 2.5 beside 700–800", () => {
+    // CANARY: drop `.btn .ico` from the heavier group (every button glyph
+    // falls back to the set's 1.7, about 1px beside Inter Bold), or add
+    // `.kv-row .v .ico` to it (a 2.5 glyph beside 400 mono text).
+    const LABEL = {
+      ".nav-item .ico": ".nav-item",
+      ".seg .ico": ".seg button",
+      ".fchip .ico": ".fchip",
+      ".chip .ico": ".chip",
+      ".card-head .trace .ico": ".card-head .trace",
+      ".pick-chip.mono > .ico": ".pick-chip.mono",
+      ".menu-item .ico": ".menu-item",
+      ".toast .ico": ".toast",
+      ".deny-note .ico": ".deny-note",
+      ".pill.quiet .ico": ".pill.quiet",
+      ".sched-when .ico": ".sched-when",
+      ".stage-menu-btn .sm-caret": ".stage-menu-btn",
+      ".rq-row .wait-tag.human .ico": ".rq-row .wait-tag.human",
+      ".gh-freshness .ico": ".gh-freshness",
+      ".ctl-msg-who .ico": ".ctl-msg-who",
+      ".btn .ico": ".btn",
+      ".pill .ico": ".pill",
+      ".wait-tag .ico": ".wait-tag",
+      ".op-rec-kind .ico": ".op-rec-kind",
+      ".model-sub .ico": ".model-sub",
+      ".cmdk-row .ico": ".cmdk-label",
+      ".rev-add .ico": ".rev-add",
+      ".own-btn .ico": ".own-btn",
+      ".rsel-btn .caret": ".rsel-btn",
+      ".pick-chip:not(.mono) > .ico": ".pick-chip",
+      ".go-hint .ico": ".go-hint",
+      ".ag-newbtn .ico": ".ag-newbtn",
+      ".trans-lock .ico": ".trans-lock",
+      ".trans-path .ico": ".trans-path",
+      ".guard-name .ico": ".guard-name",
+      ".cred-top .ico": ".cred-name",
+      ".org-tile .lbl .ico": ".org-tile .lbl",
+      ".cap-col-head .ico": ".cap-col-head",
+      ".md-collapse-toggle .ico": ".md-collapse-toggle",
+      ".rq-go .ico": ".rq-go",
+      ".session-id-export .ico": ".session-id-export",
+      ".panel-head > .ico": "h2",
+      ".sec-h > .ico": "h2",
+      ".flabel .lbl-lock": ".flabel",
+      ".ctx-lbl .lbl-lock": ".ctx-lbl",
+    } satisfies Record<string, string>;
+    const weight = (label: string) => {
+      const w = own(plain, label).get("font-weight");
+      expect(w, `${label} states its weight`).toMatch(/^[1-9]00$/);
+      return Number(w);
+    };
+    const wrong: string[] = [];
+    for (const [glyph, label] of Object.entries(LABEL)) {
+      const w = weight(label);
+      const want = w >= 700 ? "2.5" : w >= 500 ? "2" : undefined;
+      const got = own(plain, glyph).get("stroke-width");
+      if (got !== want) wrong.push(`${glyph} beside ${label} (${w}): ${got ?? "1.7"}, wants ${want ?? "1.7"}`);
+    }
+    expect(wrong).toEqual([]);
+    // Every stroke width in the sheet is one of these, so a new one has to
+    // name the label it sits beside here.
+    const stroked = RULES.filter((r) => r.decls.has("stroke-width")).flatMap(parts);
+    expect(stroked.sort()).toEqual(Object.keys(LABEL).sort());
+    // The rail glyph does not thicken as its item turns active.
+    expect(weight(".nav-item.active")).toBeLessThan(700);
+    // The .kv-row value glyph sits beside 400 mono text and keeps the set's 1.7.
+    expect(weight(".kv-row .v .mono")).toBe(400);
+    expect(source("./ui/icon.tsx")).toMatch(/strokeWidth="1\.7"/);
+    // A bold control inside a medium one (the .btn in a decision card's
+    // .deny-note) ties at equal specificity, so the heavier group comes later.
+    const at = (selector: string) => RULES.findIndex((r) => r.decls.has("stroke-width") && parts(r).includes(selector));
+    expect(at(".btn .ico")).toBeGreaterThan(at(".deny-note .ico"));
+  });
+
+  it("(F37) every disclosure's caret is the set's chevron: one rule, turned only by its own <details>", () => {
+    // CANARY: drop the chevron from "About this chain", or the reduced-motion
+    // answer to `.ico.disc-chev`.
+    // No pseudo-element draws a mitred V out of two borders any more.
+    const borderCarets = RULES.filter(
+      (r) =>
+        /::(?:before|after)/.test(r.selector) &&
+        /solid/.test(r.decls.get("border-right") ?? "") &&
+        /solid/.test(r.decls.get("border-bottom") ?? ""),
+    ).map((r) => r.selector);
+    expect(borderCarets).toEqual([]);
+    const chev = own(plain, ".ico.disc-chev");
+    expect(chev.get("width")).toBe("12px");
+    expect(chev.get("height")).toBe("12px");
+    // The chevron points right on the grid: down when folded, up when open.
+    expect(chev.get("transform")).toBe("rotate(90deg)");
+    expect(chev.get("transition")).toBe("transform .15s var(--ease-out)");
+    expect(own(plain, "details[open] > summary .disc-chev").get("transform")).toBe("rotate(-90deg)");
+    expect(own(reduced, ".ico.disc-chev").get("transition")).toBe("none");
+    const { base, answer } = order(".ico.disc-chev");
+    expect(answer).toBeGreaterThan(base);
+    // The advisory's shield keeps its 13px and its colour; the caret takes the
+    // summary's, so it follows the hover.
+    expect(own(plain, ".cap-advisory > summary > .ico:not(.disc-chev)").get("width")).toBe("13px");
+    expect(own(plain, ".ctl-goal-line .disc-chev").get("color")).toBe("var(--muted)");
+    // Every <summary> in the app carries the chevron, once.
+    const summaries: string[] = [];
+    const bare: string[] = [];
+    for (const file of markupFiles()) {
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/<summary\b[^>]*>([\s\S]*?)<\/summary>/g)) {
+        const where = `${path.relative(APP_DIR, file)}:${lineAt(src, m.index)}`;
+        summaries.push(where);
+        if ((m[1]!.match(/<Icon name="chevron" className="disc-chev" \/>/g) ?? []).length !== 1) bare.push(where);
+      }
+    }
+    expect(summaries).toHaveLength(4);
+    expect(bare).toEqual([]);
+  });
+
+  it("(F38) a busy state spins the set's loader; only a refresh control spins its own arrow", () => {
+    // CANARY: put the attach button back on `busy ? "refresh" : "file"`, or
+    // Rebuild back on the memory chip.
+    const spinning = icons().filter((i) => /(?:^|[\s"])spin(?:[\s"]|$)/.test(i.cls));
+    const loaders: string[] = [];
+    const arrows: string[] = [];
+    const wrong: string[] = [];
+    for (const i of spinning) {
+      if (i.literal === "loader") loaders.push(i.at);
+      else if (i.literal === "refresh") arrows.push(i.rel);
+      else {
+        // A glyph that swaps to the loader on the same condition that spins it.
+        const swap = /^(.+?)\s*\?\s*"loader"\s*:\s*"\w+"$/.exec(i.name);
+        const spin = /^(.+?)\s*\?\s*"spin"\s*:\s*""$/.exec(i.cls);
+        if (swap && spin && swap[1] === spin[1]) loaders.push(i.at);
+        else wrong.push(`${i.at}: spins ${i.name}`);
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(loaders.length).toBeGreaterThanOrEqual(8);
+    // The controls whose arrow IS the meaning and already their glyph at
+    // rest, so busy swaps nothing: re-scan (Home and the board), re-index and
+    // test connection.
+    expect(arrows.sort()).toEqual([
+      path.join("features", "board", "board-page.tsx"),
+      path.join("features", "home", "home-sections.tsx"),
+      path.join("features", "org-settings", "resource-rows.tsx"),
+      path.join("features", "org-settings", "resource-rows.tsx"),
+    ]);
+    expect(source("./ui/icon.tsx")).toMatch(/\n\s*loader: '/);
+  });
+
+  it("(F47) the wait row's rule reaches its own clock, never the Viberr chip's mark", () => {
+    // CANARY: put the rule back on the bare `.log-line.wait .ico`.
+    expect(RULES.some((r) => parts(r).includes(".log-line.wait .ico"))).toBe(false);
+    // The clock now sits in the orb's 20px cell (the contextual-icon block
+    // below), still a direct child of what sizes it.
+    const clock = own(plain, ".lw-glyph > .ico");
+    expect(clock.get("width")).toBe("14px");
+    expect(clock.get("height")).toBe("14px");
+    expect(clock.get("color")).toBe("#8a95b1");
+    // The mark keeps its 9px and inherits the tile's dark ink.
+    const mark = own(plain, ".log-chip .lc-mark .ico");
+    expect(mark.get("width")).toBe("9px");
+    expect(mark.has("color")).toBe(false);
+    expect(own(plain, ".log-chip .lc-mark").get("color")).toBe("#1a1433");
+    // No other console rule reaches a glyph through a bare descendant.
+    const leaks = RULES.flatMap(parts).filter((s) => /^\.(?:log-(?:line|wait)|lw-glyph)\b/.test(s) && /[^>] \.ico$/.test(s));
+    expect(leaks).toEqual([]);
+  });
+
+  it("(F48) the Google mark is the set's glyph on every surface, not a typed letter", () => {
+    // CANARY: put the typed "G" span back in the domain row.
+    expect(source("./ui/icon.tsx")).toMatch(/\n\s*google: '<path d="[^"]+"\/>',/);
+    expect(definedClasses(CODE).has("gmark")).toBe(false);
+    const typed: string[] = [];
+    for (const file of markupFiles()) {
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/<span\b[^>]*>\s*G\s*<\/span>/g)) {
+        typed.push(`${path.relative(APP_DIR, file)}:${lineAt(src, m.index)}`);
+      }
+    }
+    expect(typed).toEqual([]);
+    const marks = icons().filter((i) => /"google"/.test(i.name) || i.literal === "google").map((i) => i.rel);
+    expect(marks.sort()).toEqual([
+      path.join("features", "org-settings", "users-panel.tsx"),
+      path.join("features", "org-settings", "users-panel.tsx"),
+      path.join("features", "org-settings", "users-panel.tsx"),
+      path.join("routes", "login.tsx"),
+    ]);
+    // The domain row's box names the colour and size the letter carried, as
+    // the picker tile beside it does.
+    expect(own(plain, ".dom-ic").get("color")).toBe("var(--muted)");
+    expect(own(plain, ".dom-ic .ico").get("width")).toBe("14px");
+    expect(own(plain, ".be-ic").get("color")).toBe("var(--muted)");
+  });
+
+  it("(F52) the Agents page's running count carries the house's working dot, stilled under reduced motion", () => {
+    // CANARY: drop `.ag-running .working` from the reduced-motion list.
+    const house = own(plain, ".wait-tag .working");
+    for (const selector of [".ag-active .working", ".ag-running .working"]) {
+      const dot = own(plain, selector);
+      for (const p of ["width", "height", "border-radius", "background", "animation"]) {
+        expect(dot.get(p), `${selector} ${p}`).toBe(house.get(p));
+      }
+      expect(dot.get("flex"), selector).toBe("none");
+      expect(own(reduced, selector).get("animation"), selector).toBe("none");
+      const { base, answer } = order(selector);
+      expect(answer, selector).toBeGreaterThan(base);
+    }
+    const agents = source("./features/agents/agents-page.tsx");
+    expect(agents).toMatch(/<span className="ag-active">\s*<span className="working" \/>/);
+    expect(agents).toMatch(/<span className="ag-running">\s*<span className="working" \/>/);
+  });
+
+  it("(F68) no typed glyph stands in for an icon: generated content is empty, an attr() or a counter", () => {
+    // CANARY: put `content: "→"` back on `.login-aside-points li::before`.
+    const typed = RULES.filter(
+      (r) => r.decls.has("content") && !/^(?:""|attr\([^)]*\)(?: \/ "")?|counter\([^)]*\))$/.test(r.decls.get("content")!),
+    ).map((r) => `${r.selector}: ${r.decls.get("content")}`);
+    expect(typed).toEqual([]);
+    const li = own(wide, ".login-aside-points li");
+    expect(li.get("display")).toBe("flex");
+    expect(li.get("align-items")).toBe("flex-start");
+    // 16px glyph + .5rem = the 24px the text sat at under the old indent.
+    expect(li.get("gap")).toBe(".5rem");
+    expect(li.has("padding-left")).toBe(false);
+    const glyph = own(wide, ".login-aside-points .ico");
+    expect(glyph.get("margin-top")).toBe(".125rem");
+    expect(glyph.get("color")).toBe("var(--teal-dark)");
+    const points = /<ul className="login-aside-points">([\s\S]*?)<\/ul>/.exec(source("./routes/login.tsx"))![1]!;
+    const items = [...points.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]!.trim());
+    expect(items).toHaveLength(3);
+    for (const item of items) expect(item).toMatch(/^<Icon name="arrow" \/>\s*\w/);
+  });
+});
+
+describe("app.css ruling 459: the better-ui pass — contextual icon motion", () => {
+  // better-ui icon-transitions.md: an icon that changes with state keeps both
+  // glyphs in the DOM and cross-fades them with opacity, scale and blur. Every
+  // swap here takes ruling 451(c)'s trim of the recipe for a 13-20px glyph:
+  // scale .25, a 2px blur, .2s on the sheet's --ease-out.
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const isReduced = (r: CssRule) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a));
+  const reduced = RULES.filter(isReduced);
+  const parts = (r: CssRule) => splitArgs(r.selector);
+  /** The declarations of the rules that name exactly this selector, later
+   *  ones winning; empty when none does. */
+  const own = (rules: CssRule[], selector: string) => {
+    const out = new Map<string, string>();
+    for (const r of rules) if (parts(r).includes(selector)) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+  const source = (file: string) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
+  /** (ids, classes + attributes + pseudo-classes, elements) as one number;
+   *  `:not()` counts its argument. Enough for the simple selectors here. */
+  const specificity = (selector: string) => {
+    const s = selector.replace(/:not\(([^()]*)\)/g, " $1");
+    const ids = (s.match(/#[\w-]+/g) ?? []).length;
+    const classes = (s.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+/g) ?? []).length;
+    const elements = (s.match(/(?:^|[\s>+~])[a-z][\w-]*/gi) ?? []).length;
+    return ids * 10000 + classes * 100 + elements;
+  };
+
+  /** Every icon swap in the sheet: the rule that carries its transition, the
+   *  states that hide a glyph and the states that show one, and which
+   *  property scales it. The copy-glyph cell scales on `scale` because its
+   *  loader turns through `transform` (see F39). */
+  const SWAPS = [
+    {
+      finding: "F39 GlyphSwap",
+      base: ".copy-glyph > *",
+      hidden: [".copy-glyph > :last-child", ".copy-glyph[data-copied] > :first-child"],
+      shown: [".copy-glyph[data-copied] > :last-child"],
+      prop: "scale",
+    },
+    {
+      finding: "F40 grant chip",
+      base: ".pick-chip .pc-check",
+      hidden: [".pick-chip .pc-check"],
+      shown: [".pick-chip.on .pc-check"],
+      prop: "transform",
+    },
+    {
+      finding: "F42 wait row",
+      base: ".lw-glyph > *",
+      hidden: [".lw-glyph[data-live] > .ico", ".lw-glyph:not([data-live]) > .log-orb"],
+      shown: [],
+      prop: "transform",
+    },
+    {
+      finding: "F73 picker",
+      base: ".be-opt .bcheck",
+      hidden: [".be-opt .bcheck"],
+      shown: [".be-opt.on .bcheck"],
+      prop: "transform",
+    },
+  ] as const;
+  const at = (prop: "scale" | "transform", size: ".25" | "1") =>
+    prop === "scale" ? size : size === "1" ? "none" : "scale(.25)";
+
+  it("every icon swap hides its glyph at scale .25 behind a 2px blur and trades over .2s on --ease-out", () => {
+    // CANARY: put `.be-opt .bcheck` back on `transform: scale(.8)` with no
+    // blur, or the copy-glyph cell back on `transform: scale(.25)`.
+    for (const swap of SWAPS) {
+      expect(own(plain, swap.base).get("transition"), swap.finding).toBe(
+        `opacity .2s var(--ease-out), ${swap.prop} .2s var(--ease-out), filter .2s var(--ease-out)`,
+      );
+      for (const selector of swap.hidden) {
+        const d = own(plain, selector);
+        expect(d.get("opacity"), selector).toBe("0");
+        expect(d.get(swap.prop), selector).toBe(at(swap.prop, ".25"));
+        expect(d.get("filter"), selector).toBe("blur(2px)");
+      }
+      for (const selector of swap.shown) {
+        const d = own(plain, selector);
+        expect(d.get("opacity"), selector).toBe("1");
+        expect(d.get(swap.prop), selector).toBe(at(swap.prop, "1"));
+        expect(d.get("filter"), selector).toBe("none");
+      }
+    }
+    // Two-way: anything the sheet hides by shrinking is one of these, so a
+    // new swap has to join the table, and so its recipe. A surface that is
+    // leaving (`[data-closing]`: a dialog, the dock) is an exit, not a swap.
+    const shrunk = plain
+      .filter((r) => r.decls.get("opacity") === "0" && (r.decls.has("scale") || /scale\(/.test(r.decls.get("transform") ?? "")))
+      .flatMap(parts)
+      .filter((s) => !s.includes("[data-closing]"))
+      .sort();
+    expect(shrunk).toEqual(SWAPS.flatMap((s) => s.hidden).sort());
+  });
+
+  it("every icon swap has a reduced-motion answer that only fades, after the rule it answers", () => {
+    // CANARY: drop `.be-opt .bcheck` from the OS reduced-motion block, or
+    // move the grant chip's answer above `.pick-chip .pc-check`.
+    for (const swap of SWAPS) {
+      for (const selector of [swap.base, ...swap.hidden, ...swap.shown]) {
+        const d = own(reduced, selector);
+        expect(d.get("transition"), selector).toBe("opacity .12s ease");
+        expect(d.get(swap.prop), selector).toBe(at(swap.prop, "1"));
+        expect(d.get("filter"), selector).toBe("none");
+        // Equal specificity, so the answer must come later in the sheet.
+        const base = RULES.findLastIndex((r) => !isReduced(r) && parts(r).includes(selector));
+        const answer = RULES.findLastIndex((r) => isReduced(r) && parts(r).includes(selector));
+        expect(answer, selector).toBeGreaterThan(base);
+      }
+    }
+  });
+
+  it("(F39) a glyph that trades with its control's state goes through GlyphSwap, never a ternary on the icon name", () => {
+    // CANARY: put the archive button back on
+    // `<Icon name={archived ? "refresh" : "lock"} />`.
+    const swaps: string[] = [];
+    const ternaries: string[] = [];
+    for (const file of markupFiles()) {
+      const src = readFileSync(file, "utf8");
+      const rel = path.relative(APP_DIR, file).split(path.sep).join("/");
+      for (const m of src.matchAll(/<GlyphSwap\b([\s\S]*?)\/>/g)) {
+        const rest = /\brest="(\w+)"/.exec(m[1]!)?.[1];
+        const alt = /\balt="(\w+)"/.exec(m[1]!)?.[1];
+        swaps.push(`${rel}: ${rest} → ${alt}${/\bspinAlt\b/.test(m[1]!) ? " (spins)" : ""}`);
+      }
+      // The loader only ever arrives through the cell (or alone, where the
+      // control had no glyph at rest: Dismiss).
+      for (const m of src.matchAll(/<Icon\b[^>]*?name=\{[^}]*\?[^}]*"loader"[^}]*\}/g)) {
+        ternaries.push(`${rel}:${lineAt(src, m.index)}`);
+      }
+    }
+    expect(ternaries).toEqual([]);
+    expect(swaps.sort()).toEqual(
+      [
+        "features/home/home-sections.tsx: memory → loader (spins)",
+        "features/home/new-project-modal.tsx: plus → loader (spins)",
+        "features/kb-browser/store-browser.tsx: arrow → loader (spins)",
+        "features/task-detail/attachments-panel.tsx: file → loader (spins)",
+        "features/task-detail/execution-profile.tsx: bolt → clock",
+        "features/task-detail/execution-profile.tsx: shield → clock",
+        "features/task-detail/operator-recommendations.tsx: check → loader (spins)",
+        "features/task-detail/task-side-panels.tsx: lock → refresh",
+        "routes/login.tsx: github → loader (spins)",
+        "routes/login.tsx: google → loader (spins)",
+        "ui/copy-glyph.tsx: copy → check",
+      ].sort(),
+    );
+    // The cell centres both marks, whatever their box.
+    const cell = own(plain, ".copy-glyph");
+    expect(cell.get("display")).toBe("inline-grid");
+    expect(cell.get("place-items")).toBe("center");
+    // No copy-glyph rule moves a glyph on `transform`, where the loader's spin
+    // animation would override it.
+    const onTransform = RULES.filter((r) => parts(r).some((p) => p.startsWith(".copy-glyph")) && r.decls.has("transform"));
+    expect(onTransform.map((r) => r.selector)).toEqual([]);
+  });
+
+  it("(F39) a loader resting hidden holds still, outranking every rule that spins it", () => {
+    // CANARY: drop the `animation-play-state: paused` rule, and a leaving
+    // loader snaps back to 0deg (spinAlt only while on) or turns unseen.
+    const pause = ".copy-glyph:not([data-copied]) > .spin";
+    expect(own(plain, pause).get("animation-play-state")).toBe("paused");
+    const spinners = RULES.filter((r) => /^spin\b/.test(r.decls.get("animation") ?? "")).flatMap(parts);
+    expect(spinners).toContain(".ico.spin");
+    for (const spinner of spinners) {
+      expect(specificity(pause), spinner).toBeGreaterThan(specificity(spinner));
+    }
+    // The component spins the alternate for good; the sheet decides when.
+    expect(source("./ui/copy-glyph.tsx")).toMatch(/<Icon name=\{alt\} className=\{spinAlt \? "spin" : ""\} \/>/);
+  });
+
+  it("(F40) a grant chip's check is always drawn, so a toggle never resizes the chip", () => {
+    // CANARY: put back `{granted.has(o.id) && <Icon name="check" />}`.
+    const mounted: string[] = [];
+    const drawn: string[] = [];
+    for (const file of markupFiles()) {
+      const src = readFileSync(file, "utf8");
+      const rel = path.relative(APP_DIR, file).split(path.sep).join("/");
+      for (const m of src.matchAll(/&&\s*<Icon name="check" \/>/g)) mounted.push(`${rel}:${lineAt(src, m.index)}`);
+      drawn.push(...Array.from(src.matchAll(/<Icon name="check" className="pc-check" \/>/g), () => rel));
+    }
+    expect(mounted).toEqual([]);
+    expect(drawn.sort()).toEqual([
+      "features/agents/create-profile-modal.tsx",
+      "features/org-settings/controller-admin-panel.tsx",
+    ]);
+    // The check leads, so every grant chip takes the glyph-led start side.
+    expect(own(plain, ".pick-chip:has(> .ico:first-child)").get("padding-left")).toBe(".5rem");
+    expect(own(plain, ".pick-chip .ico").get("width")).toBe("13px");
+  });
+
+  it("(F42) the wait row's orb and clock share one 20px cell, and the orb stops drawing once hidden", () => {
+    // CANARY: set `.lw-glyph` to 14px, or drop `paused={!live}` (a hidden
+    // orb keeps its animation-frame loop running on every row seen live).
+    const cell = own(plain, ".lw-glyph");
+    expect(cell.get("display")).toBe("inline-grid");
+    expect(cell.get("place-items")).toBe("center");
+    expect(cell.get("flex")).toBe("none");
+    expect(cell.get("width")).toBe("20px");
+    expect(cell.get("height")).toBe("20px");
+    expect(own(plain, ".lw-glyph > *").get("grid-area")).toBe("1 / 1");
+    expect(own(plain, ".lw-glyph > .ico").get("width")).toBe("14px");
+    const row = source("./features/runtime/runs-panels.tsx");
+    const markup = /<span className="lw-glyph"[^>]*>([\s\S]*?)<\/span>/.exec(row)![1]!;
+    // The orb's canvas is exactly the cell, so neither state moves the chip.
+    expect(/size=\{(\d+)\}/.exec(markup)?.[1]).toBe(cell.get("width")!.replace("px", ""));
+    expect(markup).toMatch(/paused=\{!live\}/);
+    expect(markup).toMatch(/<Icon name="clock" \/>/);
+    // Only the row's own clock is sized, never the Viberr chip's mark.
+    expect(RULES.flatMap(parts).filter((s) => s.startsWith(".lw-glyph") && s.endsWith(" .ico") && !s.endsWith("> .ico"))).toEqual([]);
+  });
+
+  it("(F73) the picker's check trades in from .25, as the copy glyph's does", () => {
+    // CANARY: put `.be-opt .bcheck` back on `opacity .14s ease`.
+    const check = own(plain, ".be-opt .bcheck");
+    expect(check.get("transform")).toBe("scale(.25)");
+    expect(check.get("transition")).not.toMatch(/\bease\b(?!-)/);
+    expect(own(plain, ".be-opt .bcheck .ico").get("width")).toBe("15px");
   });
 });

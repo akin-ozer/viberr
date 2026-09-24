@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Link, useFetcher, useNavigate } from "react-router";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -447,7 +448,7 @@ function NewProjectFooter({
           onClick={submit}
           aria-busy={busy}
         >
-          <Icon name={busy ? "loader" : "plus"} className={busy ? "spin" : ""} />
+          <GlyphSwap rest="plus" alt="loader" on={busy} spinAlt />
           {busy ? "Creating project…" : "Create project"}
         </button>
       </span>
@@ -610,6 +611,8 @@ export function NewProjectModal({
       // UI-09: the repo probe's outcome, when it wasn't clean. Creation used to
       // report unqualified success even for a repo GitHub has never heard of.
       if (fetcher.data.repoWarning) push(fetcher.data.repoWarning, "error");
+      // Instant on purpose (ruling 459): the page navigates to the new board,
+      // so there is nothing for an exit to leave toward.
       onClose();
       // F15-04: land IN the project you just made. Creation used to drop the
       // modal and leave you on the home grid, hunting for the new card.

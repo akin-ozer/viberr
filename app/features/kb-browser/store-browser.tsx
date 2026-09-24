@@ -9,6 +9,7 @@ import {
 import { useFetcher } from "react-router";
 import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -215,10 +216,7 @@ function BrowserToolbar({
             disabled={importing}
             aria-busy={importing || undefined}
           >
-            <Icon
-              name={importing ? "refresh" : "arrow"}
-              className={importing ? "spin" : ""}
-            />
+            <GlyphSwap rest="arrow" alt="loader" on={importing} spinAlt />
             {importing ? "Importing…" : "Import"}
           </button>
         </div>
@@ -515,7 +513,8 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  const { ref, close, commit } = useDialog(onCancel);
   return (
     <dialog
       ref={ref}
@@ -548,7 +547,7 @@ function DeleteConfirm({
         <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
+        <button type="button" className="btn danger" onClick={() => commit(onConfirm)}>
           {node.type === "dir" ? "Delete folder" : "Delete file"}
         </button>
       </div>
@@ -879,7 +878,8 @@ function ReplaceConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  const { ref, close, commit } = useDialog(onCancel);
   return (
     <dialog
       ref={ref}
@@ -901,7 +901,7 @@ function ReplaceConfirm({
         <button type="button" className="btn ghost" onClick={close}>
           Cancel
         </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
+        <button type="button" className="btn danger" onClick={() => commit(onConfirm)}>
           Replace document
         </button>
       </div>
@@ -1043,7 +1043,8 @@ export function StoreBrowser({
       intent: "store-delete",
       path: JSON.stringify([...path, node.name]),
     });
-    setConfirm(null);
+    // No setConfirm(null): the confirm plays its exit, then its onCancel
+    // clears it (ruling 459).
   };
 
   const nFiles = countKbFiles(nodes);
@@ -1306,10 +1307,7 @@ export function StoreBrowser({
         <ReplaceConfirm
           path={[...doc.dir, doc.name.trim()].join("/")}
           onCancel={() => editor.setConfirmReplace(false)}
-          onConfirm={() => {
-            editor.setConfirmReplace(false);
-            editor.save(true);
-          }}
+          onConfirm={() => editor.save(true)}
         />
       )}
     </>

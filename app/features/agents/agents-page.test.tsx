@@ -710,6 +710,29 @@ describe("ProfileDetail", () => {
     expect(onDelete).toHaveBeenCalledWith("developer");
   });
 
+  // Ruling 459: the confirm plays its exit after the delete lands, and the page
+  // then selects another profile. The dialog keeps the words it opened with, so
+  // its fade never names the next profile.
+  // Canary: read `a` from props in DeleteConfirm and the heading turns to Reviewer.
+  it("the delete confirm keeps the profile it opened for while the selection changes under it", () => {
+    const props = {
+      stages: STAGES,
+      workflow: WORKFLOW,
+      insts: [mkDeployment({})],
+      projectName: "Viberr Core",
+      canManage: true,
+      onOpen: () => {},
+      onDelete: () => {},
+      onEdit: () => {},
+    };
+    const { getByText, queryByText, rerender } = render(<ProfileDetail a={mkProfile({})} {...props} />);
+    fireEvent.click(getByText("Delete"));
+    expect(getByText("Delete the Developer profile?")).toBeTruthy();
+    rerender(<ProfileDetail a={mkProfile({ id: "reviewer", name: "Reviewer" })} {...props} />);
+    expect(getByText("Delete the Developer profile?")).toBeTruthy();
+    expect(queryByText("Delete the Reviewer profile?")).toBeNull();
+  });
+
   // P13-LV-02 — the eligible-stage panel used to contradict itself: it ignored
   // `spanAll` (the Operator's header said "active across the whole lifecycle"
   // while every chip rendered struck through), counted stage ids the board
@@ -1678,6 +1701,40 @@ describe("CreateProfileModal", () => {
     const ghost = container.querySelector<HTMLButtonElement>(".pick-chip.missing")!;
     expect(ghost.textContent).toBe("retired-kb");
     expect(ghost.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /**
+   * Ruling 459: a grant chip's check is always drawn and the sheet fades it in
+   * on `.on`, so a toggle never widens the chip and re-wraps the row under the
+   * pointer.
+   */
+  it("a resource grant chip keeps its check mounted as it toggles", () => {
+    // CANARY: put back `{selSet.has(it.id) && <Icon name="check" />}` and the
+    // ungranted chip has no check to fade in.
+    const { container } = renderModal({
+      initial: mkProfile({ resources: { skills: ["repo-write"], mcps: [], kb: [] } }),
+      resourceCatalog: [
+        {
+          group: "Skills",
+          key: "skills",
+          mono: true,
+          items: [
+            { id: "repo-write", def: false },
+            { id: "release-notes", def: false },
+          ],
+        },
+      ],
+    });
+    const chipFor = (id: string) =>
+      [...container.querySelectorAll<HTMLButtonElement>(".cap-mbody .pick-chip")].find((c) => c.textContent === id)!;
+    expect(chipFor("repo-write").firstElementChild!.matches("svg.ico.pc-check")).toBe(true);
+    const chip = chipFor("release-notes");
+    const check = chip.firstElementChild!;
+    expect(check.matches("svg.ico.pc-check")).toBe(true);
+    fireEvent.click(chip);
+    expect(chipFor("release-notes")).toBe(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    expect(chip.firstElementChild).toBe(check);
   });
 
   /**

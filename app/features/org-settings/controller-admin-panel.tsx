@@ -162,7 +162,9 @@ function GrantChips({
               {...(o.title ? { title: o.title } : {})}
               onClick={() => onToggle(o.id)}
             >
-              {granted.has(o.id) && <Icon name="check" />}
+              {/* Ruling 459: always drawn, faded in on `.on`, so the chip
+                  keeps its width as it toggles. */}
+              <Icon name="check" className="pc-check" />
               {o.display}
             </button>
           ),
