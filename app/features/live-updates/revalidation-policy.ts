@@ -265,8 +265,8 @@ export class LiveLedger {
    * A live data event arrived (before any load it could be in was sent).
    * Recorded once per tab: two streams whose scopes both carry an event (the
    * project controller page: the layout's and the page's own) both deliver it,
-   * with the same id and body. The id alone could match an event from before a
-   * server restart (the broker's ids start over); the id with the body cannot.
+   * with the same id and body (ids are unique across server processes, ruling
+   * 454, RV-5).
    */
   recordLive(name: string, event: MessageEvent<string>): void {
     if (event.lastEventId) {

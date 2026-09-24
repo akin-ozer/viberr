@@ -105,8 +105,8 @@ export function onLiveFrame(name: SseEventName, handler: FrameHandler): () => vo
 function dispatchFrame(name: SseEventName, event: MessageEvent<string>): void {
   const handlers = frameHandlers.get(name);
   if (!handlers || handlers.size === 0) return;
-  // The broker's ids restart with the process, so an id alone could match a
-  // frame from before a restart; the id with the body cannot.
+  // Keyed by id and body. (The id alone would do: the broker's ids are unique
+  // across processes, ruling 454, RV-5.)
   if (event.lastEventId) {
     const seen = `${event.lastEventId}|${event.data}`;
     if (recentFrames.has(seen)) return;
@@ -366,8 +366,9 @@ export function useLiveUpdates(
       if (!/^\d+$/.test(event.lastEventId)) return;
       const head = Number(event.lastEventId);
       sawId = true;
-      // A head below where the stream stood means the server restarted (its
-      // ids start over); the broker answered the replay with a resync.
+      // After a restart the head is above where the stream stood (ids are
+      // unique across processes, ruling 454, RV-5), and the broker answered
+      // the replay with a resync.
       positionRef.current = head;
       ledger.position = head;
     });

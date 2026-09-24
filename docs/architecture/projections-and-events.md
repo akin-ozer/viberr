@@ -259,7 +259,8 @@ nor tear down a healthy stream). A 256-event ring buffer replays, on the new
 connection's scopes, every event after the position a connection names: the browser's
 own `Last-Event-ID` header when it retries a source, or the `lastEventId` query param a
 new `EventSource` carries (ruling 454; the header wins). An id older than the buffer, or
-a restart, sends `stream.resync` and the client revalidates once. Root's
+a restart (ids are unique across processes: each starts at a thousand per millisecond
+of its boot clock), sends `stream.resync` and the client revalidates once. Root's
 `liveHeadMiddleware` reads the head before any loader of a request runs, and a document
 load hands it to the page as root's `liveHead`, so the page's first stream replays what
 was published between the server render and hydration. Queue backpressure caps at 1024

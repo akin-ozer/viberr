@@ -275,59 +275,96 @@ describe("wire format", () => {
   });
 
   it("hello is a stream.open event whose id equals the current head", () => {
-    publishSseEvent(rebuiltEvent(), { broadcast: true }); // head → 1
+    const head = publishSseEvent(rebuiltEvent(), { broadcast: true });
     const conn = connect("u1", [{ kind: "user" }]);
 
     const hello = conn.writes[0]!;
     expect(hello).toContain("retry: 5000\n");
-    expect(hello).toContain("id: 1\n");
+    expect(hello).toContain(`id: ${head}\n`);
     expect(hello).toContain("event: stream.open\n");
-    expect(hello).toContain('"headId":1');
+    expect(hello).toContain(`"headId":${head}`);
   });
 });
 
 describe("ring buffer replay (Last-Event-ID)", () => {
   it("replays missed scope-matching events after the given id", () => {
+    // Ids count from the process's base (ruling 454, RV-5).
+    const base = getSseBrokerStats().headId;
     publishSseEvent(taskEvent("p", "K-1"), { projectSlug: "p", taskKey: "K-1" }); // 1
     publishSseEvent(taskEvent("p", "K-2"), { projectSlug: "p", taskKey: "K-2" }); // 2
     publishSseEvent(taskEvent("q", "Q-1"), { projectSlug: "q", taskKey: "Q-1" }); // 3
     publishSseEvent(taskEvent("p", "K-3"), { projectSlug: "p", taskKey: "K-3" }); // 4
 
     const conn = connect("u1", [{ kind: "project", slug: "p" }], {
-      lastEventId: 1,
+      lastEventId: base + 1,
     });
 
     // Hello + events 2 and 4 (3 is another project's).
     const ids = conn.writes
       .flatMap((w) => w.split("\n"))
       .filter((l) => l.startsWith("id: "))
-      .map((l) => Number(l.slice(4)));
+      .map((l) => Number(l.slice(4)) - base);
     expect(ids).toEqual([4, 2, 4]); // hello head id, then replayed 2 and 4
     expect(conn.names()).toEqual(["stream.open", "task.updated", "task.updated"]);
     expect(conn.writes.at(-1)).toContain("K-3");
   });
 
   it("replay respects user targeting", () => {
+    const base = getSseBrokerStats().headId;
     publishSseEvent(notificationEvent("u_arda"), { userId: "u_arda" }); // 1
     publishSseEvent(notificationEvent("u_elif"), { userId: "u_elif" }); // 2
 
-    const elif = connect("u_elif", [{ kind: "user" }], { lastEventId: 0 });
+    const elif = connect("u_elif", [{ kind: "user" }], { lastEventId: base });
     expect(elif.names()).toEqual(["stream.open", "notification.created"]);
     expect(elif.writes.at(-1)).toContain("u_elif");
     expect(elif.writes.join("")).not.toContain("u_arda");
   });
 
   it("sends stream.resync when the id predates the buffer window", () => {
+    const base = getSseBrokerStats().headId;
     for (let i = 0; i < RING_BUFFER_SIZE + 10; i += 1) {
       publishSseEvent(rebuiltEvent(), { broadcast: true });
     }
     // Oldest buffered id is now 11 — lastEventId 3 cannot be caught up.
-    const conn = connect("u1", [{ kind: "user" }], { lastEventId: 3 });
+    const conn = connect("u1", [{ kind: "user" }], { lastEventId: base + 3 });
     expect(conn.names()).toEqual(["stream.open", "stream.resync"]);
+    // And 10, the newest id the ring let go of, can: 11 onwards is replayed.
+    const edge = connect("u1", [{ kind: "user" }], { lastEventId: base + 10 });
+    expect(edge.names().filter((n) => n === "projection.rebuilt")).toHaveLength(RING_BUFFER_SIZE);
   });
 
   it("sends stream.resync when the id is from a previous server life", () => {
     const conn = connect("u1", [{ kind: "user" }], { lastEventId: 42 });
+    expect(conn.names()).toEqual(["stream.open", "stream.resync"]);
+  });
+
+  /**
+   * Ruling 454 (RV-5): a tab's position from before a restart. The new
+   * process's ids used to start at 1 again, so once it had published past the
+   * old position, the position read as one of its own: the broker replayed only
+   * what came after it, and the change the new process made earlier (id 5
+   * here, this board's project) never reached the tab.
+   */
+  it("sends stream.resync for a position from before a restart, however far the new process has got", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
+    for (let i = 0; i < 300; i += 1) publishSseEvent(rebuiltEvent(), { broadcast: true });
+    const beforeRestart = getSseBrokerStats().headId;
+
+    // The process restarts a minute later and publishes 400 events, the 5th
+    // of them on the project this tab shows.
+    resetSseBrokerForTests();
+    vi.setSystemTime(new Date("2026-09-24T10:01:00.000Z"));
+    for (let i = 1; i <= 400; i += 1) {
+      if (i === 5) publishSseEvent(taskEvent("a", "A-1"), { projectSlug: "a", taskKey: "A-1" });
+      else publishSseEvent(rebuiltEvent(), { projectSlug: "elsewhere" });
+    }
+
+    const conn = connect("u1", [{ kind: "project", slug: "a" }, { kind: "user" }], {
+      lastEventId: beforeRestart,
+    });
+    // CANARY: start every process's ids at 0 and the old position reads as
+    // covered: no resync, and the id-5 change is never replayed.
     expect(conn.names()).toEqual(["stream.open", "stream.resync"]);
   });
 

@@ -26,10 +26,10 @@ import { logger } from "~/server/logging/logger.server";
  *   route) drops and closes that connection. A slow client can never block
  *   or crash the publisher.
  * - Ring buffer of the last 256 published events with a monotonically
- *   increasing id (`id:` SSE field). A reconnect presenting Last-Event-ID
- *   replays the missed events (scope-filtered); when the id predates the
- *   buffer window (or a restart reset ids) the client gets `stream.resync`
- *   and revalidates once instead.
+ *   increasing id (`id:` SSE field), unique across processes (ruling 454,
+ *   RV-5). A reconnect presenting Last-Event-ID replays the missed events
+ *   (scope-filtered); when the id predates the buffer window (or this
+ *   process) the client gets `stream.resync` and revalidates once instead.
  * - HMR-safe singleton (global-symbol state, same pattern as getDb()) +
  *   graceful shutdown: SIGINT/SIGTERM runs `runProcessShutdown` (connections,
  *   database, data-root writer lock), then re-raises the signal for the default
@@ -155,12 +155,27 @@ interface BrokerState {
 
 const BROKER_KEY = Symbol.for("viberr.sseBroker");
 
+/**
+ * Ruling 454 (RV-5): where this process's event ids start, a thousand per
+ * millisecond of the clock at boot, so they are unique across processes and
+ * grow from one to the next. A tab's position from before a restart is below
+ * every id this process hands out, so it reads as uncovered and gets
+ * `stream.resync`. Ids used to start at 1 in every process, and once the new
+ * one had published past a tab's old position, that position read as its own:
+ * the broker replayed only what followed it and the new process's earlier
+ * changes never reached the tab. (Room for 1,000 events per millisecond of
+ * uptime, and within `Number.MAX_SAFE_INTEGER` for two centuries.)
+ */
+function eventIdBase(): number {
+  return Date.now() * 1000;
+}
+
 function getState(): BrokerState {
   const cache: Record<symbol, BrokerState | undefined> = globalThis;
   let state = cache[BROKER_KEY];
   if (!state) {
     state = {
-      nextEventId: 0,
+      nextEventId: eventIdBase(),
       nextConnectionId: 0,
       buffer: [],
       connections: new Map(),
@@ -467,7 +482,8 @@ export function closeAllSseConnections(): void {
   }
 }
 
-/** Test-only: fresh ids, empty buffer, no connections. */
+/** Test-only: a restart. Ids start again from the clock (ruling 454, RV-5),
+ *  the buffer is empty and no connection is left. */
 export function resetSseBrokerForTests(): void {
   closeAllSseConnections();
   const cache: Record<symbol, BrokerState | undefined> = globalThis;
