@@ -10,9 +10,8 @@ import { BELL_LIST_CAP } from "~/features/shell/top-bell";
  * notifications with every document and every revalidation, for a popover
  * that is closed at first paint: 62 % of Home's payload on the demo seed.
  * Pages now carry the bell's counts (`bellCounts`), and the bell loads this
- * when the pointer or focus reaches it and when it opens, and reloads it while
- * open whenever the counts move (a notification created or read revalidates
- * the page through its `user` scope).
+ * when the pointer or focus reaches it and when it opens, and again whenever
+ * the page has re-read the counts since (`top-bell.tsx`).
  *
  * The viewer's own rows only; the same `listNotifications` the /notifications
  * page reads, capped at `BELL_LIST_CAP` (UI-14: the popover discloses the cap).
