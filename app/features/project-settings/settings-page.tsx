@@ -1898,10 +1898,10 @@ function RepairRepoDialog({
             onChange={(e) => setAck(e.target.checked)}
           />
           <span>
-            {footprintTasks} task{footprintTasks === 1 ? "" : "s"} in this
-            project carry branch/PR records against the current repository.
-            They keep their history, but every future sync runs against the
-            new one.
+            {countLabel(footprintTasks, "task")} in this project{" "}
+            {footprintTasks === 1 ? "carries" : "carry"} branch/PR records
+            against the current repository. They keep their history, but every
+            future sync runs against the new one.
           </span>
         </label>
       )}

@@ -1676,6 +1676,22 @@ describe("RepairRepoDialog refuses instead of disabling", () => {
     fireEvent.click(primary);
     expect(onRepair).toHaveBeenCalledWith("akin-ozer/other", true);
   });
+
+  it("the footprint note's verb agrees with its count", () => {
+    const note = () =>
+      document
+        .querySelector('dialog[aria-label="Repair repository"] input[type="checkbox"]')!
+        .closest("label")!.textContent;
+    openDialog(1);
+    expect(note()).toBe(
+      "1 task in this project carries branch/PR records against the current repository. They keep their history, but every future sync runs against the new one.",
+    );
+    cleanup();
+    openDialog(3);
+    expect(note()).toBe(
+      "3 tasks in this project carry branch/PR records against the current repository. They keep their history, but every future sync runs against the new one.",
+    );
+  });
 });
 
 /**

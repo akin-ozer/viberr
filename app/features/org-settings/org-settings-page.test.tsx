@@ -175,7 +175,20 @@ describe("ConnectionsPanel", () => {
     expect(
       getByText(/Projects already created from solo keep their repos/),
     ).toBeTruthy();
-    expect(queryByText(/lose branch and PR sync/)).toBeNull();
+    expect(queryByText(/branch and PR sync/)).toBeNull();
+  });
+
+  it("A4: one bound project reads in the singular", () => {
+    const one: ConnectionRecord[] = [
+      { ...CONNECTIONS[1]!, id: "solo", owner: "solo", def: false, boundProjects: 1, advisories: [] },
+    ];
+    const { getByLabelText, getByText } = renderPanel(
+      <ConnectionsPanel connections={one} />,
+    );
+    fireEvent.click(getByLabelText("Remove solo"));
+    expect(
+      getByText(/1 project bound to it loses branch and PR sync/),
+    ).toBeTruthy();
   });
 
   it("add-connection modal: duplicate guard fires client-side", async () => {

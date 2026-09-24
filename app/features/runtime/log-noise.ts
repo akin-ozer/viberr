@@ -76,6 +76,6 @@ export function telemetryLabel(entry: {
   return (
     `${countLabel(entry.count, "telemetry event")} ` +
     `(${entry.tags.join(", ")}): token and rate-limit accounting, hidden here; ` +
-    `“{ } raw” shows them`
+    `“{ } raw” shows ${entry.count === 1 ? "it" : "them"}`
   );
 }
