@@ -7,6 +7,7 @@ import {
   $createParagraphNode,
   $getRoot,
   $isParagraphNode,
+  SKIP_DOM_SELECTION_TAG,
   type LexicalEditor,
 } from "lexical";
 import { ToastProvider } from "~/ui/toast";
@@ -95,19 +96,20 @@ async function mountComposer() {
     return el;
   });
   const editor = host.__lexicalEditor;
-  // A person types into a focused editor. Unfocused, Lexical leaves the DOM
-  // selection alone, and jsdom's queued selectionchange can then hand it a
-  // stale selection in the middle of a measured update (seen only under a
-  // loaded suite: the @menu closed and the window counted its unmount).
-  await act(async () => {
-    editor.focus();
-  });
   const registrations = vi.spyOn(editor, "registerUpdateListener");
   counter.attach(view.container);
   return { ...view, editor, counter, registrations, revalidate: () => revalidate() };
 }
 
-/** Sets the whole draft, caret at the end, as one editor update. */
+/**
+ * Sets the whole draft, caret at the end, as one editor update. Every update
+ * here skips the DOM selection: jsdom has no layout, and a DOM selection
+ * Lexical writes comes back through a queued selectionchange that Lexical
+ * re-reads under time-based guards. On a loaded machine that re-read landed
+ * mid-measurement with the caret at 0 and closed the @menu, so the ratchet
+ * read 0 alone and 19 under a busy suite. What is measured is Lexical's own
+ * selection, which the tag leaves untouched.
+ */
 async function type(editor: LexicalEditor, text: string) {
   await act(async () => {
     editor.update(() => {
@@ -121,7 +123,7 @@ async function type(editor: LexicalEditor, text: string) {
       const paragraph = $createParagraphNode();
       root.append(paragraph);
       $setParagraphPlainText(paragraph, text);
-    });
+    }, { tag: SKIP_DOM_SELECTION_TAG });
   });
 }
 
@@ -164,9 +166,12 @@ describe("composer renders per keystroke (ruling 454)", () => {
     await settle(view.counter);
     view.counter.reset();
     await act(async () => {
-      view.editor.update(() => {
-        $getRoot().selectEnd();
-      });
+      view.editor.update(
+        () => {
+          $getRoot().selectEnd();
+        },
+        { tag: SKIP_DOM_SELECTION_TAG },
+      );
     });
     expect(document.querySelector('[role="listbox"]')).not.toBeNull();
     expectWithinBudget("render:composer.renders-per-same-caret-selection", view.counter.total());
