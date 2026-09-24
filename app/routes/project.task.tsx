@@ -596,12 +596,14 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
   const {
+    refused,
     auth: ctx,
     db,
     formData,
     actor,
     intent,
   } = await requireFormAction(request);
+  if (refused) return refused;
   const projectSlug = params.slug;
   const taskKey = params.key;
   // R15-4: the layout loader's membership refusal does NOT cover this action —

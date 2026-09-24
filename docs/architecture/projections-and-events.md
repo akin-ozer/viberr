@@ -324,6 +324,9 @@ An action React Router does not revalidate after (a 4xx or 5xx answer, or a call
 opts out, like the dock's send) re-runs nothing; an event its write published still does.
 A 403 re-runs root alone: it is how a stale CSRF token answers (a sign-in in another tab
 gave the session a new id), and root no longer re-reads the session on every live event.
+Every action answers it as a result, never a throw (`requireFormAction`'s `refused`, or
+`csrfError`), because React Router sends a thrown fetcher error to the route's error
+boundary without revalidating anything (ruling 454, RV-1).
 A trigger that interrupts a load in flight finds that load's obligations still in the
 ledger and loads them itself, so nothing a person has not seen is skipped.
 

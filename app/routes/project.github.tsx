@@ -111,7 +111,8 @@ function reconcileCheckView(
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, actor, intent } = await requireFormAction(request);
+  const { refused, db, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
 
   // E2 (pass 16): the layout loader does not run for an action, so the
   // members-only gate is repeated here — otherwise a signed-in non-member got a

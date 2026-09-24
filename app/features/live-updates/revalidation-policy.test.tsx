@@ -144,6 +144,32 @@ describe("the echo of one's own action (RF-5)", () => {
     expect(harness.calls.root).toBe(0);
   });
 
+  /**
+   * RV-1: a stale CSRF token (the session changed in another tab) is answered
+   * with a 403 result (`requireFormAction`'s `refused`), through a real fetcher
+   * here: root re-reads the token, the page stays up (the composer keeps its
+   * draft), and the next try carries a good token. Root re-runs on nothing
+   * else a page does, so without this the tab failed every action until a
+   * reload.
+   */
+  it("a stale-token refusal re-reads root's csrf, and only root, and keeps the page (RV-1)", async () => {
+    const harness = await tab({ path: TASK_PAGE, taskActionStatus: 403 });
+    await act(async () => sendComment());
+    await settle();
+    await advance(1_000);
+    expect(harness.actions()).toBe(1);
+    // CANARY: drop the 403 rule and root keeps the stale token (0).
+    expect(harness.calls).toEqual({
+      root: 1,
+      "routes/project": 0,
+      "routes/project.board": 0,
+      "routes/project.task": 0,
+    });
+    // No route error: the task page (and a draft in its composer) is still up.
+    expect(harness.router.state.errors).toBeNull();
+    expect(harness.router.state.location.pathname).toBe(TASK_PAGE);
+  });
+
   it("the bell's mark-read reloads the shell's counts, not the task page", async () => {
     const harness = await tab({ path: TASK_PAGE });
     await act(async () => markRead());
@@ -465,19 +491,6 @@ describe("the rules", () => {
     expect(root(posted(`/projects/${SLUG}/tasks/${TASK}`))).toBe(false);
     expect(task(posted(`/projects/${SLUG}/tasks/${TASK}`))).toBe(true);
     expect(task(posted("/prefs/theme"))).toBe(false);
-  });
-
-  it("a 403 (a stale CSRF token) re-reads root's session, and only root", async () => {
-    await tab({ path: TASK_PAGE });
-    const refused = args({
-      formMethod: "POST",
-      formAction: `/projects/${SLUG}/tasks/${TASK}`,
-      actionStatus: 403,
-      defaultShouldRevalidate: false,
-    });
-    expect(revalidateWhen("root")(refused)).toBe(true);
-    expect(revalidateWhen("routes/project")(refused)).toBe(false);
-    expect(revalidateWhen("routes/project.task")(refused)).toBe(false);
   });
 
   it("every page route module with a loader exports its own rule, and every rule names a module", () => {

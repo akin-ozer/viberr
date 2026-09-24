@@ -175,7 +175,8 @@ interface ProfileMutationSuccess {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
 
   // E2 (pass 16): the layout loader does not run for an action, so the
   // members-only gate is repeated here. Without it a signed-in non-member got

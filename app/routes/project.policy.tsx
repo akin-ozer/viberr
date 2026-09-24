@@ -51,7 +51,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const { db, formData, actor, intent } = await requireFormAction(request);
+  const { refused, db, formData, actor, intent } = await requireFormAction(request);
+  if (refused) return refused;
   // R15-4: this action runs WITHOUT the layout loader's membership gate
   // (React Router does not run parent loaders for a child action), so refuse a
   // non-member here with the same unknown-slug 404 the loader gives.
