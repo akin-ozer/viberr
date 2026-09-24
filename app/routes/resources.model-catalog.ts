@@ -34,7 +34,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const raw = url.searchParams.get("backend");
   const backend: RealBackend = raw === "codex" ? "codex" : "claude";
-  const deps: Parameters<typeof getModelCatalog>[1] = { db };
+  // Pass 40 review (R-launcher-1): the viewer is also who the live probe runs
+  // as (ruling 460), since it runs the CLI against their own sign-in.
+  const deps: Parameters<typeof getModelCatalog>[1] = { db, userId: user.id };
   const credential = viewerClaudeCredential(db, backend, user.id);
   if (credential) deps.credential = credential;
   const catalog = await getModelCatalog(backend, deps);

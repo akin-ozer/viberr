@@ -1,6 +1,10 @@
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { AGENT_UID_FLOOR, resetAgentIsolationForTests } from "./agent-isolation.server";
 import type { RunCredential } from "./backend-credentials.server";
+import type { ClaudeSpawnedProcess } from "./claude-spawn.server";
 import type {
   ClaudeQuery,
   ClaudeQueryFn,
@@ -349,6 +353,113 @@ describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", (
     expect(options.settingSources).toEqual([]);
     expect(options.skills).toEqual([]);
     expect(options.plugins).toEqual([]);
+  });
+});
+
+/**
+ * Pass 40 review (R-launcher-1): the probe runs the vendored CLI against the
+ * viewer's own `claude-home`, and a CLI with an expired OAuth token rewrites
+ * `.credentials.json` there (0600). Run as the server, that file became
+ * `node:node` and the viewer's agent uid could not read its own sign-in. So,
+ * wherever this server launches agents, the probe goes through the launcher
+ * as the viewer — or does not run at all. The stand-in launcher logs what the
+ * real one reads.
+ */
+describe("the live probe runs as the viewer's own OS user (R-launcher-1)", () => {
+  afterEach(() => resetAgentIsolationForTests());
+
+  function standInLauncher(dir: string): string {
+    const log = path.join(dir, "launch.log");
+    const launcher = path.join(dir, "viberr-launch");
+    writeFileSync(
+      launcher,
+      [
+        "#!/bin/sh",
+        'if [ "$1" = "--prepare-home" ]; then mkdir -p "$3"; exit 0; fi',
+        `echo "uid=$VIBERR_LAUNCH_UID exec=$VIBERR_LAUNCH_EXEC home=$VIBERR_LAUNCH_HOME HOME=$HOME args=$*" >> '${log}'`,
+        "exit 0",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(launcher, 0o755);
+    resetAgentIsolationForTests(
+      { status: "on", uidFloor: AGENT_UID_FLOOR, reason: null },
+      { launcher },
+    );
+    return log;
+  }
+
+  it("spawns the CLI through the launcher as the viewer, with their home handed back afterwards", async () => {
+    // Canary: drop `spawnClaudeCodeProcess` from `claudeProbeOptions` and the
+    // SDK would spawn the CLI itself, as the server: no launched line.
+    const ctx = createTestDbContext();
+    try {
+      const dir = ctx.makeTempDir("viberr-launcher-");
+      const log = standInLauncher(dir);
+      const cli = path.join(dir, "claude");
+      writeFileSync(cli, "#!/bin/sh\nexit 0\n");
+      chmodSync(cli, 0o755);
+      const homeDir = path.join(ctx.makeTempDir("viberr-home-"), "claude-home");
+      const credential: RunCredential = {
+        ...VIEWER_CREDENTIAL,
+        env: { ...VIEWER_CREDENTIAL.env, CLAUDE_CONFIG_DIR: homeDir },
+        homeDir,
+      };
+      let spawned: ClaudeSpawnedProcess | undefined;
+      const queryFn: ClaudeQueryFn = (params) => {
+        // What the SDK does with the option: it hands its CLI command here.
+        const options = params.options ?? {};
+        spawned = options.spawnClaudeCodeProcess?.({
+          command: cli,
+          args: ["--output-format", "stream-json"],
+          env: options.env ?? {},
+        });
+        return fakeQueryObject([
+          { value: "sonnet", displayName: "S", description: "", supportsEffort: true },
+        ]);
+      };
+      const cat = await getModelCatalog("claude", {
+        claudeQueryFn: queryFn,
+        credential,
+        db: ctx.makeDb(),
+        userId: "u_viewer",
+      });
+      expect(cat.models.map((m) => m.value)).toEqual(["sonnet"]);
+      expect(spawned).toBeDefined();
+      await new Promise<void>((resolve) => {
+        if (spawned?.exitCode !== null) resolve();
+        else spawned.once("exit", () => resolve());
+      });
+      const line = readFileSync(log, "utf8").trim();
+      expect(line).toMatch(new RegExp(`^uid=${AGENT_UID_FLOOR} exec=${cli} home=${homeDir} `));
+      expect(line).toMatch(/HOME=\S*\/runtimes\/users\/u_viewer\/home /);
+      expect(line).toMatch(/args=--output-format stream-json$/);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("serves the curated catalog rather than run the probe as the server when there is no viewer to run as", async () => {
+    // Canary: skip the `launchesAgents()` guard and the probe runs as the
+    // server (queryFn is called).
+    const ctx = createTestDbContext();
+    try {
+      standInLauncher(ctx.makeTempDir("viberr-launcher-"));
+      const queryFn = vi.fn<ClaudeQueryFn>();
+      const cat = await getModelCatalog("claude", {
+        claudeQueryFn: queryFn,
+        credential: VIEWER_CREDENTIAL,
+        db: ctx.makeDb(),
+      });
+      expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
+      expect(queryFn).not.toHaveBeenCalled();
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("where no agent is launched the probe spawns as before", () => {
+    expect(claudeProbeOptions(VIEWER_CREDENTIAL).spawnClaudeCodeProcess).toBeUndefined();
   });
 });
 
