@@ -78,9 +78,7 @@ export function KbPanel({
                     folder
                     {kb.fileCount > kb.injectableCount
                       ? " · " +
-                        (kb.fileCount - kb.injectableCount) +
-                        " non-text file" +
-                        (kb.fileCount - kb.injectableCount === 1 ? "" : "s") +
+                        countLabel(kb.fileCount - kb.injectableCount, "non-text file") +
                         " skipped"
                       : ""}
                   </>
@@ -100,7 +98,7 @@ export function KbPanel({
                   ? "re-scanned " + rel(kb.lastIndexedAt)
                   : "last scanned " + rel(kb.lastIndexedAt)}
                 {usedBy(kb.dir) > 0
-                  ? " · " + usedBy(kb.dir) + " template" + (usedBy(kb.dir) === 1 ? "" : "s")
+                  ? " · " + countLabel(usedBy(kb.dir), "template")
                   : ""}
               </span>
             </span>
@@ -265,7 +263,7 @@ export function McpPanel({
                   : m.up === true
                   ? (m.tools !== null
                       ? // D32-6 (pass 32): "1 tools" — count its noun.
-                        `${m.tools} ${m.tools === 1 ? "tool" : "tools"} · `
+                        `${countLabel(m.tools, "tool")} · `
                       : "reachable · ") +
                     "checked " + rel(m.lastCheckedAt) +
                     (isMcpHealthStale(m.lastCheckedAt) ? " · stale, retest" : "")
@@ -297,10 +295,7 @@ export function McpPanel({
                     to rename or remove a server had no idea what depended on
                     it. Same count, same honest "templates" label. */}
                 {usedBy(m.name) > 0
-                  ? " · " +
-                    usedBy(m.name) +
-                    " template" +
-                    (usedBy(m.name) === 1 ? "" : "s")
+                  ? " · " + countLabel(usedBy(m.name), "template")
                   : ""}
                 {/* Ruling 176: how many of its tools are withheld from agents
                     that may not write, so the row says the server is gated.
@@ -424,7 +419,7 @@ export function SkillPanel({
                 store://skills/{s.name}/ · {s.fileCount} file
                 {s.fileCount === 1 ? "" : "s"} · {updatedLabel(s.updatedAt)}
                 {usedBy(s.name) > 0
-                  ? " · " + usedBy(s.name) + " template" + (usedBy(s.name) === 1 ? "" : "s")
+                  ? " · " + countLabel(usedBy(s.name), "template")
                   : ""}
               </span>
             </span>
@@ -524,7 +519,7 @@ export function AgentPanel({
                   {stageNames || "no stages"} · {res} context resource
                   {res === 1 ? "" : "s"} ·{" "}
                   {a.used > 0
-                    ? "used in " + a.used + " project" + (a.used === 1 ? "" : "s")
+                    ? "used in " + countLabel(a.used, "project")
                     : "not deployed"}
                 </span>
               </span>

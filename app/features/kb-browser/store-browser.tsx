@@ -436,9 +436,7 @@ function StoreTree({
               <span className="fm-name">{r.node.name}</span>
               {r.node.type === "dir" ? (
                 <span className="fm-meta">
-                  {countKbFiles(r.node.children) +
-                    " file" +
-                    (countKbFiles(r.node.children) === 1 ? "" : "s")}
+                  {countLabel(countKbFiles(r.node.children), "file")}
                 </span>
               ) : (
                 <span className="fm-meta">
@@ -539,9 +537,7 @@ function DeleteConfirm({
       <p>
         {node.type === "dir"
           ? countKbFiles(node.children) > 0
-            ? countKbFiles(node.children) +
-              " file" +
-              (countKbFiles(node.children) === 1 ? "" : "s") +
+            ? countLabel(countKbFiles(node.children), "file") +
               " inside will be removed from the store. Agents lose them on their next context load."
             : "The empty folder is removed from the store."
           : "The file is removed from the store. Agents lose it on their next context load."}
@@ -1246,7 +1242,7 @@ export function StoreBrowser({
         </div>
         <div className="modal-foot">
           <span className="foot-hint mono">
-            {nDirs + " folder" + (nDirs === 1 ? "" : "s") + " · " + nFiles + " file" + (nFiles === 1 ? "" : "s")}
+            {countLabel(nDirs, "folder") + " · " + countLabel(nFiles, "file")}
             {metaTail ? " · " + metaTail : ""}
           </span>
           <span className="foot-actions">

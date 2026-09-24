@@ -230,8 +230,7 @@ export function ResourcesPanel({
             if (a.used > 0) {
               // D5: a refusal must not render the success tick.
               push(
-                "Detach " + a.name + " from its " + a.used + " project" +
-                  (a.used === 1 ? "" : "s") + " first",
+                "Detach " + a.name + " from its " + countLabel(a.used, "project") + " first",
                 "error",
               );
               return;

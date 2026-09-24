@@ -10,6 +10,7 @@ import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 import { formatDayDotTime, utcDayKey, formatClockUTC } from "~/shared/dates/format";
 import { observedAfter } from "~/shared/freshness";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * Insights: a read-only analytics dashboard over agent runs — totals, outcomes,
@@ -805,7 +806,7 @@ function DailyChart({ summary }: { summary: InsightsSummary }) {
           <span
             key={d.date}
             className="daily-col"
-            title={`${d.date}: ${d.runs} run${d.runs === 1 ? "" : "s"}, ${d.cost == null ? "cost not reported" : fmtCost(d.cost)}`}
+            title={`${d.date}: ${countLabel(d.runs, "run")}, ${d.cost == null ? "cost not reported" : fmtCost(d.cost)}`}
           >
             <span
               className="daily-bar"

@@ -912,7 +912,7 @@ export function StagesPanel({
     const n = count(s.id);
     if (n > 0) {
       push(
-        `Move ${n} ${n === 1 ? "task" : "tasks"} out of ${s.name} first`,
+        `Move ${countLabel(n, "task")} out of ${s.name} first`,
         "error",
       );
       return;

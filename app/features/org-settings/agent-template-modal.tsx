@@ -4,6 +4,7 @@ import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
+import { countLabel } from "~/shared/text/plural";
 import { MiniModal } from "./mini-modal";
 import { useModalAction } from "./resource-helpers";
 
@@ -199,9 +200,7 @@ export function AgentModal({
       footHint={
         initial && initial.used > 0
           ? "adopted by " +
-            initial.used +
-            " project" +
-            (initial.used === 1 ? "" : "s") +
+            countLabel(initial.used, "project") +
             ". Each project keeps its own copy of the grants and its own capability policy; the box above updates the grants with this save"
           : "a template: add it to a project from Agents → Add from library"
       }

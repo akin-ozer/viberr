@@ -114,7 +114,7 @@ export function HumanAccess({
         <span className="right sub fine">
           {live.length} member{live.length === 1 ? "" : "s"}
           {stale.length > 0
-            ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
+            ? ` · ${countLabel(stale.length, "removed account")}`
             : ""}
         </span>
       </div>

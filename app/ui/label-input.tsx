@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { MAX_LABEL_LENGTH, MAX_TASK_LABELS } from "~/schemas/task-file.schema";
+import { countLabel } from "~/shared/text/plural";
 import { Icon } from "./icon";
 import { useDismiss } from "./use-dismiss";
 
@@ -131,7 +132,7 @@ export function LabelInput({
     }
     if (added > 0) {
       onChange(next);
-      setStatus(`Added ${added} label${added > 1 ? "s" : ""}, ${next.length} of ${max}`);
+      setStatus(`Added ${countLabel(added, "label")}, ${next.length} of ${max}`);
     } else if (capped) {
       setStatus(`Maximum ${max} labels reached`);
     } else if (dup) {
