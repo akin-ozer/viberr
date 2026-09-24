@@ -115,6 +115,7 @@ export interface HealthSnapshot {
    * degrade health. Appended, by the key-order contract below.
    */
   mcpProxy: McpGatewayStatus;
+  /**
    * Ruling 460: whether agent processes run as their person's own OS user.
    * `on`: the launcher is installed and the boot probe could not read the
    * store as another uid. `off`: no launcher (the host dev server, the test
