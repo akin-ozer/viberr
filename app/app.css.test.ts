@@ -4209,7 +4209,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
       expect(cascade(plain, box).get("gap"), box).toBe(".5rem");
     }
     // A dismiss stays beside the sentence it dismisses, and the action pair may
-    // wrap its buttons rather than run past the card (236px in a 202px row).
+    // wrap its buttons rather than run past the card (266px in a 202px row).
     expect(cascade(plain, ".cred-ok:has(> .modal-close)").get("flex-wrap")).toBe("nowrap");
     const acts = cascade(plain, ".warn-acts");
     expect(acts.get("flex-wrap")).toBe("wrap");

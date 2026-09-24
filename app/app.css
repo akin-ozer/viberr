@@ -5637,7 +5637,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .kv-row .k.strong { color: var(--fg); }
 .live-branch { display: inline-flex; align-items: center; gap: .5rem; min-width: 0; }
 .live-branch .trace { font-size: .75rem; }
-/* The credential card's action pair is 236px and the card's footer row is 202px
+/* The credential card's action pair is 266px and the card's footer row is 202px
    at a 320px viewport: with `flex: none` "Fix in Settings" ran past the card's
    edge. It may shrink to its own line and wrap its buttons, still flush right. */
 .warn-acts {
