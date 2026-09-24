@@ -110,7 +110,7 @@ export default function PolicyView({ loaderData }: Route.ComponentProps) {
   return (
     <PolicyPage
       data={loaderData.view}
-      projectSlug={layout?.board.project.slug ?? ""}
+      projectSlug={layout?.project.slug ?? ""}
       myRole={layout?.myRole ?? null}
     />
   );

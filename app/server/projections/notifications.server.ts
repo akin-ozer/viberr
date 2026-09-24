@@ -273,25 +273,50 @@ export function deleteMemberProjectNotifications(
   );
 }
 
+/** What the bell draws without its list (ruling 454): the badge and the
+ *  popover head. */
+export interface BellCounts {
+  /** The badge: unread rows that lead somewhere (see below). */
+  unread: number;
+  /** F19-25: unread rows whose project is gone. They are not in the badge,
+   *  but the list still shows them wearing their unread dot, so the popover
+   *  head counts them too (`unread + orphanUnread`) and keeps Mark all read. */
+  orphanUnread: number;
+}
+
+/**
+ * Ruling 454 (FL-4 / SRV-6): the bell's two counts in one statement. Pages
+ * ship these instead of the bell's list, which the bell loads itself
+ * (`routes/resources.notifications.ts`).
+ *
+ * F18-1: an unread row that points at a DELETED project is not actionable —
+ * clicking it 404s — so it must not inflate the bell badge. `unread` counts
+ * unread rows that are either org-wide (no project_slug) or whose project still
+ * exists; `orphanUnread` counts the rest. The two are disjoint by construction.
+ * F19-25 used to count the orphans among the listed rows on the client; the
+ * server counts all of them, so the head no longer depends on the list's cap.
+ */
+export function bellCounts(db: DatabaseSync, userId: string): BellCounts {
+  // SAFETY: an un-grouped aggregate always returns exactly one row; `total()`
+  // is 0.0 (never NULL) over no rows, so both columns are always numbers.
+  const row = db
+    .prepare(
+      `SELECT
+         total(n.project_slug IS NULL OR p.slug IS NOT NULL) AS unread,
+         total(n.project_slug IS NOT NULL AND p.slug IS NULL) AS orphan
+       FROM notifications n
+       LEFT JOIN projects p ON p.slug = n.project_slug
+       WHERE n.user_id = ? AND n.read_at IS NULL`,
+    )
+    .get(userId) as { unread: number; orphan: number };
+  return { unread: Number(row.unread), orphanUnread: Number(row.orphan) };
+}
+
 export function countUnreadNotifications(
   db: DatabaseSync,
   userId: string,
 ): number {
-  // F18-1: an unread row that points at a DELETED project is not actionable —
-  // clicking it 404s — so it must not inflate the bell badge. Count unread rows
-  // that are either org-wide (no project_slug) or whose project still exists.
-  // SAFETY: an un-grouped `count(*)` always returns exactly one row holding one
-  // INTEGER column, so `.get()` is never undefined and `c` is always a number.
-  const row = db
-    .prepare(
-      `SELECT count(*) AS c
-       FROM notifications n
-       LEFT JOIN projects p ON p.slug = n.project_slug
-       WHERE n.user_id = ? AND n.read_at IS NULL
-         AND (n.project_slug IS NULL OR p.slug IS NOT NULL)`,
-    )
-    .get(userId) as { c: number };
-  return row.c;
+  return bellCounts(db, userId).unread;
 }
 
 /** Targeted `notification.read` — other tabs of the same user revalidate so

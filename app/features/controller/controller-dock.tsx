@@ -148,7 +148,7 @@ export function ControllerDock() {
   // route's payload (the workspace layout reads the task route's the same way)
   // and it is typed, so nothing here parses an unknown.
   const workspace = useRouteLoaderData<typeof projectLoader>("routes/project");
-  const projectName = workspace?.board.project.name ?? null;
+  const projectName = workspace?.project.name ?? null;
   const context = useMemo(
     () => dockContextFromMatches(matches, location, projectName),
     [matches, location, projectName],

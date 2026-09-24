@@ -8,7 +8,6 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { SkipLink } from "~/ui/skip-link";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { useToast } from "~/ui/toast";
-import type { NotificationView } from "~/features/notifications/notification-item";
 import { CommandPalette } from "~/features/shell/command-palette";
 import { useCommandPaletteShortcut } from "~/features/shell/use-command-palette";
 import type { HomeOrgSummary, HomeProjectCard } from "./home-query.server";
@@ -41,8 +40,9 @@ export interface HomePageData {
   projects: HomeProjectCard[];
   prefs: HomePrefs;
   org: HomeOrgSummary;
-  notifications: NotificationView[];
+  /** The bell's counts; the bell loads its own list (ruling 454). */
   unread: number;
+  orphanUnread: number;
   /** B-FD4: the host data root, org admins only (null otherwise). */
   storeRoot: string | null;
   /** F18-5: the single-writer lock holder, org admins only (null otherwise). */
@@ -241,8 +241,8 @@ export function HomePage({
         onOpenPalette={() => setPalette(true)}
         query={query}
         onQuery={setQuery}
-        notifications={data.notifications}
         unread={data.unread}
+        orphanUnread={data.orphanUnread}
         user={user}
         theme={theme}
         livePaused={livePaused}

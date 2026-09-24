@@ -38,7 +38,7 @@ import {
 } from "@dnd-kit/dom";
 import { laneAt, resolveBoardDrop, slotInLane, type LaneBlock } from "./board-dnd";
 import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
-import type { TaskSummary } from "~/shared/mapping/task.server";
+import type { BoardCard } from "./board-card";
 import {
   archivedTaskBlockedReason,
   closedPrBlockedReason,
@@ -120,20 +120,12 @@ const SR_ONLY: CSSProperties = {
 };
 
 /**
- * Gap-10: a board card's task, plus the two activity fields `listProjectTasks`
- * annotates every summary with (`TaskActivitySummary` in board-query.server.ts).
- *
- * They are OPTIONAL here for one reason only: `routes/project.tsx` re-types the
- * columns through `annotate: (t: TaskSummary): TaskSummary`, which erases them
- * from the type while the spread carries the values through at runtime. The
- * one-line patch that restores the type is in this pass's report; until it
- * lands, `undefined` means "no loader annotated this" and reads as "not quiet",
- * which is the safe direction — a missing signal must never invent a cue.
+ * A board card's task: the board card projection (ruling 454, BOARD-3,
+ * `board-card.ts`), which carries the Gap-10 `quiet` annotation and the
+ * loader's viewer annotations beside the fields the card, its filters and the
+ * acceptance ceremony read.
  */
-export interface BoardTask extends TaskSummary {
-  lastActivityAt?: string | null;
-  quiet?: boolean;
-}
+export type BoardTask = BoardCard;
 
 export interface BoardColumnData {
   stage: BoardStage;
@@ -302,7 +294,7 @@ function useRovingStageMenu(active: boolean) {
  * 218px lanes cut to "shop-6…" and told nobody anything the key beside it had
  * not; the task page's GitHub trace prints both in full.
  */
-function TraceMark({ task }: { task: TaskSummary }) {
+function TraceMark({ task }: { task: BoardTask }) {
   if (task.pr) {
     return (
       <span className="trace pr" title={"Pull request #" + task.pr.number}>
@@ -333,7 +325,7 @@ function TraceMark({ task }: { task: TaskSummary }) {
  * carrying the task draws nothing: the ghost owner avatar and a "ready" status
  * already say so, and "no agent" on every Triage card was noise.
  */
-function WhoStack({ task }: { task: TaskSummary }) {
+function WhoStack({ task }: { task: BoardTask }) {
   const sp = task.specialist;
   return (
     <span className="who">
@@ -349,7 +341,7 @@ function WhoStack({ task }: { task: TaskSummary }) {
  * pulse for its mark (R21-8); a clock rest names its instant (ruling 225) and
  * falls back to "on its own" for a schedule the read boundary could not parse.
  */
-function StatusChip({ task }: { task: TaskSummary }) {
+function StatusChip({ task }: { task: BoardTask }) {
   const s = cardStatus(task);
   if (!s) return null;
   return (
@@ -376,7 +368,7 @@ function StatusChip({ task }: { task: TaskSummary }) {
  * rather than filled pills. Every fact stays visible, on hover here and in
  * full on the task page (rulings 40/12/14).
  */
-function ProblemChips({ task }: { task: TaskSummary }) {
+function ProblemChips({ task }: { task: BoardTask }) {
   const problems = cardProblems(task);
   const shown = problems.slice(0, PROBLEM_CAP);
   const folded = problems.slice(PROBLEM_CAP);
@@ -400,7 +392,7 @@ function ProblemChips({ task }: { task: TaskSummary }) {
 /** The card's property row: the status chip, then the problems. Drawn by the
  *  card and the list row alike (F19-13: one state block, both layouts), and
  *  absent when there is nothing to say. */
-function CardChips({ task }: { task: TaskSummary }) {
+function CardChips({ task }: { task: BoardTask }) {
   if (cardStatus(task) === null && cardProblems(task).length === 0) return null;
   return (
     <div className="card-props">
@@ -412,7 +404,7 @@ function CardChips({ task }: { task: TaskSummary }) {
 
 /** The list row's agent: the badge and the name — the row has the room the
  *  card does not, and ruling 168(c)'s name stays printed here. */
-function ListAgent({ task }: { task: TaskSummary }) {
+function ListAgent({ task }: { task: BoardTask }) {
   const sp = task.specialist;
   if (!sp) return null;
   return (
@@ -432,7 +424,7 @@ function ListAgent({ task }: { task: TaskSummary }) {
  * only beside an engaged agent, which is what left a human-owned card without
  * one with a bare right end.
  */
-function OwnerSeat({ task, label }: { task: TaskSummary; label?: boolean }) {
+function OwnerSeat({ task, label }: { task: BoardTask; label?: boolean }) {
   const o = task.owner;
   const human = o && o.kind === "human" ? o : null;
   const name = human ? human.name : task.operator ? "awaiting owner" : "unassigned";
@@ -994,7 +986,7 @@ function ListView({
  * A refusal shown here is final — the board has no force-accept to bypass it.
  */
 function boardAcceptRefusal(
-  task: TaskSummary,
+  task: BoardTask,
   fromStageName: string,
   terminalName: string,
 ): string | null {
@@ -1061,7 +1053,7 @@ function AcceptOnBoardConfirm({
   onCancel,
   onConfirm,
 }: {
-  task: TaskSummary;
+  task: BoardTask;
   /** Project stages in order — supplies the shared ceremony's stage list and
    *  names the terminal (merge) stage. */
   stages: BoardStage[];
@@ -1665,7 +1657,7 @@ function FilterBar({
   );
 }
 
-function OrphanBanner({ orphanTasks }: { orphanTasks: TaskSummary[] }) {
+function OrphanBanner({ orphanTasks }: { orphanTasks: BoardTask[] }) {
   return (
     <div className="board-orphans" role="region" aria-label="Unstaged tasks">
       <Icon name="alert" />
