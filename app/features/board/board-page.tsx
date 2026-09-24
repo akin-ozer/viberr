@@ -46,6 +46,7 @@ import {
   type TaskPriority,
 } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
+import { createVelocityTracker, springFrames, springProgress, type Spring } from "~/ui/spring";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
 import { Icon, type IconName } from "~/ui/icon";
@@ -188,6 +189,13 @@ const BOARD_PLUGINS = defaultPreset.plugins.filter(
  * home and then vanished for the whole round trip). A cancelled drag, or a
  * drop that changes nothing, has no landing preview and flies home as before.
  */
+/** Critically damped: the card lands in a slot between two others, where an
+ *  overshoot would draw it over its neighbour. The response is the low end of
+ *  the default UI range, so the flight stays quick. */
+const DROP_SPRING: Spring = { dampingRatio: 1, response: 0.3 };
+/** The pointer's velocity through the drag, read by the flight at release.
+ *  One board drags at a time, so one tracker serves the module. */
+const dragVelocity = createVelocityTracker();
 const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, placeholder }) => {
   // Only the card that was lifted flies. When the server's answer re-renders
   // the card in its new lane while the drop is still settling, dnd-kit adopts
@@ -228,17 +236,32 @@ const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, plac
   const tx = m ? Number(m[1]) : 0;
   const ty = m ? Number(m[2]) : 0;
   feedbackElement.setAttribute("data-dnd-dropping", "");
-  const timing: KeyframeAnimationOptions = {
-    duration: 180,
-    easing: "cubic-bezier(.23, 1, .32, 1)",
-    fill: "forwards",
-  };
+  // The flight is a spring that leaves at the pointer's release velocity
+  // (spring.ts says why a fixed curve could not): a card let go of at rest
+  // eases off instead of lurching, and one let go of mid-throw carries on
+  // at the throw's speed instead of stopping dead first.
+  const { frames, duration } = springFrames(
+    DROP_SPRING,
+    { x: tx, y: ty },
+    { x: tx + dx, y: ty + dy },
+    dragVelocity.velocity(performance.now()),
+  );
+  const timing: KeyframeAnimationOptions = { duration, easing: "linear", fill: "forwards" };
   const flight = feedbackElement.animate(
-    { translate: [`${tx}px ${ty}px 0`, `${tx + dx}px ${ty + dy}px 0`] },
+    { translate: frames.map((f) => `${f.x}px ${f.y}px 0`) },
     timing,
   );
+  // The hole closes on the same frames, from rest, so the landing stops
+  // moving on the frame the card reaches it.
+  const progress = springProgress(DROP_SPRING, frames.length);
   const closing = closes
-    ? placeholder.animate({ marginBlockEnd: ["0px", `${-share}px`], opacity: [1, 0] }, timing)
+    ? placeholder.animate(
+        {
+          marginBlockEnd: progress.map((p) => `${-share * p}px`),
+          opacity: progress.map((p) => 1 - p),
+        },
+        timing,
+      )
     : null;
   try {
     await flight.finished;
@@ -2025,6 +2048,7 @@ export function BoardPage({
     const t = allTasks.find((x) => x.key === key);
     if (!t) return;
     setDrag({ key, fromStage: t.stage });
+    dragVelocity.reset();
     setOverStage(t.stage);
     // "Before itself": the slot the card already holds, so nothing previews
     // until the pointer moves (null would preview the lane's END on lift).
@@ -2060,7 +2084,13 @@ export function BoardPage({
     setBeforeKey((prev) => (prev === before ? prev : before));
   };
   const onDragOver = refineSlot;
-  const onDragMove = refineSlot;
+  // Only a MOVE is a velocity sample: `dragover` repeats the last position
+  // under a later clock, which would read as the pointer slowing down.
+  const onDragMove = (event: DragMoveEvent, manager: DragDropManager) => {
+    const { x, y } = event.operation.position.current;
+    dragVelocity.push(x, y, performance.now());
+    refineSlot(event, manager);
+  };
   // Fires on drop AND cancel (Escape, released outside a column). The server
   // stays authoritative: nothing commits client-side; a resolved drop submits
   // the governed reorder and revalidation applies the server's order.

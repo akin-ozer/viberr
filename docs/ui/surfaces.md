@@ -124,10 +124,23 @@ Intents behind `project.task.tsx` are explained in
 - **Theme**: light / dark / system, per user plus the `viberr_theme` cookie for
   first paint. Motion follows the OS `prefers-reduced-motion` setting only. After first
   paint, `setDocumentTheme` (`shell/theme-preference.ts`) is the one writer of
-  `<html data-theme>`: it swaps under a `transition: none` override that lives for one
-  forced style recalc, so the colour transitions in the sheet cannot smear the flip.
-  The menu, the profile page and the root effect's OS-follow listener all go through
-  it; the boot script paints once and registers no listener of its own.
+  `<html data-theme>`. A change fades over `THEME_FLIP_MS` (250 ms) on ONE clock: for
+  the flip's length an override gives every element the same colour transitions, so
+  text and its fill move together instead of each rule crossfading on its own, and the
+  page stays clickable throughout (ruling 453(c); a view transition would swallow the
+  clicks of someone cycling the account menu's theme item). The menu, the profile page
+  and the root effect's OS-follow listener all go through it; the boot script paints
+  once and registers no listener of its own.
+- **Motion, materials and type** (ruling 453). The board's drop flight is a critically
+  damped spring (`ui/spring.ts`) that leaves at the pointer's release velocity. A
+  dialog, page overlay or the dock closed while its entrance is still playing leaves
+  from where it got to (`ui/live-pose.ts`). Every transform transition, and so every
+  press, runs on `--ease-out`. The Home and standalone header, and the page overlay's
+  sticky head, draw their bottom edge only once content scrolls under them. The OS
+  increased-contrast setting swaps every frame and divider onto `--border-control`,
+  the two lighter text rungs onto `--muted`, and the translucent chrome solid, as
+  reduced transparency does. Headings track by size (`--track-title`,
+  `--track-section`, `--track-page`: -.011, -.017 and -.021em at 16, 20 and 28px).
 - **Responsive**: same surface, reflowed; the rail collapses at ≤ 720 px, the topbar
   trims at ≤ 760 px. There is no review-first mobile mode. Under the breakpoint
   the rail is a drawer: opening it moves focus to the `nav`, sets `inert` on

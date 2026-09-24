@@ -188,6 +188,17 @@
   --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Tracking is size-specific (Apple, "The Details of UI Typography"): the
+     letter-spacing that reads right at 14px reads loose at 28px, because
+     letters drift apart as they grow. One value for every heading was right
+     at 16px and wrong at 20 and 28. Each display step carries its own, taken
+     from Inter's own dynamic-metrics curve (-0.0223 + 0.185·e^(-0.1745·px),
+     in em), sampled at the step. Text at 11-14px keeps the face's default:
+     the curve is within .006em of zero there, and a sweep of body text would
+     move wrap points all over the app for nothing a reader could see. */
+  --track-title: -.011em;   /* 16px — card and panel titles, every h1-h4 by default */
+  --track-section: -.017em; /* 20px — section titles */
+  --track-page: -.021em;    /* 28px — page titles */
 
   /* Elevation scale — four resting steps + one interaction step, chosen by
      z-position: card (resting surfaces) < menu (anchored popovers, calendar,
@@ -463,7 +474,7 @@ h1, h2, h3, h4 {
   font-family: var(--font-display);
   font-weight: 800;
   margin: 0;
-  letter-spacing: -.01em;
+  letter-spacing: var(--track-title);
   text-wrap: balance;
 }
 
@@ -724,7 +735,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   font-weight: 700;
   font-size: .88rem;
   white-space: nowrap;
-  transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
+  transition: transform .15s var(--ease-out), border-color .15s ease, background .15s ease, box-shadow .15s ease;
 }
 .btn:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--fg); }
 .btn:active:not(:disabled) { transform: translateY(0) scale(.96); }
@@ -911,7 +922,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: 1rem 1.5rem .75rem;
   flex-wrap: wrap;
 }
-.board-head h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -.01em; }
+.board-head h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: var(--track-section); }
 .board-head .sub { color: var(--faint); font-size: .88rem; margin-top: .125rem;
   /* Same measure. The Agents lede ran 164 characters a line under a 28px title. */
   max-width: 70ch;
@@ -1119,7 +1130,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   background: var(--surface);
   padding: .75rem;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg), transparent 92%), 0 1px 1px rgba(0, 0, 0, .05);
-  transition: transform .15s ease, box-shadow .15s ease;
+  transition: transform .15s var(--ease-out), box-shadow .15s ease;
   display: flex; flex-direction: column; gap: 0;
 }
 .card:hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg), transparent 78%), 0 1px 2px rgba(0, 0, 0, .06); }
@@ -1238,7 +1249,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   35%  { transform: scale(1.13); }
   100% { transform: scale(1); }
 }
-.stage-menu-btn .sm-caret { width: 13px; height: 13px; color: var(--faint); transition: transform .16s ease; }
+.stage-menu-btn .sm-caret { width: 13px; height: 13px; color: var(--faint); transition: transform .16s var(--ease-out); }
 .stage-menu-btn.open .sm-caret { transform: rotate(180deg); }
 
 .stage-menu-pop {
@@ -1503,7 +1514,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* task hero */
 .task-hero { display: flex; flex-direction: column; gap: .75rem; }
 .task-hero .key { font-family: var(--font-mono); font-size: .75rem; color: var(--faint); }
-.task-hero h1 { font-size: 1.75rem; line-height: 1.08; }
+.task-hero h1 { font-size: 1.75rem; line-height: 1.08; letter-spacing: var(--track-page); }
 .task-hero .goal { color: var(--muted); font-size: 1rem; line-height: 1.5; max-width: 70ch; }
 .goal-edit-btn { margin-left: .5rem; padding: .05rem .375rem; font-size: .75rem; color: var(--blue-pressed); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-small); cursor: pointer; vertical-align: middle; }
 .goal-edit-btn:hover { border-color: var(--blue); }
@@ -2218,7 +2229,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   border-radius: var(--radius-card);
   background: var(--tint-well); padding: .75rem 1rem;
 }
-.ag-stat .n { font-family: var(--font-display); font-weight: 800; font-size: 1.25rem; line-height: 1; }
+.ag-stat .n { font-family: var(--font-display); font-weight: 800; font-size: 1.25rem; line-height: 1; letter-spacing: var(--track-section); }
 .ag-stat .l { font-size: .75rem; color: var(--muted); font-weight: 600; margin-top: .375rem; }
 
 /* master-detail layout */
@@ -2242,7 +2253,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   padding: .75rem .75rem;
   border: 1px solid var(--hairline); border-radius: var(--radius-card);
   background: var(--surface);
-  transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
+  transition: border-color .14s ease, transform .14s var(--ease-out), box-shadow .14s ease;
 }
 .ag-item:hover { border-color: var(--border); transform: translateY(-1px); }
 .ag-item.on { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
@@ -2262,7 +2273,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .ag-hero { display: flex; align-items: flex-start; gap: 1rem; }
 .ag-hero-main { flex: 1; min-width: 0; }
 .ag-hero-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.ag-hero-top .ag-hero-name { font-size: 1.25rem; margin: 0; }
+.ag-hero-top .ag-hero-name { font-size: 1.25rem; margin: 0; letter-spacing: var(--track-section); }
 .ag-scope { font-size: .75rem; color: var(--faint); margin-top: .375rem; }
 .ag-hero-actions { display: flex; gap: .5rem; flex: none; }
 .ag-running {
@@ -2368,7 +2379,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
   width: 100%; text-align: left;
   padding: .5rem .75rem;
   border: 1px solid var(--hairline); border-radius: var(--radius-box); background: var(--surface);
-  transition: border-color .14s ease, transform .14s ease;
+  transition: border-color .14s ease, transform .14s var(--ease-out);
 }
 .deploy-row:hover { border-color: var(--blue); transform: translateX(2px); }
 .deploy-eng {
@@ -2625,7 +2636,7 @@ dialog[data-closing]::backdrop {
   padding: .5rem .75rem; border: 0; background: var(--tint-well); text-align: left;
 }
 .cap-mghead:hover { background: var(--tint-hover); }
-.cap-chev { width: 15px; height: 15px; color: var(--placeholder); transform: rotate(0deg); transition: transform .15s ease; flex: none; }
+.cap-chev { width: 15px; height: 15px; color: var(--placeholder); transform: rotate(0deg); transition: transform .15s var(--ease-out); flex: none; }
 .cap-mghead.open .cap-chev { transform: rotate(90deg); }
 .cap-mglabel { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .cap-msum { margin-left: auto; display: inline-flex; gap: .5rem; }
@@ -2688,7 +2699,7 @@ dialog[data-closing]::backdrop {
   content: ""; width: 7px; height: 7px; margin-left: .125rem;
   border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
   transform: rotate(45deg) translate(-2px, -2px);
-  transition: transform .14s ease;
+  transition: transform .14s var(--ease-out);
 }
 .cap-advisory[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
 .cap-advisory > summary:hover { color: var(--fg); }
@@ -2923,7 +2934,7 @@ dialog[data-closing]::backdrop {
   width: 100%; text-align: left;
   padding: .5rem .5rem;
   border: 1px solid var(--hairline); border-radius: var(--radius-box); background: var(--surface);
-  transition: border-color .14s ease, transform .14s ease;
+  transition: border-color .14s ease, transform .14s var(--ease-out);
 }
 .pcap-row:hover { border-color: var(--border); transform: translateY(-1px); }
 /* U33-10 (pass 33): the name kept a floor. `.pcap-counts` was `flex: none`, so a
@@ -3319,7 +3330,7 @@ dialog[data-closing]::backdrop {
      mid-row after the last pill. On the one-line row `.rq-main`'s flex-grow
      leaves no free space, so the margin resolves to zero there. */
   margin-left: auto;
-  transition: color .14s ease, transform .14s ease;
+  transition: color .14s ease, transform .14s var(--ease-out);
 }
 .rq-go svg { width: 14px; height: 14px; }
 .rq-row:hover .rq-go { color: var(--blue-pressed); transform: translateX(2px); }
@@ -3527,7 +3538,7 @@ dialog[data-closing]::backdrop {
   background: none; border: 0; padding: 0;
 }
 .home-brand b { font-weight: 600; font-size: 1rem; }
-.home-brand .mark { transition: transform .15s ease, box-shadow .15s ease; }
+.home-brand .mark { transition: transform .15s var(--ease-out), box-shadow .15s ease; }
 .home-brand:hover .mark { transform: translateY(-1px); box-shadow: inset 0 -7px 0 color-mix(in srgb, var(--blue), transparent 40%); }
 .home-user-wrap { position: relative; }
 .home-user {
@@ -3662,7 +3673,7 @@ dialog[data-closing]::backdrop {
   transition: border-color .14s ease;
 }
 .rsel-btn:hover, .rsel-btn.open { border-color: var(--border); }
-.rsel-btn .caret { width: 13px; height: 13px; color: var(--placeholder); transform: rotate(90deg); transition: transform .15s ease; flex: none; }
+.rsel-btn .caret { width: 13px; height: 13px; color: var(--placeholder); transform: rotate(90deg); transition: transform .15s var(--ease-out); flex: none; }
 .rsel-btn.open .caret { transform: rotate(-90deg); }
 .rsel-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .rsel-nm .rsel-role { color: var(--faint); font-weight: 600; }
@@ -3833,7 +3844,7 @@ dialog[data-closing]::backdrop {
   transition: border-color .14s ease, color .14s ease;
 }
 .own-btn:hover, .own-btn.open { border-color: var(--border); color: var(--fg); }
-.own-btn .ico { width: 12px; height: 12px; transform: rotate(90deg); transition: transform .15s ease; }
+.own-btn .ico { width: 12px; height: 12px; transform: rotate(90deg); transition: transform .15s var(--ease-out); }
 .own-btn.open .ico { transform: rotate(-90deg); }
 .own-menu {
   position: absolute; left: 0; top: calc(100% + 6px); z-index: 60;
@@ -4177,7 +4188,7 @@ a.task-ref { white-space: nowrap; }
   background: none; border: 0; cursor: pointer;
 }
 .md-collapse-toggle:hover { text-decoration: underline; }
-.md-collapse-toggle svg { width: 14px; height: 14px; transition: transform .15s ease; }
+.md-collapse-toggle svg { width: 14px; height: 14px; transition: transform .15s var(--ease-out); }
 .md-collapse-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 
 /* P16-UI-04: the bundled display font is declared once, in the token block at
@@ -4243,7 +4254,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
     font-weight: 600; font-size: 1.25rem; font-family: var(--font-mono);
     box-shadow: inset 0 -9px 0 color-mix(in srgb, var(--blue), transparent 55%);
   }
-  .login-aside h2 { font-size: 1.25rem; line-height: 1.2; color: var(--fg); margin: 0; }
+  .login-aside h2 { font-size: 1.25rem; line-height: 1.2; color: var(--fg); margin: 0; letter-spacing: var(--track-section); }
   .login-aside p { font-size: .88rem; line-height: 1.6; color: var(--muted); margin: 0; }
   .login-aside-points { list-style: none; margin: .25rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
   .login-aside-points li { position: relative; padding-left: 1.5rem; font-size: .88rem; color: var(--muted); line-height: 1.4; }
@@ -4261,7 +4272,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 }
 .login-brand { display: flex; flex-direction: column; align-items: center; gap: 1rem; text-align: center; }
 .login-brand .mark { width: 46px; height: 46px; font-size: 1.25rem; border-radius: var(--radius-box); box-shadow: inset 0 -9px 0 color-mix(in srgb, var(--blue), transparent 55%); }
-.login-brand h1 { font-size: 1.25rem; }
+.login-brand h1 { font-size: 1.25rem; letter-spacing: var(--track-section); }
 .login-brand .sub { color: var(--faint); font-size: .88rem; margin-top: .375rem; }
 .login-providers { display: flex; flex-direction: column; gap: .5rem; }
 .btn.provider { width: 100%; min-height: 44px; justify-content: center; gap: .5rem; font-size: .88rem; }
@@ -4346,7 +4357,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   flex-wrap: wrap;
   padding-top: .375rem;
 }
-.home-hero h1 { font-size: 1.75rem; letter-spacing: -.015em; }
+.home-hero h1 { font-size: 1.75rem; letter-spacing: var(--track-page); }
 .home-hero .sub { color: var(--muted); font-size: .88rem; margin: .5rem 0 0; line-height: 1.5; }
 .home-hero .sub .working { display: inline-block; width: .46rem; height: .46rem; border-radius: 50%; background: var(--agent); margin: 0 .125rem 1px 0; animation: pulse-a 1.6s ease-out infinite; }
 .home-hero .sub b { color: var(--fg); font-weight: 700; }
@@ -4381,7 +4392,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: var(--shadow-card);
-  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+  transition: transform .15s var(--ease-out), box-shadow .15s ease, border-color .15s ease;
 }
 .pj-card:hover { transform: translateY(-2px); border-color: var(--border); box-shadow: var(--shadow-lift); }
 .pj-card:focus-within { border-color: var(--blue); }
@@ -4488,7 +4499,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   border: 0; background: none;
   border-radius: var(--radius-button);
   color: var(--placeholder);
-  transition: color .14s ease, background .14s ease, transform .14s ease;
+  transition: color .14s ease, background .14s ease, transform .14s var(--ease-out);
 }
 .pj-star:hover { background: var(--tint-press); color: var(--fg); transform: scale(1.08); }
 .pj-star.on { color: var(--pin-star); }
@@ -4525,7 +4536,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: var(--shadow-card);
-  transition: transform .14s ease, border-color .14s ease;
+  transition: transform .14s var(--ease-out), border-color .14s ease;
 }
 .pj-row:hover { transform: translateX(2px); border-color: var(--border); }
 .pj-row .pj-link {
@@ -4632,7 +4643,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   color: var(--blue-pressed);
   margin-bottom: .25rem;
 }
-.empty-hero h2 { font-size: 1.25rem; }
+.empty-hero h2 { font-size: 1.25rem; letter-spacing: var(--track-section); }
 .empty-hero p { margin: 0; color: var(--muted); font-size: .88rem; max-width: 46ch; line-height: 1.55; }
 .empty-steps { display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; justify-content: center; }
 .empty-steps .st { display: flex; align-items: center; gap: .5rem; font-size: .75rem; color: var(--faint); }
@@ -4658,7 +4669,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 
 /* ---------- Viberr settings (instance level) ---------- */
 .set-head { display: flex; align-items: flex-start; gap: 1rem; padding-top: .375rem; flex-wrap: wrap; }
-.set-head h1 { font-size: 1.75rem; letter-spacing: -.015em; }
+.set-head h1 { font-size: 1.75rem; letter-spacing: var(--track-page); }
 .set-head .sub { color: var(--muted); font-size: .88rem; margin: .375rem 0 0; max-width: 66ch; line-height: 1.5; }
 .r180 { transform: rotate(180deg); }
 
@@ -4671,10 +4682,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
    were never part of. */
 .set-main { display: flex; flex-direction: column; gap: 1.5rem; min-width: 0; }
 
-.org-tile.go { text-align: left; cursor: pointer; font: inherit; color: inherit; transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
+.org-tile.go { text-align: left; cursor: pointer; font: inherit; color: inherit; transition: border-color .15s ease, transform .15s var(--ease-out), box-shadow .15s ease; }
 .org-tile.go:hover { border-color: var(--border); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 .go-hint { display: inline-flex; align-items: center; gap: .375rem; font-family: var(--font-display); font-weight: 700; font-size: .75rem; color: var(--blue-pressed); }
-.go-hint .ico { width: 13px; height: 13px; transition: transform .15s ease; }
+.go-hint .ico { width: 13px; height: 13px; transition: transform .15s var(--ease-out); }
 .org-tile.go:hover .go-hint .ico { transform: translateX(2px); }
 
 .conn-list { display: flex; flex-direction: column; }
@@ -4723,14 +4734,14 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   border-radius: var(--radius-box);
   background: var(--surface);
   text-align: left;
-  transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease, background .14s ease;
+  transition: border-color .14s ease, box-shadow .14s ease, transform .14s var(--ease-out), background .14s ease;
 }
 .be-opt:hover { border-color: var(--border); transform: translateY(-1px); }
 .be-opt.on { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); background: color-mix(in srgb, var(--blue-soft), transparent 68%); }
 .be-opt .agent-glyph { width: 32px; height: 32px; }
 .be-opt .agent-glyph .ico { width: 16px; height: 16px; }
 .be-opt .bnm { display: block; font-family: var(--font-display); font-weight: 800; font-size: .88rem; }
-.be-opt .bcheck { margin-left: auto; display: grid; place-items: center; color: var(--blue-pressed); opacity: 0; transform: scale(.8); transition: opacity .14s ease, transform .14s ease; }
+.be-opt .bcheck { margin-left: auto; display: grid; place-items: center; color: var(--blue-pressed); opacity: 0; transform: scale(.8); transition: opacity .14s ease, transform .14s var(--ease-out); }
 .be-opt.on .bcheck { opacity: 1; transform: scale(1); }
 .be-opt .bcheck .ico { width: 15px; height: 15px; }
 .be-pick.three .be-opt { min-width: 140px; padding: .5rem .75rem; }
@@ -4761,7 +4772,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .fm-row.dir { cursor: pointer; }
 .fm-row:hover { background: var(--tint-well); }
 .fm-row .twist { width: 16px; flex: none; display: grid; place-items: center; color: var(--placeholder); }
-.fm-row .twist .ico { width: 13px; height: 13px; transition: transform .12s ease; }
+.fm-row .twist .ico { width: 13px; height: 13px; transition: transform .12s var(--ease-out); }
 .fm-row > .ico { color: var(--faint); flex: none; }
 .fm-row.dir > .ico { color: var(--muted); }
 .fm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4780,7 +4791,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   background: var(--surface);
   color: var(--muted);
   box-shadow: 0 1px 2px var(--tint-press);
-  transition: border-color .12s ease, color .12s ease, background .12s ease, transform .12s ease;
+  transition: border-color .12s ease, color .12s ease, background .12s ease, transform .12s var(--ease-out);
 }
 .fm-act .ico { width: 13px; height: 13px; }
 .fm-act:hover { border-color: var(--blue); color: var(--blue-pressed); background: color-mix(in srgb, var(--blue-soft), transparent 40%); transform: translateY(-1px); }
@@ -4928,6 +4939,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 /* Reduced transparency: frost the translucent chrome solid. */
 @media (prefers-reduced-transparency: reduce) {
   .home-top { backdrop-filter: none; background: var(--bg); }
+  .topbar { background: var(--surface); }
 }
 
 /* In-app store document editor (P13-LV-06) — knowledge bases are authorable
@@ -5282,7 +5294,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    the same pair for the same reason. */
 .insights { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.5rem var(--dock-clear); }
 .insights-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
-.insights-head h1 { font-size: 1.25rem; font-weight: 800; }
+.insights-head h1 { font-size: 1.25rem; font-weight: 800; letter-spacing: var(--track-section); }
 .stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-bottom: 1.5rem; }
 .stat-card { display: flex; flex-direction: column; gap: .125rem; padding: 1rem 1rem; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-card); box-shadow: var(--shadow-card); }
 .stat-ico { color: var(--blue-pressed); }
@@ -5291,7 +5303,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    The tile has THREE rungs — value, label, qualifier — so the label keeps a
    step above the sub (weight+color, not size): collapsing them to one style
    erased the name/qualifier hierarchy on the eight two-line cards. */
-.stat-val { font-size: 1.75rem; font-weight: 800; font-family: var(--font-display); line-height: 1.1; }
+.stat-val { font-size: 1.75rem; font-weight: 800; font-family: var(--font-display); line-height: 1.1; letter-spacing: var(--track-page); }
 .stat-label { font-size: .75rem; color: var(--muted); font-weight: 600; }
 .stat-sub { font-size: .75rem; color: var(--faint); }
 /* Ruling 290: the exceptions a stat counts, by name and linked. Wraps rather
@@ -5970,6 +5982,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
 .ctl-head h1 {
   font-family: var(--font-display);
   font-size: 1.25rem;
+  letter-spacing: var(--track-section);
   margin: 0;
 }
 .ctl-head-icon {
@@ -6184,7 +6197,7 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   border-right: 1.5px solid var(--muted);
   border-bottom: 1.5px solid var(--muted);
   transform: rotate(45deg) translate(-2px, -2px);
-  transition: transform .14s ease;
+  transition: transform .14s var(--ease-out);
 }
 .ctl-goal[open] .ctl-goal-line::after { transform: rotate(225deg) translate(-1px, -1px); }
 .ctl-goal-title { font-size: .88rem; line-height: 1.35; }
@@ -6482,7 +6495,12 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
     animation: fade-in .12s ease;
     transition: opacity .12s ease;
   }
-  .dock .dock-panel[data-closing] { opacity: 0; transform: none; }
+  /* `animation: none` because the close pins the live pose (ruling 453(b),
+     live-pose.ts): it switches the entrance off inline and releases it once
+     `data-closing` lands, and a fade-in still named here then REPLAYED on the
+     closing panel — up to full opacity, then gone at the fallback timer, with
+     no exit transition at all (review, 2026-09-24). */
+  .dock .dock-panel[data-closing] { opacity: 0; transform: none; animation: none; }
   .ctl-msg[data-fresh] { animation: fade-in .12s ease; }
   /* Both dots: the one on the trigger and the one in the panel's working row,
      which kept pulsing forever inside the sheet. */
@@ -6864,7 +6882,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   content: ""; position: absolute; inset: 5px; border-radius: 50%;
   background: var(--stage);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg), transparent 85%);
-  transition: transform .12s ease, box-shadow .12s ease;
+  transition: transform .12s var(--ease-out), box-shadow .12s ease;
 }
 .stg-swatch:hover:not(:disabled)::before, .stg-swatch.open::before {
   transform: scale(1.15);
@@ -6877,7 +6895,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
 }
 .swatch {
   width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%;
-  cursor: pointer; transition: transform .12s ease;
+  cursor: pointer; transition: transform .12s var(--ease-out);
 }
 .swatch:hover { transform: scale(1.12); }
 .swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--fg); }
@@ -6988,4 +7006,52 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
   .copy-glyph[data-copied] > .ico + .ico { transform: none; filter: none; transition: opacity .12s ease; }
   .signin-step[data-state="done"] .signin-mark .ico path { animation: none; }
   .refused { animation: none; }
+}
+
+/* ---------- appended: ruling 453, the Apple design pass ---------- */
+/* The whole UI read against Apple's design guidance ("Designing Fluid
+   Interfaces", "The Details of UI Typography", the HIG on materials and
+   accessibility), 2026-09-24. Most of it already held: presses answer on
+   pointer-down, menus grow from their trigger, toasts and dialogs leave the
+   way they came, and the OS reduced-motion and reduced-transparency answers
+   were in place. What did not hold is fixed here and in the scripts
+   (spring.ts, live-pose.ts, theme-preference.ts); ruling 453 lists it. */
+
+/* Scroll edge, not a standing divider. A translucent bar's bottom edge is
+   there to part the bar from content passing UNDER it, so it draws only once
+   something has scrolled beneath: invisible at rest, whole by 1.5rem of
+   scroll. The base colour is the resting (transparent) state on purpose: a
+   page too short to scroll has an INACTIVE timeline, the animation then
+   produces nothing, and nothing is under the bar to part it from. A browser
+   without scroll-driven animations runs the keyframes on a zero-length clock,
+   fills forward and draws the edge for good — the old look. */
+.home-top, .page-overlay .board-head { border-bottom-color: transparent; }
+.home-top {
+  animation: scroll-edge linear both;
+  animation-timeline: scroll(root block);
+  animation-range: 0 1.5rem;
+}
+.page-overlay .board-head {
+  animation: scroll-edge linear both;
+  animation-timeline: scroll(nearest block);
+  animation-range: 0 1.5rem;
+}
+@keyframes scroll-edge { from { border-bottom-color: transparent; } to { border-bottom-color: var(--hairline); } }
+
+/* Increased contrast (the OS setting; Apple: near-solid surfaces with a
+   defined, contrasting edge). The token ladder answers it once, in both
+   themes: every frame and divider takes the control border (3:1 on the
+   surface, where the decorative --border is 1.6:1), the two lighter text
+   rungs take --muted, and the translucent chrome goes solid. `:root[data-theme]`
+   so it outranks the dark block above at equal specificity by coming later. */
+@media (prefers-contrast: more) {
+  :root[data-theme] {
+    --border: var(--border-control);
+    --hairline: var(--border-control);
+    --ring: var(--border-control);
+    --faint: var(--muted);
+    --placeholder: var(--muted);
+  }
+  .home-top { background: var(--bg); backdrop-filter: none; }
+  .topbar { background: var(--surface); }
 }

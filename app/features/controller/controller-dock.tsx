@@ -27,6 +27,7 @@ import { useToast } from "~/ui/toast";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { pinLivePose } from "~/ui/live-pose";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
@@ -165,6 +166,7 @@ function DockShell({ context }: { context: DockContext }) {
   const push = useToast();
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
+  const releasePose = useRef<(() => void) | null>(null);
   const [threadsOpen, setThreadsOpen] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [text, setText] = useState("");
@@ -312,12 +314,17 @@ function DockShell({ context }: { context: DockContext }) {
         setOpen(false);
         return;
       }
+      // Closed mid-entrance (a double click on the button), the exit starts
+      // from where the entrance got to; released once `data-closing` lands.
+      releasePose.current ??= pinLivePose(panelRef.current);
       setClosing(true);
     },
     [],
   );
   useEffect(() => {
     if (!closing) return;
+    releasePose.current?.();
+    releasePose.current = null;
     const panel = panelRef.current;
     if (!panel) {
       setClosing(false);

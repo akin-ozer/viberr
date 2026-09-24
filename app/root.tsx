@@ -148,7 +148,7 @@ export default function App() {
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     // One writer for <html data-theme> (`theme-preference.ts`), so the
-    // OS-follow path swaps without the crossfade smear the menu path avoids.
+    // OS-follow path fades on the same one clock the menu path does.
     const apply = () =>
       setDocumentTheme(theme === "dark" || (theme === "system" && media.matches));
     apply();

@@ -10,31 +10,62 @@ export function applyThemePreference(theme: ThemePreference): void {
   );
 }
 
+/** How long a theme change takes. */
+export const THEME_FLIP_MS = 250;
+/** Every property the tokens paint, on one clock. */
+const FLIP_CSS =
+  "*,*::before,*::after{transition:" +
+  [
+    "color",
+    "background-color",
+    "border-color",
+    "outline-color",
+    "text-decoration-color",
+    "fill",
+    "stroke",
+    "box-shadow",
+  ]
+    .map((property) => `${property} ${THEME_FLIP_MS}ms ease`)
+    .join(",") +
+  "!important}";
+
+let flip: { style: HTMLStyleElement; timer: ReturnType<typeof setTimeout> } | null = null;
+
 /**
  * The one writer for `<html data-theme>` after first paint (the boot script
  * in root.tsx owns the first paint and registers no listener).
  *
- * The sheet animates background, colour and border-colour on ~50 rules at
- * .14s, so a theme flip used to smear: every surface crossfaded on its own
- * clock and mid-flip frames painted dark text on dark buttons. The swap now
- * happens under a `transition: none` override that lives for exactly one
- * style recalc: the attribute changes, the forced recalc commits the new
- * colours with transitions disabled (a transition only starts when a value
- * changes while transitions are enabled), and the override is removed. A
- * same-value write (the root effect re-applying after a revalidation) touches
- * nothing.
+ * A theme change fades (Apple: never cut between light and dark, an abrupt
+ * brightness jump is the one thing to avoid). It fades on ONE clock: the sheet
+ * animates colour on ~50 rules at .14s and paints the rest with none, so a
+ * flip left alone smeared — every surface crossfaded on its own clock and
+ * mid-flip frames painted dark text on dark buttons. For the length of the
+ * flip an override gives every element and pseudo-element the same colour
+ * transition, so text and the fill under it move together; the override is
+ * lifted once they have landed. It is in place when the attribute changes, so
+ * the new colours transition from the old ones in the same style pass.
+ *
+ * Not a view transition: those snapshot the page and swallow every click
+ * until they finish (measured 2026-09-24, with `::view-transition` set to
+ * `pointer-events: none` too), and the account menu's theme item stays open
+ * so a person can click through the three values. Here the page stays live,
+ * and a flip made mid-flip turns around from the colours on screen. A
+ * same-value write (the root effect re-applying after a revalidation)
+ * touches nothing.
  */
 export function setDocumentTheme(dark: boolean): void {
   const root = document.documentElement;
   const next = dark ? "dark" : "light";
   if (root.dataset.theme === next) return;
-  const style = document.createElement("style");
-  style.textContent = "*,*::before,*::after{transition:none!important}";
-  document.head.appendChild(style);
+  if (flip) clearTimeout(flip.timer);
+  const style = flip?.style ?? document.head.appendChild(document.createElement("style"));
+  style.textContent = FLIP_CSS;
   root.dataset.theme = next;
-  // The forced recalc is the load-bearing line: without it the override would
-  // be gone before any style pass saw the new colours. Reading layout is the
-  // deliberate cost of one flip.
-  void root.offsetHeight;
-  style.remove();
+  flip = {
+    style,
+    timer: setTimeout(() => {
+      style.remove();
+      flip = null;
+    }, THEME_FLIP_MS + 50),
+  };
 }

@@ -3819,3 +3819,137 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     }
   });
 });
+
+describe("app.css ruling 453: the Apple design pass", () => {
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const decls = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+
+  it("(a) every transform transition answers a press on the sheet's ease-out, never plain `ease`", () => {
+    // CANARY: put `.btn` back on `transform .15s ease`. Plain `ease` starts
+    // at under half its average speed, so a press visibly lagged the finger —
+    // on 25 controls whose neighbours already used --ease-out.
+    const layers = RULES.flatMap((r) =>
+      splitArgs(r.decls.get("transition") ?? "")
+        .filter((layer) => /^transform\b/.test(layer))
+        .map((layer) => `${r.selector} → ${layer}`),
+    );
+    expect(layers.length).toBeGreaterThan(40);
+    const offCurve = layers.filter((l) => !/ var\(--ease-out\)/.test(l.split(" → ")[1]!));
+    expect(offCurve).toEqual([]);
+  });
+
+  it("(b) tracking tightens with size, at Inter's own curve, one token per display step", () => {
+    // CANARY: set --track-page back to -.015em, or drop the tracking from
+    // `.task-hero h1` (the page title that had none of its own).
+    const curve = (px: number) => -0.0223 + 0.185 * Math.exp(-0.1745 * px);
+    const root = decls(plain, ":root");
+    for (const [token, px] of [["--track-title", 16], ["--track-section", 20], ["--track-page", 28]] as const) {
+      const em = Number(/^(-?[\d.]+)em$/.exec(root.get(token) ?? "")?.[1]);
+      expect(em, token).toBeCloseTo(curve(px), 3);
+    }
+    expect(decls(plain, "h1").get("letter-spacing")).toBe("var(--track-title)");
+    // Every rule that sets text at a display step tracks at that step — but
+    // for a glyph that is not running text, each saying why.
+    const NOT_RUNNING_TEXT = {
+      ".avatar.xl": "two initials centred in a 56px disc; tracking would push them off centre.",
+      ".login-brand .mark": "the one-letter product mark in its tile.",
+      ".login-aside-mark": "the product mark again, in the mono face, whose metrics are its own.",
+    } satisfies Record<string, string>;
+    const TRACK = new Map([
+      ["1.25rem", "var(--track-section)"],
+      ["1.75rem", "var(--track-page)"],
+    ]);
+    const hits = new Set<string>();
+    const wrong: string[] = [];
+    let checked = 0;
+    for (const r of RULES) {
+      const size = r.decls.get("font-size");
+      const track = size === undefined ? undefined : TRACK.get(size);
+      if (track === undefined) continue;
+      if (r.selector in NOT_RUNNING_TEXT) {
+        hits.add(r.selector);
+        continue;
+      }
+      checked++;
+      if (r.decls.get("letter-spacing") !== track) wrong.push(`${r.selector} (${size})`);
+    }
+    expect(checked).toBeGreaterThanOrEqual(12);
+    expect(wrong).toEqual([]);
+    expect([...hits].sort()).toEqual(Object.keys(NOT_RUNNING_TEXT).sort());
+  });
+
+  it("(c) the translucent bars draw their bottom edge only once content scrolls under them", () => {
+    // CANARY: drop `border-bottom-color: transparent` (the edge stands on an
+    // unscrolled page), or move `animation-timeline` above the `animation`
+    // shorthand, which resets it to the document clock.
+    expect(CODE).toMatch(
+      /@keyframes scroll-edge \{ from \{ border-bottom-color: transparent; \} to \{ border-bottom-color: var\(--hairline\); \} \}/,
+    );
+    for (const [selector, timeline] of [
+      [".home-top", "scroll(root block)"],
+      [".page-overlay .board-head", "scroll(nearest block)"],
+    ] as const) {
+      const d = decls(plain, selector);
+      expect(d.get("border-bottom-color"), selector).toBe("transparent");
+      const own = plain.filter((r) => r.selector === selector && r.decls.has("animation"));
+      expect(own, selector).toHaveLength(1);
+      const order = [...own[0]!.decls.keys()];
+      expect(order, selector).toEqual(["animation", "animation-timeline", "animation-range"]);
+      expect(own[0]!.decls.get("animation")).toBe("scroll-edge linear both");
+      expect(own[0]!.decls.get("animation-timeline")).toBe(timeline);
+      expect(own[0]!.decls.get("animation-range")).toBe("0 1.5rem");
+    }
+  });
+
+  it("(b) under reduced motion a pinned close never replays the dock's fade-in", () => {
+    // CANARY: drop `animation: none` from the reduced-motion
+    // `.dock .dock-panel[data-closing]`. pinLivePose switches the entrance off
+    // inline and releases it once data-closing lands; the reduced-motion
+    // `.dock .dock-panel { animation: fade-in }` (same weight, later) then
+    // restarted on the closing panel, which faded IN, never transitioned out,
+    // and vanished at the fallback timer (measured in headless Chromium).
+    const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+    expect(decls(reduced, ".dock .dock-panel").get("animation")).toMatch(/^fade-in\b/);
+    expect(decls(reduced, ".dock .dock-panel[data-closing]").get("animation")).toBe("none");
+    // Dialogs outrank their own reduced-motion fade-in by weight already.
+    expect(decls(plain, "dialog[data-closing]").get("animation")).toBe("none");
+  });
+
+  it("(d) the OS increased-contrast setting gets defined edges and solid chrome, in both themes", () => {
+    // CANARY: delete the `prefers-contrast: more` block — the app had no
+    // answer to it before this pass.
+    const more = RULES.filter((r) => r.at.some((a) => /prefers-contrast:\s*more/.test(a)));
+    const tokens = decls(more, ":root[data-theme]");
+    for (const token of ["--border", "--hairline", "--ring"]) {
+      expect(tokens.get(token), token).toBe("var(--border-control)");
+    }
+    for (const token of ["--faint", "--placeholder"]) expect(tokens.get(token), token).toBe("var(--muted)");
+    // Later than the dark block, so the equal-specificity override wins there.
+    expect(CODE.indexOf("@media (prefers-contrast: more)")).toBeGreaterThan(
+      CODE.indexOf(':root[data-theme="dark"] {'),
+    );
+    // What the swap buys, measured: every edge at 3:1 and the text rungs at
+    // --muted's ratio, on the surface of each theme.
+    for (const block of [LIGHT_ROOT, DARK_ROOT]) {
+      const surface = tokenIn(block, "--surface");
+      expect(contrastRatio(tokenIn(block, "--border-control"), surface)).toBeGreaterThanOrEqual(3);
+      expect(contrastRatio(tokenIn(block, "--muted"), surface)).toBeGreaterThan(
+        contrastRatio(tokenIn(block, "--faint"), surface),
+      );
+    }
+    // Translucent chrome goes solid, as it does for reduced transparency.
+    const lessGlass = RULES.filter((r) => r.at.some((a) => /prefers-reduced-transparency:\s*reduce/.test(a)));
+    for (const rules of [more, lessGlass]) {
+      expect(decls(rules, ".home-top").get("background")).toBe("var(--bg)");
+      expect(decls(rules, ".home-top").get("backdrop-filter")).toBe("none");
+      expect(decls(rules, ".topbar").get("background")).toBe("var(--surface)");
+    }
+  });
+});
