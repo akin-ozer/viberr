@@ -3387,15 +3387,24 @@ describe("observationLabel", () => {
     expect(observationLabel("stage")).toBe("stage");
   });
 
-  it("C7: splits camelCase, rejects path-shaped keys, and caps length", () => {
+  it("C7: splits camelCase and caps length", () => {
     // A camelCase key no longer renders as one screaming token ("NOCHANGES").
     expect(observationLabel("noChanges")).toBe("no Changes");
-    // A file path used as a field label is not a label — neutralised.
-    expect(observationLabel("origin/main test-artifacts/pass20-vib1.txt")).toBe(
-      "detail",
-    );
     // An over-long key is capped so it cannot blow out the row.
     expect(observationLabel("x".repeat(60)).length).toBeLessThanOrEqual(40);
+  });
+
+  it("ruling 470: a path-shaped key is the agent's label and is shown, never replaced", () => {
+    // Live on WEB-1 (pass 40) the operator keyed a row `origin/main`, the git
+    // ref it had read; the card said "DETAIL" and lost what the row was about.
+    expect(observationLabel("origin/main")).toBe("origin/main");
+    expect(observationLabel("CI/CD")).toBe("CI/CD");
+    // A path is not humanised (no camelCase split, no underscore rewrite) and
+    // is still capped like any key.
+    expect(observationLabel("src/pages/rssFeed_v2.xml.ts")).toBe("src/pages/rssFeed_v2.xml.ts");
+    const long = observationLabel("origin/main test-artifacts/pass20-vib1.txt and more");
+    expect(long.length).toBeLessThanOrEqual(40);
+    expect(long.startsWith("origin/main test-artifacts/")).toBe(true);
   });
 });
 

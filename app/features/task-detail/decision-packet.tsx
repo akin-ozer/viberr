@@ -78,15 +78,23 @@ function renderInlineCode(text: string): ReactNode[] {
  */
 export function observationLabel(key: string): string {
   const raw = key.trim();
-  // A path-shaped key is a mis-slotted value, not a label — don't dress it up.
-  if (/[\\/]/.test(raw)) return "detail";
+  // Ruling 470: a path-shaped key (`origin/main`, `CI/CD`, `src/pages`) is the
+  // agent's own label and is shown as written, only capped. It used to be
+  // replaced with "detail" on the theory that it was a mis-slotted value, and a
+  // live packet lost the one word saying what its row was about.
+  if (/[\\/]/.test(raw)) return capLabel(raw);
   const words = raw
     .replace(/_/g, " ")
     // camelCase / PascalCase word boundary: a lower/digit followed by an upper.
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/\s+/g, " ")
     .trim();
-  return words.length > 40 ? words.slice(0, 39).trimEnd() + "…" : words;
+  return capLabel(words);
+}
+
+/** An observation key is capped so it cannot blow out its row. */
+function capLabel(label: string): string {
+  return label.length > 40 ? label.slice(0, 39).trimEnd() + "…" : label;
 }
 
 function observationValue(key: string, value: string): string {
