@@ -1,3 +1,4 @@
+import { createContext, type MiddlewareFunction } from "react-router";
 import type { SseEvent } from "~/schemas/sse-event.schema";
 import {
   releaseDataRootLock,
@@ -394,6 +395,24 @@ export function publishSseEvent(event: SseEvent, route: SseRoute): number {
   }
   return id;
 }
+
+// ------------------------------------------------------------- live head
+
+/**
+ * Ruling 454 (RF-1): the broker's head when a request began, before any of
+ * its loaders read anything. Every event at or below it was published, and
+ * its write committed, before those reads, so the data the request renders
+ * holds them; the page's first stream asks the broker to replay from here and
+ * receives exactly what happened after (root's loader hands it over as
+ * `liveHead`).
+ */
+export const liveHeadContext = createContext<number | null>(null);
+
+/** Root middleware: records {@link liveHeadContext} for the request. */
+export const liveHeadMiddleware: MiddlewareFunction = ({ context }, next) => {
+  context.set(liveHeadContext, getState().nextEventId);
+  return next();
+};
 
 // ---------------------------------------------------------------- teardown
 

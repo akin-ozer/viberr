@@ -15,7 +15,6 @@ import "./app.css";
 import { useEffect, useMemo } from "react";
 import { z } from "zod";
 import {
-  data,
   isRouteErrorResponse,
   Links,
   Meta,
@@ -33,7 +32,12 @@ import { SHELL_FONT_PRELOADS } from "./features/shell/font-preloads";
 import { ToastProvider } from "./ui/toast";
 import { getCsrfToken } from "./server/auth/csrf.server";
 import { requestContextMiddleware } from "./server/logging/request-context.server";
-import { authenticateWithHeaders } from "./server/auth/require-user.server";
+import {
+  authenticate,
+  sessionRenewalMiddleware,
+} from "./server/auth/require-user.server";
+import { liveHeadContext, liveHeadMiddleware } from "./server/events/sse-broker.server";
+import { isDocumentNavigation } from "./server/http/single-fetch.server";
 import {
   getThemePreference,
   type ThemePreference,
@@ -56,35 +60,29 @@ export const links: Route.LinksFunction = () => [
  * opt-in `logger.child({ requestId })`, was never called by anything, and was
  * deleted as dead code — which is what happens to an opt-in nobody opts into.
  * This one is not optional.
+ *
+ * Ruling 454: `liveHeadMiddleware` reads the SSE broker's head before any
+ * loader runs (the page's first stream replays from it), and
+ * `sessionRenewalMiddleware` forwards the rolling-session renewal (F10-17) on
+ * every GET, which this loader used to do only when it ran.
  */
-export const middleware = [requestContextMiddleware];
+export const middleware = [requestContextMiddleware, liveHeadMiddleware, sessionRenewalMiddleware];
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
   const theme = getThemePreference(request);
-  // Runs on every document request: identifies the signed-in user (for the
-  // shell + <CsrfInput />) AND captures better-auth's rolling-session renewal
-  // cookie so the slide reaches the browser (F10-17).
-  const { ctx: auth, renewalHeaders } = await authenticateWithHeaders(request);
+  // Identifies the signed-in user for the shell and <CsrfInput />.
+  const auth = await authenticate(request);
   // Ruling 148(c): the in-app reduce-motion preference (and its
   // <html data-motion> hook) is gone; the OS setting is the one signal.
   const payload = {
     theme,
     csrf: auth ? getCsrfToken(auth.sessionId) : null,
   };
-  // Forward ONLY the renewal Set-Cookie(s) — never clobber other headers. Most
-  // requests are within the updateAge window and produce none, in which case
-  // the response carries no extra header.
-  const setCookies = renewalHeaders.getSetCookie();
-  if (setCookies.length === 0) return payload;
-  const headers = new Headers();
-  for (const cookie of setCookies) headers.append("Set-Cookie", cookie);
-  return data(payload, { headers });
-}
-
-// Surface loader headers (Set-Cookie renewal, F10-17) on routes without their
-// own headers export — React Router uses the deepest headers export available.
-export function headers({ loaderHeaders }: Route.HeadersArgs) {
-  return loaderHeaders;
+  // Ruling 454 (RF-1): where the page's first live stream starts. Only a
+  // document load seeds it; a `.data` answer would find the tab's streams
+  // already under way.
+  if (!isDocumentNavigation(request)) return payload;
+  return { ...payload, liveHead: context.get(liveHeadContext) };
 }
 
 /**
@@ -122,8 +120,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // corrected pre-paint by the inline script (hence suppressHydrationWarning).
   const ssrTheme = theme === "dark" ? "dark" : "light";
   // Ruling 454: one `{__html}` object per preference. React compares it by
-  // identity, and the root loader re-runs on every revalidation, so a fresh
-  // object rewrote the script's text each time (the icon cost, in <head>).
+  // identity, and a fresh object rewrote the script's text on every root
+  // reload (the icon cost, in <head>).
   const bootScript = useMemo(() => ({ __html: themeBootScript(theme) }), [theme]);
   return (
     <html lang="en" data-theme={ssrTheme} suppressHydrationWarning>

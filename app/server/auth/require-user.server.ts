@@ -1,4 +1,4 @@
-import { redirect } from "react-router";
+import { redirect, type MiddlewareFunction } from "react-router";
 import { getAuth } from "~/lib/auth.server";
 import type {
   ThemePreference,
@@ -75,8 +75,8 @@ interface AuthResolution {
  * Reads only. A POST can change what its own session resolves to (sign-in,
  * sign-out, a password reset), so a mutation resolves on every call as before;
  * the loaders that follow an action get a fresh Request from the router.
- * Sharing also means the root loader always sees the rolling-session renewal
- * cookie (F10-17): whichever loader asked first, the headers are the same.
+ * Sharing also means `sessionRenewalMiddleware` finds the rolling-session
+ * renewal cookie (F10-17) whichever loader asked first.
  */
 const resolvedByRequest = new WeakMap<Request, Promise<AuthResolution>>();
 
@@ -90,8 +90,9 @@ const resolvedByRequest = new WeakMap<Request, Promise<AuthResolution>>();
  * old code called `getSession({ headers })` and read only the session object,
  * DISCARDING that renewal cookie — so the browser cookie could expire at the
  * original login+30d mark regardless of activity, diverging from the DB. Passing
- * `returnHeaders: true` captures the `Set-Cookie` so a caller (the root loader)
- * can forward it to the browser and the roll actually reaches the client.
+ * `returnHeaders: true` captures the `Set-Cookie` so root's
+ * `sessionRenewalMiddleware` can forward it to the browser and the roll
+ * actually reaches the client.
  *
  * `renewalHeaders` is a Headers object that carries any `Set-Cookie` the refresh
  * produced (usually empty — most requests are within the updateAge window).
@@ -137,15 +138,51 @@ async function resolveSession(request: Request): Promise<AuthResolution> {
 }
 
 /**
+ * F10-17, ruling 454: forwards the rolling-session renewal onto the response
+ * of any GET whose loaders resolved the session, whichever loader asked. The
+ * root loader used to forward it, which tied the slide to root running; root
+ * no longer re-runs on live events and navigations (RF-7), and a day's one
+ * renewal lands on whichever request first asks after it is due, often a
+ * layout's `.data`. A POST resolves unshared and forwards nothing here, as
+ * before: its own action answers for the cookies it sets (sign-in, sign-out).
+ */
+export const sessionRenewalMiddleware: MiddlewareFunction<Response> = async (
+  { request },
+  next,
+) => {
+  const response = await next();
+  const pending = resolvedByRequest.get(request);
+  if (!pending) return response;
+  let renewal: string[];
+  try {
+    renewal = (await pending).renewalHeaders.getSetCookie();
+  } catch {
+    return response;
+  }
+  if (renewal.length === 0) return response;
+  const present = new Set(response.headers.getSetCookie());
+  const missing = renewal.filter((cookie) => !present.has(cookie));
+  if (missing.length === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const cookie of missing) headers.append("Set-Cookie", cookie);
+  // A new Response: a fetched or redirect response's headers are immutable.
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
+
+/**
  * Authenticates a request from its better-auth session. The identity invariant
  * (better-auth `user.id` === `users.id`) lets us load the canonical `users` row
  * for the profile/role. A disabled or vanished user has their better-auth
  * session deleted and is treated as signed out. `sessionId` is better-auth's
  * session id — it keys the double-submit CSRF token. Null when signed out.
  *
- * This drops the renewal headers; the root document loader uses
- * {@link authenticateWithHeaders} so the rolling-session cookie reaches the
- * browser (F10-17). Guards that only need the identity use this.
+ * This drops the renewal headers; {@link sessionRenewalMiddleware} forwards
+ * them from the request's shared resolution, so the rolling-session cookie
+ * reaches the browser (F10-17). Guards that only need the identity use this.
  */
 export async function authenticate(
   request: Request,
