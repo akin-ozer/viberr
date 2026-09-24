@@ -149,6 +149,49 @@ describe("CON-1: every running group's strip moves, shown or not (ruling 454, LI
   });
 });
 
+describe("CON-3: a resume keeps the shown console drawn while its new window loads", () => {
+  it("the held lines stay until the window answers, then the window replaces them", async () => {
+    const store = createLiveRunLogStore(TASK, [loaded(2)]);
+    store.show("primary");
+    const release = held("window=1");
+    store.reconcile([
+      thread({ serverRunId: "run_2", logWindow: win({ runIds: ["run_1", "run_2"], headSeq: -1, totalLines: 2, loaded: false }) }),
+    ]);
+    await flush();
+    expect(asked).toEqual(["/resources/run-log?runId=run_2&window=1"]);
+    // CANARY: swap in `fromInput` for a shown, ready thread and this reads
+    // `loading` with no lines ("loading this console…").
+    expect(store.thread("primary")).toMatchObject({ status: "ready" });
+    expect(store.thread("primary")?.lines.map((l) => l.key)).toEqual(["0:0", "0:1"]);
+
+    release(
+      ok({
+        runId: "run_2",
+        threadId: "primary",
+        lines: [line("l0"), line("l1"), runBoundaryLine(2, 2), line("fresh")],
+        lineKeys: ["0:0", "0:1", "1:resumed", "1:0"],
+        logWindow: win({ runIds: ["run_1", "run_2"], headSeq: 0, totalLines: 3 }),
+        facts: FACTS,
+      }),
+    );
+    await flush();
+    expect(store.thread("primary")?.lines.map((l) => l.key)).toEqual(["0:0", "0:1", "1:resumed", "1:0"]);
+    // The tail now follows the new run.
+    route("runId=run_2&since=0", tailPage("run_2", [1]));
+    store.onFrame("run_2", 1);
+    await flush();
+    expect(store.thread("primary")?.lines.at(-1)?.key).toBe("1:1");
+  });
+
+  it("a thread nobody shows is not loaded on a resume", async () => {
+    const store = createLiveRunLogStore(TASK, [loaded(2)]);
+    store.reconcile([thread({ serverRunId: "run_2", logWindow: win({ runIds: ["run_1", "run_2"], loaded: false }) })]);
+    await flush();
+    expect(asked).toEqual([]);
+    expect(store.thread("primary")?.status).toBe("unloaded");
+  });
+});
+
 describe("CON-5: a window that answers for a newer run is followed on that run", () => {
   it("adopts the window's run: no old-run lines appended after it, the new run's frames tail it", async () => {
     const store = createLiveRunLogStore(TASK, [

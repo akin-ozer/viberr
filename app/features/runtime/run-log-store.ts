@@ -172,6 +172,11 @@ interface ThreadState {
   /** A facts-only read is in flight (CON-1), and a frame landed during it. */
   readingFacts: boolean;
   factsAgain: boolean;
+  /** A `window=1` request is in flight. */
+  windowing: boolean;
+  /** The lines held are drawn until a window replaces them (CON-3): the
+   *  cursor is not theirs, so the tail waits for the window. */
+  replacing: boolean;
   paging: boolean;
   fillingRaw: boolean;
   shown: boolean;
@@ -311,6 +316,8 @@ export function createLiveRunLogStore(
       tailing: false,
       readingFacts: false,
       factsAgain: false,
+      windowing: false,
+      replacing: false,
       paging: false,
       fillingRaw: false,
       shown: false,
@@ -408,7 +415,7 @@ export function createLiveRunLogStore(
    * long as a frame announced a line past what it brought.
    */
   const tail = async (t: ThreadState): Promise<void> => {
-    if (t.tailing || t.view.status !== "ready" || !enabled) return;
+    if (t.tailing || t.replacing || t.view.status !== "ready" || !enabled) return;
     t.tailing = true;
     try {
       while (current(t) && t.announced > t.cursor) {
@@ -468,24 +475,31 @@ export function createLiveRunLogStore(
     }
   };
 
-  /** Owner decision 2: the one request that fills a thread the page did not. */
+  /**
+   * Owner decision 2: the one request that fills a thread the page did not.
+   * A thread `replacing` its lines keeps drawing them until the window lands.
+   */
   const loadWindow = async (t: ThreadState): Promise<void> => {
+    if (t.windowing || !enabled) return;
     // A failed load is asked again the next time the thread is shown.
-    if ((t.view.status !== "unloaded" && t.view.status !== "failed") || !enabled) return;
-    update(t, { status: "loading", loadError: null });
+    if (!t.replacing && t.view.status !== "unloaded" && t.view.status !== "failed") return;
+    t.windowing = true;
+    if (!t.replacing) update(t, { status: "loading", loadError: null });
+    const fail = (loadError: string) => {
+      t.replacing = false;
+      update(t, { status: "failed", loadError });
+    };
     try {
       const { status, data } = await getData<WindowPage>(
         `/resources/run-log?runId=${encodeURIComponent(t.runId)}&window=1`,
       );
       if (!current(t)) return;
       if (data === null) {
-        update(t, {
-          status: "failed",
-          loadError:
-            status === 403
-              ? `This console is ${forbiddenNote(source.kind)}.`
-              : `Could not load this console: the log endpoint returned ${status}.`,
-        });
+        fail(
+          status === 403
+            ? `This console is ${forbiddenNote(source.kind)}.`
+            : `Could not load this console: the log endpoint returned ${status}.`,
+        );
         return;
       }
       const { lines, lineKeys, logWindow, facts, runId } = data;
@@ -503,19 +517,21 @@ export function createLiveRunLogStore(
       t.cursor = logWindow.headSeq;
       t.announced = runId === previous ? Math.max(t.announced, t.cursor) : t.cursor;
       setFacts(runId, facts);
+      t.replacing = false;
       update(t, {
         lines: seeded,
         epoch: t.view.epoch + 1,
         total: Math.max(logWindow.totalLines, storedCount(seeded)),
         older: seedOlder(logWindow, seeded),
         status: "ready",
+        loadError: null,
       });
       if (rawView) void fillRaw(t);
       void tail(t);
     } catch {
-      if (current(t)) {
-        update(t, { status: "failed", loadError: "Could not load this console: the request failed." });
-      }
+      if (current(t)) fail("Could not load this console: the request failed.");
+    } finally {
+      t.windowing = false;
     }
   };
 
@@ -716,13 +732,25 @@ export function createLiveRunLogStore(
         // the page carries, or load it when the console shows it.
         changed = true;
         const fresh = fromInput(input);
-        if (held?.shown) fresh.shown = true;
+        if (held?.shown) {
+          fresh.shown = true;
+          // Ruling 454 (CON-3): a revalidation carries no lines, and swapping
+          // in the empty thread blanked a console the reader was looking at
+          // ("loading this console…") for the window's round trip. It keeps
+          // drawing what it holds until the new run's window replaces it.
+          if (fresh.view.status === "unloaded" && held.view.status === "ready") {
+            fresh.view = held.view;
+            fresh.replacing = true;
+          }
+        }
         next.set(input.id, fresh);
       }
       threadMap = next;
       if (changed) {
         notify();
-        for (const t of threadMap.values()) if (t.shown && t.view.status === "unloaded") void loadWindow(t);
+        for (const t of threadMap.values()) {
+          if (t.shown && (t.replacing || t.view.status === "unloaded")) void loadWindow(t);
+        }
       }
     },
     onFrame(runId, seq) {
