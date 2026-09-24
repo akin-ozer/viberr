@@ -303,6 +303,16 @@ export function runBoundaryLine(runNumber: number, runTotal: number): LogLine {
  * Mirrors `RunLogWindow` in `app/server/runtimes/run-projection.server.ts`
  * (the server owns the budgets; this is the wire shape both sides agree on).
  */
+
+/**
+ * The window's line budget (the server's byte budget is its other bound,
+ * `RUN_LOG_WINDOW_BYTES`). Declared here, where the client can read it, and
+ * applied by `run-projection.server.ts`: ruling 454 (CON-2) re-windows a
+ * console whose live tail fell further behind than one window, rather than
+ * reading every missed line forward in one request.
+ */
+export const RUN_LOG_WINDOW_LINES = 400;
+
 export interface RunLogWindow {
   /** Total console lines stored across EVERY run in the group. */
   totalLines: number;

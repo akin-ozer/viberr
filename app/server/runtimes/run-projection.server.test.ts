@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { LogLine } from "~/features/runtime/runtime-types";
+import { RUN_LOG_WINDOW_LINES, type LogLine } from "~/features/runtime/runtime-types";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertRunLine, patchRun, upsertRun, type InsertRunInput } from "./run-store.server";
 import {
   RUN_LOG_WINDOW_BYTES,
-  RUN_LOG_WINDOW_LINES,
   projectRunsForTask,
   runLogWindowFor,
 } from "./run-projection.server";

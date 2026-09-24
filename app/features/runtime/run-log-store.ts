@@ -3,6 +3,7 @@ import {
   consoleLineKey,
   isRunBoundary,
   runBoundaryLine,
+  RUN_LOG_WINDOW_LINES,
   type LogLine,
   type RunLiveFacts,
   type RunLogWindow,
@@ -410,6 +411,24 @@ export function createLiveRunLogStore(
   };
 
   /**
+   * Ruling 454 (CON-2): a thread the tail fell more than one window behind
+   * (a tab back from hidden, a resync, a revalidation after a long gap) is
+   * re-windowed, the bounded read a fresh load makes, instead of reading every
+   * missed line forward in one request and holding them all. A shown console
+   * keeps drawing what it holds until the window lands; any other thread lets
+   * go of its lines and loads when it is shown.
+   */
+  const rewindow = (t: ThreadState) => {
+    if (t.shown) {
+      t.replacing = true;
+      void loadWindow(t);
+      return;
+    }
+    t.page = null;
+    update(t, { lines: [], epoch: t.view.epoch + 1, older: NO_OLDER, status: "unloaded" });
+  };
+
+  /**
    * UI-35 / LIVE-3: at most one tail read per thread in flight, and a frame
    * that lands while one is in flight is not lost: the read runs again for as
    * long as a frame announced a line past what it brought.
@@ -419,6 +438,10 @@ export function createLiveRunLogStore(
     t.tailing = true;
     try {
       while (current(t) && t.announced > t.cursor) {
+        if (t.announced - t.cursor > RUN_LOG_WINDOW_LINES) {
+          rewindow(t);
+          return;
+        }
         const { status, data } = await getData<TailPage>(tailUrl(t.runId, t.cursor));
         if (data === null) {
           // UI-30: a 403 here means the viewer is not a project member (or, on

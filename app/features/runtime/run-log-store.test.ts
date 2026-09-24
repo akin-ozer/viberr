@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLiveRunLogStore, type ConsoleThreadInput } from "./run-log-store";
 import {
   NO_RUN_CACHE,
+  RUN_LOG_WINDOW_LINES,
   runBoundaryLine,
   type LogLine,
   type RunLiveFacts,
@@ -146,6 +147,52 @@ describe("CON-1: every running group's strip moves, shown or not (ruling 454, LI
     await flush();
     expect(asked).toHaveLength(2);
     expect(store.facts("run_spec")?.turns).toBe(3);
+  });
+});
+
+describe("CON-2: a catch-up wider than the window re-windows instead of reading every missed line", () => {
+  it("a shown thread far behind loads the bounded window, not one unbounded forward read", async () => {
+    const store = createLiveRunLogStore(TASK, [loaded(11)]);
+    store.show("primary");
+    const gapHead = 10 + RUN_LOG_WINDOW_LINES + 4_600;
+    const seqs = Array.from({ length: RUN_LOG_WINDOW_LINES }, (_, i) => gapHead - RUN_LOG_WINDOW_LINES + 1 + i);
+    route(
+      "window=1",
+      ok({
+        runId: "run_1",
+        threadId: "primary",
+        lines: seqs.map((s) => line(`l${s}`)),
+        lineKeys: seqs.map((s) => `0:${s}`),
+        logWindow: win({ headSeq: gapHead, totalLines: gapHead + 1, hasMore: true, oldest: { runId: "run_1", seq: seqs[0]! } }),
+        facts: FACTS,
+      }),
+    );
+    // A hidden tab comes back: the revalidation says the head is 5,000 lines on.
+    // CANARY: drop the gap check from `tail` and this asks `since=10` for all
+    // of them and holds 5,011 lines.
+    store.reconcile([thread({ logWindow: win({ headSeq: gapHead, totalLines: gapHead + 1, loaded: false }) })]);
+    await flush();
+    expect(asked).toEqual(["/resources/run-log?runId=run_1&window=1"]);
+    expect(store.thread("primary")?.lines).toHaveLength(RUN_LOG_WINDOW_LINES);
+    expect(store.thread("primary")?.status).toBe("ready");
+  });
+
+  it("a thread nobody shows drops what it held and asks for nothing", async () => {
+    const store = createLiveRunLogStore(TASK, [loaded(11)]);
+    store.reconcile([thread({ logWindow: win({ headSeq: 10 + RUN_LOG_WINDOW_LINES + 1, loaded: false }) })]);
+    await flush();
+    expect(asked).toEqual([]);
+    expect(store.thread("primary")).toMatchObject({ status: "unloaded", lines: [] });
+  });
+
+  it("a gap within the window is still one forward read", async () => {
+    const store = createLiveRunLogStore(TASK, [loaded(11)]);
+    store.show("primary");
+    route("since=10", tailPage("run_1", [11, 12]));
+    store.reconcile([thread({ logWindow: win({ headSeq: 12, totalLines: 13, loaded: false }) })]);
+    await flush();
+    expect(asked).toEqual(["/resources/run-log?runId=run_1&since=10&raw=0"]);
+    expect(store.thread("primary")?.lines).toHaveLength(13);
   });
 });
 

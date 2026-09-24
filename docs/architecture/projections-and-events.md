@@ -360,7 +360,8 @@ revalidation or a client navigation carries each thread's window facts
 `/resources/run-log?window=1` request, and the stored envelopes load when the raw view
 opens. A revalidation keeps what a thread holds unless its representative run changed; a
 head the loader saw past the cursor (a missed frame, a tab back from hidden) is read as a
-gap. The console pages older history on demand and, while a run is shown active and the
+gap, and a gap wider than one window (`RUN_LOG_WINDOW_LINES`, 400) loads the window
+instead, so a catch-up never outgrows what a fresh load ships. The console pages older history on demand and, while a run is shown active and the
 tab's stream is DOWN, revalidates every 20 s (F22: a missed terminal event cannot leave
 the strip "running"; with the stream up the event arrives or is replayed, ruling 454,
 RF-6); the controller page reads the working turn's tail every 5 s instead and

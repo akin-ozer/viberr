@@ -4,6 +4,7 @@ import {
   consoleBoundaryKey,
   consoleLineKey,
   runBoundaryLine,
+  RUN_LOG_WINDOW_LINES,
   SESSION_MISSING_SUFFIX,
   type LogLine,
   type RunBackend,
@@ -69,8 +70,10 @@ const WHO_NAME = {
  * This PAGINATES, it does not truncate: UI-53 deliberately widened the console
  * to the agent's whole history on the task, and `logWindow` carries the cursor
  * that walks backwards through it via `/resources/run-log?before=`.
+ *
+ * The line budget is declared in runtime-types.ts, because the console reads
+ * it too (ruling 454, CON-2: a tail further behind than one window re-windows).
  */
-export const RUN_LOG_WINDOW_LINES = 400;
 export const RUN_LOG_WINDOW_BYTES = 384 * 1024;
 
 /** Backward-paging cursor + honesty markers for one agent group's console.
