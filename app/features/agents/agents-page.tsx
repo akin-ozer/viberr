@@ -196,10 +196,7 @@ function ActiveBadge({
 }) {
   if (count > 0)
     return (
-      <span className="ag-active">
-        <span className="working" />
-        {count}
-      </span>
+      <span className="ag-active">{count} running</span>
     );
   if (unusable)
     return (
@@ -230,7 +227,14 @@ function ProfileItem({
       ? notConnectedNote(backendHealth.backend)
       : undefined;
   return (
-    <button type="button" className={"ag-item" + (on ? " on" : "")} onClick={onClick}>
+    <button
+      type="button"
+      className={"ag-item" + (on ? " on" : "")}
+      // Interface review 2026-09-24 (acce-9): the open profile's state, not
+      // just its ring.
+      aria-current={on ? "true" : undefined}
+      onClick={onClick}
+    >
       <ProfileGlyph a={a} />
       <span className="ag-item-main">
         <span className="nm">{a.name}</span>
@@ -882,7 +886,6 @@ export function ProfileDetail({
             </Pill>
             {runningKeys.length > 0 ? (
               <span className="ag-running">
-                <span className="working" />
                 running on {countLabel(runningKeys.length, "task")}
               </span>
             ) : backendMissing ? (

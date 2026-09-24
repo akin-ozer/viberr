@@ -267,42 +267,49 @@ describe("UI-24: the org tile counts the population the panel shows", () => {
 });
 
 describe("UI-03: a dropped live-update stream is surfaced", () => {
-  it("renders a paused chip only when the stream is down", () => {
-    const { queryByText, rerender } = renderHome(baseData([card()]));
-    expect(queryByText(/live updates paused/)).toBeNull();
+  const PAUSED = "Live updates paused. Cards may be out of date.";
+  // The announcer carries the same sentence, so queries pin the visible strip.
+  const STRIP_TEXT = { selector: ".archived-banner span" };
+
+  it("renders a paused strip only when the stream is down", () => {
+    const { container, rerender } = renderHome(baseData([card()]));
+    expect(container.querySelector(".archived-banner")).toBeNull();
     rerender(<div />);
 
-    const { getByText } = renderHome(baseData([card()]), { livePaused: true });
-    expect(getByText(/live updates paused/)).toBeTruthy();
+    const paused = renderHome(baseData([card()]), { livePaused: true });
+    // layo-10: a strip under the header row, inside the sticky header — the
+    // chip and Retry in the row (which cannot wrap) scrolled the page
+    // sideways at phone width. Canary: put the chip back in `.home-top-in`.
+    const strip = paused.container.querySelector("header.home-top > .archived-banner");
+    expect(strip?.textContent).toContain(PAUSED);
+    expect(paused.container.querySelector(".home-top-in .pill")).toBeNull();
   });
 
-  it("ruling 149: the sentence is a chip, the retry a real control", () => {
+  it("ruling 149: the sentence is a status line, the retry a real control", () => {
     // The same split the workspace header uses: a `.pill` has no cursor and no
     // hover, so one element that was both sentence and control read as neither.
-    // Canary: merge them back into one `.pill` button and the SPAN assertion
-    // fails; put `role="status"` on the chip and it stops being reachable by
-    // its own words.
+    // Canary: put `role="status"` on the strip and the sentence is read twice.
     let retried = 0;
     const { container, getByText, getByRole } = renderHome(baseData([card()]), {
       livePaused: true,
       onReconnect: () => (retried += 1),
     });
-    const chip = getByText("live updates paused");
-    expect(chip.tagName).toBe("SPAN");
-    expect(chip.closest('[role="status"]')).toBeNull();
+    const sentence = getByText(PAUSED, STRIP_TEXT);
+    expect(sentence.tagName).toBe("SPAN");
+    expect(sentence.closest('[role="status"]')).toBeNull();
     fireEvent.click(getByRole("button", { name: "Retry" }));
     expect(retried).toBe(1);
     const live = container.querySelector('span.vh[role="status"]');
-    expect(live?.textContent).toMatch(/Live updates paused/);
+    expect(live?.textContent).toBe(PAUSED);
   });
 
   it("ruling 149: no Retry when there is nothing to reconnect", () => {
     // The prop is optional, and a button that calls nothing is a control that
-    // does nothing — the chip still states the fact.
+    // does nothing — the strip still states the fact.
     const { getByText, queryByRole } = renderHome(baseData([card()]), {
       livePaused: true,
     });
-    expect(getByText("live updates paused")).toBeTruthy();
+    expect(getByText(PAUSED, STRIP_TEXT)).toBeTruthy();
     expect(queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
@@ -552,6 +559,81 @@ describe("F13: the home footer says what it is", () => {
       user: { ...data.user, role: "member" },
     });
     expect(container.querySelector(".store-strip")).toBeNull();
+  });
+});
+
+/**
+ * Interface review 2026-09-24 (writ-2): files the re-scan could not project were
+ * added into "N changed" and toasted with the success tick, in copy assembled
+ * from fragments ("1 project dirs, no drift found").
+ */
+describe("writ-2: the re-scan toast tells a failure from a sync", () => {
+  function rescanWith(result: {
+    ok: boolean;
+    projects?: number;
+    changed?: number;
+    removed?: number;
+    errors?: number;
+  }) {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <HomePage data={baseData([card()])} theme="system" />
+          </ToastProvider>
+        ),
+        action: () => result,
+      },
+    ]);
+    const view = render(<Stub initialEntries={["/"]} />);
+    fireEvent.click(view.getByText("Re-scan store").closest("button")!);
+    return view;
+  }
+
+  async function toast(container: HTMLElement): Promise<Element> {
+    await waitFor(() => expect(container.querySelector(".toast")).not.toBeNull());
+    return container.querySelector(".toast")!;
+  }
+
+  it("names unreadable files as an error, with the way out", async () => {
+    const { container } = rescanWith({
+      ok: true,
+      projects: 3,
+      changed: 1,
+      removed: 0,
+      errors: 2,
+    });
+    const t = await toast(container);
+    expect(t.textContent).toContain(
+      "Re-scan finished, but 2 files could not be read. The server log names each one. Fix them and re-scan.",
+    );
+    expect(t.getAttribute("data-kind")).toBe("error");
+  });
+
+  it("says nothing changed, with agreeing nouns, on a clean sync", async () => {
+    const { container } = rescanWith({
+      ok: true,
+      projects: 1,
+      changed: 0,
+      removed: 0,
+      errors: 0,
+    });
+    const t = await toast(container);
+    expect(t.textContent).toContain("Store re-scanned: 1 project, nothing changed");
+    expect(t.getAttribute("data-kind")).toBe("success");
+  });
+
+  it("counts updated files without the unreadable ones", async () => {
+    const { container } = rescanWith({
+      ok: true,
+      projects: 3,
+      changed: 1,
+      removed: 1,
+      errors: 0,
+    });
+    const t = await toast(container);
+    expect(t.textContent).toContain("Store re-scanned: 3 projects, 2 files updated");
   });
 });
 

@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { UserRole } from "~/shared/mapping/user.server";
 import { setupAppTest } from "../../../test-support/test-app";
-import { authenticate, requireAuth, roleSatisfies } from "./require-user.server";
+import {
+  authenticate,
+  requireAuth,
+  requireRole,
+  roleSatisfies,
+} from "./require-user.server";
 import { insertUser } from "./user-store.server";
 
 describe("roleSatisfies (RBAC matrix)", () => {
@@ -86,6 +91,26 @@ describe("authenticate (better-auth session)", () => {
       .prepare(`SELECT count(*) AS c FROM session WHERE userId = ?`)
       .get(user.id) as { c: number };
     expect(count.c).toBe(0);
+  });
+
+  it("writ-1: requireRole refuses a member with the org-admin sentence", async () => {
+    // The root error boundary renders this message verbatim (D32-15), so it
+    // names the tier in the product's term and says who can help.
+    const { cookie } = await seedUser("member");
+    const thrown: unknown = await requireRole(
+      app.request("/org/settings", { cookie }),
+      "admin",
+    ).catch((e) => e);
+    expect(thrown).toBeInstanceOf(Response);
+    const refusal = thrown instanceof Response ? thrown : null;
+    expect(refusal?.status).toBe(403);
+    expect(await refusal?.json()).toEqual({
+      error: {
+        code: "forbidden",
+        message:
+          "Only org admins can open this page. Ask an org admin for access.",
+      },
+    });
   });
 
   it("surfaces the pwreset_required gate", async () => {

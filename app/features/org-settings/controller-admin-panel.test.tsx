@@ -267,6 +267,8 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
     );
     expect(ghost.textContent).toContain("ghost-skill");
     expect(ghost.className).toContain("missing");
+    // Interface review 2026-09-24 (acce-33): a visible word, not amber alone.
+    expect(ghost.querySelector(".res-chip-note")?.textContent).toBe("missing");
     expect(ghost.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(ghost);
     expect(
@@ -496,6 +498,7 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     const ghost = container.querySelector(".pick-chip.missing");
     expect(ghost?.tagName).toBe("SPAN");
     expect(ghost?.textContent).toContain("ghost-skill");
+    expect(ghost?.querySelector(".res-chip-note")?.textContent).toBe("missing");
     expect(ghost?.getAttribute("title")).toContain("locked on this deployment");
   });
 

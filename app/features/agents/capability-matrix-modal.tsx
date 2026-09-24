@@ -92,17 +92,12 @@ export function CapabilityMatrixModal({
         </span>
         <div className="mh-main">
           <h2>Capability matrix</h2>
+          {/* Interface review 2026-09-24 (layo-16): one sentence only. The
+              head does not scroll, so the enforcement note that used to sit
+              here left the matrix 0px tall at 320px; it is the first note
+              below the table now. */}
           <div className="mh-sub">
             Every profile's permissions for each action in {projectName}.
-            Delivery (push · open/merge PR) is <b>server-owned</b> and gated
-            server-side on the delivering profile's grant, enforced on both
-            backends. Withholding <b>Execute code or write to the repo</b> binds on
-            Claude, which drops the write tools. Codex runs are not OS-confined
-            (ruling 185), so there it is advisory: the prompt omits every delivery
-            step, and the row is tagged "advisory on Codex" below. The scoped
-            delivery commands bind only on Claude too, and the <b>server-side
-            delivery gate</b> is what constrains what ships on either backend. Web
-            egress stays gated on both.
           </div>
         </div>
         <button
@@ -217,6 +212,11 @@ export function CapabilityMatrixModal({
                               title={MODE_TITLE[m]}
                             >
                               <span className="d" />
+                              {/* Interface review 2026-09-24 (acce-20): the
+                                  title is only a description, so table
+                                  navigation read every cell as blank. Same
+                                  fix as ruling 148's RBAC cells. */}
+                              <span className="vh">{MODE_TITLE[m]}</span>
                             </span>
                           </td>
                         );
@@ -234,6 +234,17 @@ export function CapabilityMatrixModal({
           <div className="mx-notes">
             <h3>What differs between the two runtimes</h3>
             <ul>
+              <li>
+                Delivery (push · open/merge PR) is <b>server-owned</b> and gated
+                server-side on the delivering profile's grant, enforced on both
+                backends. Withholding <b>Execute code or write to the repo</b> binds on
+                Claude, which drops the write tools. Codex runs are not OS-confined
+                (ruling 185), so there it is advisory: the prompt omits every delivery
+                step, and the row is tagged "advisory on Codex" above. The scoped
+                delivery commands bind only on Claude too, and the <b>server-side
+                delivery gate</b> is what constrains what ships on either backend. Web
+                egress stays gated on both.
+              </li>
               <li>
                 {/* U12 residual: "specialist" is retired vocabulary (C11/FR14) —
                     the rows of this very matrix are agent PROFILES, engaged per

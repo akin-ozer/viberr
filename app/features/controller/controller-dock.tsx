@@ -373,6 +373,33 @@ function DockShell({ context }: { context: DockContext }) {
   // `useDismiss` closes on any Escape anywhere, so dismissing the palette, a
   // confirm dialog or a stage menu took the helper with it (review finding 8).
   // An outside press still never closes the dock.
+  //
+  // Interface review 2026-09-24 (acce-14): one exception. With no focus trap
+  // (ruling 121), Tab walks onto page controls the panel covers, and at 320px
+  // or 200% zoom the sheet covers most of the page. Escape with focus on such a
+  // control closes the dock and uncovers it, leaving focus where it is (WCAG
+  // 2.4.11). Everything finding 8 protects still leaves the dock alone: an
+  // Escape something else handled, focus on an open popover's trigger or in a
+  // menu (useDismiss closes those without preventDefault), focus on nothing,
+  // and any control the panel does not cover, which includes a modal dialog's
+  // top layer.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const panel = panelRef.current;
+      const focused = document.activeElement;
+      if (!panel || !(focused instanceof HTMLElement) || focused === document.body) return;
+      if (panel.contains(focused)) return;
+      if (focused.closest('[aria-expanded="true"], [role="menu"], [role="listbox"]')) return;
+      const box = focused.getBoundingClientRect();
+      // Optional-chained: jsdom has no elementFromPoint, so it no-ops in tests.
+      const hit = document.elementFromPoint?.(box.left + box.width / 2, box.top + box.height / 2);
+      if (hit && panel.contains(hit)) closeDock(true);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, closeDock]);
 
   // Focus, on a USER-INITIATED open only (review findings 7 and 10). Opening
   // the dock means wanting to type, so the composer takes focus; when it cannot

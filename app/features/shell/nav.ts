@@ -82,7 +82,8 @@ export function workspaceViewLabel(view: WorkspaceNavItem["id"]): string {
  * `showModal()` overlay that covers the viewport, so a header behind one would
  * be a dimmed sliver, not a header. `/controller` is absent too — it carries
  * its own identity header (the controller's name, its model and its scope) and
- * a full-height layout that scrolls inside itself.
+ * a full-height layout of its own, which the document scrolls: app.css opts it
+ * out of the shell's clipped body (interface review 2026-09-24, acce-12).
  */
 export const STANDALONE_PAGES: readonly { path: string; label: string }[] = [
   { path: "/org/settings", label: "Instance settings" },

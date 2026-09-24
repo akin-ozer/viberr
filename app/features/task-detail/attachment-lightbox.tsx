@@ -98,6 +98,13 @@ export function useAttachmentLightbox(): (
  *  editor — a multi-megabyte log renders its head and the note says so. */
 const TEXT_VIEW_MAX_CHARS = 200_000;
 
+/** Interface review 2026-09-24 (writ-5): a fetch that PROVED the file
+ *  unservable (404, 413, auth redirect, network) drops Download, so the card
+ *  names the likely causes and the one step that clears each: a reload
+ *  refreshes a stale list, sends an ended session to sign-in, retries a drop. */
+const UNSERVABLE_COPY =
+  "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.";
+
 /**
  * Read at most `cap` characters of the body, then STOP the transfer — the
  * route serves up to 50 MB, and `res.text()` would buffer all of it before
@@ -186,7 +193,7 @@ function LightboxTextBody({
     return (
       <div className="lightbox-broken">
         <Icon name="file" />
-        <p>This attachment could not be loaded.</p>
+        <p>{UNSERVABLE_COPY}</p>
       </div>
     );
   }
@@ -288,14 +295,19 @@ function Lightbox({
               this popup has no viewer for the kind. */}
           <p>
             {fetchFailed
-              ? "This attachment could not be loaded."
+              ? UNSERVABLE_COPY
               : "This file type has no in-app preview. Use Download to save it."}
           </p>
         </div>
       ) : failed ? (
         <div className="lightbox-broken">
           <Icon name="file" />
-          <p>This attachment could not be loaded.</p>
+          {/* onError cannot tell a 404 from bytes the browser cannot decode,
+              and Download stays for exactly the second case — so point at it. */}
+          <p>
+            Unable to show this image. Use Download or Open original to get the
+            file itself.
+          </p>
         </div>
       ) : (
         <img

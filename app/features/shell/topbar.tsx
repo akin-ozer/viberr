@@ -11,6 +11,46 @@ import { UserMenu, type MenuUser } from "./user-menu";
 import { boardHref, workspaceViewFromPathname, workspaceViewLabel } from "./nav";
 
 /**
+ * UI-03: the dropped-stream notice. Interface review 2026-09-24 (layo-10): a
+ * strip UNDER the header (the `.archived-banner` idiom), never a chip in it —
+ * the ~186px chip + Retry pair sat in a fixed-height row that cannot wrap and,
+ * at 320-375px, pushed the bell and the account menu past the edge (clipped by
+ * `.main`'s overflow in the workspace, a sideways page scroll on Home). No
+ * role of its own: each header keeps an always-mounted `.vh` announcer as the
+ * live region (ruling 149). The Retry exists only when there is something to
+ * reconnect.
+ */
+export function LivePausedStrip({
+  message,
+  onReconnect,
+}: {
+  message: string;
+  onReconnect?: () => void;
+}) {
+  return (
+    <div className="archived-banner">
+      <Icon name="alert" />
+      <span>{message}</span>
+      {onReconnect && (
+        <button
+          type="button"
+          className="btn ghost sm push"
+          title="Reconnect the live update stream"
+          onClick={onReconnect}
+        >
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The workspace's paused sentence: the header's announcer and the strip the
+ *  layout renders under it (`routes/project.tsx`) say the same thing. */
+export const WORKSPACE_PAUSED_SENTENCE =
+  "Live updates paused. Counts and board state may be out of date.";
+
+/**
  * Workspace topbar (shell spec §4.2): brand → Home, crumbs (CSS truncation
  * tiers ported verbatim in viberr.css), the ⌘K palette trigger, bell popover,
  * account menu.
@@ -30,7 +70,6 @@ export function Topbar({
   notifications,
   unread,
   livePaused = false,
-  onReconnect,
   railOpen = false,
   onToggleRail,
 }: {
@@ -45,9 +84,10 @@ export function Topbar({
   theme: ThemePreference;
   notifications: NotificationView[];
   unread: number;
-  /** UI-03: the SSE stream is down — everything on screen is a stale snapshot. */
+  /** UI-03: the SSE stream is down — everything on screen is a stale snapshot.
+   *  Only the announcer lives here; the visible strip and its Retry sit under
+   *  the header (layo-10). */
   livePaused?: boolean;
-  onReconnect?: () => void;
   /** F15-18: the rail is collapsed behind a toggle under the mobile breakpoint;
    *  this is the layout's state, so the button can report it (aria-expanded). */
   railOpen?: boolean;
@@ -190,32 +230,11 @@ export function Topbar({
           `home-sections.tsx`, `controller-dock.tsx` and `ui/label-input.tsx`):
           a live region inserted together with its text is the one case screen
           readers skip, so a region that appears only while paused announces
-          nothing. The visible chip is then a plain span — its text IS the
-          headline and the `title` carries the detail, so an `aria-label` here
-          would only replace the chip's own words with a longer duplicate. */}
+          nothing. The visible sentence and the Retry are the strip the layout
+          renders under the header (`LivePausedStrip`). */}
       <span className="vh" role="status" aria-live="polite">
-        {livePaused
-          ? "Live updates paused. Counts and board state may be out of date."
-          : ""}
+        {livePaused ? WORKSPACE_PAUSED_SENTENCE : ""}
       </span>
-      {livePaused && (
-        <span
-          className="pill risk sm"
-          title="The live update stream dropped (often an expired session). Counts and board state on this page may be out of date."
-        >
-          live updates paused
-        </span>
-      )}
-      {livePaused && onReconnect && (
-        <button
-          type="button"
-          className="btn ghost sm"
-          title="Reconnect the live update stream"
-          onClick={onReconnect}
-        >
-          Retry
-        </button>
-      )}
       {/* R15-5: a BUTTON, not an input — everything typed here is answered by
           the palette, across every project the viewer can open. Shared with the
           standalone-page header so the two cannot drift (`palette-trigger.tsx`). */}

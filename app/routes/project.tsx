@@ -29,7 +29,11 @@ import { Icon } from "~/ui/icon";
 import { SkipLink } from "~/ui/skip-link";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { Rail } from "~/features/shell/rail";
-import { Topbar } from "~/features/shell/topbar";
+import {
+  LivePausedStrip,
+  Topbar,
+  WORKSPACE_PAUSED_SENTENCE,
+} from "~/features/shell/topbar";
 
 /**
  * Workspace shell layout for /projects/:slug (shell spec): rail with live
@@ -309,10 +313,18 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           notifications={loaderData.notifications}
           unread={loaderData.unread}
           livePaused={live.paused}
-          onReconnect={live.reconnect}
           railOpen={railOpen}
           onToggleRail={() => setRailOpen((open) => !open)}
         />
+        {/* Interface review 2026-09-24 (layo-10): under the header, not in
+            its fixed-height row, where it pushed the bell and account menu
+            off a phone-width screen. */}
+        {live.paused ? (
+          <LivePausedStrip
+            message={WORKSPACE_PAUSED_SENTENCE}
+            onReconnect={live.reconnect}
+          />
+        ) : null}
         {board.project.archived ? (
           <ArchivedBanner
             canRestore={roleCan(loaderData.myRole, "edit-policy")}

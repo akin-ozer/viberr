@@ -52,9 +52,9 @@ test("at 375px the rail collapses behind a toggle and nothing scrolls sideways",
 
   const rail = page.locator(".rail");
   // Off-canvas: still in the DOM (its counts drive the toggle target) but
-  // translated out of the viewport.
-  const railBox = await rail.boundingBox();
-  expect(railBox!.x + railBox!.width).toBeLessThanOrEqual(1);
+  // translated out of the viewport AND visibility:hidden, so its links leave
+  // the tab order (interface review 2026-09-24, acce-13).
+  await expect(rail).toBeHidden();
 
   // The page itself must not scroll horizontally — the D-29 "reflow" promise.
   const overflow = await page.evaluate(

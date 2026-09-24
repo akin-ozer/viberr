@@ -176,9 +176,9 @@ export default function App() {
  *  is user-facing copy when it came through as a string. D32-15 (pass 32): the
  *  role guard (`requireRole`) answers page and API requests alike with the JSON
  *  envelope `{ error: { code, message } }`, and a non-admin opening
- *  /org/settings or /insights read only "Forbidden" — the WHY ("This area
- *  requires the admin role.") was in the payload the boundary threw away. Both
- *  shapes are copy; anything else is transport noise. */
+ *  /org/settings or /insights read only "Forbidden" — the WHY (only org admins
+ *  can open it) was in the payload the boundary threw away. Both shapes are copy;
+ *  anything else is transport noise. */
 const thrownMessage = z
   .union([
     z.string(),
@@ -189,20 +189,28 @@ const thrownMessage = z
   .catch("");
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let title = "Something went wrong";
-  let detail = "An unexpected error occurred.";
+  // Interface review 2026-09-24 (writ-1): the page is titled by what happened
+  // to the reader, never by an HTTP status, and the detail says what to do.
+  let title = "Unable to load this page";
+  let detail =
+    "Reload the page to try again. If it keeps failing, go back to Home.";
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    title = error.status === 404 ? "Page not found" : `Error ${error.status}`;
+    if (error.status === 404) title = "Page not found";
+    else if (error.status === 403) title = "You don't have access to this page";
     // The thrown string (e.g. the 403 from requireProjectMember) IS the page
-    // copy. statusText is transport boilerplate, so it is only a fallback.
-    const thrown = thrownMessage.parse(error.data).trim();
+    // copy. statusText ("Forbidden", "Internal Server Error") is transport
+    // boilerplate that says nothing a reader can act on, so it never is.
+    // An unmatched URL's 404 carries the router's own diagnostic ("Error: No
+    // route matches URL …"), which is transport text too, not page copy.
+    const parsed = thrownMessage.parse(error.data).trim();
+    const thrown = parsed.startsWith("Error: No route matches URL") ? "" : parsed;
     detail =
       thrown ||
       (error.status === 404
         ? "The page you are looking for does not exist."
-        : error.statusText || detail);
+        : detail);
   } else if (import.meta.env.DEV && error instanceof Error) {
     detail = error.message;
     stack = error.stack;
@@ -210,6 +218,8 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
 
   return (
     <main className="app-splash">
+      {/* Hoisted into <head> by React: an error page had no <title> at all. */}
+      <title>{`${title} · Viberr`}</title>
       <section className="panel">
         <div className="panel-head">
           <h2>{title}</h2>
