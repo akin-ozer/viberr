@@ -7,7 +7,7 @@
 > `test-support/perf-verdict.ts`, `test-support/perf-budgets.ts` and
 > `test-support/perf-budgets/`, the `*.perf.test.ts(x)` files under `app/`,
 > `scripts/measure-routes.mjs`, `app/shared/docs/perf-budgets-sync.test.ts`.
-> Written 2026-09-24 on branch `perf/journeys-pass` (from `main` @ `2169f940`).
+> Written 2026-09-24 with the first pass (ruling 454), from `main` @ `2169f940`.
 
 ## 1. The journeys
 
@@ -73,12 +73,64 @@ npm run build && node scripts/measure-routes.mjs --check
 CI's verify job runs the same check after its build step. `node scripts/measure-routes.mjs
 routes/project.task` (no flag) still prints the raw and gzip figures for any route.
 
+The bundle table also accepts a `raised` note: a ceiling that went up says why beside the
+number, the way a TypeScript budget carries a comment.
+
 ## 4. Measuring a new hot path
 
-1. Reproduce the journey in a test before changing code. Route loaders and actions run
-   in-process through `test-support/test-app.ts` (`setupAppTest`, `cookieFor`,
-   `request`); `test-support/demo-seed.ts` seeds the demo board; renders are counted
-   with a `Profiler` in a `// @vitest-environment jsdom` file.
-2. Count the thing that is repeated (a statement, a parse, a render), not the time.
-3. Add the budget at today's value, fix, then lower it to the new value. The test that
-   pinned the old number now proves the new one.
+1. Reproduce the journey in a test before changing code, and count the thing that is
+   repeated (a statement, a parse, a render), not the time.
+2. Add the budget at today's value and see it pass, fix, then lower it to the new value.
+   The test that pinned the old number now proves the new one. Keep a behavioural test
+   beside it: a faster wrong answer is a regression.
+3. If a count moves when the suite is busy, the test is measuring the tail of the step
+   before it, not the interaction. Wait for the tree to stop committing (`settle`) before
+   resetting a counter, and keep jsdom-only side channels out of the window (the composer
+   tests pass Lexical's `SKIP_DOM_SELECTION_TAG`, because a DOM selection Lexical writes
+   comes back through a queued `selectionchange` that it re-reads under time-based guards).
+
+The harnesses, one home each:
+
+| Harness | Measures |
+|---|---|
+| `test-support/test-app.ts`, `demo-seed.ts` | route loaders and actions in-process, with real sessions and CSRF |
+| `test-support/perf-counters.ts` | SQL executions, rows, compiles and commits (`countSql`, `tallyServerReads`), store-file reads and writes (`countFileReads`, `countFileWrites`); wraps the `node:sqlite` prototypes and `node:fs`, restored on exit |
+| `test-support/render-counter.ts` | which components rendered in each commit, read off the fiber tree the way DevTools does (`createRenderCounter` + `<Profiler onRender>`), `settle`, and DOM writes (`observeMutations`) |
+| `test-support/revalidation-harness.tsx` | loaders re-run per trigger, with single fetch's choice of routes and the real SSE broker in-process |
+| `test-support/console-fixture.ts` | a big task: 870 console lines over three agent groups |
+| `test-support/controller-dock-stub.tsx` | the dock's routed stub: requests per navigation, view loads per send |
+| `test-support/static-imports.ts` | whether a route statically reaches a package (no build needed) |
+| `test-support/css-rules.ts` | the one `app.css` parser, for CSS budgets (infinite loops on the main thread, scrollers without a gutter) |
+
+## 5. What the first pass measured
+
+Ruling 454 records the pass. From `main` @ `2169f940` to the merged pass, on the fixtures
+the budgets name (103 budgets in 27 perf test files, plus 8 bundle closures):
+
+| Journey | Figure | Before | After |
+|---|---|---|---|
+| fresh-load | root closure, gzip | 275,352 B | 168,823 B |
+| fresh-load | Home closure, gzip | 319,392 B | 188,914 B |
+| fresh-load | board closure, gzip | 368,729 B | 237,090 B |
+| fresh-load | render-blocking stylesheet, gzip | 55,592 B | 35,669 B |
+| task-open | task closure, gzip | 422,641 B | 304,870 B |
+| task-open | a big task's `.data` | 1,048,869 B | 13,001 B |
+| server | YAML parses per task revalidation | 35 | 0 |
+| server | SQL statements per task revalidation | 86 | 49 |
+| server | session lookups per task revalidation | 3 | 1 |
+| server | SQL statements to create a task | 430 | 14 |
+| server | commits to create a task | 279 | 1 |
+| compose-send | loader runs per own comment | 6 | 2 |
+| live-run | component renders per console line, 400 rows | 250 | 4 |
+| live-run | loader runs per 20 s of a live run | 30 | 0 |
+| live-run | EventSources per task tab | 2 | 1 |
+| board-live | cards re-rendered when one card changes | 40 | 1 |
+| board-live | loader runs per five filter keystrokes | 15 | 0 |
+| controller | closed-dock requests per navigation | 1 | 0 |
+| controller | controller-page loader runs per 30 s turn | 14 | 0 |
+
+The findings the pass left alone, and why, are in the ruling and in the budget files'
+comments: a prepared-statement cache (under a millisecond per request once the parses
+were gone), replacing the `body:has()` login selector (about 1 ms per body restyle, for a
+match-aware root layout), and one run-log row per run instead of a window (the same SQL
+work for tiny rows).

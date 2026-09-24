@@ -14,11 +14,12 @@ npm run lint        # oxlint + vendored anti-slop plugin; must exit 0
 npm run typecheck   # react-router typegen + tsc
 npm test            # vitest run, app/**/*.test.{ts,tsx}
 npm run build       # react-router build (production build)
+node scripts/measure-routes.mjs --check   # bundle ratchet over build/client (ruling 454)
 npm run e2e         # playwright against the production Docker image (Docker required)
 ```
 
 CI (`.github/workflows/ci.yml`, push and PR on `main`) runs two jobs on `ubuntu-latest`
-with Node 26: `verify` = `npm ci` → lint → typecheck → test → build; `e2e` = `npm ci` →
+with Node 26: `verify` = `npm ci` → lint → typecheck → test → build → the bundle ratchet (`measure-routes.mjs --check`); `e2e` = `npm ci` →
 `npx playwright install --with-deps chromium` → `npm run e2e`, uploading
 `playwright-report/` for 7 days on failure. No secrets are needed: the unit setup file
 seeds synthetic ones and `compose.e2e.yml` carries its own.

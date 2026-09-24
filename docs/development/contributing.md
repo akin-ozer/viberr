@@ -34,8 +34,13 @@ Run what CI runs (details in [testing.md](testing.md)):
 
 ```sh
 npm run lint && npm run typecheck && npm test && npm run build
+node scripts/measure-routes.mjs --check   # the bundle ratchet, after the build (ruling 454)
 npm run e2e     # Docker; the only gate that boots the shipped image
 ```
+
+A change that makes a perf budget move fails `npm test` in either direction: lower the
+ceiling to keep a win, or raise it with the reason beside it
+([performance.md](performance.md)).
 
 Lint has no suppression list: fix findings, never allowlist them (ruling 86). A change
 that contradicts a numbered ruling in

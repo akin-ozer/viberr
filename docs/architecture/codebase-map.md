@@ -23,7 +23,10 @@ test-support/        vitest setup and harnesses: hermetic env + <dialog> polyfil
                      (writeFakeVendorBinaries, the sign-in driver's real child process), backend
                      credentials (connectFakeBackend / disconnectFakeBackend, ruling 127), the demo seed
                      and data, a custom 3-stage board, a raw audit reader, MCP tool-meta and
-                     strict-schema checks, the hermetic toolchain reading
+                     strict-schema checks, the hermetic toolchain reading, and the performance
+                     ratchet (ruling 454): perf-verdict / perf-budgets(/) / perf-ratchet, the
+                     counters (perf-counters, render-counter), the revalidation and dock harnesses,
+                     the console fixture, a static-import walker and the app.css rule parser
 tools/oxlint/        the vendored anti-slop lint plugin (15 rules) and its pinned manifest
 design/              the HTML/JSX prototype the UI was ported from, the design system, a PRD mirror
 planning/            canon (planning-artifacts/: prd, architecture, UX spec) and the discovery-pass
@@ -38,7 +41,8 @@ compose.yml          production-shaped single container (init: true, hostname vi
 Dockerfile           three stages: prod-deps, build, runtime (node:26-slim + git + make + curl + pnpm +
                      chromium + uv); no ENTRYPOINT, no backend credential, no runtime home baked in
                      (ruling 127); CMD runs node directly
-.claude/launch.json  two dev launchers (docker-data vs hermetic ./data on port 5174)
+.claude/launch.json  three launchers: dev on docker-data, dev on the hermetic ./data (port 5174), and the
+                     production build on ./data (port 5175) for measuring
 .claude/skills/, .agents/skills/
                      agent skills for coding sessions (skills-lock.json pins their sources)
 config               vite.config.ts, vitest.config.ts, playwright.config.ts, react-router.config.ts,
