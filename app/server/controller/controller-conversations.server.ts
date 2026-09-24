@@ -116,6 +116,9 @@ export interface ControllerMessage {
   /** Ruling 121: the page a USER message was sent from (pathname + query);
    *  null on controller rows and on messages that predate the dock. */
   surface: string | null;
+  /** Ruling 465: on a controller row, the user message it answers; null on
+   *  user rows and on a note that answers no message. */
+  replyTo: string | null;
   createdAt: string;
 }
 
@@ -157,6 +160,9 @@ const messageRowSchema = z
     text: z.string(),
     run_id: z.string().nullable(),
     surface: z.string().nullable(),
+    // Ruling 465: optional at the boundary so a root the healer has not
+    // reached yet still reads (as "not linked").
+    reply_to: z.string().nullable().optional(),
     created_at: z.string(),
   })
   .transform(
@@ -169,6 +175,7 @@ const messageRowSchema = z
       text: r.text,
       runId: r.run_id,
       surface: r.surface,
+      replyTo: r.reply_to ?? null,
       createdAt: r.created_at,
     }),
   );
@@ -398,18 +405,40 @@ export function listMessages(
   return rows.map((row) => messageRowSchema.parse(row));
 }
 
-/** The newest N messages in chronological order (prompt-context slice). */
-export function recentMessages(
+/**
+ * Ruling 465 (F40-10): the newest `limit` messages of the conversation AS IT
+ * STOOD for the user message `answered`, in `seq` order. The digest a turn
+ * carries used to be the newest rows with no bound at all, so a message queued
+ * BEHIND the running turn was in that turn's prompt, clipped to 600
+ * characters, and the model told its owner the message "never reached me".
+ *
+ * "Up to" is in reply order, not raw `seq`, because a user message takes its
+ * `seq` when it is queued: the conversation up to `answered` is every user
+ * message up to and including it, every reply to one of those (a reply to an
+ * earlier message can land after `answered` was queued), and every unlinked
+ * note written before it. A later message, and a refusal a later message got,
+ * are not in it.
+ */
+export function messagesUpTo(
   db: DatabaseSync,
   conversationId: string,
+  answered: { seq: number },
   limit: number,
 ): ControllerMessage[] {
   const rows = db
     .prepare(
-      `SELECT * FROM controller_messages WHERE conversation_id = ?
-       ORDER BY seq DESC LIMIT ?`,
+      `SELECT m.* FROM controller_messages m
+        WHERE m.conversation_id = ?
+          AND (
+            (m.author = 'user' AND m.seq <= ?)
+            OR (m.author = 'controller' AND m.reply_to IS NULL AND m.seq < ?)
+            OR (m.author = 'controller' AND m.reply_to IN (
+                  SELECT u.id FROM controller_messages u
+                   WHERE u.conversation_id = ? AND u.author = 'user' AND u.seq <= ?))
+          )
+        ORDER BY m.seq DESC LIMIT ?`,
     )
-    .all(conversationId, limit);
+    .all(conversationId, answered.seq, answered.seq, conversationId, answered.seq, limit);
   return rows.map((row) => messageRowSchema.parse(row)).reverse();
 }
 
@@ -438,6 +467,9 @@ export interface AppendMessageInput {
   runId?: string | null;
   /** Stored on USER rows only; a controller row never carries one. */
   surface?: string | null;
+  /** Ruling 465: on a CONTROLLER row, the user message it answers. Every
+   *  writer of a reply, refusal or note that answers a message passes it. */
+  replyTo?: string | null;
 }
 
 /** Append one message; bumps the conversation clock and derives a title from
@@ -468,10 +500,11 @@ export function appendMessage(
     );
   const surface =
     input.author === "user" ? normalizeSurface(input.surface) : null;
+  const replyTo = input.author === "controller" ? (input.replyTo ?? null) : null;
   db.prepare(
     `INSERT INTO controller_messages
-       (id, conversation_id, seq, author, user_id, text, run_id, surface, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, conversation_id, seq, author, user_id, text, run_id, surface, reply_to, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.conversationId,
@@ -481,6 +514,7 @@ export function appendMessage(
     input.text,
     input.runId ?? null,
     surface,
+    replyTo,
     now,
   );
   const title =

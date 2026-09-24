@@ -19,6 +19,7 @@ import {
   type LockHolder,
 } from "./data-root-lock.server";
 import { runMigrations } from "./migration-runner.server";
+import { backfillControllerReplyLinks } from "../controller/controller-reply-links.server";
 import { toError } from "../../shared/errors";
 
 /**
@@ -379,6 +380,9 @@ const BASELINE_COLUMNS: readonly {
      * for existing rows; omitted everywhere the default is the truth.
      */
     backfill?: string;
+    /** The same, when the meaning cannot be one statement (ruling 465's reply
+     *  links replay the writers' order, message by message). */
+    backfillWith?: (db: DatabaseSync) => void;
   }[];
 }[] = [
   {
@@ -470,7 +474,14 @@ const BASELINE_COLUMNS: readonly {
   },
   {
     table: "controller_messages",
-    columns: [{ name: "surface", ddl: "surface TEXT" }],
+    columns: [
+      { name: "surface", ddl: "surface TEXT" },
+      // Ruling 465: the user message a controller row answers. NULL is WRONG
+      // for the replies an older root already holds: boot recovery notes every
+      // user message no reply names, so it would write a restart note under
+      // each old one. The backfill replays the writers' FIFO order.
+      { name: "reply_to", ddl: "reply_to TEXT", backfillWith: backfillControllerReplyLinks },
+    ],
   },
   // Ruling 178: the project's resolved required-reviewer rules. The rebuilder
   // names the column on every project write and every task walk reads it, so
@@ -573,12 +584,14 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
           table,
           column: column.name,
         });
-        if (column.backfill) {
+        const statement = column.backfill;
+        const backfill = statement ? () => db.exec(statement) : column.backfillWith;
+        if (backfill) {
           // Its own try: a backfill that cannot run (an older root whose table
           // lacks a column the statement names) must not skip the columns
           // still to be added for this table.
           try {
-            db.exec(column.backfill);
+            backfill(db);
           } catch (error) {
             logger.warn(
               "a baseline column was added but its backfill did not run — rows that predate the column keep the column default",

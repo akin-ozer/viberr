@@ -18,6 +18,7 @@ import {
 import { resolveControllerName } from "~/server/controller/controller-profile.server";
 import {
   conversationTurnState,
+  IDLE_TURN,
   type ConversationTurnState,
 } from "~/server/controller/controller-run.server";
 import { listRunsForTask } from "~/server/runtimes/run-service.server";
@@ -225,7 +226,7 @@ export function getControllerSurface(
     ),
     turn: conversation
       ? conversationTurnState(db, conversation.id)
-      : { working: false, runId: null, phase: null, step: null },
+      : IDLE_TURN,
     // Ruling 99: a controller run is stored at `project_slug = ''` with the
     // conversation id for its task key, which is the scope the grouping
     // projection is asked for here.

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, type RefObject } from "react";
 import { Link } from "react-router";
-import { TurnStep, WorkingSentence } from "./turn-step";
+import { MessageState, TurnStep, WorkingSentence } from "./turn-step";
+import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/controller-thread";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import type { ControllerDockView } from "./controller-dock-query.server";
 import type { ConversationTurnState } from "~/server/controller/controller-run.server";
@@ -44,6 +45,20 @@ function emptyCopy(view: ControllerDockView): string {
     return `Ask about the ${view.scope.projectName} board or say what to do on it: tasks, agents, goal chains.`;
   }
   return "Ask about this instance or say what to do: projects, users, resources, agents, goal chains.";
+}
+
+/** The dock's "is working…" row (ruling 250's step beside it). */
+function DockWorkingRow({ name, turn }: { name: string; turn: ConversationTurnState }) {
+  return (
+    <div className="ctl-working" role="status">
+      <span className="live-dot" />
+      <WorkingSentence name={name} />
+      {/* Ruling 250: the dock follows a person onto every page and has no
+          live-run panel at all, so this row is the ONLY place the turn's own
+          step can reach them here. */}
+      <TurnStep turn={turn} />
+    </div>
+  );
 }
 
 export interface DockPanelBodyProps {
@@ -102,6 +117,12 @@ export function DockPanelBody({
   const conversationId = current?.conversation?.id ?? null;
   const messages = current?.messages ?? [];
   const fresh = useFreshMessageIds(messages, conversationId);
+  // Ruling 465: the page's order and vocabulary — each reply under the
+  // message it answers, "answering now" / "queued · N ahead" on a message
+  // with no reply yet, and "is working…" under the message the turn answers.
+  const ordered = inReplyOrder(messages);
+  const answered = answeredMessageIds(messages);
+  const workingAfter = workingRowAfter(ordered, turn?.answering ?? null);
 
   // Keep the newest message in view without scrolling the page underneath.
   // This body mounts on every open, and a fresh scroll container starts at
@@ -211,38 +232,38 @@ export function DockPanelBody({
             </div>
           ) : (
             <div className="ctl-msgs dock-msgs">
-              {messages.map((m) => (
-                <article
-                  key={m.id}
-                  className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
-                  data-fresh={fresh.has(m.id) ? "true" : undefined}
-                >
-                  <header>
-                    <span className="ctl-msg-who">
-                      {m.author === "user" ? (
-                        "You"
-                      ) : (
-                        <>
-                          <Icon name="cpu" /> {current.controllerName}
-                        </>
+              {ordered.map((m) => (
+                <Fragment key={m.id}>
+                  <article
+                    className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
+                    data-fresh={fresh.has(m.id) ? "true" : undefined}
+                  >
+                    <header>
+                      <span className="ctl-msg-who">
+                        {m.author === "user" ? (
+                          "You"
+                        ) : (
+                          <>
+                            <Icon name="cpu" /> {current.controllerName}
+                          </>
+                        )}
+                      </span>
+                      <LocalDayDotTime iso={m.createdAt} />
+                      {m.author === "user" && !answered.has(m.id) && (
+                        <MessageState turn={turn} messageId={m.id} />
                       )}
-                    </span>
-                    <LocalDayDotTime iso={m.createdAt} />
-                  </header>
-                  <div className="md-body">
-                    <Markdown text={m.text} taskLinks={current.taskLinks} />
-                  </div>
-                </article>
+                    </header>
+                    <div className="md-body">
+                      <Markdown text={m.text} taskLinks={current.taskLinks} />
+                    </div>
+                  </article>
+                  {m.id === workingAfter && turn?.working && (
+                    <DockWorkingRow name={current.controllerName} turn={turn} />
+                  )}
+                </Fragment>
               ))}
-              {turn?.working && (
-                <div className="ctl-working" role="status">
-                  <span className="live-dot" />
-                  <WorkingSentence name={current.controllerName} />
-                  {/* Ruling 250: the dock follows a person onto every page
-                      and has no live-run panel at all, so this row is the
-                      ONLY place the turn's own step can reach them here. */}
-                  <TurnStep turn={turn} />
-                </div>
+              {workingAfter === null && turn?.working && (
+                <DockWorkingRow name={current.controllerName} turn={turn} />
               )}
             </div>
           )}

@@ -140,7 +140,10 @@ Intents behind `project.task.tsx` are explained in
   Claude (ruling 127). The button carries a pulsing dot while a turn works in its scope
   and a still blue dot when a reply its owner has not seen waits in any scope
   (`/resources/controller-unseen`, rulings 448 and 457); the open panel links to replies
-  elsewhere. Root ships only the button, the panel's frame and header; the panel's body
+  elsewhere. Both transcripts (the dock and the controller pages) read in reply order,
+  each reply under the message it answers, and a message with no reply yet says
+  "answering now" or "queued · N ahead" from the server's lease, never from what the page
+  sent; "… is working" sits under the answered message (ruling 465). Root ships only the button, the panel's frame and header; the panel's body
   loads on the first open, preloaded on hover or focus (ruling 457). The dock's data
   rides no page revalidation: the page's `user` stream hands it `controller.updated`
   instead (ruling 457). On `/insights`, which has no stream of its own, the open panel

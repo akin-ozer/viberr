@@ -6,6 +6,7 @@ import {
 } from "~/shared/dependencies";
 import {
   createContext,
+  Fragment,
   useContext,
   useEffect,
   useMemo,
@@ -13,7 +14,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { TurnStep, WorkingSentence } from "./turn-step";
+import { MessageState, TurnStep, WorkingSentence } from "./turn-step";
+import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/controller-thread";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import {
   Link,
@@ -592,6 +594,25 @@ function Transcript({
       </section>
     );
   }
+  // Ruling 465 (F40-8): each reply sits under the message it answers, an
+  // unanswered message says where it stands, and "is working…" sits under
+  // the message the live turn answers, never under a later one.
+  const ordered = inReplyOrder(view.messages);
+  const answered = answeredMessageIds(view.messages);
+  const workingAfter = workingRowAfter(ordered, view.turn.answering);
+  const working = view.turn.working && (
+    <div className="ctl-working" role="status">
+      <span className="live-dot" />
+      <WorkingSentence name={view.controllerName} />
+      {/* Ruling 250 (F37-79): the turn's own phase and step, in the place
+          the person is waiting. Both are on the run row already and both
+          already render in the live-run panel further down this page;
+          the conversation showed one static line for turns measured in
+          minutes. `phase` is null while it is the generic "Working" —
+          the sentence above already says that. */}
+      <LiveTurnStep turn={view.turn} runtime={view.runtime} />
+    </div>
+  );
   return (
     <section
       ref={scrollRef}
@@ -599,47 +620,40 @@ function Transcript({
       aria-label="Conversation transcript"
     >
       <div className="ctl-msgs">
-        {view.messages.map((m) => (
-          <article
-            key={m.id}
-            className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
-            data-fresh={fresh.has(m.id) ? "true" : undefined}
-          >
-            <header>
-              <span className="ctl-msg-who">
-                {m.author === "user" ? (
-                  view.conversation?.userLabel
-                ) : (
-                  <>
-                    <Icon name="cpu" /> {view.controllerName}
-                  </>
-                )}
-              </span>
-              <LocalDayDotTime iso={m.createdAt} />
-              {m.surface && (
-                <span className="ctl-msg-surface" title={m.surface}>
-                  from {surfaceLabel(m.surface)}
+        {ordered.map((m) => (
+          <Fragment key={m.id}>
+            <article
+              className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
+              data-fresh={fresh.has(m.id) ? "true" : undefined}
+            >
+              <header>
+                <span className="ctl-msg-who">
+                  {m.author === "user" ? (
+                    view.conversation?.userLabel
+                  ) : (
+                    <>
+                      <Icon name="cpu" /> {view.controllerName}
+                    </>
+                  )}
                 </span>
-              )}
-            </header>
-            <div className="md-body">
-              <Markdown text={m.text} taskLinks={view.taskLinks} />
-            </div>
-          </article>
+                <LocalDayDotTime iso={m.createdAt} />
+                {m.surface && (
+                  <span className="ctl-msg-surface" title={m.surface}>
+                    from {surfaceLabel(m.surface)}
+                  </span>
+                )}
+                {m.author === "user" && !answered.has(m.id) && (
+                  <MessageState turn={view.turn} messageId={m.id} />
+                )}
+              </header>
+              <div className="md-body">
+                <Markdown text={m.text} taskLinks={view.taskLinks} />
+              </div>
+            </article>
+            {m.id === workingAfter && working}
+          </Fragment>
         ))}
-        {view.turn.working && (
-          <div className="ctl-working" role="status">
-            <span className="live-dot" />
-            <WorkingSentence name={view.controllerName} />
-            {/* Ruling 250 (F37-79): the turn's own phase and step, in the place
-                the person is waiting. Both are on the run row already and both
-                already render in the live-run panel further down this page;
-                the conversation showed one static line for turns measured in
-                minutes. `phase` is null while it is the generic "Working" —
-                the sentence above already says that. */}
-            <LiveTurnStep turn={view.turn} runtime={view.runtime} />
-          </div>
-        )}
+        {workingAfter === null && working}
       </div>
     </section>
   );

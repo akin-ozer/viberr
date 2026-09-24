@@ -94,7 +94,7 @@ const VIEW: ControllerSurfaceView = {
   },
   messages: [],
   taskLinks: {},
-  turn: { working: true, runId: "run_ctl", phase: null, step: "viberr_controller · list_tasks" },
+  turn: { working: true, runId: "run_ctl", phase: null, step: "viberr_controller · list_tasks", answering: null, queued: [] },
   runtime: [run],
   canInterruptTurn: true,
   goals: [],

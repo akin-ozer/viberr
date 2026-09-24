@@ -536,6 +536,12 @@ CREATE TABLE controller_messages (
   -- controller rows and on messages sent before the dock existed.
   surface TEXT,
   created_at TEXT NOT NULL,
+  -- Ruling 465: on a controller row, the id of the user message it answers
+  -- (a turn's reply, a refusal, a failure or restart note). A user message
+  -- takes its seq when it is QUEUED, so seq alone cannot say which reply
+  -- belongs to which message. NULL on user rows and on a note that answers
+  -- no message (a released project's note).
+  reply_to TEXT,
   UNIQUE (conversation_id, seq)
 );
 CREATE TABLE "agent_runs" (

@@ -461,13 +461,67 @@ describe("the turn carries the context read (ruling 121)", () => {
       userId: user.id,
       text: "earlier question",
     });
-    const prompt = buildTurnPrompt(app.db, conversation, "now this", "CONTEXT BLOCK");
+    const now = appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "user",
+      userId: user.id,
+      text: "now this",
+    });
+    const prompt = buildTurnPrompt(app.db, conversation, now, "CONTEXT BLOCK");
     expect(prompt.indexOf("CONTEXT BLOCK")).toBe(0);
     expect(prompt.indexOf("CONTEXT BLOCK")).toBeLessThan(prompt.indexOf("Recent exchange"));
     expect(prompt.indexOf("Recent exchange")).toBeLessThan(prompt.indexOf(`${user.email} says:\n\nnow this`));
     // Without a context read the prompt is exactly what it was.
-    const bare = buildTurnPrompt(app.db, conversation, "now this");
+    const bare = buildTurnPrompt(app.db, conversation, now);
     expect(bare.startsWith("Recent exchange")).toBe(true);
+  });
+
+  /**
+   * Ruling 465 (F40-10): a turn reads the conversation only up to the message
+   * it answers. Live, the turn answering dossier part 3 saw the owner's queued
+   * correction as a 600-character stub and said it "never reached me … please
+   * resend it" while it was simply next in the queue.
+   */
+  it("ruling 465: the digest stops at the answered message and counts the queue behind it", async () => {
+    const { buildTurnPrompt } = await import("./controller-run.server");
+    const { createConversation, appendMessage } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
+    const say = (text: string) =>
+      appendMessage(app.db, { conversationId: conversation.id, author: "user", userId: user.id, text });
+    const part1 = say("Dossier part 1.");
+    const part2 = say("Dossier part 2.");
+    const correction = say("CORRECTION-04: the founding year is 2019.");
+    // Part 1's reply lands AFTER both later messages were queued.
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "controller",
+      text: "Part 1 is filed.",
+      replyTo: part1.id,
+    });
+    // A refusal the correction got: it belongs to a LATER message.
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "controller",
+      text: "REFUSED-LATER",
+      replyTo: correction.id,
+    });
+
+    const prompt = buildTurnPrompt(app.db, conversation, part2, null, null, 1);
+    // CANARY: read the newest rows unbounded again (`recentMessages`) and the
+    // queued correction and its refusal are in this turn's prompt.
+    expect(prompt).not.toContain("CORRECTION-04");
+    expect(prompt).not.toContain("REFUSED-LATER");
+    // The reply to an EARLIER message is in, under that message, even though
+    // it landed after part 2 was queued.
+    expect(prompt).toContain("Person: Dossier part 1.\n\nController: Part 1 is filed.\n\nPerson: Dossier part 2.");
+    // CANARY: drop the queue line and the model is left to guess where the
+    // correction went.
+    expect(prompt).toContain(
+      `1 more message from ${user.email} is queued behind this one; each is answered in its own turn, in order — do not treat them as lost.`,
+    );
+    expect(prompt.endsWith(`${user.email} says:\n\nDossier part 2.`)).toBe(true);
+    // Nothing queued, nothing said.
+    expect(buildTurnPrompt(app.db, conversation, correction)).not.toContain("queued behind");
   });
 
   /**
@@ -482,7 +536,13 @@ describe("the turn carries the context read (ruling 121)", () => {
     const { createConversation } = await import("./controller-conversations.server");
     const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
     // CANARY: drop the `runtime` line and the turn never says which model it is.
-    const prompt = buildTurnPrompt(app.db, conversation, "now this", "CONTEXT BLOCK", "opus[1m]");
+    const prompt = buildTurnPrompt(
+      app.db,
+      conversation,
+      { id: "cmsg_none", seq: 1, text: "now this" },
+      "CONTEXT BLOCK",
+      "opus[1m]",
+    );
     expect(prompt).toContain("You run on model `opus[1m]` this turn.");
     expect(prompt.indexOf("CONTEXT BLOCK")).toBe(0);
     expect(prompt.indexOf("You run on model")).toBeLessThan(prompt.indexOf(`${user.email} says:`));

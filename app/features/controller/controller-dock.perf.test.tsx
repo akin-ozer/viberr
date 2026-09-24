@@ -50,6 +50,7 @@ function boardView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     text: i % 2 === 0 ? "Where is VIB-1? ".repeat(25) : "VIB-1 waits on review. ".repeat(65),
     runId: i % 2 === 0 ? null : `run_${i}`,
     surface: null,
+    replyTo: null,
     createdAt: "2026-09-01T10:00:00.000Z",
   }));
   return {
@@ -69,7 +70,7 @@ function boardView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     conversation: CONVERSATION,
     messages,
     taskLinks: { "VIB-1": "/projects/viberr/tasks/VIB-1" },
-    turn: { working: false, runId: null, phase: null, step: null },
+    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
     threads: [{ id: "cnv_a", title: "Plan the release", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
     viewerOwnsActive: true,
     ...over,
@@ -223,8 +224,8 @@ describe("a working turn (ruling 457, CTL-2)", () => {
       view: () =>
         boardView({
           turn: started
-            ? { working: true, runId: "run_live", phase: null, step: "Reading VIB-1" }
-            : { working: false, runId: null, phase: null, step: null },
+            ? { working: true, runId: "run_live", phase: null, step: "Reading VIB-1", answering: null, queued: [] }
+            : { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
         }),
       working: () =>
         started
