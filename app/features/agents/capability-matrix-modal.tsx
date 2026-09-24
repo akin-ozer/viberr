@@ -285,8 +285,9 @@ export function CapabilityMatrixModal({
                 the question arrives only when the run finishes.
               </li>
               <li>
-                Org MCP credentials are sent on <b>Claude</b> runs only. Codex mounts a
-                declared server unauthenticated, because its MCP config travels in argv.
+                Org MCP credentials stay in Viberr on both backends: a run reaches a
+                credentialed server through Viberr's gateway with a token that
+                works only while it runs.
               </li>
               <li>
                 {/* P14-LV-03: live, the same server answered `get-annotated-message`

@@ -11,6 +11,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { unreachableFetch } from "../../../test-support/fake-github";
+import { startHttpUpstream, startSseUpstream } from "../../../test-support/mcp-upstream";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { ENV_KEYS } from "~/server/config/env.server";
@@ -220,10 +221,33 @@ function setup() {
 const respondingFetch: typeof fetch = async () =>
   new Response("nope", { status: 404 });
 
+/** The two results the HTTP fake answers with. */
+type FakeHttpResult =
+  | {
+      protocolVersion: string;
+      capabilities: { tools: Record<string, never> };
+      serverInfo: { name: string; version: string };
+    }
+  | { tools: { name: string; inputSchema: { type: "object" } }[] };
+
+/** A JSON-RPC request as the HTTP fake reads it: the id it must echo, the
+ *  method that steers the reply, and the protocol version an `initialize`
+ *  asks for. */
+const httpRpcRequest = z
+  .object({
+    id: z.union([z.string(), z.number()]).optional(),
+    method: z.string().optional(),
+    params: z.object({ protocolVersion: z.string().optional() }).optional(),
+  })
+  .catch({});
+
 /**
  * A fake Streamable-HTTP MCP endpoint that answers the REAL handshake
- * (P13-LV-10). `sseFramed` returns the body as an SSE `data:` line, which is
- * what a real MCP server does when the client accepts text/event-stream.
+ * (P13-LV-10) the way the SDK client the probe now speaks through expects it
+ * (ruling 461): the request's own id echoed, a full `initialize` result, 202
+ * for a notification, 405 for the standalone GET stream. `sseFramed` returns
+ * the body as an SSE `data:` line, which is what a real MCP server does when
+ * the client accepts text/event-stream.
  */
 function mcpHttpFetch(
   toolCount: number,
@@ -237,8 +261,10 @@ function mcpHttpFetch(
     ) {
       return new Response("no", { status: 401 });
     }
-    const body = jsonRpcRequest.parse(JSON.parse(String(init?.body ?? "{}")));
-    const reply = (payload: FakeMcpReply) => {
+    if ((init?.method ?? "GET") !== "POST") return new Response("", { status: 405 });
+    const body = httpRpcRequest.parse(JSON.parse(String(init?.body ?? "{}")));
+    const reply = (result: FakeHttpResult) => {
+      const payload = { jsonrpc: "2.0", id: body.id ?? null, result };
       const text = opts.sseFramed
         ? `event: message\ndata: ${JSON.stringify(payload)}\n\n`
         : JSON.stringify(payload);
@@ -250,21 +276,23 @@ function mcpHttpFetch(
         },
       });
     };
+    if (body.id === undefined) return new Response("", { status: 202 });
     if (body.method === "initialize") {
-      return reply({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18" } });
+      return reply({
+        protocolVersion: body.params?.protocolVersion ?? "2025-06-18",
+        capabilities: { tools: {} },
+        serverInfo: { name: "fake-http", version: "1.0.0" },
+      });
     }
     if (body.method === "tools/list") {
       return reply({
-        jsonrpc: "2.0",
-        id: 2,
-        result: {
-          tools: Array.from({ length: toolCount }, (_, i) => ({
-            name: opts.toolNames?.[i] ?? `t${i}`,
-          })),
-        },
+        tools: Array.from({ length: toolCount }, (_, i) => ({
+          name: opts.toolNames?.[i] ?? `t${i}`,
+          inputSchema: { type: "object" },
+        })),
       });
     }
-    return new Response("", { status: 202 });
+    return new Response("", { status: 404 });
   };
 }
 
@@ -1564,6 +1592,48 @@ describe("resource reference integrity", () => {
 /* ---------------------- MCP credentials + SSE framing (P13-KM-05/KM-06/LV-10) */
 
 describe("MCP credentials and transports", () => {
+  /**
+   * Ruling 461: the probe connects through the client the MCP gateway holds a
+   * run's upstream with, so "up" on a credentialed server means up with its
+   * credential over the transport the run's calls will take. The raw
+   * Streamable-HTTP handshake it replaced called a legacy SSE server
+   * "endpoint answered 405" — a server every run then reached fine.
+   */
+  it("ruling 461: a credentialed legacy-SSE server is probed up through the gateway's upstream client", async () => {
+    const { db } = setup();
+    const upstream = await startSseUpstream("s3cret-sse");
+    try {
+      const saved = await saveMcpServer(
+        db,
+        { name: "legacy-sse", transport: "HTTP", target: upstream.url, cred: "s3cret-sse" },
+        ACTOR,
+      );
+      expect(saved.mcp).toMatchObject({ up: true, tools: 4 });
+      const retest = await testMcpServer(db, saved.mcp.id);
+      expect(retest.toast).toMatch(/^legacy-sse healthy: 4 tools · \d+ms$/);
+      // Every request carried the credential; nothing went anonymous.
+      expect(new Set(upstream.authorizations)).toEqual(new Set(["Bearer s3cret-sse"]));
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it("ruling 461: a Streamable HTTP server that refuses the stored credential reads 'authentication rejected'", async () => {
+    const { db } = setup();
+    const upstream = await startHttpUpstream("the-right-token");
+    try {
+      const saved = await saveMcpServer(
+        db,
+        { name: "cf-api", transport: "HTTP", target: upstream.url, cred: "a-revoked-token" },
+        ACTOR,
+      );
+      expect(saved.mcp.up).toBe(false);
+      expect(saved.mcp.lastError).toBe("authentication rejected");
+    } finally {
+      await upstream.close();
+    }
+  });
+
   it("discovers over an SSE-framed body, not just raw JSON", async () => {
     const { db } = setup();
     const saved = await saveMcpServer(

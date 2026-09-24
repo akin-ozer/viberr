@@ -208,9 +208,13 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
 - **Sign-in & SSO**: §2.
 - **Agent resources**: knowledge bases (`name`, `dir`, refresh `on change | manual`,
   re-index, delete), MCP servers (`HTTP` or `stdio`, target, sealed credential; saving
-  runs a real `initialize` → `tools/list` handshake, stdio children get a filtered env
-  plus `MCP_CREDENTIAL`, first-run installers finish in a 15-minute background warm-up;
-  reserved names refused). The MCP editor's "Write tools" section (ruling 176) marks the
+  runs a real `initialize` → `tools/list` handshake — over HTTP through the same client
+  the MCP gateway uses, with the SSE fallback (ruling 461) — stdio children get a
+  filtered env plus `MCP_CREDENTIAL`, first-run installers finish in a 15-minute
+  background warm-up; reserved names refused). A server with a stored credential is
+  reached by every run through Viberr's loopback MCP gateway, so the credential never
+  enters an agent process (ruling 461); its row reads "auth: configured (held by Viberr;
+  runs connect through its gateway)". The MCP editor's "Write tools" section (ruling 176) marks the
   tools that a run withholding repo write, and every operator run, does not get: the
   probe's tool names are offered, the write-looking ones pre-selected until the server
   is first reviewed, a name can be typed, and each change is audited as

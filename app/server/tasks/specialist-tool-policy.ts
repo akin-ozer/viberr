@@ -222,6 +222,24 @@ export function bashDenyReason(
 }
 
 /**
+ * Ruling 461: the sentence Viberr's MCP gateway answers a call to a withheld
+ * write tool with (ruling 176). The same shape as {@link bashDenyReason}: the
+ * capability by label and id, the thing refused, what to do instead. On a
+ * direct mount the CLI never lists such a tool at all; through the gateway it
+ * is filtered from `tools/list` too, so this is what a run reads only if it
+ * calls the name anyway.
+ */
+export function mcpWriteToolDenyReason(server: string, tool: string): string {
+  const id = "execute-code-or-write-repo";
+  const label = capabilityById(id)?.label ?? id;
+  return (
+    `Withheld by capability policy: "${label}" (${id}) is not granted on this run, so ` +
+    `\`${tool}\` on ${server}, which an administrator marked as a write tool, is refused. ` +
+    "Say what you needed in your report instead."
+  );
+}
+
+/**
  * Ruling 185 (owner, 2026-09-12, pass 36): Viberr no longer confines a Codex
  * run with the CLI's OS sandbox, so on Codex a withheld repo-write family has
  * no OS channel to bind it. It is ADVISORY there: the prompt omits every

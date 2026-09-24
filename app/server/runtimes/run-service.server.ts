@@ -102,6 +102,11 @@ import {
   reapRunProcesses,
 } from "./run-processes.server";
 import { removeSkillPlugin, type SkillPlugin } from "./skill-mount.server";
+import { encodeActorRef } from "~/server/files/actor-ref.server";
+import {
+  bindRunToMcpGateway,
+  revokeRunMcpGateway,
+} from "~/server/mcp-proxy/gateway.server";
 import {
   COMPACT_AT_COMPLETION_TOKENS,
   contextWindowEnv,
@@ -1131,6 +1136,27 @@ export async function startRun(
   if (!credential.ok) return refuse(credential.message);
   if (refusal !== null) return refuse(refusal);
 
+  // Ruling 461: a server with a stored credential is mounted through Viberr's
+  // MCP gateway; the run's own token goes on its config here, the one funnel
+  // every run takes, and is revoked on every path that ends it (the settle,
+  // an interrupt with or without a live handle, a queued run that is dropped,
+  // a launch that throws). A refused run above never gets one.
+  if (spec.mcpServers) {
+    spec.mcpServers = bindRunToMcpGateway({
+      db,
+      runId,
+      servers: spec.mcpServers,
+      toolDenials: mcpToolDenials,
+      actor: mcpGatewayAuditActor(input),
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      isLive: () => {
+        const row = getRun(db, runId);
+        return row?.state === "running" || row?.state === "queued";
+      },
+    });
+  }
+
   // U39-30: before the launch, so the run cannot answer ahead of its hook.
   if (input.onAnswered) state.answered.set(runId, input.onAnswered);
   const launchOpts: Parameters<typeof launch>[4] = {};
@@ -1155,6 +1181,27 @@ export async function startRun(
   }
   const admitted = admitRun(db, runId, launchThunk, input.kind, input.dataRoot);
   return { runId, outcome: admitted ? "started" : "queued", refusal: null };
+}
+
+/**
+ * Ruling 461: who a call to an admin-marked MCP write tool through the gateway
+ * is audited as — the agent itself on a specialist run (the ref its toolkit
+ * writes carry), the operator on an operator run, and on a controller turn the
+ * person whose turn it is, as the controller's instrument (the actor the turn
+ * already starts under).
+ */
+function mcpGatewayAuditActor(input: StartRunInput): AuditActor {
+  if (input.kind === "operator") return OPERATOR_AUDIT_ACTOR;
+  if (input.kind === "controller") return input.actor ?? OPERATOR_AUDIT_ACTOR;
+  return {
+    userId: null,
+    label: encodeActorRef({
+      kind: "agent",
+      backend: input.backend,
+      profileId: input.agentProfileId,
+      roleHint: input.role,
+    }),
+  };
 }
 
 /** What `startRun` got when it asked for its principal's credential. */
@@ -2032,7 +2079,11 @@ export function drainRunQueue(db: DatabaseSync): void {
       const next = nextPromotable(state, cap);
       if (!next) return;
       const row = getRun(db, next.runId);
-      if (!row || row.state !== "queued") continue; // stopped while waiting
+      if (!row || row.state !== "queued") {
+        // Stopped while waiting: it never starts, so its gateway token dies.
+        revokeRunMcpGateway(next.runId);
+        continue;
+      }
       next.launch();
       // Ruling 311, the other half: the timeline said "Queued … Nothing is
       // streaming yet", and this is the one place that stops being true.
@@ -2233,10 +2284,18 @@ function launch(
   // run's ids until its own launch binds its own. Outside a request (boot
   // recovery, a watcher- or timer-started run) nothing is bound; those records
   // carry their own ids.
-  const handle = forkCorrelation(() => {
-    bindCorrelation({ runId: spec.runId, taskKey: spec.taskKey });
-    return adapter.start(spec, callbacks);
-  });
+  let handle: RunHandle;
+  try {
+    handle = forkCorrelation(() => {
+      bindCorrelation({ runId: spec.runId, taskKey: spec.taskKey });
+      return adapter.start(spec, callbacks);
+    });
+  } catch (error) {
+    // Ruling 461: an adapter that throws before it runs anything leaves no
+    // process to settle, so the run's gateway token is revoked here.
+    revokeRunMcpGateway(spec.runId);
+    throw error;
+  }
   // Only track the handle if the run is still in flight. A synchronously-exiting
   // adapter (or a spawn-time crash) fires onExit DURING adapter.start(), which
   // deletes the not-yet-set handle; setting it here afterward would leave a
@@ -2245,6 +2304,10 @@ function launch(
   if (!exited) state.handles.set(spec.runId, { handle, lane: laneOf(spec.kind) });
 
   async function settleRun(exit: RunExit): Promise<void> {
+      // Ruling 461: the process that held the run's gateway token has exited,
+      // so the token stops working now — before the completion compaction,
+      // which needs no org MCP server.
+      revokeRunMcpGateway(spec.runId);
       try {
         // Ruling 369: a Codex run's per-call prompt sizes and compactions are
         // in the rollout the CLI wrote, never in its SDK stream; read once the
@@ -2417,6 +2480,10 @@ function stopRunProcess(
 ): void {
   const state = getState();
   const slot = state.handles.get(input.runId);
+  // Ruling 461: an interrupted run's gateway token stops working at once,
+  // whether a process is still winding down (the settle revokes it again) or
+  // there is none to settle (a queued or reserved run, or one a restart left).
+  revokeRunMcpGateway(input.runId);
   if (slot) {
     slot.handle.interrupt();
     state.handles.delete(input.runId);

@@ -97,6 +97,7 @@ the route table is `app/routes.ts`.
 | `interpretation/` | Readiness derivation, diagnostics severity, freshness re-export. |
 | `logging/` | Dependency-free JSON logger; request correlation via `AsyncLocalStorage`. |
 | `ops/` | Build info, disk space, health snapshot, maintenance scheduler, transcript retention, the host toolchain probe (ruling 182). |
+| `mcp-proxy/` | The loopback MCP gateway of ruling 461 (`gateway.server.ts`: the 127.0.0.1 listener, run tokens, per-run sessions, the ruling-176 filter, call logging and write-call audit) and the one MCP client Viberr speaks to an org server with (`upstream.server.ts`: Streamable HTTP with the SSE fallback, shared with the health probe; `upstream-stdio.server.ts`: a stdio command the server spawns with `MCP_CREDENTIAL`). |
 | `org/` | Org resources (KBs, MCP servers incl. stdio probes and background warm-ups, skills), the `resource.updated` broadcast, store file browser, GitHub owner connections, org users, global agent templates and template grant propagation (ruling 156), resource catalog and reference integrity, org seed, the org-settings loader payload. |
 | `prefs/` | `user_prefs` key-value store. |
 | `projections/` | Rebuilder (files → SQLite), full rebuild, instance and project rescan, the derivation version stamp, per-file projection faults for health (rulings 217/218), single-flight cooldowns, board/task/review/activity/agent-deployment/decision/notification/policy-violation read models, the dependency read model (ruling 131), task-key links, task activity ("gone quiet"). |

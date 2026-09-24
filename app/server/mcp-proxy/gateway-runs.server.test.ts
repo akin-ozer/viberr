@@ -1,0 +1,223 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { z } from "zod";
+import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import {
+  baseTaskFrontmatter,
+  setupTestStore,
+  writeTask,
+  type TestStore,
+} from "../../../test-support/test-store";
+import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import {
+  drainRunCompletions,
+  installFakeRuntime,
+  lastRunSpec,
+  queueFakeRun,
+} from "../../../test-support/fake-runtime";
+import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
+import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
+import { getRun } from "~/server/runtimes/run-store.server";
+import { sealSecret } from "~/server/secrets/secret-box.server";
+import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
+import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
+import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
+import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { mcpGatewayStatus, startMcpGateway, stopMcpGateway } from "./gateway.server";
+
+/**
+ * Ruling 461 through the run service: `startRun` is the one funnel that puts a
+ * run's token on its gateway mounts (both backends), and every path that ends
+ * a run — the settle after success or failure, an interrupt, and an interrupt
+ * of a run that never had a live handle — revokes it.
+ */
+
+const SECRET = "cf-api-token-sentinel-runs";
+let ctx: TestDbContext;
+let store: TestStore;
+let upstream: UpstreamHandle;
+
+beforeEach(async () => {
+  ctx = createTestDbContext();
+  store = setupTestStore(ctx);
+  for (const key of ["VIB-1", "VIB-2"]) {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(key, { stage: "impl", ownerUserId: store.users.arda.id }),
+    });
+  }
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  resetSseBrokerForTests();
+  installFakeRuntime();
+  await connectFakeBackend(store.db, store.users.arda.id, "claude");
+  await connectFakeBackend(store.db, store.users.arda.id, "codex");
+  await startMcpGateway({ port: 0 });
+  upstream = await startHttpUpstream(SECRET);
+  const now = new Date().toISOString();
+  const insert = store.db.prepare(
+    `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  insert.run("mcp_cf", "cloudflare", "HTTP", upstream.url, sealSecret(SECRET), now, now);
+  insert.run("mcp_pg", "pg", "stdio", "npx -y @mcp/server-postgres", sealSecret(SECRET), now, now);
+  insert.run("mcp_docs", "docs", "HTTP", "https://docs.example.test/mcp", null, now, now);
+});
+
+afterEach(async () => {
+  await drainRunCompletions();
+  await stopMcpGateway();
+  await upstream.close();
+  resetSseBrokerForTests();
+  ctx.cleanup();
+});
+
+async function settle(): Promise<void> {
+  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+const mountSchema = z.strictObject({
+  type: z.literal("http"),
+  url: z.string(),
+  headers: z.strictObject({ Authorization: z.string() }),
+});
+
+async function startWithMounts(
+  backend: RealBackend,
+  run: { keepRunning?: boolean; outcome?: "finished" | "error"; taskKey?: string } = {},
+): Promise<{ runId: string; outcome: string }> {
+  queueFakeRun(
+    {
+      lines: [{ t: "1", ev: "text", tag: "assistant", text: "working" }],
+      sessionId: "s",
+      backend,
+      keepRunning: run.keepRunning ?? false,
+      outcome: run.outcome ?? "finished",
+    },
+    backend,
+  );
+  // The resolver skips no step here: what a run mounts is what it resolved.
+  const { servers } = resolveSpecialistMcpServersDetailed(store.db, ["cloudflare", "pg", "docs"]);
+  const result = await startRun(store.db, {
+    projectSlug: store.slug,
+    taskKey: run.taskKey ?? "VIB-1",
+    role: "Developer",
+    kind: "primary",
+    backend,
+    model: defaultModelFor(backend),
+    prompt: "go",
+    dataRoot: store.dataRoot,
+    mcpServers: servers,
+    agentProfileId: "developer",
+    credentialUserId: store.users.arda.id,
+  });
+  await settle();
+  return { runId: result.runId, outcome: result.outcome };
+}
+
+async function gatewayAnswers(url: string, authorization: string): Promise<number> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "x", version: "1" } },
+    }),
+  });
+  await response.body?.cancel();
+  return response.status;
+}
+
+const interrupt = (runId: string, taskKey = "VIB-1") =>
+  interruptRun(
+    store.db,
+    { projectSlug: store.slug, taskKey, dataRoot: store.dataRoot, runId },
+    { userId: store.users.arda.id, label: store.users.arda.email },
+  );
+
+describe("startRun puts the run's token on its gateway mounts (ruling 461)", () => {
+  for (const backend of ["claude", "codex"] satisfies RealBackend[]) {
+    it(`${backend}: a credentialed HTTP and stdio server are gateway mounts with ONE run token; the spec never holds the credential`, async () => {
+      const { runId } = await startWithMounts(backend, { keepRunning: true });
+      const spec = lastRunSpec();
+      expect(spec?.runId).toBe(runId);
+      const cloudflare = mountSchema.parse(spec?.mcpServers?.cloudflare);
+      const pg = mountSchema.parse(spec?.mcpServers?.pg);
+      expect(cloudflare.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/cloudflare$/);
+      expect(pg.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/pg$/);
+      expect(cloudflare.headers.Authorization).toMatch(/^Bearer \S{43}$/);
+      expect(pg.headers).toEqual(cloudflare.headers);
+      // An uncredentialed server mounts directly, untouched.
+      expect(spec?.mcpServers?.docs).toEqual({ type: "http", url: "https://docs.example.test/mcp" });
+      // CANARY: attach the credential anywhere in the run's config and this is red.
+      expect(JSON.stringify(spec)).not.toContain(SECRET);
+
+      // The token works through the gateway while the run is live …
+      const client = new Client({ name: "agent-cli", version: "1.0.0" });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(cloudflare.url), {
+          requestInit: { headers: cloudflare.headers },
+        }),
+      );
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("whoami");
+      await client.close();
+      expect(upstream.authorizations.every((header) => header === `Bearer ${SECRET}`)).toBe(true);
+      await interrupt(runId);
+    });
+  }
+});
+
+describe("every path that ends a run revokes its token (ruling 461)", () => {
+  it("success: the settle revokes it", async () => {
+    await startWithMounts("claude");
+    const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
+    expect(getRun(store.db, lastRunSpec()!.runId)?.state).toBe("finished");
+    // CANARY: drop the revoke at the top of `settleRun` and a token outlives its run.
+    expect(mcpGatewayStatus().liveTokens).toBe(0);
+    expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
+  });
+
+  it("failure: a run that errors revokes it too", async () => {
+    await startWithMounts("codex", { outcome: "error" });
+    const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
+    expect(getRun(store.db, lastRunSpec()!.runId)?.state).toBe("error");
+    expect(mcpGatewayStatus().liveTokens).toBe(0);
+    expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
+  });
+
+  it("interrupt: a live run's token stops working", async () => {
+    const { runId } = await startWithMounts("claude", { keepRunning: true });
+    const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
+    expect(mcpGatewayStatus().liveTokens).toBe(1);
+    expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(200);
+    await interrupt(runId);
+    await settle();
+    expect(mcpGatewayStatus().liveTokens).toBe(0);
+    expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
+  });
+
+  it("no live handle: a queued run interrupted before it ever started loses its token", async () => {
+    setMaxConcurrentRuns(store.db, 1);
+    const first = await startWithMounts("claude", { keepRunning: true });
+    expect(first.outcome).toBe("started");
+    const queued = await startWithMounts("claude", { keepRunning: true, taskKey: "VIB-2" });
+    expect(queued.outcome).toBe("queued");
+    // Both hold a token: the queued one was bound in `startRun`, before the cap.
+    expect(mcpGatewayStatus().liveTokens).toBe(2);
+
+    await interrupt(queued.runId, "VIB-2");
+    // CANARY: drop the revoke in `stopRunProcess` and the queued run's token
+    // lives on with no process that could ever settle it.
+    expect(mcpGatewayStatus().liveTokens).toBe(1);
+    await interrupt(first.runId);
+    await settle();
+    expect(mcpGatewayStatus().liveTokens).toBe(0);
+  });
+});

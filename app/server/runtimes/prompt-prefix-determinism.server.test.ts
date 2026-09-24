@@ -135,6 +135,7 @@ describe("ruling 370: the operator prefix", () => {
     unresolved: [{ name: "omega", reason: "not registered" }],
     unhealthy: ["zulu"],
     toolDenials: [{ server: "alpha", tools: ["write_b", "write_a"] }],
+    proxied: [],
   };
   const checkout = (key: string): OperatorWorkspaceView => ({
     kind: "checkout",

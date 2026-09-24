@@ -32,6 +32,7 @@ import {
   type RunFailure,
 } from "~/server/tasks/agent-reply.server";
 import {
+  gatewayMcpSection,
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
 } from "~/server/tasks/specialist-mcp.server";
@@ -449,10 +450,9 @@ async function startTurnRun(
   // Org MCP grants: resolved + stdio-pre-flighted ONCE, prompt and mount from
   // the same result (the F21-3 rule).
   const mcpDetail = resolveSpecialistMcpServersDetailed(db, config.mcps);
-  const { servers: orgServers, unresolved } = await verifyStdioMcpMountsForRun(
+  const { servers: orgServers, unresolved, proxied } = await verifyStdioMcpMountsForRun(
     db,
     mcpDetail,
-    { backend: "claude" },
   );
 
   const { mcpServers, allowedTools, toolManifest: manifest } = buildControllerMounts(db, {
@@ -477,6 +477,7 @@ async function startTurnRun(
     config,
     toolManifest: manifest,
     mountedMcps: Object.keys(orgServers),
+    proxiedMcps: proxied,
     // Ruling 310: with the reason each server gave, not just its name —
     // this is the surface a person asks "why?" on.
     unresolvedMcps: unresolved.filter((u) => !u.mounted),
@@ -1057,6 +1058,9 @@ interface SystemPromptInput {
   config: ReturnType<typeof resolveControllerConfig>;
   mountedMcps: string[];
   unresolvedMcps: readonly UnresolvedMcpGrant[];
+  /** Ruling 461: the mounted org servers reached through Viberr's MCP gateway.
+   *  Optional: a prompt-shape test mounts no gateway. */
+  proxiedMcps?: readonly string[];
   /** Ruling 297: the list of every tool this turn mounts, from
    *  `buildControllerMounts`. Rebuilt per turn, so a conversation that was
    *  already running when a tool shipped is told about it. */
@@ -1166,6 +1170,10 @@ export function buildControllerSystemPrompt(
       // Ruling 297: generated from the registries this very turn mounted.
       (input.toolManifest ?? ""),
   );
+  // Ruling 461: the org servers this turn reaches through Viberr's gateway,
+  // in the sentence the specialist and operator prompts share.
+  const gateway = gatewayMcpSection(input.proxiedMcps ?? []);
+  if (gateway) parts.push(gateway);
 
   // Ruling 191: the controller has no shell, but it writes the profiles, the
   // knowledge bases and the architecture the agents that DO have one are

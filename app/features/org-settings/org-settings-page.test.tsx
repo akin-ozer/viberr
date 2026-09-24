@@ -843,11 +843,12 @@ describe("ResourcesPanel", () => {
     const { getByText, getByLabelText } = renderResources();
     // KB and skill rows have counted templates since P13-KM-08; the MCP row was
     // the one destructive path with no idea what depended on it.
-    // F-P3 (pass 25): a credentialed server's row now carries the backend caveat
-    // between "auth: configured" and the grant tail.
+    // Ruling 461: a credentialed server's row says who holds the credential,
+    // between "auth: configured" and the grant tail (it used to carry F-P3's
+    // Claude-only caveat, which the gateway ended).
     expect(
       getByText(
-        /14 tools · checked just now · auth: configured \(Claude runs only · Codex mounts it unauthenticated\) · 1 template/,
+        /14 tools · checked just now · auth: configured \(held by Viberr; runs connect through its gateway\) · 1 template/,
       ),
     ).toBeTruthy();
 

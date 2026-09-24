@@ -285,14 +285,11 @@ export function McpPanel({
                 {m.hasCred
                   ? m.credUnreadable
                     ? " · auth: unreadable (rotate the encryption key or re-enter the credential)"
-                    : // F-P3: the credential is injected only on Claude runs — a
-                      // Codex run drops it (it would otherwise leak into the
-                      // Codex CLI's --config argv), so every Codex run mounts
-                      // this server unauthenticated regardless of which
-                      // profile grants it. Say so wherever the row says
-                      // "configured" rather than only in the capability-matrix
-                      // prose.
-                      " · auth: configured (Claude runs only · Codex mounts it unauthenticated)"
+                    : // Ruling 461: the credential stays in Viberr; runs on
+                      // both backends reach this server through Viberr's
+                      // gateway (F-P3's "Claude runs only" caveat went with
+                      // the Codex limitation it described).
+                      " · auth: configured (held by Viberr; runs connect through its gateway)"
                   : ""}
                 {/* P14-KM-09: KB and skill rows have counted their templates
                     since P13-KM-08; MCP rows showed nothing, so an admin about

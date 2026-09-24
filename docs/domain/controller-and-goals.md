@@ -346,7 +346,12 @@ a notification row: replies stay out of the bell (§8).
    of its own: the anchored task's is read in fresh every turn.
 5. Mounts on every turn (`buildControllerMounts`): `viberr_controller` (§4), `viberr_ops`
    (§5), then the controller's granted org MCP servers, resolved and stdio-pre-flighted
-   once so the prompt and the mount agree. Denied built-ins: `Read`, `Grep`, `Glob`,
+   once so the prompt and the mount agree. A granted server with a stored credential is a
+   mount on Viberr's loopback MCP gateway carrying the turn's own token, exactly as on a
+   specialist run (ruling 461, [agents-and-runtime.md §6](agents-and-runtime.md)): the
+   credential stays in the server process, the token dies when the turn settles, and a
+   call to a marked write tool is audited under the asker as the controller's
+   instrument. Denied built-ins: `Read`, `Grep`, `Glob`,
    `WebFetch`, `WebSearch` plus the operator read-only set (`Bash`, `Edit`, `MultiEdit`,
    `Write`, `NotebookEdit`). Working directory is `<dataRoot>/runtimes/controller-scratch`.
 
@@ -362,7 +367,8 @@ a notification row: replies stay out of the bell (§8).
    with `read_knowledge_doc`), which on a project-scoped conversation include the
    project's rulings knowledge base (ruling 239, with the rulings note when it resolved);
    a runtime block (the model is named in each turn's message; the mounted org MCP
-   servers; `viberr_ops` always attached; no filesystem or shell); the ruling-namespace
+   servers; `viberr_ops` always attached; no filesystem or shell); the gateway sentence
+   naming the servers reached through Viberr's MCP gateway (ruling 461); the ruling-namespace
    paragraph (ruling 312: a ruling number inside a tool description is Viberr's own
    product decision, while a project's rules live in its knowledge base, number from 1,
    and are cited by document and section); the per-turn tool manifest generated from both
@@ -656,7 +662,7 @@ per-turn manifest (ruling 297); every call is audited `controller.ops.read`.
 
 | Tool | What it returns | Gate |
 |---|---|---|
-| `instance_health` | The same `healthSnapshot` the `/resources/health` route serves (status, degraded subsystems, projection counts and the standing projection fault, watchers, lock holder, `backends.<b>.connectedUsers`, browser, disk, maintenance, build, the backends' last quota readings, and the host `toolchain`), plus `backendCredentials: [{ backend, connectedUsers, askerConnected }]` and `runs`, the run concurrency snapshot `{cap, lane, live, queued}` (`lane` is the ruling-152(b) coordination lane beyond the cap). An optional `probe: string[]` (≤ 8 bare names) answers `present` + version, or `present: false` + the reason, for any command the fixed `toolchain` struct does not name (ruling 377(b)) | Open to anyone: nothing here names another person or any deployment configuration; a probe reports presence and version, never a path. The browser executable **path** stays org-admin only (`browserDetail`) |
+| `instance_health` | The same `healthSnapshot` the `/resources/health` route serves (status, degraded subsystems, projection counts and the standing projection fault, watchers, lock holder, `backends.<b>.connectedUsers`, browser, disk, maintenance, build, the backends' last quota readings, the host `toolchain`, and `mcpProxy`, the MCP gateway's `{listening, port, liveTokens}` of ruling 461), plus `backendCredentials: [{ backend, connectedUsers, askerConnected }]` and `runs`, the run concurrency snapshot `{cap, lane, live, queued}` (`lane` is the ruling-152(b) coordination lane beyond the cap). An optional `probe: string[]` (≤ 8 bare names) answers `present` + version, or `present: false` + the reason, for any command the fixed `toolchain` struct does not name (ruling 377(b)) | Open to anyone: nothing here names another person or any deployment configuration; a probe reports presence and version, never a path. The browser executable **path** stays org-admin only (`browserDetail`) |
 | `list_runs` | With no arguments, every LIVE run (running, or queued behind the cap) across the projects visible to the asker, newest first; with `projectSlug` + `taskKey`, that task's runs, finished ones included. Default 50 rows, max 200; `total` and a `truncated` note when rows were left out (ruling 302) | Membership: an invisible run is simply absent; a task listing refuses a project the asker cannot see |
 | `read_run_log` | A bounded page of a run's console: `run {…, logLines}`, `page {firstSeq, lastSeq, olderExist, newerExist, next}`, `lines[{seq, at, display}]`. Default 200 newest lines, max 500, in either direction; `since` together with `before` is refused | A member of the run's project; a controller turn's log follows conversation ownership with org-admin supervision. A missing run, a forbidden project and a forbidden conversation all answer the same not-visible sentence |
 | `read_store_doc` | One document from a KB or skill folder in the org store, by kind, id and path segments, with `truncated` reported honestly | org admin |

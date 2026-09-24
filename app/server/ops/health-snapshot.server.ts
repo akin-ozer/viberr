@@ -8,6 +8,7 @@ import {
   type BackendQuotaRow,
 } from "~/server/runtimes/backend-quota.server";
 import { countConnectedUsers } from "~/server/runtimes/backend-credentials.server";
+import { mcpGatewayStatus, type McpGatewayStatus } from "~/server/mcp-proxy/gateway.server";
 import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.server";
 import { getBuildInfo, type BuildInfo } from "./build-info.server";
 import { cachedDataRootSpace, type DiskSpace } from "./disk-space.server";
@@ -101,6 +102,15 @@ export interface HealthSnapshot {
    * not a broken host, so it never degrades health.
    */
   toolchain: Toolchain;
+  /**
+   * Ruling 461: the loopback MCP gateway a run reaches a credentialed org MCP
+   * server through — whether it is listening, on which 127.0.0.1 port, and how
+   * many runs hold a live token. Informational: a gateway that failed to bind
+   * leaves credentialed servers unmountable (each run's prompt says why), which
+   * no restart of the instance's other subsystems would fix, so it does not
+   * degrade health. Appended, by the key-order contract below.
+   */
+  mcpProxy: McpGatewayStatus;
 }
 
 /**
@@ -200,8 +210,10 @@ export function healthSnapshot(
     maintenance: maintenanceState(),
     build: getBuildInfo(),
     quota: opts.principal ? quota : stripQuotaPrincipals(quota),
-    // LAST, by the key-order contract above. Memoized: the first call (boot's
-    // integrity line, normally) pays the probe once.
+    // Memoized: the first call (boot's integrity line, normally) pays the
+    // probe once.
     toolchain: cachedToolchain(),
+    // LAST, by the key-order contract above (ruling 461).
+    mcpProxy: mcpGatewayStatus(),
   };
 }

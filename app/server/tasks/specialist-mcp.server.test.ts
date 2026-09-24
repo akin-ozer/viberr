@@ -1,10 +1,19 @@
 import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
-import { listMcpServers, type McpSpawn } from "~/server/org/resources.server";
+import {
+  getMcpCredentialState,
+  listMcpServers,
+  type McpSpawn,
+} from "~/server/org/resources.server";
+import {
+  mcpGatewayMountUrl,
+  startMcpGateway,
+  stopMcpGateway,
+} from "~/server/mcp-proxy/gateway.server";
 import {
   isReservedMcpName,
   RESERVED_MCP_NAMES,
@@ -319,27 +328,74 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     ]);
   });
 
-  it("F7-MCP1: injects a sealed HTTP credential as an Authorization header", async () => {
-    const { sealSecret } = await import("~/server/secrets/secret-box.server");
-    const store = setupTestStore(ctx);
-    addMcp(store.db, "billing-api", "HTTP", "https://mcp.example/sse", sealSecret("tok_live_123"));
-    const servers = resolveSpecialistMcpServers(store.db, ["billing-api"]);
-    expect(servers["billing-api"]).toEqual({
-      type: "http",
-      url: "https://mcp.example/sse",
-      headers: { Authorization: "Bearer tok_live_123" },
+  describe("ruling 461: a credentialed server is mounted through Viberr's gateway", () => {
+    beforeAll(async () => {
+      await startMcpGateway({ port: 0 });
     });
-  });
+    afterAll(async () => {
+      await stopMcpGateway();
+    });
 
-  it("F7-MCP1: injects a sealed stdio credential as the MCP_CREDENTIAL env var", async () => {
-    const { sealSecret } = await import("~/server/secrets/secret-box.server");
-    const store = setupTestStore(ctx);
-    addMcp(store.db, "pg-ro", "stdio", "npx -y @mcp/server-postgres", sealSecret("pg_secret"));
-    const servers = resolveSpecialistMcpServers(store.db, ["pg-ro"]);
-    expect(servers["pg-ro"]).toEqual({
-      command: "npx",
-      args: ["-y", "@mcp/server-postgres"],
-      env: { MCP_CREDENTIAL: "pg_secret" },
+    it("an HTTP server resolves to the gateway URL, and no part of the config is the credential", async () => {
+      const { sealSecret } = await import("~/server/secrets/secret-box.server");
+      const store = setupTestStore(ctx);
+      addMcp(store.db, "billing-api", "HTTP", "https://mcp.example/sse", sealSecret("tok_live_123"));
+      const resolved = resolveSpecialistMcpServersDetailed(store.db, ["billing-api"]);
+      // CANARY: put the decrypted `Authorization: Bearer` back on the config
+      // and both assertions go red.
+      expect(resolved.servers["billing-api"]).toEqual({
+        type: "http",
+        url: mcpGatewayMountUrl("billing-api"),
+      });
+      expect(JSON.stringify(resolved)).not.toContain("tok_live_123");
+      expect(resolved.proxied).toEqual(["billing-api"]);
+      expect(resolved.unresolved).toEqual([]);
+    });
+
+    it("a stdio server resolves to the gateway URL too — the server spawns it, the CLI never does", async () => {
+      const { sealSecret } = await import("~/server/secrets/secret-box.server");
+      const store = setupTestStore(ctx);
+      addMcp(store.db, "pg-ro", "stdio", "npx -y @mcp/server-postgres", sealSecret("pg_secret"));
+      const resolved = resolveSpecialistMcpServersDetailed(store.db, ["pg-ro"]);
+      expect(resolved.servers["pg-ro"]).toEqual({
+        type: "http",
+        url: mcpGatewayMountUrl("pg-ro"),
+      });
+      const json = JSON.stringify(resolved);
+      expect(json).not.toContain("pg_secret");
+      expect(json).not.toContain("MCP_CREDENTIAL");
+      expect(resolved.proxied).toEqual(["pg-ro"]);
+    });
+
+    it("an uncredentialed server beside them still mounts directly", async () => {
+      const { sealSecret } = await import("~/server/secrets/secret-box.server");
+      const store = setupTestStore(ctx);
+      addMcp(store.db, "billing-api", "HTTP", "https://mcp.example/sse", sealSecret("tok_live_123"));
+      addMcp(store.db, "docs", "HTTP", "https://docs.example/mcp");
+      addMcp(store.db, "fs", "stdio", "npx -y @mcp/server-filesystem /tmp");
+      const resolved = resolveSpecialistMcpServersDetailed(store.db, ["billing-api", "docs", "fs"]);
+      expect(resolved.servers.docs).toEqual({ type: "http", url: "https://docs.example/mcp" });
+      expect(resolved.servers.fs).toEqual({
+        command: "npx",
+        args: ["-y", "@mcp/server-filesystem", "/tmp"],
+      });
+      expect(resolved.proxied).toEqual(["billing-api"]);
+    });
+
+    it("a marked write tool keeps its per-tool deny on a gateway mount", async () => {
+      const { sealSecret } = await import("~/server/secrets/secret-box.server");
+      const store = setupTestStore(ctx);
+      addMcp(store.db, "cloudflare", "HTTP", "https://mcp.example/cf", sealSecret("cf_token"));
+      markWriteTools(store.db, "cloudflare", ["delete_zone"]);
+      const resolved = resolveSpecialistMcpServersDetailed(store.db, ["cloudflare"], {
+        withholdWriteTools: true,
+      });
+      expect(resolved.servers.cloudflare).toEqual({
+        type: "http",
+        url: mcpGatewayMountUrl("cloudflare"),
+        tools: [{ name: "delete_zone", permission_policy: "always_deny" }],
+      });
+      expect(resolved.toolDenials).toEqual([{ server: "cloudflare", tools: ["delete_zone"] }]);
     });
   });
 
@@ -449,20 +505,20 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     const saved = process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS;
     process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS = oldKey.toString("base64");
     try {
-      const servers = resolveSpecialistMcpServers(store.db, ["billing-api"]);
-      expect(servers["billing-api"]).toEqual({
-        type: "http",
-        url: "https://mcp.example/sse",
-        headers: { Authorization: "Bearer tok_live_123" },
-      });
-      // Lazy rotation: the row was re-sealed under the CURRENT key, so it keeps
-      // working after the retired key is removed from the env.
+      // The resolver opens the box (and so does not refuse the mount) …
+      await startMcpGateway({ port: 0 });
+      const resolved = resolveSpecialistMcpServersDetailed(store.db, ["billing-api"]);
+      expect(resolved.unresolved).toEqual([]);
+      expect(resolved.proxied).toEqual(["billing-api"]);
+      // … and lazy rotation re-sealed the row under the CURRENT key, so it
+      // keeps opening after the retired key is removed from the env.
       process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS = "";
-      const after = resolveSpecialistMcpServers(store.db, ["billing-api"]);
-      expect(after["billing-api"]).toMatchObject({
-        headers: { Authorization: "Bearer tok_live_123" },
+      expect(getMcpCredentialState(store.db, "billing-api")).toEqual({
+        state: "ok",
+        token: "tok_live_123",
       });
     } finally {
+      await stopMcpGateway();
       if (saved === undefined) delete process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS;
       else process.env.VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS = saved;
     }

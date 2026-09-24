@@ -600,6 +600,82 @@ describe("the turn carries the context read (ruling 121)", () => {
   });
 
   /**
+   * Ruling 461: the controller's granted org servers resolve the same way a
+   * specialist's do, so a credentialed one reaches the turn as a gateway mount
+   * carrying the turn's own token, the credential never in the turn's config,
+   * and the prompt says who holds it.
+   */
+  it("ruling 461: a turn mounts a granted credentialed server through Viberr's gateway", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { lastRunSpec, drainRunCompletions } = await import("../../../test-support/fake-runtime");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { resolveControllerConfig, saveControllerConfig } = await import("./controller-profile.server");
+    const { sealSecret } = await import("~/server/secrets/secret-box.server");
+    const { seedDefaultAgentAssets } = await import("~/server/seed/default-assets.server");
+    seedDefaultAgentAssets(app.dataRoot);
+    const { mcpGatewayMountUrl, mcpGatewayStatus, startMcpGateway, stopMcpGateway } = await import(
+      "~/server/mcp-proxy/gateway.server"
+    );
+    const secret = "cf-token-controller-sentinel";
+    const now = new Date().toISOString();
+    app.db
+      .prepare(
+        `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run("mcp_cf_ctl", "cf-controller", "HTTP", "https://mcp.example.test/mcp", sealSecret(secret), now, now);
+    const actor = { userId: user.id, label: user.email };
+    const stored = resolveControllerConfig(app.dataRoot);
+    const section = { effort: "", definition: "", skills: [], kb: [], model: stored.model ?? "" };
+    const unlockMcps = { skills: true, kb: true, mcps: false, instructions: true };
+    saveControllerConfig(app.db, { ...section, mcps: ["cf-controller"] }, actor, {
+      dataRoot: app.dataRoot,
+      locks: unlockMcps,
+    });
+    await startMcpGateway({ port: 0 });
+    await connectFakeBackend(app.db, user.id, "claude");
+    try {
+      const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "provision the zone",
+        user: { ...user, orgRole: "admin" },
+        dataRoot: app.dataRoot,
+      });
+      const spec = lastRunSpec();
+      // CANARY: resolve the controller's grants past the gateway and the
+      // mount is the upstream URL with the credential again.
+      expect(spec?.mcpServers?.["cf-controller"]).toEqual({
+        type: "http",
+        url: mcpGatewayMountUrl("cf-controller"),
+        headers: { Authorization: expect.stringMatching(/^Bearer \S{43}$/) },
+      });
+      // The other two mounts are live in-process servers (not serializable);
+      // this one, the prompt and the environment are the rest of the turn.
+      expect(JSON.stringify(spec?.mcpServers?.["cf-controller"])).not.toContain(secret);
+      expect(joinedPrompt(spec?.systemPrompt ?? "")).not.toContain(secret);
+      expect(JSON.stringify(spec?.env ?? {})).not.toContain(secret);
+      expect(joinedPrompt(spec?.systemPrompt ?? "")).toContain(
+        "cf-controller is mounted through Viberr's MCP gateway: the credential is held by Viberr",
+      );
+      // The fake turn has ended, and its token with it.
+      await drainRunCompletions();
+      expect(mcpGatewayStatus().liveTokens).toBe(0);
+    } finally {
+      await disconnectFakeBackend(app.db, user.id, "claude");
+      await stopMcpGateway();
+      saveControllerConfig(app.db, { ...section, mcps: stored.mcps }, actor, {
+        dataRoot: app.dataRoot,
+        locks: unlockMcps,
+      });
+      app.db.prepare(`DELETE FROM org_mcp_servers WHERE id = 'mcp_cf_ctl'`).run();
+    }
+  });
+
+  /**
    * Ruling 344 (pass 37, F37-180): the controller turn discloses what it was
    * given. `recordRunInputs` had two callers, both on the specialist paths, so
    * none of this instance's 71 controller turns recorded anything — and the

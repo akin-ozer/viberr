@@ -56,7 +56,8 @@ The route spreads `healthSnapshot()` after `ok`, and key order is part of the co
 | `maintenance` | `{ intervalMs, diskCheckIntervalMs, lastPassAt, lastPassReason: boot\|interval\|disk-pressure, lastFreedBytes, scheduled }` |
 | `build` | `{ version, revision, revisionSource: env\|git\|null, builtAt }`; `revision` is `null` in an image built without `npm run deploy` or the build args |
 | `quota` | one row per backend, `{ backend, reading, credentialRefused, exhausted }`: the latest rate-limit reading, the latest credential refusal and the latest quota exhaustion the run sink recorded (F32-9). On this unauthenticated route `credentialUserId` and `credentialLabel` are stripped from each record (ruling 130(d)); never `degraded` (ruling 146) |
-| `toolchain` | (last) `{ node, npm, git, python3, go, make, docker, pnpm, yarn, curl, codexCli, claudeAgentSdk }` — each version a string or `null` when that tool is not installed, plus the two pinned agent packages (rulings 182(b), 191, 196). Memoized per process. Never `degraded`: what an agent's shell finds is information, not a fault |
+| `toolchain` | `{ node, npm, git, python3, go, make, docker, pnpm, yarn, curl, codexCli, claudeAgentSdk }` — each version a string or `null` when that tool is not installed, plus the two pinned agent packages (rulings 182(b), 191, 196). Memoized per process. Never `degraded`: what an agent's shell finds is information, not a fault |
+| `mcpProxy` | (last) `{ listening, port, liveTokens }` — the loopback MCP gateway (ruling 461): whether it is listening on `127.0.0.1`, on which port (`VIBERR_MCP_PROXY_PORT`, or the one picked at boot), and how many runs hold a live gateway token. Never `degraded`: a gateway that failed to bind leaves credentialed MCP servers unmountable, which each run's prompt states |
 
 Status codes: the bare URL is a **liveness** probe and returns `200` even when degraded;
 `?probe=readiness` (or `?probe=ready`) returns `503` with the same body while

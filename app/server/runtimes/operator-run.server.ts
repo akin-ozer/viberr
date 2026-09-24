@@ -101,6 +101,7 @@ import {
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
   unavailableMcpSection,
+  gatewayMcpSection,
   type UnresolvedMcpGrant,
 } from "~/server/tasks/specialist-mcp.server";
 import {
@@ -2604,7 +2605,7 @@ async function startCodexOperatorRun(
   // child processes and org-level writes for a run that will never exist. The
   // same posture `ensureOperatorRepoCheckout` already takes above.
   const mcp = start.principal.ok
-    ? await operatorMcpResolution(db, authority.mcps, "codex")
+    ? await operatorMcpResolution(db, authority.mcps)
     : NO_OPERATOR_MCPS;
   // Pass-24 B-1 (owner ruling): the Codex operator's cwd is a dedicated empty
   // scratch folder, so the directory it works in does NOT contain `task.md` or
@@ -3487,7 +3488,7 @@ async function startRealOperatorRun(
   // rewrite its health row) for a run recorded as "no agent process was
   // started".
   const mcp = start.principal.ok
-    ? await operatorMcpResolution(db, authority.mcps, "claude")
+    ? await operatorMcpResolution(db, authority.mcps)
     : NO_OPERATOR_MCPS;
   const toolkitDeps: Parameters<typeof buildOperatorToolkit>[0] = {
     db,
@@ -3801,6 +3802,8 @@ export interface OperatorMcpResolution {
   /** Ruling 176: the mounted servers' marked write tools. The operator never
    *  writes, so every operator run withholds them. */
   toolDenials: McpToolDenial[];
+  /** Ruling 461: the mounted servers reached through Viberr's MCP gateway. */
+  proxied: string[];
 }
 
 /** Resolve the operator's MCP grants once per run (see OperatorMcpResolution).
@@ -3820,12 +3823,10 @@ export interface OperatorMcpResolution {
 async function operatorMcpResolution(
   db: DatabaseSync,
   names: readonly string[],
-  backend: RealBackend,
 ): Promise<OperatorMcpResolution> {
-  const { servers, unresolved, toolDenials } = await verifyStdioMcpMountsForRun(
+  const { servers, unresolved, toolDenials, proxied } = await verifyStdioMcpMountsForRun(
     db,
     resolveSpecialistMcpServersDetailed(db, names, { withholdWriteTools: true }),
-    { backend },
   );
   return {
     servers,
@@ -3833,6 +3834,7 @@ async function operatorMcpResolution(
     unresolved: unresolved.filter((u) => !u.mounted),
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
     toolDenials,
+    proxied,
   };
 }
 
@@ -3846,6 +3848,7 @@ const NO_OPERATOR_MCPS: OperatorMcpResolution = {
   unresolved: [],
   unhealthy: [],
   toolDenials: [],
+  proxied: [],
 };
 
 /**
@@ -4216,6 +4219,10 @@ export function buildOperatorSystemPrompt(
         "stop and open a decision packet instead.",
     );
   }
+  // Ruling 461: the servers reached through Viberr's gateway, in the sentence
+  // the specialist and controller prompts share.
+  const gateway = gatewayMcpSection(mcp.proxied);
+  if (gateway) dynamic.push(gateway);
   if (toolDenials.length > 0) {
     dynamic.push(
       "\n\n---\n# MCP write tools withheld\n\n" +

@@ -178,7 +178,7 @@ the ruling and says so.
 | No cleartext-transport guard in the app itself | Yes | Boot warns when a production origin would issue insecure cookies |
 | Notifications page caps at newest 200 | Yes | `NOTIF_PAGE_LIMIT` in `routes/notifications.tsx` |
 | Fine-grained PAT validation partly assumed | Yes | `pull_request:write` reads "assumed" until first use unless `VIBERR_GITHUB_WRITE_PROBE` opts into the dry-run |
-| Codex runs receive MCP servers without credentials | Not re-verified here | |
+| Codex runs receive MCP servers without credentials | **No longer** (ruling 461) | A credentialed server is reached through Viberr's loopback MCP gateway on both backends; the credential stays in the server process and the run holds a run-scoped token |
 
 ## 7. Method
 

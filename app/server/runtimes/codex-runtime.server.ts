@@ -191,8 +191,18 @@ const codexConfigTableSchema = z
 const codexMcpServerSchema = z.union([
   z.object({ type: z.literal("sdk") }).transform(() => null),
   z
-    .object({ type: z.literal("http"), url: z.string() })
-    .transform((server) => ({ transport: "http" as const, url: server.url })),
+    .object({
+      type: z.literal("http"),
+      url: z.string(),
+      /** Ruling 461: a gateway mount's run token. A header map that is not
+       *  all strings is not a declaration of one and reads as absent. */
+      headers: z.record(z.string(), z.string()).optional().catch(undefined),
+    })
+    .transform((server) => ({
+      transport: "http" as const,
+      url: server.url,
+      headers: server.headers ?? {},
+    })),
   z
     .object({
       command: z.string(),
@@ -235,7 +245,16 @@ const codexMcpServerSchema = z.union([
  * Ruling 176: a server's admin-marked write tools, on a run that withholds
  * repo write, become its `disabled_tools` (a per-server key the pinned CLI
  * reads, alongside `enabled_tools`). Tool names, not secrets, so argv is fine
- * here too. */
+ * here too.
+ *
+ * Ruling 461: an HTTP server's `headers` become its `http_headers` (the pinned
+ * CLI's per-server table for a Streamable HTTP server). The only headers a
+ * portable config carries are a gateway mount's `Authorization: Bearer <run
+ * token>`: never a credential — the credential stays in Viberr's gateway — and
+ * a token that opens only this run's grants, only through the loopback
+ * gateway and only while this run is live, so argv is an acceptable place for
+ * it. That is what ended "a credentialed org MCP connects unauthenticated on
+ * Codex" (F40-3): both backends now get the same gateway config. */
 function codexMcpServers(
   servers: RunSpec["mcpServers"],
   runMarker: string | undefined,
@@ -255,20 +274,15 @@ function codexMcpServers(
         .flatMap((denial) => denial.tools),
     );
 
-    // F7-MCP1 credential scope: resolveSpecialistMcpServers injects the decrypted
-    // token as `headers.Authorization` (HTTP) / `env.MCP_CREDENTIAL` (stdio).
-    // Those are DELIBERATELY NOT carried onto Codex: the codex SDK passes this
-    // config to the CLI as `--config key=value` argv, so a literal secret here
-    // would be visible in `ps auxww` (the standing codex-argv exposure the owner
-    // scoped out). So a credentialed org MCP authenticates on Claude runs only;
-    // on Codex it connects unauthenticated. This is an honest, documented
-    // limitation (same class as the S3 codex tool-confinement gap), not a silent
-    // drop — the specialist-mcp docstring says so.
     if (declaration.data.transport === "http") {
       const http: CodexConfig = {
         url: declaration.data.url,
         default_tools_approval_mode: "approve",
       };
+      // Ruling 461: the gateway mount's run token (see the docstring).
+      if (Object.keys(declaration.data.headers).length) {
+        http.http_headers = sortedRecord(declaration.data.headers);
+      }
       if (disabledTools.length) http.disabled_tools = disabledTools;
       translated[name] = http;
       continue;

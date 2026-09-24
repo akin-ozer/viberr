@@ -124,6 +124,12 @@ per process: restart to apply a change.
 |---|---|---|
 | `VIBERR_BROWSER_EXECUTABLE` | unset; the image sets `/usr/bin/chromium` | Absolute path of the browser the `use-browser` capability's Playwright MCP server drives (ruling 75, `specialist-browser-mcp.server.ts`). When set, the server passes `--executable-path <path> --no-sandbox` to that MCP server (chromium's user-namespace sandbox cannot start under Docker's default seccomp profile as a non-root user). A set path that is not on disk makes health's `browser` read `unavailable`. Unset on a dev host, Playwright's own browser resolution applies. |
 
+### MCP gateway
+
+| Variable | Default | Notes |
+|---|---|---|
+| `VIBERR_MCP_PROXY_PORT` | `0` (a free port picked at boot) | Port of the loopback MCP gateway (ruling 461, `app/server/mcp-proxy/gateway.server.ts`), always bound to `127.0.0.1` and never reachable from outside the host or container. A run reaches every org MCP server that has a stored credential through it with a run-scoped token, so the credential never enters an agent process. `0` reads the chosen port back after listening; set a number only when something on the host needs it fixed. A port that cannot be bound leaves credentialed servers unmountable (each run's prompt says why) and health reports `mcpProxy.listening: false`; boot carries on. Integer `0`–`65535`, anything else fails boot. |
+
 ### Build identity
 
 Baked at image-build time and read by `app/server/ops/build-info.server.ts` (raw), which
