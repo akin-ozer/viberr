@@ -158,6 +158,9 @@ import {
   acceptanceDisclosureDrift,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
+// Ruling 471: which open-decision option a direct acceptance answers — the one
+// predicate the write below and the accept dialog's loader both read.
+import { acceptanceAnswerOf } from "~/shared/packet-acceptance-answer";
 import {
   taskRef,
   reprojectTask,
@@ -12561,7 +12564,10 @@ export interface ForceAcceptDisclosure {
    *  the task is not at the acceptance boundary (R19-5: force may skip them). */
   skippedStageIds: string[];
   validation: Validation;
-  /** The open decision packet the acceptance withdraws unanswered, by title. */
+  /** The open decision packet the acceptance withdraws unanswered, by title.
+   *  Null when there is none, and (ruling 471) when the forced acceptance
+   *  ANSWERS it instead, because it offers `force_accept` or
+   *  `accept_completion`. */
   withdrawnPacket: string | null;
 }
 
@@ -12598,7 +12604,13 @@ function forceAcceptDisclosure(
     gates,
     skippedStageIds,
     validation: deriveValidation(fm),
-    withdrawnPacket: parsed.packet?.title ?? null,
+    // Ruling 471: a decision this force answers is not withdrawn, so neither
+    // the forced completion event nor the `task.acceptance.forced` row may say
+    // it died unanswered.
+    withdrawnPacket:
+      parsed.packet && !acceptanceAnswerOf(parsed.packet, "force")
+        ? parsed.packet.title
+        : null,
   };
 }
 
@@ -12632,7 +12644,9 @@ function forceBypassClause(project: ProjectContext, disclosure: ForceAcceptDiscl
   if (disclosure.withdrawnPacket) {
     parts.push(`the open decision "${disclosure.withdrawnPacket}" withdrawn unanswered`);
   }
-  return parts.length > 0 ? ` Bypassed: ${parts.join("; ")}` : "";
+  // Ruling 471: the list ends its sentence, because the answered-decision
+  // clause `applyAcceptanceWrite` may append starts a new one.
+  return parts.length > 0 ? ` Bypassed: ${parts.join("; ")}.` : "";
 }
 
 /**
@@ -13564,6 +13578,11 @@ interface WithdrawnPacket {
 interface WithdrawnPacketRef {
   current: WithdrawnPacket | null;
 }
+/** Ruling 471: the open decision a direct human acceptance ANSWERED, and the
+ *  option it answered with, captured inside the file lock like its sibling. */
+interface AnsweredPacketRef {
+  current: { packetKind: string; option: PacketOption } | null;
+}
 
 export async function applyAcceptanceWrite(
   db: DatabaseSync,
@@ -13591,6 +13610,15 @@ export async function applyAcceptanceWrite(
     /** Ruling 88 (F21-2): the disclosure the human acknowledged, re-compared
      *  under the lock. See `assertAcceptanceDisclosure` for the three states. */
     ack?: AcceptanceDisclosure | null;
+    /** Ruling 471: the PERSON whose direct acceptance this is. Set by every
+     *  human door (`acceptCompletion`, plain or forced), and then an open
+     *  decision that offers the option this acceptance performs
+     *  (`acceptanceAnswerOf`) is ANSWERED with it: the `task.packet.resolved`
+     *  row the packet door writes, under this person, marked `via`, and no
+     *  withdrawal. Absent on the operator's own acceptance, which answers no
+     *  question put to a person, so every open decision is withdrawn as
+     *  before (F32-11). */
+    answerer?: TaskActor;
   },
 ): Promise<{ accepted: boolean }> {
   const project = loadProjectContext(ctx, input.projectSlug);
@@ -13614,6 +13642,9 @@ export async function applyAcceptanceWrite(
   // captured inside the lock so the note and the audit row name the packet
   // that was actually there, not the one the caller read before waiting.
   const withdrawn: WithdrawnPacketRef = { current: null };
+  // Ruling 471: or the open decision this acceptance ANSWERS, captured in the
+  // same place for the same reason.
+  const answered: AnsweredPacketRef = { current: null };
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // U3 (NFR16) — the callers' "already Done → return" check reads the file
     // OUTSIDE this lock, so two concurrent acceptances of one task both passed
@@ -13704,7 +13735,24 @@ export async function applyAcceptanceWrite(
     // Done task); acceptance consumes every open offer, matching the packet
     // resolution path's long-standing behavior.
     parsed.frontmatter.recommendations = [];
-    if (parsed.packet) {
+    // Ruling 471: a person's direct acceptance ANSWERS the open decision when
+    // it offers the option this acceptance performs. Live on WEB-1 the
+    // operator recommended "Accept WEB-1 and merge PR #1", the owner pressed
+    // Accept, and the note below said the decision "was never answered". The
+    // packet door choosing that same option recorded an answer.
+    const answer =
+      parsed.packet && input.answerer
+        ? acceptanceAnswerOf(parsed.packet, input.forced ? "force" : "accept")
+        : null;
+    if (parsed.packet && answer) {
+      answered.current = { packetKind: parsed.packet.kind, option: answer.option };
+      // The packet door's own `accept_completion` answer IS its completion
+      // event, so the answer rides this one as a single clause (it needs
+      // saying here: the person pressed Accept, not the decision's option).
+      input.event.text +=
+        ` This acceptance answers the open decision "${parsed.packet.title}" with ` +
+        `"${answer.option.t}".`;
+    } else if (parsed.packet) {
       withdrawn.current = {
         title: parsed.packet.title,
         kind: parsed.packet.kind,
@@ -13783,6 +13831,29 @@ export async function applyAcceptanceWrite(
         by: input.forced ? "force-accept" : "accept",
       },
     });
+  }
+  if (accepted && answered.current && input.answerer) {
+    // Ruling 471: the row the packet door writes when a person resolves this
+    // option (same action, actor and fields), plus `via`, the direct
+    // acceptance it came through, in the vocabulary of the withdrawal row's
+    // `by`. The operator hand-off the packet door skips for both kinds
+    // (`NO_REQUEUE`: the task is Done) is skipped here by never being made.
+    recordAudit(db, {
+      action: "task.packet.resolved",
+      actor: { userId: input.answerer.userId, label: input.answerer.label },
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: {
+        optionKind: answered.current.option.kind,
+        optionTitle: answered.current.option.t,
+        packetKind: answered.current.packetKind,
+        via: input.forced ? "force-accept" : "accept",
+      },
+    });
+    // And the notifications the packet door marks read for a settled decision.
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
   }
   // Ruling 99: an acceptance that closed a goal-chain link advances its chain
   // (the next link's task is created under the goal creator's re-proven
@@ -14140,6 +14211,10 @@ async function acceptCompletion(
     event,
     headCheck,
     noChangeCheck: noChange,
+    // Ruling 471: every door into this function is a person's acceptance
+    // (Accept, Force accept, a stage move into the terminal stage, an applied
+    // acceptance card), so it answers the open decision it performs.
+    answerer: actor,
   };
   // Ruling 88: the same acknowledgment is re-compared under the write lock.
   if ("ack" in input) acceptance.ack = input.ack ?? null;

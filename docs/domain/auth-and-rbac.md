@@ -358,7 +358,12 @@ raw vendor line never reach an audit row.
   or the project settings form).
 - `task.acceptance.forced` carries `bypassed` (the gate sentences joined with " | "),
   `bypassedGates` (the same list), `skippedStages`, `validation` and `withdrawnPacket`
-  (U35-3).
+  (U35-3; null when the force answered the open decision instead, ruling 471).
+- `task.packet.resolved {optionKind, optionTitle, packetKind}` is a person resolving a
+  decision packet, actor that person. With `via: "accept" | "force-accept"` it was
+  answered by the task page's acceptance rather than the packet's confirm (ruling 471);
+  `task.packet.withdrawn {title, kind, type, by}` (actor the system) is an acceptance
+  that closed a decision it did not answer (F32-11).
 - `task.hold.lifted {cause: "operator-run" | "dispatch", trigger?, profileId?,
   byUserId?, previous: "blocked"}` is written by `liftHoldForRun`, actor the person who
   started the operator or the operator actor for a dispatch (ruling 157).

@@ -742,9 +742,11 @@ them.
    appends the same list, each gate reduced to its FIRST sentence ("Bypassed: Review
    skipped; the review gate; VIB-1 is at In Progress, not Review; This task's latest
    review requests changes on the current revision; the open decision "..." withdrawn
-   unanswered"). The remedy half of each refusal ("Move the task through the workflow
-   first") stays in `bypassedGates` only. The force dialog lists the same gates
-   (`AcceptanceAffordance.blockedGates`, ruling 393). Force never bypasses two facts: a
+   unanswered."). The remedy half of each refusal ("Move the task through the workflow
+   first") stays in `bypassedGates` only. A decision the force ANSWERS (ruling 471, step
+   7) is not withdrawn, so `withdrawnPacket` is null and the list does not name it. The
+   force dialog lists the same gates (`AcceptanceAffordance.blockedGates`, ruling 393).
+   Force never bypasses two facts: a
    closed unmerged PR (ruling 37) and an **archived** task (ruling 123) — restore it
    first. Both are `forceIrreducibleRefusal`, and on an archived task the affordance is
    withdrawn rather than disabled. The offer itself appears only once the task has
@@ -801,9 +803,20 @@ them.
    re-read, so the `completion` event names the head that actually merged and the base
    refresh the ceremony made (ruling 318), and it is dated when it is written, on the
    packet path as on the direct one (ruling 327). The write sets stage → terminal,
-   `waiting: none`, `readiness: ready`, clears `heldAtStage`, the packet (withdrawn with
-   a `task.packet.withdrawn` row) and the recommendations. A full-autonomy **operator**
-   acceptance records `pr.state: accepted` and leaves the merge to a human
+   `waiting: none`, `readiness: ready`, clears `heldAtStage`, the packet and the
+   recommendations. The open packet is ANSWERED when a person's acceptance performs one
+   of its options (ruling 471, `acceptanceAnswerOf` in
+   `app/shared/packet-acceptance-answer.ts`): a plain acceptance answers
+   `accept_completion`; a forced one answers `force_accept`, else `accept_completion`;
+   the recommended option of the kind wins, and a decision already decided (`awaiting`)
+   takes no answer. The answer is the packet door's record: a `task.packet.resolved` row
+   under the person with `optionKind`, `optionTitle`, `packetKind` and `via` (`accept` or
+   `force-accept`), the packet and approval notifications marked read, no operator
+   hand-off, and one clause on the completion event ("This acceptance answers the open
+   decision "…" with "…"."). Any other open packet is withdrawn (F32-11): a "Withdrew the
+   open decision" note and a `task.packet.withdrawn` row with `by`. The operator's own
+   full-autonomy acceptance answers nothing, so it always withdraws. A full-autonomy
+   **operator** acceptance records `pr.state: accepted` and leaves the merge to a human
    (`complete-merge` intent, `completeTaskMerge`, after re-running the head check)
    because `merge-pull-request` is always human (ruling 40). After a successful merge
    the `delete-branch-after-merge` guardrail (default on) deletes the remote task

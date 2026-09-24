@@ -1058,11 +1058,23 @@ export function TaskDetailPage({
           // 164 added) ANSWERS the open decision, so nothing is withdrawn. The
           // row used to name that packet and say it "closes unanswered", while
           // `task.acceptance.forced` recorded `withdrawnPacket: null` — the
-          // disclosure is read after the packet path has cleared it. Only the
-          // direct doors (Accept, Force accept, a recommendation, a stage move)
-          // close a standing decision unanswered.
+          // disclosure is read after the packet path has cleared it. The direct
+          // doors (Accept, Force accept, a recommendation, a stage move) close a
+          // standing decision too.
           openPacketTitle={
             confirmAccept.mode === "packet" ? null : (task.packet?.title ?? null)
+          }
+          // Ruling 471: and a direct door ANSWERS it when it offers the option
+          // that door performs. The loader names that option per door (the
+          // packet render's `forceAnswersWith` for Force accept, and
+          // `acceptAnswersWith` for every plain acceptance); without one the
+          // row stays "Withdraws".
+          answersWith={
+            confirmAccept.mode === "force"
+              ? (task.packet?.forceAnswersWith ?? null)
+              : confirmAccept.mode === "packet"
+                ? null
+                : (task.packet?.acceptAnswersWith ?? null)
           }
           // F20-6 (R20-2): no PR + the completion never claimed no-change → the
           // accept path auto-detects it by re-probing the branch. The dialog
