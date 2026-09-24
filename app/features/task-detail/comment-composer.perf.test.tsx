@@ -13,7 +13,7 @@ import { ToastProvider } from "~/ui/toast";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
-import { createRenderCounter } from "../../../test-support/render-counter";
+import { createRenderCounter, settle } from "../../../test-support/render-counter";
 import { $setParagraphPlainText } from "./lexical-mention-plugin";
 import { Timeline } from "./timeline";
 
@@ -95,6 +95,13 @@ async function mountComposer() {
     return el;
   });
   const editor = host.__lexicalEditor;
+  // A person types into a focused editor. Unfocused, Lexical leaves the DOM
+  // selection alone, and jsdom's queued selectionchange can then hand it a
+  // stale selection in the middle of a measured update (seen only under a
+  // loaded suite: the @menu closed and the window counted its unmount).
+  await act(async () => {
+    editor.focus();
+  });
   const registrations = vi.spyOn(editor, "registerUpdateListener");
   counter.attach(view.container);
   return { ...view, editor, counter, registrations, revalidate: () => revalidate() };
@@ -122,6 +129,7 @@ describe("composer renders per keystroke (ruling 454)", () => {
   it("a plain keystroke renders nothing", async () => {
     const view = await mountComposer();
     await type(view.editor, "Looks good");
+    await settle(view.counter);
     view.counter.reset();
     view.registrations.mockClear();
     await type(view.editor, "Looks good!");
@@ -133,6 +141,7 @@ describe("composer renders per keystroke (ruling 454)", () => {
     const view = await mountComposer();
     await type(view.editor, "ping @ar");
     await waitFor(() => expect(document.querySelector('[role="listbox"]')).not.toBeNull());
+    await settle(view.counter);
     view.counter.reset();
     view.registrations.mockClear();
     await type(view.editor, "ping @ard");
@@ -152,6 +161,7 @@ describe("composer renders per keystroke (ruling 454)", () => {
     const view = await mountComposer();
     await type(view.editor, "ping @ar");
     await waitFor(() => expect(document.querySelector('[role="listbox"]')).not.toBeNull());
+    await settle(view.counter);
     view.counter.reset();
     await act(async () => {
       view.editor.update(() => {
@@ -165,6 +175,7 @@ describe("composer renders per keystroke (ruling 454)", () => {
   it("a revalidation with the same directory does not re-render the editor", async () => {
     const view = await mountComposer();
     await type(view.editor, "Draft in progress");
+    await settle(view.counter);
     view.counter.reset();
     view.registrations.mockClear();
     await act(async () => view.revalidate());
