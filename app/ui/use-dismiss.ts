@@ -32,11 +32,17 @@ export interface DismissOptions {
    */
   onReflow?: boolean;
   /**
-   * Whether an outside press dismisses. Default `true`. The account menu and
-   * the notification bell deliberately stay open until Escape or an explicit
-   * action, so they pass `false`.
+   * Whether an outside press dismisses. Default `true`. The notification
+   * bell deliberately stays open until Escape or an explicit action, so it
+   * passes `false`.
    */
   outside?: boolean;
+  /**
+   * Whether the focus moving outside dismisses too. Default `false`. The
+   * account menu's press that is still waiting for its chunk passes `true`: a
+   * Tab or a click elsewhere takes the press back (ruling 454).
+   */
+  focus?: boolean;
 }
 
 /**
@@ -58,6 +64,7 @@ export function useDismiss<T extends HTMLElement = HTMLElement>(
 
   const outside = options?.outside ?? true;
   const onReflow = options?.onReflow ?? false;
+  const focus = options?.focus ?? false;
   // Also held in a ref: the natural call shape is an inline array literal, and
   // a fresh identity per render would tear down and re-add the listeners on
   // every keystroke of whatever else lives in the host component.
@@ -74,10 +81,11 @@ export function useDismiss<T extends HTMLElement = HTMLElement>(
     if (!open) return;
     const dismiss = () => dismissRef.current();
 
-    // `mousedown`, not `click`: a click fires after the press has already moved
-    // focus and, for a menu whose items unmount on selection, can land on
-    // whatever slid under the cursor.
-    const onDown = (event: MouseEvent) => {
+    // A press (or, with `focus`, the focus arriving) outside. `mousedown`, not
+    // `click`: a click fires after the press has already moved focus and, for
+    // a menu whose items unmount on selection, can land on whatever slid under
+    // the cursor.
+    const onAway = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (ref.current?.contains(target)) return;
@@ -93,7 +101,8 @@ export function useDismiss<T extends HTMLElement = HTMLElement>(
     // listener on `document` is what the outside-press test actually needs
     // (a press on the page, not on the window chrome), and using one target
     // for both halves keeps the removal symmetric.
-    if (outside) document.addEventListener("mousedown", onDown);
+    if (outside) document.addEventListener("mousedown", onAway);
+    if (focus) document.addEventListener("focusin", onAway);
     document.addEventListener("keydown", onKey);
     if (onReflow) {
       // capture:true so a scroll inside any container — not just the window —
@@ -102,14 +111,15 @@ export function useDismiss<T extends HTMLElement = HTMLElement>(
       window.addEventListener("resize", onMove);
     }
     return () => {
-      if (outside) document.removeEventListener("mousedown", onDown);
+      if (outside) document.removeEventListener("mousedown", onAway);
+      if (focus) document.removeEventListener("focusin", onAway);
       document.removeEventListener("keydown", onKey);
       if (onReflow) {
         window.removeEventListener("scroll", onMove, true);
         window.removeEventListener("resize", onMove);
       }
     };
-  }, [open, outside, onReflow]);
+  }, [open, outside, onReflow, focus]);
 
   return ref;
 }

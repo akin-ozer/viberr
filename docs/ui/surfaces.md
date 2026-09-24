@@ -95,7 +95,8 @@ Intents behind `project.task.tsx` are explained in
   100", UI-14) (ruling 454). The
   account menu is a Radix ARIA menu (arrows, typeahead, Home/End, focus back to the
   avatar on close; ruling 166), fetched when the pointer or focus reaches the avatar or
-  on the first press, which opens it on arrival (ruling 454). It holds "Profile &
+  on the first press, which opens it on arrival unless Escape, a second press, or a press
+  or the focus elsewhere took it back first (ruling 454). It holds "Profile &
   preferences", "Switch project" where it applies, "Switch theme · <value>" (cycles in
   place without closing), "Instance settings" for org admins, and Sign out.
 - **The standalone-page header** (ruling 145) is the same header on the instance
