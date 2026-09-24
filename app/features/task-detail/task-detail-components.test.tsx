@@ -20,6 +20,7 @@ import {
   observationLabel,
 } from "./decision-packet";
 import { GithubTrace } from "./task-side-panels";
+import { MoveBackConfirm } from "./move-back-confirm";
 import { DiagnosticsPanel, TaskHero } from "./task-main-sections";
 import type { DiagnosticRecord } from "~/server/projections/task-query.server";
 import { ReleaseConfirm } from "./release-confirm";
@@ -770,11 +771,11 @@ function renderExec(
         canRunAgents
         liveAgentRuns={[]}
         operatorRunActive={false}
-        runBusy={false}
+        runInFlight={null}
         onRunAgent={onRunAgent}
         releaseBusy={false}
         onReleaseAgent={onReleaseAgent}
-        operatorBusy={false}
+        operatorInFlight={null}
         onRunOperator={onRunOperator}
         schedules={[]}
         scheduleBusy={false}
@@ -3250,6 +3251,39 @@ describe("DecisionPacket — pass-20 governance", () => {
     expect(onRequestMaintainer).toHaveBeenCalled();
   });
 
+  // Ruling 368: the escalation in flight shows itself on its button. It was
+  // never even disabled for its own request (only the resolve fetcher's), so a
+  // second click re-posted it and nothing said it was on its way.
+  // Canary: stop passing `escalating: escalateBusy` in task-detail-page.tsx
+  // (this renders the card directly, so drop `aria-busy` on the button instead).
+  it("ruling 368: an escalation in flight reads Sending…, busy, the loader spinning", () => {
+    const { container } = render(
+      <DecisionPacket
+        packet={withOptions([
+          { kind: "edit_goal", t: "Refine the goal", d: "", rec: true },
+          { kind: "archive_task", t: "Archive the task", d: "" },
+        ])}
+        busy={false}
+        canResolve
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive={false}
+        canDiscardBranch={false}
+        archiveDisclosure={{ taskKey: "VIB-5", branch: null, pendingRecommendations: 0, unownedPr: null, openPr: null, foreignHead: null }}
+        onResolveCustom={() => {}} onResolve={() => {}}
+        onRequestMaintainer={() => {}}
+        escalating
+        onAsk={() => {}}
+      />,
+    );
+    const send = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      b.textContent?.includes("Sending…"),
+    )!;
+    expect(send.getAttribute("aria-busy")).toBe("true");
+    expect(send.disabled).toBe(true);
+    expect(send.querySelector("svg.ico.spin")).not.toBeNull();
+  });
+
   it("F20-18: no escalation when at least one option is within reach", () => {
     const { container } = render(
       <DecisionPacket
@@ -4198,5 +4232,80 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
       />,
     );
     expect(queryByText("Write your own directive")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 368 on the GitHub trace: Complete merge and Force accept share the
+ * task page's run fetcher with interrupt and retry, so both went `disabled`
+ * (the .45 refused step) for ANY of them, their own included, with their
+ * resting labels. Deliver named its work but kept the branch glyph at .45.
+ * Canary: drop `aria-busy={forcing || undefined}` in task-side-panels.tsx.
+ */
+describe("ruling 368: the GitHub trace's requests in flight", () => {
+  const blocked = traceAcceptance({ blockedReason: "Waiting on a verdict." });
+  const trace = (props: Partial<ComponentProps<typeof GithubTrace>>) =>
+    render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask()}
+          acceptance={blocked}
+          onForceAccept={() => {}}
+          {...props}
+        />
+      </MemoryRouter>,
+    ).container;
+  const button = (c: HTMLElement, text: string) =>
+    Array.from(c.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      b.textContent?.includes(text),
+    );
+
+  it("a force-accept in flight reads Force-accepting…", () => {
+    const c = trace({ runIntent: "force-accept" });
+    const b = button(c, "Force-accepting…")!;
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    expect(b.disabled).toBe(true);
+    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+  });
+
+  it("an interrupt in flight leaves Force accept waiting, claiming nothing", () => {
+    const c = trace({ runIntent: "run-interrupt" });
+    const b = button(c, "Force accept")!;
+    expect(b.disabled).toBe(true);
+    expect(b.hasAttribute("aria-busy")).toBe(false);
+    expect(b.querySelector(".spin")).toBeNull();
+  });
+
+  it("a delivery in flight reads Delivering…, busy, the loader spinning", () => {
+    const c = trace({ onDeliver: () => {}, delivering: true });
+    const b = button(c, "Delivering…")!;
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+  });
+});
+
+/**
+ * Ruling 368's other half: a control that merely waits claims nothing. Both
+ * callers close the move-back dialog on the click, so its busy step is always
+ * another move in flight; the button used to read "Moving…" for it.
+ * Canary: put `{busy ? "Moving…" : "Move back"}` back in move-back-confirm.tsx.
+ */
+describe("ruling 368: the move-back dialog waits without claiming the move", () => {
+  it("busy: disabled, still reads Move back, no busy mark", () => {
+    const { getByText } = render(
+      <MoveBackConfirm
+        taskKey="VIB-151"
+        taskTitle="Compress long-running task timelines"
+        fromStageName="Review"
+        toStageName="In progress"
+        busy
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const b = getByText("Move back").closest("button")!;
+    expect(b.disabled).toBe(true);
+    expect(b.hasAttribute("aria-busy")).toBe(false);
   });
 });

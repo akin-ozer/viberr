@@ -8,6 +8,7 @@ import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { TaskLinks } from "~/shared/task-key-links";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
+import { inFlightIntent } from "~/ui/in-flight";
 import { Pill, ReadinessPill, ValidationPill, validationQuiet } from "~/ui/pill";
 import { Markdown } from "~/ui/markdown";
 import {
@@ -15,6 +16,7 @@ import {
   type DeployedSpecialistView,
   type LiveAgentRun,
   type OwnerAction,
+  type RunInFlight,
   type TaskMemberView,
 } from "./execution-profile";
 import type { TaskRunPrincipalView } from "./run-principal-view";
@@ -457,6 +459,11 @@ export function ExecutionSection({
   useActionFeedback(cancelFetcher);
   const agentBusy = agentFetcher.state !== "idle";
   const operatorBusy = operatorFetcher.state !== "idle";
+  // Ruling 368: a run control shows which request it sent — a run now or a
+  // scheduled one — read off its fetcher, because the control resets its
+  // picker to Now on the click.
+  const runKind = (intent: string | null): RunInFlight =>
+    intent === null ? null : intent === "schedule-action" ? "schedule" : "run";
   const releaseBusy = releaseFetcher.state !== "idle";
   const cancelBusy = cancelFetcher.state !== "idle";
 
@@ -544,11 +551,11 @@ export function ExecutionSection({
       canRunAgents={canRunAgents}
       liveAgentRuns={liveAgentRuns}
       operatorRunActive={operatorRunActive}
-      runBusy={agentBusy}
+      runInFlight={runKind(inFlightIntent(agentFetcher))}
       onRunAgent={onRunAgent}
       releaseBusy={releaseBusy}
       onReleaseAgent={onReleaseAgent}
-      operatorBusy={operatorBusy}
+      operatorInFlight={runKind(inFlightIntent(operatorFetcher))}
       onRunOperator={onRunOperator}
       schedules={schedules}
       scheduleBusy={cancelBusy}

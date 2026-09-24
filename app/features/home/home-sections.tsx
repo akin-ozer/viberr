@@ -634,22 +634,30 @@ export function StoreStrip({
           GROUP is pushed to the end rather than the first button. What stays
           inline is this row's own layout, not compensation for that. */}
       <span className="inline-row">
+        {/* Ruling 368: each request shows itself on the button that started
+            it (busy, the loader spinning, the label naming the work) and
+            cannot be pressed again mid-flight: Rebuild used to stay live and
+            reopen its confirm while the rebuild it had started was running. */}
         <button
           type="button"
           className="btn ghost sm"
           onClick={onRescan}
+          disabled={scanning}
+          aria-busy={scanning || undefined}
           title="Re-read the task files and update any board row that drifted from them"
         >
-          <Icon name="refresh" className={scanning ? "spin" : ""} />
+          <Icon name={scanning ? "loader" : "refresh"} className={scanning ? "spin" : ""} />
           {scanning ? "Scanning…" : "Re-scan store"}
         </button>
         <button
           type="button"
           className="btn ghost sm danger"
           onClick={onRebuild}
+          disabled={rebuilding}
+          aria-busy={rebuilding || undefined}
           title="Recovery: drop every projection row and re-project the whole store from files"
         >
-          <Icon name="memory" className={rebuilding ? "spin" : ""} />
+          <Icon name={rebuilding ? "loader" : "memory"} className={rebuilding ? "spin" : ""} />
           {rebuilding ? "Rebuilding…" : "Rebuild projections…"}
         </button>
       </span>

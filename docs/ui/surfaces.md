@@ -227,6 +227,14 @@ Intents behind `project.task.tsx` are explained in
   on the all-projects live scope the moment the new project is projected, still
   mid-request, and the live list would already carry the key being created. It reads
   the live list again once a refused submit has settled.
+- **Requests in flight** (rulings 147(a) and 368): the button that started a request
+  carries `aria-busy` (the sheet's .7 busy step, which wins over `.btn:disabled`), the
+  `loader` glyph with `spin` in place of its icon, and a label naming the work
+  ("Checking…", "Updating…", "Attaching…", "Scheduling…"). A sibling that merely waits
+  keeps the .45 disabled step and its resting label. When one fetcher serves several
+  buttons, `inFlightIntent(fetcher)` (`app/ui/in-flight.ts`) reads the intent it carries
+  off its form data, which survives `submitting` and the revalidating `loading` after;
+  a dialog that closes on its click is never the starter, so its confirm only waits.
 
 ## 3. Instance settings intents
 

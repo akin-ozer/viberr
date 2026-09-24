@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
 import type { AuthProviderView } from "~/server/org/org-view.server";
@@ -151,5 +151,70 @@ describe("SsoPanel", () => {
     expect(container.textContent).toContain(
       "overrides the credentials in this deployment",
     );
+  });
+});
+
+/**
+ * Ruling 368: a provider test or switch in flight shows itself on the button
+ * that started it. Both went `disabled` for the whole wait with their resting
+ * label, so a click painted the .45 refused step and said nothing while the
+ * server called the provider. Now the starter carries `aria-busy`, the loader
+ * spins and the label names the work; the row's other buttons only wait.
+ * Canary: drop `aria-busy={testing || undefined}` in `sso-panel.tsx`.
+ */
+describe("SsoPanel: the request in flight", () => {
+  const CONFIGURED: AuthProviderView = {
+    ...BLANK,
+    source: "app",
+    clientId: "Iv1.abc",
+    configuredInApp: true,
+    verifiedAt: "2026-09-20T10:00:00.000Z",
+    active: true,
+  };
+  function renderHeld() {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <SsoPanel
+              providers={[CONFIGURED, { ...CONFIGURED, provider: "google" }]}
+              callbackOrigin="https://viberr.example"
+            />
+          </ToastProvider>
+        ),
+        // Never answers: the test reads the wait itself.
+        action: () => new Promise(() => {}),
+      },
+    ]);
+    return render(<Stub initialEntries={["/org/settings"]} />).container;
+  }
+  const rowButtons = (c: HTMLElement, i: number) => [
+    ...c.querySelectorAll<HTMLButtonElement>(".conn-row")[i]!.querySelectorAll<HTMLButtonElement>("button.btn"),
+  ];
+
+  it("Test says it is testing, on that provider's row only", async () => {
+    const c = renderHeld();
+    const test = rowButtons(c, 0).find((b) => b.textContent === "Test")!;
+    fireEvent.click(test);
+    await waitFor(() => expect(test.getAttribute("aria-busy")).toBe("true"));
+    expect(test.textContent).toBe("Testing…");
+    expect(test.disabled).toBe(true);
+    expect(test.querySelector("svg.ico.spin")).not.toBeNull();
+    const turnOff = rowButtons(c, 0).find((b) => b.textContent === "Turn off")!;
+    expect(turnOff.disabled).toBe(true);
+    expect(turnOff.hasAttribute("aria-busy")).toBe(false);
+    // The other provider's Test waits too, and claims nothing.
+    const other = rowButtons(c, 1).find((b) => b.textContent === "Test")!;
+    expect(other.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("Turn off says it is turning off", async () => {
+    const c = renderHeld();
+    const turnOff = rowButtons(c, 1).find((b) => b.textContent === "Turn off")!;
+    fireEvent.click(turnOff);
+    await waitFor(() => expect(turnOff.getAttribute("aria-busy")).toBe("true"));
+    expect(turnOff.textContent).toBe("Turning off…");
+    expect(rowButtons(c, 1).find((b) => b.textContent === "Test")!.hasAttribute("aria-busy")).toBe(false);
   });
 });

@@ -1880,6 +1880,29 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
     expect(push.disabled).toBe(true);
   });
 
+  // Ruling 368: the export in flight shows itself on Export to S3 now (busy,
+  // the loader, "Exporting…"); Remove, which shares the fetcher, only waits.
+  // Canary: drop `aria-busy={exporting || undefined}` in org-settings-page.tsx.
+  it("ruling 368: an export in flight reads Exporting… and Remove only waits", async () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => <ToastProvider>{page(S3)}</ToastProvider>,
+        // Never answers: the test reads the wait itself.
+        action: () => new Promise(() => {}),
+      },
+    ]);
+    const { getByText } = render(<Stub initialEntries={["/org/settings"]} />);
+    const push = getByText("Export to S3 now").closest("button")!;
+    fireEvent.click(push);
+    await waitFor(() => expect(push.getAttribute("aria-busy")).toBe("true"));
+    expect(push.textContent).toBe("Exporting…");
+    expect(push.querySelector("svg.ico.spin")).not.toBeNull();
+    const remove = getByText("Remove", { selector: ".audit-s3-actions button" });
+    expect(remove.hasAttribute("disabled")).toBe(true);
+    expect(remove.hasAttribute("aria-busy")).toBe(false);
+  });
+
   it("ruling 147: an incomplete target is refused in the modal, field by field", () => {
     const { getByText, getByPlaceholderText } = renderPanel(page(null));
     fireEvent.click(getByText("Set up S3 target").closest("button")!);

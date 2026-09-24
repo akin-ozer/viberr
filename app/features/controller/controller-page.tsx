@@ -401,6 +401,7 @@ function ConversationRuntime({
           onInterrupt={(id) => setConfirmInterrupt(id)}
           canInterrupt={view.canInterruptTurn}
           interrupting={stopping}
+          interruptingRunId={stopping ? String(stop.formData?.get("runId") ?? "") : null}
           consoleOpen={consoleOpen}
           console={<AgentLogsPanel {...logProps} />}
         />
@@ -742,7 +743,9 @@ function Composer({
           className="btn primary sm"
           onClick={submit}
           disabled={busy || disabled || !text.trim()}
+          aria-busy={busy || undefined}
         >
+          {busy && <Icon name="loader" className="spin" />}
           {busy ? "Sending…" : "Send"}
         </button>
       </div>
@@ -1041,6 +1044,11 @@ function GoalCard({
   const [showAllHistory, setShowAllHistory] = useState(false);
 
   const busy = op.state !== "idle";
+  // Ruling 368: every goal control rides this one fetcher, so the one whose
+  // op (and, for a link, whose index) is in flight shows the work; the rest
+  // only wait.
+  const opInFlight = busy ? String(op.formData?.get("op") ?? "") : null;
+  const opIndex = busy ? String(op.formData?.get("index") ?? "") : null;
   const act = (fields: Record<string, string>) => {
     const body = new FormData();
     body.set("_csrf", csrf);
@@ -1124,17 +1132,33 @@ function GoalCard({
                     type="button"
                     className="btn ghost sm"
                     disabled={busy}
+                    aria-busy={(opInFlight === "retry_link" && opIndex === String(l.index)) || undefined}
                     onClick={() => act({ op: "retry_link", index: String(l.index) })}
                   >
-                    Retry
+                    {opInFlight === "retry_link" && opIndex === String(l.index) ? (
+                      <>
+                        <Icon name="loader" className="spin" />
+                        Retrying…
+                      </>
+                    ) : (
+                      "Retry"
+                    )}
                   </button>
                   <button
                     type="button"
                     className="btn ghost sm"
                     disabled={busy}
+                    aria-busy={(opInFlight === "skip_link" && opIndex === String(l.index)) || undefined}
                     onClick={() => ask({ kind: "skip", index: l.index, title: l.title })}
                   >
-                    Skip
+                    {opInFlight === "skip_link" && opIndex === String(l.index) ? (
+                      <>
+                        <Icon name="loader" className="spin" />
+                        Skipping…
+                      </>
+                    ) : (
+                      "Skip"
+                    )}
                   </button>
                 </span>
               )}
@@ -1195,18 +1219,22 @@ function GoalCard({
               type="button"
               className="btn sm"
               disabled={busy}
+              aria-busy={opInFlight === "resume" || undefined}
               onClick={() => act({ op: "resume" })}
             >
-              Resume
+              {opInFlight === "resume" && <Icon name="loader" className="spin" />}
+              {opInFlight === "resume" ? "Resuming…" : "Resume"}
             </button>
           ) : (
             <button
               type="button"
               className="btn ghost sm"
               disabled={busy}
+              aria-busy={opInFlight === "pause" || undefined}
               onClick={() => act({ op: "pause" })}
             >
-              Pause
+              {opInFlight === "pause" && <Icon name="loader" className="spin" />}
+              {opInFlight === "pause" ? "Pausing…" : "Pause"}
             </button>
           )}
           {/* Ruling 419(c): cancel is terminal (resume refuses a cancelled
@@ -1216,9 +1244,11 @@ function GoalCard({
             type="button"
             className="btn ghost sm danger"
             disabled={busy}
+            aria-busy={opInFlight === "cancel" || undefined}
             onClick={() => ask({ kind: "cancel" })}
           >
-            Cancel goal
+            {opInFlight === "cancel" && <Icon name="loader" className="spin" />}
+            {opInFlight === "cancel" ? "Cancelling…" : "Cancel goal"}
           </button>
         </footer>
       )}

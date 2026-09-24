@@ -4,6 +4,7 @@ import { oauthCallbackUrl } from "~/shared/auth/auth-paths";
 import { LocalCalendarDate } from "~/ui/local-time";
 import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
+import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { ConfirmDelete, MiniModal } from "./mini-modal";
@@ -198,6 +199,10 @@ export function SsoPanel({
   const [modal, setModal] = useState<AuthProviderView | null>(null);
   const [confirm, setConfirm] = useState<AuthProviderView | null>(null);
   const action = useOrgAction();
+  // Ruling 368: the row and the button whose request is in flight. The rest
+  // of the row's controls only wait.
+  const inFlight = inFlightIntent(action.fetcher);
+  const inFlightProvider = action.fetcher.formData?.get("provider") ?? null;
 
   const activeCount = providers.filter((p) => p.active).length;
 
@@ -228,6 +233,8 @@ export function SsoPanel({
           const meta = PROVIDER_META[p.provider];
           const callback = oauthCallbackUrl(callbackOrigin, p.provider);
           const proved = p.verifiedAt !== null;
+          const testing = inFlight === "oauth-test" && inFlightProvider === p.provider;
+          const toggling = inFlight === "oauth-toggle" && inFlightProvider === p.provider;
           return (
             <div className="conn-row" key={p.provider}>
               <span className="conn-ico">
@@ -297,11 +304,13 @@ export function SsoPanel({
                   type="button"
                   className="btn ghost sm"
                   disabled={action.busy}
+                  aria-busy={testing || undefined}
                   onClick={() =>
                     action.submit({ intent: "oauth-test", provider: p.provider })
                   }
                 >
-                  Test
+                  {testing && <Icon name="loader" className="spin" />}
+                  {testing ? "Testing…" : "Test"}
                 </button>
               )}
               {p.configuredInApp && (
@@ -309,6 +318,7 @@ export function SsoPanel({
                   type="button"
                   className="btn ghost sm"
                   disabled={action.busy || (!proved && !p.active)}
+                  aria-busy={toggling || undefined}
                   title={
                     !proved && !p.active
                       ? "Test the credentials first: a sign-in method is only offered once the provider has accepted it"
@@ -322,7 +332,14 @@ export function SsoPanel({
                     })
                   }
                 >
-                  {p.active ? "Turn off" : "Turn on"}
+                  {toggling && <Icon name="loader" className="spin" />}
+                  {p.active
+                    ? toggling
+                      ? "Turning off…"
+                      : "Turn off"
+                    : toggling
+                      ? "Turning on…"
+                      : "Turn on"}
                 </button>
               )}
               {p.configuredInApp && (

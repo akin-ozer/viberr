@@ -1987,3 +1987,76 @@ describe("the console on a live store (ruling 457)", () => {
     expect(foot()).toContain("Live tail disconnected");
   });
 });
+
+/**
+ * Ruling 368: a run request shows itself on the button that started it. The
+ * task page's run fetcher carries interrupts, retries and merges alike, so
+ * Interrupt and Retry used to go `disabled` for ANY of them with their resting
+ * glyph and label: the one that was pressed painted the .45 refused step and
+ * said nothing. The page now names the run (or agent) in flight; that button
+ * carries `aria-busy`, the loader spinning and the work's own name.
+ * Canary: drop `aria-busy` from Interrupt in `runs-panels.tsx`.
+ */
+describe("ruling 368: run requests in flight", () => {
+  it("Interrupt reads Interrupting… for the run being stopped", () => {
+    const { getByText } = render(
+      <LiveRunPanel
+        runtime={[mkRun({})]}
+        onViewLogs={() => {}}
+        onInterrupt={() => {}}
+        canInterrupt
+        interrupting
+        interruptingRunId="run_1"
+      />,
+    );
+    const b = getByText("Interrupting…").closest("button")!;
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    expect(b.disabled).toBe(true);
+    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+  });
+
+  it("another request in flight leaves Interrupt waiting, claiming nothing", () => {
+    const { getByText } = render(
+      <LiveRunPanel
+        runtime={[mkRun({})]}
+        onViewLogs={() => {}}
+        onInterrupt={() => {}}
+        canInterrupt
+        interrupting
+        interruptingRunId={null}
+      />,
+    );
+    const b = getByText("Interrupt").closest("button")!;
+    expect(b.disabled).toBe(true);
+    expect(b.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("Retry reads Retrying on Codex… when the shown agent's retry is in flight", () => {
+    const failed = mkRun({
+      state: "error",
+      lifecycle: "error",
+      failureKind: "quota",
+      failedBackendUnavailable: true,
+      altBackend: "codex",
+    });
+    const props = {
+      runtime: [failed],
+      sel: "primary",
+      onSel: () => {},
+      onRetryBackend: () => {},
+      retryBackends: ["claude", "codex"] as const,
+      linesByThread: { primary: [] },
+      retrying: true,
+    };
+    const { getByText, rerender } = render(<Logs {...props} retryingProfileId="developer" />);
+    const b = getByText("Retrying on Codex…").closest("button")!;
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+
+    // Another agent's retry (or any other run request): this one only waits.
+    rerender(<Logs {...props} retryingProfileId="reviewer" />);
+    const waiting = getByText("Retry on Codex").closest("button")!;
+    expect(waiting.disabled).toBe(true);
+    expect(waiting.hasAttribute("aria-busy")).toBe(false);
+  });
+});

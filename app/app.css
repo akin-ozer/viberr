@@ -6265,10 +6265,11 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
    "Schedule", and the button's new width moved the picker under the pointer
    that had just used it (the steer or prompt field before it takes up the
    difference). Each start holds the width of its widest label, measured in
-   Inter 700 at .btn.sm: "Run operator" 115px (7.1875rem), and the dispatch's
-   "Schedule" 94px (5.875rem), each rounded up for a pixel of slack. */
-.op-run > .run-go { min-width: 7.25rem; }
-.op-run.agent-run > .run-go { min-width: 6rem; }
+   Inter 700 at .btn.sm. Since ruling 368 reached the run controls, that is the
+   in-flight "Scheduling…" (117px) on both, wider than "Run operator" (115px)
+   and "Schedule" (94px), so one floor serves the two starts, rounded up for a
+   pixel of slack: the row no longer shifts on the click either. */
+.op-run > .run-go { min-width: 7.4rem; }
 /* The baked-in when-picker: a size variant of the base select rule. */
 .run-when { flex: none; font-size: .75rem; padding: .25rem .375rem; }
 /* Pending scheduled runs listed under a control take the full control width. */

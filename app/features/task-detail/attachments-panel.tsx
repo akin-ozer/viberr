@@ -182,8 +182,10 @@ function AttachFile() {
   const error = fetcher.data && !fetcher.data.ok ? fetcher.data.error : null;
   return (
     <div className="attach-add">
-      <label className={`btn ghost sm${busy ? " busy" : ""}`}>
-        <Icon name={busy ? "refresh" : "file"} className={busy ? "spin" : ""} />
+      {/* Ruling 368: the upload in flight is `aria-busy` (the sheet's .7 busy
+          step) with the loader spinning, the same shape as every busy button. */}
+      <label className={`btn ghost sm${busy ? " busy" : ""}`} aria-busy={busy || undefined}>
+        <Icon name={busy ? "loader" : "file"} className={busy ? "spin" : ""} />
         {busy ? "Attaching…" : "Attach a file"}
         <input
           ref={input}

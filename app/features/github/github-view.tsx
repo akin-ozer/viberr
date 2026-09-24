@@ -2,6 +2,7 @@ import { useFetcher, useNavigate } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
+import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useActionToast } from "~/ui/use-action-toast";
@@ -515,8 +516,11 @@ export function GithubViewPage({
   // credential is configured (F6). Only offer it once a PAT is bound; the
   // no-credential card still shows "Fix in Settings" / "Attach credential".
   const hasCredential = data.credential.source === "pat";
-  const busy =
-    reconcileFetcher.state !== "idle" || grantFetcher.state !== "idle";
+  // Ruling 368: each request shows itself on the button that started it; the
+  // other one only waits at the disabled step.
+  const reconciling = reconcileFetcher.state !== "idle";
+  const rechecking = grantFetcher.state !== "idle";
+  const busy = reconciling || rechecking;
 
   // The cred-warn action slot: Re-check scopes (lives here until the
   // Phase-9 Settings card exists) + the mock's Fix in Settings navigation.
@@ -528,10 +532,11 @@ export function GithubViewPage({
           className="btn sm"
           onClick={grantScope}
           disabled={busy}
+          aria-busy={rechecking || undefined}
           title="Re-check the credential's scopes against GitHub"
         >
-          <Icon name="check" />
-          Re-check scopes
+          <Icon name={rechecking ? "loader" : "check"} className={rechecking ? "spin" : ""} />
+          {rechecking ? "Checking…" : "Re-check scopes"}
         </button>
       )}
       <button
@@ -551,7 +556,7 @@ export function GithubViewPage({
     <CredentialManageActions
       configured={data.credential.source === "pat"}
       canManage={canGrant}
-      busy={credFetcher.state !== "idle"}
+      inFlight={inFlightIntent(credFetcher)}
       onSet={() =>
         credFetcher.submit(
           { intent: "set-credential", _csrf: csrf },
@@ -654,10 +659,11 @@ export function GithubViewPage({
               className="btn ghost sm"
               onClick={reconcile}
               disabled={busy}
+              aria-busy={reconciling || undefined}
               title="Update branch/PR status from GitHub now"
             >
-              <Icon name="refresh" />
-              Update status
+              <Icon name={reconciling ? "loader" : "refresh"} className={reconciling ? "spin" : ""} />
+              {reconciling ? "Updating…" : "Update status"}
             </button>
           )}
           {data.project.repo && (

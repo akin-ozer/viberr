@@ -151,6 +151,30 @@ describe("AttachmentsPanel attach control (F39-6)", () => {
     expect(input!.accept).not.toContain(".svg");
   });
 
+  // Ruling 368: the upload in flight is `aria-busy` on the control that
+  // started it, the loader spinning and the label naming the work.
+  // Canary: drop `aria-busy` from the label in attachments-panel.tsx.
+  it("ruling 368: an upload in flight reads Attaching…, busy, the loader spinning", async () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/t",
+        Component: () => <AttachmentsPanel base={BASE} attachments={[]} canAttach />,
+        // Never answers: the test reads the wait itself.
+        action: () => new Promise(() => {}),
+      },
+    ]);
+    const { container } = render(<Stub initialEntries={["/t"]} />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, {
+      target: { files: [new File(["a: 1"], "fixture.yaml", { type: "text/yaml" })] },
+    });
+    const label = input.closest("label")!;
+    await waitFor(() => expect(label.getAttribute("aria-busy")).toBe("true"));
+    expect(label.textContent).toBe("Attaching…");
+    expect(input.disabled).toBe(true);
+    expect(label.querySelector("svg.ico.spin")).not.toBeNull();
+  });
+
   it("stays silent for a viewer who may NOT attach and has no browser agent", () => {
     const { container } = renderPanel(
       <AttachmentsPanel base={BASE} attachments={[]} />,

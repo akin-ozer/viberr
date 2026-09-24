@@ -111,14 +111,22 @@ export function KbPanel({
               >
                 <FolderIco />
               </button>
+              {/* Ruling 368: the probe in flight shows itself here — busy, the
+                  loader spinning, a name that says the work — and a second
+                  press cannot re-submit it. */}
               <button
                 type="button"
                 className="stg-x"
-                title="Re-scan folder to refresh the doc count"
-                aria-label={"Re-scan " + kb.name}
+                title={reindexing === kb.id ? "Re-scanning…" : "Re-scan folder to refresh the doc count"}
+                aria-label={(reindexing === kb.id ? "Re-scanning " : "Re-scan ") + kb.name}
+                disabled={reindexing === kb.id}
+                aria-busy={reindexing === kb.id || undefined}
                 onClick={() => onReindex(kb)}
               >
-                <Icon name="refresh" className={reindexing === kb.id ? "spin" : ""} />
+                <Icon
+                  name={reindexing === kb.id ? "loader" : "refresh"}
+                  className={reindexing === kb.id ? "spin" : ""}
+                />
               </button>
               <button
                 type="button"
@@ -328,14 +336,20 @@ export function McpPanel({
               )}
             </span>
             <span className="rsrc-acts">
+              {/* Ruling 368: same shape as the KB re-scan above. */}
               <button
                 type="button"
                 className="stg-x"
-                title="Test connection"
-                aria-label={"Test " + m.name}
+                title={testing === m.id ? "Testing…" : "Test connection"}
+                aria-label={(testing === m.id ? "Testing " : "Test ") + m.name}
+                disabled={testing === m.id}
+                aria-busy={testing === m.id || undefined}
                 onClick={() => onTest(m)}
               >
-                <Icon name="refresh" className={testing === m.id ? "spin" : ""} />
+                <Icon
+                  name={testing === m.id ? "loader" : "refresh"}
+                  className={testing === m.id ? "spin" : ""}
+                />
               </button>
               <button
                 type="button"

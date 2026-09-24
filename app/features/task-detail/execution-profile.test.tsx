@@ -122,11 +122,11 @@ function renderExec(props: Partial<ComponentProps<typeof ExecutionProfile>> = {}
         canRunAgents
         liveAgentRuns={[]}
         operatorRunActive={false}
-        runBusy={false}
+        runInFlight={null}
         onRunAgent={() => {}}
         releaseBusy={false}
         onReleaseAgent={() => {}}
-        operatorBusy={false}
+        operatorInFlight={null}
         onRunOperator={() => {}}
         schedules={[]}
         scheduleBusy={false}
@@ -672,11 +672,83 @@ describe("the engaged-agent card names the live run's lifecycle", () => {
 });
 
 /**
+ * Ruling 368: a run control's request shows itself on the control's own button.
+ * The operator control read "Running…" for every request, a SCHEDULE included,
+ * with the resting glyph and the .45 refused step (the picker resets to Now on
+ * the click, so the control could not tell what it had sent); the agent control
+ * said nothing at all. The page now reads the request off each fetcher, and the
+ * button carries `aria-busy`, the loader spinning, and the work's own name.
+ * Canary: drop `aria-busy` from the operator control's button in execution-profile.tsx.
+ */
+describe("ruling 368: the run controls name the request in flight", () => {
+  const operatorButton = (c: HTMLElement) =>
+    c.querySelectorAll<HTMLButtonElement>(".op-run")[0]!.querySelector<HTMLButtonElement>(
+      "button.btn",
+    )!;
+  const agentButton = (c: HTMLElement) =>
+    c.querySelector<HTMLButtonElement>(".agent-run > button.btn")!;
+
+  it("an operator schedule in flight reads Scheduling…, busy, the loader spinning", () => {
+    const { container } = renderExec({
+      task: ownedTask(),
+      runPrincipal: connectedPrincipal(),
+      operatorInFlight: "schedule",
+    });
+    const b = operatorButton(container);
+    expect(b.textContent).toBe("Scheduling…");
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    expect(b.disabled).toBe(true);
+    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+    // The agent control's request is not this one.
+    expect(agentButton(container).hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("an operator run in flight reads Starting…", () => {
+    const { container } = renderExec({
+      task: ownedTask(),
+      runPrincipal: connectedPrincipal(),
+      operatorInFlight: "run",
+    });
+    expect(operatorButton(container).textContent).toBe("Starting…");
+    expect(operatorButton(container).getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("an agent run and an agent schedule in flight read Starting… and Scheduling…", () => {
+    const run = renderExec({
+      task: ownedTask(),
+      runPrincipal: connectedPrincipal(),
+      runInFlight: "run",
+    });
+    const b = agentButton(run.container);
+    expect(b.textContent).toBe("Starting…");
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(operatorButton(run.container).hasAttribute("aria-busy")).toBe(false);
+    cleanup();
+
+    const sched = renderExec({
+      task: ownedTask(),
+      runPrincipal: connectedPrincipal(),
+      runInFlight: "schedule",
+    });
+    expect(agentButton(sched.container).textContent).toBe("Scheduling…");
+  });
+
+  it("at rest: the resting labels, no busy mark", () => {
+    const { container } = renderExec({ task: ownedTask(), runPrincipal: connectedPrincipal() });
+    expect(operatorButton(container).textContent).toBe("Run operator");
+    expect(operatorButton(container).hasAttribute("aria-busy")).toBe(false);
+    expect(agentButton(container).textContent).toBe("Run");
+  });
+});
+
+/**
  * Better-ui review 2026-09-24: the when-picker turns a start into "Schedule",
  * and the button's new width slid the picker under the pointer that had just
- * used it. `app.css` holds each start at the width of its widest label, keyed
- * on `.op-run > .run-go` and `.op-run.agent-run > .run-go`. This pins that the
- * rendered starts are what those selectors select, on both sides of the
+ * used it. `app.css` holds each start at the width of its widest label (the
+ * in-flight "Scheduling…" since ruling 368), keyed on `.op-run > .run-go`,
+ * which the dispatch's `.op-run.agent-run` row matches too. This pins that the
+ * rendered starts are what that selector selects, on both sides of the
  * switch. Canary: drop `run-go` from either button.
  */
 describe("a run control's start keeps its width rule across Run and Schedule", () => {

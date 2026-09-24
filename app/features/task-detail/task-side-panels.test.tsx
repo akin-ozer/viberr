@@ -107,7 +107,7 @@ function renderPanel(patch: Partial<TaskDetail> = {}) {
           onAccept={() => {}}
           onTransition={() => {}}
           transitionBusy={false}
-          acceptBusy={false}
+          acceptInFlight={null}
           dispositionBusy={false}
         />
       ),
@@ -138,7 +138,7 @@ function renderAsContributor(patch: Partial<TaskDetail> = {}, myRole = "contribu
           onAccept={() => {}}
           onTransition={() => {}}
           transitionBusy={false}
-          acceptBusy={false}
+          acceptInFlight={null}
           dispositionBusy={false}
         />
       ),

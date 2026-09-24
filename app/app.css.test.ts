@@ -4380,10 +4380,11 @@ describe("better-ui review 2026-09-24: the small leftovers", () => {
   });
 
   it("a run control's start holds the width of its widest label", () => {
-    // CANARY: drop either min-width, and the when-picker slides 21px (operator)
-    // or 32px (dispatch) under the pointer that just switched it to Schedule.
-    expect(cascade(plain, ".op-run > .run-go").get("min-width")).toBe("7.25rem");
-    expect(cascade(plain, ".op-run.agent-run > .run-go").get("min-width")).toBe("6rem");
+    // CANARY: drop the min-width, and the when-picker slides 21px (operator)
+    // or 32px (dispatch) under the pointer that just switched it to Schedule,
+    // and the row shifts again when the start reads "Scheduling…" (ruling 368).
+    // One floor serves both starts: "Scheduling…" is the widest label on each.
+    expect(cascade(plain, ".op-run > .run-go").get("min-width")).toBe("7.4rem");
     // The widths were measured at these metrics; a change here re-opens them.
     const sm = cascade(plain, ".btn.sm");
     expect(sm.get("font-size")).toBe(".75rem");
