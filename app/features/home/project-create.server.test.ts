@@ -691,6 +691,106 @@ describe("ruling 462: createRepository creates the repository before the project
     expect(existsSync(join(store.dataRoot, "projects", "website"))).toBe(false);
   });
 
+  /** GitHub makes the repository but answers the create 502, and refuses a
+   *  second create of the same name the way it does ("name already exists"). */
+  function madeThenBadGateway(owner: string, name: string) {
+    let made = false;
+    return fakeGithubFetch({
+      [`GET /repos/${owner}/${name}`]: () =>
+        made
+          ? { body: { default_branch: "main", permissions: { push: true } } }
+          : { status: 404, body: { message: "Not Found" } },
+      "POST /user/repos": () => {
+        if (made) {
+          return {
+            status: 422,
+            body: {
+              message: "Repository creation failed.",
+              errors: [{ message: "name already exists on this account" }],
+            },
+          };
+        }
+        made = true;
+        return { status: 502, body: { message: "Server Error" } };
+      },
+    });
+  }
+
+  it("a create GitHub made but answered 502 is sent once, recorded as made, and the project uses it (R-repo-1)", async () => {
+    // CANARY: let the client retry the POST and the retry's 422 says "Nothing
+    // was created" about a repository Viberr just made, with no audit row;
+    // skip the read-back after a 5xx and it refuses without looking.
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = madeThenBadGateway("akin-ozer", "website");
+
+    const result = await createProject(store.db, website(), ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+    });
+
+    expect(gh.callsTo("POST /user/repos")).toHaveLength(1);
+    expect(result.repoNote).toBe(
+      "Created akin-ozer/website on GitHub (private): GitHub answered 502, but the repository is there now.",
+    );
+    expect(result.repoWarning).toBeNull();
+    expect(
+      listAuditEvents(store.db, { action: "project.repository.created" }).map((e) => e.details),
+    ).toEqual([{ repo: "akin-ozer/website", private: true }]);
+    expect(readProjectFile({ projectSlug: result.slug, dataRoot: store.dataRoot })?.parsed.frontmatter.repo).toBe(
+      "akin-ozer/website",
+    );
+  });
+
+  it("a create whose connection dropped is read back the same way (R-repo-1)", async () => {
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    let made = false;
+    const reads = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": () =>
+        made
+          ? { body: { default_branch: "main", permissions: { push: true } } }
+          : { status: 404, body: { message: "Not Found" } },
+    });
+    const fetchImpl: typeof fetch = async (input, init) => {
+      if ((init?.method ?? "GET").toUpperCase() === "POST") {
+        made = true;
+        throw new TypeError("socket hang up");
+      }
+      return reads.fetchImpl(input, init);
+    };
+
+    const result = await createProject(store.db, website(), ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl,
+    });
+
+    expect(result.repoNote).toBe(
+      "Created akin-ozer/website on GitHub (private): the connection dropped before GitHub answered, but the repository is there now.",
+    );
+    expect(listAuditEvents(store.db, { action: "project.repository.created" })).toHaveLength(1);
+  });
+
+  it("a 5xx that made nothing refuses without saying nothing was created (R-repo-1)", async () => {
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": { status: 404, body: { message: "Not Found" } },
+      "POST /user/repos": { status: 502, body: { message: "Server Error" } },
+    });
+
+    const refused = createProject(store.db, website(), ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+    });
+    await expect(refused).rejects.toThrow(
+      "GitHub answered 502 when asked to create akin-ozer/website: Server Error. No project was written; ask again.",
+    );
+    expect(gh.callsTo("POST /user/repos")).toHaveLength(1);
+    expect(existsSync(join(store.dataRoot, "projects", "website"))).toBe(false);
+    expect(listAuditEvents(store.db, { action: "project.repository.created" })).toHaveLength(0);
+  });
+
   it("an existing repository makes the flag a no-op, and the reply says it was used", async () => {
     // CANARY: POST whatever the probe said and this sees a create call.
     const store = setupTestStore(ctx);

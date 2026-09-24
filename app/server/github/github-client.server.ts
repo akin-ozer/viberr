@@ -99,6 +99,14 @@ export interface GithubRequestOptions {
   searchParams?: Record<string, string | number>;
   /** Override the per-request timeout (P13-UI-04). */
   timeoutMs?: number;
+  /**
+   * False for a write that must not be sent twice. The client retries once on
+   * a 5xx, and a create GitHub made before answering 502 is refused by that
+   * retry ("name already exists", "sha wasn't supplied"), which reads as
+   * "nothing was made" (pre-merge review of pass 40, R-repo-1). Such a caller
+   * takes the 5xx instead and reads back what GitHub holds.
+   */
+  retryServerError?: boolean;
 }
 
 export type GithubMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -257,8 +265,9 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
     let response: Response;
     try {
       response = await doFetch(method, url.toString(), requestOptions);
-      // Exactly one retry, 5xx only (no retry storms).
-      if (response.status >= 500) {
+      // Exactly one retry, 5xx only (no retry storms), unless the caller's
+      // write must not be sent twice.
+      if (response.status >= 500 && requestOptions.retryServerError !== false) {
         response = await doFetch(method, url.toString(), requestOptions);
       }
     } catch (error) {

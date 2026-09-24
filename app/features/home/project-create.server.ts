@@ -339,30 +339,60 @@ async function createRepositoryWhenMissing(
   };
   const description = request.description?.trim();
   if (description) body.description = description;
+  // Sent once: the client's 5xx retry would turn a create GitHub made before
+  // failing into a 422 "name already exists", and so into "Nothing was
+  // created" (R-repo-1).
   const created = await createGithubClient(clientOptions).request(
     "POST",
     personal ? "/user/repos" : `/orgs/${encodeURIComponent(owner)}/repos`,
     z.unknown(),
-    { body },
+    { body, retryServerError: false },
   );
-  if (!created.ok) {
-    throw AppError.validation(repositoryRefusal(created, owner, repo, personal));
+  const made = `Created ${repo} on GitHub (${request.private ? "private" : "public"})`;
+  if (created.ok) {
+    recordRepositoryCreated(db, target.slug, repo, request.private, actor);
+    return {
+      probe: await probeRemoteRepo(token, repo, fetchImpl),
+      note: `${made}.`,
+    };
   }
-  // A GitHub-side write the person asked for: audited the moment it happened,
-  // so a project write that fails after it still leaves the repository on the
-  // record.
+  // A 5xx or a dropped connection does not say whether GitHub made it (a slow
+  // `auto_init` create can outlive the gateway), so GitHub is asked. The probe
+  // said 404 a moment ago; a repository there now is the one this call made.
+  const unanswered =
+    created.kind === "network" || (created.kind === "http" && created.status >= 500);
+  if (unanswered) {
+    const after = await probeRemoteRepo(token, repo, fetchImpl);
+    if (after.status === "ok" || after.status === "read_only") {
+      recordRepositoryCreated(db, target.slug, repo, request.private, actor);
+      const answer =
+        created.kind === "network"
+          ? "the connection dropped before GitHub answered"
+          : `GitHub answered ${created.status}`;
+      return { probe: after, note: `${made}: ${answer}, but the repository is there now.` };
+    }
+  }
+  throw AppError.validation(repositoryRefusal(created, owner, repo, personal));
+}
+
+/** A GitHub-side write the person asked for: audited the moment GitHub is
+ *  known to have made it, so a project write that fails after it still leaves
+ *  the repository on the record. */
+function recordRepositoryCreated(
+  db: DatabaseSync,
+  slug: string,
+  repo: string,
+  isPrivate: boolean,
+  actor: { userId: string; label: string },
+): void {
   recordAudit(db, {
     action: "project.repository.created",
     actor,
     subjectKind: "project",
-    subjectId: target.slug,
-    projectSlug: target.slug,
-    details: { repo, private: request.private },
+    subjectId: slug,
+    projectSlug: slug,
+    details: { repo, private: isPrivate },
   });
-  return {
-    probe: await probeRemoteRepo(token, repo, fetchImpl),
-    note: `Created ${repo} on GitHub (${request.private ? "private" : "public"}).`,
-  };
 }
 
 /**

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -128,6 +129,60 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     const timeline = readTaskFile({ projectSlug: store.slug, taskKey: "JC-1", dataRoot: store.dataRoot })!
       .parsed.timeline;
     expect(timeline.some((e) => e.text.includes("Bootstrapped the repository"))).toBe(false);
+  });
+
+  /** An empty repository whose first commit lands on the first PUT, which
+   *  GitHub answers 502; a second PUT meets the file and is refused. */
+  function landedThenBadGateway(headCommit: (putMessage: string) => { message: string; parents: unknown[] }) {
+    let landed = false;
+    let putMessage = "";
+    return fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: () =>
+        landed ? { body: { object: { sha: ROOT } } } : EMPTY_REF,
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: (call) => {
+        if (landed) return { status: 422, body: { message: 'Invalid request.\n\n"sha" wasn\'t supplied.' } };
+        landed = true;
+        putMessage = z.object({ message: z.string() }).parse(call.body).message;
+        return { status: 502, body: { message: "Server Error" } };
+      },
+      [`GET ${REPO_PATH}/git/commits/${ROOT}`]: () => ({ body: { sha: ROOT, ...headCommit(putMessage) } }),
+    });
+  }
+
+  it("R-repo-1: a first commit that landed but answered 502 is sent once and recorded as the bootstrap", async () => {
+    // CANARY: let the client retry the PUT and its 422 sends the race arm to
+    // `exists`: Viberr's own first commit gets no audit row and no timeline
+    // line. Skip the head-commit read and it is `exists` too.
+    const store = setup();
+    const gh = landedThenBadGateway((message) => ({ message, parents: [] }));
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug, taskKey: "JC-1" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
+    expect(result).toEqual({ status: "bootstrapped", defaultBranch: "main", how: "initial_commit", sha: ROOT });
+    expect(listAuditEvents(store.db).filter((e) => e.action === "github.repo.bootstrapped")).toHaveLength(1);
+    const timeline = readTaskFile({ projectSlug: store.slug, taskKey: "JC-1", dataRoot: store.dataRoot })!
+      .parsed.timeline;
+    expect(timeline.some((e) => e.text.includes("Bootstrapped the repository"))).toBe(true);
+  });
+
+  it("R-repo-1: after a 502, a branch whose head is not this write's first commit answers `exists` and writes nothing", async () => {
+    const store = setup();
+    const gh = landedThenBadGateway(() => ({ message: "Add a readme by hand", parents: [{ sha: NEWER }] }));
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug, taskKey: "JC-1" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toEqual({ status: "exists", defaultBranch: "main" });
+    expect(listAuditEvents(store.db).some((e) => e.action === "github.repo.bootstrapped")).toBe(false);
   });
 
   it("a 409 `Git Repository is empty.` on the ref read is a missing ref, not a network failure", async () => {
