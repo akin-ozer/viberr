@@ -188,12 +188,17 @@ export function roleSatisfies(role: UserRole, required: UserRole): boolean {
   return ROLE_ORDER[role] >= ROLE_ORDER[required];
 }
 
-function forbiddenRole(required: UserRole): Response {
+/** Interface review 2026-09-24 (writ-1): the only gated tier is "admin" (a
+ *  member is every signed-in user), so the refusal names it in the product's
+ *  term, "org admin", and says who can help. The page error boundary shows
+ *  this message verbatim (D32-15). */
+function forbiddenRole(): Response {
   return new Response(
     JSON.stringify({
       error: {
         code: "forbidden",
-        message: `This area requires the ${required} role.`,
+        message:
+          "Only org admins can open this page. Ask an org admin for access.",
       },
     }),
     {
@@ -210,7 +215,7 @@ export async function requireRole(
   required: UserRole,
 ): Promise<SessionUser> {
   const user = await requireUser(request);
-  if (!roleSatisfies(user.role, required)) throw forbiddenRole(required);
+  if (!roleSatisfies(user.role, required)) throw forbiddenRole();
   return user;
 }
 
@@ -224,6 +229,6 @@ export async function requireRoleAuth(
   required: UserRole,
 ): Promise<AuthContext> {
   const ctx = await requireAuth(request);
-  if (!roleSatisfies(ctx.user.role, required)) throw forbiddenRole(required);
+  if (!roleSatisfies(ctx.user.role, required)) throw forbiddenRole();
   return ctx;
 }

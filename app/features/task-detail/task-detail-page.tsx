@@ -1227,6 +1227,8 @@ export function TaskDetailPage({
           }
           confirmLabel="Dismiss recommendation"
           tone="primary"
+          // colo-7: the warning triangle reads as a warning on any wash.
+          icon="shield"
           busy={recBusy}
           onCancel={() => setConfirmDismiss(null)}
           onConfirm={() => {

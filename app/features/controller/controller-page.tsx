@@ -522,6 +522,9 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
             <li key={c.id}>
               <Link
                 className={`ctl-conv${c.id === active ? " on" : ""}${c.unread ? " unread" : ""}`}
+                // Interface review 2026-09-24 (acce-9): set by hand, since
+                // NavLink matches the pathname and ignores ?c=.
+                aria-current={c.id === active ? "page" : undefined}
                 to={href(c)}
               >
                 <span className="ctl-conv-title">

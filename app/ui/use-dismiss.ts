@@ -85,9 +85,20 @@ export function useDismiss<T extends HTMLElement = HTMLElement>(
       dismiss();
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") dismiss();
+      if (event.key !== "Escape") return;
+      // Consumed: the Escape closed THIS popover, so an enclosing <dialog>
+      // must not cancel on it too, and the controller dock's page-level
+      // Escape skips it (interface review 2026-09-24, acce-15 / acce-14).
+      event.preventDefault();
+      dismiss();
     };
-    const onMove = () => dismiss();
+    const onMove = (event: Event) => {
+      // A scroll INSIDE the popover (a height-capped list, or focus() bringing
+      // an item into view) moves nothing the popover is positioned from.
+      const target = event.target;
+      if (target instanceof Node && ref.current?.contains(target)) return;
+      dismiss();
+    };
 
     // `document` for both: `window` receives the same bubbled events, but a
     // listener on `document` is what the outside-press test actually needs

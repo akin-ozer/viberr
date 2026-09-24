@@ -9,6 +9,7 @@ import { AgentGlyph } from "~/ui/identity";
 import { useDialog } from "~/ui/use-dialog";
 import type { NotificationView } from "~/features/notifications/notification-item";
 import { TopBell } from "~/features/shell/top-bell";
+import { LivePausedStrip } from "~/features/shell/topbar";
 import { UserMenu } from "~/features/shell/user-menu";
 import type { HomeOrgSummary, HomeProjectCard } from "./home-query.server";
 import {
@@ -26,6 +27,8 @@ import {
  * `HomePage` and flows down via explicit props, so the rendered DOM is
  * unchanged.
  */
+
+const HOME_PAUSED_SENTENCE = "Live updates paused. Cards may be out of date.";
 
 export function HomeTopBar({
   searchRef,
@@ -76,34 +79,12 @@ export function HomeTopBar({
             The sentence and the retry are then split the way the workspace
             header splits them (`shell/topbar.tsx`): a `.pill` has no cursor and
             no hover, so one element that was both read as neither, and with no
-            `onReconnect` it was a button that did nothing. The chip states the
-            fact; the Retry beside it exists only when there is something to
-            reconnect. */}
+            `onReconnect` it was a button that did nothing. Both now sit in the
+            strip under this row (layo-10, below). */}
         <span className="vh" role="status" aria-live="polite">
-          {livePaused ? "Live updates paused. Cards may be out of date." : ""}
+          {livePaused ? HOME_PAUSED_SENTENCE : ""}
         </span>
-        {livePaused && (
-          <span
-            className="pill risk sm push"
-            title="The live update stream dropped (often an expired session). These cards may be out of date."
-          >
-            live updates paused
-          </span>
-        )}
-        {livePaused && onReconnect && (
-          <button
-            type="button"
-            className="btn ghost sm"
-            title="Reconnect the live update stream"
-            onClick={onReconnect}
-          >
-            Retry
-          </button>
-        )}
-        <div
-          className="top-search"
-          style={livePaused ? undefined : { marginLeft: "auto" }}
-        >
+        <div className="top-search">
           <Icon name="search" />
           <input
             ref={searchRef}
@@ -140,6 +121,15 @@ export function HomeTopBar({
           theme={theme}
         />
       </div>
+      {/* Interface review 2026-09-24 (layo-10): the chip and Retry sat in the
+          row above, which cannot wrap, and scrolled the page sideways at phone
+          width. The strip stays inside the sticky header. */}
+      {livePaused && (
+        <LivePausedStrip
+          message={HOME_PAUSED_SENTENCE}
+          onReconnect={onReconnect}
+        />
+      )}
     </header>
   );
 }

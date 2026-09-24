@@ -216,6 +216,21 @@ describe("StageMenu dismissal (shared useDismiss)", () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
+  it("a scroll INSIDE the menu keeps it open — a height-capped list scrolls itself", () => {
+    const view = renderMenu();
+    const menu = openMenu(view);
+    fireEvent.scroll(menu);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  });
+
+  it("the Escape that closes it is consumed, so an enclosing dialog does not cancel too", () => {
+    const view = renderMenu();
+    openMenu(view);
+    // fireEvent returns dispatchEvent's answer: false when the default was prevented.
+    expect(fireEvent.keyDown(document, { key: "Escape" })).toBe(false);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
   it("a resize closes it for the same reason", () => {
     const view = renderMenu();
     openMenu(view);
@@ -235,5 +250,112 @@ describe("StageMenu dismissal (shared useDismiss)", () => {
         .length,
     ).toBe(2);
     add.mockRestore();
+  });
+});
+
+/**
+ * Interface review 2026-09-24 (layo-8) — the menu always opened downward with
+ * no vertical clamp, so a trigger near the viewport's bottom put stages
+ * off-screen, and scrolling them back closes the menu. jsdom has no layout, so
+ * the trigger's rect, the menu's height and the viewport are stated.
+ */
+describe("StageMenu placement (layo-8)", () => {
+  const MENU_HEIGHT = 178;
+
+  function placeAt(triggerTop: number, viewportHeight = 768) {
+    vi.stubGlobal("innerHeight", viewportHeight);
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(MENU_HEIGHT);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 400, y: triggerTop, width: 24, height: 24 }),
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens below the trigger when the menu fits there", () => {
+    placeAt(100);
+    const menu = openMenu(renderMenu());
+    expect(menu.getAttribute("data-side")).toBe("bottom");
+    expect(menu.style.top).toBe("130px");
+    expect(menu.style.maxHeight).toBe("");
+  });
+
+  it("opens above the trigger when there is no room below", () => {
+    // The last list row on a desktop: 44px under the trigger, 700 above it.
+    placeAt(700);
+    const menu = openMenu(renderMenu());
+    expect(menu.getAttribute("data-side")).toBe("top");
+    expect(menu.style.top).toBe(`${700 - 6 - MENU_HEIGHT}px`);
+    expect(menu.style.maxHeight).toBe("");
+    // Focus still lands on the first selectable stage, now on-screen.
+    expect(activeName()).toBe("Triage");
+  });
+
+  it("clamps into the viewport and caps its height when neither side fits", () => {
+    // A 300px-tall viewport with the trigger mid-way: 122px below, 126 above.
+    placeAt(140, 300);
+    const menu = openMenu(renderMenu());
+    expect(menu.getAttribute("data-side")).toBe("top");
+    expect(menu.style.top).toBe("8px");
+    // Its bottom edge stops 6px above the trigger; the list scrolls inside.
+    expect(menu.style.maxHeight).toBe(`${140 - 6 - 8}px`);
+  });
+});
+
+/**
+ * Interface review 2026-09-24 (acce-17) — a card's slot within its lane could
+ * be set only by dragging. The board card passes `onReorder`, and the menu then
+ * offers Move up / Move down after the stages, walked by the same keys.
+ */
+describe("StageMenu reorder items (acce-17)", () => {
+  it("renders none unless the caller asks (task detail passes nothing)", () => {
+    const view = renderMenu();
+    openMenu(view);
+    expect(view.queryByRole("menuitem", { name: "Move up" })).toBeNull();
+    expect(view.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+  });
+
+  it("follows the stages, skips a disabled edge, and focus still opens on a stage", () => {
+    const onReorder = vi.fn();
+    const view = renderMenu({ onReorder, canMoveUp: false, canMoveDown: true });
+    const menu = openMenu(view);
+
+    // SAFETY: StageMenu renders both reorder items as `<button role="menuitem">`.
+    const up = view.getByRole("menuitem", { name: "Move up" }) as HTMLButtonElement;
+    expect(up.disabled).toBe(true);
+    expect(enabledNames(menu)).toEqual([
+      "Triage",
+      "In Progress",
+      "Review",
+      "Done",
+      "Move down",
+    ]);
+    expect(activeName()).toBe("Triage");
+
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(activeName()).toBe("Move down");
+    fireEvent.keyDown(menu, { key: "ArrowUp" });
+    expect(activeName()).toBe("Done");
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    // Wraps from the last item back to the first stage.
+    expect(activeName()).toBe("Triage");
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it("a nudge reports its direction, closes, and returns focus to the trigger", () => {
+    const onReorder = vi.fn();
+    const view = renderMenu({ onReorder, canMoveUp: true, canMoveDown: false });
+    openMenu(view);
+
+    fireEvent.click(view.getByRole("menuitem", { name: "Move up" }));
+
+    expect(onReorder).toHaveBeenCalledExactlyOnceWith(-1);
+    expect(view.onSelect).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger(view));
   });
 });

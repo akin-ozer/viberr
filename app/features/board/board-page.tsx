@@ -60,6 +60,7 @@ import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
+import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -455,6 +456,9 @@ function TaskCard({
   inFlight,
   allStages,
   onMoveTask,
+  onNudgeTask,
+  canMoveUp,
+  canMoveDown,
   roving,
 }: {
   task: BoardTask;
@@ -470,6 +474,11 @@ function TaskCard({
   /** F10-25: all stages, for the keyboard-accessible "Move to stage" menu. */
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  /** acce-17: Move up / Move down within the lane; the edges say whether this
+   *  card has a neighbour on that side. */
+  onNudgeTask: (taskKey: string, stageId: string, dir: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
   /** D19: this card holds the board's single tab stop (see `onCardKeyDown`). */
   roving: boolean;
 }) {
@@ -563,6 +572,9 @@ function TaskCard({
             stages={allStages}
             currentStageId={task.stage}
             onSelect={(stageId) => onMoveTask(task.key, stageId)}
+            onReorder={(dir) => onNudgeTask(task.key, task.stage, dir)}
+            canMoveUp={canMoveUp}
+            canMoveDown={canMoveDown}
           />
         </div>
       )}
@@ -663,6 +675,7 @@ function Column({
   inFlightKey,
   allStages,
   onMoveTask,
+  onNudgeTask,
   emptyCopy,
   rovingKey,
 }: {
@@ -696,6 +709,7 @@ function Column({
   inFlightKey: string | null;
   allStages: BoardStage[];
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  onNudgeTask: (taskKey: string, stageId: string, dir: -1 | 1) => void;
 }) {
   // The lane is a droppable for two reasons that are not its collisions: the
   // slot rule (`refineSlot`) finds the lanes' live rectangles through dnd-kit's
@@ -796,6 +810,9 @@ function Column({
                   inFlight={inFlightKey === t.key}
                   allStages={allStages}
                   onMoveTask={onMoveTask}
+                  onNudgeTask={onNudgeTask}
+                  canMoveUp={i > 0}
+                  canMoveDown={i < tasks.length - 1}
                   roving={rovingKey === t.key}
                 />
               </Fragment>
@@ -1123,9 +1140,10 @@ function NewTaskModal({
 
   const valid = title.trim().length >= 3;
   // The dialog opened on an empty title, so `!valid` was true from first paint
-  // and the footer greeted every new task with "A title is required." — an error
-  // for something the person had not had a chance to do yet. The requirement is
-  // only *unmet* once they have left the field or tried to submit.
+  // and the footer greeted every new task with "A title needs at least 3
+  // characters." — an error for something the person had not had a chance to
+  // do yet. The requirement is only *unmet* once they have left the field or
+  // tried to submit.
   const [titleTouched, setTitleTouched] = useState(false);
   // One condition for the red hint, the alert role, the field's aria-invalid
   // and its describedby, so the four can never disagree.
@@ -1200,6 +1218,7 @@ function NewTaskModal({
         <div className="field">
           <label className="flabel" htmlFor="new-task-title">
             Title<span className="req">*</span>
+            <span className="fhint">at least 3 characters</span>
           </label>
           <input
             id="new-task-title"
@@ -1272,6 +1291,9 @@ function NewTaskModal({
             </label>
             <DatePicker
               id="new-task-due"
+              label="Due date"
+              // Visible text inside the name "Due date: not set" (label in name).
+              placeholder="Not set"
               value={dueDate || null}
               onChange={(v) => setDueDate(v ?? "")}
             />
@@ -1303,8 +1325,10 @@ function NewTaskModal({
           // whenever the title is what is wrong.
           role={serverError || titleError ? "alert" : undefined}
         >
+          {/* Interface review 2026-09-24 (writ-4): "A title is required." said
+              nothing to someone who had typed "QA"; the rule is the length. */}
           {titleError
-            ? "A title is required."
+            ? "A title needs at least 3 characters."
             : serverError
               ? serverError
               : "The task key is assigned automatically."}
@@ -1739,6 +1763,7 @@ export function StageBoard({
   inFlight,
   inFlightTask,
   onMoveTask,
+  onNudgeTask,
   emptyCopyFor,
   rovingKey,
   onCardKeyDown,
@@ -1768,6 +1793,9 @@ export function StageBoard({
   inFlightTask: BoardTask | null;
   /** F10-25: the StageMenu move — the always-available non-drag path. */
   onMoveTask: (taskKey: string, toStageId: string) => void;
+  /** acce-17: the StageMenu's Move up / Move down — the non-drag path to a
+   *  slot within the lane. */
+  onNudgeTask: (taskKey: string, stageId: string, dir: -1 | 1) => void;
 }) {
   // All stages, for the per-card keyboard "Move to stage" menu (F10-25).
   const allStages = columns.map((c) => c.stage);
@@ -1891,6 +1919,7 @@ export function StageBoard({
             inFlightKey={flight && flightFrom === c.stage.id ? flight.key : null}
             allStages={allStages}
             onMoveTask={onMoveTask}
+            onNudgeTask={onNudgeTask}
             rovingKey={rovingKey}
           />
         );
@@ -1942,7 +1971,7 @@ export function BoardPage({
   // R19-14: creation always lands at the entry stage, so this is a plain
   // open/closed flag — no per-lane stage rides along any more.
   const [creating, setCreating] = useState(false);
-  const rescanFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const rescanFetcher = useFetcher<{ ok: boolean; error?: string; errors?: number }>();
   const csrf = useCsrfToken();
   const push = useToast();
 
@@ -2170,6 +2199,41 @@ export function BoardPage({
     }
     submitReorder(taskKey, toStageId, "");
   };
+
+  // Interface review 2026-09-24 (acce-17): the card menu's Move up / Move down,
+  // the keyboard and single-pointer way to a slot within the lane, which only
+  // the drag offered. The SAME governed reorder the drop submits, read against
+  // the same visible() order: up lands before the card above, down before the
+  // card two below, or at the lane's end.
+  const refocusKey = useRef<string | null>(null);
+  const onNudgeTask = (taskKey: string, stageId: string, dir: -1 | 1) => {
+    const keys = visible(columns.find((c) => c.stage.id === stageId)?.tasks ?? []).map(
+      (t) => t.key,
+    );
+    const i = keys.indexOf(taskKey);
+    if (i < 0 || (dir > 0 && i === keys.length - 1)) return;
+    const beforeKey = dir < 0 ? keys[i - 1] : (keys[i + 2] ?? "");
+    if (beforeKey === undefined) return;
+    refocusKey.current = taskKey;
+    submitReorder(taskKey, stageId, beforeKey);
+  };
+  // The card hides while its move is in flight (`.in-flight`), which drops the
+  // focus the menu handed back to its trigger. Once the answer is in, a nudge
+  // puts it back there, so the next nudge is one keystroke away. Only when
+  // focus really was dropped: a person who moved on meanwhile keeps their place.
+  useEffect(() => {
+    const key = refocusKey.current;
+    if (inFlight || !key) return;
+    refocusKey.current = null;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const card = [...document.querySelectorAll<HTMLElement>(".card-wrap[data-card-key]")].find(
+      (el) => el.dataset.cardKey === key,
+    );
+    const trigger = card?.querySelector<HTMLButtonElement>("button.stage-menu-btn");
+    if (!trigger) return;
+    setFocusKey(key);
+    trigger.focus();
+  }, [inFlight]);
 
   // Toast on completion (and drop the pulse if the move was rejected).
   useEffect(() => {
@@ -2467,6 +2531,17 @@ export function BoardPage({
     if (rescanFetcher.state === "submitting") rescanDone.current = false;
     if (rescanFetcher.state === "idle" && rescanFetcher.data && !rescanDone.current) {
       rescanDone.current = true;
+      const { ok, errors } = rescanFetcher.data;
+      // Interface review 2026-09-24 (writ-2): a file the re-scan could not
+      // project comes back as `errors` on an ok answer, and this said the
+      // board matched the store. Same sentence as Home's re-scan.
+      if (ok && errors) {
+        push(
+          `Re-scan finished, but ${countLabel(errors, "file")} could not be read. The server log names each one. Fix ${pluralNoun(errors, "it", "them")} and re-scan.`,
+          "error",
+        );
+        return;
+      }
       // Surface BOTH outcomes — a swallowed {ok:false} (e.g. a role 403) used to
       // leave the "Re-scanning…" toast as the last word (MU-3).
       push(
@@ -2592,6 +2667,7 @@ export function BoardPage({
             inFlight={inFlight}
             inFlightTask={inFlightTask}
             onMoveTask={onMoveTask}
+            onNudgeTask={onNudgeTask}
             rovingKey={rovingKey}
             onCardKeyDown={onCardKeyDown}
           />

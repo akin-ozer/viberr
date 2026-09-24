@@ -34,18 +34,21 @@ export function DatePicker({
   onChange,
   id,
   placeholder = "Pick a date",
-  ariaLabel,
+  label,
 }: {
   /** `YYYY-MM-DD` or null. */
   value: string | null;
   onChange: (iso: string | null) => void;
   id?: string;
   placeholder?: string;
-  /** Stable accessible name for the trigger. Without it the name is the
-   *  trigger's text — the placeholder at rest, then the PICKED DATE, which is
-   *  ambiguous the moment a page has more than one picker (the feed filters
-   *  have four). */
-  ariaLabel?: string;
+  /** What the field is for ("Due date"). Interface review 2026-09-24
+   *  (acce-16): the trigger's accessible name is this label AND the value —
+   *  "Due date: Sep 25, 2026" / "Due date: not set". A label alone (the old
+   *  optional `ariaLabel`, or an associated `<label for>`) hid the picked date
+   *  from screen readers; the button text alone never said what the field is,
+   *  and is ambiguous once a page has more than one picker. Required, so a new
+   *  picker cannot ship without a name. */
+  label: string;
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -72,7 +75,16 @@ export function DatePicker({
       className="datepick"
       ref={wrapRef}
       onKeyDown={(e) => {
-        if (e.key === "Escape" && open) close();
+        if (e.key === "Escape" && open) {
+          // Interface review 2026-09-24 (acce-15): consume Escape only to close
+          // the calendar; with the calendar closed it bubbles, so an enclosing
+          // dialog still cancels on it (as LabelInput does). preventDefault is
+          // what stops the native <dialog> cancel, which would otherwise
+          // discard the whole New task form.
+          e.preventDefault();
+          e.stopPropagation();
+          close();
+        }
       }}
     >
       <div className="datepick-control">
@@ -83,7 +95,7 @@ export function DatePicker({
           className={"datepick-trigger" + (value ? "" : " dp-empty")}
           aria-haspopup="dialog"
           aria-expanded={open}
-          aria-label={ariaLabel}
+          aria-label={`${label}: ${value ? displayDate(value) : "not set"}`}
           onClick={() => setOpen((o) => !o)}
         >
           <Icon name="clock" />

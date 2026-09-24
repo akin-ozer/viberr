@@ -75,6 +75,7 @@ describe("LabelInput", () => {
     fireEvent.keyDown(field(container), { key: "Enter" });
     expect(getByTestId("value").textContent).toBe(twelve.join("|")); // rejected
     expect(tokens(container)).toHaveLength(12);
+    expect(field(container).value).toBe("overflow"); // …and kept, not dropped
 
     cleanup();
     const long = render(<Harness />);
@@ -196,5 +197,102 @@ describe("LabelInput checkbox multi-select", () => {
     const r = rows(container);
     expect(r).toHaveLength(12); // only the 12 chosen, all checked
     expect(r.every((row) => row.checked === "true")).toBe(true);
+  });
+});
+
+/**
+ * Interface review 2026-09-24 (writ-8). At the cap the refusal was a
+ * screen-reader-only "Maximum 12 labels reached" and every commit path cleared
+ * the typed text anyway, so a sighted person watched the label vanish as if it
+ * had been saved.
+ */
+describe("LabelInput at the 12-label cap", () => {
+  const twelve = Array.from({ length: 12 }, (_, i) => `l${i}`);
+  const CAP_NOTE = "A task can have at most 12 labels. Remove one to add another.";
+  const note = (c: HTMLElement) => c.querySelector(".label-combo > p.fine");
+
+  it("shows the cap under the field, before anything is refused, and describes the field with it", () => {
+    const { container } = render(<Harness initial={twelve} />);
+    expect(note(container)?.textContent).toBe(CAP_NOTE);
+    const describedBy = field(container).getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)).toBe(note(container));
+  });
+
+  it("shows no cap note while there is room", () => {
+    const { container } = render(<Harness initial={twelve.slice(1)} />);
+    expect(note(container)).toBeNull();
+    expect(field(container).hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  it("gives each field its own note id", () => {
+    const { container } = render(
+      <>
+        <Harness initial={twelve} />
+        <Harness initial={twelve} />
+      </>,
+    );
+    const ids = [...container.querySelectorAll(".label-input-field")].map((f) =>
+      f.getAttribute("aria-describedby"),
+    );
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  it("announces the same sentence it shows", () => {
+    const { container } = render(<Harness initial={twelve} />);
+    fireEvent.change(field(container), { target: { value: "overflow" } });
+    fireEvent.keyDown(field(container), { key: "Enter" });
+    expect(container.querySelector('[role="status"]')!.textContent).toBe(CAP_NOTE);
+  });
+
+  it("keeps a label typed before a comma that the cap refused", () => {
+    const { container, getByTestId } = render(<Harness initial={twelve} />);
+    fireEvent.change(field(container), { target: { value: "one,two" } });
+    expect(getByTestId("value").textContent).toBe(twelve.join("|"));
+    expect(field(container).value).toBe("one,two");
+  });
+
+  it("keeps the rest of a comma list once the cap is reached mid-list", () => {
+    const { container, getByTestId } = render(
+      <Harness initial={twelve.slice(1)} />,
+    );
+    fireEvent.change(field(container), { target: { value: "a,b,c" } });
+    expect(getByTestId("value").textContent).toBe([...twelve.slice(1), "a"].join("|"));
+    expect(field(container).value).toBe("b,c");
+  });
+
+  it("keeps a half-typed label the cap refuses when focus leaves", () => {
+    const { container } = render(
+      <>
+        <Harness initial={twelve} />
+        <button type="button">elsewhere</button>
+      </>,
+    );
+    fireEvent.change(field(container), { target: { value: "overflow" } });
+    fireEvent.blur(field(container), {
+      relatedTarget: container.querySelector("button"),
+    });
+    expect(field(container).value).toBe("overflow");
+  });
+
+  it("still clears a duplicate — it is already there as a chip", () => {
+    const { container } = render(<Harness initial={twelve} />);
+    fireEvent.change(field(container), { target: { value: "l3" } });
+    fireEvent.keyDown(field(container), { key: "Enter" });
+    expect(field(container).value).toBe("");
+  });
+
+  it("splits text the cap put back once there is room again", () => {
+    // The comma path keeps "b,c" in the field; committing it later must not
+    // land a single "b,c" label.
+    const { container, getByTestId } = render(
+      <Harness initial={twelve.slice(1)} />,
+    );
+    fireEvent.change(field(container), { target: { value: "a,b,c" } });
+    fireEvent.focus(field(container));
+    fireEvent.mouseDown(rowNamed(container, "a")); // uncheck: room for more
+    fireEvent.keyDown(field(container), { key: "Enter" });
+    expect(getByTestId("value").textContent).toBe([...twelve.slice(1), "b"].join("|"));
+    expect(field(container).value).toBe("c");
   });
 });

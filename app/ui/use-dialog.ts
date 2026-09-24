@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Dialog behavior required on EVERY dialog by orchestrator ruling 16, now on
@@ -24,6 +24,16 @@ export function useDialog(
   onDismissRequest?: () => boolean,
 ) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // Interface review 2026-09-24 (acce-2): the element to restore focus to is
+  // read at FIRST RENDER. By the time the effect below runs, React's commit-time
+  // autoFocus has already moved focus to a field inside the dialog, so the
+  // effect's read was that field — close "restored" focus to a removed node and
+  // dropped keyboard users on <body>.
+  const [opener] = useState<HTMLElement | null>(() =>
+    "document" in globalThis && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   const onCloseRef = useRef(onClose);
   const onDismissRef = useRef(onDismissRequest);
   useEffect(() => {
@@ -65,7 +75,7 @@ export function useDialog(
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    const previouslyFocused =
+    const focused =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
@@ -73,10 +83,7 @@ export function useDialog(
     // inside the dialog at commit time (showModal() would move focus off it,
     // so put it back), or a field opts in via [data-autofocus] and is focused
     // after showModal() — same first-field UX without an autoFocus prop.
-    const preFocused =
-      previouslyFocused && dialog.contains(previouslyFocused)
-        ? previouslyFocused
-        : null;
+    const preFocused = focused && dialog.contains(focused) ? focused : null;
     const initial =
       preFocused ?? dialog.querySelector<HTMLElement>("[data-autofocus]");
     if (!dialog.open) dialog.showModal();
@@ -114,9 +121,9 @@ export function useDialog(
       dialog.removeEventListener("cancel", onCancel);
       dialog.removeEventListener("click", onClick);
       document.body.style.overflow = previousOverflow;
-      previouslyFocused?.focus();
+      if (opener?.isConnected) opener.focus();
     };
-  }, [close]);
+  }, [close, opener]);
 
   return { ref: dialogRef, close };
 }

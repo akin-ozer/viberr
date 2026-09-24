@@ -137,7 +137,7 @@ for the operator), `icon` (one stroke icon set), `pill` (the one
 readiness/validation/state mapping), `rich-text` (inline `**bold**`, `` `code` ``,
 `@mention`), `markdown` (react-markdown + GFM with attachment-aware images), `code-view` +
 `code-language` + `code-highlight` (the ruling-363 reader: numbered lines, Shiki tokens by
-filename grammar, loaded on first use), `mention-spans`, `toast` (bottom-center, 2600 ms),
+filename grammar, loaded on first use), `mention-spans`, `toast` (bottom-center; success 5 s, paused on hover or focus; errors stay until dismissed, ruling 455),
 `confirm-dialog`, `use-dialog` (native `<dialog>` contract: Escape, backdrop click, focus
 restore), `use-dismiss`, `page-overlay`, `stage-menu`, `task-meta` (priority, labels, due
 date), `label-input`, `calendar` + `date-picker`, `local-time` + `use-relative-time`

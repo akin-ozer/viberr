@@ -25,7 +25,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/` | `_index.tsx` | user, form | Home: pinned, all and archived projects, waiting counts, the Settings tiles (connections, users, resources, insights), store strip (org admin), new-project modal | `create-project`, `pin`, `view`, `rescan` (org admin), `rebuild-projections` (org admin) |
 | `/projects` | `projects.tsx` | user | redirects to `/` | |
 | `/projects/:slug` | `project.tsx` + `project._index.tsx` | user → member (404 parity) | workspace shell (rail, topbar, palette, live updates); index redirects to the board | |
-| `/projects/:slug/board` | `project.board.tsx` | member, form | board by stage (a card is one status chip, a row of problem chips and an avatar stack, ruling 365), filters in the URL (`filter`, `view`, `q`), drag-and-drop, accept-from-board confirm, the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first) | `create-task`, `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
+| `/projects/:slug/board` | `project.board.tsx` | member, form | board by stage (a card is one status chip, a row of problem chips and an avatar stack, ruling 365), filters in the URL (`filter`, `view`, `q`), drag-and-drop and the card's Move menu (a stage, or Move up / Move down within the lane: the keyboard and single-pointer path to a slot, ruling 455(c)), accept-from-board confirm, the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first) | `create-task`, `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
 | `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" (tasks at a stage the workflow makes acceptance legal from, whose acceptance nothing blocks, for a viewer who can accept) and "Still in review" (every other review-work row: at the review stage, an open review PR at any stage, or a required reviewer's verdict outstanding; a row before the boundary reads "Review in progress at Validation · PR #8 · awaiting verdict", or names the live PR fact instead when it carries one: unpushed revision, conflict, drifted head; U35-5). A row whose open PR shares changed paths with another open PR carries a "collides with <keys>" chip on both rows (ruling 236, read-only). Header: "N in review · M waiting on your acceptance" | |
 | `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project: New conversation in the page head, a sticky rail (conversations first, then goal chains) and a capped transcript (ruling 419); unseen replies marked (ruling 448); goal chain controls, `cancel` and skip behind a confirm; with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `goal-op` (`op`: `pause`, `resume`, `cancel`, `skip_link`, `retry_link`; `goalId`, `index`, `reason`), `interrupt` (`conversationId`, `runId`) |
 | `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail (a copy whose grants differ from its template says so on the scope line and under each list, ruling 156; the project's rulings knowledge base named when one is set, ruling 239), capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile`, `sync-profile-resources` (org admin only, carries the record's fingerprint) |
@@ -101,10 +101,11 @@ Intents behind `project.task.tsx` are explained in
   settings and the controller page; every governed change arrives by loader
   revalidation. A hidden tab holds no stream: both the layout's `useLiveUpdates` and the
   console's `use-run-log-stream` close on `visibilitychange` and reopen, revalidating,
-  on return (ruling 301). While the stream is down, the workspace header and Home both
-  show a "live updates paused" chip (a plain span: a pill has no cursor and no hover, so
-  it is the sentence, not a control) beside a `Retry` button, rendered only when the
-  surface really has a reconnect to offer. The sentence is also announced through a
+  on return (ruling 301). While the stream is down, the workspace and Home both show a
+  strip directly under the header (the archived banner's idiom: "Live updates paused. …"
+  with a trailing `Retry` button, the button rendered only when the surface really has a
+  reconnect to offer). It used to be a chip inside the header row, where at 320–375 px it
+  pushed search, the bell and the account menu off the screen (ruling 455(f)). The sentence is also announced through a
   visually hidden `role="status"` region that is mounted at all times and only changes
   its text: a live region inserted together with its text is the one case screen
   readers skip.
@@ -135,7 +136,9 @@ Intents behind `project.task.tsx` are explained in
   controller dock (which root mounts beside the layout, so `<body
   data-rail-open>` carries the state for it); closing it by Escape, the scrim,
   a rail link or a resize returns focus to the toggle after the close has
-  committed, and an open modal dialog keeps its own Escape. Under the same
+  committed, and an open modal dialog keeps its own Escape. Closed, the drawer is
+  `visibility: hidden` as well as translated away, so its links leave the tab order
+  (ruling 455). Under the same
   breakpoint the typing surfaces render at the 1.05rem scale step (16.8px) so
   iOS Safari does not zoom on focus: every `.field` input and textarea,
   `select`, the search, board-filter and palette inputs, the comment and
@@ -276,6 +279,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   task rests on a clock (rulings 36, 91, 225).
 - A failure toast never renders the success tick: the kind is passed from the server
   result (`use-action-toast.ts`).
+- An error toast stays until it is dismissed (it carries a Dismiss button); a success
+  toast lasts 5 s and pauses while the pointer or focus is inside the stack
+  (`ui/toast.tsx`, ruling 455(a)).
 - **Every attachment kind opens a card, and every card carries Download** (ruling 105):
   images show the picture; the known binary kinds (archives, media, fonts, office and
   PDF documents, executables, databases) are decided by name and get an honest "no

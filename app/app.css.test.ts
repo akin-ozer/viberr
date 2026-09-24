@@ -484,18 +484,23 @@ describe("app.css secondary text tokens meet WCAG AA (P13-D-12)", () => {
     }
   });
 
-  it("holds 4.5:1 for both tokens over the 4% --fg surface tint labels sit on", () => {
+  it("holds 4.5:1 for both tokens over the 5% --tint-hover every row takes under the pointer", () => {
     // `.live-head`, `.cap-matrix-table tr.grp td` and `.field input[disabled]`
     // put --placeholder / --faint text on `color-mix(--fg, transparent 96-97%)`,
-    // which is measurably darker than --surface.
+    // which is measurably darker than --surface. Interface review 2026-09-24
+    // (colo-3): the gate mixed 4%, and missed the 5% --tint-hover that a
+    // hovered `.rq-row`, `.ntf-item` or `.ctl-conv` paints under its
+    // --placeholder timestamp: dark #868d9f measured 4.46:1 there. The mix is
+    // now the darkest one secondary text sits on. CANARY: set the dark
+    // --placeholder back to #868d9f.
     for (const [theme, block] of [["light", LIGHT_ROOT], ["dark", DARK_ROOT]] as const) {
       const surface = tokenIn(block, "--surface");
       const fg = tokenIn(block, "--fg");
-      const tint = mixHex(surface, fg, 0.04);
+      const tint = mixHex(surface, fg, 0.05);
       for (const token of ["--faint", "--placeholder"]) {
         expect(
           contrastRatio(tokenIn(block, token), tint),
-          `${theme} ${token} on a 4% --fg tint (${tint})`,
+          `${theme} ${token} on the 5% --tint-hover (${tint})`,
         ).toBeGreaterThanOrEqual(AA_SMALL_TEXT);
       }
     }
@@ -738,10 +743,11 @@ describe("app.css defines every class the markup uses (P16-UI-02)", () => {
   });
 
   it("keeps the composer's positioning contract in the stylesheet (P16-UI-03)", () => {
-    // `.composer-box .composer-placeholder` is position:absolute and MentionMenu
-    // positions itself absolutely, so both need a positioned ancestor. It used
-    // to be an inline `style={{position:"relative"}}` in timeline.tsx — delete
-    // that attribute and both jump to the viewport.
+    // MentionMenu positions itself absolutely, so it needs a positioned
+    // ancestor. It used to be an inline `style={{position:"relative"}}` in
+    // timeline.tsx — delete that attribute and it jumps to the viewport. (The
+    // placeholder was absolute too until interface review 2026-09-24, layo-12:
+    // it now shares the editor's grid cell, pinned in the block at the end.)
     for (const selector of [".composer-box", ".composer-input"]) {
       const rule = CODE.match(
         new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`),
@@ -1780,6 +1786,12 @@ const THEMES = [
   ["dark", themeTokens(true)],
 ] as const;
 
+/** A rule under `@media (forced-colors: active)` paints in the SYSTEM palette
+ *  (`SelectedItem`, `Canvas`, …) that the UA and the user supply, not in either
+ *  app theme, so neither theme's sweep reads it (interface review 2026-09-24:
+ *  the selected chip, segment and calendar day name `SelectedItem` there). */
+const forcedColors = (rule: CssRule) => rule.at.some((q) => /forced-colors:\s*active/.test(q));
+
 /** A selector part with its state pseudo-classes and pseudo-elements dropped —
  *  `.card:hover` and `.card` paint the same box, and `.top-search input` is
  *  where `.top-search input::placeholder` sits. */
@@ -1807,6 +1819,7 @@ function paintMap(dark: boolean): Map<string, string> {
   const paints = new Map<string, string>();
   const scoped = new Map<string, string>();
   for (const rule of RULES) {
+    if (forcedColors(rule)) continue;
     const bg = rule.decls.get("background") ?? rule.decls.get("background-color");
     if (!bg) continue;
     for (const part of rule.selector.split(",")) {
@@ -1951,6 +1964,7 @@ function sweep(): Sweep {
     // with no background at all and invents a failure.
     const effective = new Map<string, Map<string, string>>();
     for (const rule of RULES) {
+      if (forcedColors(rule)) continue;
       for (const rawPart of rule.selector.split(",")) {
         const part = rawPart.trim();
         if (!part) continue;
@@ -2407,6 +2421,7 @@ const HIDDEN_BY_DESIGN = {
   ".crumbs .crumb-root": "topbar tier 1 drops the project crumb at 1080px. The destination is the board, which the project rail links from every width — INTENT §4 keeps the rail's width at every breakpoint precisely so the crumbs can truncate. Navigation duplicated, not removed.",
   ".crumbs .crumb-mid": "topbar tier 2 drops the middle crumb at 760px. Same duplication: the view it links to is a rail item, and at 720px the rail becomes an overlay that still lists all of them.",
   ".home-top .top-search input": "P16-G3. At 900px Home's finder collapses to its `.kbd` BUTTON, which becomes the whole 36×36 box and opens the command palette — the same search over the same projects. The capability moves to a control a phone can actually use; it is not withdrawn. The three tests in `app.css palette reachability on touch` pin the replacement.",
+  ".rail": "interface review 2026-09-24 (acce-13). At 720px the project rail is a drawer behind `.rail-toggle` (aria-expanded), and closed it is `visibility: hidden` so its links leave the tab order instead of taking nine invisible Tab stops off-screen. `.app[data-rail-open=\"true\"] .rail` restores visibility, so every link is one toggle press away, not removed.",
   ".pj-row .pj-stats .pill": "the 1100px tier drops the least load-bearing stat from a Home project ROW. `.pill` is a shared chip class that is a <button> elsewhere (the notification filter, the topbar's live-paused retry), and the ancestors here live in a different component from the pills, so the sweep widens to every `.pill` and picks those buttons up. The pills this rule reaches are project-cards.tsx spans inside `.pj-stats`, and the same numbers stay on the project's own page.",
 } satisfies Record<string, string>;
 
@@ -2425,7 +2440,7 @@ const UNFIXED_HIDDEN: Record<string, string> = {};
  *  changes WHAT IS RENDERED is the thing the contract bans; these move things
  *  that are already there. */
 const VIEWPORT_READS = {
-  "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
+  "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`, and (interface review 2026-09-24, layo-8) flips it above its trigger or caps its height when the room below runs out. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
 } satisfies Record<string, string>;
 
 type Hidden = {
@@ -3817,5 +3832,194 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
       expect(decls.get("filter"), selector).toBe("none");
       expect(decls.get("transition"), selector).toBe("opacity .12s ease");
     }
+  });
+});
+
+/* -------------------------------------- interface review 2026-09-24 (sheet) */
+
+/**
+ * Interface review 2026-09-24 — the sheet-side half of the whole-UI pass. Each
+ * of these rules is one declaration a later tidy-up could drop without any
+ * other test noticing, and each one's absence was measured: a clipped primary
+ * action, a heading cut to "E.", nine invisible Tab stops, a selected chip
+ * told apart by a 1.17:1 fill.
+ */
+describe("interface review 2026-09-24: the rules the fixes rest on", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const mobile = within(/max-width: 720px/);
+  const collapse = within(/max-width: 1100px/);
+  const reduce = within(/prefers-reduced-motion:\s*reduce/);
+  /** What the cascade leaves `selector` among `rules`: later declarations win. */
+  const cascade = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const decls = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) decls.set(k, v);
+    return decls;
+  };
+
+  it("layo-1: a dialog's action row wraps at phone width, and only there", () => {
+    // The footer sits outside the scrolling body of an overflow-hidden card, so
+    // at 320px a nowrap row put "Create project" 0% on screen. CANARY: move the
+    // wrap to the base rules; at 1440 it re-rowed the Archive footer.
+    for (const selector of [".modal-foot", ".modal-foot .foot-actions", ".confirm-actions"]) {
+      expect(cascade(mobile, selector).get("flex-wrap"), selector).toBe("wrap");
+      expect(cascade(plain, selector).get("flex-wrap"), `${selector} wraps only at 720px`).toBeUndefined();
+    }
+    expect(cascade(mobile, ".confirm-actions .btn").get("white-space")).toBe("normal");
+  });
+
+  it("layo-2: a panel title counts toward its head's line at phone width, so the wrap fires", () => {
+    // `flex: 1` is a zero basis: the title added nothing to the line, the
+    // cluster never dropped, and the title was squeezed to one letter.
+    const h2 = cascade(mobile, ".panel-head h2");
+    expect(h2.get("flex")).toBe("1 1 auto");
+    expect(h2.get("white-space")).toBe("normal");
+    expect(cascade(mobile, ".panel-head").get("flex-wrap")).toBe("wrap");
+  });
+
+  it("acce-13: the closed drawer is hidden, so its links leave the tab order", () => {
+    const rail = cascade(mobile, ".rail");
+    expect(rail.get("visibility")).toBe("hidden");
+    // Hidden AFTER the slide-out, not before it.
+    expect(rail.get("transition")).toMatch(/visibility 0s linear \.2s/);
+    const open = cascade(mobile, '.app[data-rail-open="true"] .rail');
+    expect(open.get("visibility")).toBe("visible");
+    expect(open.get("transition-delay")).toBe("0s");
+    expect(Object.keys(HIDDEN_BY_DESIGN)).toContain(".rail");
+  });
+
+  it("ui-1: every entrance that rises has a later reduced-motion answer that does not", () => {
+    // The reduce block is an allow-list, and `.login-aside` was missing from it.
+    // CANARY: drop `.login-aside` from the closing reduced-motion list.
+    const risers = RULES.flatMap((rule, index) =>
+      !rule.at.some((a) => /prefers-reduced-motion/.test(a)) &&
+      /^rise\b/.test(rule.decls.get("animation") ?? "")
+        ? parts(rule).map((selector) => ({ selector, index }))
+        : [],
+    );
+    expect(risers.map((r) => r.selector)).toEqual(
+      expect.arrayContaining([".toast", ".login-card", ".login-aside"]),
+    );
+    for (const { selector, index } of risers) {
+      const answered = RULES.some(
+        (rule, at) =>
+          at > index &&
+          reduce.includes(rule) &&
+          parts(rule).includes(selector) &&
+          /^(fade-in\b|none$)/.test(rule.decls.get("animation") ?? ""),
+      );
+      expect(answered, `${selector} rises; it needs a later reduced-motion answer`).toBe(true);
+    }
+  });
+
+  it("colo-1 / colo-2: a selected chip or segment carries an edge, not only a fill", () => {
+    // Weight, size and width are the same in both states, so the edge is the
+    // only non-hue cue. --border-control is held at 3:1 on --surface above.
+    // The chip's hover selector is in the rule because the plain hover rule
+    // outranks `.fchip.on` and would swap the edge back.
+    for (const selector of [".fchip.on", ".fchip.on:hover:not(:disabled)"]) {
+      expect(cascade(plain, selector).get("border-color"), selector).toBe("var(--border-control)");
+    }
+    expect(cascade(plain, ".seg button.on").get("box-shadow")).toBe("inset 0 0 0 1px var(--border-control)");
+    expect(cascade(plain, ".mini-seg button.on").get("box-shadow")).toBe("inset 0 0 0 1px var(--blue)");
+    expect(cascade(plain, ".mini-seg button.on:hover:not(:disabled)").has("box-shadow")).toBe(false);
+    // Forced colors paints both states alike unless the selected one names a
+    // system colour.
+    const forced = within(/forced-colors:\s*active/);
+    for (const selector of [".fchip.on", ".seg button.on", ".cal-day.sel"]) {
+      expect(cascade(forced, selector).get("background"), selector).toBe("SelectedItem");
+    }
+  });
+
+  it("acce-9: an open conversation or profile wears the selected pair, not the focus idiom", () => {
+    for (const selector of [".ctl-conv.on", ".ag-item.on"]) {
+      const decls = cascade(plain, selector);
+      expect(decls.get("background"), selector).toBe("var(--blue-soft)");
+      expect(decls.get("border-color"), selector).toBe("var(--blue)");
+      expect(decls.get("box-shadow") ?? "", selector).not.toContain("--focus-wash");
+    }
+    // --placeholder is 4.26:1 / 4.10:1 on --blue-soft; the selected rows lift
+    // their dim line to --faint, the pair the P13-D-12 block holds at 4.5:1.
+    expect(cascade(plain, ".ctl-conv.on .fine.dim").get("color")).toBe("var(--faint)");
+    expect(cascade(plain, ".ag-item.on .ag-idle").get("color")).toBe("var(--faint)");
+  });
+
+  it("acce-4: component focus rules add to the app ring instead of erasing it", () => {
+    for (const selector of [
+      "select:focus", ".goal-textarea:focus", ".datepick-trigger:focus-visible", ".op-steer:focus",
+      '.field input[type="text"]', ".field input:focus", ".field textarea:focus",
+      ".meta-edit-panel .meta-field input:focus", ".fm-gh input:focus", ".feed-filters .ff-task:focus",
+      '.guard-ctl input[type="number"]:focus', ".stg-input", ".ctl-composer textarea",
+    ]) {
+      expect(cascade(plain, selector).get("outline") ?? "", selector).not.toMatch(/^(0|none)$/);
+    }
+    // The two rules that replaced the ring with a box-shadow (which forced
+    // colors drops) are gone.
+    expect(CODE).not.toMatch(/\.cal-day[^{]*:focus-visible/);
+    expect(CODE).not.toMatch(/\.top-search \.kbd:focus-visible/);
+    // A borderless input's wrapper draws the ring for it.
+    for (const selector of [
+      "div.top-search:has(input:focus-visible)", ".board-filter-input:focus-within",
+      ".label-input:focus-within", ".repo-input:focus-within", ".feed-filters .ff-search:focus-within",
+      ".attach-add > label:has(input:focus-visible)",
+    ]) {
+      expect(cascade(plain, selector).get("outline"), selector).toBe("2px solid var(--blue)");
+    }
+  });
+
+  it("layo-5: the three horizontal scrollers mark their cut edge on their own timeline", () => {
+    for (const selector of [".rbac-scroll", ".md-table-wrap", ".md-body pre"]) {
+      const decls = cascade(plain, selector);
+      expect(decls.get("animation"), selector).toBe("x-cut-edge linear both");
+      expect(decls.get("animation-timeline"), selector).toBe("scroll(self inline)");
+    }
+    // The shorthand resets `animation-timeline`, so it has to come first.
+    expect(CODE).toMatch(
+      /\.rbac-scroll, \.md-table-wrap, \.md-body pre\s*\{\s*animation:[^;]*;\s*animation-timeline:/,
+    );
+    // No overflow (an inactive timeline) or no support must leave NO mask.
+    const frames = CODE.match(/@keyframes x-cut-edge\s*\{([\s\S]*?)\n\}/);
+    expect(frames, "the cue's keyframes must exist").toBeTruthy();
+    expect(frames![1]).toMatch(/100%\s*\{[^}]*\bmask-image:\s*none/);
+  });
+
+  it("acce-10: a long mono token may break rather than widen the page", () => {
+    for (const selector of [
+      ".conn-main .sub.mono", ".rsrc-main .sub.mono", ".rsrc-main b.mono-b", ".pol-note", ".hero-file",
+    ]) {
+      expect(cascade(plain, selector).get("overflow-wrap"), selector).toBe("anywhere");
+    }
+    expect(CODE, "the file-path chip's nowrap must not come back").not.toMatch(/\.hero-file,\s*\.hero-file \*/);
+  });
+
+  it("layo-12: the composer's placeholder shares the editor's cell instead of floating over the foot", () => {
+    expect(cascade(plain, ".composer-input").get("display")).toBe("grid");
+    const placeholder = cascade(plain, ".composer-box .composer-placeholder");
+    expect(placeholder.get("grid-area")).toBe("1 / 1");
+    expect(placeholder.has("position")).toBe(false);
+    expect(cascade(plain, ".composer-box .composer-ce").get("grid-area")).toBe("1 / 1");
+  });
+
+  it("layo-19 / acce-12: the stacked tables and the stacked Agents page can be scrolled to", () => {
+    // `.live-table` clips (overflow: hidden rounds its head band), so a row
+    // min-width only cut the columns off. CANARY: put it back on the rows.
+    expect(cascade(collapse, ".gh-table .live-table").get("min-width")).toBe("34rem");
+    expect(cascade(collapse, ".live-wrap .live-table").get("min-width")).toBe("42rem");
+    expect(collapse.some((r) => parts(r).includes(".gh-table .live-row") && r.decls.has("min-width"))).toBe(false);
+    const block = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
+    expect(block).toMatch(/\.board-wrap:has\(> \.agents-layout, > \.live-wrap\)\s*\{\s*overflow-y:\s*auto/);
+    // The shell-less controller is opted out of the clipped body like Home.
+    expect(CODE).toMatch(/body:has\(\.ctl-wrap\.standalone\)\s*\{[^}]*overflow:\s*auto/);
+  });
+
+  it("layo-8 / ui-3: a flipped stage menu and the closing dock button have reduced-motion answers", () => {
+    expect(cascade(plain, '.stage-menu-pop[data-side="top"]').get("animation-name")).toBe("menu-in-up");
+    expect(cascade(plain, ".stage-menu-pop").get("overflow-y")).toBe("auto");
+    // The data-side rule outranks `.stage-menu-pop`, so it needs its own entry.
+    expect(cascade(reduce, '.stage-menu-pop[data-side="top"]').get("animation")).toMatch(/^fade-in\b/);
+    expect(cascade(reduce, ".dock:has(.dock-panel[data-closing]) .dock-fab").get("transition")).toBe("none");
   });
 });

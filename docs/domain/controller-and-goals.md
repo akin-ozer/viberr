@@ -120,9 +120,11 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   page's message vocabulary and the composer takes focus on open (the send hint names the
   viewer's own modifier and drops on a coarse pointer) — on a user-initiated open only, so
   a remembered-open reload never starts focus inside the textarea. Escape closes and
-  returns focus to the trigger **while focus is inside the panel**; an Escape elsewhere
-  (the palette, a confirm dialog, a stage menu) leaves the dock alone, and an outside press
-  never closes it. An empty thread offers the scope's three examples, which send on click.
+  returns focus to the trigger **while focus is inside the panel**. An Escape pressed on a
+  page control the panel covers also closes it and leaves focus on that control (with no
+  focus trap, Tab reaches controls under the panel; ruling 455(d)). Any other Escape (the
+  palette, a confirm dialog, a stage menu or its trigger, focus on nothing) leaves the dock
+  alone, and an outside press never closes it. An empty thread offers the scope's three examples, which send on click.
 - **Availability is the VIEWER's** (ruling 127): the dock's `available` is
   `isBackendAvailableFor(db, viewer, "claude")`, in the normal view and in the
   `unavailable` refusal view alike, so a person with no Claude connected reads the

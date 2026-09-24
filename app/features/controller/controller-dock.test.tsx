@@ -373,6 +373,58 @@ describe("the controller dock (ruling 121)", () => {
     expect(screen.getByRole("dialog", { name: "Controller dock" })).toBeTruthy();
   });
 
+  /**
+   * Interface review 2026-09-24 (acce-14): no focus trap (ruling 121), so Tab
+   * reaches page controls the panel covers. Escape there uncovers the control
+   * without moving focus. jsdom has no layout, so the hit test is stubbed: it
+   * answers the panel for a covered control and the control itself otherwise.
+   */
+  async function withPageControl(
+    covered: boolean,
+    setup: (control: HTMLButtonElement) => void,
+    check: (control: HTMLButtonElement) => Promise<void>,
+  ) {
+    mount({ path: "/projects/viberr/board", view: () => taskView() });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · viberr" }));
+    const panel = await screen.findByRole("dialog", { name: "Controller dock" });
+    const control = document.createElement("button");
+    control.textContent = "Edit";
+    document.body.append(control);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: () => (covered ? panel : control),
+    });
+    try {
+      setup(control);
+      control.focus();
+      fireEvent.keyDown(control, { key: "Escape" });
+      await check(control);
+    } finally {
+      Reflect.deleteProperty(document, "elementFromPoint");
+      control.remove();
+    }
+  }
+
+  it("Escape on a page control under the panel closes the dock and leaves focus there (acce-14)", async () => {
+    await withPageControl(true, () => {}, async (control) => {
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
+      expect(document.activeElement).toBe(control);
+      expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("0");
+    });
+  });
+
+  it.each([
+    ["the control is not under the panel", false, () => {}],
+    ["the control is an open popover's trigger", true, (c: HTMLButtonElement) => c.setAttribute("aria-expanded", "true")],
+    ["something else already handled the Escape", true, (c: HTMLButtonElement) =>
+      c.addEventListener("keydown", (e) => e.preventDefault())],
+  ])("Escape on a page control leaves the dock alone when %s (acce-14)", async (_, covered, setup) => {
+    await withPageControl(covered, setup, async () => {
+      await waitFor(() => expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("1"));
+      expect(screen.getByRole("dialog", { name: "Controller dock" })).toBeTruthy();
+    });
+  });
+
   it("restores open without stealing focus, and never re-aims off a control (findings 7, 10)", async () => {
     window.sessionStorage.setItem("viberr.dock.open", "1");
     mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });

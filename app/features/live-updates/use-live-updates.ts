@@ -36,8 +36,8 @@ import {
  * so a tab left open overnight silently froze the board, rail counts, bell
  * badge and review queue while still looking live. Now:
  *
- *  - a closed stream flips `paused` (the topbar renders a "live updates paused"
- *    chip, so the user knows the screen is a snapshot), and
+ *  - a closed stream flips `paused` (a "live updates paused" strip renders under
+ *    the header, so the user knows the screen is a snapshot), and
  *  - a fresh EventSource is opened on a bounded exponential backoff, which is
  *    what actually recovers after a re-login (the browser's own retry does not
  *    run for a failed connection).
@@ -136,7 +136,7 @@ async function sessionUnauthenticated(url: string): Promise<boolean> {
 export interface LiveUpdatesState {
   /** True while the stream is down — the surface is a stale snapshot. */
   paused: boolean;
-  /** Re-open immediately (the "retry" affordance next to the paused chip). */
+  /** Re-open immediately (the "Retry" button in the paused strip). */
   reconnect: () => void;
 }
 
@@ -149,8 +149,8 @@ export function useLiveUpdates(scopes: readonly string[]): LiveUpdatesState {
   const [paused, setPaused] = useState(false);
   const [attempt, setAttempt] = useState(0);
   // OBS-6: the session behind this stream is gone (a probe said 401), so no
-  // reopen can succeed and the loop stops. `paused` stays true — the topbar
-  // keeps its chip, whose retry calls `reconnect` and clears this.
+  // reopen can succeed and the loop stops. `paused` stays true — the strip
+  // under the header stays, and its Retry calls `reconnect` and clears this.
   const [signedOut, setSignedOut] = useState(false);
   // Ruling 301: a BACKGROUND tab holds no stream. An SSE connection is a
   // permanent one, Viberr is served over HTTP/1.1, and a browser allows about

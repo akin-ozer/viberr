@@ -248,7 +248,7 @@ React Router loaders on any data event or `stream.resync` (debounced 300 ms; a r
 only on its own task's page, floored at 2 s, joining a pending revalidation rather than
 pushing it out), and revalidates once on any connect that follows a previous stream. A
 hidden tab holds no stream: the hook closes on `visibilitychange` and reopens on return
-(ruling 301). A failed stream flips `paused` (the topbar's "live updates paused" chip),
+(ruling 301). A failed stream flips `paused` (the "live updates paused" strip under the header, ruling 455(f)),
 reopens on a 2 / 5 / 15 / 30 s backoff, probes the session after two consecutive
 failures and stops on a 401 until the user retries. There is no optimistic UI for
 governed state: revalidation is the update mechanism. (Measured 2026-09-23 on the
