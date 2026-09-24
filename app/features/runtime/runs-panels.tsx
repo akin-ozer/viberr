@@ -1598,7 +1598,6 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
     altBackend !== null &&
     (retryBackends?.includes(altBackend) ?? false);
   const canRetryBackend = retryPossible && !!onRetryBackend;
-  const altLabel = altBackend === "codex" ? "Codex" : "Claude";
   // Ruling 127: the offer, and when there is none, WHY there is none. A run
   // that failed on quota with an owner who never connected the other backend
   // gets no button on any surface (the blocked packet withholds
@@ -1612,11 +1611,11 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
   // credential fact that was often false and always irrelevant.
   const retryOffered = cur.kind === "primary" || cur.kind === "reviewer";
   const retryClause = canRetryBackend
-    ? `. Retry on ${altLabel}`
+    ? `. Retry on ${BACKEND_LABEL[altBackend]}`
     : retryPossible
       ? ". A maintainer can retry it on the other backend"
       : retryOffered && altBackend !== null && retryBackends !== undefined
-        ? `. ${altLabel} isn't connected for the task owner, so there is no other backend to retry on`
+        ? `. ${BACKEND_LABEL[altBackend]} isn't connected for the task owner, so there is no other backend to retry on`
         : "";
   const footer =
     cur.state === "running"
@@ -1765,10 +1764,10 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
             className="btn sm"
             disabled={retrying}
             onClick={() => onRetryBackend!(altBackend!, cur)}
-            title={`Re-run the ${cur.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}
+            title={`Re-run the ${cur.kind === "reviewer" ? "reviewer" : "specialist"} on ${BACKEND_LABEL[altBackend]}. The current backend was unavailable`}
           >
             <Icon name="refresh" />
-            Retry on {altLabel}
+            Retry on {BACKEND_LABEL[altBackend]}
           </button>
         )}
         {/* UI-57: both toggles carry their state for assistive tech, not just

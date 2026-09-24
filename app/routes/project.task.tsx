@@ -791,7 +791,7 @@ export async function action({ request, params }: Route.ActionArgs) {
                 ? "Held for runtime debug · the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
                   ? retryStarted
-                    ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude"} · streaming to agent logs`
+                    ? `Retrying on ${option.backend ? BACKEND_LABEL[option.backend] : "Claude"} · streaming to agent logs`
                     : "Decision recorded, but the retry could NOT start. The reason is on the timeline"
                   : option.kind === "edit_goal"
                     ? "Decision recorded · type the new goal; the packet clears when it lands"

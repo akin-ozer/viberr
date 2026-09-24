@@ -122,7 +122,7 @@ function BackendChip({
   b,
   health,
 }: {
-  b: string;
+  b: "codex" | "claude";
   /** Undefined = not probed on this surface; nothing is claimed. */
   health?: BackendConnectionSummary | undefined;
 }) {
@@ -138,7 +138,7 @@ function BackendChip({
   return (
     <span className="be-chip">
       <AgentGlyph backend={b} decorative />
-      {b === "claude" ? "Claude" : "Codex"}
+      {BACKEND_LABEL[b]}
       {missing && (
         <span className="model-sub" title={notConnectedNote(b)}>
           <Icon name="alert" />
@@ -151,9 +151,8 @@ function BackendChip({
 
 /** Ruling 127: what a person who has not connected a backend must do, in one
  *  sentence, addressed to them. */
-function notConnectedNote(backend: string): string {
-  const label = backend === "claude" ? "Claude" : "Codex";
-  return `You haven't connected ${label}. Connect it on your Profile → Agent accounts to run this profile on your tasks.`;
+function notConnectedNote(backend: "codex" | "claude"): string {
+  return `You haven't connected ${BACKEND_LABEL[backend]}. Connect it on your Profile → Agent accounts to run this profile on your tasks.`;
 }
 
 /**
@@ -782,7 +781,7 @@ export function ProfileDetail({
   // Ruling 127: the second claim is now about the VIEWER's own account — they
   // are the person who would press Run.
   const backendMissing = runHealth !== null && !runHealth.viewerConnected;
-  const backendLabel = runHealth?.backend === "claude" ? "Claude" : "Codex";
+  const backendLabel = runHealth ? BACKEND_LABEL[runHealth.backend] : "Codex";
   // F15-05/F15-06: the capability columns show GOVERNED policy only — the same
   // partition the matrix draws between its curated groups and "Other actions".
   // A grant with no runtime consumer (advisory catalog id, bespoke extra) is
@@ -1369,8 +1368,8 @@ export function LiveRoster({
               <span className="live-be">
                 {isOp
                   ? "orchestration"
-                  : d.backend === "claude"
-                    ? "Claude"
+                  : d.backend
+                    ? BACKEND_LABEL[d.backend]
                     : "Codex"}
               </span>
               <span className="live-task">
