@@ -22,10 +22,12 @@ Without the two secrets the server dies at boot with `Invalid environment
 configuration` listing every problem. Default sign-in after `npm run seed`:
 `admin@viberr.dev` / `viberr-dev-2828` (or `VIBERR_SEED_ADMIN_EMAIL` /
 `VIBERR_SEED_ADMIN_PASSWORD`, read while the users table is empty). `.env.example` sets
-`VIBERR_DATA_ROOT=./docker-data`, the same directory `compose.yml` bind-mounts at
-`/data`, so the dev server and the container share one store; the writer lock refuses the
-second process, so run one at a time (the schema default, used when the variable is
-unset, is `./data`). All variables are documented in
+`VIBERR_DATA_ROOT=./docker-data`, the dev server's store. Until ruling 460 it was also the
+directory `compose.yml` bind-mounted at `/data`; the container now mounts the named volume
+`viberr-data` instead (a macOS bind mount enforces no file permissions between users, and
+every agent runs as its person's own user), so the dev server and the container no longer
+share a store — read the container's through the app or `docker compose exec` (the schema
+default, used when the variable is unset, is `./data`). All variables are documented in
 [../operations/configuration.md](../operations/configuration.md).
 
 ## 2. Before you push

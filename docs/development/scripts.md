@@ -52,8 +52,14 @@ Every script that imports the app's config loads `.env` from the working directo
 | `npm run keys -- status` | none; reads a copy of the DB whenever `state/writer.lock` is present (ruling 158), and says so | how many sealed secrets still open only under a retired `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` key, across every registered store (`SEALED_STORES`): GitHub PATs, MCP server credentials, sign-in provider secrets, the S3 audit-export secret and personal backend API keys (`user_backend_credentials`, ruling 127; a `login` row has no box and is skipped) |
 | `npm run keys -- reseal [--dry-run]` | **writer** | re-seal them under the current key, personal backend keys included. A row it reports as unopenable is a person who must connect that backend again; the report names the backend, never the person's email |
 | `node scripts/measure-routes.mjs [routeId…]` | none | client asset closure per route (raw + gzip bytes, stable JSON) from a prior `npm run build`; not in `package.json`. `--check` compares every `bundle:` entry of `test-support/perf-budgets/bundle.json` and exits 1 on a regression or an unrecorded improvement (ruling 457; a CI step) |
+| `npm run store:to-volume [-- <dir>] [--volume <name>]` | **writer** on the SOURCE (`./docker-data` by default) | `tsx scripts/store-to-volume.ts` (ruling 460): the one-time move of a bind-mounted store into the named volume `viberr-data` compose now mounts. Refuses while an app holds the source's writer lock (the running container does) and when the volume already holds a store; copies with a `node:26-slim` helper container, drops its own lock file from the copy, makes the tree uid 1000's and leaves the source as it was. See [deployment.md](../operations/deployment.md#moving-the-store-to-the-named-volume-ruling-460) |
+| `sh scripts/check-agent-isolation.sh` | none | ruling 460's in-image check, run INSIDE the image as `node` against a store on a named volume (`docker compose exec -T app sh scripts/check-agent-isolation.sh`; `npm run e2e` runs it): an agent uid is refused the server's `/proc/<pid>/environ`, the projection database and another person's home, writes its own home and a shared workspace, and the launcher's relays, hard kill, PDEATHSIG, `--reap` and refusals hold. Exit 1 with the failures listed; removes what it creates |
 
-`tools/` holds no CLI: `tools/oxlint/` is the vendored lint plugin and its manifest.
+`tools/` holds no CLI an operator runs: `tools/oxlint/` is the vendored lint plugin and
+its manifest, and `tools/viberr-launch/viberr-launch.c` is the agent launcher the image
+compiles and installs setuid (ruling 460); the server runs it, and `docker compose exec
+-T app /usr/local/libexec/viberr-launch --reap 0 <runId>` is the one by-hand use (the
+runbook's "Agent runtimes").
 
 ## 3. Details that matter
 
@@ -147,4 +153,7 @@ untrusted-file report from the projected diagnostics.
 
 Two dev launchers exist for Claude Code users: `viberr-dev` refuses to start while a
 `viberr-app-1` container runs and exports `VIBERR_DATA_ROOT=$PWD/docker-data` on port
-5173; `viberr-dev-hermetic` uses `$PWD/data` on port 5174. Neither is part of CI.
+5173; `viberr-dev-hermetic` uses `$PWD/data` on port 5174. Neither is part of CI. Since
+ruling 460 the container's store is the named volume `viberr-data`, so `docker-data/` is
+the dev server's own store and no longer the live instance's: read a live instance
+through the app, `docker compose exec app …` or a backup, never from `docker-data/`.

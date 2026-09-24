@@ -20,6 +20,7 @@ import {
 import { getDb, getProjectionDbPath } from "./db/sqlite.server";
 import { selfHealProjectionDbIfCorrupt } from "./db/self-heal.server";
 import { repairCodexRolloutPaths } from "./runtimes/user-homes.server";
+import { bootAgentIsolation } from "./runtimes/agent-isolation.server";
 import { startEventPublisher } from "./events/event-publisher.server";
 import { armProcessShutdown } from "./events/sse-broker.server";
 import { startMcpGateway } from "./mcp-proxy/gateway.server";
@@ -705,6 +706,18 @@ export async function bootServer(): Promise<void> {
     );
   }
   const db = getDb();
+
+  // Ruling 460: before anything spawns an agent or creates a workspace — the
+  // server's umask, the store layout, every person's home handed to their
+  // agent uid, and the probe that says whether the store enforces any of it
+  // (`/resources/health` → `agentIsolation`). Without a launcher (the host dev
+  // server) it only records `off`. Never throws: a layout it could not set is
+  // logged and the probe reports the outcome.
+  try {
+    bootAgentIsolation(db);
+  } catch (error) {
+    logger.error("agent isolation could not be set up at boot", { err: toError(error) });
+  }
 
   await seedInitialAdmin(db, {
     email: env.VIBERR_SEED_ADMIN_EMAIL,

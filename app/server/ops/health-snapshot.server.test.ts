@@ -46,12 +46,12 @@ describe("healthSnapshot reports the MCP gateway (ruling 461)", () => {
     await stopMcpGateway();
   });
 
-  it("appends mcpProxy LAST — key order is the wire contract — with the gateway's live reading", async () => {
+  it("appends mcpProxy after toolchain and before ruling 460's agentIsolation — key order is the wire contract — with the gateway's live reading", async () => {
     const store = setupTestStore(ctx);
-    // Canary: drop `mcpProxy` from the snapshot, or put it anywhere but last.
+    // Canary: drop `mcpProxy` from the snapshot, or move it out of its slot.
     const down = healthSnapshot(store.db);
-    expect(Object.keys(down).at(-1)).toBe("mcpProxy");
-    expect(Object.keys(down).at(-2)).toBe("toolchain");
+    expect(Object.keys(down).at(-2)).toBe("mcpProxy");
+    expect(Object.keys(down).at(-3)).toBe("toolchain");
     expect(down.mcpProxy).toEqual({ listening: false, port: null, liveTokens: 0 });
     // Not listening is reported, never degraded: the instance serves anyway.
     expect(down.degraded).not.toContain("mcpProxy");
@@ -72,15 +72,17 @@ describe("healthSnapshot reports the MCP gateway (ruling 461)", () => {
 });
 
 describe("healthSnapshot reports the toolchain (ruling 182)", () => {
-  it("carries the toolchain reading right before mcpProxy — key order is the wire contract — versions only", () => {
+  it("carries the toolchain reading, then mcpProxy, then agentIsolation — key order is the wire contract — versions only", () => {
     // G36-4: nothing probed whether a sandboxed Codex run could exec at all,
     // so bubblewrap's refusal surfaced as a reviewer's "missing evidence"
     // verdict. The reading rides the health body and, through the spread,
-    // `instance_health`. Canary: drop `toolchain` from the snapshot.
+    // `instance_health`. Canary: drop `toolchain` from the snapshot. It was
+    // the last key until ruling 460 appended `agentIsolation` behind it, as
+    // the contract says a new field must be.
     const store = setupTestStore(ctx);
     const snapshot = healthSnapshot(store.db);
-    // Ruling 461 appended `mcpProxy` after it.
-    expect(Object.keys(snapshot).at(-2)).toBe("toolchain");
+    // Ruling 461 appended `mcpProxy` after it, and ruling 460 `agentIsolation` after that.
+    expect(Object.keys(snapshot).slice(-3)).toEqual(["toolchain", "mcpProxy", "agentIsolation"]);
     // The one memoized reading (`cachedToolchain`), never a second probe: the
     // suite primes it hermetic in setup-env, and that is what comes back.
     expect(snapshot.toolchain).toEqual(HERMETIC_TOOLCHAIN);

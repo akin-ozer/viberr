@@ -45,7 +45,7 @@ The route spreads `healthSnapshot()` after `ok`, and key order is part of the co
 |---|---|
 | `ok` | `false` only when SQLite is unreachable |
 | `status` | `ok` \| `degraded` (`down` only in the 503 body below) |
-| `degraded[]` | any of `watcher`, `kbWatcher`, `lock`, `disk`, `projections` |
+| `degraded[]` | any of `watcher`, `kbWatcher`, `lock`, `disk`, `projections`, `agentIsolation` |
 | `projections` | `{ projects, tasks }` row counts |
 | `projectionStore` | `null` while every canonical file projects; otherwise `{ files, latest: { at, sourcePath, message, failures } }` — how many files currently fail to rebuild and the most recent one, with the store's own error (rulings 217/218). A latch set by the rebuilder's catch and cleared per file by that file's next successful rebuild, never a probe. Non-null marks `degraded: ["projections"]` |
 | `watcher`, `kbWatcher` | store and knowledge-base watchers alive; a watcher error clears the handle, so `false` is a real dead watcher, not "never started" |
@@ -57,7 +57,8 @@ The route spreads `healthSnapshot()` after `ok`, and key order is part of the co
 | `build` | `{ version, revision, revisionSource: env\|git\|null, builtAt }`; `revision` is `null` in an image built without `npm run deploy` or the build args |
 | `quota` | one row per backend, `{ backend, reading, credentialRefused, exhausted }`: the latest rate-limit reading, the latest credential refusal and the latest quota exhaustion the run sink recorded (F32-9). On this unauthenticated route `credentialUserId` and `credentialLabel` are stripped from each record (ruling 130(d)); never `degraded` (ruling 146) |
 | `toolchain` | `{ node, npm, git, python3, go, make, docker, pnpm, yarn, curl, codexCli, claudeAgentSdk }` — each version a string or `null` when that tool is not installed, plus the two pinned agent packages (rulings 182(b), 191, 196). Memoized per process. Never `degraded`: what an agent's shell finds is information, not a fault |
-| `mcpProxy` | (last) `{ listening, port, liveTokens }` — the loopback MCP gateway (ruling 461): whether it is listening on `127.0.0.1`, on which port (`VIBERR_MCP_PROXY_PORT`, or the one picked at boot), and how many runs hold a live gateway token. Never `degraded`: a gateway that failed to bind leaves credentialed MCP servers unmountable, which each run's prompt states |
+| `mcpProxy` | `{ listening, port, liveTokens }` — the loopback MCP gateway (ruling 461): whether it is listening on `127.0.0.1`, on which port (`VIBERR_MCP_PROXY_PORT`, or the one picked at boot), and how many runs hold a live gateway token. Never `degraded`: a gateway that failed to bind leaves credentialed MCP servers unmountable, which each run's prompt states |
+| `agentIsolation` | (last) `{ status: on\|off\|degraded, uidFloor, reason }` (ruling 460). `on`: the launcher is installed and the boot probe, reading `state/projection.sqlite` as a uid that is not the server's, was refused — every agent process runs as its person's own OS user and cannot read the server's environment, the database or another person's home. `off`: no launcher (the host dev server, the test harness); runs spawn as the server's user; never `degraded`. `degraded` (marks `degraded: ["agentIsolation"]`): the launcher exists but the probe READ the store — the data root is on a mount that enforces no permissions between users, the macOS `./docker-data` bind mount; move it with `npm run store:to-volume` (deployment.md) — or the probe itself failed, with the launcher's own words in `reason` |
 
 Status codes: the bare URL is a **liveness** probe and returns `200` even when degraded;
 `?probe=readiness` (or `?probe=ready`) returns `503` with the same body while
@@ -322,7 +323,7 @@ recommendation is open. Nothing is owed by anyone while it waits.
   sign-in lives only at
   `$VIBERR_DATA_ROOT/runtimes/users/<userId>/claude-home/.credentials.json` or
   `.../codex-home/auth.json`; deleting or recreating that directory removes it while the
-  credential ROW stays in `user_backend_credentials` (a wipe of the WHOLE `./docker-data`
+  credential ROW stays in `user_backend_credentials` (a wipe of the WHOLE `viberr-data`
   volume takes the database with it, and then the row is gone too). Health for that person
   then reads "Your <Backend> sign-in file is missing from this server (the runtime volume
   was wiped). Sign in again on your Profile → Agent accounts." Do not copy a file in by
@@ -443,8 +444,23 @@ recommendation is open. Nothing is owed by anyone while it waits.
   SIGKILLs the rest. The `info` line `reaped the processes a settled run left behind`
   gives the run ids and how many were terminated and killed. A non-zero `killed` means
   something ignored SIGTERM. A process the run started that is still alive after its row
-  settled is a bug. To list a run's processes by hand inside the container, run
-  `docker compose exec -T app sh -c 'grep -l "VIBERR_RUN_ID=<runId>" /proc/[0-9]*/environ'`.
+  settled is a bug. An agent runs as its person's own uid (ruling 460), so the server
+  user cannot read its environment: list a run's processes by hand with the launcher,
+  which reads it as root, `docker compose exec -T app /usr/local/libexec/viberr-launch
+  --reap 0 <runId>` (one pid per line; `--reap KILL <runId>` ends them).
+- **Every agent runs as its person's own OS user (ruling 460).** `ps -o user,pid,cmd`
+  inside the container shows agent processes under numeric uids from 20001 (the person's
+  uid is `agent_os_users.os_uid`, allocated once and never reused). A run that fails at
+  start with "The agent could not be started as its person's own user (ruling 460): …"
+  is refused before any process started, and the sentence carries the launcher's own
+  words: the person's home could not be handed to their uid (a directory on the path owned
+  by someone else, a path outside `runtimes/users/`). Nothing falls back to the server's
+  user. `scripts/check-agent-isolation.sh` checks the whole mechanism in place:
+  `docker compose exec -T app sh scripts/check-agent-isolation.sh` (it uses two throwaway
+  uids at the top of the range and removes what it creates). A person's files under
+  `runtimes/users/<userId>/` are theirs: read them as the server (group `node` reads every
+  file there once the launcher has handed the home back after a run) or with
+  `docker compose exec`, never by changing their owner.
 
 ## Auth / access
 
@@ -574,9 +590,11 @@ stop it first. Do **not** wipe `state/` while the app runs.
 The writer lock stops a second WRITER. Nothing stops a second READER, and a second reader
 is the hazard: any process that opens `state/projection.sqlite` while the app holds it
 (`sqlite3`, a desktop SQLite browser, `node -e` with `readOnly: true`) maps the WAL index
-(`-shm`) the server has memory-mapped, and on the shipped Docker deployment
-(`./docker-data` is a bind mount over VirtioFS) the open path's lock probe on that file
-is unreliable, so a reader can truncate the index under the server. A stale shared
+(`-shm`) the server has memory-mapped, and on the Docker deployment as it shipped until
+ruling 460 (`./docker-data`, a bind mount over VirtioFS) the open path's lock probe on
+that file was unreliable, so a reader could truncate the index under the server; the store
+is now the named volume `viberr-data`, which the host cannot open at all, and the rule
+below stands regardless. A stale shared
 mapping in the guest is what a SIGBUS looks like. `readOnly` is no protection and neither
 is being inside the container: pass 34 saw exit 135 one second after a host-side reader,
 pass 35 one second after an in-container `readOnly: true` reader (and boot recovery then

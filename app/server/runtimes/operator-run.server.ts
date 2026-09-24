@@ -3,7 +3,8 @@ import {
   serverOutcomeSentence,
   type ResolvedPacketOption,
 } from "~/shared/packet-server-outcome";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { shareDirWithAgents } from "./agent-isolation.server";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -1517,7 +1518,8 @@ function ensureOperatorScratchDir(input: TaskFileRef): string {
     taskDir(input.projectSlug, input.taskKey, input.dataRoot),
     ".operator-scratch",
   );
-  mkdirSync(dir, { recursive: true });
+  // Ruling 460: the operator runs as its principal's own user and writes here.
+  shareDirWithAgents(dir);
   return dir;
 }
 
@@ -1575,7 +1577,9 @@ export async function ensureOperatorRepoCheckout(
   // absent, and both are true when it says them.
   let credential: CloneCredential = "absent";
   try {
-    mkdirSync(path.dirname(dir), { recursive: true });
+    // Ruling 460: `workspace/` is shared with the agent group, so what the
+    // clone writes below it stays editable by the agents that run there.
+    shareDirWithAgents(path.dirname(dir));
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
     credential = token ? "supplied" : "absent";

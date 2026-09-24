@@ -17,7 +17,8 @@ import {
   type CodexThread,
 } from "./codex-runtime.server";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { codexVendor } from "./codex-app-server.server";
 import path from "node:path";
 import { ensureUserBackendHome } from "./user-homes.server";
 import { insertRunLine, upsertRun } from "./run-store.server";
@@ -1745,6 +1746,59 @@ describe("per-run CODEX_HOME (ruling 181)", () => {
     // …and the settle carried it back and removed the run home.
     expect(existsSync(runHome)).toBe(false);
     expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"after"}');
+  });
+
+  /**
+   * Ruling 460: the SDK spawns `codexPathOverride` with its own argv, so the
+   * launcher stands in for the CLI and execs the SDK's vendored binary as the
+   * principal's uid. The run home the server forks is handed to that uid
+   * before the CLI starts, and handed back (with the written-back sign-in) at
+   * the settle, through the launcher's `--prepare-home`.
+   */
+  it("launches the vendored CLI through the launcher as the principal's uid, and hands the run home to it (ruling 460)", async () => {
+    const dir = homes.makeTempDir("viberr-launcher-");
+    const log = path.join(dir, "calls.log");
+    const launcher = path.join(dir, "viberr-launch");
+    writeFileSync(launcher, `#!/bin/sh\necho "$*" >> '${log}'\nexit 0\n`);
+    chmodSync(launcher, 0o755);
+    const shared = ensureUserBackendHome("u_arda", "codex", homes.makeTempDir());
+    writeFileSync(path.join(shared, "auth.json"), '{"tokens":"before"}');
+    const run = gatedCodex();
+    let exit: RunExit | undefined;
+    createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
+      {
+        ...SPEC,
+        runId: "run_launched",
+        agent: { uid: 20001, launcher, launchHome: shared, home: "/data/runtimes/users/u_arda/home" },
+        env: { CODEX_HOME: shared, VIBERR_RUN_ID: "run_launched" },
+      },
+      { onLine: () => {}, onExit: (e) => { exit = e; } },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    const options = run.factoryOptions();
+    const runHome = path.join(shared, "runs", "run_launched");
+    const vendor = codexVendor();
+    expect(options?.codexPathOverride).toBe(launcher);
+    expect(options?.env?.VIBERR_LAUNCH_EXEC).toBe(vendor.binary);
+    expect(path.isAbsolute(options?.env?.VIBERR_LAUNCH_EXEC ?? "")).toBe(true);
+    expect(options?.env?.VIBERR_LAUNCH_UID).toBe("20001");
+    expect(options?.env?.VIBERR_LAUNCH_HOME).toBe(shared);
+    // The run's own env still reaches the CLI through the launcher.
+    expect(options?.env?.CODEX_HOME).toBe(runHome);
+    expect(options?.env?.VIBERR_RUN_ID).toBe("run_launched");
+    // The SDK adds its helper directories to PATH only for its own lookup.
+    expect(options?.env?.PATH?.split(path.delimiter)).toEqual([...vendor.pathDirs, "/usr/bin"]);
+    // The run home the server just forked belongs to the principal's uid
+    // before the CLI (running as that uid) reads its copied sign-in.
+    expect(readFileSync(log, "utf8")).toContain(`--prepare-home 20001 ${runHome}`);
+
+    writeFileSync(path.join(runHome, "auth.json"), '{"tokens":"after"}');
+    run.release();
+    await drain();
+    expect(exit?.outcome).toBe("finished");
+    // The written-back sign-in is the server's file: handed back to the uid.
+    expect(readFileSync(log, "utf8")).toContain(`--prepare-home 20001 ${path.join(shared, "auth.json")}`);
   });
 
   it("removes the run home when the run is interrupted, too", async () => {

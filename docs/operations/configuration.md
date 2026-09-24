@@ -49,7 +49,7 @@ deployment environment and restart.
 |---|---|---|
 | `NODE_ENV` | `development` | `development \| production \| test`. The image sets `production` and compose forces it. Also read raw by the logger (default level) and the SSE broker (no signal handlers under `test`). |
 | `PORT` | `5173` | Dev server and `react-router-serve`. The image sets `3000`; compose publishes `${PORT:-3000}` on both sides. `vite.config.ts` reads it raw for the dev server (`strictPort`). |
-| `VIBERR_DATA_ROOT` | `./data` | The runtime data root (canonical markdown, SQLite, run logs, KBs, skills, per-person runtime homes). The image sets `/data` and compose forces it; `.env.example` sets `./docker-data` so a host-side CLI and the container name the same directory. Relative paths resolve against the working directory. `vite.config.ts` reads it raw to keep the root out of the dev watcher. |
+| `VIBERR_DATA_ROOT` | `./data` | The runtime data root (canonical markdown, SQLite, run logs, KBs, skills, per-person runtime homes). The image sets `/data` and compose forces it (the named volume `viberr-data`, ruling 460); `.env.example` sets `./docker-data`, the host dev server's own store — since ruling 460 no longer the container's, whose volume the host cannot open. Relative paths resolve against the working directory. The agent launcher is compiled against the image's value (the Dockerfile's global `VIBERR_DATA_ROOT` ARG) and refuses a home outside `<that root>/runtimes/users/`. `vite.config.ts` reads it raw to keep the root out of the dev watcher. |
 | `VIBERR_FORCE_DATA_ROOT_LOCK` | unset | `1`, `true` or `yes` for ONE boot (or one CLI run) to take over a `state/writer.lock` whose holder cannot be judged, typically one left by a process on another host (`forceDataRootTakeover` in `app/server/db/data-root-lock.server.ts`). See the single-writer lock in the [runbook](runbook.md#the-single-writer-lock-and-cli-refusals). |
 | `BETTER_AUTH_URL` | unset | Absolute public origin. Optional in dev (inferred per request). **Required behind a reverse proxy**: better-auth derives OAuth callback URLs, `trustedOrigins` and the cookie `Secure` attribute from it, and `appOrigin()` uses it for the back-links in PR bodies (no link at all when unset). Boot warns when an OAuth client id is configured without it, and when it is an `http://` non-loopback origin under `NODE_ENV=production` (`insecureAuthOriginWarning`). |
 | `BETTER_AUTH_SECRET` | falls back to `VIBERR_SESSION_SECRET` | ≥ 32 chars. Set only to rotate the auth secret independently. |
@@ -299,20 +299,37 @@ From the `Dockerfile` runtime stage: `NODE_ENV=production`, `VIBERR_DATA_ROOT=/d
 comes from `.env` via compose `env_file`. Compose additionally forces `NODE_ENV=production`
 and `VIBERR_DATA_ROOT=/data` even when `.env` carries the dev values, passes the four
 controller unlock flags with `disabled` as the default, pins `hostname: viberr` (so a
-recreated container can reclaim its own writer lock) and runs with `init: true`.
+recreated container can reclaim its own writer lock), runs with `init: true` and mounts
+the named volume `viberr-data` at `/data` (ruling 460).
 
 The image bakes **no** backend credential and **no** runtime home, and it declares no
 `ENTRYPOINT`: the CMD runs `node` on `react-router-serve` directly as pid 1 (so a
 `docker compose stop` SIGTERM reaches the process that checkpoints the WAL and releases
 the writer lock), and compose's `init: true` reaps orphans. Each person's home is created
-on demand at `/data/runtimes/users/<userId>/{claude-home,codex-home}`, mode 0700, by
-`ensureUserBackendHome`.
+on demand at `/data/runtimes/users/<userId>/{claude-home,codex-home}` by
+`ensureUserBackendHome` and handed to that person's agent uid.
+
+Ruling 460's image pieces are build arguments, not environment variables: the Dockerfile's
+global `ARG VIBERR_AGENT_UID_FLOOR=20001`, `VIBERR_AGENT_UID_MAX=59999`,
+`VIBERR_AGENT_GID=20000` and `VIBERR_DATA_ROOT=/data` are compiled into the setuid launcher
+`/usr/local/libexec/viberr-launch` (root:node 4750), which reads none of them from its
+environment; `agent-isolation.server.ts` holds the same three numbers and a test pins them
+to the ARG defaults. The image also creates the group `viberr-agents` (with `node` in it)
+and a root-owned `/etc/gitconfig` carrying `safe.directory=*` and
+`core.sharedRepository=group`. The launcher reads exactly three variables from the
+environment the server hands it — `VIBERR_LAUNCH_UID`, `VIBERR_LAUNCH_EXEC` and
+`VIBERR_LAUNCH_HOME` — and removes every `VIBERR_LAUNCH_*` name before it execs anything;
+they are process plumbing, not configuration, and nothing reads them from `.env`.
 
 ## 6. Local development
 
 `.claude/launch.json` defines two launchers: `viberr-dev` exports
 `VIBERR_DATA_ROOT=<repo>/docker-data` on port 5173 and **refuses to start while the
 `viberr-app-1` container is running** (two writers on one data root corrupt the
-SQLite WAL); `viberr-dev-hermetic` uses `<repo>/data` on port 5174. `vite.config.ts`
+SQLite WAL — true while the container still ran on that directory; since ruling 460 it
+runs on the named volume, and the host dev server's `./docker-data` is its own store);
+`viberr-dev-hermetic` uses `<repo>/data` on port 5174. The host dev server has no agent
+launcher, so its runs spawn as your own user and its health says `agentIsolation: off`.
+`vite.config.ts`
 loads `.env` itself and excludes the data root from the dev watcher, because task
 workspaces under it are full nested clones of the target repository.

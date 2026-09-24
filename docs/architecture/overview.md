@@ -264,7 +264,8 @@ table list with retention is in [data-model.md](data-model.md).
   credential. Each person connects Claude and Codex on Profile → Agent accounts; a hosted
   sign-in is executed by the unmodified vendor binary and its credential file stays in
   that person's own runtime home (`<dataRoot>/runtimes/users/<userId>/{claude-home,
-  codex-home}`, mode 0700), while a pasted key or workspace token is sealed in
+  codex-home}`, owned by that person's agent uid, ruling 460), while a pasted key or
+  workspace token is sealed in
   `user_backend_credentials` and never returned to a loader. Every run resolves ONE
   principal (the task owner, or the asker on a controller turn), persisted as
   `agent_runs.credential_user_id`; a run with no available principal is refused before any
@@ -294,9 +295,22 @@ table list with retention is in [data-model.md](data-model.md).
   variables, and gains back only the one principal's credential and the one home they
   own. A settled run leaves no live process: the Claude CLI leads its own process group
   and both backends' leftovers are swept by run id (ruling 174).
+- **Every agent process runs as its person's own OS user (ruling 460)**: in the image,
+  each person gets a stable agent uid (from 20001, never reused) in the shared group
+  `viberr-agents`, and every Claude and Codex CLI, the Codex compaction and the backend
+  sign-in flows are started through one setuid launcher (`viberr-launch`, root:node 4750,
+  `tools/viberr-launch/viberr-launch.c`) that execs them as that uid. The server stays
+  `node` and never becomes root. What that buys, measured: a run's shell is refused the
+  server's `/proc/<pid>/environ` (the secret-encryption key, the session secret), the
+  projection database (`state/` is 0700) and every other person's home. It needs the store
+  on a mount that enforces permissions — the named volume `viberr-data`, not the macOS bind
+  mount, which enforces none between uids — and health says which it is
+  (`agentIsolation: on | off | degraded`). Workspaces, attachments and the uv caches are
+  shared with the agent group (2770 setgid); canonical files, knowledge bases and skills are
+  readable and never writable to an agent.
 - **Ops**: single-writer lock with a fail-closed guard, WAL checkpoint on shutdown,
   self-heal on corruption, liveness vs readiness on `/resources/health` (readiness 503s
-  when the watcher, KB watcher, lock, disk or a projection is degraded).
+  when the watcher, KB watcher, lock, disk, a projection or agent isolation is degraded).
 
 ## 9. Where the canon lives
 

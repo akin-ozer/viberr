@@ -548,6 +548,14 @@ const BASELINE_TABLES: readonly string[] = [
      updated_at TEXT NOT NULL,
      UNIQUE (user_id, backend)
    )`,
+  // Ruling 460: each person's agent uid. A root that predates it would refuse
+  // every run start in the image ("no such table") — the uid is allocated
+  // before the launch.
+  `CREATE TABLE IF NOT EXISTS agent_os_users (
+     user_id TEXT PRIMARY KEY,
+     os_uid INTEGER NOT NULL UNIQUE,
+     created_at TEXT NOT NULL
+  )`,
 ];
 
 /** Indexes the baseline gained after a root applied it. `IF NOT EXISTS` makes

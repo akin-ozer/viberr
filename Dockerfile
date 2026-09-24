@@ -1,5 +1,14 @@
 # syntax=docker/dockerfile:1
 
+# Ruling 460's numbers, declared once for the two stages that use them: the
+# launcher compiles them in, the runtime stage creates the group and the data
+# root. `agent-isolation.server.ts` holds the same three numbers and
+# `agent-isolation.server.test.ts` pins them against these defaults.
+ARG VIBERR_AGENT_UID_FLOOR=20001
+ARG VIBERR_AGENT_UID_MAX=59999
+ARG VIBERR_AGENT_GID=20000
+ARG VIBERR_DATA_ROOT=/data
+
 # ============================================================================
 # Production dependency tree.
 #
@@ -41,6 +50,44 @@ RUN npm ci --foreground-scripts
 
 COPY . .
 RUN npm run build --no-audit --no-fund
+
+# ============================================================================
+# The agent launcher (ruling 460) — see "every agent process runs as its
+# person's own OS user" in the runtime stage for what it is.
+#
+# Its own stage because the runtime stage carries no compiler: the slim base
+# has none, and none of the runtime packages pulls one in. (The ruling's spec
+# said gcc was already in the final stage; it was, in an image built on an
+# older base, and the current base does not have it — measured 2026-09-24.)
+# Same base image as the runtime stage, so the binary links against exactly
+# the glibc it runs on. The layer is keyed on the one C file, so it rebuilds
+# only when the launcher changes, in parallel with the app build.
+# ============================================================================
+FROM node:26-slim AS launcher
+
+ARG VIBERR_AGENT_UID_FLOOR
+ARG VIBERR_AGENT_UID_MAX
+ARG VIBERR_AGENT_GID
+ARG VIBERR_DATA_ROOT
+
+# hadolint ignore=DL3008
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && node -p 'require("tls").rootCertificates.join(require("os").EOL)' > /tmp/node-roots.pem \
+    && apt-get -o Acquire::https::CaInfo=/tmp/node-roots.pem update \
+    && apt-get -o Acquire::https::CaInfo=/tmp/node-roots.pem install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/* /tmp/node-roots.pem
+
+COPY tools/viberr-launch/viberr-launch.c /src/viberr-launch.c
+# The uid range, the agent gid, the server's ids and the data root are
+# compiled in: the binary is setuid root and reads none of them from the
+# environment it is handed.
+RUN mkdir -p /out \
+    && gcc -O2 -Wall -Wextra -Werror -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
+        -fPIE -pie -Wl,-z,relro,-z,now \
+        -DAGENT_UID_FLOOR="${VIBERR_AGENT_UID_FLOOR}" -DAGENT_UID_MAX="${VIBERR_AGENT_UID_MAX}" \
+        -DAGENT_GID="${VIBERR_AGENT_GID}" -DSERVER_UID="$(id -u node)" -DSERVER_GID="$(id -g node)" \
+        -DDATA_ROOT="\"${VIBERR_DATA_ROOT}\"" \
+        -o /out/viberr-launch /src/viberr-launch.c
 
 # ============================================================================
 # Runtime stage.
@@ -147,11 +194,13 @@ ENV NODE_ENV=production
 # Canonical file store + SQLite projections live here; compose mounts a
 # host directory (or named volume) at this path. Ruling 127: each person's own
 # agent-backend sign-in and provider sessions live under
-# /data/runtimes/users/<userId>/{claude-home,codex-home}, created 0o700 on
-# demand, so they survive container restarts and a `docker compose up --build`.
-# There is no image-level backend credential and no shared runtime home: a run
-# gets the home and key of the ONE person it bills.
-ENV VIBERR_DATA_ROOT=/data
+# /data/runtimes/users/<userId>/{claude-home,codex-home}, owned by that
+# person's agent uid (ruling 460), so they survive container restarts and a
+# `docker compose up --build`. There is no image-level backend credential and
+# no shared runtime home: a run gets the home and key of the ONE person it
+# bills. The launcher is compiled against the same root (the global ARG).
+ARG VIBERR_DATA_ROOT
+ENV VIBERR_DATA_ROOT=$VIBERR_DATA_ROOT
 # uv's package cache and its managed CPython, on the same volume for the same
 # reason: both default under $HOME, which is container-local, so every
 # `docker compose up` after a recreate would re-download an interpreter and
@@ -159,6 +208,37 @@ ENV VIBERR_DATA_ROOT=/data
 ENV UV_CACHE_DIR=/data/runtimes/uv-cache
 ENV UV_PYTHON_INSTALL_DIR=/data/runtimes/uv-python
 ENV PORT=3000
+
+# Ruling 460: every agent process runs as its person's own OS user.
+#
+# Before it, the server (`node`) spawned every Claude and Codex CLI as `node`
+# too, so a run's shell could read the server's /proc/<pid>/environ (the
+# secret-encryption key, the session secret), the projection database and every
+# other person's sign-in. Now each person gets a stable uid from
+# VIBERR_AGENT_UID_FLOOR up (`agent_os_users`), every agent shares the primary
+# group `viberr-agents`, and `node` is a supplementary member of that group, so
+# the server reads and writes what agents share (workspaces, attachments, the uv
+# caches) while an agent reaches nothing of the server's and nothing of another
+# person's home.
+#
+# The one privileged step is `viberr-launch` (tools/viberr-launch/viberr-launch.c,
+# built in the `launcher` stage above): root:node 4750, so only root and the
+# server's group can execute it — agents are not in group `node`.
+#
+# `safe.directory=*` and `core.sharedRepository=group` go in the SYSTEM git
+# config: git refuses a repository another uid owns ("dubious ownership"), and a
+# workspace is cloned by the server and edited by agents. /etc/gitconfig is
+# root-owned, so no agent can change it, and it binds every git invocation —
+# the server's, an agent's shell, a tool that clears its environment — where
+# an environment variable would reach only the processes it was passed to.
+ARG VIBERR_AGENT_GID
+COPY --from=launcher /out/viberr-launch /usr/local/libexec/viberr-launch
+RUN groupadd --gid "${VIBERR_AGENT_GID}" viberr-agents \
+    && usermod --append --groups viberr-agents node \
+    && git config --system safe.directory '*' \
+    && git config --system core.sharedRepository group \
+    && chown root:node /usr/local/libexec/viberr-launch \
+    && chmod 4750 /usr/local/libexec/viberr-launch
 
 WORKDIR /app
 
@@ -178,12 +258,13 @@ COPY --from=build --chown=node:node /app/scripts ./scripts
 COPY --from=build --chown=node:node /app/app ./app
 COPY --from=build --chown=node:node /app/tsconfig.json ./tsconfig.json
 
-# Data root must exist and be writable by the non-root user.
-# NOTE: this only takes effect when /data is NOT bind-mounted. compose.yml
-# mounts ./docker-data over it, and a bind mount shadows the image directory
-# completely — the host path's ownership is what the container sees. See
-# "First run" in docs/operations/deployment.md for the one-line host-side fix.
-RUN mkdir -p /data && chown node:node /data
+# The data root: the server's, traversable by the agent group and by nobody
+# else (ruling 460). A NAMED volume mounted here is initialised from this
+# directory, ownership and mode included; compose.yml mounts one
+# (`viberr-data`), because a macOS bind mount does not enforce file permissions
+# between uids at all (measured: uid 65534 read a 0600 file owned by 1000).
+# The server re-asserts the layout below it on every boot.
+RUN mkdir -p /data && chown node:viberr-agents /data && chmod 0750 /data
 
 USER node
 

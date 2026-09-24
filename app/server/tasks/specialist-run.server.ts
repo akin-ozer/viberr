@@ -12,6 +12,7 @@ import {
   type WorkspaceRefreshInput,
 } from "./workspace-refresh.server";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
@@ -1699,6 +1700,8 @@ async function dispatchAgentRun(
   const cloneFailure = clone?.failure ?? null;
   const runWorkdir = clone?.dir ?? (realBackend ? supportRoot : null);
   if (runWorkdir && !existsSync(runWorkdir)) {
+    // Ruling 460: the agent runs as its person's own user and writes here.
+    shareDirWithAgents(workspaceRoot);
     mkdirSync(runWorkdir, { recursive: true });
   }
   // C4-opres: the clone above is the MINUTES-long window in which the human can
@@ -1761,7 +1764,8 @@ async function dispatchAgentRun(
   // the dir must exist BEFORE the run so a plain `cp` into it cannot fail on
   // a missing path (the browser mount creates it too — idempotent).
   if (collab.evidence && realBackend) {
-    mkdirSync(attachmentsDir, { recursive: true });
+    // Ruling 460: shared with the agent group, which writes the drop.
+    shareDirWithAgents(attachmentsDir);
   }
 
   // The agent's run persona: its detailed definition + granted skills + KB docs.
@@ -3807,7 +3811,7 @@ export async function resolveResumeConfinement(
         input.taskKey,
         ctx.dataRoot,
       );
-      mkdirSync(attachmentsWritableDir, { recursive: true });
+      shareDirWithAgents(attachmentsWritableDir);
     }
     const confinement: ResumeConfinement = {
       disallowedTools,
@@ -4109,6 +4113,10 @@ async function cloneRepo(
         // never about a credential, and saying it was sent a human (and an
         // operator, live on SHOP-5) to re-provision one that already worked.
         credential = "not_involved";
+        // Ruling 460: the checkout is cloned by the server and edited by
+        // agents running as their own users; what is created below the
+        // shared root stays in the agent group.
+        shareDirWithAgents(workspaceRoot);
         mkdirSync(path.dirname(dir), { recursive: true });
         try {
           await execFileAsync("git", ["clone", "--local", deliveringDir, dir], {
@@ -4189,6 +4197,7 @@ async function cloneRepo(
       }
       return described ? { dir, refreshed: described } : { dir };
     }
+    shareDirWithAgents(workspaceRoot);
     mkdirSync(path.dirname(dir), { recursive: true });
 
     const cred = getProjectCredential(db, input.projectSlug);
