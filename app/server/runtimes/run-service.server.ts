@@ -2302,14 +2302,14 @@ function launch(
               const post =
                 event.postTokens === null
                   ? "a summary"
-                  : `${Math.round(event.postTokens / 1000)}k tokens`;
+                  : `${wholeThousands(event.postTokens)} tokens`;
               sink.line({
                 raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion", ...event }),
                 display: {
                   t: occurredAt.slice(11, 19),
                   ev: "meta",
                   tag: "run·compacted·completion",
-                  text: `context compacted at the end of the run · ${Math.round(event.preTokens / 1000)}k → ${post}`,
+                  text: `context compacted at the end of the run · ${wholeThousands(event.preTokens)} → ${post}`,
                 },
                 facts: { compaction: { trigger: "completion", ...event } },
                 occurredAt,

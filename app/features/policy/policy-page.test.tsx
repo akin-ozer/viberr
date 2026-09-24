@@ -644,11 +644,11 @@ describe("operatorAutonomyState (F20-19)", () => {
 
 /* F19-33: all three panel heads on this page took their count's type scale from
    a private `PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" }`
-   — a byte copy of the sheet's `.fine` (app.css:230) that seven other panel
-   heads already opt into by name, and that github-view.tsx and settings-page.tsx
-   each kept their own copy of. app.css.test.ts holds the structural gate (no
-   style object, hoisted or inline, may restate a utility rule); these assert
-   what this surface actually renders. Ruling 14: never fork per surface. */
+   — a byte copy of the sheet's `.fine` that seven other panel heads already
+   opt into by name, and that github-view.tsx and settings-page.tsx each kept
+   their own copy of. app.css.test.ts holds the structural gate (no style
+   object, hoisted or inline, may restate a utility rule); these assert what
+   this surface actually renders. Ruling 14: never fork per surface. */
 describe("policy panel heads take their count styling from the sheet (F19-33)", () => {
   const expectSheetStyledCount = (container: HTMLElement) => {
     const count = container.querySelector(".panel-head .right")!;

@@ -57,8 +57,8 @@ type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
 
 /* F19-33: the three panel-head counts below used to be styled by a private
    `PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" }` const —
-   a byte copy of the sheet's `.fine` utility (app.css:230) that github-view.tsx
-   and settings-page.tsx each kept a copy of too. Hoisting the object out of the
+   a byte copy of the sheet's `.fine` utility that github-view.tsx and
+   settings-page.tsx each kept a copy of too. Hoisting the object out of the
    JSX also slipped it past app.css.test.ts's `style={{…}}` scan. Ruling 14:
    shared single implementations, never fork per surface — the count is
    `right sub fine`, the same three classes seven other panel heads use. */

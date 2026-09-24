@@ -15,7 +15,7 @@ import { describeRevisionDrift } from "~/shared/revision-drift";
 import { newId } from "~/shared/ids/new-id.server";
 import { taskClosure } from "~/server/tasks/task-closure.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
-import { POLICY_ENGINE_NOTIFY_FROM } from "~/server/tasks/task-mutation.server";
+import { POLICY_ENGINE_NOTIFY_FROM, taskRef } from "~/server/tasks/task-mutation.server";
 import {
   recordAudit,
   type AuditActor,
@@ -156,17 +156,6 @@ export interface GithubActionContext {
    *  human-triggered "Update status" leaves it unset — someone is waiting for
    *  the whole board's truth, not a slice of it. */
   taskBudget?: number;
-}
-
-function taskRefOf(
-  input: { projectSlug: string; taskKey: string },
-  ctx: GithubActionContext,
-) {
-  return {
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    dataRoot: ctx.dataRoot,
-  };
 }
 
 /** `fetchImpl` is an OPTIONAL key: the context reads it with a truthiness check,
@@ -336,7 +325,7 @@ async function reconcileTaskUnlocked(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<TaskReconcileResult> {
-  const ref = taskRefOf(input, ctx);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const file = readTaskFile(ref);
   if (!file) return { status: "task_not_found", taskKey: input.taskKey };
   const fm = file.parsed.frontmatter;
@@ -1770,7 +1759,7 @@ export async function mergeTaskPr(
   actor: AuditActor & { userId: string },
   ctx: GithubActionContext = {},
 ): Promise<MergeTaskPrResult> {
-  const ref = taskRefOf(input, ctx);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const file = readTaskFile(ref);
   if (!file) return { status: "task_not_found", taskKey: input.taskKey };
   const fm = file.parsed.frontmatter;
@@ -2087,7 +2076,7 @@ export async function deleteTaskRemoteBranch(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<BranchDeleteResult | GithubContextFailure> {
-  const ref = taskRefOf(input, ctx);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const file = readTaskFile(ref);
   if (!file?.parsed.frontmatter.branch) return { status: "no_branch" };
   const fm = file.parsed.frontmatter;
@@ -2290,7 +2279,7 @@ export async function resolveRemoteBranchCollision(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<RemoteCollisionResult> {
-  const ref = taskRefOf(input, ctx);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const file = readTaskFile(ref);
   const branch = file?.parsed.frontmatter.branch;
   if (!file || !branch) {

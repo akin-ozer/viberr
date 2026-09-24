@@ -870,11 +870,11 @@ describe("MembersPanel", () => {
 });
 
 /* F19-33: both panels below styled their head count with a private
-   `PANEL_COUNT_STYLE` (a byte copy of `.fine`, app.css:230) and their trailing
-   note with a private `POL_NOTE_STYLE` (a copy of `.pol-note.after` +
-   `.pol-note.last`, app.css:3844-3846). github-view.tsx and policy-page.tsx kept
-   their own copies of the same two objects, and the note copies had already
-   drifted three ways — .8rem here, .9rem in github-view, .85rem in the sheet.
+   `PANEL_COUNT_STYLE` (a byte copy of `.fine`) and their trailing note with a
+   private `POL_NOTE_STYLE` (a copy of `.pol-note.after` + `.pol-note.last`).
+   github-view.tsx and policy-page.tsx kept their own copies of the same two
+   objects, and the note copies had already drifted three ways — .8rem here,
+   .9rem in github-view, .85rem in the sheet.
    app.css.test.ts holds the structural gate (no style object, hoisted or inline,
    may restate a utility rule); these assert what this surface renders.
    Ruling 14: shared single implementations, never fork per surface. */

@@ -452,7 +452,7 @@ function StoreTree({
                   screen to explain it. `.rsrc-acts` is the always-visible row-
                   action wrapper the org-settings resource rows already use, so
                   this is also the app's one row-action shape rather than a
-                  third. (For UI-A: `.fm-acts` at app.css:3242-3243 is now dead.) */}
+                  third. (`.fm-acts` has since been deleted from app.css, P16-UI-25.) */}
               <span className="rsrc-acts" onClick={(e) => e.stopPropagation()}>
                 {r.node.type === "dir" && (
                   <>

@@ -1381,6 +1381,8 @@ inventory is not regenerated automatically and has drifted; the verified module 
     *(Amended 2026-09-21 by ruling 375: a prompted manual dispatch records the directive comment
     BEFORE the run starts, so no completion window can redeliver it, and a start that throws
     appends "No run started for <agent>: <reason>" beside it.)*
+    *(Noted 2026-09-24 — both copies of `agentBackendName` (the mapping layer's and actor-ref's)
+    are gone; those sites now read `BACKEND_LABEL` in `app/shared/text/backend-label.ts`.)*
 
 93. **R22 (2026-08-21, pass 22): the Codex OS process sandbox is REMOVED — "viberr itself
     is the sandbox."** `resolveCodexSandboxMode` returns `read-only` for NO run anymore:

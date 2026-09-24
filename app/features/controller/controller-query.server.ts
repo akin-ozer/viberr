@@ -25,7 +25,7 @@ import type { RunView } from "~/features/runtime/runtime-types";
 import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-actions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { taskKeyLinks } from "~/server/projections/task-key-links.server";
-import { NEW_CONVERSATION_PARAM } from "./controller-page";
+import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own

@@ -94,10 +94,10 @@ export type ProjectActionGate = (
 
 /* F19-33: the panel-head counts and the trailing panel notes below used to be
    styled by two private consts here — `PANEL_COUNT_STYLE` (a byte copy of the
-   sheet's `.fine`, app.css:230) and `POL_NOTE_STYLE` (a copy of
-   `.pol-note.after` + `.pol-note.last`, app.css:3844-3846). github-view.tsx and
-   policy-page.tsx each kept their own copies, and the note copies had already
-   drifted three ways: .8rem here, .9rem in github-view, .85rem in the sheet.
+   sheet's `.fine`) and `POL_NOTE_STYLE` (a copy of `.pol-note.after` +
+   `.pol-note.last`). github-view.tsx and policy-page.tsx each kept their own
+   copies, and the note copies had already drifted three ways: .8rem here,
+   .9rem in github-view, .85rem in the sheet.
    Hoisting the objects out of the JSX also slipped them past app.css.test.ts's
    `style={{…}}` scan, which is why the drift went unnoticed. Ruling 14: shared
    single implementations, never fork per surface. */
@@ -228,8 +228,8 @@ export function ProjectPanel({
           entirely without the grant — the fields above are already `disabled`
           there and the note names the grant, so a Save control would only offer
           a role an act it cannot perform. `.confirm-actions` is the sheet's
-          existing commit/cancel row (app.css:2133): cancel first, primary last,
-          same order as every confirm in the product. */}
+          existing commit/cancel row: cancel first, primary last, same order
+          as every confirm in the product. */}
       {canManage && (
         <div className="confirm-actions">
           <button
@@ -779,8 +779,8 @@ function StageRow({
     <div
       ref={ref}
       // `.draggable` is the grab-cursor hook, named to match the board's
-      // `.card-wrap.draggable` (app.css:672-673) — the whole-row surface has no
-      // grip, so the cursor is its only pointer affordance.
+      // `.card-wrap.draggable` — the whole-row surface has no grip, so the
+      // cursor is its only pointer affordance.
       className={
         "stg-row" +
         (canDrag ? " draggable" : "") +

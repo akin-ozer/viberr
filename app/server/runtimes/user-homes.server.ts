@@ -18,6 +18,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { AppError } from "~/server/errors/app-error.server";
+import { errnoSchema } from "~/server/files/atomic-file.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import type { RealBackend } from "./runtime-registry.server";
@@ -460,10 +461,6 @@ function readIfPresent(file: string): Buffer | null {
   }
 }
 
-/** What `openSync(..., "wx")` throws when the lock is held: the one field the
- *  retry reads, decoded rather than asserted. */
-const fsErrorSchema = z.object({ code: z.string().optional() }).catch({});
-
 /** A lockfile with retry: `O_EXCL` create, poll while held, break a holder
  *  that is older than a settle could possibly be. Serializes the write-back
  *  between concurrent runs of one person; last writer wins by design. */
@@ -475,7 +472,9 @@ function withAuthLock(sharedHome: string, runId: string, action: () => void): vo
       closeSync(openSync(lock, "wx", 0o600));
       break;
     } catch (error) {
-      if (fsErrorSchema.parse(error).code !== "EEXIST") throw error;
+      // What `openSync(..., "wx")` throws when the lock is held: the one
+      // field the retry reads, decoded rather than asserted.
+      if (errnoSchema.safeParse(error).data?.code !== "EEXIST") throw error;
     }
     if (Date.now() >= deadline || lockIsStale(lock)) {
       logger.warn("codex run home: breaking a stale sign-in write-back lock", { runId });

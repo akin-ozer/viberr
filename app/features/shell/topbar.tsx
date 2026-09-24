@@ -127,7 +127,8 @@ export function Topbar({
           class="cur"> — no landmark, no current-page signal. <nav> + the label
           and `aria-current` are pure semantics: `.crumbs` is a flex container
           styled by class, and <nav> is a block box exactly like the <div> it
-          replaces, so the truncation tiers (app.css:2306-2316) are untouched.
+          replaces, so the truncation tiers (the `.crumbs` breakpoints in app.css)
+          are untouched.
           (The fuller <ol>/<li> shape would need `display: contents` rules that
           do not exist yet — reported rather than invented.) */}
       <nav className="crumbs" aria-label="Breadcrumb">

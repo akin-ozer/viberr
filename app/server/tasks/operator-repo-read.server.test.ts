@@ -16,6 +16,7 @@ import {
   readDefaultBranchFile,
   readProjectDefaultBranchFile,
 } from "./operator-repo-read.server";
+import { cloneWorkspaceRepo, projectRepoMirrorDir } from "./repo-mirror.server";
 
 /** A Go-shaped file of `lines` lines, each about 30 characters. */
 function goLines(lines: number): string {
@@ -70,7 +71,6 @@ describe("ruling 436: a default-branch read comes in pages the CLI will carry", 
     expect(defaultBranchPageNote({ kind: "found", refreshed: true, ...whole })).toEqual({ range: "", note: "" });
   });
 });
-import { cloneWorkspaceRepo, projectRepoMirrorDir } from "./repo-mirror.server";
 
 /**
  * F21-21 — the operator's anchored "what is on the default branch?" read.

@@ -61,10 +61,6 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
   const advanceOrigin = (): Promise<string> =>
     origin.advance({ file: "CHANGELOG.md", message: "second" });
 
-  /** Point `https://github.com/` at `root` for the duration of `work`. */
-  const withOrigin = <T,>(root: string, work: () => Promise<T>): Promise<T> =>
-    withLocalGithub(root, work);
-
   const clone = (name: string) =>
     cloneWorkspaceRepo({
       projectSlug: SLUG,
@@ -96,7 +92,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // point of the fallback, and why the mirror needs its own assertion).
     await makeOrigin();
 
-    const result = await withOrigin(origins, () => clone("a"));
+    const result = await withLocalGithub(origins, () => clone("a"));
 
     expect(result.viaMirror).toBe(true);
     expect(existsSync(path.join(workspace("a"), "README.md"))).toBe(true);
@@ -127,10 +123,10 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // every clone goes direct) and the inode assertion fails — the second tree
     // is then a fresh copy with objects of its own.
     await makeOrigin();
-    await withOrigin(origins, () => clone("a"));
+    await withLocalGithub(origins, () => clone("a"));
     const second = await advanceOrigin();
 
-    const result = await withOrigin(origins, () => clone("b"));
+    const result = await withLocalGithub(origins, () => clone("b"));
 
     expect(result.viaMirror).toBe(true);
     // Fresh-from-remote: the mirror was fetched in the same call, so the commit
@@ -167,7 +163,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     writeFileSync(path.join(dataRoot, "projects", SLUG, ".repo-mirror"), "not a dir\n");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
-    const result = await withOrigin(origins, () => clone("a"));
+    const result = await withLocalGithub(origins, () => clone("a"));
 
     expect(result.viaMirror).toBe(false);
     expect(existsSync(path.join(workspace("a"), "README.md"))).toBe(true);
@@ -204,12 +200,12 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // move. Canary: restore `return null` on the fetch failure and this fails on
     // both the returned mirror and the warning.
     await makeOrigin();
-    await withOrigin(origins, () => clone("a"));
+    await withLocalGithub(origins, () => clone("a"));
     await advanceOrigin();
     await breakMirrorRemote();
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
-    const result = await withOrigin(origins, () => clone("b"));
+    const result = await withLocalGithub(origins, () => clone("b"));
 
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
       "the project's repository mirror could not be refreshed — serving a possibly stale mirror",
@@ -229,20 +225,20 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // rot is worse than none. Canary: raise MIRROR_REBUILD_AFTER_FAILURES out of
     // reach and the rebuild assertions fail.
     await makeOrigin();
-    await withOrigin(origins, () => clone("a"));
+    await withLocalGithub(origins, () => clone("a"));
     const second = await advanceOrigin();
     await breakMirrorRemote();
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
     // #1 serves stale (its remote is broken, so it never sees `second`)…
-    expect(await withOrigin(origins, () => refresh(true))).toMatchObject({
+    expect(await withLocalGithub(origins, () => refresh(true))).toMatchObject({
       refreshed: false,
     });
     const stale = await exec("git", ["-C", mirrorDir(), "rev-parse", "main"]);
     expect(stale.stdout.trim()).toBe(firstCommit);
 
     // …#2 condemns it and re-clones from the (redirected) GitHub URL.
-    const rebuilt = await withOrigin(origins, () => refresh(true));
+    const rebuilt = await withLocalGithub(origins, () => refresh(true));
 
     expect(rebuilt).toEqual({ dir: mirrorDir(), refreshed: true });
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
@@ -290,7 +286,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     await makeOrigin();
     const orphan = leaveKilledCloneAtMirror();
 
-    const result = await withOrigin(origins, () => clone("a"));
+    const result = await withLocalGithub(origins, () => clone("a"));
 
     // Rebuilt from the origin, not served: the working tree has real content…
     expect(result.viaMirror).toBe(true);
@@ -322,7 +318,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     mkdirSync(sidecar, { recursive: true });
     writeFileSync(path.join(sidecar, "HEAD"), "ref: refs/heads/.invalid\n");
 
-    const result = await withOrigin(origins, () => clone("a"));
+    const result = await withLocalGithub(origins, () => clone("a"));
 
     expect(result.viaMirror).toBe(true);
     expect(existsSync(path.join(workspace("a"), "README.md"))).toBe(true);
@@ -339,12 +335,12 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // and exits 0. Canary: weaken `mirrorCanCheckOut` to "does it hold any
     // refs?" and this workspace comes back with no README.
     await makeOrigin();
-    await withOrigin(origins, () => clone("a"));
+    await withLocalGithub(origins, () => clone("a"));
     await exec("git", ["-C", mirrorDir(), "symbolic-ref", "HEAD", "refs/heads/nope"]);
     await breakMirrorRemote();
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
-    const result = await withOrigin(origins, () => clone("b"));
+    const result = await withLocalGithub(origins, () => clone("b"));
 
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
       "the project's repository mirror has no branch to check out — cloning from GitHub",
@@ -360,7 +356,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // parentless commit into. Canary: drop the `mirrorHasRefs` guard and the
     // README assertion fails on an empty workspace.
     await makeOrigin();
-    await withOrigin(origins, () => clone("a"));
+    await withLocalGithub(origins, () => clone("a"));
     // Strip every ref and break the remote, so the refresh cannot quietly put
     // them back: a mirror that is COMPLETE, served stale, and holds nothing.
     rmSync(path.join(mirrorDir(), "packed-refs"), { force: true });
@@ -371,7 +367,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     await breakMirrorRemote();
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
-    const result = await withOrigin(origins, () => clone("b"));
+    const result = await withLocalGithub(origins, () => clone("b"));
 
     expect(warn.mock.calls.map(([msg]) => msg)).toContain(
       "the project's repository mirror has no branch to check out — cloning from GitHub",
@@ -385,7 +381,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // Canary: default `create` to true in `refreshProjectMirror` and this fails.
     await makeOrigin();
 
-    expect(await withOrigin(origins, () => refresh(false))).toBeNull();
+    expect(await withLocalGithub(origins, () => refresh(false))).toBeNull();
     expect(existsSync(mirrorDir())).toBe(false);
   });
 
@@ -396,7 +392,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // Canary: drop `withMirrorLock` and this goes flaky/red under repeat runs.
     await makeOrigin();
 
-    const results = await withOrigin(origins, () =>
+    const results = await withLocalGithub(origins, () =>
       Promise.all([clone("a"), clone("b")]),
     );
 
@@ -429,7 +425,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     writeFileSync(path.join(dest, "occupied.txt"), "in the way\n");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
-    const result = await withOrigin(origins, () =>
+    const result = await withLocalGithub(origins, () =>
       cloneWorkspaceRepo({
         projectSlug: SLUG,
         repo: REPO,
@@ -459,13 +455,13 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // the old mirror is gone while the new one survives.
     await makeOrigin(); // acme/widgets
     await makeBareOrigin("gadgets"); // acme/gadgets, the repointed target
-    await withOrigin(origins, () => clone("a"));
+    await withLocalGithub(origins, () => clone("a"));
     const widgetsMirror = projectRepoMirrorDir(SLUG, "acme/widgets", dataRoot)!;
     expect(existsSync(path.join(widgetsMirror, "HEAD"))).toBe(true);
 
     // The project now points at acme/gadgets: cloning it builds the gadgets
     // mirror and prunes the stale widgets sibling in the same `.repo-mirror` dir.
-    await withOrigin(origins, () =>
+    await withLocalGithub(origins, () =>
       cloneWorkspaceRepo({
         projectSlug: SLUG,
         repo: "acme/gadgets",

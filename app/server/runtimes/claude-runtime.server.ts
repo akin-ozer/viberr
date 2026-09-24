@@ -10,6 +10,7 @@ import {
 } from "~/shared/run-failure";
 import { splitClaudeVariant } from "~/shared/model-ids";
 import { formatAbsoluteUTC } from "~/shared/dates/format";
+import { wholeThousands } from "~/shared/text/thousands";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -1292,7 +1293,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       }
       phase(RUN_PHASE.compacting, "at the end of the run");
       const clock = (iso: string) => iso.slice(11, 19);
-      const k = (n: number | null) => (n === null ? "?" : `${Math.round(n / 1000)}k`);
+      const k = (n: number | null) => (n === null ? "?" : wholeThousands(n));
       let outcome: CompactOutcome = {
         compacted: false,
         reason: "the provider reported no compaction boundary",
