@@ -24,7 +24,7 @@ describe("the operations pages count the SSE streams a page holds (ruling 457)",
 
   it.each(PAGES)("%s says one stream per page, and names the page with two", (page) => {
     const text = readFileSync(path.join(root, page), "utf8").replace(/\s+/g, " ");
-    expect(text.includes("task page holds two SSE streams"), "the pre-454 count").toBe(false);
+    expect(text.includes("task page holds two SSE streams"), "the pre-457 count").toBe(false);
     expect(
       text.includes("holds at most one SSE stream, except the project controller page"),
       "the one-stream sentence",

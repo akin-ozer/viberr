@@ -364,6 +364,58 @@ describe("the controller dock (ruling 121)", () => {
     expect(screen.getByRole("dialog", { name: "Controller dock" })).toBeTruthy();
   });
 
+  /**
+   * Interface review 2026-09-24 (acce-14): no focus trap (ruling 121), so Tab
+   * reaches page controls the panel covers. Escape there uncovers the control
+   * without moving focus. jsdom has no layout, so the hit test is stubbed: it
+   * answers the panel for a covered control and the control itself otherwise.
+   */
+  async function withPageControl(
+    covered: boolean,
+    setup: (control: HTMLButtonElement) => void,
+    check: (control: HTMLButtonElement) => Promise<void>,
+  ) {
+    mount({ path: "/projects/viberr/board", view: () => taskView() });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · viberr" }));
+    const panel = await screen.findByRole("dialog", { name: "Controller dock" });
+    const control = document.createElement("button");
+    control.textContent = "Edit";
+    document.body.append(control);
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: () => (covered ? panel : control),
+    });
+    try {
+      setup(control);
+      control.focus();
+      fireEvent.keyDown(control, { key: "Escape" });
+      await check(control);
+    } finally {
+      Reflect.deleteProperty(document, "elementFromPoint");
+      control.remove();
+    }
+  }
+
+  it("Escape on a page control under the panel closes the dock and leaves focus there (acce-14)", async () => {
+    await withPageControl(true, () => {}, async (control) => {
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
+      expect(document.activeElement).toBe(control);
+      expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("0");
+    });
+  });
+
+  it.each([
+    ["the control is not under the panel", false, () => {}],
+    ["the control is an open popover's trigger", true, (c: HTMLButtonElement) => c.setAttribute("aria-expanded", "true")],
+    ["something else already handled the Escape", true, (c: HTMLButtonElement) =>
+      c.addEventListener("keydown", (e) => e.preventDefault())],
+  ])("Escape on a page control leaves the dock alone when %s (acce-14)", async (_, covered, setup) => {
+    await withPageControl(covered, setup, async () => {
+      await waitFor(() => expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("1"));
+      expect(screen.getByRole("dialog", { name: "Controller dock" })).toBeTruthy();
+    });
+  });
+
   it("restores open without stealing focus, and never re-aims off a control (findings 7, 10)", async () => {
     window.sessionStorage.setItem("viberr.dock.open", "1");
     mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
@@ -448,6 +500,48 @@ describe("the controller dock (ruling 121)", () => {
     // jsdom reports a 0s transition duration, so the close finishes at once.
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("ruling 454: at sheet width a pull down the header dismisses the dock, and focus comes back", async () => {
+    // The 720px block's flag is what makes the panel a sheet; jsdom lays
+    // nothing out, so the sheet's height is stubbed (halfway at 300px).
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (query: string) => ({ matches: false, media: query }),
+    });
+    const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
+    try {
+      mount({ path: "/projects/viberr/board", view: () => taskView() });
+      const trigger = await screen.findByRole("button", { name: "Controller · viberr" });
+      fireEvent.click(trigger);
+      const panel = await screen.findByRole("dialog", { name: "Controller dock" });
+      // The grabber only says "this pulls"; Close stays the named way out.
+      const grabber = panel.querySelector(".dock-grabber");
+      expect(grabber?.getAttribute("aria-hidden")).toBe("true");
+      expect(grabber?.hasAttribute("data-sheet-handle")).toBe(true);
+      const head = panel.querySelector<HTMLElement>("header.dock-head");
+      expect(head?.hasAttribute("data-sheet-handle")).toBe(true);
+      panel.style.setProperty("--sheet-draggable", "1");
+      const at = (type: string, y: number) =>
+        fireEvent(
+          head!,
+          new PointerEvent(type, { pointerId: 1, isPrimary: true, button: 0, clientY: y, bubbles: true }),
+        );
+      at("pointerdown", 100);
+      for (let y = 120; y <= 500; y += 20) at("pointermove", y);
+      const dock = panel.closest<HTMLElement>(".dock")!;
+      expect(dock.style.getPropertyValue("--sheet-drag")).toBe("380px");
+      at("pointerup", 500);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(trigger);
+      // The dock let go of the drag, so its button returns to rest.
+      expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
+      expect(dock.style.getPropertyValue("--sheet-drag")).toBe("");
+    } finally {
+      height.mockRestore();
+      Reflect.deleteProperty(window, "matchMedia");
+    }
   });
 
   it("the Threads toggle keeps one name and lets aria-pressed carry the state (finding 25)", async () => {

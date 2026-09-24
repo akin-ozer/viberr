@@ -31,7 +31,7 @@ import { BoardPage } from "~/features/board/board-page";
 
 /**
  * Board view (board spec). The columns are this route's own loader (ruling
- * 454, BOARD-6: they used to ride the workspace layout, so every project page
+ * 457, BOARD-6: they used to ride the workspace layout, so every project page
  * shipped them); the rail counts stay in the layout, and both read the project
  * through `readWorkspace`, so one query per request still feeds the rail counts
  * AND the columns, and every action here revalidates both. Actions:

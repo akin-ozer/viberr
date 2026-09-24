@@ -25,7 +25,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/` | `_index.tsx` | user, form | Home: pinned, all and archived projects, waiting counts, the Settings tiles (connections, users, resources, insights), store strip (org admin), new-project modal | `create-project`, `pin`, `view`, `rescan` (org admin), `rebuild-projections` (org admin) |
 | `/projects` | `projects.tsx` | user | redirects to `/` | |
 | `/projects/:slug` | `project.tsx` + `project._index.tsx` | user → member (404 parity) | workspace shell (rail, topbar, palette, live updates); index redirects to the board | |
-| `/projects/:slug/board` | `project.board.tsx` | member (the layout's `readWorkspace` gate), form | board by stage from its own loader (ruling 457: the columns, as board cards carrying the fields the board reads, `toBoardCard`; the layout carries none) (a card is one status chip, a row of problem chips and an avatar stack, ruling 365), filters in the URL (`filter`, `view`, `q`), drag-and-drop, accept-from-board confirm, the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first) | `create-task`, `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
+| `/projects/:slug/board` | `project.board.tsx` | member (the layout's `readWorkspace` gate), form | board by stage from its own loader (ruling 457: the columns, as board cards carrying the fields the board reads, `toBoardCard`; the layout carries none) (a card is one status chip, a row of problem chips and an avatar stack, ruling 365), filters in the URL (`filter`, `view`, `q`), drag-and-drop and the card's Move menu (a stage, or Move up / Move down within the lane: the keyboard and single-pointer path to a slot, ruling 455(c)), accept-from-board confirm, the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first) | `create-task`, `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
 | `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" (tasks at a stage the workflow makes acceptance legal from, whose acceptance nothing blocks, for a viewer who can accept) and "Still in review" (every other review-work row: at the review stage, an open review PR at any stage, or a required reviewer's verdict outstanding; a row before the boundary reads "Review in progress at Validation · PR #8 · awaiting verdict", or names the live PR fact instead when it carries one: unpushed revision, conflict, drifted head; U35-5). A row whose open PR shares changed paths with another open PR carries a "collides with <keys>" chip on both rows (ruling 236, read-only). Header: "N in review · M waiting on your acceptance" | |
 | `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project: New conversation in the page head, a sticky rail (conversations first, then goal chains) and a capped transcript (ruling 419); unseen replies marked (ruling 448); goal chain controls, `cancel` and skip behind a confirm; with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `goal-op` (`op`: `pause`, `resume`, `cancel`, `skip_link`, `retry_link`; `goalId`, `index`, `reason`), `interrupt` (`conversationId`, `runId`) |
 | `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail (a copy whose grants differ from its template says so on the scope line and under each list, ruling 156; the project's rulings knowledge base named when one is set, ruling 239), capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile`, `sync-profile-resources` (org admin only, carries the record's fingerprint) |
@@ -119,10 +119,11 @@ Intents behind `project.task.tsx` are explained in
   stream: `useLiveUpdates` closes on `visibilitychange` and reopens on return from the
   last event id it saw, the broker replays what it missed (or answers `stream.resync`,
   which pulls every loader once), and the console reads whatever it missed as one gap
-  (ruling 301). While the stream is down, the workspace header and Home both
-  show a "live updates paused" chip (a plain span: a pill has no cursor and no hover, so
-  it is the sentence, not a control) beside a `Retry` button, rendered only when the
-  surface really has a reconnect to offer. The sentence is also announced through a
+  (ruling 301). While the stream is down, the workspace and Home both show a
+  strip directly under the header (the archived banner's idiom: "Live updates paused. …"
+  with a trailing `Retry` button, the button rendered only when the surface really has a
+  reconnect to offer). It used to be a chip inside the header row, where at 320–375 px it
+  pushed search, the bell and the account menu off the screen (ruling 455(f)). The sentence is also announced through a
   visually hidden `role="status"` region that is mounted at all times and only changes
   its text: a live region inserted together with its text is the one case screen
   readers skip.
@@ -131,11 +132,12 @@ Intents behind `project.task.tsx` are explained in
   pages, and `/profile` and `/notifications` (both render their whole page inside a
   `showModal()` overlay, which would leave the dock inert behind it). It is a floating
   bottom-right button named `Controller · <scope>` opening a non-modal panel bound to
-  the current instance, board or task (a bottom sheet at ≤ 720 px). Its composer is
+  the current instance, board or task (a bottom sheet at ≤ 720 px, which a finger pulls down
+  to dismiss, ruling 454). Its composer is
   disabled, with the same sentence the full page uses, when the VIEWER has not connected
   Claude (ruling 127). The button carries a pulsing dot while a turn works in its scope
   and a still blue dot when a reply its owner has not seen waits in any scope
-  (`/resources/controller-unseen`, rulings 448 and 454); the open panel links to replies
+  (`/resources/controller-unseen`, rulings 448 and 457); the open panel links to replies
   elsewhere. Root ships only the button, the panel's frame and header; the panel's body
   loads on the first open, preloaded on hover or focus (ruling 457). The dock's data
   rides no page revalidation: the page's `user` stream hands it `controller.updated`
@@ -145,10 +147,23 @@ Intents behind `project.task.tsx` are explained in
 - **Theme**: light / dark / system, per user plus the `viberr_theme` cookie for
   first paint. Motion follows the OS `prefers-reduced-motion` setting only. After first
   paint, `setDocumentTheme` (`shell/theme-preference.ts`) is the one writer of
-  `<html data-theme>`: it swaps under a `transition: none` override that lives for one
-  forced style recalc, so the colour transitions in the sheet cannot smear the flip.
-  The menu, the profile page and the root effect's OS-follow listener all go through
-  it; the boot script paints once and registers no listener of its own.
+  `<html data-theme>`. A change fades over `THEME_FLIP_MS` (250 ms) on ONE clock: for
+  the flip's length an override gives every element the same colour transitions, so
+  text and its fill move together instead of each rule crossfading on its own, and the
+  page stays clickable throughout (ruling 453(c); a view transition would swallow the
+  clicks of someone cycling the account menu's theme item). The menu, the profile page
+  and the root effect's OS-follow listener all go through it; the boot script paints
+  once and registers no listener of its own.
+- **Motion, materials and type** (ruling 453). The board's drop flight is a critically
+  damped spring (`ui/spring.ts`) that leaves at the pointer's release velocity. A
+  dialog, page overlay or the dock closed while its entrance is still playing leaves
+  from where it got to (`ui/live-pose.ts`). Every transform transition, and so every
+  press, runs on `--ease-out`. The Home and standalone header, and the page overlay's
+  sticky head, draw their bottom edge only once content scrolls under them. The OS
+  increased-contrast setting swaps every frame and divider onto `--border-control`,
+  the two lighter text rungs onto `--muted`, and the translucent chrome solid, as
+  reduced transparency does. Headings track by size (`--track-title`,
+  `--track-section`, `--track-page`: -.011, -.017 and -.021em at 16, 20 and 28px).
 - **Responsive**: same surface, reflowed; the rail collapses at ≤ 720 px, the topbar
   trims at ≤ 760 px. There is no review-first mobile mode. Under the breakpoint
   the rail is a drawer: opening it moves focus to the `nav`, sets `inert` on
@@ -156,7 +171,9 @@ Intents behind `project.task.tsx` are explained in
   controller dock (which root mounts beside the layout, so `<body
   data-rail-open>` carries the state for it); closing it by Escape, the scrim,
   a rail link or a resize returns focus to the toggle after the close has
-  committed, and an open modal dialog keeps its own Escape. Under the same
+  committed, and an open modal dialog keeps its own Escape. Closed, the drawer is
+  `visibility: hidden` as well as translated away, so its links leave the tab order
+  (ruling 455). Under the same
   breakpoint the typing surfaces render at the 1.05rem scale step (16.8px) so
   iOS Safari does not zoom on focus: every `.field` input and textarea,
   `select`, the search, board-filter and palette inputs, the comment and
@@ -297,6 +314,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   task rests on a clock (rulings 36, 91, 225).
 - A failure toast never renders the success tick: the kind is passed from the server
   result (`use-action-toast.ts`).
+- An error toast stays until it is dismissed (it carries a Dismiss button); a success
+  toast lasts 5 s and pauses while the pointer or focus is inside the stack
+  (`ui/toast.tsx`, ruling 455(a)).
 - **Every attachment kind opens a card, and every card carries Download** (ruling 105):
   images show the picture; the known binary kinds (archives, media, fonts, office and
   PDF documents, executables, databases) are decided by name and get an honest "no

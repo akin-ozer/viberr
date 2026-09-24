@@ -43,7 +43,7 @@ interface RailData {
 }
 
 /** The rail (the workspace layout's loader) and the board it counts (ruling
- *  454, BOARD-6: the board route's own loader), as one board request runs
+ *  457, BOARD-6: the board route's own loader), as one board request runs
  *  them: together, on one Request. */
 async function railCounts(): Promise<RailData> {
   const [{ loader: layoutLoader }, { loader: boardLoader }] = await Promise.all([

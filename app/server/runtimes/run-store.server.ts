@@ -706,7 +706,7 @@ export function runLineRaw(db: DatabaseSync, runId: string, seq: number): string
  * (ruling 107's page-local cursor) needs exactly this, and it is one index
  * probe — `runLineStats` answers it too, but counts every line of the run to
  * do so, which the live tail paid once per streamed line per viewer (ruling
- * 454, LIVE-9).
+ * 457, LIVE-9).
  */
 export function hasRunLinesBefore(db: DatabaseSync, runId: string, seq: number): boolean {
   // SAFETY: `EXISTS` always yields 0 or 1.

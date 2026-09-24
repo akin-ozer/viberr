@@ -62,7 +62,7 @@ import { viewerTimeZone } from "~/shared/dates/time-zone";
  * revalidates on the owner-routed `controller.updated` SSE reference; while a
  * turn is working the console reads the turn's tail every 5 s as the fallback
  * for a missed settle, and revalidates once the tail says it ended (ruling
- * 454, CTL-2).
+ * 457, CTL-2).
  */
 
 interface ActionResult {
@@ -283,7 +283,7 @@ const TurnStoreContext = createContext<RunLogStore | null>(null);
 
 /**
  * Ruling 250's step on the working row, from the console's tail reads (ruling
- * 454, CTL-2): each line and each 5 s status read carries the run row's phase
+ * 457, CTL-2): each line and each 5 s status read carries the run row's phase
  * and step, so the row moves without the page revalidating. Until a read moves
  * them past what the page loaded, the loader's own turn state stands (it and
  * the run projection were read together).
@@ -505,6 +505,9 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
             <li key={c.id}>
               <Link
                 className={`ctl-conv${c.id === active ? " on" : ""}${c.unread ? " unread" : ""}`}
+                // Interface review 2026-09-24 (acce-9): set by hand, since
+                // NavLink matches the pathname and ignores ?c=.
+                aria-current={c.id === active ? "page" : undefined}
                 to={href(c)}
               >
                 <span className="ctl-conv-title">

@@ -182,6 +182,7 @@ describe("board revalidation cost (ruling 457)", () => {
       emptyCopyFor: () => "No tasks in this stage.",
       onNew: () => {},
       onMoveTask: () => {},
+      onNudgeTask: () => {},
       onCardKeyDown: () => {},
     };
     let moveSlot: (key: string) => void = () => {};
@@ -207,6 +208,7 @@ describe("board revalidation cost (ruling 457)", () => {
             inFlight={null}
             inFlightTask={null}
             onMoveTask={stable.onMoveTask}
+            onNudgeTask={stable.onNudgeTask}
             rovingKey={columns[0]!.tasks[0]!.key}
             onCardKeyDown={stable.onCardKeyDown}
           />

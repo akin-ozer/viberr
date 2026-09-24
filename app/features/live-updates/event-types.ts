@@ -20,7 +20,7 @@ export const SSE_CONTROL_EVENTS: readonly SseEventName[] = ["stream.open"];
  * else, so no surface revalidates on them. `controller.log-appended` rides the
  * `user` scope every signed-in surface subscribes for its bell;
  * `run.log-appended` reaches only a connection holding its task's scope (ruling
- * 454, LIVE-5). The task page used to revalidate root, layout and task on its
+ * 457, LIVE-5). The task page used to revalidate root, layout and task on its
  * own run's lines every 2 s to move the Live run strip; the strip now reads the
  * facts each tail fetch returns (ruling 457, LIVE-1).
  */

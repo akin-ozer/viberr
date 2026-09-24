@@ -58,8 +58,8 @@ import { useLiveLedger } from "./revalidation-policy";
  * so a tab left open overnight silently froze the board, rail counts, bell
  * badge and review queue while still looking live. Now:
  *
- *  - a closed stream flips `paused` (the topbar renders a "live updates paused"
- *    chip, so the user knows the screen is a snapshot), and
+ *  - a closed stream flips `paused` (a "live updates paused" strip renders under
+ *    the header, so the user knows the screen is a snapshot), and
  *  - a fresh EventSource is opened on a bounded exponential backoff, which is
  *    what actually recovers after a re-login (the browser's own retry does not
  *    run for a failed connection).
@@ -209,7 +209,7 @@ async function sessionUnauthenticated(url: string): Promise<boolean> {
 export interface LiveUpdatesState {
   /** True while the stream is down — the surface is a stale snapshot. */
   paused: boolean;
-  /** Re-open immediately (the "retry" affordance next to the paused chip). */
+  /** Re-open immediately (the "Retry" button in the paused strip). */
   reconnect: () => void;
 }
 
@@ -240,8 +240,8 @@ export function useLiveUpdates(
   const [paused, setPaused] = useState(false);
   const [attempt, setAttempt] = useState(0);
   // OBS-6: the session behind this stream is gone (a probe said 401), so no
-  // reopen can succeed and the loop stops. `paused` stays true — the topbar
-  // keeps its chip, whose retry calls `reconnect` and clears this.
+  // reopen can succeed and the loop stops. `paused` stays true — the strip
+  // under the header stays, and its Retry calls `reconnect` and clears this.
   const [signedOut, setSignedOut] = useState(false);
   // Ruling 301: a BACKGROUND tab holds no stream. An SSE connection is a
   // permanent one, Viberr is served over HTTP/1.1, and a browser allows about
@@ -427,7 +427,7 @@ export function useLiveUpdates(
       // top, and the session probe is no longer owed.
       failuresRef.current = 0;
       // A gap in the stream means the surface may have missed events. Ruling
-      // 454 (RF-1): the connection asked the broker to replay them (`from` on
+      // 457 (RF-1): the connection asked the broker to replay them (`from` on
       // the URL, or the browser's own `Last-Event-ID` when it retries this
       // source), so the replay revalidates for what was missed and nothing
       // else: a scope change (opening a task) and a quiet return from a

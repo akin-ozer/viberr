@@ -295,7 +295,7 @@ export class LiveLedger {
    * Recorded once per tab: two streams whose scopes both carry an event (the
    * project controller page: the layout's and the page's own) both deliver it,
    * with the same id and body (ids are unique across server processes, ruling
-   * 454, RV-5).
+   * 457, RV-5).
    */
   recordLive(name: string, event: MessageEvent<string>): void {
     if (event.lastEventId) {

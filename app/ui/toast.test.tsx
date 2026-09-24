@@ -5,9 +5,9 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { ToastProvider, useToast } from "./toast";
 
 /**
- * Two-phase toast dismissal: a pushed toast lives 2600 ms, then carries
+ * Two-phase toast dismissal: a pushed success toast lives 5000 ms, then carries
  * `.leaving` for 200 ms (CSS plays the exit fade, mirroring the `rise`
- * entrance path) before unmounting.
+ * entrance path) before unmounting. An error toast has no timer at all.
  */
 
 afterEach(() => {
@@ -36,7 +36,7 @@ function CountingPusher() {
 }
 
 describe("toast lifecycle", () => {
-  it("marks the toast .leaving at 2600 ms and unmounts it 200 ms later", () => {
+  it("marks the toast .leaving at 5000 ms and unmounts it 200 ms later", () => {
     vi.useFakeTimers();
     const { container, getByText } = render(
       <ToastProvider>
@@ -49,7 +49,9 @@ describe("toast lifecycle", () => {
     expect(toast()).not.toBeNull();
     expect(toast()!.classList.contains("leaving")).toBe(false);
 
-    act(() => vi.advanceTimersByTime(2600));
+    act(() => vi.advanceTimersByTime(4999));
+    expect(toast()!.classList.contains("leaving")).toBe(false);
+    act(() => vi.advanceTimersByTime(1));
     expect(toast()).not.toBeNull();
     expect(toast()!.classList.contains("leaving")).toBe(true);
 
@@ -65,7 +67,7 @@ describe("toast lifecycle", () => {
       </ToastProvider>,
     );
     fireEvent.click(getByText("push"));
-    act(() => vi.advanceTimersByTime(2600));
+    act(() => vi.advanceTimersByTime(5000));
     fireEvent.click(getByText("push"));
 
     const toasts = container.querySelectorAll(".toast");
@@ -75,6 +77,140 @@ describe("toast lifecycle", () => {
 
     act(() => vi.advanceTimersByTime(200));
     expect(container.querySelectorAll(".toast").length).toBe(1);
+  });
+});
+
+/** One button per kind, so a test can mix a timed success with an untimed error. */
+function KindPusher() {
+  const push = useToast();
+  return (
+    <>
+      <button type="button" onClick={() => push("saved")}>
+        push success
+      </button>
+      <button type="button" onClick={() => push("refused", "error")}>
+        push error
+      </button>
+    </>
+  );
+}
+
+/**
+ * Interface review 2026-09-24 (acce-3). Every toast used to vanish after 2.6 s
+ * whatever it said and whatever the pointer was doing; for most refusals the
+ * toast is the only account of what went wrong.
+ */
+describe("toast timing and dismissal", () => {
+  function renderKinds() {
+    vi.useFakeTimers();
+    const view = render(
+      <ToastProvider>
+        <KindPusher />
+      </ToastProvider>,
+    );
+    const host = view.container.querySelector<HTMLElement>(".toast-wrap")!;
+    const byKind = (kind: string) =>
+      view.container.querySelector<HTMLElement>(`.toast[data-kind="${kind}"]`);
+    return { ...view, host, byKind };
+  }
+
+  it("keeps an error toast until its Dismiss button is pressed", () => {
+    const { getByText, byKind } = renderKinds();
+    fireEvent.click(getByText("push error"));
+    act(() => vi.advanceTimersByTime(60_000));
+    const toast = byKind("error")!;
+    expect(toast).not.toBeNull();
+    expect(toast.classList.contains("leaving")).toBe(false);
+
+    // The control is the toast's last child, named, and plays the same exit.
+    const dismiss = toast.lastElementChild!;
+    expect(dismiss.tagName).toBe("BUTTON");
+    expect(dismiss.getAttribute("type")).toBe("button");
+    expect(dismiss.getAttribute("aria-label")).toBe("Dismiss");
+    fireEvent.click(dismiss);
+    expect(byKind("error")!.classList.contains("leaving")).toBe(true);
+    act(() => vi.advanceTimersByTime(200));
+    expect(byKind("error")).toBeNull();
+  });
+
+  it("gives a success toast no Dismiss button", () => {
+    const { getByText, byKind } = renderKinds();
+    fireEvent.click(getByText("push success"));
+    expect(byKind("success")!.querySelector("button")).toBeNull();
+  });
+
+  it("holds a success toast while the pointer is on the stack", () => {
+    const { getByText, host, byKind } = renderKinds();
+    fireEvent.click(getByText("push success"));
+    act(() => vi.advanceTimersByTime(4000));
+    fireEvent.pointerEnter(host);
+    act(() => vi.advanceTimersByTime(20_000));
+    expect(byKind("success")!.classList.contains("leaving")).toBe(false);
+
+    // Leaving the stack gives it its full time again, not the 1 s it had left.
+    fireEvent.pointerLeave(host);
+    act(() => vi.advanceTimersByTime(4999));
+    expect(byKind("success")!.classList.contains("leaving")).toBe(false);
+    act(() => vi.advanceTimersByTime(1));
+    expect(byKind("success")!.classList.contains("leaving")).toBe(true);
+  });
+
+  it("does not start a toast's timer while the stack is held", () => {
+    const { getByText, host, byKind } = renderKinds();
+    fireEvent.click(getByText("push error"));
+    fireEvent.pointerEnter(host);
+    fireEvent.click(getByText("push success"));
+    act(() => vi.advanceTimersByTime(20_000));
+    expect(byKind("success")!.classList.contains("leaving")).toBe(false);
+  });
+
+  it("holds a success toast while focus is inside the stack", () => {
+    const { getByText, byKind } = renderKinds();
+    fireEvent.click(getByText("push error"));
+    fireEvent.click(getByText("push success"));
+    const dismiss = byKind("error")!.querySelector("button")!;
+    act(() => dismiss.focus());
+    act(() => vi.advanceTimersByTime(20_000));
+    expect(byKind("success")!.classList.contains("leaving")).toBe(false);
+
+    act(() => getByText("push success").focus());
+    act(() => vi.advanceTimersByTime(5000));
+    expect(byKind("success")!.classList.contains("leaving")).toBe(true);
+  });
+
+  it("releases the hold when the focused Dismiss button's toast is removed", () => {
+    // No blur from a removed node reaches React, so without a re-read the
+    // hold would stick and the success toast would never leave.
+    const { getByText, byKind } = renderKinds();
+    fireEvent.click(getByText("push success"));
+    fireEvent.click(getByText("push error"));
+    const dismiss = byKind("error")!.querySelector("button")!;
+    act(() => dismiss.focus());
+    fireEvent.click(dismiss);
+    act(() => vi.advanceTimersByTime(200));
+    expect(byKind("error")).toBeNull();
+
+    act(() => vi.advanceTimersByTime(5000));
+    expect(byKind("success")!.classList.contains("leaving")).toBe(true);
+  });
+
+  // Interface review 2026-09-24: a keyboard Dismiss used to drop focus on <body>.
+  it("moves focus to the next error's Dismiss, then back to where it came from", () => {
+    const { getByText, byKind } = renderKinds();
+    const from = getByText("push error");
+    fireEvent.click(from);
+    fireEvent.click(from);
+    const [first, second] = [
+      ...document.querySelectorAll<HTMLButtonElement>('.toast[data-kind="error"] button'),
+    ];
+    act(() => from.focus());
+    act(() => first!.focus());
+    fireEvent.click(first!);
+    expect(document.activeElement).toBe(second);
+    fireEvent.click(second!);
+    expect(document.activeElement).toBe(from);
+    act(() => vi.advanceTimersByTime(400));
+    expect(byKind("error")).toBeNull();
   });
 });
 
@@ -178,7 +314,7 @@ describe("toast host live region", () => {
         </ToastProvider>,
       );
       fireEvent.click(getByText("push"));
-      act(() => vi.advanceTimersByTime(2800));
+      act(() => vi.advanceTimersByTime(5200));
       expect(popover.calls).toEqual(["show:0", "hide:0"]);
       // Re-armed from scratch, so the next burst gets the empty-region step
       // again rather than inheriting a stale top-layer slot.
@@ -227,7 +363,7 @@ describe("toast stack cap", () => {
 
   it("still plays the two-phase exit for a toast that times out normally", () => {
     // The cap must not short-circuit the leaving phase — a capped-out toast is
-    // removed on the spot, but one that reaches its own 2600 ms timer still
+    // removed on the spot, but one that reaches its own 5000 ms timer still
     // fades for 200 ms first.
     vi.useFakeTimers();
     const { container, getByText } = render(
@@ -238,7 +374,7 @@ describe("toast stack cap", () => {
     for (let i = 0; i < 5; i++) fireEvent.click(getByText("push"));
     expect(container.querySelectorAll(".toast").length).toBe(4);
 
-    act(() => vi.advanceTimersByTime(2600));
+    act(() => vi.advanceTimersByTime(5000));
     const leaving = [...container.querySelectorAll(".toast")];
     expect(leaving.length).toBe(4);
     expect(leaving.every((t) => t.classList.contains("leaving"))).toBe(true);
@@ -260,8 +396,8 @@ describe("toast stack cap", () => {
     act(() => vi.advanceTimersByTime(100));
     for (let i = 0; i < 4; i++) fireEvent.click(getByText("push"));
 
-    // "toast 1" is already gone; its timers land at 2600/2800 ms.
-    act(() => vi.advanceTimersByTime(2600));
+    // "toast 1" is already gone; its timers land at 5000/5200 ms.
+    act(() => vi.advanceTimersByTime(5000));
     const texts = [...container.querySelectorAll(".toast")].map((t) => t.textContent);
     expect(texts).toEqual(["toast 2", "toast 3", "toast 4", "toast 5"]);
   });

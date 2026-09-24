@@ -87,7 +87,7 @@ the page's first stream, ruling 457) and the rolling-session renewal, which forw
 better-auth's refreshed cookie on whichever GET resolved the session (F10-17). The root
 loader authenticates, reads the theme cookie and mints the CSRF token; it re-runs only
 after a sign-in, a sign-out, a theme or profile change and on a document load (ruling
-454). A signed-in page also mounts the controller dock (ruling 121).
+457). A signed-in page also mounts the controller dock (ruling 121).
 
 **Read path** (`/projects/:slug/board`): layout loader and board loader, together on one
 request → `requireUser` → `readWorkspace` (`routes/project-workspace.server.ts`, once per

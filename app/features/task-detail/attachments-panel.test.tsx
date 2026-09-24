@@ -493,7 +493,9 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
         </AttachmentLightboxProvider>,
       );
       fireEvent.click(container.querySelector(".tl-attach-chip")!);
-      await findByText("This attachment could not be loaded.");
+      await findByText(
+        "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.",
+      );
     } finally {
       globalThis.fetch = origFetch;
     }
@@ -530,7 +532,9 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
         </AttachmentLightboxProvider>,
       );
       fireEvent.click(container.querySelector(".tl-attach-chip")!);
-      await findByText("This attachment could not be loaded.");
+      await findByText(
+        "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.",
+      );
       // The proven failure also drops the Download button — downloading the
       // 404 would hand some browsers the error body as "capture.yml".
       expect(
@@ -619,7 +623,9 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
         </AttachmentLightboxProvider>,
       );
       fireEvent.click(container.querySelector(".tl-attach-chip")!);
-      await findByText("This attachment could not be loaded.");
+      await findByText(
+        "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.",
+      );
       const dialog = baseElement.querySelector(DIALOG)!;
       expect(dialog.querySelector('a[href$="?download=1"]')).toBeNull();
     } finally {
@@ -741,9 +747,12 @@ describe("attachment images degrade gracefully when the picture cannot load", ()
     const dialog = baseElement.querySelector(DIALOG)!;
     fireEvent.error(dialog.querySelector<HTMLImageElement>(".lightbox-img")!);
     expect(dialog.querySelector(".lightbox-img")).toBeNull();
-    expect(dialog.querySelector(".lightbox-broken")!.textContent).toContain(
-      "could not be loaded",
+    // writ-5: onError cannot name the cause, but Download (kept for bytes the
+    // browser cannot decode) and Open original are the way to the file.
+    expect(dialog.querySelector(".lightbox-broken")!.textContent).toBe(
+      "Unable to show this image. Use Download or Open original to get the file itself.",
     );
+    expect(dialog.querySelector('a[href$="?download=1"]')).not.toBeNull();
     const original = [...dialog.querySelectorAll("a")].find(
       (a) => a.textContent === "Open original",
     )!;

@@ -9,8 +9,12 @@ export const CONTROLLER_BUDGETS: PerfBudgetTable = {
   // Raised 18 -> 19 by ruling 457 (RF-1/RF-5): the dock's live hook records
   // into the tab's revalidation ledger (`live-updates/revalidation-policy.ts`),
   // a module root imports itself, so no byte is added to the first download.
+  // Raised 19 -> 22 on merging main: ruling 454's pull-to-dismiss sheet
+  // lives in the dock's frame, which root ships, and brings
+  // ui/use-sheet-drag.ts, ui/spring.ts and ui/live-pose.ts with it. The
+  // panel's body, the markdown and the console stay lazy.
   "controller:closed-dock.static-modules": {
-    ceiling: 19,
+    ceiling: 22,
     unit: "count",
     journey: "fresh-load",
     fixture:

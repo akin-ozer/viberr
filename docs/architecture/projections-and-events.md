@@ -288,7 +288,7 @@ data events and `stream.resync` (debounced 300 ms; never on a stream event;
 two controller pages, which render the conversation and pass `{ conversations: true }`:
 every other surface hands it, debounced the same way, to the controller dock as the
 window event `CONTROLLER_UPDATED_EVENT`, and the dock reloads its own resources, ruling
-454).
+457).
 
 **Which loaders re-run** (`revalidation-policy.ts`, ruling 457). Single fetch asks every
 route on screen to re-run after every navigation, action and `revalidate()`; every route
@@ -357,7 +357,7 @@ project from a `user`-only surface such as notifications, after that project cha
 but not yet flushed (a hide or a re-scope inside the 300 ms window) is still in the
 ledger, and the reopened stream flushes it. A hidden tab holds no stream: the hook
 closes on `visibilitychange` and reopens on return (ruling 301), and the replay is its
-catch-up. A failed stream flips `paused` (the topbar's "live updates paused" chip),
+catch-up. A failed stream flips `paused` (the "live updates paused" strip under the header, ruling 455(f)),
 reopens on a 2 / 5 / 15 / 30 s backoff, probes the session after two consecutive
 failures and stops on a 401 until the user retries; while it is down the tab's consoles
 say so in their footer (`useLiveStreamFailed`). There is no optimistic UI for

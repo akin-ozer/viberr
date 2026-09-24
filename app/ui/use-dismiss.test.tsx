@@ -111,8 +111,15 @@ describe("useDismiss", () => {
     // A non-bubbling scroll on a nested element: only a capture-phase window
     // listener sees it, which is the case StageMenu's column scroll needs.
     const scrolled = render(<Harness options={{ onReflow: true }} />);
-    fireEvent(scrolled.getByTestId("inside"), new Event("scroll"));
+    fireEvent(scrolled.getByTestId("outside"), new Event("scroll"));
     expect(scrolled.queryByTestId("pop")).toBeNull();
+    cleanup();
+
+    // A scroll INSIDE the popover moves nothing it is positioned from (a
+    // height-capped list scrolling itself; interface review 2026-09-24, layo-8).
+    const inner = render(<Harness options={{ onReflow: true }} />);
+    fireEvent(inner.getByTestId("inside"), new Event("scroll"));
+    expect(inner.queryByTestId("pop")).not.toBeNull();
     cleanup();
 
     const resized = render(<Harness options={{ onReflow: true }} />);

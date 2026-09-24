@@ -120,6 +120,22 @@ describe("SsoPanel", () => {
     expect(container.textContent).not.toContain("(UTC)");
   });
 
+  it("colo-13: off is a quiet fact, and only 'not tested' asks for action", () => {
+    // Local accounts only is a valid setup, so "off" wears the describe tier a
+    // disabled user wears, not the amber input_required fill.
+    const off = renderPanel([BLANK]).container.querySelector(".pill")!;
+    expect(off.textContent).toBe("off");
+    expect(off.className).toBe("pill neutral sm quiet");
+
+    const configured = renderPanel([
+      { ...BLANK, configuredInApp: true, clientId: "Iv1.abc" },
+    ]).container;
+    const notTested = [...configured.querySelectorAll(".pill")].find(
+      (el) => el.textContent === "not tested",
+    );
+    expect(notTested?.className).toBe("pill input sm");
+  });
+
   it("says when the app's OFF switch is overriding the deployment env", () => {
     const { container } = renderPanel([
       {

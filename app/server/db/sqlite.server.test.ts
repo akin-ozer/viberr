@@ -251,7 +251,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
    * Ruling 457: the task page's freshness reads got composite indexes after
    * roots had applied the baseline; boot adds them to an older root.
    */
-  it("adds the freshness indexes a pre-454 root lacks", () => {
+  it("adds the freshness indexes a pre-457 root lacks", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "viberr-freshidx-"));
     try {
       const db = openDatabase(path.join(dir, "old.sqlite"));

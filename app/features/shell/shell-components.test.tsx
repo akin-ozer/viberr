@@ -8,7 +8,7 @@ import type { NotificationView } from "~/features/notifications/notification-ite
 import { BELL_LIST_CAP, BELL_LIST_URL, TopBell } from "./top-bell";
 import { UserMenu } from "./user-menu";
 import { PageTopbar } from "./page-topbar";
-import { Topbar } from "./topbar";
+import { LivePausedStrip, Topbar, WORKSPACE_PAUSED_SENTENCE } from "./topbar";
 import { Rail } from "./rail";
 
 /**
@@ -279,28 +279,45 @@ describe("Topbar: UI-03 paused chip + UI-55 shortcut hint", () => {
     expect(queryByText(/live updates paused/)).toBeNull();
   });
 
-  it("surfaces a dropped stream as a status, with the retry as a real control", () => {
+  it("layo-10: the header row carries no chip or Retry while paused", () => {
+    // The ~186px pair sat in a fixed-height row that cannot wrap, and at
+    // 320-375px pushed the bell and account menu past `.main`'s clipped edge.
+    // The row keeps only the announcer; the layout renders the strip below.
+    // Canary: put the chip back in Topbar and this goes red.
+    const { container, queryByRole } = renderIn(topbar({ livePaused: true }));
+    expect(container.querySelector(".topbar .pill")).toBeNull();
+    expect(container.querySelector(".archived-banner")).toBeNull();
+    expect(queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("surfaces a dropped stream as a strip, with the retry as a real control", () => {
     let retried = 0;
-    const { getByText, getByRole } = renderIn(
-      topbar({ livePaused: true, onReconnect: () => (retried += 1) }),
+    const { container, getByText, getByRole } = renderIn(
+      <LivePausedStrip
+        message={WORKSPACE_PAUSED_SENTENCE}
+        onReconnect={() => (retried += 1)}
+      />,
     );
     // The sentence is a status; the retry is an action. One `.pill` (no cursor,
     // no hover) with role="status" over a click handler was neither, and
     // role="status" hid the button role, so "retry" was unreachable by name.
-    const chip = getByText("live updates paused");
-    expect(chip.tagName).toBe("SPAN");
-    // The chip is not itself the live region, and it keeps its own words as its
-    // accessible name (an `aria-label` here only replaced them with a longer
-    // duplicate of the `title`).
-    expect(chip.getAttribute("role")).toBeNull();
-    expect(chip.getAttribute("aria-label")).toBeNull();
+    const sentence = getByText(
+      "Live updates paused. Counts and board state may be out of date.",
+    );
+    expect(sentence.tagName).toBe("SPAN");
+    // The strip is not itself the live region (the header's always-mounted
+    // announcer is), so the sentence is not read twice on the drop.
+    expect(container.querySelector(".archived-banner")!.getAttribute("role")).toBeNull();
+    expect(sentence.closest('[role="status"]')).toBeNull();
     fireEvent.click(getByRole("button", { name: "Retry" }));
     expect(retried).toBe(1);
   });
 
   it("renders no retry control when there is nothing to reconnect", () => {
-    const { getByText, queryByRole } = renderIn(topbar({ livePaused: true }));
-    expect(getByText("live updates paused")).toBeTruthy();
+    const { getByText, queryByRole } = renderIn(
+      <LivePausedStrip message={WORKSPACE_PAUSED_SENTENCE} />,
+    );
+    expect(getByText(WORKSPACE_PAUSED_SENTENCE)).toBeTruthy();
     expect(queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
@@ -385,6 +402,47 @@ function railAt(entry: string) {
     entry,
   );
 }
+
+describe("acce-19: the rail's violations count says what it counts", () => {
+  function railWith(violations: number) {
+    return renderAt(
+      <Rail
+        projectSlug="viberr-core"
+        projectName="Viberr Core"
+        projectRepo={null}
+        membersCount={1}
+        boardCount={10}
+        reviewCount={3}
+        violations={violations}
+      />,
+      "/projects/viberr-core/board",
+    );
+  }
+
+  it("names the alarm in words, so red is not the only cue", () => {
+    // A bare red "1" gave the link the name "Settings 1" — the same shape as
+    // the neutral "Board 10" — and read as just another count in grayscale.
+    const one = railWith(1);
+    expect(one.getByText("Settings").closest("a")!.textContent).toBe(
+      "Settings1 violation",
+    );
+    expect(one.container.querySelector(".count.violations")!.textContent).toBe(
+      "1 violation",
+    );
+    cleanup();
+    const many = railWith(3);
+    expect(many.container.querySelector(".count.violations")!.textContent).toBe(
+      "3 violations",
+    );
+    // The neutral counts keep their bare numerals: the item names them.
+    expect(many.getByText("Board").closest("a")!.textContent).toBe("Board10");
+  });
+
+  it("renders no count at all while nothing is open", () => {
+    const { container } = railWith(0);
+    expect(container.querySelector(".count.violations")).toBeNull();
+  });
+});
 
 describe("P13-D-35: in-app paths back to the board keep filter and search", () => {
   it("keeps the project crumb pointed at the filtered board", () => {

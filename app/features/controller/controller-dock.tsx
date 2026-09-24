@@ -22,6 +22,8 @@ import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { pinLivePose } from "~/ui/live-pose";
+import { useSheetDrag } from "~/ui/use-sheet-drag";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/event-types";
@@ -169,6 +171,8 @@ function DockShell({ context }: { context: DockContext }) {
   const push = useToast();
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
+  const releasePose = useRef<(() => void) | null>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   const [threadsOpen, setThreadsOpen] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [text, setText] = useState("");
@@ -369,6 +373,9 @@ function DockShell({ context }: { context: DockContext }) {
         setOpen(false);
         return;
       }
+      // Closed mid-entrance (a double click on the button), the exit starts
+      // from where the entrance got to; released once `data-closing` lands.
+      releasePose.current ??= pinLivePose(panelRef.current);
       setClosing(true);
     },
     [],
@@ -376,6 +383,8 @@ function DockShell({ context }: { context: DockContext }) {
   const leaveDock = useCallback(() => closeDock(true), [closeDock]);
   useEffect(() => {
     if (!closing) return;
+    releasePose.current?.();
+    releasePose.current = null;
     const panel = panelRef.current;
     if (!panel) {
       setClosing(false);
@@ -409,10 +418,46 @@ function DockShell({ context }: { context: DockContext }) {
       if (fallback !== null) clearTimeout(fallback);
     };
   }, [closing]);
+  // Ruling 454: at sheet width a finger pulls the dock down to dismiss it.
+  // The gesture has already carried the sheet out of sight when it calls
+  // back, so the unmount is the instant one.
+  useSheetDrag({
+    sheetRef: panelRef,
+    hostRef: dockRef,
+    open,
+    onDismiss: () => closeDock(true),
+  });
   // Escape is handled ON THE PANEL (its onKeyDown below), not on the document.
   // `useDismiss` closes on any Escape anywhere, so dismissing the palette, a
   // confirm dialog or a stage menu took the helper with it (review finding 8).
   // An outside press still never closes the dock.
+  //
+  // Interface review 2026-09-24 (acce-14): one exception. With no focus trap
+  // (ruling 121), Tab walks onto page controls the panel covers, and at 320px
+  // or 200% zoom the sheet covers most of the page. Escape with focus on such a
+  // control closes the dock and uncovers it, leaving focus where it is (WCAG
+  // 2.4.11). Everything finding 8 protects still leaves the dock alone: an
+  // Escape something else handled, focus on an open popover's trigger or in a
+  // menu (useDismiss closes those without preventDefault), focus on nothing,
+  // and any control the panel does not cover, which includes a modal dialog's
+  // top layer.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const panel = panelRef.current;
+      const focused = document.activeElement;
+      if (!panel || !(focused instanceof HTMLElement) || focused === document.body) return;
+      if (panel.contains(focused)) return;
+      if (focused.closest('[aria-expanded="true"], [role="menu"], [role="listbox"]')) return;
+      const box = focused.getBoundingClientRect();
+      // Optional-chained: jsdom has no elementFromPoint, so it no-ops in tests.
+      const hit = document.elementFromPoint?.(box.left + box.width / 2, box.top + box.height / 2);
+      if (hit && panel.contains(hit)) closeDock(true);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, closeDock]);
 
   // Focus, on a USER-INITIATED open only (review findings 7 and 10). Opening
   // the dock means wanting to type, so the composer takes focus; when it cannot
@@ -542,7 +587,7 @@ function DockShell({ context }: { context: DockContext }) {
       : "?c=new");
 
   return (
-    <div className="dock" data-open={open ? "true" : "false"}>
+    <div className="dock" ref={dockRef} data-open={open ? "true" : "false"}>
       {open && context.needsOwnStream && <DockLive />}
       {open && (
         <section
@@ -564,7 +609,11 @@ function DockShell({ context }: { context: DockContext }) {
             closeDock(true);
           }}
         >
-          <header className="dock-head">
+          {/* Ruling 454: at sheet width the grabber and the header are the
+              sheet's drag handles (useSheetDrag); the grabber only says so.
+              Close stays the named way out. */}
+          <div className="dock-grabber" data-sheet-handle aria-hidden="true" />
+          <header className="dock-head" data-sheet-handle>
             <span className="dock-head-icon">
               <Icon name="cpu" />
             </span>

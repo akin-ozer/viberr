@@ -273,7 +273,10 @@ export function SsoPanel({
                   live
                 </Pill>
               ) : (
-                <Pill kind="input" sm>
+                // Interface review 2026-09-24 (colo-13): off is a valid setup
+                // (local accounts only), a settled fact that goes quiet like a
+                // disabled user. `not tested` below keeps the amber demand.
+                <Pill kind="neutral" sm quiet>
                   off
                 </Pill>
               )}
