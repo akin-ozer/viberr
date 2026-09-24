@@ -64,16 +64,18 @@ export function publishRunLogAppended(input: {
         seq: input.seq,
       },
     },
-    // Ruling-free perf fix (owner, 2026-09-06): keep project- and task-scoped
-    // delivery exactly as it is — a board showing this task is a legitimate
-    // recipient and that is pinned — but keep this OFF the all-projects
+    // Ruling-free perf fix (owner, 2026-09-06): keep this OFF the all-projects
     // firehose. It is one reference per console line, and Home subscribes
     // `projects`, so a single agent run was re-running Home's loaders once per
     // line of output. `run.state-changed` stays on the firehose: that one is a
-    // real project fact and fires a handful of times per run. Since 2026-09-23 a
-    // project-scoped page receives the frame but revalidates only when it shows
-    // that task (`SSE_RUN_LINE_EVENTS` in the client's `event-types.ts`).
-    { projectSlug: input.projectSlug, taskKey: input.taskKey, skipFirehose: true },
+    // real project fact and fires a handful of times per run.
+    //
+    // Ruling 454 (LIVE-5): and off the `project:` scope too. That fix kept the
+    // board as a recipient because the board revalidated on a line then; since
+    // 2026-09-23 nothing but the console of the page showing THIS task reads
+    // the frame, and that page holds the task's scope. Every open board of the
+    // project was receiving, parsing and dropping one frame per console line.
+    { projectSlug: input.projectSlug, taskKey: input.taskKey, taskOnly: true },
   );
 }
 

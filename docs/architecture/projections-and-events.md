@@ -224,7 +224,7 @@ an empty project slug and no route publishes nothing), and the org resource broa
 | `notification.created`, `notification.read` | `userId` | that user's `user` scope |
 | `violation.updated` | `projectSlug, taskKey` (nullable) | project, plus task when named |
 | `resource.updated` | `kind` (`kb`, `skill`, `mcp`), `id` | broadcast |
-| `run.log-appended` | `projectSlug, taskKey, runId, threadId, seq` | project + task, kept off the `projects` firehose (`skipFirehose`) |
+| `run.log-appended` | `projectSlug, taskKey, runId, threadId, seq` | the task's own scope only (`taskOnly`, ruling 454): no `project:` connection and no `projects` firehose |
 | `run.state-changed` | `projectSlug, taskKey, runId, threadId, state` | project + task |
 | `controller.updated` | `conversationId, userId` | the owner's `user` scope |
 | `controller.log-appended` | `conversationId, userId, runId, threadId, seq` | the owner's `user` scope |
@@ -236,10 +236,9 @@ an empty project slug and no route publishes nothing), and the org resource broa
 `event-types.ts`): one frame per console line on the `user` scope every signed-in
 surface subscribes, so `useLiveUpdates` does not revalidate on it; only the dedicated
 log consumer handles it. `run.log-appended` is a **run-line event**
-(`SSE_RUN_LINE_EVENTS`): the `project:` scope delivers it for every run of the project
-(to the board, the controller page and every open task page, which subscribes its
-project for the rail), but only the page whose `task:` scope names that task revalidates
-on it, at most once per `RUN_LINE_REVALIDATE_MS` (2 s), because its Live run strip
+(`SSE_RUN_LINE_EVENTS`): only a connection holding its task's `task:` scope receives it
+(ruling 454: every board of the project used to receive and drop every line), and that
+page revalidates on it, at most once per `RUN_LINE_REVALIDATE_MS` (2 s), because its Live run strip
 (phase, step, turns, tokens) is loader data that moves per line. Nothing else a
 project-scoped page renders changes per line: the board's "agent running" fact moves on
 `run.state-changed`.

@@ -130,9 +130,10 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
     journey: "live-run",
     fixture: `${TABS}; frames per line on the task tab`,
   },
-  // LIVE-5: every board of the project received and dropped every line.
+  // LIVE-5: 1 while every board of the project received and dropped every
+  // line; the frame is task-scoped only now.
   "console:sse.run-line-frames-per-line-board-tab": {
-    ceiling: 1,
+    ceiling: 0,
     unit: "count",
     journey: "live-run",
     fixture: `${TABS}; frames per line on the board tab`,

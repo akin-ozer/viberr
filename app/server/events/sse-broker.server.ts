@@ -91,6 +91,12 @@ export interface SseRoute {
    *  showing that task IS a legitimate recipient (pinned in
    *  run-events.server.test.ts) and still gets it. */
   skipFirehose?: boolean;
+  /** Ruling 454 (LIVE-5): deliver to connections holding THIS task's scope
+   *  only. For a reference whose one reader is the console of the page
+   *  showing that task: one `run.log-appended` per console line reached every
+   *  board of the project, which parsed and dropped it. Implies
+   *  `skipFirehose`. */
+  taskOnly?: boolean;
 }
 
 export function routeMatchesConnection(
@@ -106,8 +112,8 @@ export function routeMatchesConnection(
   if (route.broadcast) return true;
   if (route.projectSlug === undefined) return false;
   return conn.scopes.some((s) => {
-    if (s.kind === "projects") return route.skipFirehose !== true;
-    if (s.kind === "project") return s.slug === route.projectSlug;
+    if (s.kind === "projects") return route.skipFirehose !== true && route.taskOnly !== true;
+    if (s.kind === "project") return route.taskOnly !== true && s.slug === route.projectSlug;
     if (s.kind === "task") {
       return (
         s.slug === route.projectSlug &&
