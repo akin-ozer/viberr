@@ -324,33 +324,24 @@ export interface GatewayRunBinding {
  * the map back untouched and no token.
  *
  * A gateway mount is a server whose config is the resolver's
- * `{ type: "http", url: mcpGatewayMountUrl(name) }` — the URL itself is the
- * marker, so no second channel carries "this one is proxied" past the callers
- * in between. When the gateway has stopped between the resolve and this call
- * (a shutdown), such a server is removed rather than mounted without a token.
+ * `{ type: "http", url: mcpGatewayMountUrl(name) }` — that exact URL, this
+ * gateway's own port included, is the marker, so no second channel carries
+ * "this one is proxied" past the callers in between, and an org server that
+ * merely lives on the loopback at a `/mcp/<name>` path is left alone. A
+ * gateway that is not listening marks nothing (the resolver mounts no
+ * credentialed server then, and says why).
  */
 export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
   const mounts: { name: string; config: z.infer<typeof gatewayMountSchema> }[] = [];
   for (const [name, value] of Object.entries(input.servers)) {
     const parsed = gatewayMountSchema.safeParse(value);
     if (!parsed.success) continue;
-    const url = parsed.data.url;
-    if (!url.startsWith("http://127.0.0.1:") || !url.endsWith(`/mcp/${encodeURIComponent(name)}`)) {
-      continue;
-    }
+    const own = mcpGatewayMountUrl(name);
+    if (own === null || parsed.data.url !== own) continue;
     mounts.push({ name, config: parsed.data });
   }
   if (mounts.length === 0) return input.servers;
   const out: RunServerMap = { ...input.servers };
-  const state = getState();
-  if (!state.http || state.port === null) {
-    for (const mount of mounts) delete out[mount.name];
-    logger.warn("mcp gateway is not listening — credentialed servers dropped from the run", {
-      runId: input.runId,
-      mcps: mounts.map((m) => m.name),
-    });
-    return out;
-  }
   revokeRunMcpGateway(input.runId);
   const token = randomBytes(32).toString("base64url");
   const servers = new Map<string, ReadonlySet<string>>();
@@ -359,16 +350,18 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
       .filter((denial) => denial.server === mount.name)
       .flatMap((denial) => denial.tools);
     servers.set(mount.name, new Set(withheld));
+    // Rebuilt from the parsed mount, so nothing but the URL, the run's token
+    // and ruling 176's per-tool denies reaches the run.
     const config: HttpMcpServerConfig = {
       type: "http",
-      // Re-derived rather than trusted, so a stale port never reaches a run.
-      url: `http://127.0.0.1:${state.port}/mcp/${encodeURIComponent(mount.name)}`,
+      url: mount.config.url,
       headers: { Authorization: `Bearer ${token}` },
     };
     if (mount.config.tools?.length) config.tools = mount.config.tools;
     out[mount.name] = config;
   }
   const hash = hashToken(token);
+  const state = getState();
   state.grants.set(hash, {
     runId: input.runId,
     db: input.db,

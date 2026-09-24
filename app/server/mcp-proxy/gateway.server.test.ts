@@ -350,6 +350,26 @@ describe("the gateway against a stdio upstream the server spawns", () => {
   });
 });
 
+describe("what counts as a gateway mount", () => {
+  it("an uncredentialed server that merely lives on the loopback at /mcp/<name> is left alone", () => {
+    // Canary: recognize a mount by its `127.0.0.1…/mcp/<name>` shape instead
+    // of the gateway's own URL, and this local server is rewritten and bound.
+    const local = { type: "http", url: "http://127.0.0.1:9/mcp/local" };
+    const servers = bindRunToMcpGateway({
+      db,
+      runId: "run_local",
+      servers: { local },
+      toolDenials: [],
+      actor: { userId: null, label: "operator" },
+      projectSlug: "acme",
+      taskKey: "VIB-1",
+      isLive: () => true,
+    });
+    expect(servers).toEqual({ local });
+    expect(mcpGatewayStatus().liveTokens).toBe(0);
+  });
+});
+
 describe("mounting when the gateway is down", () => {
   it("a credentialed server is not mounted and the run is told why; an uncredentialed one mounts directly", async () => {
     await stopMcpGateway();
