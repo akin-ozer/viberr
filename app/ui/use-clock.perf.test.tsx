@@ -31,12 +31,12 @@ afterEach(() => {
 
 function Stamp({ iso }: { iso: string }) {
   const rel = useRelativeTime(iso);
-  return <span className="stamp">{rel}</span>;
+  return <span data-clock="stamp">{rel}</span>;
 }
 
 function Elapsed({ startedAt }: { startedAt: string }) {
   const s = useElapsed(startedAt, true);
-  return <span className="elapsed">{s}</span>;
+  return <span data-clock="elapsed">{s}</span>;
 }
 
 function Page() {
@@ -56,9 +56,9 @@ describe("shared clocks (ruling 454)", () => {
   it("one interval per cadence, whatever the number of readers", () => {
     const view = render(<Page />);
     const stamps = () =>
-      [...view.container.querySelectorAll(".stamp")].map((el) => el.textContent);
+      [...view.container.querySelectorAll("[data-clock=stamp]")].map((el) => el.textContent);
     const elapsed = () =>
-      [...view.container.querySelectorAll(".elapsed")].map((el) => el.textContent);
+      [...view.container.querySelectorAll("[data-clock=elapsed]")].map((el) => el.textContent);
 
     // The viewer's clock, from the first client render on.
     expect(stamps()[0]).toBe("1m ago");
