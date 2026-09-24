@@ -331,18 +331,22 @@ function DockShell({ context }: { context: DockContext }) {
   /** Ruling 259: what was submitted, held until the server answers. */
   const pending = useRef<string | null>(null);
   useFetcherResult(send, (result) => {
+    // `sent` is read before the ref is nulled, because React may run the
+    // updater below later than this line.
+    const sent = pending.current;
+    pending.current = null;
     if (!result.ok) {
       // The text is still in the composer, and Send is live again: the person
       // can retry or copy it out.
       push(result.error ?? "The controller could not take that. Try again.", "error");
-      pending.current = null;
       return;
     }
-    // Ruling 259: cleared HERE, and only if the box still holds exactly what
-    // went out — somebody who started typing the next message while this one
-    // was in flight keeps it.
-    setText((cur) => (cur === pending.current ? "" : cur));
-    pending.current = null;
+    // Ruling 259: cleared HERE, and only if the box still holds what went out —
+    // somebody who started typing the next message while this one was in
+    // flight keeps it. What went out is the TRIMMED text, so the box is
+    // compared trimmed too: a message sent with a trailing space or newline
+    // clears like any other.
+    setText((cur) => (cur.trim() === sent ? "" : cur));
     const key = sentUnder.current;
     // A thread the selection does not name yet (a new one, or the scope's
     // newest with nothing selected) is selected, and the load effect above

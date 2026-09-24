@@ -905,3 +905,66 @@ describe("the controller dock (ruling 121)", () => {
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
   });
 });
+
+/**
+ * Ruling 259's clear, for a message that ends in whitespace, in the dock (the
+ * page composer's twin). The dock sends the TRIMMED text, and its success
+ * handler compared that against the raw box, so "hello " or a message ending
+ * in a newline stayed in the box after the controller had taken it.
+ */
+describe("ruling 259: the dock compares the box with what went out, trimmed", () => {
+  const typed = "hello \n";
+
+  /** Opens the dock on VIB-1 and types `typed` into the composer. */
+  async function typeIntoDock() {
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    const box = await screen.findByLabelText<HTMLTextAreaElement>("Message to the controller");
+    await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
+    fireEvent.change(box, { target: { value: typed } });
+    return box;
+  }
+
+  function clickSend() {
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  }
+
+  it("clears a message sent with a trailing space and newline", async () => {
+    const { loads, sends } = mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
+    const box = await typeIntoDock();
+    clickSend();
+    // The success handler selects the thread the send landed in; that load
+    // shows the handler has run.
+    await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("cnv_new"));
+    expect(sends[0]!.get("text")).toBe("hello");
+    // CANARY: compare the raw box (`cur === sent`) and this stays "hello \n".
+    expect(box.value).toBe("");
+  });
+
+  it("keeps what was typed while the send was in flight", async () => {
+    const { loads, sends } = mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
+    const box = await typeIntoDock();
+    clickSend();
+    // The person types on before the answer lands: nothing between the click
+    // and this line awaits, and the stub's action is async, so the POST has
+    // not even reached the action yet.
+    fireEvent.change(box, { target: { value: `${typed}and the next thing` } });
+    expect(sends.length).toBe(0);
+    await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("cnv_new"));
+    expect(sends[0]!.get("text")).toBe("hello");
+    // CANARY: clear on every success and the next message is lost.
+    expect(box.value).toBe(`${typed}and the next thing`);
+  });
+
+  it("keeps the message when the send fails", async () => {
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () => taskView(),
+      action: () => ({ ok: false, error: "That request expired." }),
+    });
+    const box = await typeIntoDock();
+    clickSend();
+    await screen.findByText("That request expired.");
+    // CANARY: clear before the `result.ok` check and the failed message is gone.
+    expect(box.value).toBe(typed);
+  });
+});
