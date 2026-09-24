@@ -464,8 +464,11 @@ function OperatorRunControl({
       <span className="op-backend">{backendLabel}</span>
       <PromptInput
         value={steer}
-        ariaLabel="Steer this operator run (optional)"
-        placeholder="Optional: tell the operator what this run should focus on"
+        ariaLabel="Steer this run (optional)"
+        // Interface review 2026-09-24 (acce-38): short enough to fit the box
+        // at every width (the long hint cut mid-word), and the first words of
+        // the accessible name, so what shows and what is announced agree.
+        placeholder="Steer this run (optional)"
         disabled={hardOff}
         maxLength={2000}
         onChange={setSteer}
@@ -760,8 +763,8 @@ function AgentRunControl({
       />
       <PromptInput
         value={prompt}
-        ariaLabel="Tell the agent what this run should do (optional)"
-        placeholder="Optional: tell it what this run should do"
+        ariaLabel="Prompt for this agent run (optional)"
+        placeholder="Prompt (optional)"
         disabled={busy}
         maxLength={4000}
         onChange={setPrompt}

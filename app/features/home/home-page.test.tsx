@@ -789,3 +789,27 @@ describe("U33-2: an unreachable repository has a home on the project card", () =
     expect(repoLine(none.container).querySelector(".pill")).toBeNull();
   });
 });
+
+describe("acce-8: the project link is named by what it shows", () => {
+  // "Open X board" as an aria-label replaced the content, so a screen reader
+  // never heard the repo, the task counts, "N waiting on you" or the last
+  // update. Canary: restore the aria-label on either form.
+  function renderPiece(node: ReactNode) {
+    const Stub = createRoutesStub([{ path: "/", Component: () => <>{node}</> }]);
+    return render(<Stub initialEntries={["/"]} />);
+  }
+  const p = card({ total: 3, dist: { impl: 3 }, waiting: 2 });
+
+  it.each([
+    ["card", <ProjectCard key="c" p={p} starred={false} onStar={() => {}} />],
+    ["row", <ProjectRow key="r" p={p} starred={false} onStar={() => {}} />],
+  ])("the %s link carries the project's state and hides only the initial", (_, node) => {
+    const { container, getByRole } = renderPiece(node);
+    const link = container.querySelector("a.pj-link")!;
+    expect(link.hasAttribute("aria-label")).toBe(false);
+    expect(container.querySelector(".pj-mark")!.getAttribute("aria-hidden")).toBe("true");
+    expect(
+      getByRole("link", { name: /^Viberr Core.*akin-ozer\/viberr.*3 tasks.*2 waiting on you/ }),
+    ).toBe(link);
+  });
+});

@@ -231,6 +231,10 @@ describe("ActivityPage", () => {
     const audit = container.querySelectorAll(".pev-list .pol-ev");
     expect(audit[0]!.querySelector(".pev-ico.violation")).toBeTruthy();
     expect(audit[0]!.querySelector(".pill.input")!.textContent).toBe("open");
+    // Interface review 2026-09-24 (acce-5): the remedy was title-only.
+    expect(audit[0]!.querySelector(".pill.input")!.parentElement!.textContent).toBe(
+      "open: grant the missing scope to resolve",
+    );
     expect(audit[0]!.querySelector(".keybtn")!.textContent).toBe("VIB-142");
     expect(audit[0]!.querySelector(".pev-t")!.textContent).toBe("today 09:38");
     expect(audit[1]!.querySelector(".pev-ico.change")).toBeTruthy();
@@ -250,6 +254,14 @@ describe("ActivityPage", () => {
     expect(pill.textContent).toBe("resolved");
     expect(pill.parentElement!.getAttribute("title")).toContain(
       "Resolved by Arda Kaya",
+    );
+    // …and the same who/when reaches the accessibility tree, not only a
+    // hovering mouse (interface review 2026-09-24, acce-5).
+    expect(pill.parentElement!.querySelector(".vh")!.textContent).toMatch(
+      /^ by Arda Kaya · /,
+    );
+    expect(pill.parentElement!.getAttribute("title")).toBe(
+      "Resolved" + pill.parentElement!.querySelector(".vh")!.textContent,
     );
   });
 

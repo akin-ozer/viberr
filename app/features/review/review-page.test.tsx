@@ -57,6 +57,7 @@ function renderQueue(
   working: ReviewRowView[],
   total = ready.length + working.length,
   acceptance?: { operatorCanAccept: boolean; operatorName: string },
+  waitingOnMe?: ReadonlySet<string>,
 ) {
   const Stub = createRoutesStub([
     {
@@ -68,6 +69,7 @@ function renderQueue(
           working={working}
           total={total}
           acceptance={acceptance}
+          waitingOnMe={waitingOnMe}
         />
       ),
     },
@@ -168,22 +170,29 @@ describe("ReviewQueuePage", () => {
     // region — the surface read as having no action at all. It stays a triage
     // list; the row just says what the click does.
     // Canary: delete the .rq-go span and both halves fail.
-    const { container } = renderQueue([rowHuman], [rowAgent]);
+    const { container, getByRole } = renderQueue([rowHuman], [rowAgent]);
     const rows = container.querySelectorAll(".rq-row");
     for (const row of rows) {
       const go = row.querySelector(".rq-go");
       expect(go, "each row needs a named primary action").toBeTruthy();
       expect(go!.textContent).toContain("Review");
-      // Decorative for AT — the row's own aria-label already names the target,
-      // so the chevron+label must not be read a second time.
-      expect(go!.getAttribute("aria-hidden")).toBe("true");
+      // Interface review 2026-09-24 (acce-8): the visible "Review" IS the
+      // action in the row's name now, so it is not hidden from AT.
+      expect(go!.hasAttribute("aria-hidden")).toBe(false);
+      // No aria-label: one replaced the row's content, so a screen reader
+      // heard key + title and never the PR, validation or wait tag.
+      expect(row.hasAttribute("aria-label")).toBe(false);
     }
     // It must NOT say "Accept": acceptance is verdict-gated (R15-1) and can
     // refuse, and this surface cannot promise an outcome it does not evaluate.
     expect(container.querySelector(".rq-go")!.textContent).not.toContain("Accept");
-    expect(rows[0]!.getAttribute("aria-label")).toBe(
-      "Review VIB-142: Attach execution workspace to task runtime",
-    );
+    // The name comes from the content: key, title, state, and the action.
+    // Canary: restore the aria-label and this lookup finds no button.
+    expect(
+      getByRole("button", {
+        name: /VIB-142.*Attach execution workspace to task runtime.*PR #318.*waiting on you.*Review/,
+      }),
+    ).toBe(rows[0]);
   });
 
   it("labels a human-waiting row in the working panel 'waiting on a human', never 'agent working'", () => {
@@ -201,6 +210,33 @@ describe("ReviewQueuePage", () => {
       "waiting on a human",
     );
     expect(row.querySelector(".wait-tag.agent")).toBeNull();
+  });
+
+  it("writ-3: a row the board marks waitingOnMe reads 'waiting on you' in either panel", () => {
+    // The queue tested acceptance alone, so a viewer who owns an open decision
+    // on a review task read "waiting on a human" here while the board, one
+    // click away, said "waiting on you". The flag is the board's own, handed in
+    // by the route. Canary: drop the `waitingOnMe` term from the tag test.
+    const mine: ReviewRowView = { ...rowAgent, key: "VIB-150", waiting: "human" };
+    const theirs: ReviewRowView = { ...rowAgent, key: "VIB-151", waiting: "human" };
+    // The board's precedence: an agent at work reads "agent working" even when
+    // the viewer also owns a decision on the task (card-status.ts).
+    const running: ReviewRowView = { ...rowAgent, key: "VIB-152" };
+    const { container } = renderQueue(
+      [],
+      [mine, theirs, running],
+      3,
+      undefined,
+      new Set(["VIB-150", "VIB-152"]),
+    );
+    const [a, b, c] = [...container.querySelectorAll(".rq-row")];
+    expect(a!.querySelector(".wait-tag.you")!.textContent).toContain("waiting on you");
+    expect(a!.querySelector(".wait-tag.human")).toBeNull();
+    expect(b!.querySelector(".wait-tag.human")!.textContent).toContain(
+      "waiting on a human",
+    );
+    expect(c!.querySelector(".wait-tag.agent")).toBeTruthy();
+    expect(c!.querySelector(".wait-tag.you")).toBeNull();
   });
 
   it("F19-31: a `waiting: none` row shows NO wait tag — the board's answer for the same value", () => {
@@ -266,7 +302,7 @@ describe("ReviewQueuePage", () => {
     const { getByText } = renderQueue([], []);
     expect(
       getByText(
-        "Nothing waits on you. Completion reports land here when a task reaches the boundary.",
+        "Nothing waits on your acceptance. Completion reports land here when a task reaches the boundary.",
       ),
     ).toBeTruthy();
     expect(getByText(/No review work in flight/)).toBeTruthy();
@@ -546,6 +582,29 @@ describe("ruling 236: the collision chip", () => {
       (e.getAttribute("title") ?? "").includes("into conflict"),
     );
     expect(chip?.getAttribute("title")).toContain("may be larger");
+  });
+
+  it("acce-5: the tooltip's facts reach assistive tech through a .vh copy", () => {
+    // `title` never opens for keyboard, touch or most screen readers, and it
+    // was the only copy of the shared files and the keys folded into "1 more".
+    const { container } = renderQueue(
+      [
+        colliding([
+          { taskKey: "VIB-9", prNumber: 9, paths: ["a.ts"], partial: false },
+          { taskKey: "VIB-10", prNumber: 10, paths: ["b.ts"], partial: false },
+          { taskKey: "VIB-11", prNumber: 11, paths: ["a.ts"], partial: false },
+        ]),
+      ],
+      [],
+    );
+    const chip = [...container.querySelectorAll("[title]")].find((e) =>
+      (e.getAttribute("title") ?? "").includes("into conflict"),
+    )!;
+    const vh = chip.querySelector(".vh")!;
+    expect(vh.textContent).toContain("VIB-11");
+    expect(vh.textContent).toContain("Shared files: a.ts, b.ts");
+    // The same sentence the pointer gets, and title stays as a mouse extra.
+    expect(vh.textContent!.trim()).toBe(chip.getAttribute("title"));
   });
 
   it("renders nothing when no pull request collides", () => {

@@ -10,7 +10,7 @@ import { useDialog } from "~/ui/use-dialog";
  * THE credential card (github-view spec §7.12: one component, used by the
  * GitHub view now and Settings → RepoSettings in Phase 9, so the two can't
  * drift). Markup is the mock's `.cred-card` verbatim; the footer action
- * slot is the only variation point ("Fix in Settings" here, "Grant scope"
+ * slot is the only variation point ("Fix in Settings" here, "Re-check scopes"
  * in Settings — this page currently renders both, see the phase report).
  *
  * States:
@@ -38,7 +38,7 @@ export function CredentialCard({
   credential: CredentialCardData;
   /** Opens the flagged task (the cred-warn `.keybtn`). */
   onOpenTask: (taskKey: string) => void;
-  /** Right-aligned footer action slot (Fix in Settings / Grant scope). */
+  /** Right-aligned footer action slot (Fix in Settings / Re-check scopes). */
   warnActions?: ReactNode;
   /** Always-visible manage row (attach / rotate / remove the credential). */
   manageActions?: ReactNode;
@@ -154,7 +154,7 @@ export function CredentialCard({
             {unproven.length > 0
               ? ` (${unproven.map((s) => s.id).join(", ")})`
               : ""}
-            . Run Grant scope to validate.
+            . Use Re-check scopes to verify them.
           </span>
           {warnActions}
         </div>

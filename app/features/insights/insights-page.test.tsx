@@ -7,6 +7,14 @@ import { InsightsPage } from "./insights-page";
 
 afterEach(cleanup);
 
+/** What a sighted reader sees: the element's text without its `.vh` copy. */
+function visibleText(el: Element | null): string {
+  const copy = el?.cloneNode(true);
+  if (!(copy instanceof Element)) return "";
+  for (const vh of copy.querySelectorAll(".vh")) vh.remove();
+  return copy.textContent ?? "";
+}
+
 function renderPage(summary: InsightsSummary) {
   const Stub = createRoutesStub([
     { path: "/insights", Component: () => <InsightsPage summary={summary} /> },
@@ -244,6 +252,15 @@ describe("InsightsPage", () => {
     expect(getAllByText("codex").length).toBeGreaterThanOrEqual(1);
     // One daily column per window day.
     expect(container.querySelectorAll(".daily-col")).toHaveLength(30);
+    // Interface review 2026-09-24 (acce-5): the chart is a list whose items
+    // say their day, run count and cost; as role="img" its children were
+    // presentational and the per-day figures lived only in hover titles.
+    const chart = container.querySelector(".daily-chart")!;
+    expect(chart.getAttribute("role")).toBe("list");
+    expect(chart.querySelectorAll('[role="listitem"]')).toHaveLength(30);
+    const last = chart.querySelectorAll(".daily-col")[29]!;
+    expect(last.querySelector(".vh")?.textContent).toBe(last.getAttribute("title"));
+    expect(last.querySelector(".vh")?.textContent).toMatch(/^2026-07-30: 5 runs, /);
     // The busiest backend bar fills 100%, the other proportionally less.
     const fills = container.querySelectorAll<HTMLElement>(".bar-fill");
     expect(fills[0]?.style.width).toBe("100%"); // claude (28, the max)
@@ -429,6 +446,48 @@ describe("InsightsPage", () => {
     expect(queryByText("no reading yet")).toBeTruthy();
   });
 
+  it("names the reading's age and a refused credential's sentence in the accessibility tree, not only in `title` (acce-5)", async () => {
+    const { container } = renderPage({
+      ...FULL,
+      backendQuota: [
+        {
+          backend: "claude",
+          reading: {
+            status: "allowed",
+            rateLimitType: "five_hour",
+            utilization: 0.4,
+            resetsAt: null,
+            isUsingOverage: false,
+            observedAt: "2026-08-27T12:59:20.000Z",
+            credentialUserId: null,
+            credentialLabel: null,
+          },
+          credentialRefused: null,
+          exhausted: null,
+        },
+        {
+          backend: "codex",
+          reading: null,
+          credentialRefused: {
+            providerText: "token revoked",
+            runId: "run_2",
+            observedAt: "2026-08-31T09:00:00.000Z",
+            credentialUserId: null,
+            credentialLabel: null,
+          },
+          exhausted: null,
+        },
+      ],
+    });
+    await waitFor(() => {
+      const observed = container.querySelector(".bar-cost[title^='observed ']")!;
+      expect(observed.querySelector(".vh")?.textContent).toBe(" · " + observed.getAttribute("title"));
+    });
+    const refused = container.querySelector(".bar-cost[title^='run run_2 was refused ']")!;
+    expect(refused.querySelector(".vh")?.textContent).toBe(" · " + refused.getAttribute("title"));
+    expect(refused.querySelector(".vh")?.textContent).toContain("token revoked");
+  });
+
   /**
    * D5 (pass 31): live-caught. Codex had been quota-blocked for days — every
    * run refused with the limit and its reset date in the provider's own words —
@@ -472,6 +531,9 @@ describe("InsightsPage", () => {
         /^run run_abc was refused (?:\d\d:\d\d|(?:Yesterday|[A-Z][a-z]{2} \d{1,2}) · \d\d:\d\d): You've hit your usage limit/,
       );
       expect(bar.getAttribute("title")).not.toContain("refused $");
+      // Interface review 2026-09-24 (acce-5): the same sentence in `.vh`, for
+      // everyone a title never reaches.
+      expect(bar.querySelector(".vh")?.textContent).toBe(" · " + bar.getAttribute("title"));
     });
     expect(getByText(/retry after/)).toBeTruthy();
     // …and the contradiction this replaced is gone from the exhausted row
@@ -754,14 +816,19 @@ describe("the prompt-cache panel (ruling 369)", () => {
     expect(panel.querySelector("h2")?.textContent).toBe("Prompt cache");
     const primary = panel.querySelector('[data-cache-row="by run kind:primary"]')!;
     expect(primary.querySelector("[data-runs]")?.getAttribute("data-runs")).toBe("20");
-    expect(primary.querySelector("[data-warm-rate]")?.textContent).toBe("28%");
+    expect(visibleText(primary.querySelector("[data-warm-rate]"))).toBe("28%");
     expect(primary.querySelector("[data-warm-rate]")?.getAttribute("title")).toBe("5 of 18 first calls read more than they wrote");
+    // Interface review 2026-09-24 (acce-5): the fraction reaches the
+    // accessibility tree too, not only a hovering mouse.
+    expect(primary.querySelector("[data-warm-rate] .vh")?.textContent).toBe(
+      ", 5 of 18 first calls read more than they wrote",
+    );
     expect(primary.querySelector("[data-write]")?.getAttribute("data-write")).toBe("1900000");
     expect(primary.querySelector("[data-write-read]")?.textContent).toBe("0.020");
     expect(primary.querySelector("[data-large]")?.textContent).toBe("1");
     expect(primary.querySelector("[data-ttl-1h]")?.textContent).toBe("18 × 1h");
     const operator = panel.querySelector('[data-cache-row="by run kind:operator"]')!;
-    expect(operator.querySelector("[data-warm-rate]")?.textContent).toBe("n/a");
+    expect(visibleText(operator.querySelector("[data-warm-rate]"))).toBe("n/a");
     expect(operator.querySelector("[data-write-read]")?.textContent).toBe("n/a");
     expect(operator.querySelector("[data-ttl-1h]")?.textContent).toBe("not reported");
     expect(panel.querySelector('[data-cache-row="by credential kind:login"]')).not.toBeNull();

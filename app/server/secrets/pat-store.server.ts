@@ -395,14 +395,14 @@ export function credentialAdvisories(
       id: "workflow_scope",
       scope: "workflow",
       source: "violation",
-      text: `GitHub refused a push under .github/workflows/ with this token${violation.taskKey ? ` (${violation.taskKey})` : ""}: it lacks the workflow scope. Grant it on GitHub, then Re-check the credential.`,
+      text: `GitHub refused a push under .github/workflows/ with this token${violation.taskKey ? ` (${violation.taskKey})` : ""}: it lacks the workflow scope. Grant it on GitHub, then use Re-check scopes on the project's GitHub page.`,
     });
   } else if (header && validation?.tokenKind === "classic" && !header.includes("workflow")) {
     advisories.push({
       id: "workflow_scope",
       scope: "workflow",
       source: "header",
-      text: "This classic token has no workflow scope, so it cannot push changes under .github/workflows/. Grant it on GitHub if a task will ship CI, then Re-check the credential.",
+      text: "This classic token has no workflow scope, so it cannot push changes under .github/workflows/. Grant it on GitHub if a task will ship CI, then use Re-check scopes on the project's GitHub page.",
     });
   }
   // Ruling 360 (pass 38, F38-14): the check-runs read GitHub refused with this
@@ -418,7 +418,7 @@ export function credentialAdvisories(
       id: "checks_read",
       scope: "checks:read",
       source: "violation",
-      text: `GitHub refused this token's read of pull-request check results${checks.taskKey ? ` (${checks.taskKey})` : ""}: it lacks Checks: read, so CI status is not shown on task pages or accept dialogs, and merges proceed without it. Grant it on GitHub, then Re-check the credential.`,
+      text: `GitHub refused this token's read of pull-request check results${checks.taskKey ? ` (${checks.taskKey})` : ""}: it lacks Checks: read, so CI status is not shown on task pages or accept dialogs, and merges proceed without it. Grant it on GitHub, then use Re-check scopes on the project's GitHub page.`,
     });
   }
   return advisories;

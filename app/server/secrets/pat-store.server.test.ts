@@ -349,7 +349,8 @@ describe("credentialAdvisories (ruling 144)", () => {
     const [advisory] = credentialAdvisories(validation("classic", ["repo", "workflow"]), [{ scope: "workflow", taskKey: "JC-6" }]);
     expect(advisory).toMatchObject({ source: "violation" });
     expect(advisory!.text).toContain("(JC-6)");
-    expect(advisory!.text).toContain("Re-check");
+    // writ-6: the remedy names the control by its label.
+    expect(advisory!.text).toContain("Re-check scopes");
   });
   it("rides the project credential health", () => {
     const store = setupTestStore(ctx);
