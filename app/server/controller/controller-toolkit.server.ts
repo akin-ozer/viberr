@@ -110,6 +110,7 @@ import {
   writeStoreDoc,
 } from "~/server/org/store-files.server";
 import { getInsightsSummary } from "~/server/insights/insights-query.server";
+import { describePersonaChange } from "~/server/agents/persona-change.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
 import {
@@ -1253,7 +1254,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .boolean()
           .optional()
           .describe(
-            "Also rewrite the grants of every project copy that no longer matches this template. Off by default: a project's copy is its own record.",
+            "Also rewrite the grants of every project copy that no longer matches this template, and, when THIS call changes the persona, the persona of every copy still running older text (ruling 467); the reply names each copy and what it rewrote. Off by default: a project's copy is its own record.",
           ),
         skills: z
           .array(z.string())
@@ -1337,14 +1338,27 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // grants", and four runs still mounted the old text. This rides
           // EVERY arm because the two facts are independent: grants can be in
           // step while the text is not, which is exactly the case that misled.
+          // Ruling 467: the doors that now exist for an older copy. Propagate
+          // rewrites a persona only in a call that changes it, and never a
+          // summary, so both of the other doors stay named.
+          const olderFields = [...new Set(saved.textBehind.flatMap((d) => d.fields))];
+          const doors = olderFields.includes("persona")
+            ? "a save_global_agent call that changes the persona with propagate: true rewrites the copies' persona, " +
+              "update_agent_deployment with persona sets one copy, and an org admin can edit each copy on that " +
+              "project's Agents page."
+            : "propagate does not rewrite a summary — an org admin fixes each copy on that project's Agents page.";
           const behind =
             saved.textBehind.length > 0
               ? ` ${saved.textBehind.length} project cop${saved.textBehind.length === 1 ? "y" : "ies"} still ` +
-                `run${saved.textBehind.length === 1 ? "s" : ""} the older ` +
-                `${[...new Set(saved.textBehind.flatMap((d) => d.fields))].join(" and ")}: ` +
+                `run${saved.textBehind.length === 1 ? "s" : ""} the older ${olderFields.join(" and ")}: ` +
                 `${saved.textBehind.map((d) => d.projectSlug).join(", ")}. A deployment snapshots ` +
-                `that text and propagate does not rewrite it — an org admin fixes each copy on ` +
-                `that project's Agents page.`
+                `that text: ${doors}`
+              : "";
+          // Ruling 467: per project, what the persona propagation rewrote.
+          const personaCopies =
+            saved.personaPropagated.length > 0
+              ? ` Persona rewritten on ${countLabel(saved.personaPropagated.length, "project copy", "project copies")}: ` +
+                `${saved.personaPropagated.map((p) => `${p.projectSlug} (${p.change})`).join("; ")}.`
               : "";
           if (saved.propagated.length > 0) {
             const per = saved.propagated.map((p) => {
@@ -1353,15 +1367,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (p.removed.length) parts.push(`dropped ${p.removed.join(", ")}`);
               return `${p.projectSlug}${parts.length ? ` (${parts.join("; ")})` : ""}`;
             });
-            return `${head} Grants copied to ${countLabel(saved.propagated.length, "project")}: ${per.join("; ")}.${behind}${defaults}`;
+            return `${head} Grants copied to ${countLabel(saved.propagated.length, "project")}: ${per.join("; ")}.${personaCopies}${behind}${defaults}`;
           }
           if (saved.diverged.length > 0) {
-            return `${head} ${divergedSentence(saved.diverged)} Call save_global_agent again with propagate: true to rewrite those copies, or an org admin takes the template's grants on that project's Agents page.${behind}${defaults}`;
+            return `${head} ${divergedSentence(saved.diverged)} Call save_global_agent again with propagate: true to rewrite those copies, or an org admin takes the template's grants on that project's Agents page.${personaCopies}${behind}${defaults}`;
           }
           if (args.id && saved.profile.used > 0) {
-            return `${head} Every project copy carries the template's grants.${behind}${defaults}`;
+            return `${head} Every project copy carries the template's grants.${personaCopies}${behind}${defaults}`;
           }
-          return `${head}${behind}${defaults}`;
+          return `${head}${personaCopies}${behind}${defaults}`;
         },
       ),
     ),
@@ -3250,7 +3264,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_agent_deployment",
-      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, or the deployment's own resource grants (skills, mcps, kbs — every kind, the operator included). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases — never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
+      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, the deployment's own resource grants (skills, mcps, kbs — every kind, the operator included), or its persona (ruling 467: the deployment's own system-prompt text, which a template edit does not reach). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases — never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -3267,6 +3281,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           ),
         stages: z.array(z.string()).optional(),
         autonomy: z.enum(["supervised", "full"]).optional().describe("Operator only."),
+        persona: z
+          .string()
+          .optional()
+          .describe(
+            "Ruling 467: the deployment's WHOLE persona (its system prompt), replacing the copy it holds. Omit to keep it; an empty one is refused. Read the current text first (get_project lists the deployment; list_global_agents has the template's). The reply names the length before and after and the first and last changed lines.",
+          ),
         skills: z
           .array(z.string())
           .optional()
@@ -3296,12 +3316,23 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           effort?: string;
           stages?: string[];
           autonomy?: "supervised" | "full";
+          persona?: string;
           skills?: string[];
           mcps?: string[];
           kbs?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "manage this project's agents");
+          // Ruling 467: an empty persona would leave the agent with no system
+          // prompt of its own, and the form writer reads "" as "keep", so an
+          // empty one sent here is a request nothing could honour. Refused
+          // before anything is read or written.
+          const persona = args.persona === undefined ? undefined : prose(args.persona).trim();
+          if (persona !== undefined && !persona) {
+            throw AppError.validation(
+              "An empty persona is refused: a deployment runs on its persona, and omitting the field keeps the one it has. Nothing was written.",
+            );
+          }
           const file = readProjectFile({ projectSlug: slug, dataRoot });
           const deployment = file?.parsed.frontmatter.agents.find(
             (a) => a.profileId === args.profileId,
@@ -3395,7 +3426,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             backend,
             stages,
             definition: "",
-            persona: "",
+            // Ruling 467: "" keeps the deployment's persona (the form writer's
+            // own rule); a persona sent here replaces it whole.
+            persona: persona ?? "",
             model: args.model ?? (switched ? defaultModelFor(backend) : view.model),
             effort,
             caps,
@@ -3442,6 +3475,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           changed("skills", view.resources.skills.join(", "), resources.skills.join(", "));
           changed("mcps", view.resources.mcps.join(", "), resources.mcps.join(", "));
           changed("kb", view.resources.kb.join(", "), resources.kb.join(", "));
+          if (persona !== undefined) {
+            // Ruling 467: from the record the writer left, not the request.
+            const written =
+              readProjectFile({ projectSlug: slug, dataRoot })?.parsed.frontmatter.agents.find(
+                (a) => a.profileId === args.profileId,
+              )?.definition?.persona ?? view.definition;
+            const personaChange = describePersonaChange(view.definition, written);
+            if (personaChange) changes.push(`persona ${personaChange}`);
+          }
           const summary = changes.length ? `: ${changes.join("; ")}.` : ". No field changed.";
           return `[done] ${result.name} updated on ${slug}${summary}${governance}${notices}`;
         },

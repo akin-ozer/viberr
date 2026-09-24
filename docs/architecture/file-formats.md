@@ -206,6 +206,9 @@ Notes:
   `update_agent_deployment`, the org resource-rename rewriter, or a propagation
   from the template (`save_global_agent { propagate }`, the org modal's box, the
   Agents page's "Use the template's grants"), and a run mounts the copy.
+  `definition.persona` is a snapshot the same way: the project editor,
+  `update_agent_deployment`'s `persona` and a template save that changes the persona
+  with `propagate` rewrite it (ruling 467).
 - A lease whose holder task is archived, in the terminal stage or gone binds nobody
   (resolved at read time by `activeFileLeases`, ruling 247); the row stays in the file until
   someone clears it.

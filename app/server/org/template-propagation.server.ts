@@ -12,6 +12,7 @@ import {
 } from "~/server/files/project-writer.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { deploymentFingerprint } from "~/features/agents/agent-profile-actions.server";
+import { describePersonaChange } from "~/server/agents/persona-change.server";
 import type {
   ResourceDrift,
   ResourceLists,
@@ -214,6 +215,97 @@ export function listTemplateTextDrift(
     if (fields.length > 0) {
       out.push({ projectSlug: row.slug, projectName: file.parsed.frontmatter.name, fields });
     }
+  }
+  return out;
+}
+
+/** What the persona propagation read off one copy inside its file writer. */
+interface PersonaCopyRead {
+  projectName: string;
+  /** The copy's persona before the rewrite; null when it was not rewritten. */
+  before: string | null;
+  role: string;
+  backend: string;
+}
+
+/** Ruling 467: one deployed copy whose persona a propagation rewrote. */
+export interface PersonaPropagatedCopy {
+  projectSlug: string;
+  projectName: string;
+  /** The template's display name. */
+  name: string;
+  /** `describePersonaChange` of the copy's old persona against the template's. */
+  change: string;
+}
+
+/**
+ * Ruling 467 (pass 40, F40-11): rewrite each named project's copy of
+ * `profileId`'s PERSONA to the template's. `propagateTemplateResources` below
+ * rewrites only the grants (ruling 156), so a template whose persona the owner
+ * overturned kept running the old text on every deployment until a person
+ * edited each copy by hand; live, the controller had to ask for two.
+ *
+ * The caller decides WHEN (`saveGlobalAgentProfile` calls this only on a save
+ * that changed the template's persona, with `propagate`); this decides nothing
+ * about which copies, beyond skipping one that already matches or that
+ * snapshotted no persona (it resolves the template live). Audited exactly as a
+ * persona edit on the Agents page is: `project.agent_profile.updated` with
+ * `personaChanged` and `personaChars`, plus `source: "org-template"`.
+ */
+export async function propagateTemplatePersona(
+  db: DatabaseSync,
+  input: { profileId: string; projectSlugs: string[] },
+  actor: AuditActor,
+  ctx: PropagationContext = {},
+): Promise<PersonaPropagatedCopy[]> {
+  const template = readTemplate(input.profileId, ctx.dataRoot);
+  if (!template || template.kind !== "specialist") {
+    throw AppError.notFound("No such agent profile.");
+  }
+  const persona = template.description;
+  const out: PersonaPropagatedCopy[] = [];
+  for (const slug of input.projectSlugs) {
+    const seen: PersonaCopyRead = {
+      projectName: slug,
+      before: null,
+      role: template.role,
+      backend: template.backends[0] ?? "claude",
+    };
+    await updateProjectFile({ projectSlug: slug, dataRoot: ctx.dataRoot }, (parsed) => {
+      seen.projectName = parsed.frontmatter.name;
+      const def = parsed.frontmatter.agents.find(
+        (a) => a.profileId === input.profileId,
+      )?.definition;
+      if (!def || def.persona === undefined || def.persona === persona) return;
+      seen.before = def.persona;
+      seen.role = def.role ?? seen.role;
+      seen.backend = def.backends?.[0] ?? seen.backend;
+      def.persona = persona;
+    });
+    if (seen.before === null) continue;
+    reprojectProject(db, ctx, slug);
+    recordAudit(db, {
+      action: "project.agent_profile.updated",
+      actor,
+      subjectKind: "agent_profile",
+      subjectId: input.profileId,
+      projectSlug: slug,
+      details: {
+        name: template.name,
+        role: seen.role,
+        backend: seen.backend,
+        personaChanged: true,
+        personaChars: persona.length,
+        templateId: input.profileId,
+        source: "org-template",
+      },
+    });
+    out.push({
+      projectSlug: slug,
+      projectName: seen.projectName,
+      name: template.name,
+      change: describePersonaChange(seen.before, persona) ?? "",
+    });
   }
   return out;
 }

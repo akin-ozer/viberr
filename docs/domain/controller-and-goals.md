@@ -468,7 +468,7 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `save_skill` | Create or update a skill (name, summary, SKILL.md body) (§4.1) | org admin |
 | `save_mcp_server` | Create or update a connection; takes no credential; reserved names refused; `writeTools` marks the tools withheld from runs without repo-write and from every operator run (ruling 176), and a save with none set names the tools that look like writes | org admin |
 | `test_mcp_server` | Probe one connection now and report its health in the command's words | org admin |
-| `save_global_agent` | Create or update a specialist template: backend, summary, persona, stages, default model and effort, grants (§4.1, §4.2); `propagate: true` rewrites differing project copies' grants (ruling 156) | org admin |
+| `save_global_agent` | Create or update a specialist template: backend, summary, persona, stages, default model and effort, grants (§4.1, §4.2); `propagate: true` rewrites differing project copies' grants (ruling 156) and, on a call that changes the persona, the persona of every copy still running older text (ruling 467) | org admin |
 
 **Project creation**
 
@@ -514,7 +514,7 @@ matrix the human surfaces use; the tier in brackets is the floor)
 | `invite_member` | Add a member by email (an unknown email gets an account and a relayed one-time password), seated in the given `role` in one write (default viewer; an unknown role refused by name) [`manage-members`] |
 | `set_member_role` | Change a member's role; the last project admin cannot be demoted [`manage-members`] |
 | `deploy_agent` | Deploy a global template; `model` / `effort` overrides checked before the write; the reply says whether the copy can write the repo [`manage-agents`] |
-| `update_agent_deployment` | A deployment's capability modes, backend, model, effort, stages, operator autonomy and its own `skills` / `mcps` / `kbs` for every kind, the operator included (G36-1); merge semantics; checked before the write (§4.2) [`manage-agents`] |
+| `update_agent_deployment` | A deployment's capability modes, backend, model, effort, stages, operator autonomy, its own `skills` / `mcps` / `kbs` for every kind, the operator included (G36-1), and its `persona` (ruling 467: the whole text, an empty one refused, the reply naming the length before and after and the first and last changed lines); merge semantics; checked before the write (§4.2) [`manage-agents`] |
 
 **Goals** (`requireVisible`, then the goal gate, §7)
 
@@ -557,8 +557,14 @@ as intended).
   two doors: `propagate: true` on the next call, or an org admin's "Use the template's
   grants" on that project's Agents page (org admins only; a project admin sees the marker
   and asks). Propagation REPLACES the copy's three lists (a project-local extra is dropped
-  and the reply says so) and nothing else, and records
-  `project.agent_profile.resources_synced` per project. Names are entity-decoded once and
+  and the reply says so), and records `project.agent_profile.resources_synced` per
+  project. On a call that CHANGED the template's persona, `propagate` also rewrites the
+  persona of every copy ruling 277's `copiesWithOlderText` names, audits each as the
+  Agents page audits a persona edit (`project.agent_profile.updated` with
+  `personaChanged`, `personaChars` and `source: "org-template"`) and says per project
+  what it rewrote; a call that leaves the persona alone rewrites none, so a project's
+  own persona survives a grants propagation, and a summary is never propagated
+  (ruling 467). `update_agent_deployment`'s `persona` sets one copy. Names are entity-decoded once and
   angle brackets are refused (U35-1): `Test &amp; CI Engineer` is stored as `Test & CI
   Engineer` with the id `test-ci-engineer`.
 - **The controller edits a deployment's copy for every kind** (G36-1).

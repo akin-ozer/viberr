@@ -153,6 +153,12 @@ type ProfileDeployedAuditDetails = CouplingAuditKeys & {
   effort?: string;
 };
 
+/** Ruling 467: the persona an update wrote, when it changed the stored one;
+ *  filled inside the file writer's callback. */
+interface PersonaEditHolder {
+  after: string | null;
+}
+
 type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
   name: string;
   role: string;
@@ -164,6 +170,12 @@ type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
   operatorAutonomy?: "supervised" | "full";
   acceptCompletionIntoDone?: "direct" | "off";
   acceptCompletionActsDirectly?: boolean;
+  /** Ruling 467: the save rewrote the deployment's persona (the run's system
+   *  prompt), with its new length. Every door that edits a persona writes
+   *  these two keys: the Agents page, `update_agent_deployment` and a
+   *  template propagation (which adds `source: "org-template"`). */
+  personaChanged?: boolean;
+  personaChars?: number;
 };
 
 /** Stamp every coupling decision onto the audit row and the save result — a
@@ -742,6 +754,9 @@ export async function updateAgentProfile(
   };
 
   let appliedUpdate: ProfileSaveResult["applied"] | undefined;
+  // Ruling 467: the persona this save wrote when it differs from the one it
+  // replaced, for the audit row (a holder: the writer callback fills it).
+  const personaEdit: PersonaEditHolder = { after: null };
   await updateProjectFile(ref, (parsed) => {
     const deployment = parsed.frontmatter.agents.find(
       (a) => a.profileId === input.profileId,
@@ -840,6 +855,8 @@ export async function updateAgentProfile(
     }
     definition.resources = form.resources;
     deployment.definition = definition;
+    const personaAfter = definition.persona ?? current.definition;
+    if (personaAfter !== current.definition) personaEdit.after = personaAfter;
     appliedUpdate = {
       backend: form.backend,
       model: definition.model ?? "",
@@ -873,6 +890,10 @@ export async function updateAgentProfile(
   if (appliedUpdate) {
     details.model = appliedUpdate.model;
     details.effort = appliedUpdate.effort;
+  }
+  if (personaEdit.after !== null) {
+    details.personaChanged = true;
+    details.personaChars = personaEdit.after.length;
   }
   if (gov.isOperator) {
     details.operatorAutonomy = gov.newAutonomy;
