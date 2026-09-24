@@ -2,7 +2,7 @@ import type { PerfBudgetTable } from "../perf-verdict";
 
 /** The project.payload.perf.test.ts fixture. */
 const WORKSPACE =
-  "demo seed, arda (org admin, project admin, ten notifications): root + layout + page loaders on one .data Request, second (warm) revalidation; bytes = JSON of each loader's result, summed";
+  "demo seed on the pinned clock, arda (org admin, project admin, ten notifications): root + layout + page loaders on one .data Request, second (warm) revalidation; bytes = JSON of each loader's result, summed";
 
 /** The same, with thirty clones of the demo's task files (40 tasks). */
 const BOARD_40 = `${WORKSPACE}; viberr-core enlarged to 40 tasks by cloning the demo's task files`;
@@ -10,12 +10,17 @@ const BOARD_40 = `${WORKSPACE}; viberr-core enlarged to 40 tasks by cloning the 
 /** Ruling 454 ratchet ceilings: loader payloads (bell, board columns, board task shape). */
 export const PAYLOAD_BUDGETS: PerfBudgetTable = {
   // FL-4: 8,505 before the bell's list left the pages (owner, 2026-09-24):
-  // 62 % of Home's payload was a popover closed at first paint.
+  // 62 % of Home's payload was a popover closed at first paint. 3,251 was
+  // first recorded on the wall clock at 03:13 ("Good morning", two bytes
+  // shorter than the afternoon's greeting) and counted the data root, a temp
+  // path as long as the host makes it (71 bytes on macOS, 26 on Linux); on the
+  // pinned clock with the path measured as empty the same payload is 3,182.
   "payload:home.loader-bytes": {
-    ceiling: 3251,
+    ceiling: 3182,
     unit: "bytes",
     journey: "fresh-load",
-    fixture: "demo seed, arda (org admin, ten notifications): the Home loader's JSON, second (warm) run",
+    fixture:
+      "demo seed on the pinned clock, arda (org admin, ten notifications): the Home loader's JSON with storeRoot (the host's temp path) blanked, second (warm) run",
   },
   // FL-4: 10 before (every Home load read the bell's newest hundred).
   "payload:home.notification-rows": {
@@ -55,16 +60,19 @@ export const PAYLOAD_BUDGETS: PerfBudgetTable = {
     journey: "server",
     fixture: `${WORKSPACE}; /settings; SQL statement executions`,
   },
-  // BOARD-3 / BOARD-6 / FL-4: 85,091 before.
+  // BOARD-3 / BOARD-6 / FL-4: 85,091 before. 38,717 was first recorded on
+  // the wall clock in the small hours, before the demo's "today" agent
+  // activity was an hour old; on the pinned clock twelve cards read `quiet:
+  // true`, a byte shorter each (the same for card-bytes below).
   "payload:board-40.revalidation-bytes": {
-    ceiling: 38717,
+    ceiling: 38705,
     unit: "bytes",
     journey: "board-live",
     fixture: `${BOARD_40}; /board`,
   },
   // BOARD-3: 74,188 before (the whole TaskSummary per card).
   "payload:board-40.card-bytes": {
-    ceiling: 37060,
+    ceiling: 37048,
     unit: "bytes",
     journey: "board-live",
     fixture: `${BOARD_40}; /board; the 40 cards' JSON`,

@@ -56,8 +56,8 @@ The verdict (`test-support/perf-verdict.ts`) fails in both directions:
   and 5 % for bytes.
 
 `app/shared/docs/perf-budgets-sync.test.ts` fails when a budget id is asserted by no perf
-test, when a perf test asserts nothing, or when a bundle budget names a route that does
-not exist.
+test, when a perf test asserts nothing, when a perf test that seeds through the server
+does not pin the clock, or when a bundle budget names a route that does not exist.
 
 ### Bundle budgets
 
@@ -88,12 +88,19 @@ number, the way a TypeScript budget carries a comment.
    resetting a counter, and keep jsdom-only side channels out of the window (the composer
    tests pass Lexical's `SKIP_DOM_SELECTION_TAG`, because a DOM selection Lexical writes
    comes back through a queued `selectionchange` that it re-reads under time-based guards).
+4. A figure must not move with the time of day, the zone or the host. The demo seed dates
+   its events from the wall clock in local time and loaders derive from the hour (Home's
+   greeting, a card's `quiet` flag), so a perf file that seeds through the server calls
+   `pinPerfClock()` before it imports the seed. A byte figure leaves out what the host
+   decides, such as a temp directory's path. On the real clock, `writes:comment.sql` read
+   16 before 09:58 and 15 after, and Home's payload grew two bytes every afternoon.
 
 The harnesses, one home each:
 
 | Harness | Measures |
 |---|---|
 | `test-support/test-app.ts`, `demo-seed.ts` | route loaders and actions in-process, with real sessions and CSRF |
+| `test-support/perf-clock.ts` | the wall clock a server fixture reads: one local time, the same in every zone (`pinPerfClock`) |
 | `test-support/perf-counters.ts` | SQL executions, rows, compiles and commits (`countSql`, `tallyServerReads`), store-file reads and writes (`countFileReads`, `countFileWrites`); wraps the `node:sqlite` prototypes and `node:fs`, restored on exit |
 | `test-support/render-counter.ts` | which components rendered in each commit, read off the fiber tree the way DevTools does (`createRenderCounter` + `<Profiler onRender>`), `settle`, and DOM writes (`observeMutations`) |
 | `test-support/revalidation-harness.tsx` | loaders re-run per trigger, with single fetch's choice of routes and the real SSE broker in-process |

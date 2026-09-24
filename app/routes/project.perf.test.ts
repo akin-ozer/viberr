@@ -1,5 +1,6 @@
 import { RouterContextProvider } from "react-router";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import {
   rowsMatching,
@@ -23,13 +24,17 @@ let ardaId: string;
 const SLUG = "viberr-core";
 
 beforeAll(async () => {
+  pinPerfClock();
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
 });
-afterAll(() => app.cleanup());
+afterAll(() => {
+  vi.useRealTimers();
+  app.cleanup();
+});
 
 async function revalidateBoard(cookie: string) {
   const [root, layout, board] = await Promise.all([

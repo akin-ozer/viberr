@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { countFileWrites, countSql } from "../../../test-support/perf-counters";
+import { pinPerfClock } from "../../../test-support/perf-clock";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 import type { EmittedLine } from "./adapter.server";
@@ -12,11 +13,15 @@ import type { EmittedLine } from "./adapter.server";
 let app: AppTestContext;
 
 beforeAll(async () => {
+  pinPerfClock();
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
   await runDemoSeed(app.db, { dataRoot: app.dataRoot });
 });
-afterAll(() => app.cleanup());
+afterAll(() => {
+  vi.useRealTimers();
+  app.cleanup();
+});
 
 function line(n: number, facts: EmittedLine["facts"] = {}): EmittedLine {
   return {

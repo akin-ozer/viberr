@@ -31,6 +31,18 @@ describe("perf budgets are measured (ruling 454)", () => {
     expect(idle).toEqual([]);
   });
 
+  it("every *.perf.test file that loads through the server pins the clock", () => {
+    // The demo seed dates its events from the wall clock in local time and
+    // loaders derive from the hour, so a figure measured on the real clock
+    // moves with the time of day and the zone: `writes:comment.sql` read 16
+    // before 09:58 and 15 after (test-support/perf-clock.ts).
+    const unpinned = perfTests
+      .filter((t) => /\b(setupAppTest|runDemoSeed)\(/.test(t.text))
+      .filter((t) => !t.text.includes("pinPerfClock()"))
+      .map((t) => t.file);
+    expect(unpinned).toEqual([]);
+  });
+
   it("every bundle budget names a route module", () => {
     // SAFETY: bundle.json is the committed budget table; the assertions below
     // check the one field this test reads.
