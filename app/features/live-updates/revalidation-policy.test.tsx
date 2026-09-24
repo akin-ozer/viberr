@@ -17,6 +17,7 @@ import {
   OTHER_TASK,
   runLogAppended,
   runStateChanged,
+  savedComments,
   sendComment,
   settle,
   SLUG,
@@ -454,6 +455,88 @@ describe("reconnects replay what the tab missed (RF-1, ruling 301)", () => {
     await advance(1_000);
     expect(BrokerEventSource.instances[0]?.url).toContain(`&lastEventId=${head}`);
     expect(harness.calls["routes/project.task"]).toBe(1);
+  });
+});
+
+describe("an action still running (RV-4)", () => {
+  /**
+   * A load that started while the send was still running cannot hold its
+   * write, but it used to count as covering it (the send was recorded at
+   * submit), and the ledger dropped it. A later navigation that reads nothing
+   * then owed nothing, and still aborted the send's own revalidation.
+   */
+  it("a navigation during a slow send, then one that aborts its revalidation, still shows the write", async () => {
+    const action = gate();
+    const task = gate();
+    const harness = await tab({
+      path: TASK_PAGE,
+      taskActionGate: () => action.wait(),
+      gate: { "routes/project.task": task.wait },
+    });
+    action.close();
+    await act(async () => sendComment());
+    await settle();
+    // While the send runs, a click the task loader does not read.
+    await act(async () => {
+      await harness.router.navigate(`${TASK_PAGE}?panel=1`);
+    });
+    await settle();
+    // The send saves and answers; its revalidation is on its way.
+    task.close();
+    const before = harness.calls["routes/project.task"];
+    await act(async () => action.open());
+    await until(() => harness.calls["routes/project.task"] > before);
+    expect(savedComments()).toBe(1);
+    // Another such click supersedes that revalidation.
+    let navigated: Promise<void> = Promise.resolve();
+    await act(async () => {
+      navigated = harness.router.navigate(`${TASK_PAGE}?panel=2`);
+    });
+    await settle();
+    await act(async () => task.open());
+    await act(async () => navigated);
+    await settle();
+    await advance(1_000);
+    // CANARY: let a load that started before the send answered cover it, and
+    // the page keeps the answer from before the write (0).
+    expect(harness.savedOnPage()).toBe(1);
+  });
+
+  /**
+   * React Router asks every route twice whether to re-run after an answer, and
+   * a refused send withdrew the NEWEST send on its path each time: the send
+   * still running beside it went with it.
+   */
+  it("a refused send withdraws itself, not a second send still running", async () => {
+    const action = gate();
+    const task = gate();
+    const harness = await tab({
+      path: TASK_PAGE,
+      taskActionGate: (text) => (text === "slow" ? action.wait() : Promise.resolve()),
+      taskActionStatusFor: (text) => (text === "refused" ? 422 : 200),
+      gate: { "routes/project.task": task.wait },
+    });
+    action.close();
+    await act(async () => sendComment("slow", 0));
+    await act(async () => sendComment("refused", 1));
+    await settle();
+    expect(harness.actions()).toBe(2);
+    expect(savedComments()).toBe(0);
+    task.close();
+    const before = harness.calls["routes/project.task"];
+    await act(async () => action.open());
+    await until(() => harness.calls["routes/project.task"] > before);
+    let navigated: Promise<void> = Promise.resolve();
+    await act(async () => {
+      navigated = harness.router.navigate(`${TASK_PAGE}?panel=2`);
+    });
+    await settle();
+    await act(async () => task.open());
+    await act(async () => navigated);
+    await settle();
+    await advance(1_000);
+    // CANARY: withdraw the newest send on the path per call and this is 0.
+    expect(harness.savedOnPage()).toBe(1);
   });
 });
 

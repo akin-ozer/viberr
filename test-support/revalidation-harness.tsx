@@ -258,7 +258,7 @@ export type HarnessRouteId = keyof typeof calls;
 
 /** The `?events` each task loader call read, in order. */
 const noEventsParams: (string | null)[] = [];
-const tally = { actions: 0, eventsParams: noEventsParams };
+const tally = { actions: 0, eventsParams: noEventsParams, saved: 0 };
 
 function resetCounts(): void {
   calls.root = 0;
@@ -279,9 +279,11 @@ async function taskLoader({ request, params }: LoaderFunctionArgs) {
   calls["routes/project.task"] += 1;
   tally.eventsParams.push(new URL(request.url).searchParams.get("events"));
   active.onTaskLoader?.();
+  // What the "server" has saved, read when the loader reads (before it answers).
+  const saved = tally.saved;
   await active.gate?.["routes/project.task"]?.();
   version += 1;
-  return { key: params.key ?? TASK, n: calls["routes/project.task"], version };
+  return { key: params.key ?? TASK, n: calls["routes/project.task"], version, saved };
 }
 
 export interface HarnessOptions {
@@ -297,6 +299,10 @@ export interface HarnessOptions {
   onTaskAction?: () => void;
   /** The status the task action answers with (a refusal is a 4xx). */
   taskActionStatus?: number;
+  /** The status for a comment with this text (overrides `taskActionStatus`). */
+  taskActionStatusFor?: (text: string) => number;
+  /** The task action awaits this before it writes and answers (a slow action). */
+  taskActionGate?: (text: string) => Promise<void>;
   /** Runs at the start of each task loader call (an event published while a
    *  load is on its way). */
   onTaskLoader?: () => void;
@@ -321,16 +327,26 @@ export interface Harness {
   /** Loader calls of every route since the last `resetCounts`. */
   total: () => number;
   resetCounts: () => void;
+  /** The comments saved when the task page on screen read its data. */
+  savedOnPage: () => number | undefined;
 }
 
-let submitComment: (() => void) | null = null;
+type TaskData = Awaited<ReturnType<typeof taskLoader>>;
+
+let submitComment: ((text: string, fetcher: 0 | 1) => void) | null = null;
 let submitRead: (() => void) | null = null;
 let submitDrop: (() => void) | null = null;
 let typeFilter: ((value: string) => void) | null = null;
 
-/** Submits the task page's comment form (a fetcher, as the timeline's is). */
-export function sendComment(): void {
-  submitComment?.();
+/** Submits the task page's comment form (a fetcher, as the timeline's is).
+ *  The page has two comment fetchers, for two sends in flight at once. */
+export function sendComment(text = "hello", fetcher: 0 | 1 = 0): void {
+  submitComment?.(text, fetcher);
+}
+
+/** How many comments the task action has saved (the server's state). */
+export function savedComments(): number {
+  return tally.saved;
 }
 
 /** Marks the bell read from the task page (the bell's `/notifications/read`
@@ -391,6 +407,7 @@ function Task({ activeRun }: { activeRun: boolean }) {
   const data = useRouteLoaderData<typeof taskLoader>("routes/project.task");
   const key = data?.key ?? TASK;
   const comment = useFetcher();
+  const secondComment = useFetcher();
   const read = useFetcher();
   const [threads] = useState(() => []);
   useRunLogStream({
@@ -398,9 +415,9 @@ function Task({ activeRun }: { activeRun: boolean }) {
     threads,
     hasActiveRun: activeRun,
   });
-  submitComment = () =>
-    void comment.submit(
-      { intent: "comment", text: "hello" },
+  submitComment = (text, which) =>
+    void (which === 0 ? comment : secondComment).submit(
+      { intent: "comment", text },
       { method: "post", action: `/projects/${SLUG}/tasks/${key}` },
     );
   submitRead = () =>
@@ -417,6 +434,7 @@ function RootShell({ children }: { children: ReactNode }) {
 
 export function mountHarness(options: HarnessOptions): Harness {
   resetCounts();
+  tally.saved = 0;
   active = options;
   const counted = (id: HarnessRouteId) => async () => {
     calls[id] += 1;
@@ -482,11 +500,21 @@ export function mountHarness(options: HarnessOptions): Harness {
               path: "tasks/:key",
               loader: taskLoader,
               shouldRevalidate: rule("routes/project.task"),
-              action: () => {
+              action: ({ request }) => {
                 tally.actions += 1;
-                options.onTaskAction?.();
-                const status = options.taskActionStatus ?? 200;
-                return data({ ok: status < 400 }, { status });
+                const answer = (text: string) => {
+                  options.onTaskAction?.();
+                  const status = options.taskActionStatusFor?.(text) ?? options.taskActionStatus ?? 200;
+                  if (status < 400) tally.saved += 1;
+                  return data({ ok: status < 400 }, { status });
+                };
+                // Answers at once unless a test asked for a slow or per-text answer.
+                if (!options.taskActionGate && !options.taskActionStatusFor) return answer("");
+                return request.formData().then(async (form) => {
+                  const text = String(form.get("text") ?? "");
+                  await options.taskActionGate?.(text);
+                  return answer(text);
+                });
               },
               element: <Task activeRun={options.activeRun ?? false} />,
             },
@@ -507,6 +535,10 @@ export function mountHarness(options: HarnessOptions): Harness {
     eventsParams: () => tally.eventsParams,
     total: () => Object.values(calls).reduce((sum, n) => sum + n, 0),
     resetCounts,
+    savedOnPage: () => {
+      const task: TaskData | undefined = router.state.loaderData["routes/project.task"];
+      return task?.saved;
+    },
   };
 }
 

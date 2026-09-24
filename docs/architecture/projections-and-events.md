@@ -293,7 +293,9 @@ facts its data depends on (`domain`, `run`, `bell`, `conversation`, `theme`,
 arrives (a run's state is a `run` fact, a notification a `bell` fact, a conversation a
 `conversation` fact, anything else `domain`), every action as it is submitted (by the
 path it posts to: `/notifications/read` changes the bell, `/prefs/theme` the theme, sign-in,
-sign-out and `/profile` everything, a page's own action `domain` and `run`), and every
+sign-out and `/profile` everything, a page's own action `domain` and `run`) and again as
+it answers, since a load that started while it ran cannot hold its write (ruling 454,
+RV-4), and every
 `revalidate()` that is not the live hook's own (the F22 net, a settle, a panel's poll:
 everything but root). When a route's data lands, it covers what was recorded before the
 load that brought it started. That is the watermark: the server publishes an event after
