@@ -186,6 +186,14 @@ function subtitle(container: HTMLElement): string {
   return container.querySelector(".board-head .sub")!.textContent!.replace(/\s+/g, " ").trim();
 }
 
+/** What a sighted reader sees: the element's text without its `.vh` copy. */
+function visibleText(el: Element): string {
+  const copy = el.cloneNode(true);
+  if (!(copy instanceof Element)) return "";
+  for (const vh of copy.querySelectorAll(".vh")) vh.remove();
+  return copy.textContent ?? "";
+}
+
 describe("ruling 225: the board says a clock rest is a clock rest", () => {
   it("names the instant on the card instead of naming a person", () => {
     const { container } = renderBoard([
@@ -2490,10 +2498,11 @@ describe("ruling 172: a held task's card says `blocked`, not what it waits on", 
     const { container } = renderBoard([stormy]);
     const card = container.querySelector(".card")!;
     expect(waitChipOf(card)).toBeUndefined();
-    const fold = [...card.querySelectorAll(".chip.more")].find((p) => /^\+\d+$/.test(p.textContent ?? ""))!;
+    const fold = card.querySelector(".chip.more")!;
     // validation + checks shown; review, closed folded.
-    expect(fold.textContent).toBe("+2");
+    expect(visibleText(fold)).toBe("+2");
     expect(fold.getAttribute("title")).not.toContain("blocked by");
+    expect(fold.querySelector(".vh")!.textContent).not.toContain("blocked by");
   });
 });
 
@@ -2510,11 +2519,9 @@ describe("pass 30: the state-pill stack ranks instead of shouting", () => {
   it("shows the two leading state pills and folds the rest into +N", () => {
     const { container } = renderBoard([stormy()]);
     const card = container.querySelector(".card")!;
-    const fold = [...card.querySelectorAll(".chip.more")].find((p) =>
-      /^\+\d+$/.test(p.textContent ?? ""),
-    )!;
+    const fold = card.querySelector(".chip.more")!;
     expect(fold).toBeTruthy();
-    expect(fold.textContent).toBe("+3");
+    expect(visibleText(fold)).toBe("+3");
     // Ruling 365 ranks the failures first: validation and checks draw, the
     // review, the closed PR and the continuity fold. Every folded fact stays
     // reachable — named in the title, one hover away (rulings 40/12/14).
@@ -2524,6 +2531,13 @@ describe("pass 30: the state-pill stack ranks instead of shouting", () => {
     expect(title).toContain("changes requested");
     expect(title).toContain("closed");
     expect(title).toContain("degraded continuity");
+    // Interface review 2026-09-24 (acce-5): and named in the accessibility
+    // tree too — touch, keyboard and screen readers never see a title.
+    const named = fold.querySelector(".vh")!.textContent!;
+    expect(named).toContain("changes requested");
+    expect(named).toContain("closed");
+    expect(named).toContain("degraded continuity");
+    expect(named).not.toContain("validation failing");
   });
 
   it("leaves a two-signal card unfolded", () => {
@@ -2820,7 +2834,10 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
     ]);
     const card = withPr.container.querySelector(".card")!;
     // One trace: the PR stands in for the branch it implies.
-    expect(card.querySelector(".card-head .trace.pr")!.textContent).toContain("#291");
+    const pr = card.querySelector(".card-head .trace.pr")!;
+    expect(visibleText(pr)).toBe("#291");
+    // Interface review 2026-09-24 (acce-5): "Pull request" was title-only.
+    expect(pr.textContent).toBe("Pull request #291");
     expect(card.querySelector(".card-head .trace.br")).toBeNull();
     expect(card.textContent).not.toContain("vib-1-b3e3");
     expect(card.querySelector(".card-props .chip.st.you")!.textContent!.trim()).toBe("waiting on you");

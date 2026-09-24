@@ -7675,7 +7675,7 @@ export async function performDelivery(
       await flagScopeViolation(db, flagInput, { dataRoot: ctx.dataRoot });
       const remedy =
         `Nothing was pushed and no review PR was opened. Grant the \`${push.scope}\` scope to the ` +
-        `project's token on GitHub, then use Re-check on the project's GitHub view, and deliver again.`;
+        `project's token on GitHub, then use Re-check scopes on the project's GitHub page, and deliver again.`;
       const message =
         push.phase === "before_push"
           ? `${taskKey}'s branch changes ${files}, and the project's classic token has no \`${push.scope}\` scope: GitHub would refuse the push. ${remedy}`

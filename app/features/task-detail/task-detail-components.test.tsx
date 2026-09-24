@@ -798,7 +798,7 @@ const agentOptions = (container: HTMLElement) =>
   [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')];
 const agentPrompt = (container: HTMLElement) =>
   container.querySelector<HTMLInputElement>(
-    'input[aria-label="Tell the agent what this run should do (optional)"]',
+    'input[aria-label="Prompt for this agent run (optional)"]',
   )!;
 const agentRunBtn = (container: HTMLElement) =>
   container.querySelector<HTMLButtonElement>(".agent-run > button.btn")!;
@@ -808,7 +808,7 @@ const agentDelay = (container: HTMLElement) =>
   )!;
 const operatorSteer = (container: HTMLElement) =>
   container.querySelector<HTMLInputElement>(
-    'input[aria-label="Steer this operator run (optional)"]',
+    'input[aria-label="Steer this run (optional)"]',
   )!;
 const operatorRunBtn = (container: HTMLElement) =>
   container.querySelector<HTMLButtonElement>(

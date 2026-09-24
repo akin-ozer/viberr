@@ -1,6 +1,7 @@
-import { data } from "react-router";
+import { data, useRouteLoaderData } from "react-router";
 import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/project.review";
+import type { loader as projectLoader } from "./project";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
@@ -60,6 +61,18 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
 export default function ReviewView({ loaderData }: Route.ComponentProps) {
   const { slug, ready, working, total, stageNames, acceptance } = loaderData;
+  // Interface review 2026-09-24 (writ-3): the row's "waiting on you" reads the
+  // flag the workspace layout already computed for the board (decisions this
+  // viewer owns plus acceptance they can give, project.tsx), so the two
+  // surfaces cannot disagree about the same task and no second query runs.
+  const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
+  const waitingOnMe = new Set(
+    layout
+      ? [...layout.board.columns.flatMap((c) => c.tasks), ...layout.board.orphanTasks]
+          .filter((t) => t.waitingOnMe)
+          .map((t) => t.key)
+      : [],
+  );
   return (
     <ReviewQueuePage
       projectSlug={slug}
@@ -68,6 +81,7 @@ export default function ReviewView({ loaderData }: Route.ComponentProps) {
       total={total}
       stageNames={stageNames}
       acceptance={acceptance}
+      waitingOnMe={waitingOnMe}
     />
   );
 }

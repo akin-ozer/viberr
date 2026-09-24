@@ -2033,7 +2033,7 @@ describe("R22: the run controls carry no backend/autonomy pickers — prompt + D
       )!,
     );
     fireEvent.change(
-      cell.querySelector('input[aria-label="Tell the agent what this run should do (optional)"]')!,
+      cell.querySelector('input[aria-label="Prompt for this agent run (optional)"]')!,
       { target: { value: "fix the lint debt" } },
     );
     const when = cell.querySelector<HTMLSelectElement>(

@@ -522,7 +522,7 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
   it("B-GH8: a WRITE violation survives read-only evidence — 'assumed' never clears it", async () => {
     // Fails before B-GH8: the sweep resolved every violation whose scope the
     // fresh run reported `ok`, including `ok: true, source: "assumed"`. For a
-    // fine-grained token whose write dry-run never answered, "Grant scope"
+    // fine-grained token whose write dry-run never answered, "Re-check scopes"
     // turned "we don't know" into "granted" and the human found out at the
     // next failed delivery.
     const store = setupTestStore(ctx);

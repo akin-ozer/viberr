@@ -118,7 +118,7 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
       "Run agents",
       "Reorder the board",
       "Reconcile GitHub state",
-      "Grant GitHub scope",
+      "Manage the GitHub credential",
       "Re-scan project files & projections",
       "Release any task owner",
       "Manage members & roles",

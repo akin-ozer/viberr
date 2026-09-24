@@ -488,9 +488,10 @@ export default function Login({
 
   return (
     <div className="login-wrap login-wrap-2col" data-screen-label="Login">
-      {/* F10-27: a desktop-only brand/value panel beside the card so the wide
-          viewport reads as an intentional composition rather than a lone card
-          in empty space. Hidden below the two-column breakpoint. */}
+      {/* F10-27: a brand/value panel beside the card so the wide viewport
+          reads as an intentional composition rather than a lone card in empty
+          space. Below the two-column breakpoint it stacks under the card
+          instead of hiding (app.css, interface review 2026-09-24 acce-27). */}
       {/* UXA-12: this panel used to be `aria-hidden="true"`. Its decorative
           MARK is decorative; its heading and three product claims are not, and
           they appear nowhere else — so an assistive-tech user got a bare

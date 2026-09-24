@@ -1374,14 +1374,16 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .list-agent .agent-glyph { width: 22px; height: 22px; }
 .list-agent .agent-glyph .ico { width: 12px; height: 12px; }
 
-/* Traces elsewhere (the insights page, the live branch strip): the mono chip. */
+/* Traces elsewhere (the insights page, the live branch strip): the mono chip.
+   Interface review 2026-09-24 (colo-12): GitHub's execution branches are bare
+   `.trace`; the teal `.trace.ok` painted every branch in the ready/OK ink,
+   including ones the Sync pill reports as not compared or not pushed. */
 .trace {
   display: inline-flex; align-items: center; gap: .25rem;
   font-family: var(--font-mono); font-size: .69rem; color: var(--faint);
 }
 .trace .ico { width: 12px; height: 12px; }
 .trace.pr { color: var(--blue-pressed); }
-.trace.ok { color: var(--teal-dark); }
 
 /* Freeform labels: the neutral-pill pairing (--muted on a 94%-transparent
    --fg wash), which the R19-12 contrast sweep already clears. */
@@ -1629,8 +1631,10 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Interface review 2026-09-24 (acce-4): a day takes the app's :focus-visible
    OUTLINE, 2px outside its own inset state ring. Its focus used to be a
    box-shadow, which forced-colors mode drops, so a focused day there showed
-   nothing at all. */
-.cal-day.today:not(.sel) { box-shadow: inset 0 0 0 1px var(--blue); color: var(--blue-pressed); }
+   nothing at all. (colo-8): today is a bold numeral with NO ring, so it
+   differs from the selected day (ring + fill) by shape, not only by a 1.18:1
+   fill. */
+.cal-day.today:not(.sel) { color: var(--blue-pressed); font-weight: 700; }
 .cal-day.sel { background: var(--blue-soft); color: var(--blue-pressed); box-shadow: inset 0 0 0 1px var(--blue); }
 
 /* --- Label multi-select (chips + checkbox list) --- */
@@ -2194,14 +2198,17 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    sweep measures it against the bar and not the base `.pill` teal. */
 .gh-bar .pill.neutral { background: color-mix(in srgb, var(--fg), var(--surface) 15%); color: var(--surface); }
 .gh-body { padding: 1rem 1rem 1rem; }
+/* Interface review 2026-09-24 (typo-2, colo-11): the subject wraps under
+   itself rather than ellipsizing (nothing else in the app shows the rest of
+   it), and the SHA is plain ink: it is a span, not a link. */
 .commit {
-  display: flex; align-items: center; gap: .5rem;
+  display: flex; align-items: baseline; gap: .5rem;
   padding: .5rem 0; font-size: .75rem;
   border-bottom: 1px solid var(--hairline);
 }
 .commit:last-child { border-bottom: 0; }
-.commit .sha { font-family: var(--font-mono); font-size: .75rem; color: var(--blue-pressed); }
-.commit .msg { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit .sha { font-family: var(--font-mono); font-size: .75rem; }
+.commit .msg { color: var(--muted); overflow-wrap: anywhere; }
 
 
 /* toast */
@@ -2734,6 +2741,10 @@ dialog[data-closing]::backdrop {
 .cap-seg button.recommend.on { background: var(--blue-soft); color: var(--blue-pressed); }
 .cap-seg button.human.on { background: var(--red-light); color: var(--coral-dark); }
 .cap-seg button.off.on { background: var(--fg); color: var(--surface); }
+/* Interface review 2026-09-24 (colo-4): on a locked or read-only row the
+   CHOSEN segment is the policy value the row exists to show, so it keeps full
+   strength; the unchosen options keep the .45 disabled step. */
+.cap-seg button.on:disabled { opacity: 1; }
 
 /* definition note */
 .def-note {
@@ -3075,7 +3086,10 @@ dialog[data-closing]::backdrop {
 .trans-by { flex: 1; min-width: 200px; font-size: .75rem; color: var(--faint); line-height: 1.4; }
 .trans-lock { display: inline-flex; align-items: center; gap: .375rem; font-size: .75rem; font-weight: 700; color: var(--coral-dark); }
 .trans-lock .ico { width: 13px; height: 13px; }
-.cap-seg.locked { opacity: .55; pointer-events: none; }
+/* Interface review 2026-09-24 (colo-4): no group opacity. Every option in a
+   locked group is also `disabled`, so .55 stacked on the .45 step drew the
+   options at .25 (1.4-1.65:1). */
+.cap-seg.locked { pointer-events: none; }
 
 /* credential */
 /* Design pass 2026-09-08: this drew a second frame one step inside `.panel` —
@@ -4405,12 +4419,26 @@ a.task-ref { white-space: nowrap; }
    scrolled; the document does, as it does for the other shell-less pages. */
 body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wrap.standalone) { overflow: auto; height: auto; min-height: 100vh; }
 
-.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; }
+/* The row gap spaces the stacked aside from the card, and `align-content`
+   packs the two rows in the middle rather than centring each in half of a
+   tall screen. The set-password page has a single child, so neither changes
+   it. */
+.login-wrap { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 1.5rem; padding: 2rem 1rem; }
 
-/* Desktop two-column composition (brand aside + sign-in card). The
-   aside is hidden on narrow viewports, preserving the simple centered card on
-   mobile. */
-.login-aside { display: none; }
+/* Brand aside + sign-in card. Interface review 2026-09-24 (acce-27): below
+   900px (which includes 200% zoom on a 1440 screen) the aside stacks UNDER
+   the card instead of disappearing, because its heading and three claims
+   appear nowhere else (UXA-12). It comes first in the DOM, so `order` puts it
+   second; it holds no control, so the focus order is unchanged. Its mark
+   returns only beside the card: stacked, the card right above shows the same
+   one. */
+.login-aside { order: 1; display: flex; flex-direction: column; gap: 1rem; max-width: 380px; }
+.login-aside-mark { display: none; }
+.login-aside h2 { font-size: 1.25rem; line-height: 1.2; color: var(--fg); margin: 0; letter-spacing: var(--track-section); }
+.login-aside p { font-size: .88rem; line-height: 1.6; color: var(--muted); margin: 0; }
+.login-aside-points { list-style: none; margin: .25rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.login-aside-points li { position: relative; padding-left: 1.5rem; font-size: .88rem; color: var(--muted); line-height: 1.4; }
+.login-aside-points li::before { content: "→"; position: absolute; left: 0; color: var(--teal-dark); font-weight: 700; }
 @media (min-width: 900px) {
   .login-wrap-2col {
     grid-auto-flow: column;
@@ -4419,13 +4447,7 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
     justify-content: center;
     align-items: center;
   }
-  .login-aside {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    max-width: 380px;
-    animation: rise .3s var(--ease-out);
-  }
+  .login-aside { order: 0; animation: rise .3s var(--ease-out); }
   .login-aside-mark {
     display: inline-grid; place-items: center;
     width: 44px; height: 44px; border-radius: var(--radius-box);
@@ -4436,11 +4458,6 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
     font-weight: 600; font-size: 1.25rem; font-family: var(--font-mono);
     box-shadow: inset 0 -9px 0 color-mix(in srgb, var(--blue), transparent 55%);
   }
-  .login-aside h2 { font-size: 1.25rem; line-height: 1.2; color: var(--fg); margin: 0; letter-spacing: var(--track-section); }
-  .login-aside p { font-size: .88rem; line-height: 1.6; color: var(--muted); margin: 0; }
-  .login-aside-points { list-style: none; margin: .25rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
-  .login-aside-points li { position: relative; padding-left: 1.5rem; font-size: .88rem; color: var(--muted); line-height: 1.4; }
-  .login-aside-points li::before { content: "→"; position: absolute; left: 0; color: var(--teal-dark); font-weight: 700; }
 }
 .login-card {
   width: min(430px, 100%);
@@ -4936,8 +4953,10 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .dom-ic { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--radius-button); background: var(--tint-hover); border: 1px solid var(--hairline); }
 
 /* ---------- KB file browser ---------- */
-/* P14-KM-08: a text doc row opens the in-place editor. */
-.fm-row.openable { cursor: pointer; }
+/* P14-KM-08: a text doc row opens the in-place editor. Interface review
+   2026-09-24 (acce-32): it opens through its `.fm-open` button, so the hand is
+   on that button, not on the row's padding or the actions' gutter. */
+.fm-row.openable .fm-open, .fm-row.dir .fm-open { cursor: pointer; }
 /* P14-KM-08: the destination every toolbar action writes into. It holds store
    paths, so it is the base `select` in mono (P16-UI-05). */
 .fm-toolbar select { font-family: var(--font-mono); font-size: .75rem; max-width: 100%; }
@@ -4961,12 +4980,24 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 .fm-row + .fm-row { border-top: 1px solid var(--hairline); }
 .fm-row.droptgt { background: color-mix(in srgb, var(--blue-soft), transparent 30%); box-shadow: inset 0 0 0 1.5px var(--blue); }
 .fm-tree.droptgt { box-shadow: inset 0 0 0 2px var(--blue); background: color-mix(in srgb, var(--blue-soft), transparent 72%); }
-.fm-row.dir { cursor: pointer; }
 .fm-row:hover { background: var(--tint-well); }
 .fm-row .twist { width: 16px; flex: none; display: grid; place-items: center; color: var(--placeholder); }
 .fm-row .twist .ico { width: 13px; height: 13px; transition: transform .12s var(--ease-out); }
-.fm-row > .ico { color: var(--faint); flex: none; }
-.fm-row.dir > .ico { color: var(--muted); }
+.fm-row > .ico, .fm-open > .ico { color: var(--faint); flex: none; }
+.fm-row.dir > .ico, .fm-row.dir .fm-open > .ico { color: var(--muted); }
+/* Interface review 2026-09-24 (acce-32): the row's open/expand control is a
+   native button (a span on a file that cannot open) around the twist, glyph,
+   name and meta, with the row actions BESIDE it — a role="button" row had the
+   actions inside it. It lays its face out as the row did and wraps the meta
+   under the name the same way; the app ring draws its focus. The 12rem basis
+   is twist + glyph + the name's 9rem, so the actions keep the face's line
+   only while the name keeps its basis (an `auto` basis left the twist and
+   glyph alone on line 1 at a 300px tree). */
+.fm-open { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; flex: 1 1 0; min-width: 0; padding: 0; border: 0; text-align: start; }
+/* Inside the open button the name keeps a small basis of its own, so on a narrow
+   tree the twist, glyph and name hold line 1, the meta wraps under them and the
+   row's actions keep the line (a 12rem button basis pushed them to a third). */
+.fm-open .fm-name { flex: 1 1 5rem; }
 .fm-name { flex: 1 1 9rem; min-width: 0; overflow-wrap: anywhere; }
 .fm-row.dir .fm-name { font-family: var(--font-display); font-weight: 700; }
 .fm-row.file .fm-name { font-family: var(--font-mono); font-size: .75rem; }
@@ -5711,7 +5742,12 @@ a.card, a.project-switch, a.home-brand { color: inherit; }
   .insights-cols { grid-template-columns: minmax(0, 1fr); }
   /* review queue rows wrap instead of crushing the title */
   .rq-row { flex-wrap: wrap; }
-  .rq-main { min-width: 220px; }
+  /* Interface review 2026-09-24 (layo-6): a basis, not a floor. The title
+     takes the rest of line 1 after the key (62px + the 1rem gap) and the pills
+     and "Review ›" wrap under it. A 220px min-width overflowed the
+     Notifications panel at 320px and elsewhere pinned the title to 220px while
+     the pills took the line. */
+  .rq-main { flex: 1 1 calc(100% - 62px - 1rem); }
   /* U39-13: once the row wraps, the chips are a line of their own, read left
      to right from the row's edge. They kept the one-line row's right-justified
      52% box, so the first line hung indented and the rest fell back to the
@@ -6884,10 +6920,9 @@ body[data-rail-open="true"] .dock { visibility: hidden; }
    inherited the directory rows' hand cursor and hover fill with it, so the
    whole row advertised an activation it does not have: only the <input> inside
    it is live, and clicking the row's padding blurs the field, which DISMISSES
-   the half-typed name. Ties with `.fm-row.dir` on specificity and wins on
-   source order; the hover rule outranks `.fm-row:hover`, where the fill
-   actually comes from. */
-.fm-row.editing { cursor: default; }
+   the half-typed name. The hand now lives on a row's `.fm-open` button, which
+   this row does not render (interface review 2026-09-24, acce-32); the hover
+   rule outranks `.fm-row:hover`, where the fill actually comes from. */
 .fm-row.editing:hover { background: transparent; }
 
 /* ---------- appended: the lightbox close on the shared design (ruling 148) ---------- */

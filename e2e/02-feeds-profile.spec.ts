@@ -44,10 +44,12 @@ test("review queue rows name their primary action (R15-11)", async ({ page }) =>
 
   const go = rows.first().locator(".rq-go");
   await expect(go).toHaveText(/Review/);
-  // Decorative for assistive tech — the row's own aria-label already names the
-  // target, so the label must not be announced twice.
-  await expect(go).toHaveAttribute("aria-hidden", "true");
-  await expect(rows.first()).toHaveAttribute("aria-label", /^Review VIB-\d+: /);
+  // Interface review 2026-09-24 (acce-8): no aria-label replaces the row's
+  // content any more, so the name carries the key, the row's state and the
+  // visible "Review" action, in that order.
+  await expect(go).not.toHaveAttribute("aria-hidden");
+  await expect(rows.first()).not.toHaveAttribute("aria-label");
+  await expect(rows.first()).toHaveAccessibleName(/^VIB-\d+.*Review$/);
 
   // Never "Accept": acceptance is verdict-gated (R15-1) and can refuse, and this
   // surface does not evaluate that gate — naming it would promise an outcome it
