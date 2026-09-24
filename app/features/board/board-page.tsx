@@ -60,7 +60,7 @@ import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
-import { stageName } from "~/shared/workflow/stage-roles";
+import { stageLabel, stageName } from "~/shared/workflow/stage-roles";
 import { countLabel } from "~/shared/text/plural";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
@@ -829,10 +829,7 @@ function ListRow({
 }) {
   const archived = isArchived(task);
   const rowRef = useRovingStageMenu(roving);
-  // Ruling 148: one fact, one wording — the stage menu and the task page say
-  // "unknown stage" too, and the raw internal id is not rendered copy.
-  const stageName =
-    stages.find((s) => s.id === task.stage)?.name ?? "unknown stage";
+  const stage = stages.find((s) => s.id === task.stage);
   const to = `/projects/${task.projectSlug}/tasks/${task.key}`;
   return (
     <div className="card list-row" role="listitem" ref={rowRef}>
@@ -869,11 +866,11 @@ function ListRow({
         // Same read-only rendering the task page uses (stage-colored dot +
         // name), not a bare neutral pill — one fact, one treatment.
         <span className="stage-static">
-          <span
-            className="col-stage-dot sm"
-            data-stage-color={stages.find((s) => s.id === task.stage)?.color}
-          />
-          {stageName}
+          <span className="col-stage-dot sm" data-stage-color={stage?.color} />
+          {/* Ruling 148: one fact, one wording — the stage menu and the task
+              page say "unknown stage" too, and the raw internal id is not
+              rendered copy. */}
+          {stageLabel(stage)}
         </span>
       )}
       <ListAgent task={task} />

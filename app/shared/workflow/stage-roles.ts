@@ -106,6 +106,20 @@ export function stageName(
 }
 
 /**
+ * A stage's RENDERED label: its name, or "unknown stage" when the reference
+ * resolves to no stage the project lists. Ruling 148: a missing fact is stated
+ * in words, never as a glyph stand-in ("−"), an empty string or the raw internal
+ * id, and in the same words everywhere (the stage menu, the board's list row,
+ * the task page and the archive dialog). `stageName` is for places where the id
+ * is the right fallback; this one is only for copy on screen.
+ */
+export function stageLabel(
+  stage: Pick<StageDef, "name"> | null | undefined,
+): string {
+  return stage?.name ?? "unknown stage";
+}
+
+/**
  * True when a human gates every advance BEFORE work starts — the `strict`
  * preset's actual signature in the workflow graph.
  *

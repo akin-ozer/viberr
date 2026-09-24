@@ -3,6 +3,7 @@ import {
   humanGatesPreWorkAdvance,
   isTerminalStage,
   resolveStageRoles,
+  stageLabel,
 } from "./stage-roles";
 import { CUSTOM_3_STAGE_BOARD } from "../../../test-support/custom-board";
 import { GOVERNED_TEMPLATE } from "./templates";
@@ -88,6 +89,16 @@ describe("resolveStageRoles", () => {
     const stages = CUSTOM_3_STAGE_BOARD.stages;
     expect(isTerminalStage("done", stages)).toBe(true);
     expect(isTerminalStage("doing", stages)).toBe(false);
+  });
+});
+
+describe("stageLabel (ruling 148)", () => {
+  it("renders the stage's name, or 'unknown stage' for a reference that resolves to none", () => {
+    const stages = CUSTOM_3_STAGE_BOARD.stages;
+    expect(stageLabel(stages.find((s) => s.id === "doing"))).toBe("In progress");
+    // A renamed/removed stage id: the words, never the raw id.
+    expect(stageLabel(stages.find((s) => s.id === "gone"))).toBe("unknown stage");
+    expect(stageLabel(null)).toBe("unknown stage");
   });
 });
 
