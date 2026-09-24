@@ -302,8 +302,9 @@ export type PublishOutcome =
  * repository the SERVER owns. The branch is fetched out of the workspace into
  * `stage` over git's transport — `git-upload-pack` runs as the person
  * (`workspaceUploadPack`), no credential in its environment — and pushed from
- * the stage with `askpassEnv`. `sha`, when known, is what is pushed: the
- * commit the gates read, never a head the branch was moved to in between.
+ * the stage with `askpassEnv`. `sha`, when known, is what is pushed: the head
+ * the delivery read before it compared origin (ruling 134's `headSha`), never
+ * a head the branch was moved to after that read.
  */
 export async function publishFromWorkspace(input: {
   exec: Exec;

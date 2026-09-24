@@ -264,10 +264,10 @@ steps below, with the hold sentence on the timeline (ruling 240).
      token kind, is classified the same way (`github`), never as a generic
      `push_failed`.
    - **Push**: the branch is fetched out of the workspace into the stage (the
-     launcher's `git-upload-pack` as the person, no credential), then the head the
-     gates above read is pushed from the stage as `<sha>:refs/heads/<branch>` under the
-     askpass env with a 120-second timeout (a branch moved in between cannot slip a
-     different head through); `pushed` carries the head it published and the remote head it replaced. A
+     launcher's `git-upload-pack` as the person, no credential), then the head read for
+     the origin compare is pushed from the stage as `<sha>:refs/heads/<branch>` under the
+     askpass env with a 120-second timeout (a branch moved after that read cannot slip a
+     different head into the push); `pushed` carries the head it published and the remote head it replaced. A
      non-fast-forward is a `push_conflict` (a branch collision, never a credential
      error) whose timeline remedy first names what is on the branch (ruling 321): this
      task's own review PR (deleting the branch closes it, force-pushing rewrites what

@@ -248,7 +248,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     });
     // Pass 40 review (R-seams-1): the push runs in the server's own stage,
     // never in the agent-writable workspace, to the project's GitHub URL
-    // (never the checkout's `origin`), and publishes the head the gates read.
+    // (never the checkout's `origin`), and publishes the head it compared with origin.
     const pushCall = git.calls.find((c) => c.includes("push"));
     expect(pushCall).toEqual([
       expect.stringMatching(/^--git-dir=.*\.repo-stage/),
