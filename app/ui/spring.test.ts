@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { createVelocityTracker, springAt, springFrames, springProgress, type Spring } from "./spring";
+import {
+  createVelocityTracker,
+  project,
+  rubberband,
+  springAt,
+  springFrames,
+  springProgress,
+  unrubberband,
+  type Spring,
+} from "./spring";
 
 const CRITICAL: Spring = { dampingRatio: 1, response: 0.3 };
 const BOUNCY: Spring = { dampingRatio: 0.6, response: 0.3 };
@@ -128,7 +137,8 @@ describe("createVelocityTracker", () => {
 
   it("measures nothing, rather than dividing by zero, when the samples share one tick", () => {
     // CANARY: drop the `last.t <= first.t` guard — 0/0 is NaN, and the
-    // board's drop flight then asked WAAPI for `NaNpx` keyframes.
+    // board's drop flight then asked WAAPI for `NaNpx` keyframes, and the
+    // dock sheet painted `NaNpx` for its whole settle.
     const tracker = createVelocityTracker();
     tracker.push(0, 100, 5);
     tracker.push(0, 100, 5);
@@ -141,5 +151,42 @@ describe("createVelocityTracker", () => {
     tracker.push(0, 0, 0);
     tracker.push(900, 0, 1);
     expect(tracker.velocity(1).x).toBe(8000);
+  });
+});
+
+describe("project", () => {
+  it("is Apple's exponential-decay projection at the normal rate", () => {
+    // (v / 1000) · d / (1 − d) with d = 0.998: 499 px for a 1000 px/s throw.
+    expect(project(1000)).toBeCloseTo(499, 6);
+    expect(project(-1000)).toBeCloseTo(-499, 6);
+    expect(project(0)).toBe(0);
+  });
+
+  it("a snappier rate throws shorter", () => {
+    expect(project(1000, 0.99)).toBeCloseTo(99, 6);
+    expect(project(1000, 0.99)).toBeLessThan(project(1000));
+  });
+});
+
+describe("rubberband", () => {
+  it("follows less the further past the edge it is pulled", () => {
+    const first = rubberband(50, 600);
+    const next = rubberband(100, 600) - first;
+    expect(first).toBeLessThan(50);
+    expect(next).toBeLessThan(first);
+  });
+
+  it("is signed like the pull, and never reaches the dimension", () => {
+    expect(rubberband(-80, 600)).toBeCloseTo(-rubberband(80, 600), 9);
+    expect(rubberband(100_000, 600)).toBeLessThan(600);
+    expect(rubberband(0, 600)).toBe(0);
+  });
+});
+
+describe("unrubberband", () => {
+  it("gives back the pull that drew the band, both ways", () => {
+    for (const pull of [-400, -120, -1, 0, 1, 80, 350]) {
+      expect(unrubberband(rubberband(pull, 600), 600)).toBeCloseTo(pull, 9);
+    }
   });
 });

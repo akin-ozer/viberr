@@ -459,6 +459,48 @@ describe("the controller dock (ruling 121)", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it("ruling 454: at sheet width a pull down the header dismisses the dock, and focus comes back", async () => {
+    // The 720px block's flag is what makes the panel a sheet; jsdom lays
+    // nothing out, so the sheet's height is stubbed (halfway at 300px).
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (query: string) => ({ matches: false, media: query }),
+    });
+    const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
+    try {
+      mount({ path: "/projects/viberr/board", view: () => taskView() });
+      const trigger = await screen.findByRole("button", { name: "Controller · viberr" });
+      fireEvent.click(trigger);
+      const panel = await screen.findByRole("dialog", { name: "Controller dock" });
+      // The grabber only says "this pulls"; Close stays the named way out.
+      const grabber = panel.querySelector(".dock-grabber");
+      expect(grabber?.getAttribute("aria-hidden")).toBe("true");
+      expect(grabber?.hasAttribute("data-sheet-handle")).toBe(true);
+      const head = panel.querySelector<HTMLElement>("header.dock-head");
+      expect(head?.hasAttribute("data-sheet-handle")).toBe(true);
+      panel.style.setProperty("--sheet-draggable", "1");
+      const at = (type: string, y: number) =>
+        fireEvent(
+          head!,
+          new PointerEvent(type, { pointerId: 1, isPrimary: true, button: 0, clientY: y, bubbles: true }),
+        );
+      at("pointerdown", 100);
+      for (let y = 120; y <= 500; y += 20) at("pointermove", y);
+      const dock = panel.closest<HTMLElement>(".dock")!;
+      expect(dock.style.getPropertyValue("--sheet-drag")).toBe("380px");
+      at("pointerup", 500);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(trigger);
+      // The dock let go of the drag, so its button returns to rest.
+      expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
+      expect(dock.style.getPropertyValue("--sheet-drag")).toBe("");
+    } finally {
+      height.mockRestore();
+      Reflect.deleteProperty(window, "matchMedia");
+    }
+  });
+
   it("the Threads toggle keeps one name and lets aria-pressed carry the state (finding 25)", async () => {
     mount({
       path: "/projects/viberr/tasks/VIB-1",

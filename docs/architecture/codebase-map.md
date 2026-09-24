@@ -140,7 +140,9 @@ readiness/validation/state mapping), `rich-text` (inline `**bold**`, `` `code` `
 filename grammar, loaded on first use), `mention-spans`, `toast` (bottom-center, 2600 ms),
 `confirm-dialog`, `use-dialog` (native `<dialog>` contract: Escape, backdrop click, focus
 restore), `live-pose` (a surface closed mid-entrance leaves from where it is, ruling
-453(b)), `spring` (the board drop's spring and pointer velocity, ruling 453(a)), `use-dismiss`, `page-overlay`, `stage-menu`, `task-meta` (priority, labels, due
+453(b)), `spring` (the board drop's spring and pointer velocity, ruling 453(a); momentum projection
+and rubber-banding, ruling 454), `use-sheet-drag` (the dock's pull-to-dismiss sheet, ruling
+454), `use-dismiss`, `page-overlay`, `stage-menu`, `task-meta` (priority, labels, due
 date), `label-input`, `calendar` + `date-picker`, `local-time` + `use-relative-time`
 (hydration-safe timestamps), `number-ticker` (counts up to a figure, ruling 366(f)),
 `csrf-input`, `skip-link`, `radio-seg` (single-select group on Radix `ToggleGroup`,
