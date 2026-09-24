@@ -3,6 +3,7 @@ import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { slugify } from "~/shared/ids/slugify";
 import { mcpSignInPhrase } from "~/shared/mcp-oauth";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE } from "~/shared/mcp-tools";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
 import { MiniModal } from "./mini-modal";
@@ -226,7 +227,7 @@ function McpSignIn({ mcp }: { mcp: McpView }) {
             start.submit({ intent: "mcp-oauth-start", mcpId: mcp.id });
           }}
         >
-          <Icon name={start.busy ? "loader" : "user"} />
+          <GlyphSwap rest="user" alt="loader" on={start.busy} spinAlt />
           {start.busy ? "Starting sign-in…" : oauth?.status === "needs_sign_in" || !oauth ? "Sign in" : "Sign in again"}
         </button>
         {(signedIn || oauth?.status === "expired") && (
@@ -240,7 +241,7 @@ function McpSignIn({ mcp }: { mcp: McpView }) {
               signOut.submit({ intent: "mcp-oauth-sign-out", mcpId: mcp.id });
             }}
           >
-            <Icon name={signOut.busy ? "loader" : "x"} />
+            <GlyphSwap rest="x" alt="loader" on={signOut.busy} spinAlt />
             {signOut.busy ? "Signing out…" : "Sign out"}
           </button>
         )}
