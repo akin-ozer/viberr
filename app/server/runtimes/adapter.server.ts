@@ -8,6 +8,7 @@ import type {
 import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import type { SkillPlugin } from "./skill-mount.server";
+import type { AgentLaunch } from "./agent-isolation.server";
 import type { EnvelopeFacts } from "./wire-format.server";
 import type { RunPrompt } from "./prompt-prefix.server";
 import {
@@ -165,6 +166,11 @@ export interface RunSpec {
    *  THIS run only. `GIT_CEILING_DIRECTORIES` prevents accidental parent-repo
    *  discovery; it is not a filesystem or process isolation boundary. */
   env?: Record<string, string>;
+  /** Ruling 460: the OS user this run's processes run as — its credential
+   *  principal's agent uid — and the launcher that runs them as it. Set by
+   *  `startRun` whenever this server launches agents; absent (the host dev
+   *  server, the test harness) the CLI spawns as the server's own user. */
+  agent?: AgentLaunch;
 }
 
 /** One emitted line: the raw envelope + its projected display line + facts. */

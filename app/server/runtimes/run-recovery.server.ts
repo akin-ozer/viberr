@@ -5,6 +5,7 @@ import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import type { TaskMutationContext } from "~/server/tasks/task-actions.server";
 import { reapRunProcesses, type ReapRunProcesses, compactionRunId } from "./run-processes.server";
+import { agentUidFor, launchesAgents, prepareAgentPath } from "./agent-isolation.server";
 import { patchRun, type AgentRunRow } from "./run-store.server";
 import type { RealBackend } from "./runtime-registry.server";
 import {
@@ -225,7 +226,13 @@ export function finalizeOrphanedRuns(
     if (run.backend === "codex" && run.credential_user_id) {
       const sharedHome = userBackendHome(run.credential_user_id, "codex", deps.dataRoot);
       const dir = codexRunHomeDir(sharedHome, run.id);
-      if (existsSync(dir)) finishCodexRunHome({ dir, sharedHome, runId: run.id });
+      // Ruling 460: the write-back is the server's file, handed back to the
+      // person's uid like the adapter's settle does.
+      const principal = run.credential_user_id;
+      const own = launchesAgents()
+        ? (target: string) => prepareAgentPath(agentUidFor(db, principal), target)
+        : undefined;
+      if (existsSync(dir)) finishCodexRunHome({ dir, sharedHome, runId: run.id }, own);
     }
     patchRun(db, run.id, {
       state: "interrupted",

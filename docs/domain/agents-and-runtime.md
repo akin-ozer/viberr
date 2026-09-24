@@ -9,7 +9,9 @@
 > `app/server/tasks/specialist-*.ts`, `app/server/tasks/agent-*.ts`,
 > `app/server/tasks/run-failure-remedy.server.ts`, `app/shared/capabilities.ts`,
 > `app/shared/run-failure.ts`, `app/server/files/kb-injection.server.ts`,
-> `app/server/ops/toolchain.server.ts`, `app/server/seed/*`.
+> `app/server/ops/toolchain.server.ts`, `app/server/seed/*`; the OS user a run executes as:
+> `app/server/runtimes/agent-isolation.server.ts`, `tools/viberr-launch/viberr-launch.c`
+> (ruling 460).
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
 ## 1. Vocabulary that bites
@@ -74,10 +76,27 @@ no other account to fall back to.
 
 - `<dataRoot>/runtimes/users/<userId>/claude-home` is the child's `CLAUDE_CONFIG_DIR`
   (sessions under `projects/`); `…/codex-home` is its `CODEX_HOME` (sessions under
-  `sessions/`). Created `0o700` on demand by `ensureUserBackendHome`
-  (`user-homes.server.ts`); the user id is path-checked against
-  `/^[A-Za-z0-9_-]{1,64}$/` first. There is no deployment-wide `runtimes/claude-home` /
-  `runtimes/codex-home` and no host `~/.codex` mount.
+  `sessions/`). Created on demand by `ensureUserBackendHome` (`user-homes.server.ts`);
+  the user id is path-checked against `/^[A-Za-z0-9_-]{1,64}$/` first. There is no
+  deployment-wide `runtimes/claude-home` / `runtimes/codex-home` and no host `~/.codex`
+  mount.
+- **Every agent process runs as its person's own OS user (ruling 460).** In the image,
+  each person gets a stable agent uid (`agent_os_users`, allocated from 20001, never
+  reused) and every agent shares the primary group `viberr-agents` (gid 20000); the
+  server (`node`) is a supplementary member of that group. The person's runtime root
+  `runtimes/users/<userId>/` and everything under it — `claude-home`, `codex-home` and
+  `home` (the agent's `$HOME`: npm's cache, a `git config --global`) — is owned
+  `<uid>:node`, directories 2770: the person's agents own it, the server reads and writes it
+  through group `node`, and another person's agents (neither owner nor in `node`) reach
+  nothing. The server never becomes root: `agentLaunchFor`
+  (`agent-isolation.server.ts`) hands those three directories to the uid through the
+  setuid launcher's `--prepare-home` when they are not already its, and `startRun` puts
+  the launch on `RunSpec.agent` (uid, launcher, the vendor home to hand back) and
+  `HOME=<runtime root>/home` on the env. After every launched process exits, the launcher
+  hands the vendor home back again (owner the uid, group `node`, files gaining group read
+  and write), because a vendor writes its sign-in 0600 and the server copies, re-points or
+  backs it up. Without a launcher (the host dev server, the test harness) nothing of this
+  applies and runs spawn as the server's user; health says `agentIsolation: off`.
 - **Every Codex run gets a private `CODEX_HOME` (ruling 181).** The Codex CLI extracts
   its exec helpers (`codex-linux-sandbox`, `codex-execve-wrapper`, `apply_patch`) into
   ONE directory per home, `$CODEX_HOME/tmp/arg0/codex-arg0XXXXXX/`, and every new
@@ -85,7 +104,10 @@ no other account to fall back to.
   `codex-home` (a reviewer, the operator, a developer) delete each other's helper mid-run
   (F36-3). So the Codex adapter forks
   `<codex-home>/runs/<runId>/` at spawn (`prepareCodexRunHome`, `user-homes.server.ts`)
-  and hands it to the CLI as `CODEX_HOME`: `auth.json` and `config.toml` are **copied**
+  and hands it to the CLI as `CODEX_HOME` — the server builds it as itself, so on a
+  launched run it is handed to the person's uid (`--prepare-home`) before the CLI starts,
+  and at the settle handed over again before the server reads it, with the written-back
+  `auth.json` handed back after (ruling 460): `auth.json` and `config.toml` are **copied**
   in when present (a copy, so two runs never write one shared file through a link);
   `sessions/`, `skills/` and `memories/` are **symlinks** to the shared home's
   directories, created first, so a rollout the CLI writes lands where
@@ -147,7 +169,13 @@ no other account to fall back to.
   is set after the caller's overlay, so nothing renames a run's processes, and a refused
   run, which spawns nothing, carries none. The run sink redacts those plaintext values
   from every persisted line (`createRunSink(db, spec, { secrets })`) — the key belongs to
-  one person and the run console is visible to every project member.
+  one person and the run console is visible to every project member. What a run can READ
+  is a separate question, answered by the OS user it runs as (ruling 460): this env never
+  carried the server's secrets, but before that ruling a run's shell could read them out of
+  `/proc/<server pid>/environ`, and the projection database and every home off the disk,
+  because it ran as the server's own uid. The launcher's environment is also where glibc's
+  secure mode applies: a setuid program's `LD_*`, `TMPDIR` and the like are dropped before
+  it runs, so an agent never inherits them from the server.
 
 ### 2.3 Models and effort
 
@@ -303,7 +331,17 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
 - The CLI is spawned by Viberr, not the SDK (`spawnClaudeCodeProcess` → `spawnClaudeCli`,
   `claude-spawn.server.ts`; ruling 174): `detached`, so its pid is its process group and
   the stdio MCP servers it starts share that group. Every signal the SDK sends it — its
-  close ladder and its kill-all when the server exits — goes to the whole group. The SDK
+  close ladder and its kill-all when the server exits — goes to the whole group. On a
+  launched run (ruling 460) what is spawned, detached, is the launcher: the SDK's command
+  resolved to an absolute path rides `VIBERR_LAUNCH_EXEC`, the principal's uid
+  `VIBERR_LAUNCH_UID`, the SDK's argv passes through untouched. The launcher forks; its
+  child drops to the uid, makes the agent's own process group and execs the CLI; the
+  launcher relays every signal it receives (TERM, INT, HUP, QUIT, USR1) to that group,
+  escalates a relayed SIGTERM to SIGKILL after 5 s, and takes **SIGUSR2 as "kill the whole
+  group"** — so the server's SIGKILL of a launched group is sent as SIGUSR2
+  (`launchedSignal`): a SIGKILL of the launcher alone would leave the agent's processes
+  under a uid the server cannot signal. PDEATHSIG binds both ways (the launcher gets SIGTERM
+  when the server dies, the agent SIGKILL when the launcher dies). The SDK
   reads only stdin and stdout from a custom spawn, so Viberr drains stderr itself, keeps
   the SDK's 2 KB tail and delivers `exit` once stderr has closed, or 200 ms after the CLI
   exits if it has not (`STDERR_DRAIN_MS`); the adapter adds that tail back onto the SDK's
@@ -488,9 +526,19 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   this run is bounded by its idle timer only"). Idle 15 min
   (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); interrupt settle 20 s. The SDK spawns the CLI itself
   with a plain `spawn()` and only ever SIGTERMs it, so the settle sweep (§3.4) is what
-  reaches a CLI that outlived its abort and everything its shell started. There is no
-  wrapper around the Codex binary: the owner's decision D1 (a wrapper pointed at by
-  `codexPathOverride`) was replaced by the sweep before it shipped, ruling 174.
+  reaches a CLI that outlived its abort and everything its shell started.
+- **As the principal's own OS user (ruling 460).** On a launched run the SDK is given
+  `codexPathOverride: <viberr-launch>` and the run's env plus `VIBERR_LAUNCH_EXEC` = the
+  SDK's own vendored binary (`codexVendor()`, `codex-app-server.server.ts`, the one resolver
+  the compaction also reads) and `VIBERR_LAUNCH_UID`; the SDK spawns the launcher with the
+  argv it builds, and the launcher execs the CLI as the uid. The SDK prepends its helper
+  directory (`codex-path/`, which holds `rg`) to `PATH` only when it resolves the binary
+  itself, so the adapter prepends it for the override. The launcher leads no group the
+  server shares (the SDK's spawn is not detached): its CHILD makes the agent's group, and
+  the SDK's SIGTERM reaches the launcher, which relays it. Ruling 174's decision D1 (a
+  wrapper pointed at by `codexPathOverride`) was replaced by the sweep; the launcher is not
+  that wrapper — it confines nothing about the run and exists to change its user. The
+  completion compaction's `codex app-server` is launched the same way, in the shared home.
 - Success requires a `turn.completed` with no top-level `turn.failed`/`error`; item-level
   errors are non-fatal. Ruling 394: the adapter tracks whether anything started after the
   last completed turn (`turn.started` / `item.started` set it, `turn.completed` clears
@@ -747,6 +795,17 @@ signalled. Codex sweeps the same way without the group, since its SDK owns the s
 is cleanup, not containment: a process that clears its own environment escapes it, and
 the container plus the server-owned delivery gate stay the boundary (ruling 93). The log
 line is `reaped the processes a settled run left behind`, with the counts.
+
+On a launched run (ruling 460) the processes are another user's: the server can neither
+read their `/proc/<pid>/environ` nor signal them. So the sweep also asks the launcher —
+`viberr-launch --reap TERM <runId>…`, then after the grace `--reap KILL <runId>…` — which,
+as root, signals every process whose uid is in the agent range and whose environment
+carries one of the markers (root borrows the process's filesystem ids for the one
+`environ` read: the container holds no `CAP_SYS_PTRACE`; a pidfd pins each process so a
+recycled pid is never signalled). The group signal goes to the launcher, which relays it;
+its hard kill is SIGUSR2 (`ReapTargets.launched`). When the agent exits on its own, the
+launcher SIGTERMs whatever is still in the agent's group before it exits. The boot sweep
+of restart-orphaned runs (§8) goes through the same `--reap`.
 
 ### 3.5 Failure kinds
 
@@ -1385,7 +1444,8 @@ runtime's answer for a missing grant.
   toolkits, one implementation, `readKbDocForRun`, only the KBs attached to that run,
   one document whole up to `KB_DOC_READ_CHARS` 48 000 chars, flagged when clipped), or,
   on Codex, which mounts no Viberr tools, the file itself at the printed path (the
-  workspace contract allows those reads, ruling 422). `KB_PRECEDENCE_NOTE` (repo
+  workspace contract allows those reads, ruling 422; `kb/` stays readable, and never
+  writable, to the agent's own OS user, ruling 460). `KB_PRECEDENCE_NOTE` (repo
   conventions outrank KBs, ruling 56) is emitted only when an index is present. All three
   runtimes assemble the block (the attached-resources banner, injected skill bodies, these
   notes, the indexes) with one helper, `attachedResourcesBlock`, and pass only their own
@@ -1454,6 +1514,21 @@ runtime's answer for a missing grant.
   store-relative spelling here is a display form (ruling 159); an agent is only ever
   handed the absolute path, and a delivery whose tree carries `projects/<slug>/tasks/`
   is refused.
+- **Shared between the server and the agents' users (ruling 460).** The directories a run
+  writes — a task's `workspace/`, `attachments/` and `.operator-scratch/`, and
+  `runtimes/controller-scratch`, `uv-cache`, `uv-python` — are `node:viberr-agents` 2770
+  (`shareDirWithAgents`, called where each is created; boot hands an older tree over once,
+  recursively). setgid keeps whatever either side creates inside in the agent group; the
+  agent's umask is 0007 (the launcher sets it) and the server's is 0002 (set at boot when the
+  launcher exists), so a file the server's git checks out is one an agent can edit and a
+  file an agent writes is one the server's delivery can commit. Nothing else the server
+  writes is in the agent group (its own files are `node:node`), so the canonical
+  `task.md`, `project.md`, knowledge bases and skills stay readable and unwritable to an
+  agent. Git refuses a repository another uid owns, so the image's SYSTEM git config
+  (`/etc/gitconfig`, root-owned, which no agent can edit) carries `safe.directory=*` and
+  `core.sharedRepository=group`; it binds the server's git, an agent's shell and a tool that
+  clears its environment alike. Everything the server does itself — clone, fetch, merge,
+  push, the stdio MCP probes, reading transcripts — stays `node`.
 - Mirror (ruling 87): bare `projects/<slug>/.repo-mirror/<owner>__<repo>.git`, `fetch
   --prune` with a heads-to-heads refspec before each clone (timeout 120 s, rebuilt after
   2 consecutive failures), then a local hardlinked clone with `origin` rewritten to the
@@ -1470,6 +1545,16 @@ runtime's answer for a missing grant.
 
 ## 8. Boot recovery
 
+First of all, right after the projection opens, `bootAgentIsolation` (ruling 460,
+`agent-isolation.server.ts`): with a launcher present it sets the server's umask to 0002,
+enforces the store layout (`enforceStoreLayout`: the root 0750 in the agent group, `state/`,
+`audit-exports/` and the raw run logs 0700, `runtimes/users/` 0710, `agents/`, `kb/`,
+`skills/`, `projects/` 0755, the shared directories of §7 2770, every task's pre-460
+workspace handed over once), hands each person's runtime root to their uid (whole when it
+is not yet theirs, else just the two vendor homes), and probes the store as the reserved
+uid below the range: refused → `on`, readable → `degraded` (a bind mount; health names
+it). Without a launcher it only records `off`. It never throws.
+
 Before the chain, boot runs `repairCodexRolloutPaths` once (ruling 199, §2.2): every Codex
 thread still indexed under a removed per-run home is re-pointed at the file in the shared
 `sessions/` tree. Then `reconcileRestartedWork` (fire-and-forget after the watchers start;
@@ -1482,7 +1567,9 @@ thread still indexed under a removed per-run home is re-pointed at the file in t
    private home is finished the way its settle would have (auth write-back, directory
    removed, thread paths re-pointed; ruling 181), and the orphans' run ids are swept
    (ruling 174, §3.4): a Claude CLI leads its own group, so a server that died without
-   shutting down does not take it along. One "Interrupted by a restart" note per task
+   shutting down did not take it along — in the image the launcher's PDEATHSIG now does
+   (ruling 460), and the sweep, through the launcher's `--reap`, finds what a SIGKILLed
+   launcher's agent had already detached. One "Interrupted by a restart" note per task
    lists what was running and, separately, what was queued and had not started (ruling
    310(b)); then one `runOperator({ trigger: "manual" })` per affected task (controller
    turns get a conversation note instead), capped at 3 per task per 30 min via

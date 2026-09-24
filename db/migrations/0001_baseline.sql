@@ -356,6 +356,15 @@ CREATE TABLE user_backend_credentials (
   updated_at TEXT NOT NULL,
   UNIQUE (user_id, backend)
 );
+-- Ruling 460: the OS user each person's agent processes run as. Allocated once, sequentially
+-- from 20001 (`agentUidFor`), and never deleted — deliberately no foreign key to `users`: a
+-- removed account's transcripts stay on disk owned by its uid, and a uid handed to a second
+-- person would own them.
+CREATE TABLE agent_os_users (
+  user_id TEXT PRIMARY KEY,
+  os_uid INTEGER NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
 -- U33-2 (pass 33): the last repository-access probe per project. App-owned
 -- OBSERVATION, not a projection of project.md, so a rebuild must not clear it —
 -- which is why it is its own table rather than a `projects` column. It exists so

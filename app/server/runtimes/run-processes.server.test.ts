@@ -266,3 +266,50 @@ describe("reapRunProcesses (scripted scan)", () => {
     expect(report).toEqual({ terminated: 3, killed: 1 });
   });
 });
+
+/**
+ * Ruling 460: an agent runs as its person's own uid, so the server can neither
+ * read its environment nor signal it. The sweep reaches those processes through
+ * the launcher (`--reap`, as root, by marker) and, when the group leader is the
+ * launcher, ends its group with the launcher's SIGUSR2 instead of a SIGKILL that
+ * would only kill the launcher.
+ */
+describe("reapRunProcesses through the agent launcher (ruling 460)", () => {
+  it("asks the launcher to TERM, then after the grace to KILL, every agent process of the runs", async () => {
+    const sent: [number, NodeJS.Signals | 0][] = [];
+    const reaps: [string, string[]][] = [];
+    const report = await reapRunProcesses(
+      { runIds: ["run_x", "run_x:compaction"], groupLeader: 50, launched: true },
+      {
+        find: async () => new Map(),
+        signal: (pid, sig) => {
+          sent.push([pid, sig]);
+        },
+        graceMs: 1,
+        agentReap: async (signal, runIds) => {
+          reaps.push([signal, [...runIds]]);
+          return signal === "TERM" ? 2 : 1;
+        },
+      },
+    );
+    expect(reaps).toEqual([
+      ["TERM", ["run_x", "run_x:compaction"]],
+      ["KILL", ["run_x", "run_x:compaction"]],
+    ]);
+    // The launcher is still there after the grace: its hard kill, not SIGKILL.
+    expect(sent).toEqual([
+      [-50, "SIGTERM"],
+      [-50, 0],
+      [-50, "SIGUSR2"],
+    ]);
+    expect(report).toEqual({ terminated: 3, killed: 2 });
+  });
+
+  it("does not wait out a grace when neither the server nor the launcher found anything", async () => {
+    const report = await reapRunProcesses(
+      { runIds: ["run_x"] },
+      { find: async () => new Map(), signal: () => {}, graceMs: 60_000, agentReap: async () => 0 },
+    );
+    expect(report).toEqual({ terminated: 0, killed: 0 });
+  });
+});

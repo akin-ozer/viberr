@@ -19,6 +19,7 @@ import {
   type ClaudeQueryOptions,
 } from "./claude-runtime.server";
 import type { ReapTargets } from "./run-processes.server";
+import { filteredSpawnEnv } from "./runtime-registry.server";
 import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
@@ -1461,6 +1462,143 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
     h.exitCli();
     await drain();
     expect(h.reaped).toEqual([{ runIds: ["run_marked"], groupLeader: CLI_PID }]);
+  });
+
+  /**
+   * Ruling 460: a run carrying an agent launch spawns the LAUNCHER, detached,
+   * as the principal's uid — never the CLI as the server's user — with the
+   * SDK's argv untouched and nothing of the server's own secrets in its env.
+   */
+  describe("as the principal's own OS user (ruling 460)", () => {
+    const LAUNCH = {
+      uid: 20001,
+      launcher: "/usr/local/libexec/viberr-launch",
+      launchHome: "/data/runtimes/users/u_ada/claude-home",
+      home: "/data/runtimes/users/u_ada/home",
+    };
+    const SDK_ARGS = ["--output-format", "stream-json", "--verbose", "--input-format", "stream-json"];
+
+    function launchedHarness() {
+      const h = harness();
+      const spawned: { command: string; args: readonly string[]; env: NodeJS.ProcessEnv | undefined; detached: boolean | undefined }[] = [];
+      const deps = {
+        ...h.deps,
+        // What production hands the adapter: the credential-free base env.
+        env: filteredSpawnEnv(),
+        spawnCli: (command: string, args: readonly string[], options: { env?: NodeJS.ProcessEnv; detached?: boolean }) => {
+          spawned.push({ command, args, env: options.env, detached: options.detached });
+          return h.child;
+        },
+      };
+      return { ...h, deps, spawned };
+    }
+
+    const LAUNCHED_SPEC: RunSpec = {
+      ...SPEC,
+      runId: "run_launched",
+      agent: LAUNCH,
+      env: {
+        CLAUDE_CONFIG_DIR: LAUNCH.launchHome,
+        ANTHROPIC_API_KEY: "sk-ant-the-persons-own",
+        HOME: LAUNCH.home,
+        VIBERR_RUN_ID: "run_launched",
+      },
+    };
+
+    it("spawns the launcher with the real binary, the principal's uid and the SDK's argv untouched", async () => {
+      const h = launchedHarness();
+      let processForSdk: ReturnType<NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>> | undefined;
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          processForSdk = options?.spawnClaudeCodeProcess?.({
+            command: "/opt/claude/claude",
+            args: SDK_ARGS,
+            env: options.env ?? {},
+          });
+          return fakeQuery([SUCCESS]).q;
+        },
+      });
+      adapter.start(LAUNCHED_SPEC, { onLine: () => {}, onExit: () => {} });
+      await drain();
+
+      expect(h.spawned).toHaveLength(1);
+      const [spawn] = h.spawned;
+      expect(spawn?.command).toBe(LAUNCH.launcher);
+      expect(spawn?.args).toEqual(SDK_ARGS);
+      expect(spawn?.detached).toBe(true);
+      expect(spawn?.env?.VIBERR_LAUNCH_EXEC).toBe("/opt/claude/claude");
+      expect(spawn?.env?.VIBERR_LAUNCH_UID).toBe("20001");
+      expect(spawn?.env?.VIBERR_LAUNCH_HOME).toBe(LAUNCH.launchHome);
+      expect(spawn?.env?.HOME).toBe(LAUNCH.home);
+      // The one credential a run may carry is its principal's own (ruling 127);
+      // the server's secrets are in this process's env and must not follow.
+      expect(spawn?.env?.ANTHROPIC_API_KEY).toBe("sk-ant-the-persons-own");
+      expect(process.env.VIBERR_SECRET_ENCRYPTION_KEY).toBeTruthy();
+      expect(spawn?.env?.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
+      expect(spawn?.env?.VIBERR_SESSION_SECRET).toBeUndefined();
+
+      // The SDK's hard kill reaches the agent's group as the launcher's SIGUSR2;
+      // a SIGKILL of the launcher would orphan processes the server cannot signal.
+      processForSdk?.kill("SIGKILL");
+      processForSdk?.kill("SIGTERM");
+      expect(h.signals).toEqual([
+        [-CLI_PID, "SIGUSR2"],
+        [-CLI_PID, "SIGTERM"],
+      ]);
+
+      h.exitCli();
+      await drain();
+      expect(h.reaped).toEqual([
+        { runIds: ["run_launched"], groupLeader: CLI_PID, launched: true },
+      ]);
+    });
+
+    it("resolves a bare command on PATH: the launcher execs absolute paths only", async () => {
+      const h = launchedHarness();
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          options?.spawnClaudeCodeProcess?.({ command: "node", args: ["cli.js"], env: options.env ?? {} });
+          return fakeQuery([SUCCESS]).q;
+        },
+      });
+      adapter.start(LAUNCHED_SPEC, { onLine: () => {}, onExit: () => {} });
+      await drain();
+      const exec = h.spawned[0]?.env?.VIBERR_LAUNCH_EXEC ?? "";
+      expect(path.isAbsolute(exec)).toBe(true);
+      expect(path.basename(exec)).toBe("node");
+      expect(h.spawned[0]?.args).toEqual(["cli.js"]);
+    });
+
+    it("the completion compaction's CLI is launched as the principal too", async () => {
+      const h = launchedHarness();
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          options?.spawnClaudeCodeProcess?.({ command: "/opt/claude/claude", args: SDK_ARGS, env: options.env ?? {} });
+          return fakeQuery([SUCCESS]).q;
+        },
+      });
+      await adapter.compact?.(LAUNCHED_SPEC, "sess-1", { onLine: () => {} });
+      expect(h.spawned[0]?.command).toBe(LAUNCH.launcher);
+      expect(h.spawned[0]?.env?.VIBERR_LAUNCH_UID).toBe("20001");
+    });
+
+    it("without a launch, the CLI itself is spawned, exactly as before", async () => {
+      const h = launchedHarness();
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          options?.spawnClaudeCodeProcess?.({ command: "/opt/claude/claude", args: SDK_ARGS, env: options.env ?? {} });
+          return fakeQuery([SUCCESS]).q;
+        },
+      });
+      adapter.start(SPEC, { onLine: () => {}, onExit: () => {} });
+      await drain();
+      expect(h.spawned[0]?.command).toBe("/opt/claude/claude");
+      expect(h.spawned[0]?.env?.VIBERR_LAUNCH_UID).toBeUndefined();
+    });
   });
 
   it("a run the service did not mark still has its group swept, and sweeps by no marker", async () => {

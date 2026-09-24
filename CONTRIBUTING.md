@@ -34,9 +34,11 @@ specs are written against, run `npm run seed:demo` instead (sign in as
 `arda@viberr.dev` with `VIBERR_SEED_ADMIN_PASSWORD`, or `viberr-dev-2828` when it is
 unset).
 
-`.env.example` points `VIBERR_DATA_ROOT` at `./docker-data`, the directory the Docker
-setup mounts, so the dev server and the container share one store. Only one process may
-hold it: a second one (or a seed against a running app) is refused by the data-root
+`.env.example` points `VIBERR_DATA_ROOT` at `./docker-data`, the dev server's store. The
+Docker setup mounts the named volume `viberr-data` instead (ruling 460: every agent runs
+as its person's own OS user, and a macOS bind mount enforces no permissions between
+users), so the dev server and the container no longer share a store. Only one process may
+hold a store: a second one (or a seed against a running app) is refused by the data-root
 writer lock.
 
 See the [README](README.md) for the full quickstart, the bootstrap-admin credentials,

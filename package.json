@@ -21,7 +21,8 @@
     "backup": "tsx scripts/backup.ts",
     "restore": "tsx scripts/restore.ts",
     "keys": "tsx scripts/secret-keys.ts",
-    "deploy": "tsx scripts/deploy.ts"
+    "deploy": "tsx scripts/deploy.ts",
+    "store:to-volume": "tsx scripts/store-to-volume.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.280",

@@ -1,5 +1,7 @@
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { resetAgentIsolationForTests } from "./agent-isolation.server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -181,6 +183,51 @@ describe("resolveBackendBinary", () => {
         "or paste an API key instead.",
     );
     expect(codexFailure.userMessage).not.toBe(codexFailure.message);
+  });
+});
+
+/**
+ * Ruling 460: the sign-in writes the person's credential into their home, so it
+ * runs as the person's own OS user — through the launcher, like their runs —
+ * and so does the status check that confirms it. The stand-in launcher logs
+ * what the real one reads and then execs the vendor binary it was handed.
+ */
+describe("the sign-in runs as the person's own OS user (ruling 460)", () => {
+  afterEach(() => resetAgentIsolationForTests());
+
+  it("spawns the launcher for the sign-in and its confirmation, with the vendor binary and the person's uid", async () => {
+    const dir = ctx.makeTempDir("viberr-launcher-");
+    const log = path.join(dir, "launch.log");
+    const launcher = path.join(dir, "viberr-launch");
+    writeFileSync(
+      launcher,
+      [
+        "#!/bin/sh",
+        'if [ "$1" = "--prepare-home" ]; then exit 0; fi',
+        `echo "uid=$VIBERR_LAUNCH_UID exec=$VIBERR_LAUNCH_EXEC home=$VIBERR_LAUNCH_HOME args=$*" >> '${log}'`,
+        'exec "$VIBERR_LAUNCH_EXEC" "$@"',
+        "",
+      ].join("\n"),
+    );
+    chmodSync(launcher, 0o755);
+    resetAgentIsolationForTests({ status: "on", uidFloor: 20001, reason: null }, { launcher });
+
+    start("claude", "claudeai");
+    await waitForLogin("claude", (view) => view.needsCode, "the Claude code prompt");
+    submitBackendLoginCode(db, ACTOR, "claude", "abc-123");
+    const done = await waitForLogin("claude", isState("succeeded", "failed"), "the sign-in");
+    expect(done.state).toBe("succeeded");
+
+    const entries = readFileSync(log, "utf8").trim().split("\n");
+    const prefix = `uid=20001 exec=${fake.binaries.claude} home=${home("claude")}`;
+    expect(entries).toEqual([
+      `${prefix} args=auth login --claudeai`,
+      `${prefix} args=auth status`,
+    ]);
+    // The agent's own $HOME, not the server's.
+    expect(fakeVendorEnv(home("claude"))?.HOME).toBe(
+      path.join(dataRoot, "runtimes", "users", ACTOR.userId, "home"),
+    );
   });
 });
 

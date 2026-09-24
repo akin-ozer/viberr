@@ -9,7 +9,9 @@
  *
  * Flow: remove any leftover stack → `up --build` (seed one-shot, then the
  * production app on a fresh named volume) → wait for /resources/health →
- * `playwright test` with the derived base URL → tear down with --volumes.
+ * `agentIsolation` must be `on` and `scripts/check-agent-isolation.sh` must
+ * pass inside the app container (ruling 460) → `playwright test` with the
+ * derived base URL → tear down with --volumes.
  */
 import { spawn } from "node:child_process";
 import process from "node:process";
@@ -22,6 +24,13 @@ const COMPOSE = ["compose", "-f", "compose.e2e.yml", "-p", PROJECT];
  *  else — an error body, a proxy's HTML, a half-started reply — is "not up yet",
  *  which is what the polling loop does with a failed parse. */
 const healthBody = z.object({ ok: z.boolean().catch(false) }).catch({ ok: false });
+
+/** Ruling 460's reading, off the same body. */
+const agentIsolationBody = z.object({
+  agentIsolation: z
+    .object({ status: z.string(), reason: z.string().nullable() })
+    .catch({ status: "missing", reason: "the health body has no agentIsolation" }),
+});
 
 function run(
   command: string,
@@ -88,6 +97,23 @@ async function main(): Promise<number> {
   try {
     await waitForHealth(`${baseUrl}/resources/health`, 60_000);
     console.log(`e2e: production stack healthy at ${baseUrl}`);
+
+    // Ruling 460: the shipped image runs every agent as its person's own OS
+    // user, and this stack's store is a named volume, so the isolation must be
+    // `on` — and the kernel must agree, which only a check inside the running
+    // container can ask (`scripts/check-agent-isolation.sh`).
+    const isolation = agentIsolationBody.parse(
+      await (await fetch(`${baseUrl}/resources/health`)).json(),
+    ).agentIsolation;
+    if (isolation.status !== "on") {
+      console.error(`e2e: agentIsolation is ${isolation.status}: ${isolation.reason ?? ""}`);
+      return 1;
+    }
+    const check = await compose(["exec", "-T", "app", "sh", "scripts/check-agent-isolation.sh"]);
+    if (check.code !== 0) {
+      console.error("e2e: the in-image agent isolation check failed");
+      return 1;
+    }
 
     const result = await run("npx", ["playwright", "test", ...playwrightArgs], {
       env: { ...process.env, VIBERR_E2E_BASE_URL: baseUrl },

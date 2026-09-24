@@ -114,7 +114,8 @@ import { wholeThousands } from "~/shared/text/thousands";
 import { countLabel } from "~/shared/text/plural";
 
 import { newId } from "~/shared/ids/new-id.server";
-import { toError } from "~/shared/errors";
+import { errorMessage, toError } from "~/shared/errors";
+import { agentLaunchFor } from "./agent-isolation.server";
 
 /**
  * The only module routes call
@@ -1077,6 +1078,32 @@ export async function startRun(
   // run goes through — so no path can start a specialist or controller run
   // without it, and after the caller's overlay so nothing renames it.
   Object.assign(runEnv, contextWindowEnv(input.backend, input.kind));
+  // Ruling 460: the run executes as its principal's own OS user. Decided here,
+  // the one funnel every run goes through, so no path can start a process as
+  // the server's user while this server launches agents; and it never falls
+  // back to it — a launch that cannot be prepared refuses the run below.
+  let launchRefusal: string | null = null;
+  if (credential.ok && input.credentialUserId) {
+    try {
+      const agent = agentLaunchFor(
+        db,
+        input.credentialUserId,
+        credential.credential.homeDir,
+        input.dataRoot,
+      );
+      if (agent) {
+        spec.agent = agent;
+        // The server's own $HOME is not the agent's to write (npm's cache, a
+        // `git config --global`): each person's agents get their own.
+        if (agent.home) runEnv.HOME = agent.home;
+      }
+    } catch (error) {
+      launchRefusal =
+        error instanceof AppError
+          ? error.userMessage
+          : `The agent could not be started as its person's own user (ruling 460): ${errorMessage(error)}. Nothing ran.`;
+    }
+  }
   // Ruling 174: every process the run starts carries its id, so the settle
   // sweep can find what it left behind (`run-processes.server.ts`). Set last:
   // no caller overlay may rename a run's processes. A refused run spawns
@@ -1084,12 +1111,12 @@ export async function startRun(
   if (credential.ok) Object.assign(runEnv, runMarkerEnv(runId));
   if (Object.keys(runEnv).length) spec.env = runEnv;
 
-  // The one reason no process may start, decided on the finished spec: the
-  // credential (ruling 127) — an honest `run·unavailable` error row. Ruling
-  // 182's sandbox refusal is gone with the sandbox itself (ruling 185): a
-  // Codex run is never OS-confined by Viberr, so there is no host condition
-  // left for it to refuse on.
-  const refusal: string | null = credential.ok ? null : credential.message;
+  // The reasons no process may start, decided on the finished spec: the
+  // credential (ruling 127) and the launch as the principal's own user
+  // (ruling 460) — each an honest `run·unavailable` error row. Ruling 182's
+  // sandbox refusal is gone with the sandbox itself (ruling 185): a Codex run
+  // is never OS-confined by the CLI, so there is no such host condition.
+  const refusal: string | null = credential.ok ? launchRefusal : credential.message;
 
   const details: RunStartedAudit = {
     threadId,

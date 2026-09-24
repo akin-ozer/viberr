@@ -8,6 +8,10 @@ import {
   type BackendQuotaRow,
 } from "~/server/runtimes/backend-quota.server";
 import { countConnectedUsers } from "~/server/runtimes/backend-credentials.server";
+import {
+  agentIsolation,
+  type AgentIsolation,
+} from "~/server/runtimes/agent-isolation.server";
 import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.server";
 import { getBuildInfo, type BuildInfo } from "./build-info.server";
 import { cachedDataRootSpace, type DiskSpace } from "./disk-space.server";
@@ -101,6 +105,16 @@ export interface HealthSnapshot {
    * not a broken host, so it never degrades health.
    */
   toolchain: Toolchain;
+  /**
+   * Ruling 460: whether agent processes run as their person's own OS user.
+   * `on`: the launcher is installed and the boot probe could not read the
+   * store as another uid. `off`: no launcher (the host dev server, the test
+   * harness) — runs spawn as the server's user, and that is not a fault here.
+   * `degraded`: the launcher exists but the probe READ the store (a bind mount
+   * that does not enforce permissions) or failed — pushed into `degraded`,
+   * with the reason naming what to do.
+   */
+  agentIsolation: AgentIsolation;
 }
 
 /**
@@ -175,6 +189,12 @@ export function healthSnapshot(
 
   const browser = browserRuntimeStatus();
 
+  // Ruling 460: an image whose store does not refuse an agent uid is running
+  // agents that can read the database — a real fault, unlike `off` on a dev
+  // host, where no launcher exists to promise anything.
+  const isolation = agentIsolation();
+  if (isolation.status === "degraded") degraded.push("agentIsolation");
+
   return {
     status: degraded.length > 0 ? "degraded" : "ok",
     degraded,
@@ -200,8 +220,10 @@ export function healthSnapshot(
     maintenance: maintenanceState(),
     build: getBuildInfo(),
     quota: opts.principal ? quota : stripQuotaPrincipals(quota),
-    // LAST, by the key-order contract above. Memoized: the first call (boot's
-    // integrity line, normally) pays the probe once.
+    // Memoized: the first call (boot's integrity line, normally) pays the
+    // probe once.
     toolchain: cachedToolchain(),
+    // LAST, by the key-order contract above (ruling 460 appended it).
+    agentIsolation: isolation,
   };
 }

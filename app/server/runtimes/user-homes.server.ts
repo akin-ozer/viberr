@@ -116,7 +116,11 @@ export function userBackendHome(
  * 0o700 because a login credential file the vendor binary writes lands in here:
  * on a multi-user host, one person's runs must not be able to read another's
  * sign-in. `recursive` applies the mode to every directory this call creates;
- * the process umask can only narrow it further, never widen it.
+ * the process umask can only narrow it further, never widen it. In the image
+ * the server creates it as itself and `agentLaunchFor` then hands it to the
+ * person's agent uid (`<uid>:node`, 2770, ruling 460) before anything runs in
+ * it: the person's agents own it, the server reaches it through its group,
+ * and nobody else's agents reach it at all.
  */
 export function ensureUserBackendHome(
   userId: string,
@@ -228,8 +232,23 @@ export function codexRunHomeDir(sharedHome: string, runId: string): string {
   return path.join(sharedHome, CODEX_RUN_HOMES_DIR, assertPathSafeRunId(runId));
 }
 
-/** Build the run home (see the module note above) and return it. */
-export function prepareCodexRunHome(sharedHome: string, runId: string): CodexRunHome {
+/**
+ * Ruling 460: what hands a path in a person's home to their agent uid (the
+ * launcher's `--prepare-home`, supplied by the caller that knows the uid). The
+ * server writes the run home's copies and the written-back sign-in as itself;
+ * the CLI that reads them runs as the person.
+ */
+export type HomeOwner = (target: string) => void;
+
+/** Build the run home (see the module note above) and return it. With `own`,
+ *  the shared directories it had to create and the run home itself are handed
+ *  to the person's uid before the CLI starts (it throws when that fails: a
+ *  run whose home it cannot use must not start). */
+export function prepareCodexRunHome(
+  sharedHome: string,
+  runId: string,
+  own?: HomeOwner,
+): CodexRunHome {
   const dir = codexRunHomeDir(sharedHome, runId);
   // Whatever a crashed predecessor of this id left: start clean, never merge.
   rmSync(dir, { recursive: true, force: true });
@@ -239,26 +258,53 @@ export function prepareCodexRunHome(sharedHome: string, runId: string): CodexRun
     if (!existsSync(source)) continue;
     const target = path.join(dir, name);
     copyFileSync(source, target);
-    // A credential copy is private to the server user whatever the source
-    // mode was; the config keeps its own.
+    // A credential copy is private whatever the source mode was (to its
+    // owner and, once `own` has run, the server's group); the config keeps
+    // its own.
     if (name === "auth.json") chmodSync(target, 0o600);
   }
   for (const name of CODEX_HOME_SHARED_DIRS) {
-    mkdirSync(path.join(sharedHome, name), { recursive: true, mode: 0o700 });
+    const shared = path.join(sharedHome, name);
+    if (!existsSync(shared)) {
+      mkdirSync(shared, { recursive: true, mode: 0o700 });
+      own?.(shared);
+    }
     // Relative, so a restored or moved data root still resolves.
     symlinkSync(path.join("..", "..", name), path.join(dir, name), "dir");
   }
+  own?.(dir);
   return { dir, sharedHome, runId };
+}
+
+/** `own`, never throwing: the settle half must not. */
+function ownQuietly(own: HomeOwner | undefined, target: string, runId: string): void {
+  if (!own || !existsSync(target)) return;
+  try {
+    own(target);
+  } catch (error) {
+    logger.warn("codex run home: a path could not be handed to the person's agent user", {
+      runId,
+      err: toError(error),
+    });
+  }
 }
 
 /**
  * The settle half: carry a refreshed `auth.json` back to the shared home when
  * its bytes changed (under the per-person lock), then remove the run home.
  * Never throws — a settle that cannot clean up is logged, not propagated.
+ *
+ * With `own` (ruling 460): the run home is first handed to the person's uid
+ * and the server's group as a whole, so the server can read what the CLI
+ * wrote there 0600 and remove it; the written-back `auth.json` is the server's
+ * file, so it is handed back too, or the next compaction (which runs as the
+ * person in the shared home) could not read its own sign-in.
  */
-export function finishCodexRunHome(home: CodexRunHome): void {
+export function finishCodexRunHome(home: CodexRunHome, own?: HomeOwner): void {
+  ownQuietly(own, home.dir, home.runId);
+  for (const dbFile of codexStateDatabases(home.sharedHome)) ownQuietly(own, dbFile, home.runId);
   try {
-    writeBackAuth(home);
+    if (writeBackAuth(home)) ownQuietly(own, path.join(home.sharedHome, "auth.json"), home.runId);
   } catch (error) {
     logger.warn("codex run home: the refreshed sign-in could not be written back", {
       runId: home.runId,
@@ -438,10 +484,12 @@ function codexStateDatabases(sharedHome: string): string[] {
   }
 }
 
-function writeBackAuth(home: CodexRunHome): void {
+/** True when the shared `auth.json` was replaced. */
+function writeBackAuth(home: CodexRunHome): boolean {
   const refreshed = readIfPresent(path.join(home.dir, "auth.json"));
-  if (!refreshed) return;
+  if (!refreshed) return false;
   const sharedAuth = path.join(home.sharedHome, "auth.json");
+  let written = false;
   withAuthLock(home.sharedHome, home.runId, () => {
     const current = readIfPresent(sharedAuth);
     // The person disconnected while the run was live: the shared file is gone
@@ -451,7 +499,9 @@ function writeBackAuth(home: CodexRunHome): void {
     const staging = `${sharedAuth}.${home.runId}.tmp`;
     writeFileSync(staging, refreshed, { mode: 0o600 });
     renameSync(staging, sharedAuth);
+    written = true;
   });
+  return written;
 }
 
 function readIfPresent(file: string): Buffer | null {

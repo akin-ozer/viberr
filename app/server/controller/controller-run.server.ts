@@ -7,8 +7,8 @@ import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 import { formatAbsoluteUTC } from "~/shared/dates/format";
 import { formatUsd } from "~/shared/run-failure";
-import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
+import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
 import {
   RULING_NAMESPACE_NOTE,
   attachedResourcesBlock,
@@ -997,7 +997,8 @@ export function recoverControllerConversations(db: DatabaseSync): number {
 
 function controllerScratchDir(dataRoot?: string): string {
   const dir = path.join(getDataRoot(dataRoot), "runtimes", "controller-scratch");
-  mkdirSync(dir, { recursive: true });
+  // Ruling 460: the controller's turn runs as the asker's own user.
+  shareDirWithAgents(dir);
   return dir;
 }
 

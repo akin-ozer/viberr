@@ -7,6 +7,11 @@ import {
 import type { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { realSignal, type SignalProcess } from "./run-processes.server";
+import {
+  launchedCommand,
+  launchedSignal,
+  type AgentLaunch,
+} from "./agent-isolation.server";
 
 /**
  * Ruling 174: the Claude CLI leads its own process group.
@@ -107,19 +112,37 @@ function keepTail(text: string): string {
   return text.length > 2 * STDERR_TAIL_CHARS ? text.slice(-STDERR_TAIL_CHARS) : text;
 }
 
+/**
+ * Ruling 460: with `launch`, the CLI runs as its person's own OS user. What is
+ * spawned is then the launcher (`viberr-launch`), detached so it leads the
+ * group Viberr signals, with the SDK's command resolved to an absolute path in
+ * `VIBERR_LAUNCH_EXEC`, the uid in `VIBERR_LAUNCH_UID` and the SDK's argv passed
+ * through untouched. The launcher forks, drops to the uid in the child and
+ * relays every signal it receives to the agent's own group — which the server
+ * cannot signal itself, the processes being another user's. So the server's
+ * SIGKILL becomes SIGUSR2, the launcher's "kill the whole group": a SIGKILL of
+ * the launcher alone would orphan the agent's processes under a uid the
+ * server cannot reach.
+ */
 export function spawnClaudeCli(
   request: ClaudeSpawnRequest,
   spawnImpl: SpawnCli = realSpawn,
   signalImpl: SignalProcess = realSignal,
+  launch: AgentLaunch | null = null,
 ): ClaudeCli {
+  const spawned = launch
+    ? launchedCommand(launch, request.command, request.env)
+    : { command: request.command, env: request.env };
   const options: SpawnOptionsWithoutStdio = {
-    env: request.env,
+    env: spawned.env,
     detached: true,
     windowsHide: true,
   };
   if (request.cwd) options.cwd = request.cwd;
   if (request.signal) options.signal = request.signal;
-  const child = spawnImpl(request.command, request.args, options);
+  // Node's own abort kill (the SDK's forwarded signal) is SIGTERM, which the
+  // launcher relays as it is.
+  const child = spawnImpl(spawned.command, request.args, options);
   const pid = child.pid ?? null;
 
   const decoder = new StringDecoder("utf8");
@@ -158,7 +181,8 @@ export function spawnClaudeCli(
     if (events.listenerCount("error") > 0) events.emit("error", error);
   });
 
-  const signalGroup = (signal: NodeJS.Signals): boolean => {
+  const signalGroup = (requested: NodeJS.Signals): boolean => {
+    const signal = launch ? launchedSignal(requested) : requested;
     if (pid !== null && pid > 1) {
       try {
         signalImpl(-pid, signal);

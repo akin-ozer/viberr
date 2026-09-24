@@ -43,7 +43,7 @@ ${VIBERR_DATA_ROOT}/
     profiles/<id>.md             org-level agent profile templates (operator, controller, specialists)
   runtimes/
     users/                       per-person agent homes (ruling 127); one subdirectory per
-                                 connected person, created 0o700 on demand
+                                 connected person, owned by that person's agent uid (ruling 460)
   kb/                            knowledge-base folders (store://kb/<dir>/)
   skills/                        skill folders (store://skills/<name>/SKILL.md)
   audit-exports/                 rows the 90-day audit purge exported before deleting
@@ -82,6 +82,8 @@ Created by the code that needs them:
   runtimes/users/<userId>/codex-home/runs/<runId>/  one live run's CODEX_HOME (ruling 181): a copy of auth.json +
                                                     config.toml, symlinked sessions/ skills/ memories/, the CLI's
                                                     own tmp/; deleted when the run settles
+  runtimes/users/<userId>/home/                     that person's agents' $HOME (ruling 460): npm's cache, a
+                                                    `git config --global`, whatever a tool writes under ~
   runtimes/uv-cache/, runtimes/uv-python/           uv's cache for Python MCP servers (set by the container image)
   kb/controller-handbook/handbook.md                the controller's shipped knowledge base (written at boot)
   audit-exports/audit-events-<YYYY-MM-DD>.jsonl     rows the 90-day audit purge exported before deleting
@@ -93,9 +95,20 @@ Created by the code that needs them:
 Boot's `seedDefaultAgentAssets` writes the shipped skills
 (`skills/{viberr-app-expertise,developer-expertise,reviewer-expertise,controller-guide}/SKILL.md`),
 the two doctrine files, the `operator` and `controller` profile templates and the controller
-handbook. Each person's `runtimes/users/<userId>/{claude-home,codex-home}` is created 0o700 by
+handbook. Each person's `runtimes/users/<userId>/{claude-home,codex-home}` is created by
 `ensureUserBackendHome` the first time a run or a sign-in needs it; `userRuntimeRoot` refuses any
 user id that is not a path-safe segment (`^[A-Za-z0-9_-]{1,64}$`).
+
+**Who owns what (ruling 460).** In the image every agent process runs as its person's own
+uid in the group `viberr-agents`, so the modes are part of the layout and boot re-asserts
+them (`enforceStoreLayout`, `agent-isolation.server.ts`): the root `node:viberr-agents` 0750;
+`state/`, `audit-exports/` and `runtimes/claude|codex/` 0700; `runtimes/` 0750 and
+`runtimes/users/` 0710 in the agent group; `agents/`, `kb/`, `skills/`, `projects/` 0755 (the
+server's files, readable and never writable to an agent); each person's
+`runtimes/users/<userId>/` tree owned `<uid>:node`, directories 2770; and the directories a run
+writes — a task's `workspace/`, `attachments/`, `.operator-scratch/`, and
+`runtimes/controller-scratch/`, `uv-cache/`, `uv-python/` — `node:viberr-agents` 2770. On the
+host dev server (no launcher) none of this is applied.
 
 There is deliberately no `cache/`, `auth/` or `logs/` directory. Application logs are
 structured JSON on stdout. The watcher (`file-watch.service.server.ts`) watches only
@@ -163,6 +176,7 @@ engagement.
 | `github_connections` | P | Org-level owner connections: `id` (`slugify(owner)`), `owner` (unique) → `pat_id`, `is_default`, `repos_count`, `expires_at`, `created_at`, `updated_at`. |
 | `project_github_credentials` | P | Which PAT a project uses (one per project): `project_slug` → `pat_id`, `created_at`, `updated_at`. |
 | `scope_violations` | P | PAT scope violations per project (and optional task): `id`, `project_slug`, `task_key`, `scope`, `detail`, `status` (`open \| resolved`), `created_at`, `resolved_at`, `resolved_by`; at most one open row per (`project_slug`, `scope`, `task_key`). |
+| `agent_os_users` | P | Ruling 460: `user_id` (primary key), `os_uid` (UNIQUE), `created_at` — the OS user a person's agent processes run as, allocated once by `agentUidFor` as one more than the highest ever allocated (20001 for the first) and never deleted: deliberately no foreign key to `users`, because a removed account's transcripts stay on disk owned by its uid, and a uid handed to a second person would own them. |
 | `user_backend_credentials` | P | Ruling 127: one row per (`user_id`, `backend`) recording how that person connected Claude or Codex: `id`, `kind` (`login \| api_key \| access_token`), `method`, `secret_box`, `secret_suffix`, `detail_json`, `verified_at`, `created_at`, `updated_at`. `kind = 'login'` carries NO secret (the vendor binary holds it in `runtimes/users/<id>/…`), only `method` (`claudeai \| console \| device`) and the non-secret `detail_json` the vendor reported; `api_key` / `access_token` carry a sealed `secret_box` + `secret_suffix`. `verified_at` is the last time the provider itself accepted the value (null on a ChatGPT workspace token, which has no free probe). Connecting a new method REPLACES the row. |
 | `project_github_health` | P | The LAST repository-access probe per project: `project_slug`, `result_json`, `checked_at`, one row overwritten in place. An app-owned OBSERVATION, not a projection (a rebuild must not clear it), so the board and the home card can say a repository is unreachable without calling GitHub on a render path (U33-2). Written by project creation's own probe and the GitHub page's cached probe; deleted with the project. |
 
@@ -310,7 +324,8 @@ second adds each missing `BASELINE_COLUMNS` entry with `ALTER TABLE … ADD COLU
 - `projects`: `required_reviewers_json`;
 - `task_projections`: `recommendation_kinds`.
 
-It also creates the `BASELINE_TABLES` (`project_github_health`, `user_backend_credentials`) and
+It also creates the `BASELINE_TABLES` (`project_github_health`, `user_backend_credentials`,
+`agent_os_users`) and
 `BASELINE_INDEXES` (`idx_controller_conversations__scope`, `idx_audit_events__task_action`,
 `idx_provenance__path_action`) with `IF NOT EXISTS`. A CHECK
 cannot be added by ALTER, so an upgraded root lacks the CHECKs on the added columns and the

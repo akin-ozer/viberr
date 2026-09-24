@@ -1,5 +1,8 @@
+import { chmodSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
+import { AGENT_UID_FLOOR, resetAgentIsolationForTests } from "./agent-isolation.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { closeDb, shutdownDatabase } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
@@ -616,6 +619,87 @@ describe("ruling 185: no Codex run is refused for a sandbox", () => {
     // And the spec the adapter got carries the withheld grant, which is what
     // the prompt and the delivery gate read (the advisory posture).
     expect(lastRunSpec()?.repoWriteWithheld).toBe(true);
+  });
+});
+
+/**
+ * Ruling 460: when this server launches agents, every run executes as its
+ * credential principal's own OS user — decided in `startRun`, the one funnel —
+ * and a launch that cannot be prepared refuses the run; it never quietly runs
+ * as the server's user.
+ */
+describe("ruling 460: a run executes as its principal's own OS user", () => {
+  afterEach(() => resetAgentIsolationForTests());
+
+  function launcherScript(body: string): string {
+    const file = path.join(ctx.makeTempDir("viberr-launcher-"), "viberr-launch");
+    writeFileSync(file, `#!/bin/sh\n${body}\n`);
+    chmodSync(file, 0o755);
+    return file;
+  }
+
+  const input = () => ({
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    role: "Primary specialist",
+    kind: "primary" as const,
+    backend: "claude" as const,
+    model: "claude-sonnet-4-5",
+    prompt: "go",
+    dataRoot: store.dataRoot,
+  });
+
+  it("carries the principal's agent uid, the launcher and their own $HOME on the spec", async () => {
+    const launcher = launcherScript("exit 0");
+    resetAgentIsolationForTests(
+      { status: "on", uidFloor: AGENT_UID_FLOOR, reason: null },
+      { launcher },
+    );
+    queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
+    const { runId } = await startTestRun(store.db, input());
+    await settle();
+    expect(getRun(store.db, runId)!.state).toBe("finished");
+    const userRoot = path.join(store.dataRoot, "runtimes", "users", store.users.arda.id);
+    const spec = lastRunSpec();
+    expect(spec?.agent).toEqual({
+      uid: AGENT_UID_FLOOR,
+      launcher,
+      launchHome: path.join(userRoot, "claude-home"),
+      home: path.join(userRoot, "home"),
+    });
+    expect(spec?.env?.HOME).toBe(path.join(userRoot, "home"));
+    expect(spec?.env?.CLAUDE_CONFIG_DIR).toBe(path.join(userRoot, "claude-home"));
+  });
+
+  it("refuses the run, naming the launch, when the principal's home cannot be handed over", async () => {
+    const launcher = launcherScript(
+      "echo 'viberr-launch: a directory on the path belongs to someone else' >&2; exit 126",
+    );
+    resetAgentIsolationForTests(
+      { status: "on", uidFloor: AGENT_UID_FLOOR, reason: null },
+      { launcher },
+    );
+    const result = await startTestRun(store.db, input());
+    await settle();
+    expect(result.outcome).toBe("refused");
+    expect(result.refusal).toMatch(/as its person's own user \(ruling 460\)/);
+    expect(result.refusal).toMatch(/belongs to someone else/);
+    expect(result.refusal).toMatch(/nothing falls back to the server's own user/);
+    // No process: the adapter never saw a spec.
+    expect(lastRunSpec()).toBeUndefined();
+    const run = getRun(store.db, result.runId)!;
+    expect(run.state).toBe("error");
+    const tags = listRunLines(store.db, result.runId).map((line) => line.display.tag);
+    expect(tags).toContain("run·unavailable");
+  });
+
+  it("launches nothing on a host with no launcher: the spec carries no agent", async () => {
+    resetAgentIsolationForTests(null, { launcher: path.join(ctx.makeTempDir(), "absent") });
+    queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
+    await startTestRun(store.db, input());
+    await settle();
+    expect(lastRunSpec()?.agent).toBeUndefined();
+    expect(lastRunSpec()?.env?.HOME).toBeUndefined();
   });
 });
 

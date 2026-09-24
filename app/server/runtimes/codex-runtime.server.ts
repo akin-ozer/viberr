@@ -50,10 +50,13 @@ import {
 } from "./run-processes.server";
 import { codexCompactionConfig } from "./context-policy.server";
 import {
+  codexVendor,
   compactCodexThread,
+  withPathDirs,
   type SpawnAppServer,
   type ThreadResumeConfig,
 } from "./codex-app-server.server";
+import { launchEnv, prepareAgentPath, type AgentLaunch } from "./agent-isolation.server";
 import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server";
 import { toError } from "~/shared/errors";
 
@@ -727,6 +730,16 @@ const fatalEventMessageSchema = z
   })
   .catch({});
 
+/**
+ * Ruling 460: what hands a path in the principal's home to their uid (the
+ * launcher's `--prepare-home`) — the run home the server just forked, the
+ * sign-in it wrote back. None when the run is not launched.
+ */
+function agentOwner(agent: AgentLaunch | undefined): ((target: string) => void) | undefined {
+  if (!agent) return undefined;
+  return (target) => prepareAgentPath(agent.uid, target, agent.launcher);
+}
+
 let cachedFactory: CodexFactory | null = null;
 async function realFactory(): Promise<CodexFactory> {
   if (cachedFactory) return cachedFactory;
@@ -774,6 +787,8 @@ export function createCodexAdapter(
       if (spec.model) input.model = spec.model;
       if (env) input.env = env;
       if (deps.spawnAppServer) input.spawn = deps.spawnAppServer;
+      // Ruling 460: as the person's own OS user, like the run it compacts.
+      if (spec.agent) input.launch = spec.agent;
       const outcome = await compactCodexThread(input);
       if (!outcome.compacted) {
         const occurredAt = new Date().toISOString();
@@ -922,7 +937,7 @@ export function createCodexAdapter(
         // run it starts forks its own home from the shared file, which must
         // already hold this run's refresh. Never throws.
         if (runHome) {
-          finishCodexRunHome(runHome);
+          finishCodexRunHome(runHome, agentOwner(spec.agent));
           runHome = null;
         }
         cb.onExit({
@@ -1036,13 +1051,27 @@ export function createCodexAdapter(
         // merged env, whose process.env fallback could carry an ambient home.
         const sharedHome = spec.env?.CODEX_HOME;
         if (mergedEnv && sharedHome) {
-          runHome = prepareCodexRunHome(sharedHome, spec.runId);
+          runHome = prepareCodexRunHome(sharedHome, spec.runId, agentOwner(spec.agent));
           mergedEnv.CODEX_HOME = runHome.dir;
           mergedEnv.CODEX_SQLITE_HOME = runHome.sharedHome;
         }
         const config = codexConfigForRun(spec, deps.config);
         const codexOptions: CodexOptions = { config };
         if (mergedEnv) codexOptions.env = mergedEnv;
+        // Ruling 460: the SDK spawns `codexPathOverride` with the argv it
+        // builds, so the launcher stands in for the CLI and execs the SDK's own
+        // vendored binary (`VIBERR_LAUNCH_EXEC`) as the principal's uid. The
+        // SDK prepends its helper directories to PATH only when it resolves
+        // the binary itself, so an override carries them here.
+        if (spec.agent && mergedEnv) {
+          const vendor = codexVendor();
+          codexOptions.codexPathOverride = spec.agent.launcher;
+          codexOptions.env = launchEnv(
+            spec.agent,
+            vendor.binary,
+            withPathDirs(mergedEnv, vendor.pathDirs),
+          );
+        }
         const codex = factory(codexOptions);
         // Ruling 185: no OS confinement from Viberr. Every Codex run starts
         // `danger-full-access` — the mode that installs neither bubblewrap nor
