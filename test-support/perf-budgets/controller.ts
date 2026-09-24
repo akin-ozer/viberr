@@ -14,7 +14,7 @@ export const CONTROLLER_BUDGETS: PerfBudgetTable = {
     unit: "count",
     journey: "fresh-load",
     fixture:
-      "app/features/controller/controller-dock.tsx: app modules plus npm packages reached through static, value-carrying imports (type-only imports and import() excluded), walked from source",
+      "app/features/controller/controller-dock.tsx: client modules plus npm packages reached through static imports (`import type` statements, import() and server modules excluded), walked from source by test-support/static-imports.ts",
   },
   // RF-8: the root-owned unseen fetcher reloaded on every pathname change (1).
   // Navigation changes nothing it shows; the dock reloads it on its own moments.

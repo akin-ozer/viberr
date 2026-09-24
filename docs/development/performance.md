@@ -106,7 +106,7 @@ The harnesses, one home each:
 | `test-support/revalidation-harness.tsx` | loaders re-run per trigger, with single fetch's choice of routes and the real SSE broker in-process |
 | `test-support/console-fixture.ts` | a big task: 870 console lines over three agent groups |
 | `test-support/controller-dock-stub.tsx` | the dock's routed stub: requests per navigation, view loads per send |
-| `test-support/static-imports.ts` | whether a route statically reaches a package (no build needed) |
+| `test-support/static-imports.ts` | a module's static client closure, and so whether a route reaches a package (no build needed) |
 | `test-support/css-rules.ts` | the one `app.css` parser, for CSS budgets (infinite loops on the main thread, scrollers without a gutter) |
 
 ## 5. What the first pass measured
