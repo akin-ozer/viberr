@@ -217,7 +217,26 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   background warm-up; reserved names refused). A server with a stored credential is
   reached by every run through Viberr's loopback MCP gateway, so the credential never
   enters an agent process (ruling 461); its row reads "auth: configured (held by Viberr;
-  runs connect through its gateway)". The MCP editor's "Write tools" section (ruling 176) marks the
+  runs connect through its gateway)". An HTTP server can instead be **signed in with
+  OAuth** (ruling 469): its editor's "OAuth sign-in" section, beside the credential
+  field, offers **Sign in** (`mcp-oauth-start`), which discovers the server's
+  protected-resource and authorization-server metadata, registers Viberr dynamically
+  with the redirect URI `<origin>/resources/mcp-oauth/callback` (the origin of
+  `BETTER_AUTH_URL`, else of the request) and hands back the authorization URL; the
+  editor shows it as a link that opens in a new tab ("Continue at <host>"). The admin
+  approves Viberr on the server's own page, the callback (org admin, the same session
+  that started it, the `state` spent once) exchanges the code with the PKCE verifier,
+  seals the tokens beside the row and says the tab can be closed; this page updates on
+  the resource event. A sign-in replaces a pasted credential (a connection holds one),
+  a pasted one over a live sign-in is refused, and changing the endpoint drops the
+  sign-in. The row and the editor read "needs sign-in" (the server answered the MCP
+  authorization challenge and holds no token), "auth: OAuth, signed in (expires in …,
+  renews itself)" or "sign-in expired: an admin must sign in again" with the server's
+  reason; **Sign out** (`mcp-oauth-sign-out`) revokes the tokens at the server when it
+  offers revocation and drops them. Audited as `org.mcp.oauth_connected` {name, issuer,
+  scope, expiresAt, renews, replacedStaticCredential}, `org.mcp.oauth_failed` {name,
+  stage, reason} and `org.mcp.oauth_signed_out` {name, revocation, reason}; no token,
+  code or client secret is in any of them. The MCP editor's "Write tools" section (ruling 176) marks the
   tools that a run withholding repo write, and every operator run, does not get: the
   probe's tool names are offered, the write-looking ones pre-selected until the server
   is first reviewed, a name can be typed, and each change is audited as

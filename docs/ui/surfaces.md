@@ -51,6 +51,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/resources/controller` | `resources.controller.ts` | user; a project or task scope the viewer cannot reach answers an empty `unavailable` view (GET) or `{ ok:false }` (POST), never a thrown response, because it feeds a root-owned fetcher | the controller dock's view for the scope the person is standing in (ruling 121); `?seen=1` marks the shown transcript read (ruling 448) | `send` (`text`, `conversationId`, `project`, `task`, `surface`, `timeZone`) |
 | `/resources/notifications` | `resources.notifications.ts` | user | the bell popover's list: the viewer's newest `BELL_LIST_CAP` (100) notifications. Pages carry only the bell's counts (`bellCounts`); the bell loads this when the pointer or focus reaches it and on open, and again once the page has re-read the counts since (at once while open). It answers `shouldRevalidate` false; a signed-out request gets a 401, never a login redirect, and its `clientLoader` turns any failed load into the bell's failure row (ruling 457) | |
 | `/resources/controller-unseen` | `resources.controller-unseen.ts` | user | the dock's status: the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448); and the viewer's turns working right now, with scope, phase and step (ruling 457). Like `/resources/controller`, it answers `shouldRevalidate` false: the dock loads it itself | |
+| `/resources/mcp-oauth/callback` | `resources.mcp-oauth.callback.ts` | org admin (a signed-out admin goes through `/login` and back with the query) | where an MCP server's authorization server sends the browser after an OAuth sign-in started in Instance settings (ruling 469): spends the `state` once (bound to the session that started it), exchanges the code with the PKCE verifier, seals the tokens, probes the connection, and answers a plain page (`MCP sign-in`, no-store, no referrer, no token, code or state in it) that says the tab can be closed; a refused callback is a 400 page with the reason | |
 | `/resources/backend-login` | `resources.backend-login.ts` | user | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts; an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
 | `/resources/session-export` | `resources.session-export.ts` | member / conversation owner | `?run=<id>`: resume-script download | |
 
@@ -272,10 +273,21 @@ connections (`connection-add`, `connection-replace`, `connection-default`,
 `user-enable`, `user-remove`, `user-reset-password`), sign-in (`oauth-save`,
 `oauth-test`, `oauth-toggle`, `oauth-remove`), resources (`kb-save`, `kb-reindex`,
 `kb-delete`, `skill-save`, `skill-delete`, `mcp-save`, `mcp-test`, `mcp-delete`,
-`store-mkdir`, `store-upload`, `store-read-doc`, `store-write-doc`, `store-delete`,
-`store-import-github`), agent templates (`agent-save`, `agent-delete`), controller
-(`controller-save`), runtime (`set-concurrency`, `set-run-spend-cap`, ruling 175),
-audit (`audit-export-s3`, `s3-config-save`, `s3-config-clear`). That is 41 intents.
+`mcp-oauth-start`, `mcp-oauth-sign-out`, `store-mkdir`, `store-upload`,
+`store-read-doc`, `store-write-doc`, `store-delete`, `store-import-github`), agent
+templates (`agent-save`, `agent-delete`), controller (`controller-save`), runtime
+(`set-concurrency`, `set-run-spend-cap`, ruling 175), audit (`audit-export-s3`,
+`s3-config-save`, `s3-config-clear`). That is 43 intents.
+`mcp-oauth-start` (ruling 469) answers `{ ok, authorizeUrl, issuer }`: the MCP editor's
+"OAuth sign-in" section, shown for a saved HTTP server, renders the URL as a link to a
+new tab ("Continue at <host>", so no popup blocker intervenes) and its status line
+reads "Needs sign-in", "Signed in (expires in 52 minutes, renews itself) · <host>" or
+"Sign-in expired: an admin must sign in again" with the server's reason; while signed
+in, the pasted-credential field is replaced by a sentence saying none is used, and
+editing the endpoint warns that saving drops the sign-in. `mcp-oauth-sign-out` revokes
+and drops the tokens. The row says the same without a click: "needs sign-in · checked
+…" on a red dot instead of "unreachable", or "auth: OAuth, signed in (…); held by
+Viberr, runs connect through its gateway".
 `mcp-save` carries the MCP editor's `writeTools`, a JSON array of tool names (ruling 176):
 absent keeps the stored marks, a malformed list or a name outside the MCP alphabet is
 refused. The editor's "Write tools" section lists the probe's tool names as chips and
@@ -309,7 +321,8 @@ the project settings page), `Store strip`, `New project modal`, `Board`, `Empty 
 `Attachment lightbox`, `Command palette`, `Notifications`, `Notifications popover`,
 `Profile & preferences`, `Change password dialog`, `Instance settings`,
 `Settings · Users & access`, `Settings · GitHub connections`, `Settings · Sign-in &
-SSO`, `Settings · Agent resources`, `Controller settings`, `Audit log`, `Controller
+SSO`, `Settings · Agent resources`, `MCP sign-in` (the OAuth callback's page, ruling
+469), `Controller settings`, `Audit log`, `Controller
 dock` (the panel, ruling 121), `Insights`, `Capability matrix modal`, `Agent profile
 modal`, `S3 export target dialog` and `Add member dialog` (both ruling 148(b)), `Delete
 project dialog` (ruling 458(l)), `Rebuild projections dialog` (Home's hand-written confirm,

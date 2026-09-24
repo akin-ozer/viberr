@@ -207,6 +207,7 @@ gone or replaced. Everything else is best-effort and logged.
 | Disk-pressure check | 5 min (`VIBERR_DISK_CHECK_INTERVAL_SECONDS`); extra pass at most every 30 min | `ops/maintenance.server.ts` |
 | MCP warm-up | detached, ≤ 15 min per first install | `org/mcp-warmup.server.ts` |
 | MCP gateway (ruling 461) | listener on `127.0.0.1` for the process lifetime; one token per live run that mounts a credentialed server, one upstream per (run, server) | `mcp-proxy/gateway.server.ts` |
+| MCP OAuth sign-ins in flight (ruling 469) | in memory, 10 min each, spent by the first callback; a restart forgets them (the admin starts again) | `org/mcp-oauth.server.ts` |
 | Run idle watchdogs | 15 min per backend (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`, `VIBERR_CODEX_IDLE_TIMEOUT_MS`); Claude max 2000 turns (`VIBERR_CLAUDE_MAX_TURNS`) | `runtimes/*-runtime.server.ts` |
 | Action watchdog | 30 s, around project creation | `actions/action-watchdog.server.ts` |
 | Rate-limiter prune | on insert, ≥ 1 s apart, 10 000 keys | `auth/rate-limit.server.ts` |
