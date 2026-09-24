@@ -540,6 +540,63 @@ describe("an action still running (RV-4)", () => {
   });
 });
 
+describe("a slow action of the person's own (RV-6)", () => {
+  it("does not hold another member's change until it answers", async () => {
+    const action = gate();
+    const harness = await tab({ path: TASK_PAGE, taskActionGate: () => action.wait() });
+    action.close();
+    // A send that takes seconds (an upload, a GitHub sync).
+    await act(async () => sendComment());
+    await settle();
+    // Meanwhile another member moves this task.
+    taskUpdated();
+    await advance(1_000);
+    expect(harness.submitting()).toBe(1);
+    // CANARY: let the flush wait for a submission and nothing loads until the
+    // send answers (0 and 0).
+    expect(harness.calls["routes/project.task"]).toBe(1);
+    expect(harness.calls["routes/project"]).toBe(1);
+    // The send answers, and its own revalidation still brings its write
+    // (that load started before the write committed: RV-4).
+    await act(async () => action.open());
+    await settle();
+    await advance(1_000);
+    expect(harness.submitting()).toBe(0);
+    expect(harness.savedOnPage()).toBe(1);
+    expect(harness.calls["routes/project.task"]).toBe(2);
+  });
+
+  it("still skips the echo of an action that answers inside the flush's 300 ms", async () => {
+    const task = gate();
+    const harness = await tab({
+      path: TASK_PAGE,
+      gate: { "routes/project.task": task.wait },
+      // The write publishes as it commits, and the answer follows 200 ms later.
+      taskActionGate: () => {
+        taskUpdated();
+        return new Promise((resolve) => setTimeout(resolve, 200));
+      },
+    });
+    task.close();
+    await act(async () => sendComment());
+    await settle();
+    // The send has answered; its revalidation is still in flight at the flush.
+    await advance(1_000);
+    expect(harness.submitting()).toBe(0);
+    await act(async () => task.open());
+    await settle();
+    await advance(1_000);
+    // CANARY: let the flush stop waiting for loads in flight too, and the echo
+    // reloads the layout and the task a second time.
+    expect(harness.calls).toEqual({
+      root: 0,
+      "routes/project": 1,
+      "routes/project.board": 0,
+      "routes/project.task": 1,
+    });
+  });
+});
+
 describe("the F22 net (RF-6)", () => {
   it("still revalidates a page showing an active run while its stream is down", async () => {
     const harness = await tab({ path: TASK_PAGE, activeRun: true });

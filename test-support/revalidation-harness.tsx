@@ -329,6 +329,8 @@ export interface Harness {
   resetCounts: () => void;
   /** The comments saved when the task page on screen read its data. */
   savedOnPage: () => number | undefined;
+  /** Fetchers still submitting (an action that has not answered). */
+  submitting: () => number;
 }
 
 type TaskData = Awaited<ReturnType<typeof taskLoader>>;
@@ -539,6 +541,8 @@ export function mountHarness(options: HarnessOptions): Harness {
       const task: TaskData | undefined = router.state.loaderData["routes/project.task"];
       return task?.saved;
     },
+    submitting: () =>
+      [...router.state.fetchers.values()].filter((f) => f.state === "submitting").length,
   };
 }
 

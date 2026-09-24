@@ -23,8 +23,9 @@ import { useLiveLedger } from "./revalidation-policy";
  * state is not the workspace shell's, a notification is not a task page's),
  * and it is not owed by a route whose data was requested after the event
  * arrived: the echo of the person's own action, published while the action
- * ran, is already in the action's own revalidation, so the flush finds
- * nothing to do. Bursts — a rescan projecting ten tasks, a mutation emitting
+ * ran, is already in the action's own revalidation once the action answered
+ * inside the 300 ms, so the flush finds nothing to do (it waits for a load in
+ * flight, not for a slow submission: ruling 454, RV-6). Bursts — a rescan projecting ten tasks, a mutation emitting
  * task + project + notification — still coalesce into one loader round-trip.
  * Stream events (one per console line) revalidate nothing: they go to the
  * tab's run-log consoles through `onLiveFrame`. Conversation events only

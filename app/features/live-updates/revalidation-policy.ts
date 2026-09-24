@@ -230,13 +230,17 @@ function loadsInFlight(state: RouterState): string[] {
   return keys;
 }
 
-/** A submission or a route load is in flight. */
+/**
+ * A route load is in flight, whose landing may cover what the live flush would
+ * load. Ruling 454 (RV-6): a submission still running is not one. The flush
+ * used to wait for those too, so another member's change reached the page only
+ * after the person's own slowest action answered (an upload, a GitHub sync),
+ * and a stalled request froze live updates in the tab. An action's echo is
+ * still skipped when the action answers inside the flush's 300 ms (a write
+ * publishes as it commits, then answers); a slower answer reloads once more.
+ */
 function busy(state: RouterState): boolean {
-  if (state.navigation.state !== "idle" || state.revalidation !== "idle") return true;
-  for (const fetcher of state.fetchers.values()) {
-    if (fetcher.state !== "idle" && isMutation(fetcher.formMethod)) return true;
-  }
-  return false;
+  return loadsInFlight(state).length > 0;
 }
 
 const RECENT_EVENTS = 256;
@@ -358,8 +362,8 @@ export class LiveLedger {
   /**
    * The live hook's debounced flush: one `revalidate()` if a route on screen
    * owes a live event, none when every event is already covered (the echo of
-   * one's own action). Waits for any load or submission in flight, whose
-   * landing may cover the events, and decides when the router is idle.
+   * one's own action). Waits for any load in flight, whose landing may cover
+   * the events, and decides when none is (a submission does not hold it: RV-6).
    */
   flushLive(): void {
     if (busy(this.router.state)) {

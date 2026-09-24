@@ -303,7 +303,9 @@ its write commits, so a load the browser sent after receiving the event was answ
 data that holds it. A route re-runs when it owes something it reads, when a navigation
 changed a param or search param its loader reads, or on a navigation to the URL already
 on screen. The flush revalidates once, and only if a route on screen still owes a live
-event, and it waits for a load in flight to land first. So:
+event, and it waits for a load in flight to land first, but not for a submission: another
+member's change reaches the page while the person's own slow action (an upload, a GitHub
+sync) still runs (ruling 454, RV-6). So:
 
 | Trigger | Re-runs |
 |---|---|
@@ -312,7 +314,7 @@ event, and it waits for a load in flight to land first. So:
 | `?c=` / `?all=` on a controller page | that controller page |
 | Any search param on Activity | Activity |
 | A navigation inside a project | the new page; the workspace layout only when the slug changed; never root |
-| A page's own action (comment, drop, transition) | the workspace layout and that page; the action's own SSE echo, received before that load was sent, then re-runs nothing |
+| A page's own action (comment, drop, transition) | the workspace layout and that page; the action's own SSE echo, received before that load was sent, then re-runs nothing (when the action answered inside the flush's 300 ms) |
 | The bell's mark-read | what draws the bell's counts or list: the shells, Home and the notifications page |
 | A theme change | root and the profile page |
 | Sign-in, sign-out, a profile change | everything |
