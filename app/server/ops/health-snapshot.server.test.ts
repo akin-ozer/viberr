@@ -37,14 +37,16 @@ describe("healthSnapshot and the quota principal", () => {
 });
 
 describe("healthSnapshot reports the toolchain (ruling 182)", () => {
-  it("appends the toolchain reading LAST — key order is the wire contract — versions only", () => {
+  it("appends the toolchain reading after everything before it — key order is the wire contract — versions only", () => {
     // G36-4: nothing probed whether a sandboxed Codex run could exec at all,
     // so bubblewrap's refusal surfaced as a reviewer's "missing evidence"
     // verdict. The reading rides the health body and, through the spread,
-    // `instance_health`. Canary: drop `toolchain` from the snapshot.
+    // `instance_health`. Canary: drop `toolchain` from the snapshot. It was
+    // the last key until ruling 460 appended `agentIsolation` behind it, as
+    // the contract says a new field must be.
     const store = setupTestStore(ctx);
     const snapshot = healthSnapshot(store.db);
-    expect(Object.keys(snapshot).at(-1)).toBe("toolchain");
+    expect(Object.keys(snapshot).slice(-2)).toEqual(["toolchain", "agentIsolation"]);
     // The one memoized reading (`cachedToolchain`), never a second probe: the
     // suite primes it hermetic in setup-env, and that is what comes back.
     expect(snapshot.toolchain).toEqual(HERMETIC_TOOLCHAIN);
