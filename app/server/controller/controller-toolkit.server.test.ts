@@ -4162,6 +4162,67 @@ describe("ruling 188: the controller reads what the human surfaces render", () =
 });
 
 /**
+ * Ruling 469: the controller reads where an OAuth connection's sign-in stands
+ * and never a token, and it is told signing in is an org admin's act in
+ * Instance settings, which it cannot perform.
+ */
+describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", () => {
+  it("save_mcp_server says the admin signs the server in; list_mcp_servers reports the sign-in without a token", async () => {
+    const { startOAuthMcpServer, signInWithOAuth } = await import("../../../test-support/mcp-oauth-server");
+    const { resetMcpOAuthForTests } = await import("~/server/org/mcp-oauth.server");
+    const oauth = await startOAuthMcpServer();
+    try {
+      const reply = await call(ids.orgAdminOutsider, "save_mcp_server", {
+        name: "oauth-probe",
+        transport: "HTTP",
+        target: oauth.url,
+        writeTools: [],
+      });
+      expect(reply).toContain("needs sign-in: this server asks for an OAuth sign-in");
+      expect(reply).toContain(
+        "An org admin signs it in from its editor in Instance settings → Agent resources (Sign in); the controller cannot.",
+      );
+      expect(reply).not.toContain("the admin adds it in Instance settings");
+      // SAFETY: `list_mcp_servers` answers the JSON array of the row shape the
+      // toolkit maps; the row is asserted to exist below.
+      const listed = async () =>
+        (JSON.parse(await call(ids.orgAdminOutsider, "list_mcp_servers")) as {
+          id: string;
+          name: string;
+          signIn: { status: string; renews: boolean } | null;
+          signInNote: string | null;
+        }[]).find((m) => m.name === "oauth-probe")!;
+      expect((await listed()).signIn).toMatchObject({ status: "needs_sign_in" });
+
+      await signInWithOAuth(app.db, (await listed()).id);
+      const signedIn = await listed();
+      expect(signedIn.signIn).toMatchObject({ status: "signed_in", renews: true });
+      expect(signedIn.signInNote).toMatch(
+        /^Signed in \(expires in 60 minutes, renews itself\) with OAuth at 127\.0\.0\.1:\d+\. Viberr holds the tokens;/,
+      );
+      const text = await call(ids.orgAdminOutsider, "list_mcp_servers");
+      for (const secret of oauth.issuedSecrets()) expect(text).not.toContain(secret);
+    } finally {
+      resetMcpOAuthForTests();
+      await oauth.close();
+    }
+  });
+
+  it("save_mcp_server's description names the sign-in as the admin's", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    const save = toolkit.tools.find((t) => t.name === "save_mcp_server");
+    expect(save?.description).toContain("signed in by an org admin from its editor in Instance settings");
+    expect(save?.description).toContain("which you cannot do");
+  });
+});
+
+/**
  * Ruling 197 (F37-18, live): F33-7 put the GRANTS into `list_global_agents`
  * because "the model had no way to see what an edit was about to replace, and
  * the controller (rightly) refused to edit blind" — and left out the biggest

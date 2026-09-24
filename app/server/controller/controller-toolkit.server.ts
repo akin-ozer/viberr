@@ -83,6 +83,7 @@ import {
   type RequestableKind,
 } from "./controller-requests.server";
 import { CONTROLLER_SECTION_LABEL } from "~/shared/controller-locks";
+import { mcpSignInNote } from "~/shared/mcp-oauth";
 import {
   listKnowledgeBases,
   listMcpServers,
@@ -1033,7 +1034,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_mcp_servers",
-      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. Credentials are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
+      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. `signIn` is an HTTP server's OAuth sign-in (ruling 469): null when it is not an OAuth server, else `needs_sign_in` (runs do not mount it), `signed_in` (with `expiresAt` and whether it `renews`) or `expired` (with the reason); `signInNote` says it in words. Only an org admin signs a server in or out, in Instance settings → Agent resources; you cannot. Credentials and tokens are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
       {},
       run(() => {
         requireOrgAdmin("read the MCP connections");
@@ -1082,6 +1083,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // against. Found live on this instance.
             storePaths: m.storePaths,
             storeAccessNote: mcpStoreAccessNote(m.storePaths),
+            // Ruling 469: the public half of an OAuth sign-in, never a token.
+            signIn: m.oauth
+              ? {
+                  status: m.oauth.status,
+                  expiresAt: m.oauth.expiresAt,
+                  renews: m.oauth.renews,
+                  issuer: m.oauth.issuer,
+                  reason: m.oauth.reason,
+                }
+              : null,
+            signInNote: mcpSignInNote(m.oauth),
           })),
         );
       }),
@@ -1092,7 +1104,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_mcp_server",
-      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. Credentials do NOT travel through chat: tell the admin to add the secret in Instance settings → Agent resources, then test the server. `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
+      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. Credentials do NOT travel through chat: tell the admin to add the secret in Instance settings → Agent resources, then test the server. An HTTP server that asks for an OAuth sign-in (the reply says so) is signed in by an org admin from its editor in Instance settings → Agent resources (Sign in), which you cannot do: tell the admin, and until then runs do not mount it (ruling 469). `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
       {
         id: z.string().optional().describe("Existing server id to update; omit to create."),
         name: z.string(),
@@ -1150,8 +1162,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 ? `NOTHING is withheld: no tool on this server is marked, so every tool it exposes — including the ones that write — reaches every run that mounts it. From the names the probe listed, these look like write tools: ${suggestion.join(", ")}. Call save_mcp_server again with \`writeTools\` to mark them (or an explicit [] to record that none should be), then say which you chose. `
                 : "Nothing is marked as a write tool, so nothing is withheld. The probe listed no tool whose name looks like a write. ") +
             (storeNote ? `${storeNote} ` : "") +
-            "If it needs a credential, the admin adds it in " +
-            "Instance settings → Agent resources (secrets never travel through this chat)."
+            // Ruling 469: a server that asked for an OAuth sign-in is the
+            // admin's to sign in; the reply says so rather than "add a secret".
+            (saved.mcp.oauth && saved.mcp.oauth.status !== "signed_in"
+              ? `${mcpSignInNote(saved.mcp.oauth)} `
+              : "If it needs a credential, the admin adds it in " +
+                "Instance settings → Agent resources (secrets never travel through this chat).")
           );
         },
       ),

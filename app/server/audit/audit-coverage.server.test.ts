@@ -54,6 +54,8 @@ import {
 import { sealSecret } from "~/server/secrets/secret-box.server";
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { startHttpUpstream } from "../../../test-support/mcp-upstream";
+import { signInWithOAuth, startOAuthMcpServer } from "../../../test-support/mcp-oauth-server";
+import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   installFakeRuntime,
@@ -997,6 +999,37 @@ describe("governed actions record audit rows (table-driven)", () => {
           );
         },
       },
+      // Ruling 469: an MCP connection's OAuth sign-in, against the in-test
+      // authorization server. Instance-wide: the registry is org-level.
+      ...(["org.mcp.oauth_connected", "org.mcp.oauth_failed", "org.mcp.oauth_signed_out"] as const).map(
+        (action): CoverageRow => ({
+          name: `MCP OAuth sign-in (${action})`,
+          action,
+          instanceWide: true,
+          run: async () => {
+            const oauth = await startOAuthMcpServer(
+              action === "org.mcp.oauth_failed" ? { consent: "deny" } : {},
+            );
+            try {
+              const id = `mcp_${action.replace(/\W/g, "_")}`;
+              const now = new Date().toISOString();
+              store.db
+                .prepare(
+                  `INSERT INTO org_mcp_servers (id, name, transport, target, created_at, updated_at)
+                   VALUES (?, ?, 'HTTP', ?, ?, ?)`,
+                )
+                .run(id, id.replace(/_/g, "-"), oauth.url, now, now);
+              await signInWithOAuth(store.db, id);
+              if (action === "org.mcp.oauth_signed_out") {
+                await signOutMcpOAuth(store.db, id, actorArda());
+              }
+            } finally {
+              resetMcpOAuthForTests();
+              await oauth.close();
+            }
+          },
+        }),
+      ),
     ];
 
     for (const row of table) {
@@ -1031,6 +1064,10 @@ describe("governed actions record audit rows (table-driven)", () => {
         "org.connection.rechecked",
         // Ruling 464: a deployment taken off a project's roster.
         "project.agent_profile.deleted",
+        // Ruling 469: an org MCP connection's OAuth sign-in.
+        "org.mcp.oauth_connected",
+        "org.mcp.oauth_failed",
+        "org.mcp.oauth_signed_out",
       ].includes(row.action);
       if (!taskless) {
         expect(

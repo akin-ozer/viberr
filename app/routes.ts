@@ -73,6 +73,10 @@ export default [
   // lives on the server and the browser has no other way to see what the vendor
   // printed. Keyed by the session user; it reads nobody else's sign-in.
   route("resources/backend-login", "routes/resources.backend-login.ts"),
+  // Ruling 469: where an MCP server's authorization server sends an org
+  // admin's browser back after an OAuth sign-in started in Instance settings.
+  // A resource route: it seals the tokens and answers a plain page.
+  route("resources/mcp-oauth/callback", "routes/resources.mcp-oauth.callback.ts"),
 
   // R19-19: one task attachment (browser-produced screenshot/PDF). A resource
   // route OUTSIDE the workspace layout — it serves raw bytes, member-only.

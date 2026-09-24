@@ -466,6 +466,12 @@ const BASELINE_COLUMNS: readonly {
     columns: [
       { name: "tool_policy_json", ddl: "tool_policy_json TEXT" },
       { name: "tool_names_json", ddl: "tool_names_json TEXT" },
+      // Ruling 469: an OAuth sign-in, sealed and public halves. Every MCP read
+      // names `oauth_json` and the gateway and probes name `oauth_ref`. No
+      // backfill: NULL is the truth for every row that predates them (no
+      // connection was signed in with OAuth before they existed).
+      { name: "oauth_ref", ddl: "oauth_ref TEXT" },
+      { name: "oauth_json", ddl: "oauth_json TEXT" },
     ],
   },
   {

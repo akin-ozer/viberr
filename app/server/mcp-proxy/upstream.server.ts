@@ -1,4 +1,5 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { extractWWWAuthenticateParams } from "@modelcontextprotocol/sdk/client/auth.js";
 import { SSEClientTransport, SseError } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
   StreamableHTTPClientTransport,
@@ -59,9 +60,39 @@ export type McpFetch = (url: string | URL, init?: RequestInit) => Promise<Respon
 export interface UpstreamHttpOptions {
   /** The decrypted org credential, sent as `Authorization: Bearer <token>`. */
   token?: string | null;
+  /** Ruling 469: an OAuth sign-in's access token, asked for on every request
+   *  (so a sign-out or a refresh elsewhere takes effect on the next one) and
+   *  renewed once on a 401. Takes the place of `token`. */
+  auth?: UpstreamTokenSource;
   fetchImpl?: McpFetch;
   timeoutMs?: number;
 }
+
+/**
+ * Ruling 469: where an OAuth-signed-in connection's access token comes from.
+ * The registry implements it (`org/mcp-oauth.server.ts`); this module only
+ * attaches what it hands over, in the server process, like a static
+ * credential. Each method throws an `UpstreamConnectError` whose reason is the
+ * sentence the run, the probe and the Settings row then read.
+ */
+export interface UpstreamTokenSource {
+  /** The access token to send now, refreshed first when it has run out. */
+  accessToken(): Promise<string>;
+  /** The server answered `rejected` with a 401: the token to retry with, once. */
+  renewAfterRefusal(rejected: string): Promise<string>;
+  /** The renewed token was refused as well: record it, and return the error
+   *  the request fails with. */
+  refusedAfterRenewal(): Promise<UpstreamConnectError>;
+}
+
+/** Ruling 469: what a server with no credential says when it asks for an
+ *  OAuth sign-in (the MCP authorization spec's 401 challenge). */
+export const OAUTH_NEEDS_SIGN_IN =
+  "needs sign-in: this server asks for an OAuth sign-in, which an org admin does from its editor in Instance settings → Agent resources";
+
+/** Ruling 469: what a sign-in that can no longer be renewed says. */
+export const OAUTH_SIGN_IN_EXPIRED =
+  "sign-in expired: an admin must sign in again (Instance settings → Agent resources)";
 
 /** What both SDK HTTP client transports take from Viberr. */
 interface HttpTransportOptions {
@@ -82,6 +113,20 @@ export class UpstreamConnectError extends Error {
     super(reason, options);
     this.name = "UpstreamConnectError";
     this.reason = reason;
+  }
+}
+
+/**
+ * Ruling 469: a server with no credential answered the MCP authorization
+ * challenge, a 401 carrying `resource_metadata`. The probe records it, so the
+ * row reads "needs sign-in" and the sign-in knows where the metadata is.
+ */
+export class UpstreamSignInNeeded extends UpstreamConnectError {
+  readonly resourceMetadataUrl: string;
+  constructor(resourceMetadataUrl: string, options?: { cause?: unknown }) {
+    super(OAUTH_NEEDS_SIGN_IN, options);
+    this.name = "UpstreamSignInNeeded";
+    this.resourceMetadataUrl = resourceMetadataUrl;
   }
 }
 
@@ -181,10 +226,35 @@ function fallsBackToSse(cause: unknown): boolean {
 }
 
 /**
+ * Ruling 469: every request carries the sign-in's current access token; a 401
+ * renews it and retries once (a request body is a string, so it replays), and
+ * a second 401 ends the sign-in rather than looping.
+ */
+function bearerFetch(source: UpstreamTokenSource, base: McpFetch): McpFetch {
+  return async (url, init) => {
+    const send = (token: string) => {
+      const headers = new Headers(init?.headers);
+      headers.set("Authorization", `Bearer ${token}`);
+      return base(url, { ...init, headers });
+    };
+    const first = await source.accessToken();
+    const answer = await send(first);
+    if (answer.status !== 401) return answer;
+    await answer.body?.cancel().catch(() => undefined);
+    const renewed = await source.renewAfterRefusal(first);
+    const retry = await send(renewed);
+    if (retry.status !== 401) return retry;
+    await retry.body?.cancel().catch(() => undefined);
+    throw await source.refusedAfterRenewal();
+  };
+}
+
+/**
  * Connect to a remote MCP server: Streamable HTTP first, the legacy SSE
  * transport when the server answers the way an SSE-only server does. The
  * credential rides both as `Authorization: Bearer <token>` — attached here,
- * in the server process, and nowhere else (ruling 461).
+ * in the server process, and nowhere else (ruling 461). An OAuth sign-in's
+ * token rides the same way, through `auth` (ruling 469).
  */
 export async function connectHttpUpstream(
   target: string,
@@ -201,10 +271,29 @@ export async function connectHttpUpstream(
   }
   const timeoutMs = options.timeoutMs ?? UPSTREAM_CONNECT_TIMEOUT_MS;
   const transportOptions: HttpTransportOptions = {};
-  if (options.token) {
+  const base: McpFetch = options.fetchImpl ?? fetch;
+  // Ruling 469: with no credential at all, a 401 may be the MCP authorization
+  // challenge; its `resource_metadata` is kept to report "needs sign-in". A
+  // static credential's 401 stays "authentication rejected", as before.
+  let challenge: string | null = null;
+  if (options.auth) {
+    transportOptions.fetch = bearerFetch(options.auth, base);
+  } else if (options.token) {
     transportOptions.requestInit = { headers: { Authorization: `Bearer ${options.token}` } };
+    if (options.fetchImpl) transportOptions.fetch = options.fetchImpl;
+  } else {
+    transportOptions.fetch = async (input, init) => {
+      const res = await base(input, init);
+      if (res.status === 401) {
+        challenge = extractWWWAuthenticateParams(res).resourceMetadataUrl?.toString() ?? challenge;
+      }
+      return res;
+    };
   }
-  if (options.fetchImpl) transportOptions.fetch = options.fetchImpl;
+  const failure = (cause: unknown): UpstreamConnectError =>
+    challenge !== null && httpStatusOf(cause) === 401
+      ? new UpstreamSignInNeeded(challenge, { cause })
+      : new UpstreamConnectError(upstreamFailureReason(cause), { cause });
 
   const streamable = newUpstreamClient();
   try {
@@ -215,9 +304,7 @@ export async function connectHttpUpstream(
     );
     return { client: streamable, transport: "streamable-http" };
   } catch (primary) {
-    if (!fallsBackToSse(primary)) {
-      throw new UpstreamConnectError(upstreamFailureReason(primary), { cause: primary });
-    }
+    if (!fallsBackToSse(primary)) throw failure(primary);
     const sse = newUpstreamClient();
     try {
       await connectWithin(sse, new SSEClientTransport(url, transportOptions), timeoutMs);
@@ -226,7 +313,7 @@ export async function connectHttpUpstream(
       // The Streamable HTTP answer is the one worth reporting: the SSE attempt
       // is the compatibility retry, and its failure says only that the server
       // is not a legacy one either.
-      throw new UpstreamConnectError(upstreamFailureReason(primary), { cause: primary });
+      throw failure(primary);
     }
   }
 }

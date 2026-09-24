@@ -38,7 +38,8 @@ const TOOLS = [
   { name: "fail", description: "Answers with an error", inputSchema: { type: "object" as const } },
 ];
 
-function fixtureServer(calls: string[]): Server {
+/** The fixture MCP server every stand-in serves (ruling 469's OAuth server too). */
+export function fixtureServer(calls: string[]): Server {
   const server = new Server(
     { name: "fixture-upstream", version: "1.0.0" },
     { capabilities: { tools: {} }, instructions: "fixture instructions" },
@@ -63,7 +64,8 @@ function refuse(res: ServerResponse): void {
   res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "unauthorized" }, id: null }));
 }
 
-async function listen(
+/** An HTTP listener on 127.0.0.1 with a free port, closed with every socket. */
+export async function listen(
   handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>,
 ): Promise<{ port: number; close(): Promise<void> }> {
   const http = createServer((req, res) => {

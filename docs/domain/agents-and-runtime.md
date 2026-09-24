@@ -1475,7 +1475,8 @@ runtime's answer for a missing grant.
   grants differ with the exact difference (`templateDrift`).
 - **MCP servers**: an org registry row with no credential resolves to stdio
   `{command, args}` or http `{type: "http", url}` and the CLI connects to it directly. A
-  row WITH a stored credential never reaches an agent process (ruling 461, F40-2, F40-3):
+  row WITH a stored credential (a pasted one, or an OAuth sign-in's tokens, ruling 469)
+  never reaches an agent process (ruling 461, F40-2, F40-3):
   it resolves, on either transport and on both backends, to `{type: "http", url:
   "http://127.0.0.1:<port>/mcp/<name>"}` on Viberr's loopback MCP gateway
   (`app/server/mcp-proxy/gateway.server.ts`), and `startRun` — the one funnel every
@@ -1493,7 +1494,20 @@ runtime's answer for a missing grant.
   `Authorization: Bearer <credential>`, falling back to the legacy SSE transport on a
   4xx other than 401/403; a stdio server is a command the SERVER spawns (its own uid, the
   secret-filtered env plus `MCP_CREDENTIAL`, a process group of its own), one upstream
-  per (run, server), killed at revoke. It forwards `tools/list` (withheld write tools
+  per (run, server), killed at revoke. An HTTP server an org admin **signed in with
+  OAuth** (ruling 469) takes the same road: its tokens are sealed beside the registry row
+  (`oauth_ref`), and the gateway (and the health probe) ask
+  `mcpOAuthTokenSource` for the access token on every request — renewed with the refresh
+  token when it is within a minute of running out and once after an upstream 401
+  (single-flight per server, so two runs spend a rotating refresh token once), then
+  re-sealed. A renewal the authorization server refuses ends the sign-in: the tokens are
+  dropped, the row reads "sign-in expired: an admin must sign in again" with the
+  server's words, `org.mcp.oauth_failed` {stage: "refresh"} is audited, and the run's
+  call fails with that sentence; a renewal that fails for now (unreachable, a 5xx,
+  `temporarily_unavailable`) is reported and keeps the sign-in. A server that answers
+  the MCP authorization challenge and holds no token (or whose sign-in expired) is not
+  mounted at all: the run's prompt names it with that reason instead of a server that
+  answers every call 401. It forwards `tools/list` (withheld write tools
   removed), `tools/call` (a withheld one refused with `mcpWriteToolDenyReason`),
   resources and prompts when the upstream declares them, and `list_changed`
   notifications; a timeout (5 minutes a call, reset by progress) or an upstream error

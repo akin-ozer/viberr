@@ -106,6 +106,11 @@ import {
   type UploadFileInput,
 } from "~/server/org/store-files.server";
 import { errorMessage } from "~/shared/errors";
+import {
+  mcpOAuthRedirectUri,
+  signOutMcpOAuth,
+  startMcpOAuthSignIn,
+} from "~/server/org/mcp-oauth.server";
 
 /**
  * /org/settings — the instance-level admin surface (org-settings spec),
@@ -188,6 +193,10 @@ type SettingsOk = {
   truncated?: boolean;
   /** `store-import-github`: the store-relative folder the snapshot landed in. */
   folder?: string;
+  /** `mcp-oauth-start` (ruling 469): where the admin's browser signs in, and
+   *  the authorization server's host the editor names. */
+  authorizeUrl?: string;
+  issuer?: string;
 };
 
 /** The per-intent half of `SettingsOk` — what a case hands `ok()` beyond copy. */
@@ -661,6 +670,21 @@ export async function action({ request }: Route.ActionArgs) {
         deleteOAuthProvider(db, provider, actor);
         return ok(`${providerLabel(provider)} configuration removed.`);
       }
+      // ---- Ruling 469: an HTTP MCP connection's OAuth sign-in ----
+      case "mcp-oauth-start": {
+        const started = await startMcpOAuthSignIn(db, {
+          mcpId: field("mcpId"),
+          redirectUri: mcpOAuthRedirectUri(request),
+          userId: admin.id,
+          sessionId: ctx.sessionId,
+          actor,
+        });
+        const payload: SettingsOkPayload = { authorizeUrl: started.authorizationUrl };
+        if (started.issuer) payload.issuer = started.issuer;
+        return ok(undefined, payload);
+      }
+      case "mcp-oauth-sign-out":
+        return ok((await signOutMcpOAuth(db, field("mcpId"), actor)).toast);
       case "mcp-test":
         return ok((await testMcpServer(db, field("mcpId"))).toast);
       case "mcp-delete":
