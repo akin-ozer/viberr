@@ -140,6 +140,7 @@ import {
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
   unavailableMcpSection,
+  gatewayMcpSection,
   type UnresolvedMcpGrant,
 } from "./specialist-mcp.server";
 import {
@@ -287,6 +288,8 @@ interface RunMcpMounts {
   unhealthy: string[];
   /** Ruling 176: the mounted servers' marked write tools this run withholds. */
   toolDenials: McpToolDenial[];
+  /** Ruling 461: the mounted servers reached through Viberr's MCP gateway. */
+  proxied: string[];
 }
 
 /**
@@ -346,7 +349,6 @@ export function runDispatchLine(input: {
 async function mcpServersFor(
   db: DatabaseSync,
   names: string[],
-  backend: RealBackend,
   /** Ruling 176: the run withholds repo write, so marked write tools go. */
   withholdWriteTools: boolean,
 ): Promise<RunMcpMounts> {
@@ -358,7 +360,6 @@ async function mcpServersFor(
   const resolution = await verifyStdioMcpMountsForRun(
     db,
     resolveSpecialistMcpServersDetailed(db, names, { withholdWriteTools }),
-    { backend },
   );
   const { servers, unresolved } = resolution;
   const mounts: RunMcpMounts = {
@@ -367,6 +368,7 @@ async function mcpServersFor(
     unresolved: unresolved.filter((u) => !u.mounted),
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
     toolDenials: resolution.toolDenials,
+    proxied: resolution.proxied,
   };
   // Absent rather than empty: callers read the key's PRESENCE as "this run has
   // MCP mounts at all" before they build the prompt or the run spec.
@@ -1535,13 +1537,8 @@ async function dispatchAgentRun(
   // Ruling 176: the same denylist that withholds the file tools decides
   // whether the admin's marked MCP write tools go too — one predicate.
   const resolvedMcps: RunMcpMounts = realBackend
-    ? await mcpServersFor(
-        db,
-        mcpNames,
-        backend,
-        repoWriteWithheldFromDenylist(disallowedTools),
-      )
-    : { unresolved: [], unhealthy: [], toolDenials: [] };
+    ? await mcpServersFor(db, mcpNames, repoWriteWithheldFromDenylist(disallowedTools))
+    : { unresolved: [], unhealthy: [], toolDenials: [], proxied: [] };
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
@@ -1789,6 +1786,7 @@ async function dispatchAgentRun(
     unresolvedMcps: resolvedMcps.unresolved,
     unhealthyMcps: resolvedMcps.unhealthy,
     mcpWriteToolsDenied: resolvedMcps.toolDenials,
+    mcpProxied: resolvedMcps.proxied,
     // Ruling 159: the agent is handed the ABSOLUTE directory (inside the
     // container `/data/...` is real; on bare metal it is the data root's own
     // absolute path). The store-relative form is a display form for humans.
@@ -2729,6 +2727,9 @@ export interface SpecialistPersonaInput {
    *  withholds. Their tools are ENFORCED, so the governance paragraph below
    *  names only the servers without marks. */
   mcpWriteToolsDenied?: McpToolDenial[];
+  /** Ruling 461: the mounted org servers reached through Viberr's MCP gateway
+   *  (those with a stored credential), named in their own sentence. */
+  mcpProxied?: string[];
   /** R19-19: browser state — mounted (with the ABSOLUTE attachments dir for
    *  the guardrail text, ruling 159) or granted-but-refused (with the reason).
    *  The section renders only when the server actually mounted, so prompt and
@@ -2914,21 +2915,13 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
           "say so in your report.",
       );
     }
-    // F27-P2: an org MCP server's stored credential is honored on CLAUDE runs
-    // but NEVER forwarded to a Codex process (it would be visible in the process
-    // arguments — specialist-mcp BACKEND SCOPE / F7-MCP1). Admin surfaces disclose
-    // this, but the AGENT was told nothing — so a server that tolerates anonymous
-    // access degraded silently. State it where the agent reads, on Codex runs.
-    if (input.backend === "codex") {
-      parts.push(
-        "\n\n---\n# MCP credentials on this Codex run\n\n" +
-          "A stored credential for an attached org MCP server is NOT forwarded to " +
-          "a Codex process, so a server that normally authenticates is reached " +
-          "UNAUTHENTICATED here. If a tool returns an auth error, or fewer results " +
-          "than you expected, say so in your report rather than treating it as your " +
-          "own error — the same server would authenticate on a Claude run.",
-      );
-    }
+    // Ruling 461: a server with a stored credential is reached through
+    // Viberr's gateway on both backends, so the run is told who holds the
+    // credential and what a 401 means. (F27-P2's "MCP credentials on this
+    // Codex run" section, which told a Codex run it was unauthenticated, went
+    // with the limitation it described.)
+    const gateway = gatewayMcpSection(input.mcpProxied ?? []);
+    if (gateway) parts.push(gateway);
   }
   // F32-8 (pass 32): say when there are NONE. Live (VIB-1, VIB-2) a reviewer
   // holding no MCP grant was told by the operator's brief to "re-call qa_echo
@@ -3638,7 +3631,6 @@ export async function resolveResumeConfinement(
       resolveSpecialistMcpServersDetailed(db, resolved.mcps, {
         withholdWriteTools: repoWriteWithheldFromDenylist(disallowedTools),
       }),
-      { backend: input.backend },
     );
     const mcpServers = resumeMcps.servers;
     // R18-1 parity: a resumed/@mention reviewer must keep the deliverer's KBs it
@@ -3719,6 +3711,7 @@ export async function resolveResumeConfinement(
       unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted),
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
       mcpWriteToolsDenied: resumeMcps.toolDenials,
+      mcpProxied: resumeMcps.proxied,
       // Ruling 159: the absolute dir, exactly as the fresh path hands it.
       browser: resumeBrowser.server
         ? {

@@ -395,10 +395,31 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unresolved: [],
       unhealthy: [],
       toolDenials: [],
+      proxied: [],
     }).prompt;
     expect(prompt).toContain("MCP tools are governed too");
     expect(prompt).toContain("never use an MCP tool to merge a pull request");
     expect(prompt).toContain("change project policy");
+  });
+
+  it("ruling 461: a server reached through Viberr's gateway is named as such, and only that one", () => {
+    // Canary: drop the gateway section from buildOperatorSystemPrompt.
+    const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot, {
+      servers: {
+        cloudflare: { type: "http", url: "http://127.0.0.1:43111/mcp/cloudflare" },
+        "ops-readonly": { command: "npx", args: ["-y", "ops-readonly"] },
+      },
+      mounted: ["cloudflare", "ops-readonly"],
+      unresolved: [],
+      unhealthy: [],
+      toolDenials: [],
+      proxied: ["cloudflare"],
+    }).prompt;
+    expect(prompt).toContain(
+      "cloudflare is mounted through Viberr's MCP gateway: the credential is held by Viberr, " +
+        "and you never need it or see it; a 401 from the gateway means this run has ended.",
+    );
+    expect(prompt).not.toContain("ops-readonly is mounted through");
   });
 
   it("says nothing about MCP governance when no server mounted", () => {
@@ -419,6 +440,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unresolved: [],
       unhealthy: [],
       toolDenials: [{ server: "github", tools: ["create_pull_request", "merge_pull_request"] }],
+      proxied: [],
     }).prompt;
     expect(prompt).toContain("You have tools from these attached MCP servers: ops-readonly.");
     expect(prompt).toContain("MCP write tools withheld");
@@ -431,6 +453,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unresolved: [],
       unhealthy: [],
       toolDenials: [{ server: "github", tools: ["merge_pull_request"] }],
+      proxied: [],
     }).prompt;
     expect(allGated).not.toContain("MCP tools are governed too");
     expect(allGated).toContain("Attached MCP servers: github.");
@@ -451,6 +474,7 @@ describe("buildOperatorSystemPrompt — RESOLVED MCP servers (B8)", () => {
       unresolved: [{ name: "ghost-mcp", reason: "no server by that name is in the org registry" }],
       unhealthy: [],
       toolDenials: [],
+      proxied: [],
     }).prompt;
     expect(prompt).not.toContain("Attached MCP servers: ghost-mcp");
     expect(prompt).toContain("No MCP servers are attached to you.");
@@ -471,6 +495,7 @@ describe("buildOperatorSystemPrompt — RESOLVED MCP servers (B8)", () => {
       unresolved: [],
       unhealthy: ["flaky-mcp"],
       toolDenials: [],
+      proxied: [],
     }).prompt;
     expect(prompt).toContain("Attached MCP servers: flaky-mcp.");
     expect(prompt).toContain("MCP servers that may be unavailable");

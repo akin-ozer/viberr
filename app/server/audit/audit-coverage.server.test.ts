@@ -44,6 +44,16 @@ import {
   startBackendLogin,
 } from "~/server/runtimes/backend-login.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  bindRunToMcpGateway,
+  startMcpGateway,
+  stopMcpGateway,
+} from "~/server/mcp-proxy/gateway.server";
+import { sealSecret } from "~/server/secrets/secret-box.server";
+import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
+import { startHttpUpstream } from "../../../test-support/mcp-upstream";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   installFakeRuntime,
@@ -471,6 +481,61 @@ describe("governed actions record audit rows (table-driven)", () => {
             { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
             actorArda(),
           );
+        },
+      },
+      {
+        // Ruling 461: a call to an admin-marked MCP write tool, made through
+        // Viberr's gateway by a run whose token opens that server.
+        name: "an MCP write-tool call through the gateway",
+        action: "task.agent.mcp_write_call",
+        taskKey: "VIB-1",
+        run: async () => {
+          const upstream = await startHttpUpstream("audit-sentinel");
+          await startMcpGateway({ port: 0 });
+          const client = new Client({ name: "agent-cli", version: "1.0.0" });
+          try {
+            const now = new Date().toISOString();
+            store.db
+              .prepare(
+                `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, tool_policy_json, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              )
+              .run(
+                "mcp_audit",
+                "cloudflare",
+                "HTTP",
+                upstream.url,
+                sealSecret("audit-sentinel"),
+                JSON.stringify([{ name: "delete_zone", gate: "repo-write" }]),
+                now,
+                now,
+              );
+            const resolution = resolveSpecialistMcpServersDetailed(store.db, ["cloudflare"]);
+            const mount = z
+              .object({ url: z.string(), headers: z.object({ Authorization: z.string() }) })
+              .parse(
+                bindRunToMcpGateway({
+                  db: store.db,
+                  runId: "run_audit_gateway",
+                  servers: resolution.servers,
+                  toolDenials: resolution.toolDenials,
+                  actor: { userId: null, label: "agent:claude/developer (Developer)" },
+                  projectSlug: store.slug,
+                  taskKey: "VIB-1",
+                  isLive: () => true,
+                }).cloudflare,
+              );
+            await client.connect(
+              new StreamableHTTPClientTransport(new URL(mount.url), {
+                requestInit: { headers: mount.headers },
+              }),
+            );
+            await client.callTool({ name: "delete_zone", arguments: {} });
+          } finally {
+            await client.close();
+            await stopMcpGateway();
+            await upstream.close();
+          }
         },
       },
       {

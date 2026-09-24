@@ -50,6 +50,13 @@ import { scanStoreTree, type StoreTarget } from "./store-files.server";
 import { updateResourceReferences } from "./resource-references.server";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
+import {
+  connectHttpUpstream,
+  listAllTools,
+  MCP_CLIENT_CAPABILITIES,
+  MCP_CLIENT_INFO,
+  upstreamFailureReason,
+} from "~/server/mcp-proxy/upstream.server";
 
 /**
  * Org agent resources: knowledge bases, MCP servers, skills (org-settings
@@ -1091,7 +1098,13 @@ export function mcpSpawnEnv(
   return env;
 }
 
-const defaultSpawn: McpSpawn = (command, args, token) => {
+/**
+ * Spawn a registered stdio MCP command the way every server-side caller does:
+ * the discovery probe, the warm-up and, since ruling 461, the MCP gateway's
+ * upstream for a credentialed stdio server. One definition, so what a probe
+ * measures is what a run's calls then reach.
+ */
+export const spawnMcpProcess: McpSpawn = (command, args, token) => {
   const options: SpawnOptions = {
     // stderr was "ignore" — discarded by the OS, so the one thing that
     // explains a failure never reached us. See `discoverStdioMcpTools`.
@@ -1117,7 +1130,7 @@ const defaultSpawn: McpSpawn = (command, args, token) => {
  * Falls back to `child.kill()` when there is no pid (the test fakes) or the
  * group is already gone.
  */
-function killProcessTree(child: McpChild): void {
+export function killMcpProcessTree(child: McpChild): void {
   const pid = child.pid ?? null;
   if (pid !== null) {
     try {
@@ -1207,7 +1220,7 @@ export async function discoverStdioMcpTools(
 ): Promise<StdioDiscovery> {
   const parts = splitMcpCommand(command);
   if (parts.length === 0) return { kind: "down", reason: "no command" };
-  const spawnImpl = options.spawnImpl ?? defaultSpawn;
+  const spawnImpl = options.spawnImpl ?? spawnMcpProcess;
   /**
    * R19-17c: 5s was too short for the commands people actually register. `npx`
    * and `uvx` FETCH on first use, and the probe would kill them before either
@@ -1270,7 +1283,7 @@ export async function discoverStdioMcpTools(
       settled = true;
       clearTimeout(timer);
       // F20-2: signal the whole process group, not just the direct child.
-      killProcessTree(child);
+      killMcpProcessTree(child);
       resolve(result);
     };
     child.stderr?.on("data", (chunk) => {
@@ -1407,30 +1420,14 @@ export async function discoverStdioMcpTools(
   });
 }
 
-/**
- * The MCP client capabilities the discovery handshake declares (P13-LV-19).
- *
- * The old handshake advertised `capabilities: {}`, and a server that gates
- * tools on client capabilities then hid them: Viberr's Settings row said
- * "13 tools discovered" for the Everything server while both live runs
- * enumerated **15** from the same command. The number shown has to be the
- * number a run gets, so the probe declares the same capability set the SDK
- * clients do.
- */
-const MCP_CLIENT_CAPABILITIES = {
-  roots: { listChanged: true },
-  sampling: {},
-  elicitation: {},
-};
-
+/** The protocol version the stdio discovery handshake asks for. The HTTP probe
+ *  negotiates through the SDK client instead (ruling 461). */
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 
-const MCP_CLIENT_INFO = { name: "viberr", version: "1.0.0" };
-
 /**
- * Every JSON-RPC request the discovery handshake sends — its whole vocabulary,
- * shared by the stdio and HTTP paths. Not a general RPC client: anything else
- * would be a message no MCP server here is asked for.
+ * Every JSON-RPC request the stdio discovery handshake sends — its whole
+ * vocabulary. Not a general RPC client: anything else would be a message no
+ * MCP server here is asked for.
  */
 type McpHandshakeRequest =
   | {
@@ -1458,158 +1455,49 @@ const mcpToolListSchema = z.object({
 });
 
 /**
- * One JSON-RPC message off an MCP endpoint, decoded at the wire into the only
- * two facts the handshake asks of it: whether it carried a `result` at all (an
- * `initialize` answered with an `error` — or with no result member — is not an
- * MCP server), and how many tools that result listed.
- *
- * Tolerant per FIELD, like the hand decode it replaces: a `result` that is not
- * a tool listing decodes to `tools: null` ("answered, but not with a tool
- * list") instead of failing the whole message.
- */
-const mcpMessageSchema = z
-  .object({ result: z.unknown().optional() })
-  .transform((message) => {
-    const listed = mcpToolListSchema.safeParse(message.result).data;
-    return {
-      // JSON never yields `undefined`, so this is exactly "the body has a
-      // `result` member".
-      answered: message.result !== undefined,
-      tools: listed ? listed.tools.length : null,
-      toolNames: listed ? listed.tools.filter((name) => name !== null) : [],
-    };
-  });
-
-type McpMessage = z.infer<typeof mcpMessageSchema>;
-
-/** The JSON-RPC message in one body/SSE frame, or null when it is not one. */
-function parseMcpMessage(text: string): McpMessage | null {
-  try {
-    const parsed = mcpMessageSchema.safeParse(JSON.parse(text));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Real tool discovery over Streamable HTTP (P13-LV-10).
+ * Real tool discovery over HTTP (P13-LV-10).
  *
  * The old HTTP health check treated ANY HTTP response as "reachable": pointing
  * a server at a URL that answers 400 to a GET — or at any live website —
  * produced a green dot and the word "reachable", and no tool count was ever
  * discovered, so an HTTP MCP could never show what it actually offers. This
- * runs the same JSON-RPC handshake the stdio path does: `initialize` →
- * `notifications/initialized` → `tools/list`, carrying the session id the
- * server hands back, and accepting either a JSON or an SSE-framed body.
+ * runs the real handshake — `initialize`, `notifications/initialized`,
+ * `tools/list` — and counts the tools.
  *
- * A credentialed server is probed WITH its credential (P13-KM-05), so a server
- * that works in a run doesn't report "unreachable" in Settings.
+ * Ruling 461: through the SAME client the MCP gateway holds a run's upstream
+ * with (`connectHttpUpstream`): Streamable HTTP, the legacy SSE transport when
+ * the server answers that way, and the credential as `Authorization: Bearer`
+ * (P13-KM-05). A credentialed server's green dot therefore means "up with its
+ * credential, over the transport the run's calls will take".
  */
 async function discoverHttpMcpTools(
   target: string,
   options: McpProbeOptions & { token?: string | null } = {},
 ): Promise<StdioDiscovery> {
-  let url: URL;
-  try {
-    url = new URL(target);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return { kind: "down", reason: "endpoint is not an http(s) URL" };
-    }
-  } catch {
-    return { kind: "down", reason: "endpoint is not a valid URL" };
-  }
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 5000;
   const started = Date.now();
-  let sessionId: string | null = null;
-
-  const rpc = async (body: McpHandshakeRequest): Promise<Response> => {
-    const headers = new Map([
-      ["content-type", "application/json"],
-      ["accept", "application/json, text/event-stream"],
-      ["mcp-protocol-version", MCP_PROTOCOL_VERSION],
-    ]);
-    // Both are conditional: the session id only exists after `initialize`
-    // answers with one, and an uncredentialed server is asked anonymously.
-    if (sessionId) headers.set("mcp-session-id", sessionId);
-    if (options.token) headers.set("authorization", `Bearer ${options.token}`);
-    return fetchImpl(url.toString(), {
-      method: "POST",
-      headers: Object.fromEntries(headers),
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+  const connectOptions: Parameters<typeof connectHttpUpstream>[1] = {
+    token: options.token ?? null,
+    timeoutMs: options.timeoutMs ?? 5000,
   };
-
-  /** Body → the first JSON-RPC message, whether raw JSON or SSE-framed. */
-  const readMessage = async (res: Response): Promise<McpMessage | null> => {
-    const text = await res.text();
-    if (!text.trim()) return null;
-    const direct = parseMcpMessage(text);
-    if (direct) return direct;
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.startsWith("data:")) continue;
-      const parsed = parseMcpMessage(line.slice(5).trim());
-      if (parsed) return parsed;
-    }
-    return null;
-  };
-
+  if (options.fetchImpl) connectOptions.fetchImpl = options.fetchImpl;
+  let connection: Awaited<ReturnType<typeof connectHttpUpstream>>;
   try {
-    const initRes = await rpc({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: MCP_CLIENT_CAPABILITIES,
-        clientInfo: MCP_CLIENT_INFO,
-      },
-    });
-    if (!initRes.ok) {
-      return {
-        kind: "down",
-        reason:
-          initRes.status === 401 || initRes.status === 403
-            ? "authentication rejected"
-            : `endpoint answered ${initRes.status} (not an MCP endpoint?)`,
-      };
-    }
-    sessionId = initRes.headers.get("mcp-session-id");
-    const initMsg = await readMessage(initRes);
-    if (!initMsg?.answered) {
-      return { kind: "down", reason: "responded, but not with MCP initialize" };
-    }
-
-    await rpc({ jsonrpc: "2.0", method: "notifications/initialized" });
-
-    const listRes = await rpc({
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/list",
-      params: {},
-    });
-    if (!listRes.ok) {
-      return { kind: "down", reason: `tools/list answered ${listRes.status}` };
-    }
-    const listMsg = await readMessage(listRes);
-    const tools = listMsg?.tools ?? null;
-    if (tools === null) {
-      return { kind: "down", reason: "no tools in response" };
-    }
+    connection = await connectHttpUpstream(target, connectOptions);
+  } catch (error) {
+    return { kind: "down", reason: upstreamFailureReason(error) };
+  }
+  try {
+    const tools = await listAllTools(connection.client, { timeoutMs: connectOptions.timeoutMs });
     return {
       kind: "up",
       latencyMs: Date.now() - started,
-      tools,
-      toolNames: listMsg?.toolNames ?? [],
+      tools: tools.length,
+      toolNames: tools.map((tool) => tool.name),
     };
   } catch (error) {
-    const reason =
-      error instanceof Error && error.name === "TimeoutError"
-        ? "connection timed out"
-        : "connection refused";
-    return { kind: "down", reason };
+    return { kind: "down", reason: `tools/list failed: ${upstreamFailureReason(error)}` };
+  } finally {
+    await connection.client.close().catch(() => undefined);
   }
 }
 

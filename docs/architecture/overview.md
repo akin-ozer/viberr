@@ -160,7 +160,8 @@ for governed state.
 8. Bootstrap admin on an empty `users` table (`VIBERR_SEED_ADMIN_EMAIL`, default
    `admin@viberr.dev`; a random one-time password is logged once unless
    `VIBERR_SEED_ADMIN_PASSWORD` is set).
-9. Start the event publisher.
+9. Start the loopback MCP gateway on `127.0.0.1` (`VIBERR_MCP_PROXY_PORT`, ruling 461;
+   a bind failure is logged and boot carries on), then the event publisher.
 10. Converge projections with the files: when the stored `projection.derivationVersion`
     lags `PROJECTION_DERIVATION_VERSION`, one forced full rescan (the new stamp is written
     only when no file failed); otherwise a reconciling **rescan** (hash short-circuit, not
@@ -205,6 +206,7 @@ gone or replaced. Everything else is best-effort and logged.
 | Maintenance pass (retention, transcripts, workspaces) | boot + 6 h (`VIBERR_MAINTENANCE_INTERVAL_SECONDS`); the workspace reclaim skips while any run is queued or running | `ops/maintenance.server.ts` |
 | Disk-pressure check | 5 min (`VIBERR_DISK_CHECK_INTERVAL_SECONDS`); extra pass at most every 30 min | `ops/maintenance.server.ts` |
 | MCP warm-up | detached, ≤ 15 min per first install | `org/mcp-warmup.server.ts` |
+| MCP gateway (ruling 461) | listener on `127.0.0.1` for the process lifetime; one token per live run that mounts a credentialed server, one upstream per (run, server) | `mcp-proxy/gateway.server.ts` |
 | Run idle watchdogs | 15 min per backend (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`, `VIBERR_CODEX_IDLE_TIMEOUT_MS`); Claude max 2000 turns (`VIBERR_CLAUDE_MAX_TURNS`) | `runtimes/*-runtime.server.ts` |
 | Action watchdog | 30 s, around project creation | `actions/action-watchdog.server.ts` |
 | Rate-limiter prune | on insert, ≥ 1 s apart, 10 000 keys | `auth/rate-limit.server.ts` |
@@ -213,7 +215,8 @@ gone or replaced. Everything else is best-effort and logged.
 | Live Claude model list | 10 min cache | `runtimes/model-catalog.server.ts` |
 
 Shutdown (SIGINT/SIGTERM, `runProcessShutdown` in `events/sse-broker.server.ts`, the
-app's only signal handler): close SSE connections, stop both watchers and the lock
+app's only signal handler): close SSE connections, tear down the MCP gateway (every
+token, session and upstream, killing each stdio server it spawned), stop both watchers and the lock
 guard, WAL `TRUNCATE` checkpoint and close, release the lock, re-raise the signal. A
 normal process `exit` also releases the lock. The image's `CMD` runs node directly
 rather than through npm so the signal reaches it, and compose's `init: true` runs an
@@ -267,6 +270,16 @@ table list with retention is in [data-model.md](data-model.md).
   `agent_runs.credential_user_id`; a run with no available principal is refused before any
   process starts. Viberr implements none of the vendors' OAuth and stores no Claude.ai or
   ChatGPT session token.
+- **Org MCP credentials (ruling 461)**: a credentialed org MCP server is never handed to
+  an agent process. The server hosts a loopback MCP gateway (`127.0.0.1` only, not a
+  route); a run that mounts such a server gets a random run-scoped bearer the gateway
+  accepts only for that run's granted servers and only while the run is live, and the
+  gateway attaches the sealed credential upstream in the server process (Streamable
+  HTTP with the SSE fallback, or a stdio command the server spawns with
+  `MCP_CREDENTIAL`, under the server's own uid). Both backends get the same config. The
+  run token rides the CLI's arguments, so another process on the host can read it while
+  the run lives; it opens nothing but that run's grants, through the gateway, until the
+  run settles.
 - **Agent confinement**: Claude deny lists bind under `bypassPermissions`, and a
   withheld repo-write grant denies `Bash` command prefixes, including wrapped shapes such
   as `git -C` and `sh -c` (ruling 101(e), `runtimes/bash-policy.server.ts`). Codex runs

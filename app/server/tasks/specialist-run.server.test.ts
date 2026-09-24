@@ -3381,34 +3381,39 @@ describe("buildSpecialistPersona — attached resources", () => {
     expect(gatedOnly).not.toContain("No external MCP servers on this run");
   });
 
-  it("F27-P2: a Codex run discloses that an MCP server's stored credential was NOT forwarded", () => {
+  it("ruling 461: a server reached through Viberr's gateway is named as such, on both backends", () => {
     const dataRoot = tempRoot();
-    const codex = buildSpecialistPersona({
+    const personaOn = (backend: "claude" | "codex") =>
+      buildSpecialistPersona({
+        profileId: "scout",
+        skills: [],
+        mcps: ["cloudflare", "docs"],
+        mcpProxied: ["cloudflare"],
+        backend,
+        dataRoot,
+      });
+    for (const [backend, persona] of [
+      ["claude", personaOn("claude")],
+      ["codex", personaOn("codex")],
+    ]) {
+      expect(persona, backend).toContain("# MCP servers reached through Viberr's gateway");
+      expect(persona, backend).toContain(
+        "cloudflare is mounted through Viberr's MCP gateway: the credential is held by Viberr, " +
+          "and you never need it or see it; a 401 from the gateway means this run has ended.",
+      );
+      // F27-P2's note described a limitation the gateway ended.
+      expect(persona, backend).not.toContain("MCP credentials on this Codex run");
+      expect(persona, backend).not.toContain("UNAUTHENTICATED");
+    }
+    // Nothing proxied → no gateway section.
+    const direct = buildSpecialistPersona({
       profileId: "scout",
       skills: [],
-      mcps: ["github-mcp"],
+      mcps: ["docs"],
       backend: "codex",
       dataRoot,
     });
-    expect(codex).toContain("MCP credentials on this Codex run");
-    expect(codex).toContain("UNAUTHENTICATED");
-    // A Claude run keeps the credential — no such note.
-    const claude = buildSpecialistPersona({
-      profileId: "scout",
-      skills: [],
-      mcps: ["github-mcp"],
-      backend: "claude",
-      dataRoot,
-    });
-    expect(claude).not.toContain("MCP credentials on this Codex run");
-    // No MCP servers → no note even on Codex.
-    const noMcp = buildSpecialistPersona({
-      profileId: "scout",
-      skills: [],
-      backend: "codex",
-      dataRoot,
-    });
-    expect(noMcp).not.toContain("MCP credentials on this Codex run");
+    expect(direct).not.toContain("reached through Viberr's gateway");
   });
 
   it("mounts ONLY the declared skills — an ungranted skill sitting in the same store never reaches the run", () => {

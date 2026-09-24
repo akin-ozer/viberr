@@ -1018,25 +1018,24 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
     }
   });
 
-  it("hands the SDK the granted servers verbatim — credentials and the in-process toolkit included", async () => {
-    // The exact shapes `resolveSpecialistMcpServers` builds: an HTTP server with
-    // the decrypted org credential as an Authorization header, a stdio server
-    // with it in MCP_CREDENTIAL, and the in-process `{ type: "sdk" }` toolkit
-    // that carries post_comment / ask_human / report_outcome. Claude is the ONLY
-    // backend that gets either — Codex drops the credential (its config becomes
-    // argv) and has no in-process channel at all, which is what the matrix's
-    // "Org MCP credentials are sent on Claude runs only" and "Post mid-run
-    // comments has no Codex channel" notes describe.
+  it("hands the SDK the granted servers verbatim — a gateway mount's run token and the in-process toolkit included", async () => {
+    // The shapes a run's spec carries after `startRun` bound it to Viberr's
+    // MCP gateway (ruling 461): a credentialed server as a gateway mount with
+    // the RUN's token as its Authorization header (never the credential, which
+    // stays in the gateway), an uncredentialed stdio server, and the
+    // in-process `{ type: "sdk" }` toolkit that carries post_comment /
+    // ask_human / report_outcome. Codex gets the same gateway mount (as
+    // `http_headers`) and has no in-process channel at all, which is what the
+    // matrix's "Post mid-run comments has no Codex channel" note describes.
     const servers = {
       "everything-http": {
         type: "http",
-        url: "https://mcp.example.test/mcp",
-        headers: { Authorization: "Bearer sentinel-org-mcp-credential" },
+        url: "http://127.0.0.1:43111/mcp/everything-http",
+        headers: { Authorization: "Bearer sentinel-run-token" },
       },
       "everything-stdio": {
         command: "npx",
         args: ["-y", "example-mcp"],
-        env: { MCP_CREDENTIAL: "sentinel-org-mcp-credential" },
       },
       viberr_agent: { type: "sdk", instance: {} },
     };

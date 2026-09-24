@@ -473,12 +473,13 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   enforcement is rendered), and the operator's OS network is not forced off; it holds no
   shell tool anyway. `approvalPolicy: "never"`, `skipGitRepoCheck: true`, and withheld
   egress still sets `webSearchMode: "disabled"` (the CLI's own tool, not the sandbox).
-- MCP servers are passed **without credentials** (argv exposure), and in-process SDK
-  servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex; the
-  persona says so in its "MCP credentials on this Codex run" section, and a stdio server
-  that needs its credential just to start is dropped from the run with the reason given.
-  A Codex run therefore mounts none of Viberr's own in-process tools either (no
-  `viberr_agent`, no `read_knowledge_doc`).
+- MCP servers are translated to `mcp_servers` and in-process SDK servers are skipped, so a
+  Codex run mounts none of Viberr's own in-process tools (no `viberr_agent`, no
+  `read_knowledge_doc`). A server with a stored credential arrives the same way it does
+  on Claude (ruling 461, §6): as a mount on Viberr's loopback MCP gateway whose
+  `Authorization: Bearer <run token>` becomes the server's `http_headers`. The run token
+  sits in the CLI's `--config` argv; the credential never does, because it never leaves
+  the server process.
 - Ruling 176: a server's entries in `spec.mcpToolDenials` become its `disabled_tools`
   (the CLI reads it per `mcp_servers.<name>`, beside `enabled_tools`), by
   the server's own tool names. Live (2026-09-11), a withheld run listed and called only the
@@ -1146,6 +1147,7 @@ resources, MCP server editor), per mounted server, derived from the same denylis
 |---|---|---|
 | `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)` | advisory (ruling 185) |
 | `execute-code-or-write-repo`, org MCP write tools (ruling 176) | `mcp__<server>__<tool>` for each marked tool; an HTTP config also carries `always_deny` | that server's `disabled_tools` (binds) |
+| the same, on a server reached through the MCP gateway (ruling 461) | as above, and the gateway leaves the tool out of `tools/list` and refuses a call to it | as above, plus the gateway's filter and refusal |
 | `create-task-branch` | `Bash(git checkout -b:*)`, `-B`, `git switch -c/-C` | advisory |
 | `commit-push-branch` | `Bash(git push:*) Bash(git commit:*)` | advisory |
 | `open-review-pr` | `Bash(gh pr create:*)` | advisory |
@@ -1411,11 +1413,42 @@ runtime's answer for a missing grant.
   rewritten (the template writer's `propagate`, the org modal's box, or an org admin's
   "Use the template's grants" on the Agents page), and the roster marks a copy whose
   grants differ with the exact difference (`templateDrift`).
-- **MCP servers**: org registry rows resolve to stdio `{command, args, env:
-  {MCP_CREDENTIAL}}` or http `{url, headers: {Authorization: Bearer}}`; reserved names are
-  skipped; a missing row is reported "unresolved"; an unhealthy row is still mounted but
-  flagged; a credential that cannot be opened drops the server; stdio mounts get a real
-  discovery handshake before the run and are dropped (and marked unreachable) on failure.
+- **MCP servers**: an org registry row with no credential resolves to stdio
+  `{command, args}` or http `{type: "http", url}` and the CLI connects to it directly. A
+  row WITH a stored credential never reaches an agent process (ruling 461, F40-2, F40-3):
+  it resolves, on either transport and on both backends, to `{type: "http", url:
+  "http://127.0.0.1:<port>/mcp/<name>"}` on Viberr's loopback MCP gateway
+  (`app/server/mcp-proxy/gateway.server.ts`), and `startRun` — the one funnel every
+  specialist, operator, controller and resumed run goes through — mints ONE random
+  256-bit token for the run (`bindRunToMcpGateway`) and adds `headers: {Authorization:
+  "Bearer <token>"}` to each such mount. The token is bound to the run id, the exact
+  server names the run mounts and the write tools it withholds on each; it is revoked on
+  every path that ends the run (the settle, an interrupt with or without a live handle,
+  a queued run the drain drops, a launch that throws) and dies with the process, and the
+  gateway also refuses it once the run's row is no longer running or queued. An unknown,
+  revoked or wrong-server token gets a 401 with a JSON-RPC error and nothing is
+  forwarded. The gateway speaks MCP to the run (Streamable HTTP, SDK server transport)
+  and MCP to the real server with the credential attached in the server process
+  (`app/server/mcp-proxy/upstream*.server.ts`): an HTTP server over Streamable HTTP with
+  `Authorization: Bearer <credential>`, falling back to the legacy SSE transport on a
+  4xx other than 401/403; a stdio server is a command the SERVER spawns (its own uid, the
+  secret-filtered env plus `MCP_CREDENTIAL`, a process group of its own), one upstream
+  per (run, server), killed at revoke. It forwards `tools/list` (withheld write tools
+  removed), `tools/call` (a withheld one refused with `mcpWriteToolDenyReason`),
+  resources and prompts when the upstream declares them, and `list_changed`
+  notifications; a timeout (5 minutes a call, reset by progress) or an upstream error
+  comes back as a JSON-RPC error naming the server. Every forwarded call is logged at
+  info (run id, server, tool, duration, outcome; never arguments or results), and a call
+  to a tool an admin marked as a write tool is audited `task.agent.mcp_write_call` under
+  the run's actor (the agent, the operator, or the asker as the controller's
+  instrument). The prompt names a proxied server in one sentence (`gatewayMcpSection`:
+  the credential is held by Viberr, the agent never needs or sees it, a 401 means the
+  run ended). A gateway that is not listening leaves a credentialed server unmounted,
+  with that reason in the run's prompt. Reserved names are skipped; a missing row is
+  reported "unresolved"; an unhealthy row is still mounted but flagged; a credential that
+  cannot be opened drops the server; stdio servers get a real discovery handshake, WITH
+  the credential on both backends, before the run and are dropped (and marked
+  unreachable) on failure.
   Every grant that produced no usable server is listed in the prompt with the reason its
   own probe returned and an instruction not to infer another cause
   (`unavailableMcpSection`, `specialist-mcp.server.ts`, shared by the specialist and
@@ -1570,9 +1603,9 @@ raises a drift warning. Deployment overrides (`project.md` `agents[]`) carry aut
 1. `kind: reviewer` means "supporting run", not "the Reviewer profile".
 2. Specialist `recommend` coerces down to `off`; operator `recommend` promotes up to
    `direct` under full autonomy, except acceptance.
-3. Codex drops MCP credentials and browser images: a bearer-token HTTP MCP runs
-   unauthenticated there (the persona says so), and a stdio server that needs its
-   credential to start is dropped from the run with the reason.
+3. Codex drops browser images. It no longer drops MCP credentials: a credentialed
+   server is a gateway mount on both backends (ruling 461, §6), so the run token rides the
+   Codex CLI's argv and the credential stays in Viberr.
 4. Foreign-backend models are substituted at start and disclosed: the run log's first
    line, the switched-backend timeline event and the `retry_other_backend` option all
    name the model (F36-8). The run row stores what ran.

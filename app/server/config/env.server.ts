@@ -189,6 +189,17 @@ const envSchema = z.object({
   // at a local Chrome build.
   VIBERR_BROWSER_EXECUTABLE: z.string().min(1).optional(),
 
+  // Ruling 461: the port of the loopback MCP gateway (always bound to
+  // 127.0.0.1) that a run reaches a credentialed org MCP server through.
+  // 0, the default, picks a free port at boot and reads it back; set it only
+  // when something on the host needs the port fixed.
+  VIBERR_MCP_PROXY_PORT: z.coerce
+    .number({ error: "must be a port number, 0-65535 (0 picks a free port)" })
+    .int("must be a port number, 0-65535 (0 picks a free port)")
+    .min(0, "must be a port number, 0-65535 (0 picks a free port)")
+    .max(65535, "must be a port number, 0-65535 (0 picks a free port)")
+    .default(0),
+
   // Optional OAuth providers — the login buttons stay disabled when unset.
   GITHUB_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GITHUB_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),

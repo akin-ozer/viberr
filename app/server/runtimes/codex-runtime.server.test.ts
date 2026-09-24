@@ -1383,32 +1383,32 @@ describe("D5 — the verified SDK version is a fact, not a claim", () => {
 });
 
 /**
- * UC-16 — the Codex half of the two DISCLOSED MCP/skills asymmetries.
+ * UC-16 — the Codex half of the DISCLOSED MCP/skills asymmetries, and (ruling
+ * 461) the parity that replaced one of them.
  *
- * The capability-matrix modal tells an admin two things about this backend:
- * "Org MCP credentials are sent on Claude runs only — Codex mounts a declared
- * server unauthenticated, because its MCP config travels in argv", and that
- * granted skills arrive as prompt text here because there is no native channel.
- * A disclosure that drifts from the adapter is worse than none, so both claims
- * are pinned against what the adapter actually hands the SDK. The Claude halves
- * live in `claude-runtime.server.test.ts`; the paired assertions in
- * `runtime-registry.server.test.ts`.
+ * The capability-matrix modal used to say "Org MCP credentials are sent on
+ * Claude runs only — Codex mounts a declared server unauthenticated". Since
+ * ruling 461 a credentialed server is a gateway mount on both backends, so
+ * the modal says the credential stays in Viberr, and this pins the Codex half
+ * of that: the run token reaches the CLI as the server's `http_headers`.
+ * Granted skills still arrive as prompt text here because there is no native
+ * channel. The Claude halves live in `claude-runtime.server.test.ts`.
  */
 describe("UC-16 disclosed asymmetries — the Codex side", () => {
-  const SECRET = "sentinel-org-mcp-credential";
+  const RUN_TOKEN = "sentinel-run-token";
 
-  /** The exact shapes `resolveSpecialistMcpServers` builds for a granted org
-   *  MCP server that carries a credential (specialist-mcp.server.ts). */
-  const CREDENTIALED_SERVERS = {
+  /** The shapes a run's spec carries after `startRun` bound it to the gateway
+   *  (specialist-mcp.server.ts, gateway.server.ts): a gateway mount with the
+   *  run's token, an uncredentialed stdio server, the in-process toolkit. */
+  const MOUNTED_SERVERS = {
     "everything-http": {
       type: "http",
-      url: "https://mcp.example.test/mcp",
-      headers: { Authorization: `Bearer ${SECRET}` },
+      url: "http://127.0.0.1:43111/mcp/everything-http",
+      headers: { Authorization: `Bearer ${RUN_TOKEN}` },
     },
     "everything-stdio": {
       command: "npx",
       args: ["-y", "example-mcp"],
-      env: { MCP_CREDENTIAL: SECRET },
     },
     // The in-process toolkit (post_comment / ask_human / report_outcome).
     viberr_agent: { type: "sdk", instance: {} },
@@ -1428,8 +1428,8 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
     return run.factoryOptions()?.config;
   }
 
-  it("mounts a credentialed org MCP server UNAUTHENTICATED — the token is dropped, not the server", async () => {
-    const config = await configWith({ mcpServers: CREDENTIALED_SERVERS });
+  it("ruling 461: a gateway mount reaches the CLI with the run's token as its http_headers", async () => {
+    const config = await configWith({ mcpServers: MOUNTED_SERVERS });
     // SAFETY: `mcp_servers` is a leaf the ADAPTER writes — one table per
     // declared server (see the mcpServers translation in codex-runtime.server) —
     // so reading it back as a config table is the shape it was written as. The
@@ -1438,31 +1438,26 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
       CodexOptions["config"]
     >;
 
-    // The server still mounts (dropping it silently would be the dishonest fix).
     expect(Object.keys(servers).sort()).toEqual([
       "everything-http",
       "everything-stdio",
     ]);
+    // CANARY: drop the `http_headers` translation and the Codex run reaches
+    // the gateway without its token — the 401s F40-3 was about.
     expect(servers["everything-http"]).toEqual({
-      url: "https://mcp.example.test/mcp",
+      url: "http://127.0.0.1:43111/mcp/everything-http",
       default_tools_approval_mode: "approve",
+      http_headers: { Authorization: `Bearer ${RUN_TOKEN}` },
     });
     expect(servers["everything-stdio"]).toEqual({
       command: "npx",
       args: ["-y", "example-mcp"],
       default_tools_approval_mode: "approve",
     });
-    // …with NO credential carrier of any kind, on either transport.
-    expect(servers["everything-http"]).not.toHaveProperty("headers");
-    expect(servers["everything-stdio"]).not.toHaveProperty("env");
-    // The reason it is dropped rather than translated: this config becomes
-    // `--config key=value` argv on the spawned codex binary, where a literal
-    // secret is readable in `ps auxww`. Nothing in the config may echo it.
-    expect(JSON.stringify(config)).not.toContain(SECRET);
   });
 
   it("has no in-process tool channel: the mid-run comment/ask-human toolkit is dropped, never serialized", async () => {
-    const config = await configWith({ mcpServers: CREDENTIALED_SERVERS });
+    const config = await configWith({ mcpServers: MOUNTED_SERVERS });
     // `{ type: "sdk" }` is a live JS object with no CLI equivalent — serializing
     // it would produce invalid config instead of an honest omission. This is why
     // "Post mid-run comments" is disclosed as having no Codex channel: a Codex
@@ -1477,7 +1472,7 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
     // pre-normalize to match it — the same declaration has to keep working on
     // Claude, where the hyphen survives. The disclosure tells personas never to
     // name an MCP tool literally; this pins that Viberr itself stays neutral.
-    const config = await configWith({ mcpServers: CREDENTIALED_SERVERS });
+    const config = await configWith({ mcpServers: MOUNTED_SERVERS });
     expect(Object.keys(config?.mcp_servers ?? {})).toContain("everything-http");
     expect(Object.keys(config?.mcp_servers ?? {})).not.toContain(
       "everything_http",

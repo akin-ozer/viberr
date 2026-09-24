@@ -22,6 +22,7 @@ import { selfHealProjectionDbIfCorrupt } from "./db/self-heal.server";
 import { repairCodexRolloutPaths } from "./runtimes/user-homes.server";
 import { startEventPublisher } from "./events/event-publisher.server";
 import { armProcessShutdown } from "./events/sse-broker.server";
+import { startMcpGateway } from "./mcp-proxy/gateway.server";
 import {
   DATA_ROOT_SUBDIRS,
   ensureDataRootDirs,
@@ -709,6 +710,20 @@ export async function bootServer(): Promise<void> {
     email: env.VIBERR_SEED_ADMIN_EMAIL,
     password: env.VIBERR_SEED_ADMIN_PASSWORD,
   });
+
+  // Ruling 461: the loopback MCP gateway, before anything can start a run
+  // (recovery, the schedule and goal runners, a request). A run reaches every
+  // org MCP server with a stored credential through it; one that fails to bind
+  // leaves those servers unmountable — each run's prompt then says why — and
+  // health reports `mcpProxy.listening: false`, so boot carries on.
+  try {
+    await startMcpGateway({ port: env.VIBERR_MCP_PROXY_PORT });
+  } catch (error) {
+    logger.error("mcp gateway failed to start — credentialed MCP servers cannot be mounted", {
+      port: env.VIBERR_MCP_PROXY_PORT,
+      err: toError(error),
+    });
+  }
 
   // SSE bridge FIRST (Phase 6): projection emitter → broker, so watcher
   // reprojects and every mutation reach connected clients from the start.
