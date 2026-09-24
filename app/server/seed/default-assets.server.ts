@@ -222,6 +222,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 468 (pass 40, F40-12): before the doctrine said an empty
+    // repository is Viberr's to initialize. Nothing told the operator so, and
+    // live on WEB-1 it opened a packet asking the owner to push a README.
+    "1763e3889a2da992052bebd5accbe51854baea010bc80d7e8d7aa96266715c13",
     // Seeded-prompt sweep (2026-09-23): before "advancing a single `auto`
     // boundary and stopping is correct" gave way to ruling 152(a): the
     // operator's own transition starts no new turn, so it walks consecutive

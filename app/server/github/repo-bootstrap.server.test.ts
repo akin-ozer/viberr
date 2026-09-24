@@ -94,6 +94,42 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     expect(audit?.details).toMatchObject({ how: "initial_commit", sha: ROOT, defaultBranch: "main" });
   });
 
+  /**
+   * Ruling 468: two paths now bootstrap (the branch preparation and the
+   * operator's first checkout). A PUT that loses the race is refused by
+   * GitHub; the branch the winner made is the outcome both wanted.
+   */
+  it("ruling 468: a create refused because another call already made the branch answers `exists` and writes nothing", async () => {
+    const store = setup();
+    let reads = 0;
+    const gh = fakeGithubFetch({
+      // Empty on the first read; the winner's branch on the one after the PUT.
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: () => {
+        reads += 1;
+        return reads === 1 ? EMPTY_REF : { body: { object: { sha: ROOT } } };
+      },
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: {
+        status: 422,
+        body: { message: 'Invalid request.\n\n"sha" wasn\'t supplied.' },
+      },
+    });
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug, taskKey: "JC-1" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: drop the re-read after a refused PUT and this is `bootstrap_failed`,
+    // which refuses the push of a task whose base exists.
+    expect(result).toEqual({ status: "exists", defaultBranch: "main" });
+    expect(listAuditEvents(store.db).some((e) => e.action === "github.repo.bootstrapped")).toBe(false);
+    const timeline = readTaskFile({ projectSlug: store.slug, taskKey: "JC-1", dataRoot: store.dataRoot })!
+      .parsed.timeline;
+    expect(timeline.some((e) => e.text.includes("Bootstrapped the repository"))).toBe(false);
+  });
+
   it("a 409 `Git Repository is empty.` on the ref read is a missing ref, not a network failure", async () => {
     // Canary: drop the 409 clause from `isMissingRefAnswer` and this reads
     // `bootstrap_failed` (the 409 falls into the generic failure arm).

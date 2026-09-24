@@ -501,6 +501,39 @@ describe("RepositoryPanel", () => {
     expect(container.textContent).not.toContain("override");
   });
 
+  /**
+   * Ruling 468 (F40-12): an existing repository with no commit is said as a
+   * fact Viberr acts on, never left for a person to find at the first run.
+   */
+  it("ruling 468: an empty repository says Viberr will make its first commit", () => {
+    const panel = (empty: boolean) =>
+      render(
+        <RepositoryPanel
+          data={{
+            project: { slug: "web", name: "Website", repo: "akin-ozer/website", defaultBranch: "main" },
+            connection: {
+              status: "connected",
+              repo: "akin-ozer/website",
+              remoteDefaultBranch: "main",
+              private: false,
+              empty,
+            },
+            credential: noneCredential,
+          }}
+          onOpenTask={() => {}}
+          canSeeCredential
+        />,
+      );
+    // CANARY: drop the Contents row and the empty repository reads as any other.
+    const { container } = panel(true);
+    const contents = [...container.querySelectorAll(".kv-row")].find((r) => r.textContent?.startsWith("Contents"));
+    expect(contents?.textContent).toBe(
+      "Contentsempty: Viberr will create the first commit on main before the first task branch",
+    );
+    cleanup();
+    expect(panel(false).container.textContent).not.toContain("first commit");
+  });
+
   it("says an unset repository in words, not a dash (ruling 148)", () => {
     const { container } = render(
       <RepositoryPanel

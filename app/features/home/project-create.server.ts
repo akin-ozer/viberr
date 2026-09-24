@@ -19,7 +19,10 @@ import { getConnection } from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { recordRepoAccess } from "~/server/github/repo-health.server";
-import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
+import {
+  repositoryIsEmpty,
+  type RepoAccessResult,
+} from "~/server/github/repo-access-check.server";
 import {
   getPatMetadata,
   getPatToken,
@@ -152,8 +155,8 @@ function presetAgents(
  * to create, so an answer it cannot give refuses instead.
  */
 type RepoProbe =
-  | { status: "ok"; defaultBranch: string | null }
-  | { status: "read_only"; defaultBranch: string | null }
+  | { status: "ok"; defaultBranch: string | null; empty: boolean }
+  | { status: "read_only"; defaultBranch: string | null; empty: boolean }
   | { status: "not_found" }
   | { status: "forbidden" }
   | { status: "unreachable" };
@@ -169,8 +172,10 @@ const repoResponseSchema = z
   .object({
     default_branch: z.string().optional().catch(undefined),
     permissions: repoPermissionsSchema.optional().catch(undefined),
+    // Ruling 468: the cue for the empty-repository read below.
+    size: z.number().optional().catch(undefined),
   })
-  .catch({ default_branch: undefined, permissions: undefined });
+  .catch({ default_branch: undefined, permissions: undefined, size: undefined });
 
 /** The optional overrides `proveAttachedCredential` accepts, named so the call
  *  below can be built one key at a time. */
@@ -198,13 +203,18 @@ async function probeRemoteRepo(
     if (!res.ok) return { status: "unreachable" };
     const data = repoResponseSchema.parse(await res.json());
     const defaultBranch = data.default_branch ?? null;
+    // Ruling 468 (F40-12): an EXISTING repository with no commit. Live,
+    // `akin-ozer/website` was accepted as `ok` with `default_branch: main`, and
+    // the first operator run found an unborn `main` and asked the owner to push
+    // a README. `size: 0` is the cue, the 409 on the commits read the proof.
+    const empty = await repositoryIsEmpty(createGithubClient({ token, fetchImpl }), repo, data.size);
     // F20-14/F20-15: Repair refuses a repo the credential can only read; the same
     // check belongs at create time (live: creating against a read-only-visible
     // repo was silently accepted and failed only at first delivery).
     if (repoWritable(data.permissions) === false) {
-      return { status: "read_only", defaultBranch };
+      return { status: "read_only", defaultBranch, empty };
     }
-    return { status: "ok", defaultBranch };
+    return { status: "ok", defaultBranch, empty };
   } catch {
     return { status: "unreachable" };
   }
@@ -558,6 +568,7 @@ async function createProjectImpl(
           remoteDefaultBranch: probe.defaultBranch ?? null,
           private: false,
         };
+        if (probe.empty) repoAccess.empty = true;
         if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
       } else if (probe.status === "read_only") {
         // The repo exists and is visible, so we can adopt its default branch —
@@ -572,6 +583,7 @@ async function createProjectImpl(
           remoteDefaultBranch: probe.defaultBranch ?? null,
           private: false,
         };
+        if (probe.empty) repoAccess.empty = true;
         repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
       } else if (probe.status === "not_found") {
         repoAccess = { status: "repo_not_found", repo };
@@ -587,6 +599,13 @@ async function createProjectImpl(
         repoWarning = `Couldn't reach GitHub to verify ${repo}. The project was created with the default branch "main".`;
       }
     }
+  }
+
+  // Ruling 468: an empty repository is stated, not warned about: Viberr makes
+  // its first commit (ruling 128's bootstrap) before the first task branch.
+  if (repoAccess?.status === "connected" && repoAccess.empty) {
+    const empty = `${repo} is empty: Viberr will create its first commit on ${defaultBranch} before the first task branch, so nobody needs to push one.`;
+    repoNote = repoNote ? `${repoNote} ${empty}` : empty;
   }
 
   // Synthesized description — verbatim mock mapping (home spec §5.10), unless

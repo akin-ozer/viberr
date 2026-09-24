@@ -314,7 +314,11 @@ failure is a first-class `unavailable` arm carrying git's redacted complaint. Th
 operator reads it with `Read` / `Grep` / `Glob`; what the DEFAULT branch holds is answered
 only by `read_default_branch_file`, which reads the project's bare mirror (falling back to
 the checkout's clone-time `origin/<default>` and saying it may be stale) and pages long
-files by whole lines (`fromLine`, 40,000 characters a page; ruling 436).
+files by whole lines (`fromLine`, 40,000 characters a page; ruling 436). A checkout of an
+EMPTY repository (HEAD with no commit) is initialized first: the server makes the default
+branch's first commit (ruling 128's bootstrap) and moves the checkout onto it, and the
+doctrine tells the operator an empty repository is never a person's chore, so it never asks
+anyone to push a first commit (ruling 468).
 
 **Backends.** Writes and shell are denied on both. On Claude the operator gets the
 in-process MCP server `viberr` (loaded up front, `alwaysLoad`), its granted org MCP servers

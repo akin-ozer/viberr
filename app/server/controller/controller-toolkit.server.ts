@@ -2788,6 +2788,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           repo: data.project.repo,
           defaultBranch: data.project.defaultBranch,
           connection: data.connection.status,
+          // Ruling 468: say it, so nobody is asked to push a first commit.
+          // Null when the repository has commits (or its state is unknown).
+          contents:
+            data.connection.status === "connected" && data.connection.empty
+              ? `empty: viberr will create the first commit on ${data.project.defaultBranch} before the first task branch`
+              : null,
           reconcile: data.reconcile,
           prs: data.prs.map((p) => ({
             task: p.taskKey,

@@ -150,6 +150,22 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(shipped()).not.toContain("does not work the CURRENT stage");
   });
 
+  /**
+   * Ruling 468 (F40-12): the operator never asks a person for a repository's
+   * first commit. Live on WEB-1 its first run found an unborn `main` and
+   * opened a packet whose recommended option was "I pushed an initial commit
+   * to main"; nothing it read said Viberr makes that commit.
+   */
+  it("ruling 468: the doctrine says an empty repository is Viberr's to initialize, and its outgoing hash is recorded", async () => {
+    // Canaries: drop the sentence; remove the outgoing hash.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "1763e3889a2da992052bebd5accbe51854baea010bc80d7e8d7aa96266715c13", {})).toBe(true);
+    expect(shipped()).toContain("An EMPTY repository (no commit yet, an unborn default branch) is never a person's chore");
+    expect(shipped()).toContain("Never ask anyone to push an initial commit or a README");
+    // Nothing in it instructs a manual first commit.
+    expect(shipped()).not.toMatch(/(ask|tell) (a person|the owner|a human)[^.]*(push|make)[^.]*(initial|first) commit/i);
+  });
+
   it("pass 34 A13: the operator doctrine shipped before `set_dependencies` is a recorded prior hash, so a live store upgrades in place", async () => {
     // Canary: remove the outgoing hash from PRIOR_SHIPPED_HASHES.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");

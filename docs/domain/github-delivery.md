@@ -113,7 +113,26 @@ characters; last 8 lines, 600 characters.
   Contents API on a repository with no refs, or the configured default branch at the
   first commit of GitHub's current default (a task branch pushed first) with the
   repository default restored. Both are disclosed on the task timeline and audited as
-  `github.repo.bootstrapped` (`repo-bootstrap.server.ts`).
+  `github.repo.bootstrapped` (`repo-bootstrap.server.ts`). The Contents API is the one
+  door: GitHub answers every Git Database endpoint (blobs, trees, commits, refs) 409
+  "Git Repository is empty." until a first commit exists, so an empty-tree commit made
+  through them cannot be the first one (ruling 468).
+- **An empty repository is named, and initialized before anyone reads it** (ruling 468,
+  F40-12). Project creation's probe and the GitHub page's access check read `size: 0` on
+  `GET /repos/{r}` as the cue and `GET /repos/{r}/commits` answering 409 as the proof
+  (`repositoryIsEmpty`), and record `empty: true` on the connected repo access; creation's
+  reply and toast say "<repo> is empty: Viberr will create its first commit on <branch>
+  before the first task branch", the GitHub page's Repository panel carries a Contents
+  row, and `get_github_state` a `contents` line. The operator's checkout
+  (`ensureOperatorRepoCheckout`) is the other path that needs the base: a checkout whose
+  HEAD has no commit runs the same bootstrap (actor `system:delivery`, the timeline naming
+  the operator's first checkout) and is moved onto the new commit by ruling 129's
+  refresh, on the first clone and on a checkout an earlier run left unborn
+  (`initializeUnbornCheckout`). The bootstrap is idempotent under a race: a create GitHub
+  refuses because another call already made the branch re-reads the ref and answers
+  `exists`, writing nothing. A token that cannot write gets ruling 128's `repo` scope
+  violation, as delivery does. The operator's doctrine says the first commit is Viberr's
+  and never a person's.
 
 Only github.com is supported; there is no GitHub Enterprise host configuration.
 

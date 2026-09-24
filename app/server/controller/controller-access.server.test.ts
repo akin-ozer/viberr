@@ -576,6 +576,46 @@ describe("viberr_controller.get_github_state", () => {
   });
 
   /**
+   * Ruling 468 (F40-12): the model reads an empty repository as a fact
+   * Viberr acts on. Live, `get_github_state` read "no branches" and the
+   * operator asked the owner to push a README.
+   */
+  it("ruling 468: an empty repository says the first commit is Viberr's; one with commits says nothing", async () => {
+    const { primeRepoAccessForTests, invalidateRepoAccess } = await import(
+      "~/features/github/github-query.server"
+    );
+    primeRepoAccessForTests(app.db, SLUG, {
+      status: "connected",
+      repo: REPO,
+      remoteDefaultBranch: "main",
+      private: false,
+      empty: true,
+    });
+    try {
+      // SAFETY: as above — the permitted path is `json()` over the handler's literal.
+      const state = JSON.parse(await callTool(ids.owner, "get_github_state")) as GithubStateReply & {
+        contents: string | null;
+      };
+      // CANARY: drop `contents` from the reply and the model is told nothing.
+      expect(state.connection).toBe("connected");
+      expect(state.contents).toBe(
+        "empty: viberr will create the first commit on main before the first task branch",
+      );
+      primeRepoAccessForTests(app.db, SLUG, {
+        status: "connected",
+        repo: REPO,
+        remoteDefaultBranch: "main",
+        private: false,
+      });
+      // SAFETY: as above.
+      const full = JSON.parse(await callTool(ids.owner, "get_github_state")) as { contents: string | null };
+      expect(full.contents).toBeNull();
+    } finally {
+      invalidateRepoAccess(app.db, SLUG);
+    }
+  });
+
+  /**
    * The D2 emergency override reaches this read as well — and it is AUDITED,
    * which is the condition the owner attached to it: an org admin reading a
    * board they are not a member of leaves a row naming what they read.

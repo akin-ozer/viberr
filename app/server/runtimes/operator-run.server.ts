@@ -41,6 +41,7 @@ import {
 } from "~/server/tasks/repo-mirror.server";
 import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { stripUngovernedRepoCatalog } from "./skill-mount.server";
+import { initializeUnbornCheckout } from "~/server/tasks/unborn-checkout.server";
 import {
   RULING_NAMESPACE_NOTE,
   attachedResourcesBlock,
@@ -1561,11 +1562,25 @@ export async function ensureOperatorRepoCheckout(
   /** F27-U1: 0..1 progress for the cold clone the operator drive often pays
    *  first on a project (see the reservation set up by the caller). */
   onCloneProgress?: (fraction: number) => void,
+  /** Ruling 468: the GitHub transport for the empty-repository bootstrap
+   *  (tests inject one; production uses the global fetch). */
+  options: { fetchImpl?: typeof fetch } = {},
 ): Promise<OperatorWorkspaceView> {
   const target = operatorCheckoutTarget(input);
   if (!target) return { kind: "none" };
   const { repo, dir, relativeDir, defaultBranch } = target;
+  // Ruling 468 (F40-12): a checkout of an EMPTY repository has an unborn
+  // HEAD, and the operator read that as a chore for a person ("push one
+  // initial commit"). Viberr makes the first commit itself (ruling 128's
+  // bootstrap) and moves the checkout onto it, here as before a task branch.
+  const initialize = () =>
+    initializeUnbornCheckout(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, repo, dir, defaultBranch, dataRoot: input.dataRoot },
+      options,
+    );
   if (existsSync(path.join(dir, ".git", "HEAD"))) {
+    await initialize();
     return { kind: "checkout", repo, dir, relativeDir, defaultBranch };
   }
 
@@ -1605,6 +1620,7 @@ export async function ensureOperatorRepoCheckout(
       taskKey: input.taskKey,
       repo,
     });
+    await initialize();
     return { kind: "checkout", repo, dir, relativeDir, defaultBranch };
   } catch (error) {
     const details = cloneFailureLogDetails(error);

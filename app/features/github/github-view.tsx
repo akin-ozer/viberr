@@ -130,6 +130,19 @@ export function RepositoryPanel({
             )}
           </span>
         </div>
+        {/* Ruling 468 (F40-12): an existing repository with no commit is a fact
+            Viberr acts on, not a person's chore: the first task branch waits
+            for the default branch's first commit, which the server makes. */}
+        {data.connection.status === "connected" && data.connection.empty && (
+          <div className="kv-row">
+            <span className="k">Contents</span>
+            <span className="v plain">
+              empty: Viberr will create the first commit on{" "}
+              <span className="mono">{data.project.defaultBranch}</span> before
+              the first task branch
+            </span>
+          </div>
+        )}
         {/* P13-D-5: this row hardcoded "project default · task-level override
             allowed" — a capability nothing implemented (no writer ever set
             `task.repo`) and which the Settings toggle could not turn off either,
