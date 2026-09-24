@@ -4119,7 +4119,15 @@ async function cloneRepo(
         shareDirWithAgents(workspaceRoot);
         mkdirSync(path.dirname(dir), { recursive: true });
         try {
-          await execFileAsync("git", ["clone", "--local", deliveringDir, dir], {
+          // Pass 40 review (R-seams-2): through git's own transport, never
+          // `--local`. Under ruling 460 the delivering checkout's objects are
+          // written by an agent uid, and `--local` HARDLINKS them — the
+          // kernel's `fs.protected_hardlinks` refuses a link to a file the
+          // server neither owns nor can write, so every supporting run after
+          // the first agent commit lost its checkout. `--no-local` also never
+          // trusts that agent-writable directory's layout on disk (git refuses
+          // a symlinked object with `--local` for the same reason).
+          await execFileAsync("git", ["clone", "--no-local", deliveringDir, dir], {
             timeout: cloneTimeoutMs(),
           });
           await execFileAsync(

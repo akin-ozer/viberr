@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -4582,6 +4583,61 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // run that read nothing.
       const { getRun } = await import("~/server/runtimes/run-store.server");
       expect(getRun(store.db, run.runId)!.no_checkout).toBe(1);
+    });
+
+    /**
+     * Pass 40 review (R-seams-2). Under ruling 460 the delivering checkout's
+     * objects are written by an agent uid, and `git clone --local` HARDLINKS
+     * them: the kernel's `fs.protected_hardlinks=1` refuses a link to a file the
+     * server neither owns nor can write, so every supporting run after the first
+     * agent commit lost its checkout. A second uid is not available here, so
+     * this reproduces the same `--local`-only refusal git has for a delivering
+     * checkout it must not trust on disk (a symlinked loose object, git's
+     * CVE-2022-39253 guard): `--local` dies, the transport clone reads it.
+     */
+    it("clones the supporting checkout through git's transport, not by linking the delivering checkout's files", async () => {
+      const ws = await workspaceCheckout();
+      const objectsDir = path.join(ws, ".git", "objects");
+      const loose = readdirSync(objectsDir)
+        .filter((d) => /^[0-9a-f]{2}$/.test(d))
+        .flatMap((d) => readdirSync(path.join(objectsDir, d)).map((f) => path.join(objectsDir, d, f)));
+      expect(loose.length).toBeGreaterThan(0);
+      const stash = path.join(path.dirname(ws), "object-stash");
+      renameSync(loose[0]!, stash);
+      symlinkSync(stash, loose[0]!);
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      await interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+        actorOf(store.users.arda));
+      const criticWs = path.join(path.dirname(ws), "support", "critic", path.basename(ws));
+      // CANARY: put `--local` back on the supporting clone and this checkout is
+      // gone and the run is marked checkout-less.
+      expect(existsSync(path.join(criticWs, "README.md"))).toBe(true);
+      const { getRun } = await import("~/server/runtimes/run-store.server");
+      expect(getRun(store.db, run.runId)!.no_checkout).toBe(0);
     });
 
     it("refuses a second run of the SAME supporting engagement while one is in flight (its isolated dir is re-cloned fresh)", async () => {
