@@ -3882,18 +3882,21 @@ describe("app.css ruling 453: the Apple design pass", () => {
     }
   });
 
-  it("(b) under reduced motion a pinned close never replays the dock's fade-in", () => {
-    // CANARY: drop `animation: none` from the reduced-motion
-    // `.dock .dock-panel[data-closing]`. pinLivePose switches the entrance off
-    // inline and releases it once data-closing lands; the reduced-motion
-    // `.dock .dock-panel { animation: fade-in }` (same weight, later) then
-    // restarted on the closing panel, which faded IN, never transitioned out,
-    // and vanished at the fallback timer (measured in headless Chromium).
-    const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
-    expect(decls(reduced, ".dock .dock-panel").get("animation")).toMatch(/^fade-in\b/);
-    expect(decls(reduced, ".dock .dock-panel[data-closing]").get("animation")).toBe("none");
-    // Dialogs outrank their own reduced-motion fade-in by weight already.
+  it("(b) a pinned close never replays an entrance: dialogs switch theirs off, and the dock has none left", () => {
+    // pinLivePose switches the entrance off inline and releases it once
+    // data-closing lands, so the closing rule has to keep it off. Dialogs
+    // outrank their own reduced-motion fade-in by weight.
+    // CANARY: drop `animation: none` from `dialog[data-closing]`.
     expect(decls(plain, "dialog[data-closing]").get("animation")).toBe("none");
+    // Amended by ruling 459's deferred dock half: the dock's entrance is a
+    // transition, so it is not pinned, and its reduced-motion answer fades on
+    // that transition instead of replaying `fade-in` (it replayed on the
+    // closing panel before the pin's closing rule said `animation: none`).
+    // The dock's own gate is "app.css ruling 459: the dock's deferred half".
+    const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+    expect(decls(reduced, ".dock .dock-panel").get("transition")).toBe("opacity .12s ease");
+    expect(decls(reduced, ".dock .dock-panel").has("animation")).toBe(false);
+    expect(decls(reduced, ".dock .dock-panel[data-closing]").has("animation")).toBe(false);
   });
 
   it("(d) the OS increased-contrast setting gets defined edges and solid chrome, in both themes", () => {
@@ -6020,5 +6023,312 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
     expect(check.get("transform")).toBe("scale(.25)");
     expect(check.get("transition")).not.toMatch(/\bease\b(?!-)/);
     expect(own(plain, ".be-opt .bcheck .ico").get("width")).toBe("15px");
+  });
+});
+
+/* ------------------------------------- ruling 459: the dock's deferred half */
+
+/**
+ * Ruling 459 deferred two dock findings until they could be built on ruling
+ * 454's sheet (owner, 2026-09-24: "do the two dock fixes now").
+ *
+ *   F20 — the dock's open and close could not be turned around. The entrance
+ *     was a keyframe, which restarts instead of retargeting, and Chrome starts
+ *     no transition on a property an animation drives; and a trigger click
+ *     while the panel left was dropped. The entrance is now a transition from
+ *     @starting-style, and `[data-closing]` is the same transition's far end.
+ *   F24 — a dock the per-tab restore reopened replayed its entrance, and on a
+ *     phone its trigger flew up to the perch, on every reload and every return
+ *     from a page the dock is hidden on. `data-restored` shows it in place.
+ *
+ * What the panel and its trigger do is decided across four places (the 720px
+ * block, the base dock section after it, the reduced-motion block and the
+ * appended ruling-454 section), so these checks resolve the real cascade
+ * (weight, then source order, then the `transition` shorthand against its
+ * longhands) for each state, instead of reading one rule.
+ */
+describe("app.css ruling 459: the dock's deferred half", () => {
+  const parts = (r: CssRule) => splitArgs(r.selector);
+  type Ctx = { phone: boolean; reduced: boolean; starting?: boolean };
+  const CONTEXTS: Ctx[] = [
+    { phone: false, reduced: false },
+    { phone: true, reduced: false },
+    { phone: false, reduced: true },
+    { phone: true, reduced: true },
+  ];
+  const name = (ctx: Ctx) => `${ctx.phone ? "phone" : "desktop"}${ctx.reduced ? ", reduced" : ""}`;
+  /** Whether a rule's at-rules all hold in `ctx`; any other query is off. */
+  const holds = (r: CssRule, ctx: Ctx) =>
+    r.at.every((a) =>
+      a === "@media (max-width: 720px)"
+        ? ctx.phone
+        : a === "@media (prefers-reduced-motion: reduce)"
+          ? ctx.reduced
+          : a === "@starting-style"
+            ? ctx.starting === true
+            : false,
+    );
+  const heavier = (a: number[], b: number[]) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
+  /** [ids, classes + attributes + pseudo-classes, types + pseudo-elements].
+   *  `:not()`, `:is()` and `:has()` weigh their heaviest argument; `:where()`
+   *  weighs nothing. */
+  const weight = (selector: string): number[] => {
+    const w = [0, 0, 0];
+    let rest = "";
+    for (let i = 0; i < selector.length; i++) {
+      const fn = /^:(not|is|has|where)\(/.exec(selector.slice(i));
+      if (!fn) {
+        rest += selector[i];
+        continue;
+      }
+      let depth = 0;
+      let j = i + fn[0].length - 1;
+      for (; j < selector.length; j++) {
+        if (selector[j] === "(") depth++;
+        else if (selector[j] === ")" && --depth === 0) break;
+      }
+      if (fn[1] !== "where") {
+        const inner = splitArgs(selector.slice(i + fn[0].length, j)).map(weight).sort(heavier).at(-1)!;
+        inner.forEach((n, k) => (w[k]! += n));
+      }
+      rest += " ";
+      i = j;
+    }
+    const attributes = rest.match(/\[[^\]]*\]/g)?.length ?? 0;
+    rest = rest.replace(/\[[^\]]*\]/g, "");
+    w[0]! += rest.match(/#[-\w]+/g)?.length ?? 0;
+    w[1]! += attributes + (rest.match(/\.[-\w]+/g)?.length ?? 0) + (rest.match(/(?<!:):[-\w]+/g)?.length ?? 0);
+    w[2]! += (rest.match(/::[-\w]+/g)?.length ?? 0) + (rest.match(/(?:^|[\s>+~])[a-z][-\w]*/gi)?.length ?? 0);
+    return w;
+  };
+  /** A layer's words, split on spaces outside parentheses. */
+  const words = (layer: string) => {
+    const out: string[] = [];
+    let depth = 0;
+    let cur = "";
+    for (const ch of layer) {
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      if (/\s/.test(ch) && depth === 0) {
+        if (cur) out.push(cur);
+        cur = "";
+        continue;
+      }
+      cur += ch;
+    }
+    if (cur) out.push(cur);
+    return out;
+  };
+  const TIME = /^-?(\d*\.)?\d+m?s$/;
+  const EASING = /^(ease|ease-in|ease-out|ease-in-out|linear|step-start|step-end)$|^(var|cubic-bezier|steps|linear)\(/;
+  const LONGHANDS = ["transition-property", "transition-duration", "transition-timing-function"] as const;
+  const isLonghand = (prop: string): prop is (typeof LONGHANDS)[number] => LONGHANDS.some((l) => l === prop);
+  /** The `transition` shorthand's three longhands, as lists. */
+  const longhands = (shorthand: string) => {
+    const layers = splitArgs(shorthand).map(words);
+    return {
+      "transition-property": layers.map((l) => l.find((t) => !TIME.test(t) && !EASING.test(t)) ?? "all").join(", "),
+      "transition-duration": layers.map((l) => l.find((t) => TIME.test(t)) ?? "0s").join(", "),
+      "transition-timing-function": layers.map((l) => l.find((t) => EASING.test(t)) ?? "ease").join(", "),
+    };
+  };
+  /** One rule's value for `prop`; a later declaration in the rule wins. */
+  const valueOf = (decls: Map<string, string>, prop: string) => {
+    let value: string | undefined;
+    for (const [k, v] of decls) {
+      if (k === prop) value = v;
+      else if (k === "transition" && isLonghand(prop)) value = longhands(v)[prop];
+    }
+    return value;
+  };
+  /** What the cascade gives `prop` on an element exactly the `matching`
+   *  selectors match: the heaviest wins, and a tie goes to the later rule. */
+  const cascaded = (matching: string[], ctx: Ctx, prop: string) => {
+    let won: { weight: number[]; value: string } | undefined;
+    for (const r of RULES) {
+      if (!holds(r, ctx)) continue;
+      const hits = parts(r).filter((s) => matching.includes(s));
+      if (!hits.length) continue;
+      const value = valueOf(r.decls, prop);
+      if (value === undefined) continue;
+      const w = hits.map(weight).sort(heavier).at(-1)!;
+      if (!won || heavier(w, won.weight) >= 0) won = { weight: w, value };
+    }
+    return won?.value;
+  };
+  /** The transitions that run on a change, one `property duration easing`
+   *  per property, the lists repeated as the longhands repeat them. */
+  const transition = (matching: string[], ctx: Ctx) => {
+    const props = splitArgs(cascaded(matching, ctx, "transition-property") ?? "all");
+    if (props.join() === "none") return "none";
+    const durations = splitArgs(cascaded(matching, ctx, "transition-duration") ?? "0s");
+    const easings = splitArgs(cascaded(matching, ctx, "transition-timing-function") ?? "ease");
+    return props.map((p, i) => `${p} ${durations[i % durations.length]} ${easings[i % easings.length]}`).join(", ");
+  };
+  const seconds = (value: string) => Number(/^(\d*\.?\d+)s$/.exec(value)![1]);
+  /** The compound a selector styles, its `:not()`/`:has()` arguments dropped. */
+  const subject = (selector: string) =>
+    selector.replace(/:(not|has|is|where)\([^()]*\)/g, "").trim().split(/\s*[\s>+~]\s*/).pop()!;
+
+  // The panel's states: the selectors that match it in each.
+  const PANEL = [".dock-panel", ".dock .dock-panel"];
+  const CLOSING = [...PANEL, ".dock-panel[data-closing]", ".dock .dock-panel[data-closing]"];
+  const RESTORED = [...PANEL, ".dock[data-restored] .dock-panel:not([data-closing])"];
+  const HELD = [...PANEL, ".dock[data-sheet-drag] .dock-panel:not([data-closing])"];
+  const EASE_OUT = "var(--ease-out)";
+
+  it("keeps every rule on the panel in the table this cascade is read against", () => {
+    // Two-way: a new rule whose subject is the panel has to be read against
+    // the states below before it joins.
+    const onPanel = [...new Set(RULES.flatMap(parts).filter((s) => subject(s).startsWith(".dock-panel")))].sort();
+    expect(onPanel).toEqual([...new Set([...CLOSING, ...RESTORED, ...HELD])].sort());
+  });
+
+  it("(F20) the panel enters on a transition from @starting-style, at ruling 121(e)'s values", () => {
+    // CANARY: put `animation: dock-in .18s var(--ease-out)` back on
+    // `.dock-panel` in place of the transition, or drop either @starting-style.
+    const desktop = { phone: false, reduced: false };
+    const phone = { phone: true, reduced: false };
+    expect(transition(PANEL, desktop)).toBe(`opacity .18s ${EASE_OUT}, transform .18s ${EASE_OUT}`);
+    expect(cascaded(PANEL, { ...desktop, starting: true }, "opacity")).toBe("0");
+    expect(cascaded(PANEL, { ...desktop, starting: true }, "transform")).toBe("translateY(8px) scale(.97)");
+    // The sheet rises one sheet-height from the bottom edge and never fades.
+    expect(transition(PANEL, phone)).toBe(`opacity .22s ${EASE_OUT}, transform .22s ${EASE_OUT}`);
+    expect(cascaded(PANEL, { ...phone, starting: true }, "opacity")).toBe("1");
+    expect(cascaded(PANEL, { ...phone, starting: true }, "transform")).toBe("translateY(100%)");
+    // At rest the panel is where the entrance lands: nothing sets a pose.
+    for (const ctx of CONTEXTS) {
+      expect(cascaded(PANEL, ctx, "opacity"), name(ctx)).toBeUndefined();
+      expect(cascaded(PANEL, ctx, "transform"), name(ctx)).toBeUndefined();
+    }
+  });
+
+  it("(F20) the exit is that transition's far end, softer and shorter than the entrance at both widths", () => {
+    // CANARY: put `.dock-panel[data-closing]` back on the old `.12s`
+    // transition list, or drop the sheet's `transition-duration: .15s`.
+    const desktop = { phone: false, reduced: false };
+    const phone = { phone: true, reduced: false };
+    expect(transition(CLOSING, desktop)).toBe(`opacity .12s ${EASE_OUT}, transform .12s ${EASE_OUT}`);
+    expect(cascaded(CLOSING, desktop, "opacity")).toBe("0");
+    expect(cascaded(CLOSING, desktop, "pointer-events")).toBe("none");
+    const exit = /^translateY\((\d+)px\) scale\(([\d.]+)\)$/.exec(cascaded(CLOSING, desktop, "transform")!)!;
+    const enter = /^translateY\((\d+)px\) scale\(([\d.]+)\)$/.exec(
+      cascaded(PANEL, { ...desktop, starting: true }, "transform")!,
+    )!;
+    expect([Number(exit[1]), Number(exit[2])]).toEqual([6, 0.98]);
+    expect(Number(exit[1])).toBeLessThan(Number(enter[1]));
+    expect(Number(exit[2])).toBeGreaterThan(Number(enter[2]));
+    expect(transition(CLOSING, phone)).toBe(`opacity .15s ${EASE_OUT}, transform .15s ${EASE_OUT}`);
+    expect(cascaded(CLOSING, phone, "opacity")).toBe("1");
+    expect(cascaded(CLOSING, phone, "transform")).toBe("translateY(100%)");
+    for (const ctx of [desktop, phone]) {
+      const [out, into] = [CLOSING, PANEL].map((state) =>
+        seconds(splitArgs(cascaded(state, ctx, "transition-duration")!)[0]!),
+      );
+      expect(out, name(ctx)).toBeLessThan(into!);
+    }
+    // A closing rule names a duration and never the properties, so taking
+    // the close back retargets the same two properties instead of snapping.
+    const closing = RULES.filter((r) => parts(r).some((s) => s.endsWith("[data-closing]") && subject(s).startsWith(".dock-panel")));
+    expect(closing.length).toBeGreaterThanOrEqual(3);
+    for (const r of closing) {
+      expect(r.decls.has("transition"), r.selector).toBe(false);
+      expect(r.decls.has("transition-property"), r.selector).toBe(false);
+    }
+  });
+
+  it("(F20) nothing animates the panel at any width or preference, and its keyframes are gone", () => {
+    // CANARY: restore `.dock .dock-panel { animation: fade-in .12s ease }` in
+    // the reduced-motion block. A keyframe on the panel is what made the
+    // close unable to start from mid-entrance and the reversal replay.
+    const animated = RULES.filter((r) => parts(r).some((s) => subject(s).startsWith(".dock-panel")))
+      .filter((r) => r.decls.has("animation") || r.decls.has("animation-name"))
+      .map((r) => r.selector);
+    expect(animated).toEqual([]);
+    expect(CODE).not.toMatch(/@keyframes dock-(sheet-)?in\b/);
+  });
+
+  it("(F20) reduced motion fades the panel in and out over .12s at both widths, and nothing slides", () => {
+    // CANARY: drop `transition-duration: .12s` from the reduced-motion
+    // `.dock .dock-panel[data-closing]`: the 720px block's closing rule, one
+    // attribute heavier than the reduced `.dock .dock-panel`, then hands the
+    // sheet's .15s to the fade out.
+    for (const ctx of CONTEXTS.filter((c) => c.reduced)) {
+      expect(transition(PANEL, ctx), name(ctx)).toBe("opacity .12s ease");
+      expect(cascaded(PANEL, { ...ctx, starting: true }, "opacity"), name(ctx)).toBe("0");
+      expect(transition(CLOSING, ctx), name(ctx)).toBe("opacity .12s ease");
+      expect(cascaded(CLOSING, ctx, "opacity"), name(ctx)).toBe("0");
+      expect(cascaded(CLOSING, ctx, "transform"), name(ctx)).toBe("none");
+    }
+  });
+
+  it("(F20) a sheet caught mid-entrance is held where the finger took it, under either preference", () => {
+    // CANARY: drop `transition: none` from the ruling-454 drag rule: the
+    // entrance transition then carries on under the finger.
+    for (const ctx of CONTEXTS.filter((c) => c.phone)) {
+      expect(transition(HELD, ctx), name(ctx)).toBe("none");
+      expect(cascaded(HELD, ctx, "transform"), name(ctx)).toBe("translateY(var(--sheet-drag, 0px))");
+    }
+  });
+
+  it("(F24) a restored panel appears in place everywhere, and its later close still animates", () => {
+    // CANARY: drop `:not([data-closing])` from the restored rule, and the
+    // restored dock's pointer close snaps shut instead of leaving.
+    for (const ctx of CONTEXTS) {
+      expect(transition(RESTORED, ctx), name(ctx)).toBe("none");
+      const closingRestored = CLOSING.concat(
+        RESTORED.filter((s) => !s.includes(":not([data-closing])")),
+      );
+      expect(transition(closingRestored, ctx), name(ctx)).toBe(transition(CLOSING, ctx));
+      expect(transition(closingRestored, ctx), name(ctx)).not.toBe("none");
+    }
+    // Its weight, not its place in the sheet, is what beats the panel's own
+    // rules at both widths and under the preference.
+    const restored = weight(".dock[data-restored] .dock-panel:not([data-closing])");
+    for (const s of [...PANEL, ".dock-panel[data-closing]"]) expect(heavier(restored, weight(s)), s).toBeGreaterThan(0);
+  });
+
+  it("(F24) a restored dock's trigger lands on its perch at sheet width; a press still eases and a close still carries it home", () => {
+    // CANARY: move `.dock[data-restored] .dock-fab:not(:active)` below the
+    // `:has()` return (the pointer close then snaps the trigger home), or drop
+    // its `:not(:active)` (the press on the perched trigger snaps).
+    const FAB = [".dock-fab", '.dock[data-open="true"] .dock-fab'];
+    const RESTORED_FAB = [...FAB, ".dock[data-restored] .dock-fab:not(:active)"];
+    const PRESSED = [...FAB, ".dock-fab:active", '.dock[data-open="true"] .dock-fab:active'];
+    const HOME = ".dock:has(.dock-panel[data-closing]) .dock-fab";
+    const RESTORED_RULE = ".dock[data-restored] .dock-fab:not(:active)";
+    // Two-way, as the panel's table: every rule on the trigger is one of these.
+    const onFab = [...new Set(RULES.flatMap(parts).filter((s) => subject(s).startsWith(".dock-fab")))].sort();
+    expect(onFab).toEqual(
+      [...new Set([...RESTORED_FAB, ...PRESSED, HOME, ".dock-fab:hover", ".dock .dock-fab", ".dock[data-sheet-drag] .dock-fab"])].sort(),
+    );
+    // The restored rule steps aside while the trigger is pressed, so the
+    // press eases on the perch rule's `:active` clock.
+    expect(RESTORED_RULE).toMatch(/:not\(:active\)$/);
+    const phone = { phone: true, reduced: false };
+    const perch = cascaded(FAB, phone, "transform")!;
+    expect(perch).toMatch(/^translate\(-8px, min\(0px, calc\(/);
+    // The trigger the person opened flies up on the sheet's clock…
+    expect(transition(FAB, phone)).toBe(`transform .22s ${EASE_OUT}`);
+    // …and the restored one is simply there.
+    expect(cascaded(RESTORED_FAB, phone, "transform")).toBe(perch);
+    expect(transition(RESTORED_FAB, phone)).toBe("none");
+    expect(transition(PRESSED, phone)).toBe(`transform .1s ${EASE_OUT}`);
+    expect(transition([...RESTORED_FAB, HOME], phone)).toBe(`transform .15s ${EASE_OUT}`);
+    expect(cascaded([...RESTORED_FAB, HOME], phone, "transform")).toBe("none");
+    // Equal weight, so the return has to come later in the sheet.
+    const at = (selector: string) => RULES.findIndex((r) => holds(r, phone) && parts(r).includes(selector));
+    expect(weight(RESTORED_RULE)).toEqual(weight(HOME));
+    expect(at(HOME)).toBeGreaterThan(at(RESTORED_RULE));
+    // Nothing moves the trigger above 720px, so the rule lives only in the
+    // sheet's block; under reduced motion the trigger never slides at all.
+    const restoredRules = RULES.filter((r) => parts(r).includes(RESTORED_RULE));
+    expect(restoredRules).toHaveLength(1);
+    expect(restoredRules[0]!.at).toEqual(["@media (max-width: 720px)"]);
+    const desktop = { phone: false, reduced: false };
+    expect(transition(RESTORED_FAB, desktop)).toBe(transition(FAB, desktop));
+    for (const state of [RESTORED_FAB, [...RESTORED_FAB, HOME]]) {
+      expect(transition(state, { phone: true, reduced: true })).toBe("none");
+    }
   });
 });

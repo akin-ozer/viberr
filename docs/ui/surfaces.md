@@ -133,7 +133,9 @@ Intents behind `project.task.tsx` are explained in
   `showModal()` overlay, which would leave the dock inert behind it). It is a floating
   bottom-right button named `Controller · <scope>` opening a non-modal panel bound to
   the current instance, board or task (a bottom sheet at ≤ 720 px, which a finger pulls down
-  to dismiss, ruling 454). Its composer is
+  to dismiss, ruling 454). Its open and close are one transition, so a click on the button
+  while the panel leaves turns it back open from where it is, and a panel the per-tab memory
+  reopens appears in place with no entrance (ruling 459, F20 and F24). Its composer is
   disabled, with the same sentence the full page uses, when the VIEWER has not connected
   Claude (ruling 127). The button carries a pulsing dot while a turn works in its scope
   and a still blue dot when a reply its owner has not seen waits in any scope
@@ -164,8 +166,9 @@ Intents behind `project.task.tsx` are explained in
   error-boundary remount (ruling 459).
 - **Motion, materials and type** (ruling 453). The board's drop flight is a critically
   damped spring (`ui/spring.ts`) that leaves at the pointer's release velocity. A
-  dialog, page overlay or the dock closed while its entrance is still playing leaves
-  from where it got to (`ui/live-pose.ts`). Every transform transition, and so every
+  dialog or page overlay closed while its entrance is still playing leaves from where
+  it got to (`ui/live-pose.ts`); the dock's entrance is a transition, which its close
+  retargets with nothing pinned (ruling 459). Every transform transition, and so every
   press, runs on `--ease-out`. The Home and standalone header, and the page overlay's
   sticky head, draw their bottom edge only once content scrolls under them. The OS
   increased-contrast setting swaps every frame and divider onto `--border-control`,

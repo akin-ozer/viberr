@@ -222,16 +222,24 @@ describe("useSheetDrag", () => {
 
   it("caught mid-entrance and let go without a drag, it finishes opening", () => {
     const { host, onDismiss, sheetEl, getByTestId } = setup();
-    // The entrance keyframe, 400px from home — past halfway.
+    // The entrance transition, 400px from home — past halfway.
     sheetEl.style.transform = "matrix(1, 0, 0, 1, 0, 400)";
+    const before = sheetEl.getAttribute("style");
     const head = getByTestId("head");
     pointer(head, "pointerdown", 500);
+    // Held where it was caught on the HOST (the drag rule's `transition: none`
+    // cancels the entrance there, ruling 459). The sheet itself carries
+    // nothing the hook wrote, so nothing is left on it to replay.
+    // CANARY: put `sheet.style.animation = "none"` back in onDown.
     expect(drag(host)).toBe(400);
-    expect(sheetEl.style.animation).toBe("none");
+    expect(host.dataset.sheetDrag).toBe("");
+    expect(sheetEl.getAttribute("style")).toBe(before);
     pointer(head, "pointerup", 500, 100);
     runFrames();
     expect(onDismiss).not.toHaveBeenCalled();
     expect(drag(host)).toBeNull();
+    expect(host.dataset.sheetDrag).toBeUndefined();
+    expect(sheetEl.getAttribute("style")).toBe(before);
   });
 
   it("under reduced motion nothing slides after the release: a dismiss leaves from where it is", () => {

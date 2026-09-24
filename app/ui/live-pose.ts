@@ -3,13 +3,14 @@
  * the presentation value, never the target" (Apple, "Designing Fluid
  * Interfaces").
  *
- * The app's dialogs and the controller dock enter on keyframes and leave on a
- * `[data-closing]` transition. Chrome starts no transition on a property a CSS
- * animation is still driving, so a surface closed mid-entrance got no exit at
- * all: it vanished in one frame, and the close then waited out its fallback
- * timer (measured 2026-09-24 — closed halfway in, opacity went .50 → 0 with no
- * transition; closed after the entrance, the same rule fades 1 → 0). A double
- * click on the dock's button is enough to hit it.
+ * The app's dialogs enter on keyframes and leave on a `[data-closing]`
+ * transition. Chrome starts no transition on a property a CSS animation is
+ * still driving, so a surface closed mid-entrance got no exit at all: it
+ * vanished in one frame, and the close then waited out its fallback timer
+ * (measured 2026-09-24 — closed halfway in, opacity went .50 → 0 with no
+ * transition; closed after the entrance, the same rule fades 1 → 0). The
+ * controller dock pinned too until ruling 459 made its entrance a transition,
+ * which a close retargets from where it is with nothing pinned.
  *
  * `pinLivePose` holds the element where its entrance has got to: its live
  * opacity and transform written inline and the entrance switched off, then a

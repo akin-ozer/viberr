@@ -1004,3 +1004,276 @@ describe("ruling 368: the dock's send in flight", () => {
     expect(sending.querySelector("svg.ico.spin")).not.toBeNull();
   });
 });
+
+/**
+ * Ruling 459's deferred dock half (owner, 2026-09-24: "do the two dock fixes
+ * now"), built on ruling 454's sheet. F20: the open and close can be turned
+ * around mid-flight. F24: a panel the per-tab restore reopens appears in
+ * place (`data-restored`). The motion itself is CSS, pinned in app.css.test.ts
+ * "ruling 459: the dock's deferred half"; these are the component's halves.
+ *
+ * jsdom loads no stylesheet, so its transition duration reads 0 and a close
+ * finishes at once. A test that needs the close in flight gives the panel the
+ * desktop exit's duration inline, and the dock then waits for `transitionend`
+ * (or its fallback timer) as it does in a browser.
+ */
+describe("ruling 459: the dock's deferred half", () => {
+  const DIALOG = { name: "Controller dock" } as const;
+  function leaveSlowly(panel: HTMLElement) {
+    panel.style.setProperty("transition-duration", "0.12s");
+  }
+
+  it("(F20) a trigger click while the panel leaves takes the close back, and focus goes in", async () => {
+    mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
+    const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
+    await restored();
+    fireEvent.click(trigger);
+    const panel = await screen.findByRole("dialog", DIALOG);
+    const composer = await screen.findByLabelText("Message to the controller");
+    await waitFor(() => expect(document.activeElement).toBe(composer));
+    leaveSlowly(panel);
+    fireEvent.click(screen.getByRole("button", { name: "Close the controller dock" }));
+    expect(panel.hasAttribute("data-closing")).toBe(true);
+    // The person clicks the trigger again before the exit ends (a click
+    // focuses the button it lands on).
+    trigger.focus();
+    // CANARY: drop the `closing` branch from the trigger's onClick — the
+    // click is swallowed by the close already running, and the panel goes.
+    fireEvent.click(trigger);
+    expect(panel.isConnected).toBe(true);
+    expect(panel.hasAttribute("data-closing")).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    // It is the person's own open: focus goes in, as on any other.
+    expect(document.activeElement).toBe(composer);
+    // The close it took back never lands: not on the exit's transitionend,
+    // not on the fallback timer (the exit's .12s plus 50ms).
+    fireEvent.transitionEnd(panel);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(screen.getByRole("dialog", DIALOG)).toBe(panel);
+    expect(panel.hasAttribute("data-closing")).toBe(false);
+    expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("1");
+    // One toggle per click: the next click closes it again.
+    fireEvent.click(trigger);
+    expect(panel.hasAttribute("data-closing")).toBe(true);
+    fireEvent.transitionEnd(panel);
+    await waitFor(() => expect(screen.queryByRole("dialog", DIALOG)).toBeNull());
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("0");
+  });
+
+  it("(F20) a close writes nothing on the panel: the exit starts from where it is, nothing pinned", async () => {
+    // Ruling 453(b) amended: the dock no longer pins its live pose. Its
+    // entrance is a transition, which `data-closing` retargets from wherever
+    // it has got to; a pin's inline pose would only fight the reversal.
+    // CANARY: put `pinLivePose(panelRef.current)` back in closeDock.
+    mount({ path: "/projects/viberr/board", view: () => taskView() });
+    const trigger = await screen.findByRole("button", { name: "Controller · viberr" });
+    fireEvent.click(trigger);
+    const panel = await screen.findByRole("dialog", DIALOG);
+    leaveSlowly(panel);
+    const before = panel.getAttribute("style");
+    const observer = new MutationObserver(() => {});
+    observer.observe(panel, { attributes: true, attributeFilter: ["style"] });
+    fireEvent.click(screen.getByRole("button", { name: "Close the controller dock" }));
+    expect(panel.hasAttribute("data-closing")).toBe(true);
+    const writes = observer.takeRecords();
+    observer.disconnect();
+    expect(writes).toEqual([]);
+    expect(panel.getAttribute("style")).toBe(before);
+  });
+
+  it("(F24) a restored panel is marked until the person's own open, and keeps the mark through its close", async () => {
+    window.sessionStorage.setItem("viberr.dock.open", "1");
+    mount({ path: "/projects/viberr/board", view: () => taskView() });
+    const panel = await screen.findByRole("dialog", DIALOG);
+    const dock = panel.closest<HTMLElement>(".dock")!;
+    const trigger = screen.getByRole("button", { name: /^Controller · / });
+    // CANARY: drop `setRestoredOpen(...)` from the restore effect.
+    expect(dock.hasAttribute("data-restored")).toBe(true);
+    // A pointer close keeps it while the panel leaves (the attribute is gated
+    // on `open`, and the CSS already steps aside for `[data-closing]`)…
+    // CANARY: clear it in closeDock.
+    leaveSlowly(panel);
+    fireEvent.click(trigger);
+    expect(panel.hasAttribute("data-closing")).toBe(true);
+    expect(dock.hasAttribute("data-restored")).toBe(true);
+    fireEvent.transitionEnd(panel);
+    // …and it leaves with the panel.
+    await waitFor(() => expect(screen.queryByRole("dialog", DIALOG)).toBeNull());
+    expect(dock.hasAttribute("data-restored")).toBe(false);
+    // The person's own open plays its entrance.
+    // CANARY: drop `setRestoredOpen(false)` from the trigger's open path.
+    fireEvent.click(trigger);
+    await screen.findByRole("dialog", DIALOG);
+    expect(dock.hasAttribute("data-restored")).toBe(false);
+  });
+
+  it("(F24) a click that beat the restore's read is the person's own open, and keeps its entrance", async () => {
+    // The race "keeps an open the person clicked before the restore had read
+    // storage" pins above, with the tab remembering the dock open.
+    // CANARY: set `restoredOpen` from `stored` alone.
+    window.sessionStorage.setItem("viberr.dock.open", "1");
+    const storage: Storage = Object.getPrototypeOf(window.sessionStorage);
+    const read = storage.getItem;
+    const spy = vi
+      .spyOn(storage, "getItem")
+      .mockImplementation(function (this: Storage, key: string) {
+        if (key === "viberr.dock.open") document.querySelector<HTMLButtonElement>(".dock-fab")?.click();
+        return read.call(this, key);
+      });
+    try {
+      mount({ path: "/projects/viberr/board", view: () => taskView() });
+      await screen.findByRole("dialog", DIALOG);
+    } finally {
+      spy.mockRestore();
+    }
+    const dock = document.querySelector<HTMLElement>(".dock")!;
+    expect(dock.getAttribute("data-open")).toBe("true");
+    expect(dock.hasAttribute("data-restored")).toBe(false);
+  });
+
+  it("(F20, F24) taking back a restored panel's close drops the mark, so the way back retargets", async () => {
+    // Under `data-restored` the panel has no transition, and a reversal would
+    // snap open instead of turning around from where the exit had got to.
+    // CANARY: drop `setRestoredOpen(false)` from the trigger's closing branch.
+    window.sessionStorage.setItem("viberr.dock.open", "1");
+    mount({ path: "/projects/viberr/board", view: () => taskView() });
+    const panel = await screen.findByRole("dialog", DIALOG);
+    const dock = panel.closest<HTMLElement>(".dock")!;
+    const trigger = screen.getByRole("button", { name: /^Controller · / });
+    leaveSlowly(panel);
+    fireEvent.click(trigger);
+    expect(panel.hasAttribute("data-closing")).toBe(true);
+    fireEvent.click(trigger);
+    expect(panel.hasAttribute("data-closing")).toBe(false);
+    expect(dock.hasAttribute("data-restored")).toBe(false);
+    expect(panel.contains(document.activeElement)).toBe(true);
+  });
+
+  it("(F20) a click that lands after the exit ended, before React renders that, still keeps the panel open", async () => {
+    // The exit's transitionend queues the unmount at default priority, which
+    // renders a task later; Chrome can run a queued click first, and that
+    // click's handler still sees `closing`. One `act` holds both, so neither
+    // renders before the other has run.
+    // CANARY: drop `setOpen(true)` from the trigger's closing branch — the
+    // pending close lands after the take-back and unmounts the panel, and
+    // focus falls to <body>.
+    mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
+    const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
+    await restored();
+    fireEvent.click(trigger);
+    const panel = await screen.findByRole("dialog", DIALOG);
+    const composer = await screen.findByLabelText("Message to the controller");
+    await waitFor(() => expect(document.activeElement).toBe(composer));
+    leaveSlowly(panel);
+    fireEvent.click(trigger);
+    expect(panel.hasAttribute("data-closing")).toBe(true);
+    trigger.focus();
+    act(() => {
+      fireEvent.transitionEnd(panel);
+      fireEvent.click(trigger);
+    });
+    expect(panel.isConnected).toBe(true);
+    expect(panel.hasAttribute("data-closing")).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(composer);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(screen.getByRole("dialog", DIALOG)).toBe(panel);
+    expect(window.sessionStorage.getItem("viberr.dock.open")).toBe("1");
+  });
+
+  it("(F24) under StrictMode, as on the dev server, a restored panel is still marked", async () => {
+    // React runs mount effects twice there, and between the runs the `[open]`
+    // write has stored "0": the second restore reads a closed dock.
+    // CANARY: set `restoredOpen` with a plain value again
+    // (`setRestoredOpen(fromStore)`) — the second run clears the mark.
+    window.sessionStorage.setItem("viberr.dock.open", "1");
+    mount({ path: "/projects/viberr/board", view: () => taskView(), strict: true });
+    const panel = await screen.findByRole("dialog", DIALOG);
+    const dock = panel.closest<HTMLElement>(".dock")!;
+    expect(dock.getAttribute("data-open")).toBe("true");
+    expect(dock.hasAttribute("data-restored")).toBe(true);
+  });
+
+  describe("at sheet width, a close that interrupts a pull's settle", () => {
+    // Ruling 454's gesture under ruling 459's take-back. The 720px block's
+    // flag makes the panel a sheet; jsdom lays nothing out, so the sheet's
+    // height is stubbed (halfway at 300px).
+    let height: { mockRestore(): void } | null = null;
+    function sheet(panel: HTMLElement) {
+      Object.defineProperty(window, "matchMedia", {
+        configurable: true,
+        value: (query: string) => ({ matches: false, media: query }),
+      });
+      height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
+      panel.style.setProperty("--sheet-draggable", "1");
+      const head = panel.querySelector<HTMLElement>("header.dock-head")!;
+      return (type: string, y: number) =>
+        fireEvent(
+          head,
+          new PointerEvent(type, { pointerId: 1, isPrimary: true, button: 0, clientY: y, bubbles: true }),
+        );
+    }
+    afterEach(() => {
+      height?.mockRestore();
+      height = null;
+      Reflect.deleteProperty(window, "matchMedia");
+    });
+
+    it("lets go of the gesture at the close, so taking the close back retargets instead of snapping to the spring", async () => {
+      // CANARY: pass `open` (not `open && !closing`) to useSheetDrag — the
+      // host keeps `data-sheet-drag` through the close, and the take-back
+      // drops [data-closing] under the drag rule's `transition: none`.
+      mount({ path: "/projects/viberr/board", view: () => taskView() });
+      const trigger = await screen.findByRole("button", { name: "Controller · viberr" });
+      fireEvent.click(trigger);
+      const panel = await screen.findByRole("dialog", DIALOG);
+      const dock = panel.closest<HTMLElement>(".dock")!;
+      const at = sheet(panel);
+      leaveSlowly(panel);
+      // A pull of 180px, held still, then let go short of halfway: the
+      // return spring runs.
+      at("pointerdown", 100);
+      for (let y = 120; y <= 300; y += 20) at("pointermove", y);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      at("pointerup", 300);
+      expect(dock.hasAttribute("data-sheet-drag")).toBe(true);
+      fireEvent.click(trigger);
+      expect(panel.hasAttribute("data-closing")).toBe(true);
+      expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
+      expect(dock.style.getPropertyValue("--sheet-drag")).toBe("");
+      fireEvent.click(trigger);
+      expect(panel.hasAttribute("data-closing")).toBe(false);
+      expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
+      // No frame of the stopped spring writes it back.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
+      expect(dock.style.getPropertyValue("--sheet-drag")).toBe("");
+      expect(screen.getByRole("dialog", DIALOG)).toBe(panel);
+    });
+
+    it("a dismiss throw the person closes and then takes back does not dismiss the dock anyway", async () => {
+      // CANARY: pass `open` (not `open && !closing`) to useSheetDrag — the
+      // throw's spring runs on under the take-back, reaches the bottom and
+      // calls onDismiss, and the panel the person kept open unmounts.
+      mount({ path: "/projects/viberr/board", view: () => taskView() });
+      const trigger = await screen.findByRole("button", { name: "Controller · viberr" });
+      fireEvent.click(trigger);
+      const panel = await screen.findByRole("dialog", DIALOG);
+      const dock = panel.closest<HTMLElement>(".dock")!;
+      const at = sheet(panel);
+      leaveSlowly(panel);
+      at("pointerdown", 100);
+      for (let y = 120; y <= 500; y += 20) at("pointermove", y);
+      at("pointerup", 500);
+      fireEvent.click(trigger);
+      fireEvent.click(trigger);
+      expect(panel.hasAttribute("data-closing")).toBe(false);
+      // Well past the throw's own settle.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(screen.getByRole("dialog", DIALOG)).toBe(panel);
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+      expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
+    });
+  });
+});

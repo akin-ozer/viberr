@@ -2704,8 +2704,8 @@ dialog::backdrop { background: color-mix(in srgb, var(--fg), transparent 70%); a
 }
 /* Animated close — useDialog sets [data-closing], plays a softer, shorter
    pop-center in reverse, then unmounts on transitionend. Softer: a fixed
-   6px/.98 against the enter's 8px/.97, the dock's dock-in /
-   .dock-panel[data-closing] pair (ruling 459); shorter: .15s against .18s. */
+   6px/.98 against the enter's 8px/.97, the dock panel's @starting-style /
+   [data-closing] pair (ruling 459); shorter: .15s against .18s. */
 dialog[data-closing] {
   animation: none;
   pointer-events: none;
@@ -4530,8 +4530,11 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
     border-radius: var(--radius-panel) var(--radius-panel) 0 0;
     border-bottom: 0;
     transform-origin: bottom center;
-    animation: dock-sheet-in .22s var(--ease-out);
-    transition: opacity .15s var(--ease-out), transform .15s var(--ease-out);
+    /* The sheet rises over .22s and leaves over .15s, as one transition, so
+       a trigger click while it leaves turns it around (ruling 459, F20; the
+       desktop rule explains the pair). It never fades: both ends keep
+       opacity 1, and the rise starts one sheet-height down. */
+    transition: opacity .22s var(--ease-out), transform .22s var(--ease-out);
     /* Ruling 454: a finger pulls the sheet down to dismiss it. The flag is
        how `useSheetDrag` knows the panel is a sheet at this width without
        reading the viewport (R19-12); the floating panel never drags. */
@@ -4545,6 +4548,9 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
        right under the sheet's edge (seen live, a pull lifted 115px). */
     box-shadow: 0 calc(min(80dvh, 640px) - var(--radius-panel)) 0 var(--surface), var(--shadow-pop);
   }
+  @starting-style {
+    .dock .dock-panel { opacity: 1; transform: translateY(100%); }
+  }
   /* The grabber, and the header under it, are the sheet's handles. They take
      every one-finger touch (no page scroll, no text selection) so a pull
      moves the sheet; the header's buttons keep their taps. A pinch still
@@ -4557,7 +4563,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   }
   .dock .dock-grabber, .dock .dock-head { touch-action: none; touch-action: pinch-zoom; -webkit-user-select: none; user-select: none; }
   .dock .dock-head { padding-top: .375rem; }
-  .dock .dock-panel[data-closing] { opacity: 1; transform: translateY(100%); }
+  .dock .dock-panel[data-closing] { opacity: 1; transform: translateY(100%); transition-duration: .15s; }
   /* Ruling 459: the sheet's bottom corners are square and it spans the
      viewport, so there is no panel corner for the composer to be concentric
      with: it keeps the transcript's 12px gutter off the screen edge. Two
@@ -4595,6 +4601,12 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
     transform: translate(-8px, min(0px, calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px) + var(--sheet-drag, 0px)))) scale(.74);
     transition-duration: .1s;
   }
+  /* Ruling 459 (F24): a dock the per-tab restore reopened was already open,
+     so its trigger lands on the perch instead of flying there. Not while
+     pressed, so the press still eases on the rule above. It has the closing
+     return's weight and comes before it, so a pointer close still carries
+     the trigger home on the sheet's clock. */
+  .dock[data-restored] .dock-fab:not(:active) { transition: none; }
   /* The return is keyed off the CLOSING state, not data-open, which is still
      "true" until the panel unmounts. */
   .dock:has(.dock-panel[data-closing]) .dock-fab {
@@ -7230,20 +7242,30 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
   box-shadow: var(--shadow-pop);
   overflow: hidden;
   transform-origin: bottom right;
-  animation: dock-in .18s var(--ease-out);
-  /* The pointer close: [data-closing] transitions these two, then unmounts. */
-  transition: opacity .12s var(--ease-out), transform .12s var(--ease-out);
+  /* Ruling 121(e)'s .18s in and .12s out, as ONE transition, so the toggle
+     can turn it around mid-flight (ruling 459, F20). The entrance starts from
+     @starting-style below; a pointer close sets [data-closing], the exit's
+     target, and unmounts on transitionend; a trigger click while it leaves
+     drops the attribute, and the panel goes back from wherever it got to, on
+     the entrance's clock. A keyframe entrance could do neither: Chrome starts
+     no transition on a property an animation drives, and dropping the
+     attribute would have replayed the entrance from nothing. */
+  transition: opacity .18s var(--ease-out), transform .18s var(--ease-out);
 }
-@keyframes dock-in {
-  from { opacity: 0; transform: translateY(8px) scale(.97); }
-  to { opacity: 1; transform: none; }
+@starting-style {
+  .dock-panel { opacity: 0; transform: translateY(8px) scale(.97); }
 }
 .dock-panel[data-closing] {
-  animation: none;
   pointer-events: none;
   opacity: 0;
   transform: translateY(6px) scale(.98);
+  transition-duration: .12s;
 }
+/* Ruling 459 (F24): a panel the per-tab restore reopened was already open,
+   so it appears in place instead of replaying its entrance. Heavier than
+   every `.dock-panel` rule at every width and preference, so it wins in any
+   order. Not while closing: the same panel's later close still animates. */
+.dock[data-restored] .dock-panel:not([data-closing]) { transition: none; }
 .dock-head {
   display: flex; align-items: center; gap: .5rem;
   padding: .75rem .75rem .5rem;
@@ -7313,26 +7335,22 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
    task a thread is anchored to. */
 .ctl-msg-surface { font-size: .75rem; color: var(--faint); }
 .ctl-conv-task { margin-right: .375rem; vertical-align: middle; }
-@keyframes dock-sheet-in {
-  from { transform: translateY(100%); }
-  to { transform: none; }
-}
 @media (prefers-reduced-motion: reduce) {
   /* `.dock .dock-panel`, not `.dock-panel`: the ≤720px sheet rules are written
      at that specificity on purpose (they have to beat the base rule declared
      later in this sheet), so an override written one class lighter lost to
      them and the sheet kept sliding its full height under the preference —
-     the largest movement in the dock (review finding 10). */
-  .dock .dock-panel {
-    animation: fade-in .12s ease;
-    transition: opacity .12s ease;
+     the largest movement in the dock (review finding 10). The same weight,
+     later, reaches both widths: the panel fades in from opacity 0 and out to
+     it over .12s, and nothing slides (ruling 459, F20). */
+  .dock .dock-panel { transition: opacity .12s ease; }
+  @starting-style {
+    .dock .dock-panel { opacity: 0; }
   }
-  /* `animation: none` because the close pins the live pose (ruling 453(b),
-     live-pose.ts): it switches the entrance off inline and releases it once
-     `data-closing` lands, and a fade-in still named here then REPLAYED on the
-     closing panel — up to full opacity, then gone at the fallback timer, with
-     no exit transition at all (review, 2026-09-24). */
-  .dock .dock-panel[data-closing] { opacity: 0; transform: none; animation: none; }
+  /* The duration is restated: the 720px block's closing rule, one attribute
+     heavier than the rule above, sets the sheet's .15s, and the fade out
+     would have taken it. */
+  .dock .dock-panel[data-closing] { opacity: 0; transform: none; transition-duration: .12s; }
   .ctl-msg[data-fresh] { animation: fade-in .12s ease; }
   /* Both dots: the one on the trigger and the one in the panel's working row,
      which kept pulsing forever inside the sheet. */
@@ -7957,7 +7975,11 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
    `--sheet-drag`; the sheet and its perched button both read that one value,
    and neither transitions, because the script is the clock: it follows the
    finger 1:1 and then runs the spring. A closing sheet leaves the rule, so
-   the Close button's exit still transitions from wherever the sheet is. */
+   the Close button's exit still transitions from wherever the sheet is.
+   The same `transition: none` is what catches a sheet still rising: its
+   entrance is a transition (ruling 459, F20), which this cancels where the
+   script's offset holds it, and nothing is left to replay once the drag
+   lets go (@starting-style applies only to the panel's first style). */
 .dock { --sheet-drag: 0px; }
 .dock-grabber { display: none; }
 .dock[data-sheet-drag] .dock-panel:not([data-closing]) {

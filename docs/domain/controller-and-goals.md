@@ -141,8 +141,8 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   their taps. After a 10px slop it follows 1:1, and it rubber-bands above its resting place.
   Momentum projection decides between dismissing and coming back, and the settle is a spring
   that keeps the finger's speed (`useSheetDrag`, `ui/use-sheet-drag.ts`). A sheet grabbed
-  while it moves is caught where it is. The perched trigger rides the pull, and Close stays
-  the named way out.
+  while it moves, its entrance included, is caught where it is. The perched trigger rides
+  the pull, and Close stays the named way out.
 - **Availability is the VIEWER's** (ruling 127): the dock's `available` is
   `isBackendAvailableFor(db, viewer, "claude")`, in the normal view and in the
   `unavailable` refusal view alike, so a person with no Claude connected reads the
@@ -192,13 +192,21 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   thread answers 409 too, with the note already in the transcript. Both page routes
   (`/controller`, `/projects/:slug/controller`) answer the same 409.
 - **Motion**: the panel grows from its trigger (`transform-origin: bottom right`,
-  .18s `--ease-out` in, .12s out on a pointer close, instant on Escape); a reply that
-  arrives while the panel is open lands with a .2s fade-and-rise (history never
-  animates: the component marks only messages it had not seen in the same
-  conversation); reduced motion (OS or the in-app preference) fades only.
+  .18s `--ease-out` in, .12s out on a pointer close, instant on Escape). In and out are
+  one transition (the entrance starts from `@starting-style`, the close's target is
+  `[data-closing]`), so a click on the trigger while the panel leaves takes the close
+  back: the panel turns around from wherever it has got to, and focus goes in as on any
+  open the person asked for (ruling 459, F20). A panel the per-tab memory reopens (a
+  reload, or a return from a page the dock is hidden on) was already open, so it appears
+  in place with no entrance (`data-restored`, F24); its later close still animates. A
+  reply that arrives while the panel is open lands with a .2s fade-and-rise (history
+  never animates: the component marks only messages it had not seen in the same
+  conversation); under the OS reduced-motion setting (ruling 148(c): the one signal)
+  the panel fades only, .12s both ways at every width.
 - **Small screens** (≤ 720 px): a full-width bottom sheet, `min(80dvh, 640px)` tall,
-  entering and leaving along the bottom edge; the trigger stays on screen above the
-  sheet (R19-12), smaller, as a second close.
+  rising along the bottom edge over .22s and leaving over .15s; the trigger stays on
+  screen above the sheet (R19-12), smaller, as a second close, and travels to that perch
+  on the sheet's clock. A restored sheet's trigger is simply there.
 - **Errors**: refusals are in the transcript (the run engine writes them); transport
   failures (expired session, stale CSRF) come back as `{ ok:false, error }` and show as an
   error toast, never as the root boundary.

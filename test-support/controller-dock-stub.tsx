@@ -34,6 +34,9 @@ export interface DockStubOptions {
   action?: (form: FormData) => { ok: true; conversationId: string } | { ok: false; error: string };
   /** The pages hold the `user` stream, as the workspace layout does. */
   live?: boolean;
+  /** Mount under `<StrictMode>`, as `entry.client.tsx` does (the dev server
+   *  double-runs mount effects there; production does not). */
+  strict?: boolean;
 }
 
 export interface DockStubCounters {
@@ -150,6 +153,6 @@ export function mountDock(opts: DockStubOptions) {
       ],
     },
   ]);
-  const utils = render(<Stub initialEntries={[opts.path]} />);
+  const utils = render(<Stub initialEntries={[opts.path]} />, { reactStrictMode: opts.strict });
   return { ...utils, ...counters };
 }
