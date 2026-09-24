@@ -10,8 +10,9 @@ import {
   listTaskAttachments,
   readTaskAttachmentText,
 } from "~/server/files/task-attachments.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { countLabel } from "~/shared/text/plural";
 import {
-  BACKEND_LABEL,
   assertEffortForBackend,
   assertModelForBackend,
   defaultEffortFor,
@@ -210,6 +211,7 @@ import {
   NotVisibleError,
   notVisible,
 } from "./controller-tool-guards.server";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * The controller's in-process toolkit (ruling 99) — a Claude Agent SDK MCP
@@ -267,7 +269,7 @@ export interface ControllerToolkit {
   tools: SdkMcpToolDefinition<any>[];
 }
 
-export const CONTROLLER_TOOLKIT_INSTRUCTIONS =
+const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "Viberr controller tools. Every action runs under the ASKING PERSON's own permissions, " +
   "checked by the server per call: instance tools follow their org role, board tools follow " +
   "their role in that project. A [denied] answer is final — relay it with its reason. Reads " +
@@ -1129,7 +1131,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           return (
             `[done] ${saved.toast}. ` +
             (policy.length > 0
-              ? `${policy.length} write ${policy.length === 1 ? "tool" : "tools"} withheld from every run without execute-code-or-write-repo and from every operator run (ruling 176): ${policy.join(", ")}. `
+              ? `${countLabel(policy.length, "write tool")} withheld from every run without execute-code-or-write-repo and from every operator run (ruling 176): ${policy.join(", ")}. `
               : suggestion.length > 0
                 ? `NOTHING is withheld: no tool on this server is marked, so every tool it exposes — including the ones that write — reaches every run that mounts it. From the names the probe listed, these look like write tools: ${suggestion.join(", ")}. Call save_mcp_server again with \`writeTools\` to mark them (or an explicit [] to record that none should be), then say which you chose. `
                 : "Nothing is marked as a write tool, so nothing is withheld. The probe listed no tool whose name looks like a write. ") +
@@ -1309,7 +1311,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           });
           // Ruling 153: the reply states the defaults a deploy will take.
           const defaults =
-            ` Template defaults: ${saved.profile.backend === "codex" ? "Codex" : "Claude"}, ` +
+            ` Template defaults: ${BACKEND_LABEL[saved.profile.backend]}, ` +
             `model ${saved.profile.model || defaultModelFor(saved.profile.backend)}, ` +
             `effort ${saved.profile.effort || defaultEffortFor(saved.profile.backend)}.`;
           // Ruling 156: the reply is built from the RESULT, not the toast. A
@@ -1343,7 +1345,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (p.removed.length) parts.push(`dropped ${p.removed.join(", ")}`);
               return `${p.projectSlug}${parts.length ? ` (${parts.join("; ")})` : ""}`;
             });
-            return `${head} Grants copied to ${saved.propagated.length} project${saved.propagated.length === 1 ? "" : "s"}: ${per.join("; ")}.${behind}${defaults}`;
+            return `${head} Grants copied to ${countLabel(saved.propagated.length, "project")}: ${per.join("; ")}.${behind}${defaults}`;
           }
           if (saved.diverged.length > 0) {
             return `${head} ${divergedSentence(saved.diverged)} Call save_global_agent again with propagate: true to rewrite those copies, or an org admin takes the template's grants on that project's Agents page.${behind}${defaults}`;
@@ -2544,7 +2546,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // scheduled with the directive on it, and the recorded comment
             // predates that later run too.
             if (args.prompt && !isDispatchHeld(error)) {
-              const message = error instanceof Error ? error.message : String(error);
+              const message = errorMessage(error);
               await appendComment(
                 db,
                 {
@@ -3198,7 +3200,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (args.effort) deployInput.effort = args.effort;
         const result = await deployAgentProfileFromLibrary(db, deployInput, actor, { dataRoot });
         const stored = result.applied
-          ? ` Runs on ${result.applied.backend === "codex" ? "Codex" : "Claude"} with model ${result.applied.model} at effort ${result.applied.effort}.`
+          ? ` Runs on ${BACKEND_LABEL[result.applied.backend]} with model ${result.applied.model} at effort ${result.applied.effort}.`
           : "";
         // Ruling 264 (F37-94): this used to promise "Delivery starts withheld"
         // on every deploy. Ruling 156 made a library deploy COPY the template's

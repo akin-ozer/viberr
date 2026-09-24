@@ -8,6 +8,7 @@ import {
   listProjects,
   listProjectTasks,
 } from "~/server/projections/board-query.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Task-workspace reclamation (P13, from the ARCH-6 intent audit).
@@ -113,7 +114,7 @@ export function reclaimTerminalTaskWorkspaces(
         logger.warn("could not reclaim a finished task's workspace", {
           projectSlug: project.slug,
           taskKey: task.key,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     }

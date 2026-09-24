@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import { insertUser } from "~/server/auth/user-store.server";
 import {
   SEALED_STORES,
@@ -156,13 +157,9 @@ describe("resealSecrets", () => {
     // …and it says so, which is the whole point of the pass.
     expect(result.text).toContain("safe to remove VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS");
 
-    // SAFETY: the SELECT list names the two columns, and `audit_events.details_json`
-    // is TEXT NOT NULL in 0001_baseline — every returned row carries a string.
-    const audit = db
-      .prepare(`SELECT action, details_json FROM audit_events WHERE action = ?`)
-      .all("secrets.resealed") as { details_json: string }[];
+    const audit = listAuditEvents(db, { action: "secrets.resealed" });
     expect(audit).toHaveLength(1);
-    expect(JSON.parse(audit[0]!.details_json).resealed).toBe(2);
+    expect(audit[0]!.details!.resealed).toBe(2);
   });
 
   it("leaves an unreadable box exactly as it was and reports it", () => {

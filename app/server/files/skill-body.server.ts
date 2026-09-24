@@ -8,29 +8,32 @@ import {
 } from "~/server/files/file-store-root.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Shared skill → agent-context reader. The operator and every specialist resolve
  * declared skills through here, so there is ONE containment rule, ONE budget and
  * ONE honesty rule.
  *
- * BUDGET (P14-KM-03, then C2/pass-16). Knowledge bases have been budgeted since
- * F9; skills first got a cap in P14-KM-03 — but a PER-SKILL one, applied fresh
- * on every `readSkillBody` call inside the caller's loop. N skills × 24 k is
- * unbounded, which is precisely the failure the KB budget exists to prevent, so
+ * BUDGET (P14-KM-03, then C2/pass-16). Knowledge bases were budgeted from F9
+ * until ruling 283 replaced their injected text with an index; skills first got
+ * a cap in P14-KM-03 — but a PER-SKILL one, applied fresh on every per-skill
+ * read inside the caller's loop. N skills × 24 k is unbounded, which is
+ * precisely the failure the KB budget existed to prevent, so
  * {@link readSkillBodies} spends ONE shared budget across the whole declared
- * list exactly as the KB leg does — including the "omitted entirely" marker for
- * a skill that no longer fits, so a squeezed-out skill announces itself instead
- * of vanishing from the prompt.
+ * list exactly as the KB leg then did — including the "omitted entirely" marker
+ * for a skill that no longer fits, so a squeezed-out skill announces itself
+ * instead of vanishing from the prompt.
  *
  * CONTAINMENT (A5/pass-16). A skill body is injected as TRUSTED persona material
  * — the run is explicitly told to treat it as authoritative operating context,
- * not as untrusted input. `readKbBody` has refused to follow symlinks out of the
- * store since F9, and every other store path agreed with it after P14-RV-02 —
- * except this reader, which dereferenced a symlinked `SKILL.md` (or a symlinked
- * skill FOLDER) and handed the target's content to the model as trusted
- * instructions. The store is a real directory that humans, uploads, imports and
- * agents all write into, so that is a reachable trust-boundary crossing.
+ * not as untrusted input. The KB reader (`readKbIndexDetailed` today) has
+ * refused to follow symlinks out of the store since F9, and every other store
+ * path agreed with it after P14-RV-02 — except this reader, which dereferenced
+ * a symlinked `SKILL.md` (or a symlinked skill FOLDER) and handed the target's
+ * content to the model as trusted instructions. The store is a real directory
+ * that humans, uploads, imports and agents all write into, so that is a
+ * reachable trust-boundary crossing.
  * Symlinks are refused here exactly the way `collectKbDocs` refuses them.
  */
 
@@ -51,7 +54,10 @@ export interface SkillInjection {
   unresolved?: UnresolvedSkillGrant;
 }
 
-function lstatOr(target: string): ReturnType<typeof lstatSync> | null {
+/** `lstatSync` (which never follows a link), or null when the path does not
+ *  stat: nothing there, or no access. Exported for the skill editor's save
+ *  guard (`resources.server.ts`). */
+export function lstatOr(target: string): ReturnType<typeof lstatSync> | null {
   try {
     return lstatSync(target);
   } catch {
@@ -143,7 +149,7 @@ export function readSkillBodyDetailed(
     // `skillDirPath` throws on a traversal-shaped name (resolveStoreSegment).
     logger.warn("declared agent skill name is unsafe — run proceeds WITHOUT it", {
       skill: name,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return {
       body: "",
@@ -164,7 +170,7 @@ export function readSkillBodyDetailed(
   } catch (error) {
     logger.warn("declared agent skill unreadable — run proceeds WITHOUT it", {
       skill: name,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return {
       body: "",
@@ -198,16 +204,6 @@ export function readSkillBodyDetailed(
   return {
     body: `${trimmed.slice(0, budgetChars)}\n\n_(skill truncated — SKILL.md is ${trimmed.length} chars and exceeds the ${budgetChars}-char injection budget)_`,
   };
-}
-
-/** Read one skill's body, or "" when absent/unreadable/uncontained. Thin
- *  wrapper over {@link readSkillBodyDetailed} for callers that only inject. */
-export function readSkillBody(
-  name: string,
-  dataRoot?: string,
-  budgetChars: number = SKILL_INJECTION_BUDGET,
-): string {
-  return readSkillBodyDetailed(name, dataRoot, budgetChars).body;
 }
 
 export interface SkillInjectionSet {

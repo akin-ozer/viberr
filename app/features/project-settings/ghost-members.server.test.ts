@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeProject } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   deleteOrgUser,
@@ -33,8 +34,7 @@ const ACTOR = { userId: "u_sys", label: "system" };
  */
 describe("UI-29: deleting an org user prunes their project memberships", () => {
   it("removes the membership from project.md and re-projects", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const target = store.users.selin;
 
     const before = readProjectFile({
@@ -69,8 +69,7 @@ describe("UI-29: deleting an org user prunes their project memberships", () => {
   });
 
   it("pruning a user who is a member of nothing is a no-op", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const pruned = await pruneUserFromProjects(
       store.db,
       store.users.deniz.id,

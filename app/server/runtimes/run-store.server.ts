@@ -15,8 +15,9 @@ import type { CredentialKind } from "./backend-credentials.server";
 /**
  * Run persistence: the RAW .jsonl append (canonical truth, under
  * ${VIBERR_DATA_ROOT}/runtimes/<backend>/<sessionOrRunId>.jsonl) and the DB
- * projection rows (agent_runs + run_log_lines). Callers append a line via
- * `appendRunLine` (raw file + DB row) and read via the query helpers here.
+ * projection rows (agent_runs + run_log_lines). Callers append a line with
+ * `appendRawLine` (the raw file) and then `insertRunLine` (the DB row), and read
+ * via the query helpers here.
  */
 
 /** One `agent_runs` row, column-for-column. A row is a plain record, so this is
@@ -34,7 +35,7 @@ export type AgentRunRow = {
   session_id: string | null;
   sdk: string;
   /** The deployed agent's display name ("dev"/"Operator"/…); null on seed/
-   *  historical rows (the projection falls back to the backend WHO_NAME). */
+   *  historical rows (the projection falls back to the backend label). */
   agent_name: string | null;
   /** The deployed profile id — the stable per-agent grouping key. */
   agent_profile_id: string;
@@ -826,7 +827,8 @@ export function appendRunLine(
   return row.seq;
 }
 
-/** Insert one projected log line row (raw + display). Returns the seq used. */
+/** Insert one projected log line row (raw + display); a row already at this
+ *  (run, seq) is left as it is. */
 export function insertRunLine(
   db: DatabaseSync,
   input: { runId: string; seq: number; occurredAt: string; raw: string; display: LogLine },

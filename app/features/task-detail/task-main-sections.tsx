@@ -22,6 +22,7 @@ import {
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 
 /**
  * The task-detail MAIN column sections, in their contracted order (spec §2):
@@ -142,17 +143,14 @@ export function TaskHero({
   // Surface a failed save as a toast instead of silently leaving the editor
   // open with no explanation (WI-11); on success the effect below closes it.
   useActionFeedback(goalFetcher);
-  // Close the editor once a save round-trips successfully. Handled-ref dedup
-  // (timeline-composer pattern): `goalFetcher.data` persists after idle, so
-  // without it the stale `ok` would instantly close every later re-open.
-  const goalSaveHandled = useRef<unknown>(null);
-  useEffect(() => {
-    if (goalFetcher.state !== "idle" || !goalFetcher.data?.ok) return;
-    if (goalSaveHandled.current === goalFetcher.data) return;
-    goalSaveHandled.current = goalFetcher.data;
+  // Close the editor once a save round-trips successfully. Once per result
+  // (`useFetcherResult`): `goalFetcher.data` persists after idle, so without
+  // the dedupe the stale `ok` would instantly close every later re-open.
+  useFetcherResult(goalFetcher, (d) => {
+    if (!d.ok) return;
     setRefused(0);
     setEditing(false);
-  }, [goalFetcher.state, goalFetcher.data]);
+  });
   // A confirmed edit_goal packet decision drops the human straight into the
   // editor (the textarea's autoFocus scrolls it into view). Once-per-bump ref
   // (timeline `ask` pattern) so a later `canEditGoal` flip can't replay a

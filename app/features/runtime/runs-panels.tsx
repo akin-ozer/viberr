@@ -21,6 +21,9 @@ import { useHydrated } from "~/ui/local-time";
 import { useDismiss } from "~/ui/use-dismiss";
 import { useFreshLine } from "~/ui/use-fresh-line";
 import { useLiveStreamFailed } from "~/features/live-updates/use-live-updates";
+// Ruling 457: backend labels and count plurals are spelled inline here, not
+// through `BACKEND_LABEL` / `countLabel` (why: shared/text/backend-label.ts,
+// shared/text/plural.ts).
 
 /** P13-UI-57: the projection ships the ISO so the CLIENT renders the clock in
  *  the viewer's zone. During SSR + hydration the UTC form is rendered instead

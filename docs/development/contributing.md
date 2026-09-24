@@ -88,7 +88,13 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
 - **Logging** is the JSON logger (`app/server/logging/logger.server.ts`); never
   `console.log` in server code. Nothing credential-shaped may be logged
   (`CREDENTIAL_ENV_RE` in `runtime-registry.server.ts`, the token patterns in
-  `git-output-redact.server.ts`).
+  `git-output-redact.server.ts`). A caught value goes on a record as
+  `err: toError(error)` and into text as `errorMessage(error)` (`app/shared/errors.ts`).
+  Records inside a request carry its correlation
+  (`request-context.server.ts`) with no call-site work; an id a request learns later
+  goes on with `bindCorrelation` (identifiers only: the session guard binds `userId`,
+  a run's launch binds `runId` and `taskKey` in its own `forkCorrelation`), and every
+  response echoes the request id as `X-Request-Id` (ruling 458(d)).
 
 ## 4. Data and schema changes while pre-prod
 
@@ -118,7 +124,7 @@ into the env schema and `.env.example` (`env.server.test.ts`).
 | `docs/architecture/decisions.md` | `rulings-supersession.test.ts` | states its supersession convention, and every ruling a later one changes carries an inline marker (ruling 341) |
 | `docs/operations/runbook.md`, `docs/operations/deployment.md`, `docs/development/scripts.md` | `runbook-db-read.test.ts` | copy first, never a second connection to a live projection; in-container backups use an absolute `--out` outside `/data` (ruling 158) |
 | `docs/architecture/codebase-map.md` | `app/features/shell/nav.test.ts` | contains `` `nav.ts` order: `` and the rail labels in order |
-| `.env.example` | `env.server.test.ts` | lists every raw `process.env.VIBERR_*` read under `app/` |
+| `.env.example` | `env.server.test.ts` | lists every key the env schema declares and every raw `process.env.VIBERR_*` read under `app/` (ruling 458(c)) |
 | `vitest.config.ts` | `vitest-config.test.ts` | `testTimeout: 20_000` |
 | `tools/oxlint/anti-slop/` | `anti-slop-vendor-sync.test.ts` | matches `tools/oxlint/anti-slop.manifest.json`; re-pin with `node scripts/anti-slop-manifest.mjs` |
 
@@ -136,8 +142,9 @@ appended sections). One typeface, Inter, for body and display (ruling 365); the 
 first paint draws are preloaded from `features/shell/font-preloads.ts`, and a
 metric-matched "Inter Fallback" face stands in until they arrive (ruling 457). Unstyled
 primitive packages are allowed only behind an `app/ui/*` boundary, rendered with classes
-`app.css` defines (ruling 166). One `Icon` component. Toast kind is passed explicitly.
-Dialogs are native `<dialog>` with Escape and scrim close. Every top-level surface
+`app.css` defines (ruling 166). One `Icon` component. A failure toast passes `"error"`
+explicitly; success is the default kind (ruling 458(b)). Dialogs are native `<dialog>`
+with Escape and scrim close. Every top-level surface
 carries a `data-screen-label`. WCAG 2.2 AA in both themes is an e2e gate. Full list in
 [../architecture/decisions.md#ui-porting-rules](../architecture/decisions.md#ui-porting-rules)
 and [../ui/surfaces.md](../ui/surfaces.md).

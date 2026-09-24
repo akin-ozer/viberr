@@ -1,14 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { lockPath } from "../../../test-support/data-root-lock";
 import {
   cliLockRefusalMessage,
   runWithDataRootWriterLock,
   type CliRefusalIo,
 } from "./cli-lock.server";
 import {
-  DATA_ROOT_LOCK_FILENAME,
   DataRootLockedError,
   acquireDataRootLock,
   type LockHolder,
@@ -30,10 +29,6 @@ const SERVER: LockHolder = {
   startedAt: "2026-08-08T09:00:00.000Z",
   bootId: "boot-server",
 };
-
-function lockPath(dataRoot: string): string {
-  return path.join(dataRoot, "state", DATA_ROOT_LOCK_FILENAME);
-}
 
 function collectingIo(): CliRefusalIo & { output: string[]; exitCode: number | null } {
   const output: string[] = [];

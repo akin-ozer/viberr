@@ -142,8 +142,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             highlighted row (`aria-activedescendant`) — before this the
             highlight was a `data-active` attribute nothing announced, so a
             screen-reader user arrowing through the list heard silence. Modelled
-            on the mention composer next door (`comment-composer.tsx:259-268`),
-            which already had the contract right. */}
+            on the mention composer next door (the `ContentEditable` rendered by
+            `CommentComposer`), which already had the contract right. */}
         <input
           data-autofocus
           className="cmdk-input"

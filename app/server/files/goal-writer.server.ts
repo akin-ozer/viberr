@@ -18,6 +18,7 @@ import {
   yamlMappingSchema,
   type YamlMapping,
 } from "./frontmatter.server";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * Reader/writer for the canonical chained-goal files (ruling 99):
@@ -243,7 +244,7 @@ export async function createGoalFile(
         timeline: [
           {
             occurredAt: new Date().toISOString(),
-            text: `Goal created with ${input.frontmatter.links.length} link${input.frontmatter.links.length === 1 ? "" : "s"} by ${input.frontmatter.createdByLabel || input.frontmatter.createdBy}.`,
+            text: `Goal created with ${countLabel(input.frontmatter.links.length, "link")} by ${input.frontmatter.createdByLabel || input.frontmatter.createdBy}.`,
           },
         ],
       }),

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -99,10 +100,6 @@ interface TestUserRef {
 let ctx: TestDbContext;
 let store: TestStore;
 let orgAdmin: TestUserRef;
-
-function actorOf(u: TestUserRef) {
-  return { userId: u.id, label: u.email };
-}
 
 type Actor = ReturnType<typeof actorOf>;
 

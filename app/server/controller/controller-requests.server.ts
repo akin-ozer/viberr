@@ -61,7 +61,7 @@ import {
 export const REQUESTABLE_KINDS = ["skills", "kb", "mcps"] as const;
 export type RequestableKind = (typeof REQUESTABLE_KINDS)[number];
 
-export const RESOURCE_REQUEST_STATUSES = [
+const RESOURCE_REQUEST_STATUSES = [
   "open",
   "granted",
   "declined",

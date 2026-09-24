@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
@@ -92,7 +91,7 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
    */
   it("does not offer a symlinked KB or skill folder the store listings hide", () => {
     const store = setupTestStore(ctx);
-    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    const outside = ctx.makeTempDir();
     writeFileSync(path.join(outside, "SKILL.md"), "outside the store");
     mkdirSync(path.join(store.dataRoot, "skills"), { recursive: true });
     mkdirSync(path.join(store.dataRoot, "kb"), { recursive: true });
@@ -106,7 +105,7 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
   });
 
   it("handles a store with no resources without throwing", () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-empty-"));
+    const dataRoot = ctx.makeTempDir();
     const store = setupTestStore(ctx);
     const catalog = buildResourceCatalog(store.db, dataRoot);
     // Three groups always present; all three are empty in an empty store — the

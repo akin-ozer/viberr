@@ -29,11 +29,14 @@ import {
   BOUNDARIES,
   operatorAutonomyState,
   RBAC_ROWS,
-  ROLE_IDS,
-  ROLE_LABEL,
   type OperatorAutonomyState,
 } from "./policy-data";
-import { roleCan, type ProjectRole } from "~/shared/rbac";
+import {
+  PROJECT_ROLES,
+  ROLE_LABEL,
+  roleCan,
+  type ProjectRole,
+} from "~/shared/rbac";
 import { stageFlowPath } from "~/shared/workflow/transitions";
 import { isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
@@ -55,8 +58,8 @@ type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
 
 /* F19-33: the three panel-head counts below used to be styled by a private
    `PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" }` const —
-   a byte copy of the sheet's `.fine` utility (app.css:230) that github-view.tsx
-   and settings-page.tsx each kept a copy of too. Hoisting the object out of the
+   a byte copy of the sheet's `.fine` utility that github-view.tsx and
+   settings-page.tsx each kept a copy of too. Hoisting the object out of the
    JSX also slipped it past app.css.test.ts's `style={{…}}` scan. Ruling 14:
    shared single implementations, never fork per surface — the count is
    `right sub fine`, the same three classes seven other panel heads use. */
@@ -110,9 +113,9 @@ export function HumanAccess({
         <Icon name="user" />
         <h2>Human access · RBAC</h2>
         <span className="right sub fine">
-          {live.length} member{live.length === 1 ? "" : "s"}
+          {countLabel(live.length, "member")}
           {stale.length > 0
-            ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
+            ? ` · ${countLabel(stale.length, "removed account")}`
             : ""}
         </span>
       </div>
@@ -187,11 +190,11 @@ export function HumanAccess({
                 className="mini-seg"
                 label={"Role for " + m.name}
                 value={m.role}
-                // SAFETY: the options are ROLE_IDS, whose members are
+                // SAFETY: the options are PROJECT_ROLES, whose members are
                 // ProjectRole, so Radix hands back one of them.
                 onChange={(r) => setRole(m, r as ProjectRole)}
               >
-                {ROLE_IDS.map((r) => (
+                {PROJECT_ROLES.map((r) => (
                   <RadioSegOption
                     key={r}
                     value={r}
@@ -221,7 +224,7 @@ export function HumanAccess({
           <thead>
             <tr>
               <th>Action</th>
-              {ROLE_IDS.map((r) => (
+              {PROJECT_ROLES.map((r) => (
                 <th key={r}>
                   {ROLE_LABEL[r]} · {counts[r]}
                 </th>
@@ -247,7 +250,7 @@ export function HumanAccess({
                       comes to learn what a role can do, so the scope is here. */}
                   {row.covers ? <span className="act-covers">{row.covers}</span> : null}
                 </td>
-                {ROLE_IDS.map((r) => (
+                {PROJECT_ROLES.map((r) => (
                   <td key={r}>
                     {/* Ruling 148: same words as the profile page's "Your
                         access" list — the check is aria-hidden, so a glyph-only
@@ -1023,9 +1026,10 @@ export function PolicyPage({
   // P14-UI-58: ONE `canManage` gated both segs on `edit-policy`, but the two
   // actions behind them are different rows of the canonical matrix —
   // `set-role` enforces `manage-members`, `set-boundary` enforces
-  // `edit-policy` (policy-actions.server.ts:101,185). They resolve to the same
-  // role set today, so the bug was latent, and that is exactly the drift the
-  // single-source matrix exists to prevent: each control asks for ITS action.
+  // `edit-policy` (`setMemberRole` / `setTransitionBoundary` in
+  // policy-actions.server.ts). They resolve to the same role set today, so the
+  // bug was latent, and that is exactly the drift the single-source matrix
+  // exists to prevent: each control asks for ITS action.
   const canSetRole = roleCan(myRole, "manage-members");
   const canEditPolicy = roleCan(myRole, "edit-policy");
   const busy =

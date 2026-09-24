@@ -13,26 +13,13 @@ import {
 } from "./run-service.server";
 import type { RunSpec } from "./adapter.server";
 import type { CodexClient, CodexFactory } from "./codex-runtime.server";
-import type {
-  ClaudeQuery,
-  ClaudeQueryOptions,
-} from "./claude-runtime.server";
+import type { ClaudeQueryOptions } from "./claude-runtime.server";
+import { fakeClaudeQuery } from "../../../test-support/fake-claude-query";
 import { resolveSpecialistDisallowedTools } from "../tasks/specialist-tool-policy";
 import { agentGitIdentity } from "../tasks/specialist-run.server";
 import { CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
-
-/**
- * A Claude SDK query as the adapter consumes it: an async generator of SDK
- * messages plus `interrupt`. Yields the given messages, then completes.
- */
-function fakeClaudeQuery(...messages: unknown[]): ClaudeQuery {
-  const gen = (async function* (): AsyncGenerator<unknown, void> {
-    for (const message of messages) yield message;
-  })();
-  return Object.assign(gen, { interrupt: async () => {} });
-}
 
 describe("runtime-registry", () => {
   const RESTORE: Record<string, string | undefined> = {};

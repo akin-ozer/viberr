@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { z } from "zod";
 import type { CompactOutcome } from "./adapter.server";
+import { errorMessage } from "../../shared/errors";
 
 /**
  * Ruling 376: compact a Codex thread on demand through the CLI's app-server.
@@ -158,7 +159,7 @@ export function compactCodexThread(input: CompactThreadInput): Promise<CompactOu
       clearTimeout(timer);
       resolve({
         compacted: false,
-        reason: `the app-server could not be started: ${error instanceof Error ? error.message : String(error)}`,
+        reason: `the app-server could not be started: ${errorMessage(error)}`,
       });
       return;
     }
@@ -235,7 +236,7 @@ export function compactCodexThread(input: CompactThreadInput): Promise<CompactOu
       if (started.error) return finish({ compacted: false, reason: `thread/compact/start refused: ${started.error.message}` });
       // The notification says when the CLI has written the compaction.
     })().catch((error) =>
-      finish({ compacted: false, reason: error instanceof Error ? error.message : String(error) }),
+      finish({ compacted: false, reason: errorMessage(error) }),
     );
   });
 }

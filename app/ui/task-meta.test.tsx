@@ -6,7 +6,6 @@ import {
   LabelChips,
   PriorityFlag,
   formatDueDate,
-  hasVisibleMeta,
   isOverdue,
 } from "./task-meta";
 
@@ -110,20 +109,5 @@ describe("pure helpers", () => {
     expect(isOverdue("2026-08-23", "2026-08-23")).toBe(false); // today is not overdue
     expect(isOverdue("2026-08-25", "2026-08-23")).toBe(false);
     expect(isOverdue(null, "2026-08-23")).toBe(false);
-  });
-
-  it("hasVisibleMeta is true only for non-default metadata", () => {
-    expect(hasVisibleMeta({ priority: "normal", labels: [], dueDate: null })).toBe(
-      false,
-    );
-    expect(hasVisibleMeta({ priority: "high", labels: [], dueDate: null })).toBe(
-      true,
-    );
-    expect(hasVisibleMeta({ priority: "normal", labels: ["x"], dueDate: null })).toBe(
-      true,
-    );
-    expect(
-      hasVisibleMeta({ priority: "normal", labels: [], dueDate: "2026-09-01" }),
-    ).toBe(true);
   });
 });

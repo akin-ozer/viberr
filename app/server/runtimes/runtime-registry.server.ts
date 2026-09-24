@@ -66,7 +66,7 @@ const PRIVATE_RUNTIME_ENV_RE =
  * home its principal owns, so stripping both here is what makes this base's
  * "carries NO home" promise true rather than aspirational. The two sibling
  * spawn sites (the sign-in driver and `runVendorLogout`) delete them by hand
- * for the same reason, at the same boundary.
+ * in `vendorSpawnEnv`, for the same reason, at the same boundary.
  *
  * Ruling 181 adds `CODEX_SQLITE_HOME`, the CLI's state-db location: the Codex
  * adapter sets it per run to the principal's shared home (the run's own

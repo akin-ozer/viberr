@@ -13,7 +13,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
-import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
+import { strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
 import type { TaskMutationContext } from "./task-actions.server";
 import {
   deliverGate,
@@ -125,11 +125,6 @@ interface ToolkitDeps {
    * of their own (tests), which fall back to the un-pre-flighted resolve.
    */
   orgMcpServers?: Record<string, SpecialistMcpServerConfig>;
-}
-
-/** Every tool answers with one text block — the SDK's tool-result shape. */
-function textResult(text: string) {
-  return { content: [{ type: "text" as const, text }] };
 }
 
 // Every model-emitted prose string crosses into the store through here —

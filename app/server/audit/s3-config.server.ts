@@ -10,6 +10,7 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import type { S3Config } from "./s3-put.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The S3 audit-export target: at most one row (`id = 'default'`). The secret
@@ -90,13 +91,13 @@ export function getS3AuditConfigForUse(db: DatabaseSync): S3Config | null {
         // The read succeeded — a failed re-seal only costs the next read another
         // fallback, so never fail the export over it.
         logger.warn("could not re-seal the S3 audit secret under the current key", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     }
   } catch (error) {
     logger.error("S3 audit secret could not be opened", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return null;
   }

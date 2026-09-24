@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
@@ -144,53 +143,3 @@ export function MiniModal({
   );
 }
 
-export function ConfirmDelete({
-  what,
-  detail,
-  confirmLabel,
-  onCancel,
-  onConfirm,
-}: {
-  what: string;
-  detail: string;
-  /** C6: the confirm button named a bare "Remove" — the only destructive
-   *  guardrail in org-settings whose button did not name what it removes,
-   *  against the hand-written ceremonies that say "Archive VIB-4". Each caller
-   *  now passes the outcome ("Remove MCP server"); the blast radius stays in
-   *  `detail` (resources-panel already counts the grants that drop). */
-  confirmLabel?: string;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  // Delegates to the shared consequence-confirm (D6) so org-settings and the
-  // task/project confirmation sites share one grammar and one chrome.
-  return (
-    <ConfirmDialog
-      screenLabel="Resource removal dialog"
-      title={`Remove ${what}?`}
-      body={detail}
-      confirmLabel={confirmLabel ?? `Remove ${what}`}
-      onCancel={onCancel}
-      onConfirm={onConfirm}
-    />
-  );
-}
-
-/** Local pencil SVG (org-settings.jsx — not in the shared Icon set). */
-export function EditIco() {
-  return (
-    <svg
-      className="ico"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z" />
-      <path d="M13.5 7.5l3 3" />
-    </svg>
-  );
-}

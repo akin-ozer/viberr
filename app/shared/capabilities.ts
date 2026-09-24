@@ -311,7 +311,7 @@ export function capabilityEnforcement(id: string): EnforcementScope {
  * `report-validation-verdict`, which the completion pipeline gates server-side
  * (the engage-time `verdictCapable` snapshot).
  */
-export const VERDICT_OUTCOME_CAPABILITY_IDS: readonly string[] = [
+const VERDICT_OUTCOME_CAPABILITY_IDS: readonly string[] = [
   "approve-review",
   "request-changes",
   "post-quality-flags",
@@ -365,9 +365,10 @@ export function applyVerdictOutcomeGate<
  * The seed is now honest (agent-catalog.server.ts writes `direct`, never
  * `recommend`, for a specialist). A stray `recommend` — a hand-edited project.md
  * or a hostile form submission — normalizes DOWN to `off` (withheld, the SAFE
- * direction), never up to `direct`, at both the write path and the `:285`
- * display read, so stored = enforced = displayed. Re-introducing a
- * `recommend → direct` transform here is the F20-21 regression.
+ * direction), never up to `direct`, at both the write path and the display read
+ * (`effectiveProfileView` in agents-query.server.ts), so stored = enforced =
+ * displayed. Re-introducing a `recommend → direct` transform here is the
+ * F20-21 regression.
  */
 export function coerceSpecialistCapabilityMode<M extends string>(
   mode: M,

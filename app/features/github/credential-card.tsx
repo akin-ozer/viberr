@@ -3,9 +3,9 @@ import type {
   ProjectCredentialHealth,
   ScopeChip,
 } from "~/server/secrets/pat-store.server";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
-import { useDialog } from "~/ui/use-dialog";
 
 /**
  * THE credential card (github-view spec §7.12: one component, used by the
@@ -182,6 +182,7 @@ export function CredentialCard({
   );
 }
 
+/** The remove confirm, on the shared `ConfirmDialog` (ruling 458(f)). */
 function RemoveCredentialDialog({
   onCancel,
   onConfirm,
@@ -189,33 +190,21 @@ function RemoveCredentialDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
-  const { ref, close, commit } = useDialog(onCancel);
   return (
-    <dialog
-      ref={ref}
-      className="confirm-card"
-      role="alertdialog"
-      aria-label="Remove credential?"
-    >
-      <div className="confirm-icon">
-        <Icon name="alert" />
-      </div>
-      <h3>Remove this credential?</h3>
-      <p>
-        Branch and PR sync go offline until a credential is attached again.
-        Nothing already pushed to GitHub is affected, and the token itself stays
-        in Instance settings.
-      </p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={() => commit(onConfirm)}>
-          Remove credential
-        </button>
-      </div>
-    </dialog>
+    <ConfirmDialog
+      screenLabel="Credential removal dialog"
+      title="Remove this credential?"
+      body={
+        <>
+          Branch and PR sync go offline until a credential is attached again.
+          Nothing already pushed to GitHub is affected, and the token itself stays
+          in Instance settings.
+        </>
+      }
+      confirmLabel="Remove credential"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

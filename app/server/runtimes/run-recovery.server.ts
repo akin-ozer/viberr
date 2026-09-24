@@ -13,6 +13,7 @@ import {
   userBackendHome,
 } from "./user-homes.server";
 import type { TaskFileRef } from "~/server/files/task-writer.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Crash-loop backstop for the boot recovery re-invoke (F7-BOOT1). A boot that
@@ -152,7 +153,7 @@ function notifyCappedTask(db: DatabaseSync, projectSlug: string, taskKey: string
   } catch (error) {
     logger.warn("capped-recovery notification failed", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -203,7 +204,7 @@ export function finalizeOrphanedRuns(
     () => {},
     (error) => {
       logger.warn("reaping the orphaned runs' processes failed", {
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     },
   );
@@ -388,7 +389,7 @@ export function finalizeOrphanedRuns(
       } catch (error) {
         logger.warn("restart note failed", {
           taskKey: t.taskKey,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     }
@@ -411,7 +412,7 @@ export function finalizeOrphanedRuns(
         } catch (error) {
           logger.warn("operator re-invoke after orphan finalize failed", {
             taskKey: t.taskKey,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         }
       }
@@ -686,7 +687,7 @@ export async function settleAbandonedWaits(
     } catch (error) {
       logger.warn("abandoned-wait settle failed", {
         taskKey: row.key,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       // The operator could not run (none deployed, a refusal): the board must
       // still stop claiming an agent is on it.
@@ -709,7 +710,7 @@ export async function settleAbandonedWaits(
  * `runIdExpr` is the SQL expression naming the run: a column in the sweep
  * (`r.id`), a bound `?` for one run.
  */
-export function replyNeverLandedSql(runIdExpr: string): string {
+function replyNeverLandedSql(runIdExpr: string): string {
   return (
     `NOT EXISTS (
             SELECT 1 FROM audit_events a
@@ -924,7 +925,7 @@ export async function recoverUnreactedAgentRuns(
       logger.warn("agent-reply recovery failed for a run", {
         runId: row.id,
         taskKey: row.task_key,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -1019,7 +1020,7 @@ export async function recoverStrandedOperatorPlans(
       logger.warn("codex operator plan recovery failed for a run", {
         runId: row.id,
         taskKey: row.task_key,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

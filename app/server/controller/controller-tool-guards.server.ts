@@ -11,6 +11,8 @@ import {
 } from "~/server/auth/project-authority.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
+import { textResult } from "~/server/runtimes/strict-tool.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The refusal machinery every controller-side MCP shares (ruling 107).
@@ -33,16 +35,13 @@ export interface ControllerToolUser {
   name: string;
 }
 
-/** The single result shape every controller tool answers in. A type alias, not
- *  an interface: the SDK's tool-result parameter carries an index signature, and
- *  only an alias picks up the implicit one that makes it assignable. */
+/** The single result shape every controller tool answers in (`textResult`'s,
+ *  the shape every Viberr tool shares). A type alias, not an interface: the
+ *  SDK's tool-result parameter carries an index signature, and only an alias
+ *  picks up the implicit one that makes it assignable. */
 export type ControllerToolText = {
   content: { type: "text"; text: string }[];
 };
-
-export function controllerToolText(text: string): ControllerToolText {
-  return { content: [{ type: "text", text }] };
-}
 
 /** Uniform not-visible copy: a missing project and a forbidden one read
  *  identically, so a probe cannot learn that a project exists (R15-4). */
@@ -113,21 +112,21 @@ export function controllerToolGuards(
   function run(fn: () => Promise<string> | string) {
     return async () => {
       try {
-        return controllerToolText(await fn());
+        return textResult(await fn());
       } catch (error) {
         if (error instanceof AppError) {
           const denied = error.status === 403 || error.status === 401;
-          return controllerToolText(
+          return textResult(
             `[${denied ? "denied" : "error"}] ${error.userMessage}`,
           );
         }
         if (error instanceof NotVisibleError) {
-          return controllerToolText(error.message);
+          return textResult(error.message);
         }
         logger.error("controller tool failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
-        return controllerToolText(
+        return textResult(
           "[error] That action failed unexpectedly. The details are in the server log; nothing was partially hidden from the audit trail.",
         );
       }

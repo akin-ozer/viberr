@@ -192,6 +192,19 @@ export function formatClockUTC(iso: string): string {
   return clock(d.getUTCHours(), d.getUTCMinutes());
 }
 
+/**
+ * `2026-09-03 11:50 UTC`: absolute, never relative, for a provider's quota
+ * reset read in a sentence long after it was written. Server-composed copy, not
+ * a hydration first pass: the clock stays UTC and says so. Unlike the display
+ * forms above, an unparseable input comes back as itself rather than as "", so
+ * the sentence still carries whatever the provider said.
+ */
+export function formatAbsoluteUTC(iso: string): string {
+  const d = toDate(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
 /** Relative form for home cards / store strip ("updated 2m ago"). */
 export function formatRelative(iso: string, now: Date = new Date()): string {
   const d = toDate(iso);

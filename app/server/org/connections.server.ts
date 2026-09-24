@@ -236,7 +236,7 @@ export function getDefaultConnectionToken(
  * reads `validationState` until a human opens org settings and re-checks by
  * hand — and token expiry only ever showed as a ≤30-day badge.
  */
-export const CONNECTION_REVALIDATE_AFTER_MS = 24 * 60 * 60 * 1000;
+const CONNECTION_REVALIDATE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 export interface FreshnessOptions extends ConnectionOptions {
   /** Clock hook for tests. */

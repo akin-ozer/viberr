@@ -21,6 +21,7 @@
  */
 import { createBackup } from "../app/server/db/backup.server";
 import { getEnv } from "../app/server/config/env.server";
+import { errorMessage } from "../app/shared/errors";
 
 function flagValue(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -39,7 +40,7 @@ try {
   console.log(result.text);
 } catch (error) {
   console.error(
-    `viberr backup failed: ${error instanceof Error ? error.message : String(error)}`,
+    `viberr backup failed: ${errorMessage(error)}`,
   );
   process.exit(1);
 }

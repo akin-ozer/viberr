@@ -18,9 +18,11 @@ import {
   moveStageTarget,
 } from "~/shared/workflow/packet-options";
 import { setTaskDependencies } from "./dependencies.server";
-import type { TaskActor } from "./task-mutation.server";
 import {
   recordRecommendationWithdrawal,
+  reprojectTask,
+  stageDisplayName,
+  taskRef,
   terminalStageIdFor,
   withdrawAcceptanceOffers,
   type OfferWithdrawalSlot,
@@ -54,6 +56,8 @@ import {
   type UnpushedRevision,
 } from "~/schemas/task-file.schema";
 import { PLAN_NOT_CARRIED_OUT_RE, RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { escapeRegExp } from "~/shared/text/regexp";
 import { readGoalFile } from "~/server/files/goal-writer.server";
 import { acceptanceBoundaryRefusal } from "~/server/github/acceptance-boundary.server";
 import {
@@ -391,7 +395,7 @@ export interface OperatorAuthorityOverrides {
  * lookup below and the authority resolver read it, so a change to the picking
  * rule cannot land in one place and miss the other.
  */
-export function deploymentBackend(view: { backends: readonly string[] }): RealBackend {
+function deploymentBackend(view: { backends: readonly string[] }): RealBackend {
   return view.backends.find((b) => b === "claude" || b === "codex") === "codex"
     ? "codex"
     : "claude";
@@ -709,25 +713,6 @@ export function dispatchGate(authority: OperatorAuthority): Gate {
 
 // ------------------------------------------------------------- helpers
 
-function taskRef(ctx: TaskMutationContext, projectSlug: string, taskKey: string) {
-  return {
-    projectSlug,
-    taskKey,
-    dataRoot: ctx.dataRoot,
-  };
-}
-
-function reproject(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  taskKey: string,
-): void {
-  rebuildPath(db, resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), {
-    dataRoot: ctx.dataRoot,
-  });
-}
-
 /** The operator mutation context — carries the operator-authorized flag so
  *  the shared mutations skip human RBAC and attribute to the operator. */
 function opCtx(ctx: TaskMutationContext): TaskMutationContext {
@@ -858,7 +843,7 @@ async function writeOperatorComment(
     recordCommentDrop(db, projectSlug, taskKey, variant, "duplicate");
     return { text: null, dropped: "duplicate", trimmedBy: guardrail.trimmedBy };
   }
-  reproject(db, ctx, projectSlug, taskKey);
+  reprojectTask(db, ctx, projectSlug, taskKey);
   // NEW-4: the operator is instructed to tag the person it answers ("@Arda …");
   // the tag must actually notify them — same fan-out as every other comment.
   // B-FD8b: scan the caller's ORIGINAL text, not the stored post-trim form — a
@@ -1029,7 +1014,7 @@ async function addRecommendation(
       evidence: null,
     });
   });
-  reproject(db, ctx, projectSlug, taskKey);
+  reprojectTask(db, ctx, projectSlug, taskKey);
   recordAudit(db, {
     action: "task.operator.recommended",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -1230,7 +1215,7 @@ function retryOtherBackendDefaults(
  * `askedBy`. One predicate for the refusal and for the snapshot that warns
  * about it, so the two cannot disagree.
  */
-export function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">): boolean {
+function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">): boolean {
   return packet.from === "operator" && !packet.askedBy;
 }
 
@@ -1239,7 +1224,7 @@ export function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">):
  * Ruling 161: the one sentence naming why a `discard_branch` option cannot be
  * offered, from the fact that says the revision left the workspace.
  */
-export function revisionDepartureSentence(
+function revisionDepartureSentence(
   departure: RevisionDeparture,
   taskKey: string,
   branch: string | null,
@@ -1490,7 +1475,7 @@ export async function operatorOpenPacket(
         if (!backend || !ownerId) continue;
         const hold = backendDispatchHold(db, backend, { credentialUserId: ownerId });
         if (!hold) continue;
-        const label = backend === "codex" ? "Codex" : "Claude";
+        const label = BACKEND_LABEL[backend];
         const until = hold.until
           ? ` until ${new Date(hold.until).toISOString()}`
           : "";
@@ -1877,7 +1862,7 @@ export async function operatorOpenPacket(
       message: `Another decision packet was opened on ${input.taskKey} first; this one was not written.`,
     };
   }
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   if (packetWithdrawal.offers) {
     recordRecommendationWithdrawal(db, {
       projectSlug: input.projectSlug,
@@ -2000,7 +1985,7 @@ export async function operatorResolvePacket(
       message: `The open packet on ${input.taskKey} changed before it could be withdrawn; nothing was removed.`,
     };
   }
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.operator.packet_withdrawn",
@@ -2040,7 +2025,7 @@ export interface ContextConflict {
  * The event states the RULING as its first words, because the record is also
  * what the next agent re-anchors on: the repository won, and here is what lost.
  */
-export function contextConflictEvent(
+function contextConflictEvent(
   actor: TaskFileEvent["actor"],
   conflict: ContextConflict,
 ): TaskFileEvent {
@@ -2205,7 +2190,7 @@ export async function operatorProposeRuling(
       parsed.timeline.unshift(event);
     },
   );
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.operator.ruling_proposed",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -2383,7 +2368,7 @@ export async function operatorLeaseFiles(
       evidence: null,
     });
   });
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: FILE_LEASES_AUDIT_ACTION,
     actor: OPERATOR_AUDIT_ACTOR,
@@ -2418,7 +2403,7 @@ export async function operatorLeaseFiles(
         evidence: null,
       });
     });
-    reproject(db, ctx, input.projectSlug, other.key);
+    reprojectTask(db, ctx, input.projectSlug, other.key);
     notifyTaskWatchers(
       db,
       {
@@ -3128,7 +3113,7 @@ function findUnansweredRefusal(
 }
 
 /** Ruling 415: how many of a task's human decisions the snapshot carries. */
-export const HUMAN_DECISIONS_MAX = 5;
+const HUMAN_DECISIONS_MAX = 5;
 /** Ruling 285: the window cuts an entry here for an operator that can read
  *  the rest with `read_timeline_entry`. */
 const TIMELINE_ENTRY_CAP = 1500;
@@ -3237,13 +3222,12 @@ export function operatorSnapshot(
   const orgCtx: { dataRoot?: string } = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
   const stages = project.parsed.frontmatter.stages;
   const workflow = project.parsed.frontmatter.workflow;
-  const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   const roles = resolveStageRoles(stages, workflow);
   const doneStageId = roles.terminalId;
 
   const nextStages = workflow.flatMap((w) =>
     w.from === fm.stage
-      ? [{ id: w.to, name: stageName(w.to), boundary: w.boundary }]
+      ? [{ id: w.to, name: stageName(stages, w.to), boundary: w.boundary }]
       : [],
   );
   // R7-4: the rework license, listed rather than left to be inferred. Same
@@ -3285,9 +3269,9 @@ export function operatorSnapshot(
     dueDate: fm.dueDate,
     blockedBy: resolveDependencies(db, projectSlug, fm.blockedBy),
     stage: fm.stage,
-    stageName: stageName(fm.stage),
+    stageName: stageName(stages, fm.stage),
     previousStage: fm.previousStageId
-      ? { id: fm.previousStageId, name: stageName(fm.previousStageId) }
+      ? { id: fm.previousStageId, name: stageName(stages, fm.previousStageId) }
       : null,
     readiness: fm.readiness,
     waiting: fm.waiting,
@@ -3712,7 +3696,7 @@ export async function operatorFlagContextConflict(
       parsed.timeline.unshift(event);
     },
   );
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.operator.context_conflict",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -3744,10 +3728,6 @@ export async function operatorFlagContextConflict(
   };
 }
 
-/** The in-process actor the operator's writes are attributed to when a task
- *  writer wants one; RBAC is skipped under `operatorAuthorized`. */
-const OPERATOR_WRITE_ACTOR: TaskActor = { userId: "operator", label: "operator" };
-
 /**
  * Ruling 131(b) (pass 34): the operator records what a task WAITS ON with a
  * tool of its own instead of a hold packet (JC-9's "standing token"). Gated
@@ -3773,7 +3753,7 @@ export async function operatorSetDependencies(
     const result = await setTaskDependencies(
       db,
       { projectSlug: input.projectSlug, taskKey: input.taskKey, blockedBy: input.blockedBy },
-      OPERATOR_WRITE_ACTOR,
+      OPERATOR_TASK_ACTOR,
       { ...ctx, operatorAuthorized: true },
     );
     const list = result.blockedBy.join(", ");
@@ -3862,7 +3842,7 @@ export async function operatorSetGoal(
   if (clearedPacket) {
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
   }
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.goal.updated",
     actor: OPERATOR_AUDIT_ACTOR,
@@ -3930,8 +3910,7 @@ function annotateUngrantedMcps(
   const ungranted = listMcpServerNames(db).filter((name) => {
     const key = mcpNameKey(name);
     if (held.has(key)) return false;
-    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(^|[^a-z0-9-])${escaped}([^a-z0-9-]|$)`).test(text);
+    return new RegExp(`(^|[^a-z0-9-])${escapeRegExp(key)}([^a-z0-9-]|$)`).test(text);
   });
   if (ungranted.length === 0) return prompt;
   return (
@@ -4216,7 +4195,7 @@ export async function operatorDispatchAgent(
     // the owner's credential, and the failure opens the very packet this
     // sentence forbade. So the alternative is offered only when it exists.
     const otherBackend: RealBackend = error.hold.backend === "codex" ? "claude" : "codex";
-    const other = otherBackend === "claude" ? "Claude" : "Codex";
+    const other = BACKEND_LABEL[otherBackend];
     const ownerId =
       readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.frontmatter
         .ownerUserId ?? null;
@@ -4310,7 +4289,7 @@ export async function operatorDispatchAgent(
   }
   return {
     outcome: "done",
-    message: `Started a ${result.backend === "claude" ? "Claude" : "Codex"} run for ${agent.name} (${as}).`,
+    message: `Started a ${BACKEND_LABEL[result.backend]} run for ${agent.name} (${as}).`,
   };
 }
 
@@ -4527,7 +4506,7 @@ export async function operatorTransitionStage(
   // + failing before honoring the off-graph move.
   const isRework = isReworkMove(ctx, input.projectSlug, input.taskKey, input.toStageId);
   const boundary = operatorBoundaryFor(ctx, input.projectSlug, input.taskKey, input.toStageId);
-  const terminalId = resolveTerminalStageId(ctx, input.projectSlug);
+  const terminalId = terminalStageIdFor(ctx, input.projectSlug);
   // F19-26: a transition whose TARGET is the terminal stage is an ACCEPTANCE,
   // whatever the tool it arrived through. A supervised operator calling
   // transition_stage(<terminal>) used to file a plain "Move the task to Done"
@@ -4555,7 +4534,7 @@ export async function operatorTransitionStage(
       authority,
     );
   }
-  const name = stageNameOf(ctx, input.projectSlug, input.toStageId);
+  const name = stageDisplayName(ctx, input.projectSlug, input.toStageId);
   // Ruling 162 (pass 35, F35-12 (b), owner Q35-17): Merge means mergeable. A
   // move INTO the acceptance stage (the stage with the edge into the terminal
   // one) is refused with the gate's own sentence while the review PR conflicts
@@ -4587,7 +4566,7 @@ export async function operatorTransitionStage(
     };
   }
   if (!isRework && boundary === "approval") {
-    const fromName = stageNameOf(ctx, input.projectSlug, currentStageOf(ctx, input));
+    const fromName = stageDisplayName(ctx, input.projectSlug, currentStageOf(ctx, input));
     await addRecommendation(
       db,
       ctx,
@@ -4666,7 +4645,7 @@ function nextBoundarySentence(
   ctx: TaskMutationContext,
   projectSlug: string,
   stageId: string,
-  stageDisplayName: string,
+  fromName: string,
   authority: OperatorAuthority,
 ): string {
   const project = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
@@ -4674,9 +4653,9 @@ function nextBoundarySentence(
   const edge = project.parsed.frontmatter.workflow.find((w) => w.from === stageId);
   if (!edge) return "";
   const toName = stageName(project.parsed.frontmatter.stages, edge.to);
-  const label = `The next boundary, ${stageDisplayName} to ${toName},`;
+  const label = `The next boundary, ${fromName} to ${toName},`;
   if (edge.boundary === "auto") {
-    return `${label} is auto: continue in this turn when nothing at ${stageDisplayName} needs an agent.`;
+    return `${label} is auto: continue in this turn when nothing at ${fromName} needs an agent.`;
   }
   if (edge.boundary === "approval") {
     return `${label} is approved by a human: recommend it when the work is ready.`;
@@ -4738,32 +4717,6 @@ export async function foldAcceptanceRecommendation(
     recommended: false,
     message: `Acceptance is not recommended yet: ${result.message}`,
   };
-}
-
-/** The project's terminal (Done-equivalent) stage id (B-WF4). `resolveStageRoles`
- *  already does the positional-last fallback internally, so there is nothing to
- *  add here. Named apart from task-actions' `terminalStageIdOf(project)` — this
- *  one reads the file, that one takes a loaded `ProjectContext`. */
-function resolveTerminalStageId(
-  ctx: TaskMutationContext,
-  projectSlug: string,
-): string | null {
-  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
-  if (!file) return null;
-  return resolveStageRoles(
-    file.parsed.frontmatter.stages,
-    file.parsed.frontmatter.workflow,
-  ).terminalId;
-}
-
-/** Resolve a stage's display name for a recommendation label. */
-function stageNameOf(
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  stageId: string,
-): string {
-  const file = readProjectFile({ projectSlug, dataRoot: ctx.dataRoot });
-  return file ? stageName(file.parsed.frontmatter.stages, stageId) : stageId;
 }
 
 /** True when moving `taskKey` to `toStageId` is an operator rework move (R7-4):
@@ -4965,7 +4918,7 @@ export async function operatorAcceptCompletion(
     // U36-9 (pass 36): the terminal stage by the board's own name.
     return {
       outcome: "noop",
-      message: `${input.taskKey} is already ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`,
+      message: `${input.taskKey} is already ${stageDisplayName(ctx, input.projectSlug, doneStageId)}.`,
     };
   }
 
@@ -5015,7 +4968,7 @@ export async function operatorAcceptCompletion(
   // file a card — the withheld modes now refuse at the top of the function and
   // never arrive here.
   if (authority.autonomy !== "full" || gate(authority, "completion-for-acceptance") !== "direct") {
-    const doneName = stageNameOf(ctx, input.projectSlug, doneStageId);
+    const doneName = stageDisplayName(ctx, input.projectSlug, doneStageId);
     // R19-8: a task with nothing to deliver merges nothing, so the card must not
     // promise a merge — the old single sentence told a human that applying it
     // "merges the review PR", for a task that has no PR and never will. The card
@@ -5110,8 +5063,8 @@ export async function operatorAcceptCompletion(
           text:
             // U36-9 (pass 36): the terminal stage by the board's own name.
             (hasPr
-              ? `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to ${stageNameOf(ctx, input.projectSlug, doneStageId)}; the review PR is **accepted, merge pending** (a human merges it).`
-              : `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`) +
+              ? `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to ${stageDisplayName(ctx, input.projectSlug, doneStageId)}; the review PR is **accepted, merge pending** (a human merges it).`
+              : `Operator accepted completion under **full-autonomy** policy. ${input.taskKey} moved to ${stageDisplayName(ctx, input.projectSlug, doneStageId)}.`) +
             driftNote,
           toAgent: false,
           evidence: null,
@@ -5129,7 +5082,7 @@ export async function operatorAcceptCompletion(
   if (!accepted) {
     return {
       outcome: "noop",
-      message: `${input.taskKey} is already ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`,
+      message: `${input.taskKey} is already ${stageDisplayName(ctx, input.projectSlug, doneStageId)}.`,
     };
   }
   recordAudit(db, {
@@ -5143,6 +5096,6 @@ export async function operatorAcceptCompletion(
   });
   return {
     outcome: "done",
-    message: `Accepted completion: ${input.taskKey} moved to ${stageNameOf(ctx, input.projectSlug, doneStageId)}.`,
+    message: `Accepted completion: ${input.taskKey} moved to ${stageDisplayName(ctx, input.projectSlug, doneStageId)}.`,
   };
 }

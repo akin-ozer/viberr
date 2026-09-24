@@ -30,18 +30,18 @@ import {
   retireUserBackends,
   type BackendBinaries,
 } from "~/server/runtimes/backend-credentials.server";
-import { projectFilePath } from "~/server/files/file-store-root.server";
 import {
   readProjectFile,
   updateProjectFile,
 } from "~/server/files/project-writer.server";
 import { listProjects } from "~/server/projections/board-query.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { releaseTasksOwnedBy } from "~/server/tasks/task-actions.server";
 import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { newId } from "~/shared/ids/new-id.server";
-import { initialsOfName } from "~/shared/mapping/actor.server";
+import { initialsOf } from "~/ui/initials";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * Org "Users & access" server layer (org-settings spec §4.2) — thin
@@ -106,13 +106,13 @@ function statusOf(user: UserRecord): OrgUserStatus {
   return "active";
 }
 
-export function toOrgUserView(user: UserRecord): OrgUserView {
+function toOrgUserView(user: UserRecord): OrgUserView {
   const status = statusOf(user);
   return {
     id: user.id,
     name: user.name,
     email: user.email,
-    initials: initialsOfName(user.name),
+    initials: initialsOf(user.name),
     tone: user.avatarTone ?? "",
     role: user.role,
     status,
@@ -435,9 +435,7 @@ export async function pruneUserFromProjects(
           (m) => m.userId !== userId,
         );
       });
-      rebuildPath(db, projectFilePath(project.slug, ctx.dataRoot), {
-        dataRoot: ctx.dataRoot,
-      });
+      reprojectProject(db, ctx, project.slug);
     }
     // A3: release the tasks this user OWNED before their account disappears, so no
     // task strands on a ghost owner. Mirrors the project-level removeMember path —
@@ -580,7 +578,7 @@ export async function deleteOrgUser(
   const extras = [
     ...(projectsPruned.length > 0
       ? [
-          `dropped from ${projectsPruned.length} project${projectsPruned.length === 1 ? "" : "s"}`,
+          `dropped from ${countLabel(projectsPruned.length, "project")}`,
         ]
       : []),
     // Named, not counted: which GitHub owner stopped working matters more than
@@ -592,7 +590,7 @@ export async function deleteOrgUser(
       : []),
     ...(projectsUnboundSlugs.length > 0
       ? [
-          `unbound the repo credential on ${projectsUnboundSlugs.length} project${projectsUnboundSlugs.length === 1 ? "" : "s"}`,
+          `unbound the repo credential on ${countLabel(projectsUnboundSlugs.length, "project")}`,
         ]
       : []),
   ];

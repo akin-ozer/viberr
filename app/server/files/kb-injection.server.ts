@@ -9,7 +9,9 @@ import {
 import path from "node:path";
 import { logger } from "~/server/logging/logger.server";
 import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
+import { countLabel } from "~/shared/text/plural";
 import { kbDirPath } from "./file-store-root.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Shared knowledge-base → agent-context reader (F6).
@@ -92,12 +94,12 @@ export function isInjectableKbDoc(fileName: string): boolean {
 
 /** Heading outline per KB, shared across its docs. Past it, documents are still
  *  NAMED — the index's whole job is that the run can ask for any of them. */
-export const KB_INDEX_OUTLINE_BUDGET = 4_000;
+const KB_INDEX_OUTLINE_BUDGET = 4_000;
 
 /** Docs listed per KB. A folder with more says how many it did not name; no
  *  real knowledge base is near this, and an index that walks 10,000 files is
  *  the prompt problem this ruling exists to remove. */
-export const KB_INDEX_MAX_DOCS = 200;
+const KB_INDEX_MAX_DOCS = 200;
 
 /** Cap on ONE `read_knowledge_doc` call. Generous — the point of the pull is
  *  that a document arrives whole — but not unbounded. */
@@ -240,7 +242,7 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       // (a grant stored under the display name) and KM-07 (a rename that
       // orphaned every reference). Live-proven: after renaming a KB, a fresh
       // run reported "there is no p13-facts knowledge base reaching this run"
-      // while every UI still showed it attached. Mirrors readSkillBody.
+      // while every UI still showed it attached. Mirrors readSkillBodyDetailed.
       logger.warn(
         "declared knowledge base not found in the store — run proceeds WITHOUT it",
         { kb: name },
@@ -292,22 +294,22 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       if (kept.length === 0) return head;
       const more =
         kept.length < outline.length
-          ? `\n  … ${outline.length - kept.length} more section${outline.length - kept.length === 1 ? "" : "s"}`
+          ? `\n  … ${countLabel(outline.length - kept.length, "more section")}`
           : "";
       return `${head}${kept.join("")}${more}`;
     });
     if (docs.length > listed.length) {
       entries.push(
-        `- … ${docs.length - listed.length} more document${docs.length - listed.length === 1 ? "" : "s"} in this folder, not listed here.`,
+        `- … ${countLabel(docs.length - listed.length, "more document")} in this folder, not listed here.`,
       );
     }
     return {
-      body: `Folder \`${dir}\`. ${docs.length} document${docs.length === 1 ? "" : "s"}:\n\n${entries.join("\n")}`,
+      body: `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`,
     };
   } catch (error) {
     logger.warn("knowledge base unreadable — run proceeds WITHOUT it", {
       kb: name,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return miss("its store folder could not be read");
   }
@@ -361,7 +363,7 @@ export function readKbIndexes(
 /** Ruling 286: the sentence that separates a BINDING index from an optional
  *  one, on the index itself — so it is read with the document list rather than
  *  in a note the run may have scrolled past. */
-export const RULINGS_BINDING_LINE =
+const RULINGS_BINDING_LINE =
   "**BINDING on this run.** This is the project's settled rulings knowledge base " +
   "(ruling 239): an administrator made it binding on every run this project makes, " +
   "you included. Read it — the obligation is not conditional on your finding it " +
@@ -442,15 +444,17 @@ export const KB_INDEX_NOTE =
  * either run which source outranks the other. Two agents on one repo must not
  * be able to derive two house styles from the same evidence.
  *
- * It lives HERE, beside {@link readKbBodies}, because it is a property of the
- * KB injection itself — not of either runtime. Both runtimes (specialist +
- * operator) import this one constant and push it immediately before the bodies
- * it ranks, so the rule cannot drift between them; the operator used to import
- * a prompt constant from the specialist runtime, which put the rule in the
- * wrong place and made one runtime depend on the other for it.
+ * It lives HERE, beside {@link readKbIndexes}, because it is a property of the
+ * KB injection itself — not of any runtime. Every runtime that injects
+ * knowledge bases (specialist, operator, controller) gets it from
+ * {@link attachedResourcesBlock}, which pushes it immediately before the
+ * indexes it ranks, so the rule cannot drift between them; the operator used
+ * to import a prompt constant from the specialist runtime, which put the rule
+ * in the wrong place and made one runtime depend on the other for it.
  *
- * Emitted only alongside REAL KB text (`kbSet.parts.length > 0`), so a run with
- * no knowledge base never carries a rule about a resource it does not have.
+ * Emitted only alongside a REAL KB index (a non-empty `readKbIndexes` result),
+ * so a run with no knowledge base never carries a rule about a resource it does
+ * not have.
  */
 export const KB_PRECEDENCE_NOTE =
   "\n\n---\n# Which source wins (knowledge bases vs the repository)\n\n" +
@@ -551,6 +555,73 @@ export const KB_RULINGS_NOTE =
   "In your final report, state which rulings sections you relied on, and say so " +
   "plainly if you did not open them. A delivery that contradicts a rule its author " +
   "never read is a thing a reviewer should be able to SEE, rather than rediscover.";
+
+/**
+ * The attached-resources block of an agent's static prompt: the
+ * trusted-provenance banner, the injected skill bodies, the knowledge-base
+ * notes and the indexes. ONE assembly for the three runtimes that attach skills
+ * and knowledge bases (specialist, operator, controller), which each used to
+ * push this sequence by hand. Prompt caching (rulings 369-376) keys on these
+ * bytes — the block sits in every one of those prompts' static prefix (ruling
+ * 370) — and `kb-prompt-block.server.test.ts` pins them element by element.
+ *
+ * The caller reads the grants (`readSkillBodies`, then `readKbIndexes`) and
+ * keeps their `unresolved` rows for its dynamic tail; this arranges only what
+ * resolved:
+ *
+ *  - Nothing at all when nothing resolved. The banner (F7-RES4) vouches for
+ *    attached content, so it is emitted only when there is some: a profile that
+ *    declares resources the store does not ship still produces no block.
+ *  - The banner, worded by the caller for the profile it heads, then
+ *    `kbAddendum` when a knowledge base is attached, then every skill body.
+ *  - R19-2: {@link KB_PRECEDENCE_NOTE} ONCE (not per KB) and BEFORE the
+ *    indexes it ranks, so the rule is read before the guidance it qualifies;
+ *    then ruling 283's {@link KB_INDEX_NOTE} on the same gate and for the same
+ *    reason — a run with no knowledge base is never told how to read one, and
+ *    a run WITH one is never handed a list of documents and left to work out
+ *    the channel.
+ *  - Ruling 286: {@link KB_RULINGS_NOTE} only when the rulings KB actually
+ *    RESOLVED. A run told its project's rulings bind it, on a project that
+ *    names none or whose folder is missing, is being given an obligation it
+ *    cannot discharge.
+ *  - One section per index, in the order `readKbIndexes` emitted them.
+ *
+ * Every section is its own element: the operator's and the controller's static
+ * blocks reach Claude as a `string[]`, so where one element ends is part of
+ * their prompts.
+ */
+export function attachedResourcesBlock(input: {
+  /** The trusted-provenance banner, worded for the profile it heads. */
+  banner: string;
+  /** A section that follows the banner only when a knowledge base is attached. */
+  kbAddendum?: string;
+  /** The injected skill bodies, in order (`readSkillBodies(…).parts`). */
+  skills: readonly { name: string; body: string }[];
+  /** The indexes, in order (`readKbIndexes(…).parts`). */
+  indexes: readonly { name: string; body: string }[];
+  /** The rulings KB `readKbIndexes` was given (ruling 286), or null. */
+  rulingsKb: string | null;
+}): string[] {
+  const resourceParts: string[] = [];
+  for (const part of input.skills) {
+    resourceParts.push(`\n\n---\n# ${part.name} (skill)\n\n${part.body}`);
+  }
+  const hasKb = input.indexes.length > 0;
+  if (hasKb) {
+    resourceParts.push(KB_PRECEDENCE_NOTE, KB_INDEX_NOTE);
+    if (input.rulingsKb && input.indexes.some((p) => p.name === input.rulingsKb)) {
+      resourceParts.push(KB_RULINGS_NOTE);
+    }
+  }
+  for (const part of input.indexes) {
+    resourceParts.push(`\n\n---\n# ${part.name} (knowledge base)\n\n${part.body}`);
+  }
+  if (resourceParts.length === 0) return [];
+  const block = [input.banner];
+  if (hasKb && input.kbAddendum !== undefined) block.push(input.kbAddendum);
+  block.push(...resourceParts);
+  return block;
+}
 
 /**
  * Ruling 312: two ruling namespaces, one word. Tool descriptions cite "ruling N"

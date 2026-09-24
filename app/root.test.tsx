@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { act } from "react";
+import { hydrateRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { ErrorBoundary } from "./root";
 
@@ -140,5 +143,75 @@ describe("root ErrorBoundary (route error responses)", () => {
     expect(container.querySelector(".detail-line")!.textContent).toBe(
       "Reload the page to try again. If it keeps failing, go back to Home.",
     );
+  });
+});
+
+/**
+ * Ruling 458(d): the error page shows the id of the request that failed, so a
+ * person can quote it and the server's log line can be found. Root's data
+ * carries the DOCUMENT request's id, which belongs to the error only when that
+ * error came with the document: its server render and the hydration of that
+ * markup. Root does not re-run on a navigation, so an error met later sits
+ * beside an earlier request's id and must show none rather than a wrong one.
+ */
+describe("root ErrorBoundary request id (ruling 458(d))", () => {
+  const documentData = {
+    theme: "system",
+    csrf: null,
+    liveHead: 0,
+    requestId: "a1b2c3d4e5f6",
+  } as const;
+  const serverError = new Error("Unexpected Server Error");
+  const boundary = (error: Error, loaderData?: typeof documentData) => (
+    <ErrorBoundary error={error} params={{}} loaderData={loaderData} />
+  );
+
+  it("the server render names the document request's id", () => {
+    expect(renderToString(boundary(serverError, documentData))).toContain(
+      'Request id: <code class="mono">a1b2c3d4e5f6</code>',
+    );
+  });
+
+  describe("after hydration", () => {
+    let container: HTMLDivElement;
+    let root: Root | null = null;
+    afterEach(() => {
+      act(() => root?.unmount());
+      root = null;
+      container.remove();
+    });
+
+    async function hydrate(element: React.ReactElement): Promise<() => void> {
+      container = document.createElement("div");
+      container.innerHTML = renderToString(element);
+      document.body.append(container);
+      const mismatch = vi.fn();
+      await act(async () => {
+        root = hydrateRoot(container, element, { onRecoverableError: mismatch });
+      });
+      return () => expect(mismatch).not.toHaveBeenCalled();
+    }
+
+    it("hydration keeps the id: the same markup, no mismatch", async () => {
+      const noMismatch = await hydrate(boundary(serverError, documentData));
+      expect(container.textContent).toContain("Request id: a1b2c3d4e5f6");
+      noMismatch();
+    });
+
+    it("a later error in the hydrated boundary shows none", async () => {
+      await hydrate(boundary(serverError, documentData));
+      await act(async () => root?.render(boundary(new Error("a navigation failed"), documentData)));
+      expect(container.textContent).not.toContain("Request id");
+    });
+  });
+
+  it("a boundary mounted after hydration shows none: root's data is an earlier request's", () => {
+    // CANARY: show `loaderData.requestId` unconditionally and this reads the id.
+    const { container } = render(boundary(serverError, documentData));
+    expect(container.textContent).not.toContain("Request id");
+  });
+
+  it("no root data (root's own loader failed) shows none", () => {
+    expect(renderToString(boundary(serverError))).not.toContain("Request id");
   });
 });

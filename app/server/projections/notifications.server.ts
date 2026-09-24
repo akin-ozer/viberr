@@ -103,7 +103,7 @@ export function createNotification(
  * the destination here, once, lets every surface either navigate or render the
  * row as plainly non-clickable instead of each one re-deriving the rule.
  */
-export function notificationHref(
+function notificationHref(
   record: Pick<NotificationRecord, "projectSlug" | "taskKey">,
 ): string | null {
   if (record.projectSlug && record.taskKey) {

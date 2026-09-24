@@ -87,6 +87,34 @@ export function splitFrontmatter(content: string): FrontmatterSplit {
   }
 }
 
+/** A {@link FrontmatterSplit} whose frontmatter is read as a mapping. */
+export interface FrontmatterMappingSplit extends FrontmatterSplit {
+  /** The frontmatter fields, or none when the frontmatter is not a mapping. */
+  data: YamlMapping;
+}
+
+/**
+ * The read prologue `project.md` and `task.md` share: split the file, then
+ * read its frontmatter as a mapping. Frontmatter that is not a mapping (a
+ * scalar, a sequence) contributes no fields at all and is a hard stop; the
+ * file schema then falls every field back to its default. The diagnostics are
+ * the split's, then that hard stop, in that order.
+ */
+export function splitFrontmatterMapping(content: string): FrontmatterMappingSplit {
+  const { data, body, diagnostics } = splitFrontmatter(content);
+  const mapping = yamlMappingSchema.safeParse(data);
+  if (mapping.success) return { data: mapping.data, body, diagnostics };
+  diagnostics.push(
+    diagError(
+      "frontmatter.not_a_map",
+      "Frontmatter is not a YAML mapping — all fields fall back to defaults.",
+      undefined,
+      true,
+    ),
+  );
+  return { data: {}, body, diagnostics };
+}
+
 /**
  * A plain string a YAML 1.1 reader takes for a boolean. The `yaml` package
  * reads YAML 1.2 core, where `off` is text; PyYAML's `safe_load`, Ruby's

@@ -82,25 +82,41 @@ adapters spawn on, so an ambient value never reaches an agent process. The only
 credential env a child sees is its principal's, added by `runCredentialFor` for that one
 run (§3).
 
-### Runtime tuning
+### Runtime tuning (ruling 458(j))
 
-Declared in the schema as raw strings; each call site applies its own coercion and
-fallback, and a value that does not parse (or is not positive, where noted) falls back to
-the default.
+Parsed by the schema, which owns their coercion and defaults, as it does for the knobs
+in the next section; each call site reads the typed value through `getEnv()`. The
+numbers take `Number()` coercion. The turn cap must be 1 or more (a fraction rounds down),
+the timeouts a number above zero, and the retention windows a number of days, `0` or more.
+A value that does not parse fails boot with "Invalid environment configuration".
 
 | Variable | Default | Read by |
 |---|---|---|
 | `VIBERR_CLAUDE_MAX_TURNS` | `2000` | Runaway turn cap for a Claude run; hitting it ends the run as `run·error·max_turns` (`resolveMaxTurns`, `claude-runtime.server.ts`, via `getEnv()`). |
 | `VIBERR_CLAUDE_IDLE_TIMEOUT_MS` | `900000` (15 min) | Idle window before a Claude run is treated as hung and interrupted (`claudeIdleTimeoutMs`, `claude-runtime.server.ts`, via `getEnv()`). |
 | `VIBERR_CODEX_IDLE_TIMEOUT_MS` | `900000` (15 min) | Same guard for Codex (`codexIdleTimeoutMs`, `codex-runtime.server.ts`, via `getEnv()`). |
-| `VIBERR_GIT_CLONE_TIMEOUT_MS` | `900000` (15 min) | Ceiling on one `git clone` / mirror fetch (`cloneTimeoutMs`, `git-clone-auth.server.ts`, via `getEnv()`); the schedule claim lease is sized against it. Ignored unless a positive integer. |
-| `VIBERR_TRANSCRIPT_RETENTION_DAYS` | `30` | Age at which `runtimes/<backend>/<runId>.jsonl` is pruned (`transcript-retention.server.ts`, via `getEnv()`). `0` keeps forever; a negative or non-numeric value reads as the default. Aligned with the 30-day `run_log_lines` window. |
+| `VIBERR_GIT_CLONE_TIMEOUT_MS` | `900000` (15 min) | Ceiling on one `git clone` / mirror fetch (`cloneTimeoutMs`, `git-clone-auth.server.ts`, via `getEnv()`); the schedule claim lease is sized against it. |
+| `VIBERR_TRANSCRIPT_RETENTION_DAYS` | `30` | Age at which `runtimes/<backend>/<runId>.jsonl` is pruned (`transcript-retention.server.ts`, via `getEnv()`). `0` keeps forever. Aligned with the 30-day `run_log_lines` window. |
 | `VIBERR_SESSION_HOME_RETENTION_DAYS` | `30` | Same window and rules for the per-person provider session files (`runtimes/users/*/claude-home/projects/**`, `runtimes/users/*/codex-home/sessions/**`). `*.jsonl` only, so a sign-in file is never pruned. |
-| `VIBERR_MAINTENANCE_INTERVAL_MS` | `21600000` (6 h) | Cadence of the periodic store-maintenance pass (`maintenanceIntervalMs`, `app/server/ops/maintenance.server.ts`, raw). |
-| `VIBERR_DISK_CHECK_INTERVAL_MS` | `300000` (5 min) | Cadence of the free-space check on the data root (`maintenance.server.ts`, raw). |
-| `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`diskThresholds`, `app/server/ops/disk-space.server.ts`, raw). |
+
+### Maintenance, disk space and the write probe (rulings 458(c) and 458(i))
+
+Parsed by the schema, which owns their coercion and defaults; each module reads the
+typed value through `getEnv()`. The numbers take `Number()` coercion (so `1.5` and `1e3`
+parse) and must come out above zero; the two periods are in seconds and at most `86400`
+(24 hours). A value that does not parse fails boot with "Invalid environment
+configuration", like any other invalid variable. So does the retired
+`VIBERR_MAINTENANCE_INTERVAL_MS` or `VIBERR_DISK_CHECK_INTERVAL_MS`: the message names
+the `_SECONDS` variable that replaced it. Like the rest of the env, they are read once
+per process: restart to apply a change.
+
+| Variable | Default | Read by |
+|---|---|---|
+| `VIBERR_MAINTENANCE_INTERVAL_SECONDS` | `21600` (6 h) | Cadence of the periodic store-maintenance pass, in seconds (`startMaintenanceScheduler`, `app/server/ops/maintenance.server.ts`). |
+| `VIBERR_DISK_CHECK_INTERVAL_SECONDS` | `300` (5 min) | Cadence of the free-space check on the data root, in seconds (`maintenance.server.ts`). |
+| `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`diskThresholds`, `app/server/ops/disk-space.server.ts`). |
 | `VIBERR_DISK_CRITICAL_FREE_MB` | `512` | Threshold for `critical`. Either state marks health `degraded` and triggers an out-of-band maintenance pass at most every 30 minutes (`MIN_PRESSURE_PASS_GAP_MS`). |
-| `VIBERR_GITHUB_WRITE_PROBE` | unset | `1`, `true` or `yes` opts the PAT validator into an empty-payload write probe; by default write access is proved read-only from the repo `permissions` block (`writeProbeEnabled`, `pat-validator.server.ts`, raw). |
+| `VIBERR_GITHUB_WRITE_PROBE` | off | `1`, `true` or `yes` opts the PAT validator into an empty-payload write probe; `0`, `false` or `no` leaves it off, and any other spelling fails boot. Off, write access is proved read-only from the repo `permissions` block (`writeProbeEnabled`, `pat-validator.server.ts`). |
 
 ### Governed browser
 
@@ -167,11 +183,11 @@ at deploy time and restarting.
 
 What is left here is honoured but not declared in the schema.
 `env.server.test.ts` gates the `VIBERR_*` names: every raw `process.env.VIBERR_*` read in
-a non-test file under `app/` must be declared in the schema AND appear as a `NAME=` or
-`#NAME=` line in `.env.example`. The exceptions are named in the test: the test-only hooks
-`VIBERR_CATALOG_PROBE_MARKER`, `VIBERR_CLAUDE_TEST_MARKER`, `VIBERR_CODEX_TEST_MARKER`,
-and `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`, which `.env.example` documents only as a
-commented rotation note.
+a non-test file under `app/` must be declared in the schema, and it and every declared key
+must appear as a `NAME=` or `#NAME=` line in `.env.example`. The exceptions are named in
+the test: the test-only hooks `VIBERR_CATALOG_PROBE_MARKER`, `VIBERR_CLAUDE_TEST_MARKER`,
+`VIBERR_CODEX_TEST_MARKER`, and `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`, which
+`.env.example` documents only as a commented rotation note.
 
 | Variable | Default | Where |
 |---|---|---|

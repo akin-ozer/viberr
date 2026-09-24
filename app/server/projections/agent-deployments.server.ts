@@ -106,16 +106,19 @@ function engagementStatus(
   return engagement === "operator" && hasPacket ? "packet open" : "waiting on human";
 }
 
-/** Reviewer thread ids index into reviewers[] — "r0", "r1", … for app-started
- *  runs, "c0", "c1", … for legacy/seed rows (both accepted). */
+/** Reviewer thread ids index into the task's supporting engagements
+ *  (`reviewers_json`, written from `supportingEngagements(fm)`; ruling 98
+ *  retired the `reviewers[]` slot) — "r0", "r1", …. Ruling 458(a): only the
+ *  `r` prefix is read. `c` was the consultant prefix until consultants became
+ *  reviewers (5c13978d), and nothing has written it since. */
 function reviewerIndex(threadId: string): number {
-  const match = /^[rc](\d+)/.exec(threadId);
+  const match = /^r(\d+)/.exec(threadId);
   return match ? Number(match[1]) : 0;
 }
 
 /** The join key between a task's engagement and its run rows: operator and
  *  primary are singletons per task; a reviewer is addressed by its index into
- *  `reviewers[]`, which the run's thread id carries. */
+ *  the supporting engagements, which the run's thread id carries. */
 function engagementKey(taskKey: string, engagement: Engagement, index: number): string {
   return engagement === "reviewer"
     ? `${taskKey}·reviewer·${index}`

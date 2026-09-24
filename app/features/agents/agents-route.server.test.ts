@@ -6,6 +6,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type { GrantCouplingNotice } from "~/shared/capabilities";
 import type {
@@ -27,16 +28,11 @@ import type {
 
 let app: AppTestContext;
 
-/** The three seeded accounts every case below acts as. */
-interface SeededActors {
-  /** project admin */
-  arda: string;
-  /** project reviewer */
-  selin: string;
-  /** a registered user who is NOT a member of viberr-core */
-  deniz: string;
-}
-let ids: SeededActors;
+/**
+ * The seeded accounts every case below acts as: arda is project admin, selin
+ * project reviewer, deniz a registered user who is NOT a member of viberr-core.
+ */
+let ids: SeedUserIds;
 
 /** Ruling 127: what the loader answers about backends. `backendHealth` is the
  *  ONE answer: the VIEWER's own connection (which the roster badge and the
@@ -64,13 +60,7 @@ type LoaderData = {
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id, // project admin
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // project reviewer
-    deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id, // NOT a member
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 
   // VIB-151's live crew: a running claude primary + a running codex reviewer
   // (thread r0 → reviewers[0]). The seed no longer fabricates these (R7-2);

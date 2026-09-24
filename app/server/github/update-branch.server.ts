@@ -22,6 +22,7 @@ import {
 } from "./push-workspace.server";
 import { activeFileLeases } from "~/server/tasks/file-leases.server";
 import { leaseConflictFor, leaseRefusal } from "~/shared/file-leases";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * Bring a task branch up to date with its base (N19 gap 9).
@@ -678,7 +679,7 @@ export async function updateWorkspaceBranchFromBase(
   } catch (error) {
     logger.info("branch update errored", {
       taskKey,
-      err: error instanceof Error ? error.message : String(error),
+      err: errorMessage(error),
     });
     return { status: "update_failed", reason: "unexpected error" };
   }

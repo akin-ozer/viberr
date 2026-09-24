@@ -142,6 +142,7 @@ export function LabelInput({
     }
     if (added > 0) {
       onChange(next);
+      // Inline plural, not `countLabel`: ruling 457 (shared/text/plural.ts).
       setStatus(`Added ${added} label${added > 1 ? "s" : ""}, ${next.length} of ${max}`);
     } else if (refused.length > 0) {
       setStatus(capNote);

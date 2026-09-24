@@ -12,12 +12,7 @@ import { TopBell } from "~/features/shell/top-bell";
 import { LivePausedStrip } from "~/features/shell/topbar";
 import { UserMenu } from "~/features/shell/user-menu";
 import type { HomeOrgSummary, HomeProjectCard } from "./home-query.server";
-import {
-  MemberStack,
-  ProjectCard,
-  ProjectRow,
-  StarIco,
-} from "./project-cards";
+import { MemberStack, ProjectCard, ProjectRow } from "./project-cards";
 
 /**
  * The home page's own sections, top to bottom: header, hero, empty state, the
@@ -346,7 +341,7 @@ export function ProjectSections({
       {pinned.length > 0 && (
         <section data-screen-label="Pinned projects">
           <div className="sec-h">
-            <StarIco on />
+            <Icon name="starfilled" />
             <h2>Pinned</h2>
             <span className="ct">{pinned.length}</span>
           </div>
@@ -668,7 +663,11 @@ export function StoreStrip({
   );
 }
 
-/** Confirm dialog for the full projection rebuild (admin recovery action). */
+/** Confirm dialog for the full projection rebuild (admin recovery action).
+ *  Hand-written, not the shared `ConfirmDialog` ruling 458(f) moved the other
+ *  plain confirms onto. Home loads no other confirm, and the shared one's
+ *  chunk would add ~0.5 KB gzip to Home's ruling-457 budget (ruling 458's
+ *  2026-09-24 note). */
 export function RebuildConfirm({
   onCancel,
   onConfirm,
@@ -686,6 +685,7 @@ export function RebuildConfirm({
       className="confirm-card"
       role="alertdialog"
       aria-labelledby="rebuild-confirm-title"
+      data-screen-label="Rebuild projections dialog"
     >
       <div className="confirm-icon">
         <Icon name="alert" />

@@ -1,21 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { projectNameFromRepo, slugifyProjectName } from "./project-name";
+import { slugify } from "~/shared/ids/slugify";
+import { projectNameFromRepo } from "./project-name";
 
-describe("slugifyProjectName (repo default of the linked name↔repo pair)", () => {
+describe("slugify (repo default of the linked name↔repo pair)", () => {
   it("kebab-cases a multi-word name", () => {
-    expect(slugifyProjectName("Payments Gateway")).toBe("payments-gateway");
+    expect(slugify("Payments Gateway")).toBe("payments-gateway");
   });
 
   it("collapses runs of non-alphanumerics and trims edge dashes", () => {
-    expect(slugifyProjectName("  Core -- API!  ")).toBe("core-api");
+    expect(slugify("  Core -- API!  ")).toBe("core-api");
   });
 
   it("drops a trailing separator while a word is being typed", () => {
-    expect(slugifyProjectName("Payments ")).toBe("payments");
+    expect(slugify("Payments ")).toBe("payments");
   });
 
   it("is empty for an empty/blank name", () => {
-    expect(slugifyProjectName("   ")).toBe("");
+    expect(slugify("   ")).toBe("");
   });
 });
 
@@ -28,8 +29,8 @@ describe("projectNameFromRepo", () => {
     expect(projectNameFromRepo("core_api.v2")).toBe("Core Api V2");
   });
 
-  it("round-trips with slugifyProjectName", () => {
-    expect(slugifyProjectName(projectNameFromRepo("payments-gateway"))).toBe(
+  it("round-trips with slugify", () => {
+    expect(slugify(projectNameFromRepo("payments-gateway"))).toBe(
       "payments-gateway",
     );
   });

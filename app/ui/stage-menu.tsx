@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { stageLabel } from "~/shared/workflow/stage-label";
 import { Icon } from "./icon";
 import { useDismiss } from "./use-dismiss";
 
@@ -227,12 +228,12 @@ export function StageMenu({
         // words, the same words everywhere. The visible label was a "−" that
         // read as a cleared control while this name said "unknown", so the
         // accessible name did not even contain the visible one.
-        aria-label={`Change stage (currently ${current?.name ?? "unknown stage"})`}
+        aria-label={`Change stage (currently ${stageLabel(current)})`}
         title="Change stage"
       >
         <span key={currentStageId} className={`sm-current${changed ? " changed" : ""}`}>
           <span className="col-stage-dot" data-stage-color={current?.color} />
-          <span className="sm-name">{current?.name ?? "unknown stage"}</span>
+          <span className="sm-name">{stageLabel(current)}</span>
         </span>
         <Icon name="chevron" className="sm-caret" />
       </button>

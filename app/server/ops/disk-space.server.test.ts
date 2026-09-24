@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  DEFAULT_DISK_CRITICAL_FREE_MB,
+  DEFAULT_DISK_LOW_FREE_MB,
+  resetEnvCacheForTests,
+} from "~/server/config/env.server";
+import {
   classifyFreeBytes,
-  DEFAULT_DISK_CRITICAL_FREE_BYTES,
-  DEFAULT_DISK_LOW_FREE_BYTES,
   dfReading,
   diskThresholds,
   formatBytes,
@@ -18,11 +21,26 @@ import {
  * not "0 bytes free".
  */
 
+const MB = 1024 * 1024;
+const DEFAULT_DISK_LOW_FREE_BYTES = DEFAULT_DISK_LOW_FREE_MB * MB;
+const DEFAULT_DISK_CRITICAL_FREE_BYTES = DEFAULT_DISK_CRITICAL_FREE_MB * MB;
+
+/** The thresholds are read through `getEnv()`, which parses once per process:
+ *  a case that sets them drops the cached parse (ruling 458(c)). */
+function setThresholdsMb(env: {
+  VIBERR_DISK_LOW_FREE_MB?: string;
+  VIBERR_DISK_CRITICAL_FREE_MB?: string;
+}): void {
+  Object.assign(process.env, env);
+  resetEnvCacheForTests();
+}
+
 const ctx = createTestDbContext();
 
 afterEach(() => {
   delete process.env.VIBERR_DISK_LOW_FREE_MB;
   delete process.env.VIBERR_DISK_CRITICAL_FREE_MB;
+  resetEnvCacheForTests();
   resetDiskSpaceCacheForTests();
   ctx.cleanup();
 });
@@ -137,8 +155,10 @@ describe("thresholds", () => {
   });
 
   it("is configurable in MB", () => {
-    process.env.VIBERR_DISK_LOW_FREE_MB = "10";
-    process.env.VIBERR_DISK_CRITICAL_FREE_MB = "2";
+    setThresholdsMb({
+      VIBERR_DISK_LOW_FREE_MB: "10",
+      VIBERR_DISK_CRITICAL_FREE_MB: "2",
+    });
     expect(diskThresholds()).toEqual({
       low: 10 * 1024 * 1024,
       critical: 2 * 1024 * 1024,
@@ -148,8 +168,10 @@ describe("thresholds", () => {
   });
 
   it("clamps a critical threshold configured above the low one", () => {
-    process.env.VIBERR_DISK_LOW_FREE_MB = "1";
-    process.env.VIBERR_DISK_CRITICAL_FREE_MB = "50";
+    setThresholdsMb({
+      VIBERR_DISK_LOW_FREE_MB: "1",
+      VIBERR_DISK_CRITICAL_FREE_MB: "50",
+    });
     // Otherwise "low" would be unreachable and the warning tier would silently
     // never fire — the exact failure this whole gap is about.
     expect(diskThresholds()).toEqual({
@@ -158,9 +180,14 @@ describe("thresholds", () => {
     });
   });
 
-  it("ignores a nonsense override rather than disabling the signal", () => {
-    process.env.VIBERR_DISK_LOW_FREE_MB = "not-a-number";
-    expect(diskThresholds().low).toBe(DEFAULT_DISK_LOW_FREE_BYTES);
+  // Ruling 458(c): a nonsense override used to be ignored for the default. It
+  // still cannot disable the signal, and it no longer passes in silence: the
+  // env schema refuses it, which fails boot.
+  it("refuses a nonsense override rather than disabling the signal", () => {
+    setThresholdsMb({ VIBERR_DISK_LOW_FREE_MB: "not-a-number" });
+    expect(() => diskThresholds()).toThrowError(
+      /Invalid environment configuration:[\s\S]*VIBERR_DISK_LOW_FREE_MB/,
+    );
   });
 });
 

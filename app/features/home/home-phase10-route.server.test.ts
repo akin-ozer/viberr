@@ -22,12 +22,11 @@ let denizId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { seedOrgResources } = await import("~/server/org/org-seed.server");
   seedOrgResources(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id; // org admin
-  denizId = findUserByEmail(app.db, "deniz@viberr.dev")!.id; // org member
+  ardaId = userIds.arda; // org admin
+  denizId = userIds.deniz; // org member
 });
 afterAll(() => app.cleanup());
 

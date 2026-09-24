@@ -11,10 +11,7 @@ import { getDb } from "~/server/db/sqlite.server";
 import { z } from "zod";
 import { PROJECT_ROLES } from "~/schemas/project-file.schema";
 import { roleCan } from "~/shared/rbac";
-import {
-  createConversation,
-  listConversations,
-} from "~/server/controller/controller-conversations.server";
+import { createConversation } from "~/server/controller/controller-conversations.server";
 import {
   interruptControllerTurn,
   runControllerTurn,
@@ -23,11 +20,11 @@ import {
   updateGoal,
   type UpdateGoalOp,
 } from "~/server/tasks/goal-actions.server";
+import { ControllerPage } from "~/features/controller/controller-page";
 import {
-  ControllerPage,
-  NEW_CONVERSATION_PARAM,
-} from "~/features/controller/controller-page";
-import { getControllerSurface } from "~/features/controller/controller-query.server";
+  getControllerSurface,
+  selectedConversationId,
+} from "~/features/controller/controller-query.server";
 import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
@@ -40,36 +37,6 @@ import { isDocumentNavigation } from "~/server/http/single-fetch.server";
  *  project title from the workspace layout. */
 export function meta({ params }: Route.MetaArgs) {
   return [{ title: pageTitle("Controller", params.slug) }];
-}
-
-/**
- * U33-8: which thread this visit opens — the dock's continuity rule (ruling
- * 121) on the page, so the two entry points answer the same person, standing
- * in the same place, with the same thread. No `?c=` opens this scope's newest
- * thread, `?c=new` is the blank composer the New link asks for, and an
- * explicit id still wins (`getControllerSurface` judges it and 404s when it
- * belongs to another scope or another person).
- *
- * "This scope" is what the rail lists: the board's threads AND the threads
- * anchored to its tasks — same `projectSlug`, which is the boundary the query
- * enforces. The default comes from the viewer's OWN threads, as the dock's
- * does, so an org admin reading everyone's (`?all=1`) lands on a thread they
- * can actually talk in.
- */
-function selectedConversationId(
-  db: ReturnType<typeof getDb>,
-  url: URL,
-  binding: { userId: string; projectSlug: string },
-): string | null {
-  const requested = url.searchParams.get("c");
-  if (requested === NEW_CONVERSATION_PARAM) return null;
-  if (requested !== null) return requested;
-  const newest = listConversations(db, {
-    userId: binding.userId,
-    projectSlug: binding.projectSlug,
-    limit: 1,
-  })[0];
-  return newest?.id ?? null;
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {

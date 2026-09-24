@@ -15,6 +15,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -57,7 +58,9 @@ import type {
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import {
+  drainRunCompletions,
   installFakeRuntime,
+  installRunAdapters,
   lastRunSpec,
   queueFakeRun,
   startedRunSpecs,
@@ -96,10 +99,6 @@ import { promisify } from "node:util";
 
 let ctx: TestDbContext;
 let store: TestStore;
-
-function actor(user: { id: string; email: string }) {
-  return { userId: user.id, label: user.email };
-}
 
 /** Poll until a run has streamed at least `n` log lines. */
 async function waitForLines(
@@ -173,7 +172,8 @@ beforeEach(async () => {
   await connectFakeBackend(store.db, store.users.arda.id, "codex");
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await drainRunCompletions();
   resetSseBrokerForTests();
   ctx.cleanup();
 });
@@ -330,7 +330,7 @@ describe("assignSpecialist", () => {
     const result = await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result).toMatchObject({ profileId: "dev", role: "developer", backend: "claude" });
@@ -365,7 +365,7 @@ describe("assignSpecialist", () => {
       assignSpecialist(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "nope" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -377,7 +377,7 @@ describe("assignSpecialist", () => {
         assignSpecialist(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-          actor(user),
+          actorOf(user),
           { dataRoot: store.dataRoot },
         ),
       ).rejects.toMatchObject({ status: 403 });
@@ -388,7 +388,7 @@ describe("assignSpecialist", () => {
     const result = await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.murat),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot },
     );
     expect(result.profileId).toBe("dev");
@@ -422,7 +422,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
   // wrong afterwards.
   it("P14-GV-10: refuses to replace the deliverer while its run is in flight", async () => {
     deploySecond("style");
-    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
     // A primary run in flight for the CURRENT deliverer.
     upsertRun(store.db, {
       id: "run_live",
@@ -438,7 +438,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
       state: "running",
     });
     await expect(
-      assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+      assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actorOf(store.users.arda), { dataRoot: store.dataRoot }),
     ).rejects.toMatchObject({ status: 409 });
     // The task still names the original deliverer — no half-applied swap.
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -447,7 +447,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
 
   it("P14-GV-10: a settled run allows the swap, and the handoff is its own audited fact", async () => {
     deploySecond("style");
-    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
     upsertRun(store.db, {
       id: "run_done",
       projectSlug: store.slug,
@@ -461,7 +461,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
       agentProfileId: "dev",
       state: "finished",
     });
-    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     expect(deliveringEngagement(file.parsed.frontmatter)?.profileId).toBe("style");
@@ -477,10 +477,10 @@ describe("engagement uniqueness (adversarial-review)", () => {
   it("promoting a SUPPORTING profile to deliverer never duplicates its profileId", async () => {
     deploySecond("style");
     // dev delivers; style is a supporting reviewer.
-    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
-    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
     // Promote style to be THE deliverer.
-    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
     // style appears exactly once (as deliverer); dev is dropped; no duplicate.
@@ -496,8 +496,8 @@ describe("engagement uniqueness (adversarial-review)", () => {
     // to the profile's own backend — the one the retry existed to escape, with
     // no record a pin was ever in force.
     deploySecond("style");
-    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
-    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile(
@@ -510,7 +510,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
       },
     );
 
-    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
     const promoted = deliveringEngagement(fm)!;
@@ -519,8 +519,8 @@ describe("engagement uniqueness (adversarial-review)", () => {
   });
 
   it("engaging the current deliverer as a reviewer is a no-op (no duplicate)", async () => {
-    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
-    const res = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot });
+    await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
+    const res = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
     expect(res.alreadyEngaged).toBe(true);
 
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -534,7 +534,7 @@ describe("startSpecialistRun", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
   }
@@ -544,7 +544,7 @@ describe("startSpecialistRun", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -574,7 +574,7 @@ describe("startSpecialistRun", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -623,7 +623,7 @@ describe("startSpecialistRun", () => {
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.runId).toBeTruthy();
@@ -663,7 +663,7 @@ describe("startSpecialistRun", () => {
         triggeredByName: store.users.arda.email,
         triggeredByUserId: store.users.arda.id,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -709,11 +709,11 @@ describe("startSpecialistRun", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     // The supporting engagement is refused with the dispatcher's own sentence.
     await expect(
-      startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "helper" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+      startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "helper" }, actorOf(store.users.arda), { dataRoot: store.dataRoot }),
     ).rejects.toThrow(/helper is not eligible for the In Progress stage/);
     // A NEW delivering engagement is gated at `assignSpecialist`.
     await expect(
-      startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+      startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot }),
     ).rejects.toThrow(/dev is not eligible for the In Progress stage/);
     expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter.engagements.map((e) => e.profileId)).toEqual(["helper"]);
   });
@@ -747,13 +747,13 @@ describe("startSpecialistRun", () => {
       interruptRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
       );
     seedHeld();
     const first = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(fm().frontmatter.readiness).toBe("ready");
@@ -782,7 +782,7 @@ describe("startSpecialistRun", () => {
     const second = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // The packet's own withdrawal path may lift the readiness (the
@@ -806,7 +806,7 @@ describe("startSpecialistRun", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -827,7 +827,7 @@ describe("startSpecialistRun", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -848,7 +848,7 @@ describe("startSpecialistRun", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -869,7 +869,7 @@ describe("startSpecialistRun", () => {
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot, operatorRun },
     );
     expect(result.runId).toBeTruthy();
@@ -958,7 +958,7 @@ describe("startSpecialistRun", () => {
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.backend).toBe("claude");
@@ -975,7 +975,7 @@ describe("startSpecialistRun", () => {
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
 
     // Typed agent event + task-level audit (runtime.run.started is separate).
@@ -998,7 +998,7 @@ describe("startSpecialistRun", () => {
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // The run follows the live deployment, not the assign-time snapshot …
@@ -1008,7 +1008,7 @@ describe("startSpecialistRun", () => {
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
 
     // … and the snapshot is refreshed so every later resolution (operator
@@ -1029,13 +1029,13 @@ describe("startSpecialistRun", () => {
       const r = await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: over },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       await interruptRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", runId: r.runId, dataRoot: store.dataRoot },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
       );
       return r;
     };
@@ -1081,7 +1081,7 @@ describe("startSpecialistRun", () => {
     const retry = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "claude" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await waitForLines(retry.runId, 1);
@@ -1089,7 +1089,7 @@ describe("startSpecialistRun", () => {
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: retry.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
 
     // The row names what actually ran …
@@ -1138,13 +1138,13 @@ describe("startSpecialistRun", () => {
     const run = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "claude" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
 
     // The override won over the pin …
@@ -1189,13 +1189,13 @@ describe("startSpecialistRun", () => {
     const run = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(run.backend).toBe("codex");
   });
@@ -1207,7 +1207,7 @@ describe("startSpecialistRun", () => {
         startAgentRun(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1" },
-          actor(user),
+          actorOf(user),
           { dataRoot: store.dataRoot },
         ),
       ).rejects.toMatchObject({ status: 403 });
@@ -1220,7 +1220,7 @@ describe("assignReviewer / removeReviewer", () => {
     const result = await assignReviewer(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result).toMatchObject({
@@ -1290,7 +1290,7 @@ describe("assignReviewer / removeReviewer", () => {
     const result = await assignReviewer(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -1306,8 +1306,8 @@ describe("assignReviewer / removeReviewer", () => {
 
   it("is idempotent — a second assign is a no-op (alreadyEngaged)", async () => {
     const opts = { dataRoot: store.dataRoot };
-    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
-    const again = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), opts);
+    const again = await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), opts);
     expect(again.alreadyEngaged).toBe(true);
     // The EXISTING engagement's snapshot — the one the acceptance gate reads —
     // so the "already engaged" answer names the same capacity the first one did.
@@ -1318,15 +1318,15 @@ describe("assignReviewer / removeReviewer", () => {
 
   it("removeReviewer drops the ref (+ event/audit); missing id is a no-op", async () => {
     const opts = { dataRoot: store.dataRoot };
-    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
-    const removed = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), opts);
+    await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), opts);
+    const removed = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), opts);
     expect(removed.removed).toBe(true);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     expect(supportingEngagements(file.parsed.frontmatter)).toEqual([]);
     expect(file.parsed.timeline[0]!.text).toContain("Released reviewer **dev**");
     expect(listAuditEvents(store.db, { action: "task.reviewer.removed" })[0]?.taskKey).toBe("VIB-1");
 
-    const noop = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "ghost" }, actor(store.users.arda), opts);
+    const noop = await removeReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "ghost" }, actorOf(store.users.arda), opts);
     expect(noop.removed).toBe(false);
   });
 
@@ -1397,7 +1397,7 @@ describe("assignReviewer / removeReviewer", () => {
         { projectSlug: store.slug, taskKey: "VIB-1", profileId },
         // A project ADMIN — the tier ruling 118 lets reassign a closed task's
         // owner "for the record". It buys nothing here.
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
 
@@ -1450,7 +1450,7 @@ describe("assignReviewer / removeReviewer", () => {
         startAgentRun(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", profileId: "helper" },
-          actor(store.users.arda),
+          actorOf(store.users.arda),
           { dataRoot: store.dataRoot },
         ),
       ).rejects.toThrow(/VIB-1 is archived — restore it before running an agent/);
@@ -1569,7 +1569,7 @@ describe("assignReviewer / removeReviewer", () => {
       await assignReviewer(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic2" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       const fm = readFm();
@@ -1584,7 +1584,7 @@ describe("assignReviewer / removeReviewer", () => {
       await removeReviewer(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       const fm = readFm();
@@ -1602,7 +1602,7 @@ describe("assignReviewer / removeReviewer", () => {
       await assignSpecialist(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       const fm = readFm();
@@ -1616,7 +1616,7 @@ describe("assignReviewer / removeReviewer", () => {
       await assignReviewer(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "scout" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       const fm = readFm();
@@ -1628,7 +1628,7 @@ describe("assignReviewer / removeReviewer", () => {
   it("denies reviewer + viewer roles (admin|maintainer only)", async () => {
     for (const user of [store.users.selin, store.users.elif]) {
       await expect(
-        assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(user), { dataRoot: store.dataRoot }),
+        assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(user), { dataRoot: store.dataRoot }),
       ).rejects.toMatchObject({ status: 403 });
     }
   });
@@ -1654,7 +1654,7 @@ describe("assignReviewer / removeReviewer", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await expect(
-      assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actor(store.users.arda), { dataRoot: store.dataRoot }),
+      assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot }),
     ).rejects.toThrow(/not eligible/i);
   });
 });
@@ -1675,13 +1675,13 @@ describe("startAgentRun — no credential principal (ruling 127)", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const { runId } = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     return runId;
@@ -1747,14 +1747,14 @@ describe("startAgentRun — no credential principal (ruling 127)", () => {
       await assignSpecialist(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       updateUserFields(store.db, store.users.arda.id, { disabled: true });
       const started = await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       return started.runId;
@@ -1786,7 +1786,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     await assignReviewer(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
   }
@@ -1801,7 +1801,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.name).toBe("dev");
@@ -1826,7 +1826,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
   });
 
@@ -1835,7 +1835,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "ghost" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/"ghost" is not deployed on this project/);
@@ -1846,7 +1846,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/Pick an agent to run/);
@@ -1857,7 +1857,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const run = getRun(store.db, result.runId)!;
@@ -1872,7 +1872,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     expect(
       listAuditEvents(store.db, { action: "task.agent.run_started" })[0]?.taskKey,
@@ -1884,7 +1884,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // Let it stream, then finish it — the default reply hook (registered by
@@ -1896,7 +1896,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     let replied = false;
     for (let i = 0; i < 120 && !replied; i++) {
@@ -1949,17 +1949,14 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
 
   beforeEach(async () => {
     specs.length = 0;
-    const { configureRunServiceForTests } = await import(
-      "~/server/runtimes/run-service.server"
-    );
-    configureRunServiceForTests({
+    installRunAdapters({
       claude: recordingAdapter("claude"),
       codex: recordingAdapter("codex"),
     });
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
   });
@@ -1974,7 +1971,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2001,16 +1998,13 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { configureRunServiceForTests } = await import(
-      "~/server/runtimes/run-service.server"
-    );
     const throwingAdapter = (backend: RealBackend): RuntimeAdapter => ({
       backend,
       start(): RunHandle {
         throw new Error("dispatch blew up after reserveRun");
       },
     });
-    configureRunServiceForTests({
+    installRunAdapters({
       claude: throwingAdapter("claude"),
       codex: throwingAdapter("codex"),
     });
@@ -2019,7 +2013,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow(/dispatch blew up/);
@@ -2028,21 +2022,17 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // accepted, NOT refused by single-flight. Canary: drop the wrapper's abandon()
     // in startAgentRun and this second run 409s ("A delivering agent run is
     // already in progress").
-    configureRunServiceForTests({
+    installRunAdapters({
       claude: recordingAdapter("claude"),
       codex: recordingAdapter("codex"),
     });
     const retry = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(retry.runId).toMatch(/^run_/);
-    // The retry's recordingAdapter fires its onExit on a microtask; let its
-    // completion drain before teardown closes the DB (avoids a caught-but-noisy
-    // "database is not open" from the completion handler racing cleanup).
-    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
   /**
@@ -2086,7 +2076,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2126,7 +2116,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2144,7 +2134,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2167,7 +2157,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2216,7 +2206,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2262,7 +2252,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const sys = joinedPrompt(specs.at(-1)!.systemPrompt ?? "");
@@ -2314,7 +2304,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2360,7 +2350,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -3080,7 +3070,7 @@ describe("directiveRequestsDelivery (F10-31)", () => {
 /* ----------------------- KB + MCP in the persona (P13-KM-04 / KM-10) */
 
 describe("buildSpecialistPersona — attached resources", () => {
-  const tempRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-persona-"));
+  const tempRoot = () => ctx.makeTempDir();
 
   it("injects a granted KB's docs and marks attached resources trusted", () => {
     const dataRoot = tempRoot();
@@ -3113,9 +3103,9 @@ describe("buildSpecialistPersona — attached resources", () => {
    * that follows it).
    */
   it("R19-2: with MANY KBs the precedence note is still pushed once, before them all", () => {
-    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the `for (const part of
-    // kbSet.parts)` loop and the count assertion fails; fork its text into a
-    // local string literal and the exported-constant assertion fails.
+    // Canary: move the `KB_PRECEDENCE_NOTE` push inside the per-index loop in
+    // `attachedResourcesBlock` and the count assertion fails; fork its text into
+    // a local string literal and the exported-constant assertion fails.
     const dataRoot = tempRoot();
     for (const [name, sentinel] of [
       ["house-style", "SENTINEL-KB-HOUSE"],
@@ -3292,12 +3282,13 @@ describe("buildSpecialistPersona — attached resources", () => {
   /**
    * A5/pass-16 — the skill body sits under the "trusted — configured for you"
    * banner, so a symlinked SKILL.md was a way to put arbitrary host content into
-   * the model's context AS TRUSTED PERSONA. `readKbBody` has refused links since
-   * F9; the skill reader now agrees, and the refusal is visible in the prompt.
+   * the model's context AS TRUSTED PERSONA. The KB reader (`readKbIndexDetailed`
+   * today) has refused links since F9; the skill reader now agrees, and the
+   * refusal is visible in the prompt.
    */
   it("a symlinked SKILL.md never becomes trusted persona material", () => {
     const dataRoot = tempRoot();
-    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    const outside = ctx.makeTempDir();
     writeFileSync(
       path.join(outside, "SKILL.md"),
       "# Evil\n\nSENTINEL-LINKED-SKILL",
@@ -3535,7 +3526,7 @@ describe("buildSpecialistPersona — attached resources", () => {
  * said which source wins.
  */
 describe("R19-2 — the repository wins; a knowledge base is context", () => {
-  const tempRoot = () => mkdtempSync(path.join(tmpdir(), "viberr-precedence-"));
+  const tempRoot = () => ctx.makeTempDir();
 
   function personaWithKb(): string {
     const dataRoot = tempRoot();
@@ -3554,7 +3545,8 @@ describe("R19-2 — the repository wins; a knowledge base is context", () => {
 
   it("states the precedence rule whenever a KB is attached", () => {
     const persona = personaWithKb();
-    // Canary: delete the `kbSet.parts.length > 0` block and this fails.
+    // Canary: drop the `kbAddendum` buildSpecialistPromptPrefix passes to
+    // `attachedResourcesBlock` and this fails.
     expect(persona).toContain(
       "When a knowledge base and the repository disagree",
     );
@@ -3625,18 +3617,18 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
   async function engageAndRunCritic(): Promise<string> {
     await assignSpecialist(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     await assignReviewer(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     const result = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     expect(result.role).toBe("reviewer");
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
     await interruptRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda));
+      actorOf(store.users.arda));
     return joinedPrompt(lastRunSpec()?.systemPrompt ?? "");
   }
 
@@ -3715,8 +3707,8 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     // The owner ruled the repo wins and the KB supplements — and that the rule
     // ships with every KB injection.
     //
-    // Canary: drop the `KB_PRECEDENCE_NOTE` push in buildSpecialistPersona and
-    // the first two assertions fail.
+    // Canary: drop the `KB_PRECEDENCE_NOTE` push in `attachedResourcesBlock`
+    // and the first two assertions fail.
     deployKbPair(["house"], []);
     writeKb("house", "# House style SENTINEL-DELIVERER-KB\n\nbody text");
     const sys = await engageAndRunCritic();
@@ -3747,17 +3739,17 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     writeKb("bar", "# Bar\n\nSENTINEL-REVIEWER-ONLY-KB");
     await assignSpecialist(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     await assignReviewer(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     const devRun = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
     await interruptRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda));
+      actorOf(store.users.arda));
     expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).not.toContain("SENTINEL-REVIEWER-ONLY-KB");
   });
 });
@@ -3818,14 +3810,14 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
   async function runDev(): Promise<void> {
     await assignSpecialist(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
     await interruptRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda));
+      actorOf(store.users.arda));
   }
 
   /**
@@ -3878,12 +3870,12 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
     await assignSpecialist(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     // A run that stays LIVE, so the plugin can be inspected while it exists.
     queueFakeRun({ lines: [], keepRunning: true });
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
     const spec = lastRunSpec()!;
     expect(spec.skills).toEqual(["conventional-commits"]);
@@ -3904,7 +3896,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
     await interruptRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda));
+      actorOf(store.users.arda));
     expect(existsSync(plugin)).toBe(false);
   });
 
@@ -4089,7 +4081,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     // when GitHub is unreachable) and give it the workspace-clone refspec.
     await exec("git", ["-C", mirror, "config", "remote.origin.url", "https://github.com/acme/widgets.git"]);
     await exec("git", ["-C", mirror, "config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"]);
-    const seed = mkdtempSync(path.join(tmpdir(), "viberr-mirror-seed-"));
+    const seed = ctx.makeTempDir("viberr-mirror-seed-");
     await exec("git", ["clone", "-q", "-b", "main", mirror, seed]);
     await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
     await exec("git", ["-C", seed, "config", "user.name", "T"]);
@@ -4105,11 +4097,11 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     deployWithSkills([]);
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", delivers: false },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
     await interruptRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda));
+      actorOf(store.users.arda));
     const support = path.join(
       store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "support", "dev", "widgets",
     );
@@ -4168,13 +4160,13 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
       await assignSpecialist(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       // A run that stays LIVE, so the plugin can be inspected while it exists
       // (run-service removes it the moment the run settles, ruling 180).
       queueFakeRun({ lines: [], keepRunning: true });
       const run = await startAgentRun(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
       const spec = lastRunSpec()!;
       // (1) the native SDK channel (R18-5 / ruling 51) — exactly the grant.
@@ -4191,7 +4183,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       const { interruptRun } = await import("~/server/runtimes/run-service.server");
       await interruptRun(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actor(store.users.arda));
+        actorOf(store.users.arda));
       // (3) NOTHING the run is handed names the decoy or carries its body —
       // system prompt, turn prompt, tool policy, env, MCP config, all of it.
       const assembled = JSON.stringify(spec);
@@ -4408,17 +4400,17 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
       await assignSpecialist(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       const run = await startAgentRun(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       const { interruptRun } = await import("~/server/runtimes/run-service.server");
       await interruptRun(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actor(store.users.arda));
+        actorOf(store.users.arda));
 
       const spec = lastRunSpec()!;
       // R18-1: the deliverer's KB crosses to the reviewer…
@@ -4492,17 +4484,17 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       await assignSpecialist(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       const run = await startAgentRun(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       const { interruptRun } = await import("~/server/runtimes/run-service.server");
       await interruptRun(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actor(store.users.arda));
+        actorOf(store.users.arda));
 
       const criticWs = path.join(
         path.dirname(ws), "support", "critic", path.basename(ws),
@@ -4561,14 +4553,14 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       const run = await startAgentRun(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       const { interruptRun } = await import("~/server/runtimes/run-service.server");
       await interruptRun(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actor(store.users.arda));
+        actorOf(store.users.arda));
 
       const prompt = lastRunSpec()?.prompt ?? "";
       // The run really did lose its checkout.
@@ -4610,7 +4602,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-        actor(store.users.arda), { dataRoot: store.dataRoot });
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
       const { upsertRun } = await import("~/server/runtimes/run-store.server");
       upsertRun(store.db, {
         id: "run_inflight_critic",
@@ -4623,7 +4615,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       await expect(
         startAgentRun(store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-          actor(store.users.arda), { dataRoot: store.dataRoot }),
+          actorOf(store.users.arda), { dataRoot: store.dataRoot }),
       ).rejects.toMatchObject({ status: 409 });
     });
   });
@@ -4712,7 +4704,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
     const run = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const prompt = lastRunSpec()?.prompt ?? "";
@@ -4736,7 +4728,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
   });
 
@@ -4753,7 +4745,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev what is left here?" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("started");
@@ -4832,20 +4824,20 @@ describe("P19-G11 — the run records what it was given", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const run = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     return run.runId;
   }
@@ -5207,7 +5199,7 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -5216,7 +5208,7 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
       const pending = startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       // Poll while the clone's child process is in flight. Bounded, and it can
@@ -5235,7 +5227,7 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
       await interruptRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
       );
       return run;
     });
@@ -5290,7 +5282,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
       await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", directive: "continue the migration" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
     } catch (error) {
@@ -5341,7 +5333,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.backend).toBe("claude");
@@ -5351,7 +5343,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
   });
 
@@ -5365,7 +5357,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
       await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
     } catch (error) {
@@ -5390,7 +5382,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.backend).toBe("codex");
@@ -5398,7 +5390,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
   });
 
@@ -5462,7 +5454,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
         await startAgentRun(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", directive },
-          actor(store.users.arda),
+          actorOf(store.users.arda),
           { dataRoot: store.dataRoot },
         );
       } catch (error) {
@@ -5508,7 +5500,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
         await startAgentRun(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", directive },
-          actor(store.users.arda),
+          actorOf(store.users.arda),
           { dataRoot: store.dataRoot },
         );
       } catch (error) {
@@ -5543,7 +5535,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
   let second: string;
 
   beforeEach(async () => {
-    dir = mkdtempSync(path.join(tmpdir(), "viberr-pin-"));
+    dir = ctx.makeTempDir("viberr-pin-");
     await execFileAsync("git", ["init", "-q", "-b", "main", dir]);
     await execFileAsync("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
     await execFileAsync("git", ["-C", dir, "config", "user.name", "T"]);
@@ -5654,7 +5646,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
     await setTaskDependencies(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: entries },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
   }
@@ -5663,7 +5655,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await hold();
@@ -5672,7 +5664,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -5685,7 +5677,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await hold();
@@ -5694,7 +5686,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({
@@ -5711,7 +5703,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
       startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400 });
@@ -5729,7 +5721,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await hold();
@@ -5738,7 +5730,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
     await setTaskDependencies(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: [] },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -5746,7 +5738,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
     const runId = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(runId).toBeTruthy();
@@ -5779,14 +5771,14 @@ describe("ruling 422: a dispatched run's contract names the knowledge-base folde
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await assignReviewer(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
-      actor(store.users.arda), { dataRoot: store.dataRoot });
+      actorOf(store.users.arda), { dataRoot: store.dataRoot });
     const { interruptRun } = await import("~/server/runtimes/run-service.server");
     await interruptRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actor(store.users.arda));
+      actorOf(store.users.arda));
     const prompt = lastRunSpec()?.prompt ?? "";
     const house = path.join(store.dataRoot, "kb", "house-rules");
     const rulings = path.join(store.dataRoot, "kb", "project-rulings");

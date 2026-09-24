@@ -1,9 +1,13 @@
-import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  createLocalOrigin,
+  gitOut,
+  type LocalOrigin,
+  withLocalGithub,
+} from "../../../test-support/git-origin";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   DEFAULT_BRANCH_READ_PAGE_CHARS,
@@ -12,6 +16,7 @@ import {
   readDefaultBranchFile,
   readProjectDefaultBranchFile,
 } from "./operator-repo-read.server";
+import { cloneWorkspaceRepo, projectRepoMirrorDir } from "./repo-mirror.server";
 
 /** A Go-shaped file of `lines` lines, each about 30 characters. */
 function goLines(lines: number): string {
@@ -66,7 +71,6 @@ describe("ruling 436: a default-branch read comes in pages the CLI will carry", 
     expect(defaultBranchPageNote({ kind: "found", refreshed: true, ...whole })).toEqual({ range: "", note: "" });
   });
 });
-import { cloneWorkspaceRepo, projectRepoMirrorDir } from "./repo-mirror.server";
 
 /**
  * F21-21 — the operator's anchored "what is on the default branch?" read.
@@ -79,13 +83,12 @@ import { cloneWorkspaceRepo, projectRepoMirrorDir } from "./repo-mirror.server";
  * (bare, per-project, refreshed on every workspace clone); the checkout is only
  * ever read, and only when there is no mirror at all.
  *
- * Real git throughout, against a local origin: `GIT_ALLOW_PROTOCOL=file`
- * (setup-env) plus a `url.<local>.insteadOf` entry in a temp `GIT_CONFIG_GLOBAL`
- * point `https://github.com/` at a directory, so nothing here touches the
- * network.
+ * Real git throughout, against a local origin (test-support/git-origin.ts):
+ * `GIT_ALLOW_PROTOCOL=file` plus a `url.<local>.insteadOf` entry in a temp
+ * `GIT_CONFIG_GLOBAL` point `https://github.com/` at a directory, so nothing
+ * here touches the network.
  */
 describe("readDefaultBranchFile", () => {
-  const exec = promisify(execFile);
   const SLUG = "viberr-core";
   const REPO = "acme/widgets";
   const TASK_BRANCH = "vib-1";
@@ -94,64 +97,8 @@ describe("readDefaultBranchFile", () => {
   let db: DatabaseSync;
   let dataRoot: string;
   let origins: string;
+  let origin: LocalOrigin;
   let checkout: string;
-
-  /** A local bare origin for `acme/widgets` with `docs/guide.md` on `main`. */
-  async function makeOrigin(): Promise<void> {
-    const bare = path.join(origins, "acme", "widgets.git");
-    mkdirSync(path.dirname(bare), { recursive: true });
-    await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
-    const seed = path.join(origins, "seed");
-    mkdirSync(path.join(seed, "docs"), { recursive: true });
-    writeFileSync(path.join(seed, "docs", "guide.md"), "the guide\n");
-    await exec("git", ["init", "-q", "-b", "main", seed]);
-    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
-    await exec("git", ["-C", seed, "config", "user.name", "T"]);
-    await exec("git", ["-C", seed, "add", "-A"]);
-    await exec("git", ["-C", seed, "commit", "-qm", "init"]);
-    await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
-  }
-
-  /** Land another commit on the origin's `main`. */
-  async function advanceOrigin(text: string): Promise<void> {
-    const seed = path.join(origins, "seed");
-    writeFileSync(path.join(seed, "docs", "guide.md"), text);
-    await exec("git", ["-C", seed, "add", "-A"]);
-    await exec("git", ["-C", seed, "commit", "-qm", "second"]);
-    await exec("git", [
-      "-C",
-      seed,
-      "push",
-      "-q",
-      path.join(origins, "acme", "widgets.git"),
-      "HEAD:refs/heads/main",
-    ]);
-  }
-
-  async function withOrigin<T>(work: () => Promise<T>): Promise<T> {
-    const configPath = path.join(origins, "gitconfig");
-    writeFileSync(
-      configPath,
-      `[url "${origins}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
-    );
-    const saved = {
-      global: process.env.GIT_CONFIG_GLOBAL,
-      system: process.env.GIT_CONFIG_SYSTEM,
-    };
-    process.env.GIT_CONFIG_GLOBAL = configPath;
-    process.env.GIT_CONFIG_SYSTEM = "/dev/null";
-    try {
-      return await work();
-    } finally {
-      for (const [key, value] of [
-        ["GIT_CONFIG_GLOBAL", saved.global],
-        ["GIT_CONFIG_SYSTEM", saved.system],
-      ] as const) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
-  }
 
   /**
    * The workspace as a run leaves it: cut from the project's mirror (so the
@@ -159,7 +106,7 @@ describe("readDefaultBranchFile", () => {
    * branch with the deliverer's commit — the live shape of VIB-7.
    */
   async function makeCheckout(): Promise<void> {
-    await withOrigin(() =>
+    await withLocalGithub(origins, () =>
       cloneWorkspaceRepo({
         projectSlug: SLUG,
         repo: REPO,
@@ -167,20 +114,20 @@ describe("readDefaultBranchFile", () => {
         dataRoot,
       }),
     );
-    await exec("git", ["-C", checkout, "config", "user.email", "t@t.dev"]);
-    await exec("git", ["-C", checkout, "config", "user.name", "T"]);
-    await exec("git", ["-C", checkout, "checkout", "-qb", TASK_BRANCH]);
+    await gitOut(checkout, ["config", "user.email", "t@t.dev"]);
+    await gitOut(checkout, ["config", "user.name", "T"]);
+    await gitOut(checkout, ["checkout", "-qb", TASK_BRANCH]);
     writeFileSync(
       path.join(checkout, "docs", "guide.md"),
       "the guide\nthe governed row\n",
     );
     writeFileSync(path.join(checkout, "docs", "new.md"), "brand new\n");
-    await exec("git", ["-C", checkout, "add", "-A"]);
-    await exec("git", ["-C", checkout, "commit", "-qm", "the deliverer's work"]);
+    await gitOut(checkout, ["add", "-A"]);
+    await gitOut(checkout, ["commit", "-qm", "the deliverer's work"]);
   }
 
   const read = (repoPath: string) =>
-    withOrigin(() =>
+    withLocalGithub(origins, () =>
       readDefaultBranchFile(db, {
         projectSlug: SLUG,
         dir: checkout,
@@ -190,9 +137,6 @@ describe("readDefaultBranchFile", () => {
       }),
     );
 
-  const gitOut = async (args: string[]) =>
-    (await exec("git", ["-C", checkout, ...args])).stdout.trim();
-
   beforeEach(async () => {
     ctx = createTestDbContext();
     db = ctx.makeDb();
@@ -200,7 +144,11 @@ describe("readDefaultBranchFile", () => {
     origins = ctx.makeTempDir();
     mkdirSync(path.join(dataRoot, "projects", SLUG), { recursive: true });
     checkout = path.join(dataRoot, "workspace", "widgets");
-    await makeOrigin();
+    // A local bare origin for `acme/widgets` with `docs/guide.md` on `main`.
+    origin = await createLocalOrigin(origins, {
+      repo: REPO,
+      files: { "docs/guide.md": "the guide\n" },
+    });
     await makeCheckout();
   });
 
@@ -228,23 +176,24 @@ describe("readDefaultBranchFile", () => {
     // `git fetch --depth 1 origin +refs/heads/main:refs/remotes/origin/main`
     // back into the read (against `input.dir`) and both assertions fail — the
     // checkout flips to shallow and the merge-base stops resolving.
-    expect(await gitOut(["rev-parse", "--is-shallow-repository"])).toBe("false");
-    const base = await gitOut(["merge-base", "origin/main", TASK_BRANCH]);
+    expect(await gitOut(checkout, ["rev-parse", "--is-shallow-repository"])).toBe("false");
+    const base = await gitOut(checkout, ["merge-base", "origin/main", TASK_BRANCH]);
 
     await read("docs/guide.md");
 
-    expect(await gitOut(["rev-parse", "--is-shallow-repository"])).toBe("false");
-    expect(await gitOut(["merge-base", "origin/main", TASK_BRANCH])).toBe(base);
+    expect(await gitOut(checkout, ["rev-parse", "--is-shallow-repository"])).toBe("false");
+    expect(await gitOut(checkout, ["merge-base", "origin/main", TASK_BRANCH])).toBe(base);
     // Nothing was written into the workspace at all: the tree is still the
     // deliverer's, on its own branch, with its own commit at the tip.
-    expect(await gitOut(["rev-parse", "--abbrev-ref", "HEAD"])).toBe(TASK_BRANCH);
-    expect(await gitOut(["status", "--porcelain"])).toBe("");
+    expect(await gitOut(checkout, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe(TASK_BRANCH);
+    expect(await gitOut(checkout, ["status", "--porcelain"])).toBe("");
   });
 
   it("reads what the default branch has NOW — the mirror is refreshed for the read", async () => {
     // Freshness is why the old code fetched at all. The mirror supplies it
     // without touching the checkout, whose `origin/main` is frozen at clone time.
-    await advanceOrigin("the guide\nthe rewritten section\n");
+    // (`advance` writes its message plus a newline into the file.)
+    await origin.advance({ file: "docs/guide.md", message: "the guide\nthe rewritten section" });
 
     const after = await read("docs/guide.md");
 
@@ -252,7 +201,7 @@ describe("readDefaultBranchFile", () => {
     expect(after.kind === "found" && after.refreshed).toBe(true);
     expect(after.kind === "found" && after.text).toContain("the rewritten section");
     // …and the checkout's own remote-tracking ref never moved.
-    expect(await gitOut(["show", "origin/main:docs/guide.md"])).toBe("the guide");
+    expect(await gitOut(checkout, ["show", "origin/main:docs/guide.md"])).toBe("the guide");
   });
 
   it("degrades to the checkout's CLONE-TIME ref when the project has no mirror", async () => {
@@ -263,7 +212,7 @@ describe("readDefaultBranchFile", () => {
       recursive: true,
       force: true,
     });
-    await advanceOrigin("the guide\nthe rewritten section\n");
+    await origin.advance({ file: "docs/guide.md", message: "the guide\nthe rewritten section" });
 
     const fallback = await read("docs/guide.md");
 
@@ -271,7 +220,7 @@ describe("readDefaultBranchFile", () => {
     expect(fallback.kind === "found" && fallback.refreshed).toBe(false);
     // The clone-time answer, not the working tree's, and not the newer remote's.
     expect(fallback.kind === "found" && fallback.text).toBe("the guide\n");
-    expect(await gitOut(["rev-parse", "--is-shallow-repository"])).toBe("false");
+    expect(await gitOut(checkout, ["rev-parse", "--is-shallow-repository"])).toBe("false");
   });
 
   it("refuses a path that is not a repository-relative file path", async () => {
@@ -297,7 +246,6 @@ describe("readDefaultBranchFile", () => {
  * rulings, and I am structurally unable to follow it."
  */
 describe("readProjectDefaultBranchFile (ruling 299)", () => {
-  const exec = promisify(execFile);
   const SLUG = "viberr-core";
   const REPO = "acme/widgets";
 
@@ -306,52 +254,8 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
   let dataRoot: string;
   let origins: string;
 
-  async function makeOrigin(): Promise<void> {
-    const bare = path.join(origins, "acme", "widgets.git");
-    mkdirSync(path.dirname(bare), { recursive: true });
-    await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
-    const seed = path.join(origins, "seed");
-    mkdirSync(path.join(seed, "services"), { recursive: true });
-    writeFileSync(path.join(seed, "services", "catalog.ts"), "nine routes live here\n");
-    // Ruling 436: past the old 240,000-byte buffer, which made git's overflow
-    // read as "unavailable".
-    mkdirSync(path.join(seed, "internal", "runtime"), { recursive: true });
-    writeFileSync(path.join(seed, "internal", "runtime", "executor.go"), goLines(10_000));
-    await exec("git", ["init", "-q", "-b", "main", seed]);
-    await exec("git", ["-C", seed, "config", "user.email", "t@t.dev"]);
-    await exec("git", ["-C", seed, "config", "user.name", "T"]);
-    await exec("git", ["-C", seed, "add", "-A"]);
-    await exec("git", ["-C", seed, "commit", "-qm", "init"]);
-    await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
-  }
-
-  async function withOrigin<T>(work: () => Promise<T>): Promise<T> {
-    const configPath = path.join(origins, "gitconfig");
-    writeFileSync(
-      configPath,
-      `[url "${origins}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
-    );
-    const saved = {
-      global: process.env.GIT_CONFIG_GLOBAL,
-      system: process.env.GIT_CONFIG_SYSTEM,
-    };
-    process.env.GIT_CONFIG_GLOBAL = configPath;
-    process.env.GIT_CONFIG_SYSTEM = "/dev/null";
-    try {
-      return await work();
-    } finally {
-      for (const [key, value] of [
-        ["GIT_CONFIG_GLOBAL", saved.global],
-        ["GIT_CONFIG_SYSTEM", saved.system],
-      ] as const) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
-  }
-
   const readIt = (repoPath: string, repo = REPO) =>
-    withOrigin(() =>
+    withLocalGithub(origins, () =>
       readProjectDefaultBranchFile(db, {
         projectSlug: SLUG,
         repo,
@@ -366,7 +270,15 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
     db = ctx.makeDb();
     dataRoot = ctx.makeTempDir();
     origins = ctx.makeTempDir();
-    await makeOrigin();
+    await createLocalOrigin(origins, {
+      repo: REPO,
+      files: {
+        "services/catalog.ts": "nine routes live here\n",
+        // Ruling 436: past the old 240,000-byte buffer, which made git's overflow
+        // read as "unavailable".
+        "internal/runtime/executor.go": goLines(10_000),
+      },
+    });
   });
   afterEach(() => {
     const dir = projectRepoMirrorDir(SLUG, REPO, dataRoot);
@@ -396,7 +308,7 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
         dataRoot,
       };
       if (fromLine) request.fromLine = fromLine;
-      const read = await withOrigin(() => readProjectDefaultBranchFile(db, request));
+      const read = await withLocalGithub(origins, () => readProjectDefaultBranchFile(db, request));
       if (read.kind !== "found") throw new Error(`read ${read.kind}`);
       expect(read.totalLines).toBe(10_000);
       seen.push(read.text.replace(/\n$/, ""));

@@ -19,7 +19,7 @@ import { z } from "zod";
  * opens a scope violation (ruling 5).
  */
 
-export const PAT_VALIDATION_STATUS_VALUES = [
+const PAT_VALIDATION_STATUS_VALUES = [
   "valid",
   "insufficient_scope",
   "expired",
@@ -29,7 +29,7 @@ export const PAT_VALIDATION_STATUS_VALUES = [
   "network_error",
 ] as const;
 
-export const PAT_TOKEN_KINDS = ["classic", "fine_grained", "unknown"] as const;
+const PAT_TOKEN_KINDS = ["classic", "fine_grained", "unknown"] as const;
 export type PatTokenKind = (typeof PAT_TOKEN_KINDS)[number];
 
 /** How a scope verdict was reached (honesty marker, surfaced in UI/tooling):
@@ -38,7 +38,7 @@ export type PatTokenKind = (typeof PAT_TOKEN_KINDS)[number];
  *  assumed  — no safe probe exists; treated as granted until a 403 proves
  *             otherwise (fine-grained write permissions)
  */
-export const scopeCheckSchema = z
+const scopeCheckSchema = z
   .object({
     id: z.string().min(1),
     ok: z.boolean(),
@@ -48,7 +48,7 @@ export const scopeCheckSchema = z
   .loose();
 export type ScopeCheck = z.infer<typeof scopeCheckSchema>;
 
-export const patValidationSchema = z
+const patValidationSchema = z
   .object({
     status: z.enum(PAT_VALIDATION_STATUS_VALUES),
     /** UTC ISO timestamp of the validator run. */

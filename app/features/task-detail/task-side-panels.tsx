@@ -1,5 +1,5 @@
 import { holdEntriesSentence } from "~/shared/dependencies";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { unpushedRevisionOf } from "~/schemas/task-file.schema";
 import { useFetcher } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
@@ -18,7 +18,9 @@ import { Pill } from "~/ui/pill";
 import { StageMenu } from "~/ui/stage-menu";
 import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
+import { stageLabel } from "~/shared/workflow/stage-label";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { checksPill, checksUnreadPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
@@ -40,13 +42,13 @@ function viewerRole(myRole: string | null): ProjectRole | null {
 }
 
 /** Ruling 134(c): the push control's label, with its own busy text and tooltip. */
-export const PUSH_LABEL = (rev: string, prNumber: number): string =>
+const PUSH_LABEL = (rev: string, prNumber: number): string =>
   `Push ${rev} to PR #${prNumber}`;
 /** Ruling 160 (pass 35, F35-11): the refusal the server gives a delivery over a
  *  pull request a person closed without merging, said on the control rather than
  *  after the click. The server's own sentence is `closedByHumanDeliveryText`;
  *  this is its client half, so the card never offers a door that then 409s. */
-export const CLOSED_PR_DELIVERY_REFUSAL = (
+const CLOSED_PR_DELIVERY_REFUSAL = (
   prNumber: number,
   closedBy: string | null,
 ): string =>
@@ -54,7 +56,10 @@ export const CLOSED_PR_DELIVERY_REFUSAL = (
   `A closed pull request is a person's decision about the task, so Viberr opens no new ` +
   `pull request for this branch until the closed-PR decision is answered. Reopening PR ` +
   `#${prNumber} on GitHub lifts the block too.`;
-/** The refusal the server would give a plain push of a diverged branch. */
+/** The refusal the server would give a plain push of a diverged branch.
+ *  Exported with no importer on purpose: exported, the build inlines it at its
+ *  one use; module-local, it ships as a variable, 6 B more on the budgeted
+ *  project.task closure (ruling 457's ratchet; measured for ruling 458(g)). */
 export const DIVERGED_PUSH_REFUSAL =
   "Origin's copy of this branch holds commits the workspace does not, so a plain push would be refused as non-fast-forward. Resolve the branch history first; the operator can open a decision packet for it.";
 
@@ -564,13 +569,9 @@ export function TaskDetailsPanel({
   useActionFeedback(depFetcher);
   const [depOpen, setDepOpen] = useState(false);
   const [depText, setDepText] = useState(task.blockedBy.map((e) => e.ref).join(", "));
-  const depHandled = useRef<unknown>(null);
-  useEffect(() => {
-    if (depFetcher.state !== "idle" || !depFetcher.data?.ok) return;
-    if (depHandled.current === depFetcher.data) return;
-    depHandled.current = depFetcher.data;
-    setDepOpen(false);
-  }, [depFetcher.state, depFetcher.data]);
+  useFetcherResult(depFetcher, (d) => {
+    if (d.ok) setDepOpen(false);
+  });
   const startDepEdit = () => {
     setDepText(task.blockedBy.map((e) => e.ref).join(", "));
     setDepOpen(true);
@@ -578,13 +579,9 @@ export function TaskDetailsPanel({
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [labels, setLabels] = useState<string[]>(task.labels);
   const [due, setDue] = useState(task.dueDate ?? "");
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data?.ok) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    setOpen(false);
-  }, [fetcher.state, fetcher.data]);
+  useFetcherResult(fetcher, (d) => {
+    if (d.ok) setOpen(false);
+  });
 
   const startEdit = () => {
     setPriority(task.priority);
@@ -917,7 +914,7 @@ export function CurrentStatePanel({
                 />
                 {/* Ruling 148: the empty string left a bare coloured dot with
                     no words at all. Same phrase as the stage menu. */}
-                {stage?.name ?? "unknown stage"}
+                {stageLabel(stage)}
               </span>
             )}
           </span>

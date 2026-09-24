@@ -26,10 +26,9 @@ const TARGET = "http://127.0.0.1:9/mcp";
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id; // org admin
-  elifId = findUserByEmail(app.db, "elif@viberr.dev")!.id; // org member (not admin)
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  ardaId = userIds.arda; // org admin
+  elifId = userIds.elif; // org member (not admin)
 });
 afterAll(() => app.cleanup());
 

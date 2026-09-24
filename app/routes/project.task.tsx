@@ -14,6 +14,8 @@ import {
   useRouteLoaderData,
 } from "react-router";
 import { pageTitle } from "~/shared/page-title";
+import { countLabel } from "~/shared/text/plural";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import type { Route } from "./+types/project.task";
 import type { loader as projectLoader } from "./project";
 import {
@@ -129,7 +131,9 @@ import {
   timelineWindowSize,
 } from "~/features/task-detail/timeline-slice";
 import { roleCan } from "~/shared/rbac";
+import { stageName } from "~/shared/workflow/stage-roles";
 import { Icon } from "~/ui/icon";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * /projects/:slug/tasks/:key — the full task workspace (task-detail spec).
@@ -228,7 +232,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       logger.warn("R19-15 task-view read-marking failed", {
         projectSlug: params.slug,
         taskKey: params.key,
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: toError(error),
       });
     }
   }
@@ -362,7 +366,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       logger.warn("ruling 319 fan-out disclosure failed", {
         projectSlug: params.slug,
         taskKey: params.key,
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: toError(error),
       });
     }
   }
@@ -397,15 +401,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         packetCreateTaskEchoes[i] = echoes.map((e) => ({
           key: e.key,
           title: e.title,
-          stage:
-            project?.stages.find((st) => st.id === e.stageId)?.name ?? e.stageId,
+          stage: stageName(project?.stages ?? [], e.stageId),
         }));
       }
     } catch (error) {
       logger.warn("ruling 324 similar-task disclosure failed", {
         projectSlug: params.slug,
         taskKey: params.key,
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: toError(error),
       });
     }
   }
@@ -773,11 +776,10 @@ export async function action({ request, params }: Route.ActionArgs) {
               ? completionToast("forced", taskKey, terminalStageNameFor(getProject(db, projectSlug)))
               : option.kind === "move_stage"
                 ? resolvedTask.stage === option.toStage
-                  ? `Decision recorded · ${taskKey} moved to ${
-                      getProject(db, projectSlug)?.stages.find(
-                        (s) => s.id === resolvedTask.stage,
-                      )?.name ?? resolvedTask.stage
-                    }`
+                  ? `Decision recorded · ${taskKey} moved to ${stageName(
+                      getProject(db, projectSlug)?.stages ?? [],
+                      resolvedTask.stage,
+                    )}`
                   : // Toast honesty: the move runs after the decision and can
                     // refuse (the task moved underneath it, the project froze).
                     // Its reason is the timeline note the resolution wrote.
@@ -790,7 +792,7 @@ export async function action({ request, params }: Route.ActionArgs) {
                 ? "Held for runtime debug · the session is recorded per audit policy"
                 : option.kind === "retry_other_backend"
                   ? retryStarted
-                    ? `Retrying on ${option.backend === "codex" ? "Codex" : "Claude"} · streaming to agent logs`
+                    ? `Retrying on ${option.backend ? BACKEND_LABEL[option.backend] : "Claude"} · streaming to agent logs`
                     : "Decision recorded, but the retry could NOT start. The reason is on the timeline"
                   : option.kind === "edit_goal"
                     ? "Decision recorded · type the new goal; the packet clears when it lands"
@@ -831,7 +833,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast:
             notified > 0
-              ? `Sent to ${notified} maintainer${notified === 1 ? "" : "s"} · they'll decide`
+              ? `Sent to ${countLabel(notified, "maintainer")} · they'll decide`
               : "Sent · a maintainer will decide",
         };
       }
@@ -877,8 +879,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           },
           actor,
         );
-        const toName =
-          proj?.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+        const toName = stageName(proj?.stages ?? [], task.stage);
         return {
           ok: true as const,
           intent,
@@ -1054,8 +1055,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         const stageBefore = getTaskSummary(db, projectSlug, taskKey)?.stage;
         const task = await transitionStage(db, move, actor);
         const proj = getProject(db, projectSlug);
-        const toName =
-          proj?.stages.find((s) => s.id === task.stage)?.name ?? task.stage;
+        const toName = stageName(proj?.stages ?? [], task.stage);
         return {
           ok: true as const,
           intent,
@@ -1173,7 +1173,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             return { ok: true as const, intent, toast: error.userMessage };
           }
           if (prompt) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = errorMessage(error);
             await appendComment(
               db,
               {
@@ -1207,7 +1207,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          toast: `${result.backend === "claude" ? "Claude" : "Codex"} run started for ${result.name} · streaming to agent logs`,
+          toast: `${BACKEND_LABEL[result.backend]} run started for ${result.name} · streaming to agent logs`,
         };
       }
       case "release-agent": {
@@ -1324,7 +1324,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             actor,
           );
         }
-        const backendLabel = started.backend === "claude" ? "Claude" : "Codex";
+        const backendLabel = BACKEND_LABEL[started.backend];
         return {
           ok: true as const,
           intent,

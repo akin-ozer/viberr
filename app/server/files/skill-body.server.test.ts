@@ -1,14 +1,17 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   SKILL_INJECTION_BUDGET,
   assertSkillBodyWellFormed,
+  lstatOr,
   readSkillBodies,
-  readSkillBody,
   readSkillBodyDetailed,
 } from "./skill-body.server";
+import { createTempDirs } from "../../../test-support/temp-dirs";
+
+const temp = createTempDirs();
+afterAll(temp.cleanup);
 
 /**
  * P14-KM-03: skill injection was the one unbounded prompt input. KBs have been
@@ -17,13 +20,13 @@ import {
  */
 
 function freshSkill(name = "craft") {
-  const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-skill-"));
+  const dataRoot = temp.make("viberr-skill-");
   const skillDir = path.join(dataRoot, "skills", name);
   mkdirSync(skillDir, { recursive: true });
   return { dataRoot, skillDir };
 }
 
-describe("readSkillBody", () => {
+describe("readSkillBodyDetailed — the body", () => {
   it("returns the body with frontmatter stripped", () => {
     const { dataRoot, skillDir } = freshSkill();
     writeFileSync(
@@ -31,20 +34,20 @@ describe("readSkillBody", () => {
       "---\nname: craft\n---\n\n# Craft\nMARKER-BODY",
       "utf8",
     );
-    const body = readSkillBody("craft", dataRoot);
+    const body = readSkillBodyDetailed("craft", dataRoot).body;
     expect(body).toContain("MARKER-BODY");
     expect(body).not.toContain("name: craft");
   });
 
   it("returns '' for a skill with no folder on disk", () => {
     const { dataRoot } = freshSkill();
-    expect(readSkillBody("does-not-exist", dataRoot)).toBe("");
+    expect(readSkillBodyDetailed("does-not-exist", dataRoot).body).toBe("");
   });
 
   it("clips an oversized SKILL.md at the budget and says so", () => {
     const { dataRoot, skillDir } = freshSkill();
     writeFileSync(path.join(skillDir, "SKILL.md"), "X".repeat(200), "utf8");
-    const body = readSkillBody("craft", dataRoot, 50);
+    const body = readSkillBodyDetailed("craft", dataRoot, 50).body;
     expect(body).toContain("skill truncated");
     expect(body).toContain("200 chars");
     // The clipped text is the budget, not the whole file.
@@ -54,7 +57,7 @@ describe("readSkillBody", () => {
   it("leaves a body that fits untouched — no marker", () => {
     const { dataRoot, skillDir } = freshSkill();
     writeFileSync(path.join(skillDir, "SKILL.md"), "short", "utf8");
-    expect(readSkillBody("craft", dataRoot, 50)).toBe("short");
+    expect(readSkillBodyDetailed("craft", dataRoot, 50).body).toBe("short");
   });
 
   it("defaults to the KB-sized budget rather than no cap at all", () => {
@@ -64,7 +67,7 @@ describe("readSkillBody", () => {
       "Y".repeat(SKILL_INJECTION_BUDGET + 5_000),
       "utf8",
     );
-    const body = readSkillBody("craft", dataRoot);
+    const body = readSkillBodyDetailed("craft", dataRoot).body;
     expect(body.length).toBeLessThan(SKILL_INJECTION_BUDGET + 300);
     expect(body).toContain("skill truncated");
   });
@@ -73,14 +76,15 @@ describe("readSkillBody", () => {
 /**
  * A5/pass-16 — a skill body is injected under the "Attached resources (trusted
  * — configured for you)" banner, i.e. the run is explicitly told to follow its
- * instructions. `readKbBody` has refused to follow symlinks out of the store
- * since F9 and every other store path agreed after P14-RV-02; this reader
- * dereferenced them, so a symlinked SKILL.md (or skill folder) put arbitrary
- * host content into the model's context AS TRUSTED PERSONA.
+ * instructions. The KB reader (`readKbIndexDetailed` today) has refused to
+ * follow symlinks out of the store since F9 and every other store path agreed
+ * after P14-RV-02; this reader dereferenced them, so a symlinked SKILL.md (or
+ * skill folder) put arbitrary host content into the model's context AS TRUSTED
+ * PERSONA.
  */
-describe("readSkillBody — store containment (A5)", () => {
+describe("readSkillBodyDetailed — store containment (A5)", () => {
   function outsideFile(body: string): string {
-    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    const outside = temp.make("viberr-outside-");
     writeFileSync(path.join(outside, "SKILL.md"), body, "utf8");
     return outside;
   }
@@ -101,14 +105,14 @@ describe("readSkillBody — store containment (A5)", () => {
     symlinkSync(outside, path.join(dataRoot, "skills", "linked"));
     const detailed = readSkillBodyDetailed("linked", dataRoot);
     expect(detailed.body).toBe("");
-    expect(readSkillBody("linked", dataRoot)).not.toContain("MARKER-EVIL-FOLDER");
+    expect(detailed.body).not.toContain("MARKER-EVIL-FOLDER");
     expect(detailed.unresolved?.reason).toContain("symlink");
   });
 
   it("a real SKILL.md in a real folder still reads (containment is not a ban)", () => {
     const { dataRoot, skillDir } = freshSkill();
     writeFileSync(path.join(skillDir, "SKILL.md"), "MARKER-REAL", "utf8");
-    expect(readSkillBody("craft", dataRoot)).toContain("MARKER-REAL");
+    expect(readSkillBodyDetailed("craft", dataRoot).body).toContain("MARKER-REAL");
   });
 });
 
@@ -236,5 +240,20 @@ describe("assertSkillBodyWellFormed (ruling 183)", () => {
       assertSkillBodyWellFormed("---\nname: x\ndescription: Fine.\n---\n# Body"),
     ).not.toThrow();
     expect(() => assertSkillBodyWellFormed("# Plain\n- markdown")).not.toThrow();
+  });
+});
+
+describe("lstatOr", () => {
+  it("stats the link itself, never its target, and answers null for a missing path", () => {
+    const { skillDir } = freshSkill();
+    const file = path.join(skillDir, "SKILL.md");
+    writeFileSync(file, "# Craft", "utf8");
+    symlinkSync(file, path.join(skillDir, "linked.md"));
+    expect(lstatOr(file)?.isFile()).toBe(true);
+    expect(lstatOr(path.join(skillDir, "linked.md"))?.isSymbolicLink()).toBe(true);
+    // A dangling link is still a link: it stats, where `existsSync` says no.
+    symlinkSync(path.join(skillDir, "gone.md"), path.join(skillDir, "dangling.md"));
+    expect(lstatOr(path.join(skillDir, "dangling.md"))?.isSymbolicLink()).toBe(true);
+    expect(lstatOr(path.join(skillDir, "missing.md"))).toBeNull();
   });
 });

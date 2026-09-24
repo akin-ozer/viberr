@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
@@ -39,11 +40,6 @@ import {
  */
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
-
-function actor(store: TestStore, who: "arda" | "murat" | "selin" | "deniz") {
-  const u = store.users[who];
-  return { userId: u.id, label: u.email };
-}
 
 async function seed(store: TestStore): Promise<void> {
   const seeds: [string, Parameters<typeof baseTaskFrontmatter>[1]][] = [
@@ -154,7 +150,7 @@ describe("setTaskDependencies", () => {
     const result = await setTaskDependencies(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["goal-1 link 2", "VIB-5"] },
-      actor(store, "arda"),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result).toMatchObject({ changed: true, blockedBy: ["goal-1 link 2", "VIB-5"], added: ["goal-1 link 2", "VIB-5"], removed: [] });
@@ -175,7 +171,7 @@ describe("setTaskDependencies", () => {
     const again = await setTaskDependencies(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["goal-1 link 2", "vib-5"] },
-      actor(store, "arda"),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(again.changed).toBe(false);
@@ -194,7 +190,7 @@ describe("setTaskDependencies", () => {
       setTaskDependencies(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-2"] },
-        actor(store, "arda"),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toThrow("VIB-2 is already done, so waiting on it holds nothing. Leave it off the list.");
@@ -206,7 +202,7 @@ describe("setTaskDependencies", () => {
     const kept = await setTaskDependencies(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-4", blockedBy: ["VIB-5", "goal-1 link 2"] },
-      actor(store, "arda"),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(kept.blockedBy).toEqual(["VIB-5", "goal-1 link 2"]);
@@ -219,15 +215,15 @@ describe("setTaskDependencies", () => {
       frontmatter: baseTaskFrontmatter("VIB-6", { stage: "impl", waiting: "agent" }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-6", blockedBy: ["VIB-5"] }, actor(store, "arda"), { dataRoot: store.dataRoot });
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-6", blockedBy: ["VIB-5"] }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
     expect(file(store, "VIB-6").frontmatter.waiting).toBe("agent");
 
     await expect(
-      setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-3", blockedBy: ["VIB-5"] }, actor(store, "arda"), { dataRoot: store.dataRoot }),
+      setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-3", blockedBy: ["VIB-5"] }, actorOf(store.users.arda), { dataRoot: store.dataRoot }),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("VIB-3 is archived; restore it before editing what it waits on") });
     // deniz is the seeded viewer.
     await expect(
-      setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-5"] }, actor(store, "deniz"), { dataRoot: store.dataRoot }),
+      setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-5"] }, actorOf(store.users.deniz), { dataRoot: store.dataRoot }),
     ).rejects.toMatchObject({ status: 403 });
     // The operator is not gated (in-process authority).
     const op = await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-5"] }, { userId: "operator", label: "operator" }, { dataRoot: store.dataRoot, operatorAuthorized: true });
@@ -255,7 +251,7 @@ describe("setTaskDependencies", () => {
     const result = await setTaskDependencies(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: [] },
-      actor(store, "murat"),
+      actorOf(store.users.murat),
       { dataRoot: store.dataRoot, deps: { runOperator } },
     );
     expect(result).toMatchObject({ changed: true, blockedBy: [], removed: ["VIB-5"] });
@@ -444,7 +440,7 @@ describe("the release engine", () => {
     // VIB-2 is done, VIB-5 and VIB-1 are not: a partial completion. A move
     // of VIB-5 towards review fires the hook, which releases nothing.
     expect(await releaseDependents(store.db, ctxWith, store.slug)).toEqual([]);
-    await transitionStage(store.db, { projectSlug: store.slug, taskKey: "VIB-5", toStageId: "review", manual: true }, actor(store, "arda"), ctxWith);
+    await transitionStage(store.db, { projectSlug: store.slug, taskKey: "VIB-5", toStageId: "review", manual: true }, actorOf(store.users.arda), ctxWith);
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(file(store, "VIB-10").frontmatter.blockedBy).toEqual(["VIB-2", "VIB-5", "VIB-1"]);
     // Both land (accepted by hand here; the acceptance path fires the same
@@ -454,7 +450,7 @@ describe("the release engine", () => {
       writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter(key, { stage: "done", waiting: "none" }) });
     }
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    await transitionStage(store.db, { projectSlug: store.slug, taskKey: "VIB-4", toStageId: "review", manual: true }, actor(store, "arda"), ctxWith);
+    await transitionStage(store.db, { projectSlug: store.slug, taskKey: "VIB-4", toStageId: "review", manual: true }, actorOf(store.users.arda), ctxWith);
     // The re-invoke is the LAST step of the release; waiting on it means the
     // note, the audit row and the notification have all landed.
     await eventually(() =>
@@ -513,7 +509,7 @@ describe("the release engine", () => {
     const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator } };
     expect(await releaseDependents(store.db, ctxWith, store.slug)).toEqual(["VIB-11"]);
 
-    await setTaskArchived(store.db, { projectSlug: store.slug, taskKey: "VIB-5", archived: true }, actor(store, "arda"), ctxWith);
+    await setTaskArchived(store.db, { projectSlug: store.slug, taskKey: "VIB-5", archived: true }, actorOf(store.users.arda), ctxWith);
     const held = file(store, "VIB-12");
     expect(held.frontmatter.blockedBy).toEqual(["VIB-5"]);
     expect(held.frontmatter.waiting).toBe("human");
@@ -729,7 +725,7 @@ describe("F37-63: a pending link on a cancelled goal is a dead wait", () => {
     await updateGoal(
       store.db,
       { projectSlug: store.slug, goalId: "goal-1", action: { op: "cancel" } },
-      { userId: store.users.arda.id, label: store.users.arda.email },
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     writeTask(store.dataRoot, store.slug, {
@@ -812,14 +808,14 @@ describe("the archive hook and the convergent sweep state the same fact once", (
     await setTaskArchived(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-5", archived: true },
-      actor(store, "arda"),
+      actorOf(store.users.arda),
       ctxWith,
     );
     expect(notes()).toHaveLength(1);
     await setTaskArchived(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-9", archived: true },
-      actor(store, "arda"),
+      actorOf(store.users.arda),
       ctxWith,
     );
     expect(notes()).toHaveLength(2);
@@ -890,7 +886,7 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
     const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } };
 
     // A person empties the task's list: the release, and the mirror.
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: [] }, actor(store, "arda"), ctxWith);
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: [] }, actorOf(store.users.arda), ctxWith);
     expect(file(store, "VIB-7").frontmatter.blockedBy).toEqual([]);
     expect(goal().frontmatter.links[0]!.blockedBy).toEqual([]);
     expect(goal().timeline[0]!.text).toBe(
@@ -902,7 +898,7 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
     expect(goal().frontmatter.links[1]!.blockedBy).toEqual([]);
 
     // A new list on the task lands on the link too.
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: ["VIB-5"] }, actor(store, "arda"), ctxWith);
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: ["VIB-5"] }, actorOf(store.users.arda), ctxWith);
     expect(goal().frontmatter.links[0]!.blockedBy).toEqual(["VIB-5"]);
     expect(goal().timeline[0]!.text).toMatch(/^Link 1 \(Log view\) now waits on VIB-5: VIB-7's list was changed by /);
 
@@ -918,7 +914,7 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
 
     // Convergent: the same list again writes no second timeline line.
     const lines = goal().timeline.length;
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: [] }, actor(store, "arda"), ctxWith);
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: [] }, actorOf(store.users.arda), ctxWith);
     expect(goal().timeline.length).toBe(lines);
   });
 
@@ -933,7 +929,7 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const goal2 = () => readGoalFile({ projectSlug: store.slug, goalId: "goal-2", dataRoot: store.dataRoot })!;
     const before = goal2().raw;
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-8", blockedBy: [] }, actor(store, "arda"), { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } });
+    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-8", blockedBy: [] }, actorOf(store.users.arda), { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } });
     expect(goal2().raw).toBe(before);
     expect(goal2().parsed.frontmatter.links[0]!.blockedBy).toEqual(["goal-1 link 2"]);
   });
@@ -1066,7 +1062,7 @@ describe("F37-68 / ruling 241: a reviewer question the hold refused survives the
     await setTaskDependencies(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-11", blockedBy: [] },
-      actor(store, "arda"),
+      actorOf(store.users.arda),
       {
         dataRoot: store.dataRoot,
         operatorAuthorized: true,

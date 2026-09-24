@@ -1,5 +1,5 @@
 import { expect, test as setup } from "@playwright/test";
-import { SEED_DEFAULT_PASSWORD } from "../test-support/demo-seed";
+import { SEED_DEFAULT_PASSWORD } from "../app/server/seed/seed-credentials";
 
 const ARDA_STATE = "e2e/.auth/arda.json";
 

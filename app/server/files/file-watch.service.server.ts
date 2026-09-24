@@ -6,7 +6,9 @@ import { z } from "zod";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildGoalFile, rebuildPath, rebuildTaskFile } from "~/server/projections/rebuilder.server";
+import { errnoSchema } from "./atomic-file.server";
 import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-store-root.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Watches ${dataRoot}/projects and incrementally rebuilds projections.
@@ -30,7 +32,7 @@ import { getDataRoot, projectFilePath, projectsDir, taskFilePath } from "./file-
  *   reload reuses the running watcher instead of stacking a duplicate.
  */
 
-export const WATCH_DEBOUNCE_MS = 250;
+const WATCH_DEBOUNCE_MS = 250;
 
 /** The single column the removal reconcile below selects from each table:
  *  `task_projections.task_key` is TEXT NOT NULL, `projects.slug` is its
@@ -38,12 +40,6 @@ export const WATCH_DEBOUNCE_MS = 250;
 const taskKeyRowSchema = z.object({ task_key: z.string() });
 const goalIdRowSchema = z.object({ goal_id: z.string() });
 const projectSlugRowSchema = z.object({ slug: z.string() });
-
-/** Node hangs its errno off `code`; a watcher error without one is not a
- *  condition this module branches on. */
-const errnoSchema = z.object({
-  code: z.string().optional().catch(undefined),
-});
 
 const WATCHER_KEY = Symbol.for("viberr.fileWatcher");
 
@@ -227,7 +223,7 @@ export function startFileWatcher(
         });
       }
     } catch (error) {
-      failed(error instanceof Error ? error : new Error(String(error)));
+      failed(toError(error));
     }
   };
   function scheduleRetry(absPath: string): void {
@@ -329,7 +325,7 @@ export function startFileWatcher(
     } catch (error) {
       logger.error("watcher directory reconcile failed", {
         path: absDir,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   };
@@ -380,7 +376,7 @@ export function startFileWatcher(
     // isFileWatcherAlive() (and /resources/health) reports the truth instead
     // of a zombie watcher.
     logger.error("file watcher error — clearing watcher handle", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
       code,
     });
     const current = cache[WATCHER_KEY];
@@ -413,7 +409,7 @@ export function startFileWatcher(
           startFileWatcher(options);
         } catch (reErr) {
           logger.error("file watcher re-arm failed", {
-            err: reErr instanceof Error ? reErr : new Error(String(reErr)),
+            err: toError(reErr),
           });
         }
       }, 2_000);

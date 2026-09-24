@@ -6,11 +6,8 @@ import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
-import {
-  keyFromName,
-  projectNameFromRepo,
-  slugifyProjectName,
-} from "./project-name";
+import { slugify } from "~/shared/ids/slugify";
+import { keyFromName, projectNameFromRepo } from "./project-name";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
@@ -246,7 +243,7 @@ function NewProjectConnectionField({
  * user's value and is never selected out from under them again. (The derive
  * itself already stopped on first edit — the pass-8 P1 `*Touched` rule.)
  */
-export function selectDerivedOnFocus(derived: boolean) {
+function selectDerivedOnFocus(derived: boolean) {
   return (e: React.FocusEvent<HTMLInputElement>) => {
     if (derived) e.currentTarget.select();
   };
@@ -540,8 +537,8 @@ export function NewProjectModal({
   const keyInUse =
     effKey.length >= 2 &&
     keyPool.some((k) => k.toUpperCase() === effKey.toUpperCase());
-  const effRepo = repo || slugifyProjectName(name);
-  const slug = slugifyProjectName(name);
+  const effRepo = repo || slugify(name);
+  const slug = slugify(name);
   // Name ↔ repo AUTOCOMPLETE (not a persistent two-way lock — pass-8 P1 ruling):
   // typing into an empty/untouched field fills the OTHER, but once a field has
   // been edited by hand it is `*Touched` and the other's derive no longer
@@ -551,7 +548,7 @@ export function NewProjectModal({
   const editName = (v: string) => {
     setName(v);
     setNameTouched(true);
-    if (!repoTouched) setRepo(slugifyProjectName(v));
+    if (!repoTouched) setRepo(slugify(v));
   };
   const editRepo = (raw: string) => {
     const v = raw

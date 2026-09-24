@@ -67,7 +67,9 @@ export function collapseTelemetry<T extends { display: LogLine }>(
   return out;
 }
 
-/** The collapsed row's own copy — names what was folded and where it went. */
+/** The collapsed row's own copy — names what was folded and where it went.
+ *  The plurals are inline, not `countLabel`, under ruling 457
+ *  (shared/text/plural.ts). */
 export function telemetryLabel(entry: {
   count: number;
   tags: string[];
@@ -75,6 +77,6 @@ export function telemetryLabel(entry: {
   return (
     `${entry.count} telemetry event${entry.count === 1 ? "" : "s"} ` +
     `(${entry.tags.join(", ")}): token and rate-limit accounting, hidden here; ` +
-    `“{ } raw” shows them`
+    `“{ } raw” shows ${entry.count === 1 ? "it" : "them"}`
   );
 }

@@ -18,6 +18,7 @@ import {
   type ConversationScope,
 } from "~/server/controller/controller-conversations.server";
 import { resolveControllerName } from "~/server/controller/controller-profile.server";
+import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import {
   conversationTurnState,
   type ConversationTurnState,
@@ -88,9 +89,6 @@ export interface ControllerDockView {
   viewerOwnsActive: boolean;
 }
 
-/** The dock's `c` parameter: absent = the newest thread here, `new` = none. */
-export const DOCK_NEW_CONVERSATION = "new";
-
 export function describeDockScope(
   db: DatabaseSync,
   binding: { projectSlug: string | null; taskKey: string | null },
@@ -150,7 +148,8 @@ export function getControllerDock(
   input: {
     projectSlug: string | null;
     taskKey: string | null;
-    /** A conversation id, `DOCK_NEW_CONVERSATION`, or null for the newest. */
+    /** A conversation id, `NEW_CONVERSATION_PARAM` (none), or null for the
+     *  newest thread here. */
     conversationId: string | null;
     /**
      * O39-d: the panel is OPEN and shows this transcript, so its owner has
@@ -177,7 +176,7 @@ export function getControllerDock(
   let staleSelection = false;
   if (input.conversationId === null) {
     conversation = rows[0] ?? null;
-  } else if (input.conversationId !== DOCK_NEW_CONVERSATION) {
+  } else if (input.conversationId !== NEW_CONVERSATION_PARAM) {
     const found = getConversation(db, input.conversationId);
     const admin = isOrgAdmin(db, viewer.id);
     if (

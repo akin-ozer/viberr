@@ -473,7 +473,7 @@ export interface RunWho {
  * panels stay props-driven (runs.md §3.1).
  */
 export interface RunView {
-  /** Thread id unique within the task ("op" | "primary" | "c0"). */
+  /** Thread id unique within the task ("op" | "primary" | "r0"). */
   id: string;
   /** DB run id (agent_runs.id) — for interrupt + the run-log tail fetch. */
   serverRunId: string;

@@ -1,13 +1,16 @@
 import { z } from "zod";
 import {
   diagError,
-  diagInfo,
   diagWarning,
+  tolerantField,
+  tolerantListField,
   tolerantRowsOf,
   type FileDiagnostic,
+  type TolerantField,
+  type TolerantListField,
 } from "./file-diagnostics";
 import { canonicalDependencyRef } from "~/shared/dependencies";
-import { headCarriesRevision, type RefreshLink, type RevisionDrift } from "~/shared/revision-drift";
+import { headCarriesRevision, type RefreshLink } from "~/shared/revision-drift";
 
 /**
  * Zod schemas + tolerant parser for the `task.md` frontmatter and packet
@@ -277,7 +280,7 @@ export type AgentRef = z.infer<typeof agentRefSchema>;
  * behavior difference comes from the profile's capability grants, never from
  * which list an agent sits in.
  */
-export const engagementSchema = z
+const engagementSchema = z
   .object({
     profileId: z.string().min(1),
     backend: z.enum(["codex", "claude"]),
@@ -382,7 +385,7 @@ export type OperatorRef = z.infer<typeof operatorRefSchema>;
  * (rather than performing it); the task UI renders each as a one-click card a
  * human accepts (applies) or dismisses. Distinct from packets (single decision):
  * a task can carry several pending recommendations at once. */
-export const RECOMMENDATION_KINDS = [
+const RECOMMENDATION_KINDS = [
   "transition",
   // Dynamic-dispatch rework (2026-08-29): the four slot-shaped kinds
   // (`assign_specialist` / `assign_reviewer` / `run_specialist` /
@@ -404,7 +407,7 @@ export const RECOMMENDATION_KINDS = [
 ] as const;
 export type RecommendationKind = (typeof RECOMMENDATION_KINDS)[number];
 
-export const recommendationSchema = z
+const recommendationSchema = z
   .object({
     id: z.string().min(1),
     kind: z.enum(RECOMMENDATION_KINDS),
@@ -445,7 +448,7 @@ export type Recommendation = z.infer<typeof recommendationSchema>;
  * runner fires due entries (server-side → backend-agnostic, works for Claude
  * AND Codex, no per-backend agent tool). Never fires on a terminal (Done) task.
  */
-export const SCHEDULE_ACTION_TYPES = ["run-operator", "run-agent"] as const;
+const SCHEDULE_ACTION_TYPES = ["run-operator", "run-agent"] as const;
 export type ScheduleAction = (typeof SCHEDULE_ACTION_TYPES)[number];
 
 // F10-16 lifecycle: pending → claimed → fired (success) | failed (terminal).
@@ -453,7 +456,7 @@ export type ScheduleAction = (typeof SCHEDULE_ACTION_TYPES)[number];
 // crash/enqueue failure between the claim and completion is RECOVERABLE (a
 // stale claim past its lease is re-driven) rather than silently lost, which the
 // old pending→fired-before-enqueue flow did. `cancelled` is a human withdrawal.
-export const SCHEDULE_STATUS_VALUES = [
+const SCHEDULE_STATUS_VALUES = [
   "pending",
   "claimed",
   "fired",
@@ -477,7 +480,7 @@ export const SCHEDULE_STATUS_VALUES = [
  * put the moment the task can run again. `announceRelease` is the one release
  * chokepoint, so the drain has exactly one home.
  */
-export const queuedQuestionSchema = z
+const queuedQuestionSchema = z
   .object({
     id: z.string().min(1),
     /** The reviewer the question is for. Resolved against the LIVE engagement
@@ -559,7 +562,7 @@ export type PrState = (typeof PR_STATE_VALUES)[number];
  * ABSENT/null means "nothing outstanding, or GitHub was never successfully
  * read" — never rendered as a verdict. Kept in ONE place, like PR_STATE_VALUES.
  */
-export const PR_REVIEW_VALUES = [
+const PR_REVIEW_VALUES = [
   "approved",
   "changes_requested",
   "review_required",
@@ -591,7 +594,7 @@ export type PrReviewState = (typeof PR_REVIEW_VALUES)[number];
  *  hand-edited file can put in memory. */
 export const PR_PATHS_MAX = 300;
 
-export const PR_MERGEABLE_VALUES = ["clean", "conflicting", "unknown"] as const;
+const PR_MERGEABLE_VALUES = ["clean", "conflicting", "unknown"] as const;
 export type PrMergeable = (typeof PR_MERGEABLE_VALUES)[number];
 
 /** P13-D-28: check-runs roll-up for the PR head sha. Fetched since phase 7 and
@@ -741,10 +744,6 @@ export type PrRef = z.infer<typeof prRefSchema>;
 export type UnpushedRevision = NonNullable<PrRef["unpushedRevision"]>;
 export type PrClosure = NonNullable<PrRef["closure"]>;
 
-/** The stored `pr.revisionDrift`, typed as the shared drift record so the
- *  file and the sentence builder can never disagree on the shape. */
-export type StoredRevisionDrift = RevisionDrift;
-
 /**
  * Ruling 135: the recorded unpushed-revision fact, when it still describes the
  * task's CURRENT delivered revision, or null. `currentRevisionSha` is the
@@ -852,7 +851,7 @@ export function revisionLeftWorkspace(fm: {
 
 /** GitHub projection cache mirrored into the file by the Phase-7
  * reconciler — commits + change stats. Not human-edited truth. */
-export const githubCommitSchema = z
+const githubCommitSchema = z
   .object({
     sha: z.string(),
     msg: z.string(),
@@ -867,7 +866,7 @@ export const githubCommitSchema = z
     pushed: z.boolean().optional(),
   })
   .loose();
-export const githubCacheSchema = z
+const githubCacheSchema = z
   .object({
     commits: z.array(githubCommitSchema).default([]),
     changed: z
@@ -924,7 +923,7 @@ export type PacketObservation = z.infer<typeof packetObservationSchema>;
  * prefix upper-cased, a goal id lower-cased, whitespace collapsed) so the file
  * carries exactly what the surfaces print and the resolver looks up.
  */
-export const dependencyRefTextSchema = z
+const dependencyRefTextSchema = z
   .string()
   .transform((value, ctx) => {
     const canonical = canonicalDependencyRef(value);
@@ -1102,7 +1101,7 @@ export type TaskPacket = z.infer<typeof taskPacketSchema>;
  * that is the whole of new-commit invalidation and the fix for the F10-32
  * "rework = a comment or stage bounce" heuristic.
  */
-export const workRevisionSchema = z
+const workRevisionSchema = z
   .object({
     id: z.string().min(1),
     /** Full commit SHA the reviewers judge (not the abbreviated `git log` form). */
@@ -1167,10 +1166,10 @@ export function activeWorkRevision(
   return rev;
 }
 
-export const REVIEW_VERDICT_RESULTS = ["approve", "request_changes"] as const;
+const REVIEW_VERDICT_RESULTS = ["approve", "request_changes"] as const;
 
 /** One reviewing engagement's verdict, bound to the revision it judged (F10-15). */
-export const reviewVerdictSchema = z
+const reviewVerdictSchema = z
   .object({
     profileId: z.string().min(1),
     /** What this verdict judged: the `workRevision.id`, or — ruling 388, when
@@ -1213,7 +1212,7 @@ export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;
 // -------------------------------------------------------- frontmatter
 
 /** Ruling 132: one recorded base refresh (see `baseRefreshes` below). */
-export const baseRefreshSchema = z
+const baseRefreshSchema = z
   .object({
     /** The merge commit `update_branch_from_base` created (full sha). The
      *  refresh merges with `--no-ff`, so this is always a two-parent commit. */
@@ -1410,7 +1409,7 @@ const taskFrontmatterFields = {
 };
 
 /** Strict target shape — what a fully valid task.md frontmatter parses to. */
-export const taskFrontmatterSchema = z.object(taskFrontmatterFields);
+const taskFrontmatterSchema = z.object(taskFrontmatterFields);
 export type TaskFrontmatter = z.infer<typeof taskFrontmatterSchema>;
 
 // ------------------------------------------- review-state derivation (F10-15)
@@ -1808,53 +1807,12 @@ export interface TolerantTaskFrontmatterResult {
  *  ruling. A file still carrying those keys keeps them as unknown keys.) */
 type ReadableFrontmatterKey = keyof TaskFrontmatter;
 
-/** Runs `schema` over `data[path]`; on failure records a diagnostic and returns
- * `fallback`. Absent (undefined) values only diagnose when `required`. */
-function tolerant<T>(
-  diagnostics: FileDiagnostic[],
-  data: RawFrontmatter,
-  path: ReadableFrontmatterKey,
-  schema: z.ZodType<T>,
-  fallback: T,
-  options: { required?: boolean; severity?: "info" | "warning" } = {},
-): T {
-  const value = data[path];
-  if (value === undefined) {
-    if (options.required) {
-      const make = options.severity === "info" ? diagInfo : diagWarning;
-      diagnostics.push(
-        make(
-          "frontmatter.missing_field",
-          `Frontmatter field \`${path}\` is missing; using ${JSON.stringify(fallback)}.`,
-          path,
-        ),
-      );
-    }
-    return fallback;
-  }
-  const result = schema.safeParse(value);
-  if (result.success) return result.data;
-  const make = options.severity === "info" ? diagInfo : diagWarning;
-  diagnostics.push(
-    make(
-      "frontmatter.invalid_field",
-      `Frontmatter field \`${path}\` is invalid (${result.error.issues[0]?.message ?? "unparseable"}); using ${JSON.stringify(fallback)}.`,
-      path,
-    ),
-  );
-  return fallback;
-}
+/** The shared tolerant readers (`file-diagnostics.ts`), held to this file's
+ *  keys: `tolerant` falls a whole field back, `tolerantRows` keeps a list's
+ *  good rows (the F18 contract). */
+const tolerant: TolerantField<ReadableFrontmatterKey> = tolerantField;
+const tolerantRows: TolerantListField<ReadableFrontmatterKey> = tolerantListField;
 
-/**
- * Validate a list field ONE ROW AT A TIME, keeping the good rows and dropping
- * only the bad ones with a per-index diagnostic — the F18 contract.
- *
- * The whole-array {@link tolerant} above empties the ENTIRE list on one bad
- * row, and because the diagnostic is only a warning (not a hardStop) the file
- * stays writable, so the next `updateTaskFile` serializes the emptied list back
- * over the rows that had been fine — a durable, silent loss. Any list whose
- * loss would persist (verdicts, schedules, engagements, …) parses through here.
- */
 /**
  * C01-A8 (pass 32): `github.commits` gets the per-row tolerance every other
  * list has. The cache is reconciler-written, but ONE odd row (`sha: 1234` as a
@@ -1885,37 +1843,6 @@ function githubWithCleanCommits(
     }),
   );
   return { ...data, github: { ...probe.data, commits } };
-}
-
-function tolerantRows<T>(
-  diagnostics: FileDiagnostic[],
-  data: RawFrontmatter,
-  path: ReadableFrontmatterKey,
-  element: z.ZodType<T>,
-): T[] {
-  const value = data[path];
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) {
-    diagnostics.push(
-      diagWarning(
-        "frontmatter.invalid_field",
-        `Frontmatter field \`${path}\` is not a list — using an empty list.`,
-        path,
-      ),
-    );
-    return [];
-  }
-  return tolerantRowsOf(
-    diagnostics,
-    value,
-    element,
-    "frontmatter.invalid_field",
-    (i) => ({
-      subject: `Frontmatter \`${path}[${i}]\``,
-      noun: "entry",
-      path: `${path}[${i}]`,
-    }),
-  );
 }
 
 /**
@@ -2448,7 +2375,7 @@ export function normalizeEvidenceRows(
  *  task's `attachments/` dir, so they stay small by construction (the files
  *  themselves live on disk; the panel and the timeline chips resolve names
  *  against the live directory). */
-export const EVENT_ATTACHMENTS_MAX = 20;
+const EVENT_ATTACHMENTS_MAX = 20;
 const ATTACHMENT_NAME_MAX_CHARS = 200;
 
 /**

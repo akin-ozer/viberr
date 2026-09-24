@@ -78,7 +78,7 @@ export interface PolicyViewData {
 }
 
 /** Audit actions that count as "policy changes" for the last-change chip. */
-export const POLICY_AUDIT_ACTIONS = [
+const POLICY_AUDIT_ACTIONS = [
   "project.member.role_changed",
   "project.policy.boundary_changed",
   "project.policy.guardrail_changed",
@@ -89,7 +89,7 @@ export const POLICY_AUDIT_ACTIONS = [
   "project.agent_profile.deleted",
 ] as const;
 
-export function latestPolicyChange(
+function latestPolicyChange(
   db: DatabaseSync,
   projectSlug: string,
 ): { by: string; at: string } | null {
@@ -150,7 +150,7 @@ export function getPolicyViewData(
 
 /** Every default guardrail (present or not) in shipped order, then whatever
  *  else project.md carries, in file order. */
-export function listGuardrailViews(
+function listGuardrailViews(
   projectSlug: string,
   ctx: { dataRoot?: string } = {},
 ): GuardrailView[] {

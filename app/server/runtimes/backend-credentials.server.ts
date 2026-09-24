@@ -12,6 +12,7 @@ import {
   sealSecret,
 } from "~/server/secrets/secret-box.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { retireBackendRecordsFor } from "./backend-quota.server";
 import { filteredSpawnEnv, type RealBackend } from "./runtime-registry.server";
 import {
@@ -20,6 +21,7 @@ import {
   ensureUserBackendHome,
   userBackendHome,
 } from "./user-homes.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Personal agent-backend credentials (ruling 127) — the store, and the ONE
@@ -97,8 +99,6 @@ export interface BackendCredentialRow {
   updatedAt: string;
 }
 
-/** Ruling 92: the backends are called "Claude" and "Codex" everywhere. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 /** Who actually accepts or rejects a pasted key — the company, not the CLI. */
 const VENDOR_LABEL = { claude: "Anthropic", codex: "OpenAI" } as const;
 
@@ -229,7 +229,7 @@ function openBackendSecret(db: DatabaseSync, credentialId: string): string {
       // fallback, so it never fails the caller.
       logger.warn("could not re-seal a backend credential", {
         credentialId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -257,6 +257,30 @@ const HOME_ENV_KEY = {
   codex: "CODEX_HOME",
 } as const;
 
+/**
+ * The env a vendor binary runs on for one person outside a run: the sign-in
+ * driver (`startBackendLogin`) and `runVendorLogout`. `filteredSpawnEnv()`
+ * (every credential-shaped variable stripped) plus the ONE home variable of
+ * this backend, pointed at that person's home, so the child cannot reach any
+ * credential but the one it is signing in or revoking.
+ */
+export function vendorSpawnEnv(
+  userId: string,
+  backend: RealBackend,
+  dataRoot?: string,
+): Record<string, string> {
+  const home = ensureUserBackendHome(userId, backend, dataRoot);
+  const env = filteredSpawnEnv();
+  // Neither vendor's home variable may be inherited: the child must act on the
+  // home this call names and on nothing else, so an ambient CLAUDE_CONFIG_DIR
+  // can never make a `codex logout` read a directory nobody chose, nor an
+  // ambient CODEX_HOME a `claude auth login`.
+  delete env.CLAUDE_CONFIG_DIR;
+  delete env.CODEX_HOME;
+  env[HOME_ENV_KEY[backend]] = home;
+  return env;
+}
+
 const LOGOUT_ARGS = {
   claude: ["auth", "logout"],
   codex: ["logout"],
@@ -265,8 +289,8 @@ const LOGOUT_ARGS = {
 /**
  * Ask the vendor's own binary to revoke the sign-in it holds.
  *
- * argv only, never a shell; the child gets `filteredSpawnEnv()` (every
- * credential-shaped variable stripped) plus the one home variable, so a logout
+ * argv only, never a shell; the child gets `vendorSpawnEnv` (every
+ * credential-shaped variable stripped, plus the one home variable), so a logout
  * cannot reach any credential but the one it is revoking. Never throws: a
  * failed or missing logout must not stop the disconnect — the credential FILE
  * is removed either way, which is what makes the account unusable from this
@@ -278,14 +302,7 @@ async function runVendorLogout(
   binary: string,
   dataRoot?: string,
 ): Promise<void> {
-  const home = ensureUserBackendHome(userId, backend, dataRoot);
-  const env = filteredSpawnEnv();
-  // Neither vendor's home variable may be inherited: the child must act on the
-  // home this call names and on nothing else, so an ambient CLAUDE_CONFIG_DIR
-  // can never make a `codex logout` read a directory nobody chose.
-  delete env.CLAUDE_CONFIG_DIR;
-  delete env.CODEX_HOME;
-  env[HOME_ENV_KEY[backend]] = home;
+  const env = vendorSpawnEnv(userId, backend, dataRoot);
   try {
     await execFileAsync(binary, [...LOGOUT_ARGS[backend]], {
       env,
@@ -318,7 +335,7 @@ function removeLoginCredentialFile(
   } catch (error) {
     logger.warn("could not remove a vendor credential file", {
       backend,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -926,9 +943,7 @@ export function runCredentialFor(
     });
   }
   const homeDir = ensureUserBackendHome(userId, backend, dataRoot);
-  const env = {
-    [backend === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"]: homeDir,
-  };
+  const env = { [HOME_ENV_KEY[backend]]: homeDir };
   const secrets: string[] = [];
   if (row.kind !== "login") {
     // A `login` row adds nothing here: the binary reads its own file from the
@@ -964,7 +979,7 @@ function openStoredSecret(
     logger.error("a connected backend credential could not be opened", {
       backend,
       userId: row.userId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     throw new AppError({
       code: ERROR_CODES.RUN_UNAVAILABLE,

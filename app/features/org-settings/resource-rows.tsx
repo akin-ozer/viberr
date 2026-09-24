@@ -1,13 +1,14 @@
-import { FolderIco } from "~/features/kb-browser/icons";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
-import { EditIco } from "./mini-modal";
-import { isStaleCheck, rel, updatedLabel } from "./resource-helpers";
+import { rel, updatedLabel } from "./resource-helpers";
+import { isMcpHealthStale } from "~/shared/freshness";
 import { looksLikeWriteTool } from "~/shared/mcp-tools";
+import { countLabel } from "~/shared/text/plural";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 
 /**
  * The four resource list panels (knowledge bases, MCP servers, skills, global
@@ -76,9 +77,7 @@ export function KbPanel({
                     folder
                     {kb.fileCount > kb.injectableCount
                       ? " · " +
-                        (kb.fileCount - kb.injectableCount) +
-                        " non-text file" +
-                        (kb.fileCount - kb.injectableCount === 1 ? "" : "s") +
+                        countLabel(kb.fileCount - kb.injectableCount, "non-text file") +
                         " skipped"
                       : ""}
                   </>
@@ -98,7 +97,7 @@ export function KbPanel({
                   ? "re-scanned " + rel(kb.lastIndexedAt)
                   : "last scanned " + rel(kb.lastIndexedAt)}
                 {usedBy(kb.dir) > 0
-                  ? " · " + usedBy(kb.dir) + " template" + (usedBy(kb.dir) === 1 ? "" : "s")
+                  ? " · " + countLabel(usedBy(kb.dir), "template")
                   : ""}
               </span>
             </span>
@@ -110,7 +109,7 @@ export function KbPanel({
                 aria-label={"Browse files in " + kb.name}
                 onClick={() => onBrowse(kb)}
               >
-                <FolderIco />
+                <Icon name="folder" />
               </button>
               {/* Ruling 368: the probe in flight shows itself here — busy, the
                   loader spinning, a name that says the work — and a second
@@ -133,7 +132,7 @@ export function KbPanel({
                 aria-label={"Edit " + kb.name}
                 onClick={() => onEdit(kb)}
               >
-                <EditIco />
+                <Icon name="edit" />
               </button>
               <button
                 type="button"
@@ -174,12 +173,12 @@ export function KbPanel({
 function writeToolPosture(m: McpView): string {
   if (m.writeTools.length > 0) {
     const n = m.writeTools.length;
-    return ` · ${n} write tool${n === 1 ? "" : "s"} withheld from read-only runs`;
+    return ` · ${countLabel(n, "write tool")} withheld from read-only runs`;
   }
   const writeSuspects = (m.discoveredTools ?? []).filter(looksLikeWriteTool);
   if (m.writeToolsReviewed) {
     return writeSuspects.length > 0
-      ? ` · reviewed: none of its ${writeSuspects.length} write-looking tool${writeSuspects.length === 1 ? "" : "s"} is withheld`
+      ? ` · reviewed: none of its ${countLabel(writeSuspects.length, "write-looking tool")} is withheld`
       : " · reviewed: no write tools";
   }
   if (writeSuspects.length === 0) return "";
@@ -219,7 +218,7 @@ export function McpPanel({
         {mcps.map((m) => (
           <div className="rsrc-row" key={m.id}>
             {(() => {
-              const stale = m.up === true && isStaleCheck(m.lastCheckedAt);
+              const stale = m.up === true && isMcpHealthStale(m.lastCheckedAt);
               // R19-18: a first-run install is neither up nor broken, and it
               // outranks the stored `up` — that value is the verdict of the
               // probe this install was started BY.
@@ -268,10 +267,10 @@ export function McpPanel({
                   : m.up === true
                   ? (m.tools !== null
                       ? // D32-6 (pass 32): "1 tools" — count its noun.
-                        `${m.tools} ${m.tools === 1 ? "tool" : "tools"} · `
+                        `${countLabel(m.tools, "tool")} · `
                       : "reachable · ") +
                     "checked " + rel(m.lastCheckedAt) +
-                    (isStaleCheck(m.lastCheckedAt) ? " · stale, retest" : "")
+                    (isMcpHealthStale(m.lastCheckedAt) ? " · stale, retest" : "")
                   : m.up === false
                     ? "unreachable · checked " + rel(m.lastCheckedAt)
                     : /* P13-UI-16: defensive — every save/test writes `up`, so a
@@ -300,10 +299,7 @@ export function McpPanel({
                     to rename or remove a server had no idea what depended on
                     it. Same count, same honest "templates" label. */}
                 {usedBy(m.name) > 0
-                  ? " · " +
-                    usedBy(m.name) +
-                    " template" +
-                    (usedBy(m.name) === 1 ? "" : "s")
+                  ? " · " + countLabel(usedBy(m.name), "template")
                   : ""}
                 {/* Ruling 176: how many of its tools are withheld from agents
                     that may not write, so the row says the server is gated.
@@ -353,7 +349,7 @@ export function McpPanel({
                 aria-label={"Edit " + m.name}
                 onClick={() => onEdit(m)}
               >
-                <EditIco />
+                <Icon name="edit" />
               </button>
               <button
                 type="button"
@@ -427,10 +423,10 @@ export function SkillPanel({
                 {s.summary}
               </span>
               <span className="sub mono">
-                store://skills/{s.name}/ · {s.fileCount} file
-                {s.fileCount === 1 ? "" : "s"} · {updatedLabel(s.updatedAt)}
+                store://skills/{s.name}/ · {countLabel(s.fileCount, "file")} ·{" "}
+                {updatedLabel(s.updatedAt)}
                 {usedBy(s.name) > 0
-                  ? " · " + usedBy(s.name) + " template" + (usedBy(s.name) === 1 ? "" : "s")
+                  ? " · " + countLabel(usedBy(s.name), "template")
                   : ""}
               </span>
             </span>
@@ -442,7 +438,7 @@ export function SkillPanel({
                 aria-label={"Browse files in " + s.name}
                 onClick={() => onBrowse(s)}
               >
-                <FolderIco />
+                <Icon name="folder" />
               </button>
               <button
                 type="button"
@@ -451,7 +447,7 @@ export function SkillPanel({
                 aria-label={"Edit " + s.name}
                 onClick={() => onEdit(s)}
               >
-                <EditIco />
+                <Icon name="edit" />
               </button>
               <button
                 type="button"
@@ -524,13 +520,13 @@ export function AgentPanel({
                   {a.summary}
                 </span>
                 <span className="sub mono">
-                  {a.backend === "claude" ? "Claude" : "Codex"} ·{" "}
+                  {BACKEND_LABEL[a.backend]} ·{" "}
                   {/* P14-WL-06: the row right below already pluralizes
                       ("project"/"projects"); this one always said "resources". */}
-                  {stageNames || "no stages"} · {res} context resource
-                  {res === 1 ? "" : "s"} ·{" "}
+                  {stageNames || "no stages"} ·{" "}
+                  {countLabel(res, "context resource")} ·{" "}
                   {a.used > 0
-                    ? "used in " + a.used + " project" + (a.used === 1 ? "" : "s")
+                    ? "used in " + countLabel(a.used, "project")
                     : "not deployed"}
                 </span>
               </span>
@@ -542,7 +538,7 @@ export function AgentPanel({
                   aria-label={"Edit " + a.name}
                   onClick={() => onEdit(a)}
                 >
-                  <EditIco />
+                  <Icon name="edit" />
                 </button>
                 <button
                   type="button"

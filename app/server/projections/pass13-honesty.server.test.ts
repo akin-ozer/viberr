@@ -7,6 +7,7 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "./rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getBoard, labelUnresolvedHuman } from "./board-query.server";
 import { decisionsRequiring } from "./decisions.server";
 import { getTaskSummary } from "./task-query.server";
@@ -100,8 +101,7 @@ describe("LV-20: waiting is normalized at the terminal stage", () => {
  */
 describe("UI-02: a task-less project has no recency signal", () => {
   it("returns null updatedAt instead of the projection timestamp", () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const card = listHomeProjects(store.db).find((p) => p.slug === store.slug)!;
     expect(card.total).toBe(0);
     expect(card.updatedAt).toBeNull();

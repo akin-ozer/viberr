@@ -23,6 +23,8 @@ import {
   type TaskRunPrincipalView,
 } from "./run-principal-view";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
+// Ruling 457: backend labels are spelled here (and through `backendLabelOf`),
+// not through `BACKEND_LABEL` (why: shared/text/backend-label.ts).
 
 /**
  * One engagement's LIVE run, as the task loader ships it: which profile, and
@@ -41,7 +43,7 @@ export interface LiveAgentRun {
  * live runs executes, "queued" when every one is still waiting for a slot,
  * null with no live run.
  */
-export function liveAgentRunLabel(
+function liveAgentRunLabel(
   liveAgentRuns: readonly LiveAgentRun[],
   profileId: string,
 ): "running…" | "queued" | null {
@@ -236,7 +238,7 @@ function DelayPicker({
 export type RunInFlight = "run" | "schedule" | null;
 
 /** Minutes a non-"now" delay stands for (the schedule intent's payload). */
-export function delayMinutes(delay: RunDelay): number | null {
+function delayMinutes(delay: RunDelay): number | null {
   return delay === "now" ? null : Number(delay);
 }
 

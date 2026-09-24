@@ -5452,14 +5452,6 @@ describe("R19-1 — the operator's read-only repository view", () => {
     });
   }
 
-  /**
-   * Point `https://github.com/` at a local directory for the duration of `work`
-   * — an existing one for the success arm, a missing one to make the real clone
-   * fail instantly and offline.
-   */
-  const withOrigin = <T,>(root: string, work: () => Promise<T>): Promise<T> =>
-    withLocalGithub(root, work);
-
   beforeEach(async () => {
     ctx7 = createTestDbContext();
     store7 = setupTestStore(ctx7);
@@ -5486,7 +5478,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     deploy("acme/widgets");
     await makeOrigin();
 
-    await withOrigin(origins, () => drive());
+    await withLocalGithub(origins, () => drive());
 
     // The real tree is on disk — the two things the live packet claimed were
     // absent are the two things asserted here.
@@ -5551,7 +5543,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     deploy("acme/widgets");
     await makeOrigin();
 
-    await withOrigin(origins, () => drive());
+    await withLocalGithub(origins, () => drive());
 
     const spec = adapter7.pending!.spec;
     for (const tool of ["Bash", "Edit", "MultiEdit", "Write", "NotebookEdit"]) {
@@ -5569,7 +5561,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     deploy("acme/widgets", { backends: ["codex"], model: defaultModelFor("codex") });
     await makeOrigin();
 
-    await withOrigin(origins, () => drive({ backend: "codex" }));
+    await withLocalGithub(origins, () => drive({ backend: "codex" }));
 
     const spec = adapter7.pending!.spec;
     expect(spec.backend).toBe("codex");
@@ -5597,7 +5589,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     // (drop its catch) and the run never starts.
     deploy("acme/widgets");
 
-    const result = await withOrigin(path.join(origins, "nope"), () => drive());
+    const result = await withLocalGithub(path.join(origins, "nope"), () => drive());
 
     expect(result.runId).not.toBeNull();
     expect(adapter7.pending).not.toBeNull();
@@ -5639,7 +5631,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
       await makeOrigin();
 
       const seen: { id: string; step: string | null }[] = [];
-      await withOrigin(origins, async () => {
+      await withLocalGithub(origins, async () => {
         const pending = drive();
         // Poll while the clone's child processes are in flight. Bounded, and it
         // can only end early by the drive finishing — which would itself be the
@@ -5706,7 +5698,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
       deploy("acme/widgets");
       await makeOrigin();
 
-      await withOrigin(origins, () => drive());
+      await withLocalGithub(origins, () => drive());
 
       const prompt = systemPrompt();
       expect(prompt).toContain("SAME working tree the delivering agent uses");
@@ -5721,7 +5713,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     it("offers `read_default_branch_file` when the run holds a checkout", async () => {
       deploy("acme/widgets");
       await makeOrigin();
-      await withOrigin(origins, () => drive());
+      await withLocalGithub(origins, () => drive());
       expect(adapter7.pending!.spec.allowedTools).toContain(
         "mcp__viberr__read_default_branch_file",
       );
@@ -5742,7 +5734,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
       // `origin/<branch>:` ref) and both assertions flip.
       deploy("acme/widgets");
       await makeOrigin();
-      await withOrigin(origins, () => drive());
+      await withLocalGithub(origins, () => drive());
 
       const dir = checkoutDir();
       await exec("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
@@ -5758,7 +5750,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
         "the governed row",
       );
 
-      const reads = await withOrigin(origins, async () => ({
+      const reads = await withLocalGithub(origins, async () => ({
         changed: await readDefaultBranchFile(store7.db, {
           projectSlug: store7.slug,
           dir,
@@ -5813,7 +5805,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
       });
       await makeOrigin();
 
-      await withOrigin(origins, () => drive());
+      await withLocalGithub(origins, () => drive());
 
       const spec = adapter7.pending!.spec;
       // The prompt does not claim it, and says why.
@@ -5829,7 +5821,7 @@ describe("R19-1 — the operator's read-only repository view", () => {
     it("refuses a path that is not a repository-relative file path", async () => {
       deploy("acme/widgets");
       await makeOrigin();
-      await withOrigin(origins, () => drive());
+      await withLocalGithub(origins, () => drive());
 
       const bad = await readDefaultBranchFile(store7.db, {
         projectSlug: store7.slug,

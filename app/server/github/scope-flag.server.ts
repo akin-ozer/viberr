@@ -16,7 +16,10 @@ import {
   type ScopeViolationRecord,
 } from "~/server/projections/policy-violations.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
-import { notifyTaskWatchers } from "~/server/tasks/task-mutation.server";
+import {
+  notifyTaskWatchers,
+  POLICY_ENGINE_NOTIFY_FROM,
+} from "~/server/tasks/task-mutation.server";
 
 /**
  * Policy-engine side effects around scope violations (ruling 5 + github
@@ -43,14 +46,6 @@ export const POLICY_ENGINE_ACTOR = {
   kind: "system" as const,
   systemId: "policy-engine",
 };
-
-/**
- * F39-5 (pass 39): advisory vs required scopes live in `~/shared/credential-scopes`
- * so the timeline writer here and the credential card in `pat-store.server.ts`
- * read ONE list; re-exported because callers of this module expect them here.
- */
-export { ADVISORY_SCOPES, scopeIsAdvisory } from "~/shared/credential-scopes";
-
 
 /**
  * The sentence for a refusal on a scope the project REQUIRES — a genuine
@@ -189,7 +184,7 @@ export async function flagScopeViolation(
         taskKey: input.taskKey,
         kind: "policy",
         text: input.detail,
-        from: { kind: "system", name: "Policy engine" },
+        from: POLICY_ENGINE_NOTIFY_FROM,
       },
       { dataRoot: ctx.dataRoot },
     );

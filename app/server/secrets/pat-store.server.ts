@@ -14,6 +14,7 @@ import { logger } from "~/server/logging/logger.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { openSecretRotating, sealSecret } from "./secret-box.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
+import { toError } from "~/shared/errors";
 
 /**
  * PAT store (Phase 7): user-provided GitHub PATs, AES-256-GCM encrypted at
@@ -233,7 +234,7 @@ export function getPatToken(
       // another fallback, so never fail the caller over it.
       logger.warn("could not re-seal a PAT under the current encryption key", {
         patId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

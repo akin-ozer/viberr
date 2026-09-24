@@ -6,7 +6,11 @@ import {
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
-import { fakeGithubFetch , unreachableFetch } from "../../../test-support/fake-github";
+import {
+  fakeGithubFetch,
+  unreachableFetch,
+  unreadableResponse,
+} from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
@@ -558,19 +562,6 @@ describe("ref paths (B11)", () => {
   });
 });
 
-/** A 2xx whose headers throw on read: the one shape that still reaches
- *  `ensureTaskBranch` as a THROW (`rateLimitFrom(response.headers)` sits
- *  outside both try blocks), so the hook's own catch is exercised. */
-function unreadableResponse(): Response {
-  const response = new Response("{}", { status: 200 });
-  Object.defineProperty(response, "headers", {
-    get(): never {
-      throw new TypeError("terminated");
-    },
-  });
-  return response;
-}
-
 /**
  * F34-3 (pass 34): the pre-dispatch branch hook returns its typed result and
  * discloses the failures a person can act on, once, on the timeline and in the
@@ -604,6 +595,9 @@ describe("F34-3: ensureTaskBranchBestEffort discloses prepare failures", () => {
 
   it("a THROWN error is disclosed too, and a recorded branch changes the sentence", async () => {
     const store = setupWithCredential("VIB-201", "vib-201-x");
+    // A 2xx whose headers throw on read is the one shape that still reaches
+    // `ensureTaskBranch` as a THROW (`rateLimitFrom(response.headers)` sits
+    // outside both try blocks), so the hook's own catch is exercised.
     const exploding: typeof fetch = async () => unreadableResponse();
     const result = await prepare(store, exploding);
     expect(result.status).toBe("threw");

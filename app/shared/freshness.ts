@@ -60,3 +60,15 @@ export function isMcpHealthStale(
 ): boolean {
   return !!checkedAt && isStale(checkedAt, STALE_AFTER_MS, now ?? Date.now());
 }
+
+/** Is `iso` strictly newer than `thanIso`? False when either is missing or
+ *  unparseable — an unreadable stamp never displaces a recorded claim. /insights
+ *  (`insights-page.tsx`) and the profile page (`profile-query.server.ts`) both
+ *  ask it, so the two surfaces cannot disagree about which of two provider
+ *  claims is the fresher one. */
+export function observedAfter(iso: string | undefined, thanIso: string): boolean {
+  if (!iso) return false;
+  const a = Date.parse(iso);
+  const b = Date.parse(thanIso);
+  return Number.isFinite(a) && Number.isFinite(b) && a > b;
+}

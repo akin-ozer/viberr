@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   installFakeRuntime,
@@ -20,14 +21,11 @@ import type { loader as taskLoader, action as taskAction } from "~/routes/projec
  * One seed per file; read-only assertions before the mutating interrupt.
  */
 
-/** The seeded users this file drives the route with. */
-interface SeedUserIds {
-  arda: string;
-  selin: string;
-  deniz: string;
-}
-
 let app: AppTestContext;
+/**
+ * The seeded users this file drives the route with; deniz is registered, but a
+ * member of NO project — the UI-30 gate subject.
+ */
 let ids: SeedUserIds;
 let finishedRunId: string;
 let runningRunId: string;
@@ -38,14 +36,7 @@ type ActionData = Awaited<ReturnType<typeof taskAction>>;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id,
-    // Registered, but a member of NO project — the UI-30 gate subject.
-    deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 
   // Ruling 127: these runs bill arda (the demo tasks' owner), so he needs the
   // backend connected — the same thing that makes a real dispatch reach an

@@ -11,6 +11,7 @@ import {
 } from "../../../test-support/test-store";
 import {
   fakeGithubFetch,
+  unreadableResponse,
   type FakeResponder,
 } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -29,6 +30,7 @@ import {
 import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
 import type { RevisionDrift } from "~/shared/revision-drift";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import {
   createPat,
@@ -62,25 +64,6 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 const REPO_PATH = "/repos/akin-ozer/viberr";
-
-/**
- * FAULT INJECTION: a 200 whose HEADERS throw on read. Every header read in the
- * GitHub client sits outside its try/catch, so this reaches the code paths that
- * must survive an unexpected throw from inside a pass.
- *
- * It used to be a truncated BODY, which no longer qualifies: F21-9 wraps the
- * body read, so a stream that dies mid-read is now a typed `network` failure —
- * a degraded mode the callers handle, not a throw that escapes them.
- */
-function unreadableResponse(): Response {
-  const response = new Response("{}", { status: 200 });
-  Object.defineProperty(response, "headers", {
-    get(): never {
-      throw new TypeError("terminated");
-    },
-  });
-  return response;
-}
 
 function setup() {
   const store = setupTestStore(ctx);
@@ -2127,8 +2110,7 @@ describe("reconcileProject", () => {
     expect(listAuditEvents(store.db, { action: "github.reconcile.project" })).toHaveLength(1);
 
     // No PAT → typed short-circuit without network.
-    const bare = setupTestStore(ctx);
-    rebuildAll(bare.db, { dataRoot: bare.dataRoot });
+    const bare = setupProjectedStore(ctx);
     const degraded = await reconcileProject(bare.db, bare.slug, actor, {
       dataRoot: bare.dataRoot,
       fetchImpl: fakeGithubFetch({}).fetchImpl,

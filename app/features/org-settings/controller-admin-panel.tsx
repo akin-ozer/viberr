@@ -57,8 +57,7 @@ export interface ControllerKbOption {
 // Ruling 108: the lock vocabulary (sections, unlock variables, the unlock
 // value) is shared with the server through `~/shared/controller-locks`
 // (P07-G, pass 32) — the panel used to carry hand-copied mirrors with a drift
-// test standing between them. Re-exported for the route's loader typing.
-export type { ControllerSectionLocks } from "~/shared/controller-locks";
+// test standing between them.
 import type {
   ControllerSection,
   ControllerSectionLocks,

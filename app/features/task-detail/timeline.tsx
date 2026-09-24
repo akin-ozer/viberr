@@ -12,6 +12,7 @@ import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useStableRows, useStableValue } from "~/ui/use-stable-rows";
 import { EVIDENCE_EMPTY_COLUMN } from "~/schemas/task-file.schema";
 import { eventMeta, typedKind } from "./event-meta";
@@ -470,7 +471,6 @@ export function Timeline({
   const csrf = useCsrfToken();
   const push = useToast();
   const busy = fetcher.state !== "idle";
-  const handled = useRef<unknown>(null);
 
   // "Ask operator" (spec §4.2): prefill only a blank draft, scroll + focus.
   useEffect(() => {
@@ -484,21 +484,18 @@ export function Timeline({
 
   // Comment result: success clears the draft + toasts (server copy);
   // failure keeps the draft and shows the inline error below.
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    if (fetcher.data.ok) {
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok) {
       draftRef.current = "";
       // Clear the editor AND its undo history — ⌘Z must not resurrect a
       // posted comment. A failure runs neither: the draft stays as typed.
       composerRef.current?.clearAfterSuccess();
-      if (fetcher.data.toast) push(fetcher.data.toast);
+      if (data.toast) push(data.toast);
       // BUG 3: hand the grouped Agent-logs id up so the page selects + scrolls
       // to the mentioned agent's live output.
-      if (fetcher.data.logThreadId && onAgentLog) onAgentLog(fetcher.data.logThreadId);
+      if (data.logThreadId && onAgentLog) onAgentLog(data.logThreadId);
     }
-  }, [fetcher.state, fetcher.data, push, onAgentLog]);
+  });
 
   const commentError =
     fetcher.state === "idle" && fetcher.data && !fetcher.data.ok

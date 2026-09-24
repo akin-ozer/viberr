@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { readdirSync } from "node:fs";
 import { z } from "zod";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
+import { sha256Hex } from "~/server/files/content-hash.server";
 import { logger } from "~/server/logging/logger.server";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
 
@@ -178,8 +179,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     const manifest = manifestSchema.parse(
       JSON.parse(readFileSync(manifestPath, "utf8")),
     );
-    const { assetHash } = await import("./default-assets.server");
-    manifest[OPERATOR_REL] = assetHash(oldDoctrine);
+    manifest[OPERATOR_REL] = sha256Hex(oldDoctrine);
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
 
     seedDefaultAgentAssets(dataRoot);
@@ -188,7 +188,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     const after = manifestSchema.parse(
       JSON.parse(readFileSync(manifestPath, "utf8")),
     );
-    expect(after[OPERATOR_REL]).toBe(assetHash(shipped()));
+    expect(after[OPERATOR_REL]).toBe(sha256Hex(shipped()));
   });
 
   it("never touches a copy a human edited", async () => {
@@ -210,9 +210,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
    * `assign_specialist` tools. Boot must name the file and the drift.
    */
   it("WARNS that a diverged copy is being kept, naming the asset and both hashes", async () => {
-    const { seedDefaultAgentAssets, assetHash } = await import(
-      "./default-assets.server"
-    );
+    const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = freshStore();
     seedDefaultAgentAssets(dataRoot);
 
@@ -234,8 +232,8 @@ describe("shipped-asset refresh (B-OP1)", () => {
       });
       expect(call, "no warning named the diverged asset").toBeDefined();
       const fields = divergenceFieldsSchema.parse(call![1]);
-      expect(fields.onDisk).toBe(assetHash(diverged).slice(0, 12));
-      expect(fields.shipped).toBe(assetHash(shipped()).slice(0, 12));
+      expect(fields.onDisk).toBe(sha256Hex(diverged).slice(0, 12));
+      expect(fields.shipped).toBe(sha256Hex(shipped()).slice(0, 12));
       expect(fields.path).toBe(path.join(dataRoot, OPERATOR_REL));
     } finally {
       warn.mockRestore();
@@ -243,7 +241,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 
   it("adopts a pre-manifest store that is already current, so the NEXT rewrite reaches it", async () => {
-    const { seedDefaultAgentAssets, assetHash } = await import("./default-assets.server");
+    const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = freshStore();
     // A store written by a build with no manifest: the file is there, the
     // bookkeeping is not.
@@ -257,7 +255,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
         readFileSync(path.join(dataRoot, "state", "shipped-assets.json"), "utf8"),
       ),
     );
-    expect(manifest[OPERATOR_REL]).toBe(assetHash(shipped()));
+    expect(manifest[OPERATOR_REL]).toBe(sha256Hex(shipped()));
   });
 
   it("recognizes the versions shipped before the manifest existed", async () => {
@@ -285,7 +283,7 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
   const assetsDir = path.join(import.meta.dirname, "assets");
 
   it("lists the outgoing versions of both files, so an unedited store copy is refreshed at boot", async () => {
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited, assetHash } = await import(
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
       "./default-assets.server"
     );
     const definitionRel = path.join("agents", "definitions", "controller.md");
@@ -305,8 +303,8 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
     // The shipped text is NEW: neither outgoing hash is the current one.
     const definition = readFileSync(path.join(assetsDir, "controller.definition.md"), "utf8");
     const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
-    expect(PRIOR_SHIPPED_HASHES[definitionRel]).not.toContain(assetHash(definition));
-    expect(PRIOR_SHIPPED_HASHES[skillRel]).not.toContain(assetHash(skill));
+    expect(PRIOR_SHIPPED_HASHES[definitionRel]).not.toContain(sha256Hex(definition));
+    expect(PRIOR_SHIPPED_HASHES[skillRel]).not.toContain(sha256Hex(skill));
   });
 
   /**
@@ -319,7 +317,7 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
    * the shipped one, for the two ruling-121 assets specifically.
    */
   it("upgrades a recorded copy of the controller doctrine and skill in place", async () => {
-    const { seedDefaultAgentAssets, assetHash } = await import("./default-assets.server");
+    const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const definitionRel = path.join("agents", "definitions", "controller.md");
     const skillRel = path.join("skills", "controller-guide", "SKILL.md");
     const shipped = {
@@ -336,7 +334,7 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
       writeFileSync(dest, older, "utf8");
       // What the app recorded when it last wrote that file — the same claim
       // every entry in PRIOR_SHIPPED_HASHES makes about a released version.
-      manifest[rel] = assetHash(older);
+      manifest[rel] = sha256Hex(older);
     }
     mkdirSync(path.join(root, "state"), { recursive: true });
     writeFileSync(
@@ -382,7 +380,7 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
 describe("the operator doctrine upgrade in place (ruling 134)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
   it("carries the rework-delivery sentence and lists its outgoing version", async () => {
-    const { PRIOR_SHIPPED_HASHES, assetHash } = await import("./default-assets.server");
+    const { PRIOR_SHIPPED_HASHES } = await import("./default-assets.server");
     const definition = readFileSync(path.join(assetsDir, "operator.definition.md"), "utf8");
     expect(definition).toContain("shows `pr.unpushedRevision`, call `deliver_for_review`");
     expect(definition).toContain("Pushing is never a person's job and never an agent's.");
@@ -391,7 +389,7 @@ describe("the operator doctrine upgrade in place (ruling 134)", () => {
     expect(PRIOR_SHIPPED_HASHES[rel]).toContain(
       "9462381afd6c87b991f5653610252ac2e7a4815b039709d818bbecec1db7532e",
     );
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(assetHash(definition));
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(definition));
   });
 });
 

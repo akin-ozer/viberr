@@ -7,6 +7,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { roleCan } from "~/shared/rbac";
 import type { SettingsViewData } from "./settings-query.server";
@@ -20,30 +21,18 @@ import type { SettingsViewData } from "./settings-query.server";
  * project).
  */
 
-/** The seeded people this file drives the settings surface as. */
-interface SeedUserIds {
-  arda: string;
-  elif: string;
-  murat: string;
-  selin: string;
-  deniz: string;
-}
-
 let app: AppTestContext;
+/**
+ * The seeded people this file drives the settings surface as: arda and elif
+ * are project admins, murat a maintainer, selin a contributor, deniz a
+ * registered non-member.
+ */
 let ids: SeedUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id, // project admin
-    elif: findUserByEmail(app.db, "elif@viberr.dev")!.id, // project admin
-    murat: findUserByEmail(app.db, "murat@viberr.dev")!.id, // maintainer
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // contributor
-    deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id, // registered non-member
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 });
 afterAll(() => app.cleanup());
 

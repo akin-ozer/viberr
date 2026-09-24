@@ -14,6 +14,8 @@ import {
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import { newId } from "~/shared/ids/new-id.server";
 import { taskClosure } from "~/server/tasks/task-closure.server";
+import { userDisplayName } from "~/server/tasks/user-display-name.server";
+import { POLICY_ENGINE_NOTIFY_FROM, taskRef } from "~/server/tasks/task-mutation.server";
 import {
   recordAudit,
   type AuditActor,
@@ -93,6 +95,7 @@ import {
   resolveScopeViolationWithEvent,
 } from "./scope-flag.server";
 import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * GitHub reconciler (Phase 7): given a task, fetches live GitHub facts
@@ -156,17 +159,6 @@ export interface GithubActionContext {
   taskBudget?: number;
 }
 
-function taskRefOf(
-  input: { projectSlug: string; taskKey: string },
-  ctx: GithubActionContext,
-) {
-  return {
-    projectSlug: input.projectSlug,
-    taskKey: input.taskKey,
-    dataRoot: ctx.dataRoot,
-  };
-}
-
 /** `fetchImpl` is an OPTIONAL key: the context reads it with a truthiness check,
  *  so the hook is set only when a caller supplied one. */
 function githubOptionsOf(ctx: GithubActionContext): GithubContextOptions {
@@ -223,17 +215,6 @@ function recordGithubProvenance(
   );
 }
 
-/** `users.name` is NOT NULL, so a row that fails this parse is a missing user —
- *  the id is then the honest display fallback. */
-const userNameRow = z.object({ name: z.string() });
-
-function userName(db: DatabaseSync, userId: string): string {
-  const row = userNameRow.safeParse(
-    db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId),
-  );
-  return row.success ? row.data.name : userId;
-}
-
 // ------------------------------------------------------------- reconcile
 
 export type TaskReconcileResult =
@@ -264,13 +245,6 @@ export type TaskReconcileResult =
    * with an honest count instead of a 500.
    */
   | { status: "task_error"; taskKey: string; message: string };
-
-/** Notification sender for R8-6 GitHub divergence alerts (an `ActorRender`
- * system identity, matching the "Policy engine" timeline actor). */
-const POLICY_ENGINE_NOTIFY_FROM = {
-  kind: "system" as const,
-  name: "Policy engine",
-};
 
 /**
  * F19-19: ONE reconcile pass per task at a time.
@@ -352,7 +326,7 @@ async function reconcileTaskUnlocked(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<TaskReconcileResult> {
-  const ref = taskRefOf(input, ctx);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const file = readTaskFile(ref);
   if (!file) return { status: "task_not_found", taskKey: input.taskKey };
   const fm = file.parsed.frontmatter;
@@ -1492,7 +1466,7 @@ export function reconcileTask(
         // used to abort the whole project sweep (and 500 the Reconcile button),
         // taking every task after it with it — the poller's next tick then hit
         // the same task first and lost the board again.
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         logger.error("task reconcile failed unexpectedly", {
           projectSlug: input.projectSlug,
           taskKey: input.taskKey,
@@ -1786,7 +1760,7 @@ export async function mergeTaskPr(
   actor: AuditActor & { userId: string },
   ctx: GithubActionContext = {},
 ): Promise<MergeTaskPrResult> {
-  const ref = taskRefOf(input, ctx);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const file = readTaskFile(ref);
   if (!file) return { status: "task_not_found", taskKey: input.taskKey };
   const fm = file.parsed.frontmatter;
@@ -1875,7 +1849,7 @@ export async function mergeTaskPr(
       actor: {
         kind: "human",
         userId: actor.userId,
-        nameHint: userName(db, actor.userId),
+        nameHint: userDisplayName(db, actor.userId),
       },
       title: null,
       text: `Merged **PR #${prNumber}** into \`${gh.defaultBranch}\`.`,
@@ -2103,7 +2077,7 @@ export async function deleteTaskRemoteBranch(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<BranchDeleteResult | GithubContextFailure> {
-  const ref = taskRefOf(input, ctx);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const file = readTaskFile(ref);
   if (!file?.parsed.frontmatter.branch) return { status: "no_branch" };
   const fm = file.parsed.frontmatter;
@@ -2217,7 +2191,7 @@ export async function deleteTaskRemoteBranch(
       actor: {
         kind: "human",
         userId,
-        nameHint: userName(db, userId),
+        nameHint: userDisplayName(db, userId),
       },
       title: null,
       text:
@@ -2306,7 +2280,7 @@ export async function resolveRemoteBranchCollision(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<RemoteCollisionResult> {
-  const ref = taskRefOf(input, ctx);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const file = readTaskFile(ref);
   const branch = file?.parsed.frontmatter.branch;
   if (!file || !branch) {
@@ -2410,7 +2384,7 @@ export async function resolveRemoteBranchCollision(
       await appendTimelineEvent(ref, {
         occurredAt: new Date().toISOString(),
         type: "github",
-        actor: { kind: "human", userId, nameHint: userName(db, userId) },
+        actor: { kind: "human", userId, nameHint: userDisplayName(db, userId) },
         title: null,
         text: `Branch collision cleared: ${fate}. PR #${unowned} was not ${input.taskKey}'s review PR; it only stood on the name.`,
         toAgent: false,

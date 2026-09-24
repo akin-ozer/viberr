@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
@@ -6,6 +7,7 @@ import { $getRoot, $getSelection, $isRangeSelection, type LexicalEditor } from "
 import { ToastProvider } from "~/ui/toast";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import { staticPackagesOf } from "../../../test-support/static-imports";
+import type { CommentComposerHandle } from "./comment-composer-slot";
 import { Timeline } from "./timeline";
 
 /**
@@ -189,6 +191,44 @@ describe("a composition is never cut by the editor's arrival (ruling 457)", () =
     await waitFor(() => expect(host.textContent).toBe("日本"));
     // The caret moved with it (Lexical focuses through the DOM selection).
     expect(host.contains(document.getSelection()!.anchorNode)).toBe(true);
+  });
+});
+
+/**
+ * The timeline's handle (Ask-operator prefill, the clear after a send) reaches
+ * whichever composer is live. Until the editor arrives that is the stand-in,
+ * which nothing else here drives through the ref.
+ */
+describe("the stand-in answers the composer's handle until the editor arrives (ruling 457)", () => {
+  it("prefills a blank draft only, focuses it, and clears it after a send", async () => {
+    vi.resetModules();
+    const { CommentComposer } = await import("./comment-composer-slot");
+    const handle = createRef<CommentComposerHandle>();
+    const changes: string[] = [];
+    const view = render(
+      <CommentComposer
+        ref={handle}
+        mentionables={MENTIONABLES}
+        onChange={(raw) => changes.push(raw)}
+        onSubmit={() => {}}
+      />,
+    );
+    const standIn = view.container.querySelector<HTMLElement>(".composer-ce")!;
+    act(() => handle.current!.prefillIfEmpty("@operator "));
+    expect(standIn.hasAttribute("data-lexical-editor"), "still the stand-in").toBe(false);
+    expect(standIn.textContent).toBe("@operator ");
+    expect(changes).toEqual(["@operator "]);
+    expect(document.activeElement).toBe(standIn);
+    expect(view.container.querySelector(".composer-placeholder")).toBeNull();
+    // A draft is never overwritten.
+    act(() => handle.current!.prefillIfEmpty("@dev "));
+    expect(standIn.textContent).toBe("@operator ");
+    act(() => handle.current!.clearAfterSuccess());
+    expect(standIn.textContent).toBe("");
+    expect(view.container.querySelector(".composer-placeholder")).not.toBeNull();
+    // The focus asked for the editor, which takes over the cleared draft.
+    const host = await editorIn(view.container);
+    expect(host.textContent).toBe("");
   });
 });
 

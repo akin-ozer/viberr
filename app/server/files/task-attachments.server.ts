@@ -393,7 +393,7 @@ export function writeTaskAttachment(
  * this channel, and saying so is better than handing back bytes it will
  * describe as if it had looked.
  */
-export const ATTACHMENT_READ_CHARS = 40_000;
+const ATTACHMENT_READ_CHARS = 40_000;
 
 export interface TaskAttachmentRead {
   name: string;

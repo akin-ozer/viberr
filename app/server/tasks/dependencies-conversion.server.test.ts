@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -96,7 +97,7 @@ describe("ruling 131(f): converting the two live holds", () => {
   let ctx: TestDbContext;
   let store: TestStore;
   let adapter: ControlledAdapter;
-  const actor = () => ({ userId: store.users.arda.id, label: store.users.arda.email });
+  const actor = () => actorOf(store.users.arda);
   const file = (key: string) =>
     readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
 

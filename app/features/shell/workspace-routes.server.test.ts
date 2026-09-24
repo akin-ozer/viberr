@@ -7,6 +7,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 
 /**
  * Route-level tests for the phase-4 shell: real Requests against the actual
@@ -14,25 +15,14 @@ import {
  * RBAC, notification reads, theme persistence).
  */
 
-/** The seeded people this file drives the shell routes as. */
-interface SeedUserIds {
-  arda: string;
-  deniz: string;
-  selin: string;
-}
-
 let app: AppTestContext;
+/** The seeded people this file drives the shell routes as. */
 let seedIds: SeedUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  const arda = findUserByEmail(app.db, "arda@viberr.dev")!;
-  const deniz = findUserByEmail(app.db, "deniz@viberr.dev")!;
-  const selin = findUserByEmail(app.db, "selin@viberr.dev")!;
-  seedIds = { arda: arda.id, deniz: deniz.id, selin: selin.id };
+  seedIds = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 });
 afterAll(() => app.cleanup());
 

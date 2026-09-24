@@ -1,5 +1,4 @@
 import type { DatabaseSync } from "node:sqlite";
-import { createHash } from "node:crypto";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { z } from "zod";
 import type { AgentDeployment, CapabilityMode } from "~/schemas/project-file.schema";
@@ -15,16 +14,16 @@ import {
 import { deliveryWithheld } from "~/server/tasks/specialist-tool-policy";
 import { slugify } from "~/shared/ids/slugify";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { sha256Hex } from "~/server/files/content-hash.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import {
   agentProfileFilePath,
   agentProfilesDir,
-  projectFilePath,
   resolveStoreSegment,
 } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import {
   defaultEffortFor,
   defaultModelFor,
@@ -35,6 +34,7 @@ import {
   assertModelForBackend,
 } from "~/server/runtimes/model-catalog.server";
 import { displayNameRefusal, normalizeDisplayName } from "~/shared/names";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { existsSync, readFileSync } from "node:fs";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import {
@@ -213,7 +213,7 @@ export function deploymentFingerprint(deployment: AgentDeployment): string {
     extras: deployment.extras,
     definition: deployment.definition ?? null,
   });
-  return createHash("sha256").update(canonical, "utf8").digest("hex").slice(0, 32);
+  return sha256Hex(canonical).slice(0, 32);
 }
 
 const profileFormSchema = z.object({
@@ -286,19 +286,6 @@ function requireProjectAction(
     { dataRoot: ctx.dataRoot },
   );
 }
-
-function reprojectProject(
-  db: DatabaseSync,
-  ctx: ProfileMutationContext,
-  projectSlug: string,
-): void {
-  rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
-    dataRoot: ctx.dataRoot,
-  });
-}
-
-/** The product's name for each backend, as the picker spells it. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 function parseForm(raw: SubmittedProfileForm): ProfileFormInput {
   const parsed = profileFormSchema.safeParse(raw);
@@ -873,7 +860,8 @@ export async function updateAgentProfile(
   const directAcceptNewlyGranted =
     gov.isOperator && gov.newDirectAccept && !gov.priorDirectAccept;
   // The human-only-Done exception is LIVE after this save iff both hold (the
-  // exact `operator-actions.server.ts:2580` combination).
+  // exact combination `operatorAcceptCompletion` in operator-actions.server.ts
+  // checks).
   const directDoneLive =
     gov.isOperator && gov.newAutonomy === "full" && gov.newDirectAccept;
 

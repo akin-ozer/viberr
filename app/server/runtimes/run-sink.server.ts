@@ -15,6 +15,7 @@ import {
   providerSentence,
 } from "./backend-quota.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
+import { escapeRegExp } from "~/shared/text/regexp";
 import { findUserById } from "~/server/auth/user-store.server";
 import { controllerRunRoute } from "~/server/controller/controller-conversations.server";
 import { publishRunLogAppended, publishRunStateChanged } from "./run-events.server";
@@ -33,6 +34,7 @@ import {
 } from "~/server/secrets/git-output-redact.server";
 import { startTemperature } from "./context-policy.server";
 import { noteRunCompaction } from "./run-context-events.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /** Terminal run states — reaching one is the run's final answer. */
 const TERMINAL_STATES: readonly RunState[] = ["finished", "error", "interrupted"];
@@ -61,7 +63,7 @@ export function runPersistDrained(db: DatabaseSync): boolean {
  * exited. The recorded human intervention lost to a race with the thing it was
  * stopping. Precedence, not ordering, decides now.
  */
-export function resolveTerminalState(
+function resolveTerminalState(
   current: RunState | null,
   desired: RunState,
 ): RunState {
@@ -94,7 +96,7 @@ function currentRunState(db: DatabaseSync, runId: string): RunState | null {
 /** The `err` tag marking a run whose DB projection is missing lines the raw
  *  `.jsonl` has. Mirrors `run·session_missing`: a durable classified line, no
  *  column, no migration. */
-export const LINE_LOST_TAG = "run·line_lost";
+const LINE_LOST_TAG = "run·line_lost";
 
 /**
  * The RunSink turns adapter callbacks into durable state + live SSE. For
@@ -150,10 +152,6 @@ export const LINE_LOST_TAG = "run·line_lost";
  * would scrub every digit out of every log line.
  */
 const MIN_SECRET_VALUE_LEN = 12;
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /**
  * Build the redactor ONCE per run (in `createRunSink`), not per line: the
@@ -406,7 +404,7 @@ export function createRunSink(
       source: "viberr",
       reason: "line_lost",
       message: text,
-      cause: cause instanceof Error ? cause.message : String(cause),
+      cause: errorMessage(cause),
     });
     try {
       appendRawLine(effectiveBackend, spec.runId, raw);
@@ -432,7 +430,7 @@ export function createRunSink(
     } catch (error) {
       logger.error("run divergence marker could not be persisted", {
         runId: spec.runId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   };
@@ -539,7 +537,7 @@ export function createRunSink(
           } catch (error) {
             logger.error("compaction audit failed", {
               runId: spec.runId,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
           }
         }
@@ -687,7 +685,7 @@ export function createRunSink(
         }
         logger.error("run line persist failed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
         markDivergent(error);
       }
@@ -720,7 +718,7 @@ export function createRunSink(
         } catch (error) {
           logger.error("compaction audit failed", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         }
       }

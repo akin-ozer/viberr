@@ -10,7 +10,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type { StoreNode } from "~/features/kb-browser/tree";
@@ -32,8 +31,10 @@ import {
   STORE_TEXT_EXTENSIONS,
   STORE_TEXT_EXTENSION_LIST,
 } from "~/shared/text/store-extensions";
+import { countLabel } from "~/shared/text/plural";
 import { logger } from "~/server/logging/logger.server";
 import { assertSkillBodyWellFormed } from "~/server/files/skill-body.server";
+import { sha256Hex } from "~/server/files/content-hash.server";
 import { newId } from "~/shared/ids/new-id.server";
 import {
   getDefaultConnectionTokenFresh,
@@ -135,7 +136,7 @@ function cleanSegment(segment: string): string | null {
 }
 
 /** Sanitizes a directory path (array of segments). Throws on traversal. */
-export function sanitizeDirPath(segments: string[]): string[] {
+function sanitizeDirPath(segments: string[]): string[] {
   const out: string[] = [];
   for (const raw of segments) {
     if (raw.includes("..")) {
@@ -172,8 +173,9 @@ function assertInsideRoot(rootAbs: string, absPath: string): void {
   // real folder users manage outside the app, and uploads/imports/agents all
   // write there) points wherever it likes: a link named `notes.md` served an
   // arbitrary host file through the in-app reader, and a write through one would
-  // have clobbered the link's target. `readKbBody` has refused to follow
-  // symlinks since F9 (`kb-injection.server.ts`) — every store path now agrees.
+  // have clobbered the link's target. The KB reader has refused to follow
+  // symlinks since F9 (`readKbIndexDetailed`, `kb-injection.server.ts`) — every
+  // store path now agrees.
   // Resolved with `realpathSync` so an intermediate symlinked DIRECTORY is
   // caught too, and only on parts that exist (creates resolve their parent).
   const existing = existsSync(absPath) ? absPath : path.dirname(absPath);
@@ -444,7 +446,7 @@ export function storeDocVersion(target: StoreTarget, nodePath: string[]): string
   const abs = path.join(target.rootAbs, ...parts);
   assertInsideRoot(target.rootAbs, abs);
   if (!existsSync(abs) || !statSync(abs).isFile()) return null;
-  return createHash("sha256").update(readFileSync(abs)).digest("hex").slice(0, 12);
+  return sha256Hex(readFileSync(abs)).slice(0, 12);
 }
 
 export function readStoreDoc(
@@ -594,10 +596,10 @@ export function deleteStoreNode(
 // ---------------------------------------------------------- GitHub import
 
 /** Mock URL contract (§4.3) + a branch capture for real fetching. */
-export const GITHUB_IMPORT_URL_RE =
+const GITHUB_IMPORT_URL_RE =
   /github\.com\/([\w.-]+)\/([\w.-]+)(?:\/(?:tree|blob)\/([\w.-]+)\/?(.*))?/;
 
-export const GITHUB_IMPORT_URL_ERROR =
+const GITHUB_IMPORT_URL_ERROR =
   "Paste a GitHub link: a repo, a folder (…/tree/main/docs), or a single file (…/blob/main/SKILL.md).";
 
 const IMPORT_MAX_FILES = 100;
@@ -1003,7 +1005,7 @@ export async function importGithubSnapshot(
   const suffix = [
     ...(truncated ? [" (truncated)"] : []),
     ...(skipped > 0
-      ? [` · ${skipped} file${skipped === 1 ? "" : "s"} skipped (fetch failed)`]
+      ? [` · ${countLabel(skipped, "file")} skipped (fetch failed)`]
       : []),
   ].join("");
   return {
@@ -1013,6 +1015,6 @@ export async function importGithubSnapshot(
     skipped,
     source,
     truncated,
-    toast: `${written} file${written === 1 ? "" : "s"} ${refreshed ? "re-imported" : "imported"} from ${source} into ${destination}/ (a snapshot, not a live sync)${suffix}`,
+    toast: `${countLabel(written, "file")} ${refreshed ? "re-imported" : "imported"} from ${source} into ${destination}/ (a snapshot, not a live sync)${suffix}`,
   };
 }

@@ -114,6 +114,7 @@ export interface ContinuityLoss {
   agents: ContinuityAgent[];
 }
 
+/** Spelled here, not `BACKEND_LABEL`: ruling 457 (shared/text/backend-label.ts). */
 function backendLabel(backend: "claude" | "codex"): string {
   return backend === "claude" ? "Claude" : "Codex";
 }

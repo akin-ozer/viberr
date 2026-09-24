@@ -9,7 +9,8 @@
  * - Network failures and HTTP failures come back as TYPED RESULTS, never
  *   throws — services build their degraded modes on top, and a body that dies
  *   MID-READ (truncated/aborted stream) is a network failure like any other.
- *   `toAppError` converts a failure at a route boundary when throwing is wanted.
+ *   `githubFailureMessage` reads any failure's human-readable line; a caller
+ *   that wants a throw raises its own `AppError` from the result.
  * - Success bodies are decoded by a caller-supplied zod schema (see
  *   `GithubClient.request`); failure bodies stay unparsed. A success body the
  *   schema REFUSES is a typed `decode` failure carrying the raw body — the
@@ -20,6 +21,7 @@
  */
 
 import { z } from "zod";
+import { errorMessage } from "../../shared/errors";
 
 export const GITHUB_API_BASE = "https://api.github.com";
 const API_VERSION = "2022-11-28";
@@ -117,16 +119,6 @@ export interface GithubClient {
     schema: Schema,
     options?: GithubRequestOptions,
   ): Promise<GithubResponse<z.output<Schema>>>;
-  /**
-   * @deprecated Schema-less form: the success body is handed over unchecked as
-   * `T`. Kept only for the `task-actions.server.ts` call sites until they
-   * migrate to schemas (phase 2) — new callers pass a schema.
-   */
-  request<T>(
-    method: GithubMethod,
-    path: string,
-    options?: GithubRequestOptions,
-  ): Promise<GithubResponse<T>>;
 }
 
 function rateLimitFrom(headers: Headers): RateLimitInfo {
@@ -207,7 +199,7 @@ interface RequestHeaders {
 
 /** Per-request budget for a GitHub API call (P13-UI-04). Generous enough for a
  *  slow tree/blob fetch, short enough that a hung endpoint surfaces. */
-export const GITHUB_REQUEST_TIMEOUT_MS = 20_000;
+const GITHUB_REQUEST_TIMEOUT_MS = 20_000;
 
 export function createGithubClient(options: GithubClientOptions): GithubClient {
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -246,32 +238,13 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
     return fetchImpl(url, init);
   }
 
-  function request<Schema extends z.ZodType>(
+  async function request<Schema extends z.ZodType>(
     method: GithubMethod,
     path: string,
     schema: Schema,
     options?: GithubRequestOptions,
-  ): Promise<GithubResponse<z.output<Schema>>>;
-  function request<T>(
-    method: GithubMethod,
-    path: string,
-    options?: GithubRequestOptions,
-  ): Promise<GithubResponse<T>>;
-  async function request(
-    method: GithubMethod,
-    path: string,
-    schemaOrOptions?: z.ZodType | GithubRequestOptions,
-    maybeOptions?: GithubRequestOptions,
-  ): Promise<GithubResponse<unknown>> {
-    let schema: z.ZodType | undefined;
-    let requestOptions: GithubRequestOptions;
-    if (schemaOrOptions instanceof z.ZodType) {
-      schema = schemaOrOptions;
-      requestOptions = maybeOptions ?? {};
-    } else {
-      schema = undefined;
-      requestOptions = schemaOrOptions ?? {};
-    }
+  ): Promise<GithubResponse<z.output<Schema>>> {
+    const requestOptions = options ?? {};
     const url = new URL(
       path.startsWith("http") ? path : `${baseUrl}${path}`,
     );
@@ -292,7 +265,7 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
       return {
         ok: false,
         kind: "network",
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
       };
     }
 
@@ -316,7 +289,7 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
       return {
         ok: false,
         kind: "network",
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
       };
     }
 
@@ -326,25 +299,21 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
       // (a thrown ZodError 500s the route that called it, and — worse — an
       // undecodable POST response threw AFTER the write GitHub had already
       // performed, leaving the created resource unrecorded).
-      let decoded: unknown = data;
-      if (schema !== undefined) {
-        const parsed = schema.safeParse(data);
-        if (!parsed.success) {
-          return {
-            ok: false,
-            kind: "decode",
-            status: response.status,
-            message: decodeMessage(parsed.error),
-            data,
-            rateLimit,
-          };
-        }
-        decoded = parsed.data;
+      const parsed = schema.safeParse(data);
+      if (!parsed.success) {
+        return {
+          ok: false,
+          kind: "decode",
+          status: response.status,
+          message: decodeMessage(parsed.error),
+          data,
+          rateLimit,
+        };
       }
       return {
         ok: true,
         status: response.status,
-        data: decoded,
+        data: parsed.data,
         etag,
         rateLimit,
         scopesHeader: response.headers.get("x-oauth-scopes"),
@@ -406,7 +375,7 @@ export function encodeRefPath(ref: string): string {
 }
 
 /** Convenience header read used by the PAT validator. */
-export function tokenExpirationFrom(headers: Headers): string | null {
+function tokenExpirationFrom(headers: Headers): string | null {
   const raw = headers.get("github-authentication-token-expiration");
   if (!raw) return null;
   const date = new Date(raw);

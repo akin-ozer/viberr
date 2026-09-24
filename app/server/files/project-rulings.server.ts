@@ -44,12 +44,14 @@ export function projectRulingsKb(
 /**
  * A run's KB list with the project's rulings KB guaranteed present.
  *
- * Appended, not prepended: `readKbBodies` spends a shared character budget in
- * order, and a rulings KB that displaced a profile's own grants would silently
- * take context from the thing the profile was deployed to do. Deduped, because
- * a profile that ALSO grants it explicitly must not be charged twice for it —
- * which is the likely shape when an existing KB is promoted into this role, as
- * the owner asked to be possible.
+ * Appended, not prepended: ruling 239 puts a profile's own grants first and the
+ * project's rulings last, and `readKbIndexes` emits the indexes in that order.
+ * It is a reading order now; until ruling 283 it was a shared character budget
+ * spent in order, and a rulings KB in front would have silently taken context
+ * from the thing the profile was deployed to do. Deduped, because a profile
+ * that ALSO grants it explicitly must not have it indexed twice — which is the
+ * likely shape when an existing KB is promoted into this role, as the owner
+ * asked to be possible.
  */
 export function withProjectRulings(
   kb: readonly string[],

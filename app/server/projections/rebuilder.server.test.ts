@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -30,6 +30,7 @@ import {
   rebuildPath,
   rebuildProject,
   rebuildTaskFile,
+  reprojectProject,
 } from "./rebuilder.server";
 import { getBoard, listProjectTasks } from "./board-query.server";
 import {
@@ -1075,6 +1076,47 @@ describe("scoped project rescan (F20)", () => {
 
     expect(scopes).toContain("project");
     expect(scopes).not.toContain("full");
+  });
+});
+
+/* ------------------------------------------------------ reprojectProject */
+describe("reprojectProject", () => {
+  const nameRow = z.object({ name: z.string() });
+
+  it("re-projects project.md from the context's data root after a write", () => {
+    const store = setupTestStore(ctx);
+    writeSecondProject(store, "other-proj");
+    const nameOf = () =>
+      nameRow.parse(
+        store.db.prepare(`SELECT name FROM projects WHERE slug = ?`).get("other-proj"),
+      ).name;
+
+    reprojectProject(store.db, { dataRoot: store.dataRoot }, "other-proj");
+    expect(nameOf()).toBe("Other Project");
+
+    const file = projectFilePath("other-proj", store.dataRoot);
+    const before = readFileSync(file, "utf8");
+    const after = before.replace("Other Project", "Renamed Project");
+    expect(after).not.toBe(before);
+    writeFileSync(file, after);
+    reprojectProject(store.db, { dataRoot: store.dataRoot }, "other-proj");
+    expect(nameOf()).toBe("Renamed Project");
+  });
+
+  it("records a failed rebuild instead of throwing into the write that already happened", () => {
+    const store = setupTestStore(ctx);
+    resetProjectionFaultsForTests();
+    writeSecondProject(store, "other-proj");
+    store.db.exec(`ALTER TABLE project_members RENAME TO project_members_gone`);
+    try {
+      expect(() =>
+        reprojectProject(store.db, { dataRoot: store.dataRoot }, "other-proj"),
+      ).not.toThrow();
+      expect(projectionFault()?.sourcePath).toContain("other-proj");
+    } finally {
+      store.db.exec(`ALTER TABLE project_members_gone RENAME TO project_members`);
+      resetProjectionFaultsForTests();
+    }
   });
 });
 

@@ -6,8 +6,8 @@ import { useEffect, useRef } from "react";
  * the POST fails) to result time — and each call site hand-rolled the same
  * idle-check + seen-ref dedupe effect. This hook IS that effect, shared: the
  * handler decides what a result means (success toast, error toast, optimistic
- * rollback); dedupe is by data identity, the same rule useActionToast applies
- * to server-computed toasts.
+ * rollback); dedupe is by data identity. useActionToast, the path for
+ * server-computed toasts, is built on it.
  */
 export function useFetcherResult<T>(
   fetcher: { state: "idle" | "loading" | "submitting"; data?: T },

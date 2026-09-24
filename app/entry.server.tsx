@@ -2,6 +2,7 @@ import { PassThrough, Readable } from "node:stream";
 
 import type {
   EntryContext,
+  HandleDataRequestFunction,
   HandleErrorFunction,
   RouterContextProvider,
 } from "react-router";
@@ -14,8 +15,11 @@ import { logger } from "./server/logging/logger.server";
 import {
   correlationFor,
   currentCorrelation,
+  echoRequestId,
+  REQUEST_ID_HEADER,
   runWithRequestContext,
 } from "./server/logging/request-context.server";
+import { toError } from "./shared/errors";
 
 // One-time startup: validate env (fail fast) + open db and run migrations.
 await bootServer();
@@ -38,13 +42,28 @@ export const handleError: HandleErrorFunction = (error, { request }) => {
   // so a 500 in the log could not be tied to the request that caused it. When a
   // correlation is already bound (root middleware, or the render below) the
   // logger merges it automatically; otherwise seed one from the request so the
-  // record is never anonymous.
+  // record is never anonymous. `correlationFor` gives one Request one
+  // correlation, so the seeded id is the one the response echoes (ruling
+  // 458(d)).
   const bound = currentCorrelation();
   const log = bound ? logger : logger.child(correlationFor(request));
   log.error("request handler error", {
-    err: error instanceof Error ? error : new Error(String(error)),
+    err: toError(error),
   });
 };
+
+/**
+ * Ruling 458(d): every `.data` response carries its request's id. Route
+ * middleware already stamped each matched one with the same id, which is kept;
+ * this covers the ones React Router answers without running it — an unmatched
+ * URL, a 405, a mutation refused as a potential CSRF attack. It runs after the
+ * middleware's context has ended, so the id comes from the Request itself,
+ * which names the same id `handleError` logged for it.
+ */
+export const handleDataRequest: HandleDataRequestFunction = (
+  response,
+  { request },
+) => echoRequestId(response, request);
 
 export default function handleRequest(
   request: Request,
@@ -59,6 +78,10 @@ export default function handleRequest(
   // middleware already bound one; mints one when it did not, so this entry
   // point is never uncorrelated on its own.
   const correlation = currentCorrelation() ?? correlationFor(request);
+  // Ruling 458(d): the document carries its id. Route middleware stamps every
+  // response it produces; this covers the documents React Router renders
+  // without running it (an unmatched URL's 404, a 405).
+  responseHeaders.set(REQUEST_ID_HEADER, correlation.requestId);
   return runWithRequestContext(correlation, () =>
     renderDocument(
       request,
@@ -85,7 +108,7 @@ function renderDocument(
     });
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise<Response>((resolve, reject) => {
     let shellRendered = false;
     const readyOption: keyof RenderToPipeableStreamOptions =
       routerContext.isSpaMode ? "onAllReady" : "onShellReady";
@@ -139,7 +162,7 @@ function renderDocument(
           // reject and get logged in handleDocumentRequest.
           if (shellRendered) {
             logger.error("streaming render error", {
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
           }
         },

@@ -29,6 +29,7 @@ import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useActionToast } from "~/ui/use-action-toast";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
   CredentialCard,
   CredentialManageActions,
@@ -42,7 +43,7 @@ import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
 import type { FileLeaseView, SettingsViewData } from "./settings-query.server";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
-import { isTerminalStage, stageLockReason } from "~/shared/workflow/stage-roles";
+import { isTerminalStage, stageLockReason, stageName } from "~/shared/workflow/stage-roles";
 import {
   PROJECT_ROLES,
   roleCan,
@@ -95,10 +96,10 @@ export type ProjectActionGate = (
 
 /* F19-33: the panel-head counts and the trailing panel notes below used to be
    styled by two private consts here — `PANEL_COUNT_STYLE` (a byte copy of the
-   sheet's `.fine`, app.css:230) and `POL_NOTE_STYLE` (a copy of
-   `.pol-note.after` + `.pol-note.last`, app.css:3844-3846). github-view.tsx and
-   policy-page.tsx each kept their own copies, and the note copies had already
-   drifted three ways: .8rem here, .9rem in github-view, .85rem in the sheet.
+   sheet's `.fine`) and `POL_NOTE_STYLE` (a copy of `.pol-note.after` +
+   `.pol-note.last`). github-view.tsx and policy-page.tsx each kept their own
+   copies, and the note copies had already drifted three ways: .8rem here,
+   .9rem in github-view, .85rem in the sheet.
    Hoisting the objects out of the JSX also slipped them past app.css.test.ts's
    `style={{…}}` scan, which is why the drift went unnoticed. Ruling 14: shared
    single implementations, never fork per surface. */
@@ -229,8 +230,8 @@ export function ProjectPanel({
           entirely without the grant — the fields above are already `disabled`
           there and the note names the grant, so a Save control would only offer
           a role an act it cannot perform. `.confirm-actions` is the sheet's
-          existing commit/cancel row (app.css:2133): cancel first, primary last,
-          same order as every confirm in the product. */}
+          existing commit/cancel row: cancel first, primary last, same order
+          as every confirm in the product. */}
       {canManage && (
         <div className="confirm-actions">
           <button
@@ -790,8 +791,8 @@ function StageRow({
     <div
       ref={ref}
       // `.draggable` is the grab-cursor hook, named to match the board's
-      // `.card-wrap.draggable` (app.css:672-673) — the whole-row surface has no
-      // grip, so the cursor is its only pointer affordance.
+      // `.card-wrap.draggable` — the whole-row surface has no grip, so the
+      // cursor is its only pointer affordance.
       className={
         "stg-row" +
         (canDrag ? " draggable" : "") +
@@ -931,7 +932,7 @@ export function StagesPanel({
     const n = count(s.id);
     if (n > 0) {
       push(
-        `Move ${n} ${n === 1 ? "task" : "tasks"} out of ${s.name} first`,
+        `Move ${countLabel(n, "task")} out of ${s.name} first`,
         "error",
       );
       return;
@@ -1139,7 +1140,6 @@ export function RequiredReviewersPanel({
   const update = (i: number, patch: Partial<RequiredReviewerDraft>) =>
     setDraft((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
   const remove = (i: number) => setDraft((rows) => rows.filter((_, j) => j !== i));
-  const stageName = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
   const agentName = (id: string) => candidates.find((c) => c.id === id)?.name ?? id;
   return (
     <div className="panel">
@@ -1210,7 +1210,7 @@ export function RequiredReviewersPanel({
               <button
                 type="button"
                 className="btn ghost sm"
-                aria-label={`Remove rule ${i + 1}: ${agentName(row.profileId)} at ${stageName(row.stageId)}`}
+                aria-label={`Remove rule ${i + 1}: ${agentName(row.profileId)} at ${stageName(stages, row.stageId)}`}
                 disabled={busy}
                 onClick={() => remove(i)}
               >
@@ -1714,7 +1714,7 @@ export function MembersPanel({
         <span className="right sub fine">
           {members.length - stale.length} active
           {stale.length > 0
-            ? ` · ${stale.length} removed account${stale.length === 1 ? "" : "s"}`
+            ? ` · ${countLabel(stale.length, "removed account")}`
             : ""}
         </span>
         {/* Ruling 148(b): the panel's one create action sits in its head, the
@@ -1934,10 +1934,10 @@ function RepairRepoDialog({
             onChange={(e) => setAck(e.target.checked)}
           />
           <span>
-            {footprintTasks} task{footprintTasks === 1 ? "" : "s"} in this
-            project carry branch/PR records against the current repository.
-            They keep their history, but every future sync runs against the
-            new one.
+            {countLabel(footprintTasks, "task")} in this project{" "}
+            {footprintTasks === 1 ? "carries" : "carry"} branch/PR records
+            against the current repository. They keep their history, but every
+            future sync runs against the new one.
           </span>
         </label>
       )}
@@ -2209,11 +2209,14 @@ function DeleteProjectDialog({
   return (
     // Native <dialog>: Escape, backdrop-click light-dismiss, scroll lock, and
     // focus restore come from useDialog + showModal(); role="alertdialog"
-    // keeps the stronger semantics.
+    // keeps the stronger semantics. Ruling 458(l): it stays hand-written, since
+    // its confirm waits on the typed name, and carries the screen label every
+    // dialog does (surfaces.md §4).
     <dialog
       className="confirm-card"
       role="alertdialog"
       aria-label="Delete project"
+      data-screen-label="Delete project dialog"
       ref={dialogRef}
     >
       <div className="confirm-icon">
@@ -2429,15 +2432,11 @@ export function SettingsPage({
   // Stage rename edit-mode lives here so a fresh add-stage response can
   // drop the new row straight into edit mode (mock behavior).
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
-  const autoEdited = useRef<unknown>(null);
-  useEffect(() => {
-    if (stageFetcher.state !== "idle" || !stageFetcher.data) return;
-    if (autoEdited.current === stageFetcher.data) return;
-    autoEdited.current = stageFetcher.data;
-    if (stageFetcher.data.ok && stageFetcher.data.stageId) {
-      setEditingStageId(stageFetcher.data.stageId);
+  useFetcherResult(stageFetcher, (d) => {
+    if (d.ok && d.stageId) {
+      setEditingStageId(d.stageId);
     }
-  }, [stageFetcher.state, stageFetcher.data]);
+  });
 
   const onNavPolicy = () => navigate(`/projects/${slug}/policy`);
   const onOpenTask = (taskKey: string) =>

@@ -84,13 +84,18 @@ async function takeSubsystemsDown(): Promise<void> {
 
 /** Pin the configurable free-space thresholds low enough that a real volume
  *  with any room at all classifies `ok` — the "low"/"critical" cases raise
- *  them instead of fabricating a measurement. */
+ *  them instead of fabricating a measurement. The thresholds are read through
+ *  `getEnv()`, which parses once per process, so the cached parse goes too
+ *  (ruling 458(c)). */
 async function setDiskThresholds(lowMb: number, criticalMb: number): Promise<void> {
   process.env.VIBERR_DISK_LOW_FREE_MB = String(lowMb);
   process.env.VIBERR_DISK_CRITICAL_FREE_MB = String(criticalMb);
-  const { resetDiskSpaceCacheForTests } = await import(
-    "~/server/ops/disk-space.server"
-  );
+  const [{ resetEnvCacheForTests }, { resetDiskSpaceCacheForTests }] =
+    await Promise.all([
+      import("~/server/config/env.server"),
+      import("~/server/ops/disk-space.server"),
+    ]);
+  resetEnvCacheForTests();
   resetDiskSpaceCacheForTests();
 }
 

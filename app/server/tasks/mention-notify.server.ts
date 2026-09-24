@@ -8,7 +8,13 @@ import { resolveTaskFilePath, updateTaskFile } from "~/server/files/task-writer.
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
-import { extractMentions, findMentionSpans } from "~/ui/mention-spans";
+import {
+  CONTROLLER_MENTION_HANDLE,
+  extractMentions,
+  findMentionSpans,
+  RESERVED_MENTION_HANDLES,
+} from "~/ui/mention-spans";
+import { toError } from "~/shared/errors";
 
 /**
  * @mention → `mention`-notification fan-out, shared by EVERY comment writer
@@ -57,13 +63,13 @@ import { extractMentions, findMentionSpans } from "~/ui/mention-spans";
  * makes the handle ambiguous (guessing stays worse than a visible non-delivery).
  */
 
-/** Single-token mention grammar. Kept exported for callers that only need the
- *  raw token shape; routing itself goes through `extractMentions`. */
-export const MENTION_RE = /@([A-Za-z][\w-]*)/g;
-
-/** Handles that route to agents, never to a person named e.g. "Claude". */
-// "controller" (ruling 99): the instance controller's handle never maps to a human.
-export const RESERVED_HANDLES = new Set(["agent", "operator", "codex", "claude", "controller"]);
+/** Handles that route to agents, never to a person named e.g. "Claude": the
+ *  reserved handles (their one home is ~/ui/mention-spans) plus the instance
+ *  controller's, which never maps to a human either (ruling 99). */
+export const RESERVED_HANDLES = new Set<string>([
+  ...RESERVED_MENTION_HANDLES,
+  CONTROLLER_MENTION_HANDLE,
+]);
 
 /** Cap the quoted comment inside the notification text — an agent reply can be
  *  a full report; the inbox row needs the gist, the timeline has the rest. */
@@ -334,24 +340,6 @@ function resolveIn(
 }
 
 /**
- * The @handles in `text` that route to nobody, resolved against the same user
- * set the fan-out uses. Callers that must disclose the non-delivery need the
- * handles BEFORE anything is written, so the disclosure and the comment land in
- * one write.
- *
- * `projectSlug` is optional only because the call sites predate F33-9; pass it
- * whenever the comment belongs to a project, or a non-member tag is dropped
- * without the author being told (see {@link mentionNonDeliveryNote}).
- */
-export function ambiguousMentionHandles(
-  db: DatabaseSync,
-  text: string,
-  projectSlug?: string,
-): string[] {
-  return resolveIn(db, text, projectSlug).ambiguous;
-}
-
-/**
  * The whole non-delivery report for one comment, already rendered — "" when
  * every handle routed. The human comment path writes this as its policy note,
  * so ONE call covers both reasons a tag reaches nobody (ambiguous, F33-9
@@ -579,7 +567,7 @@ export async function stampNotifiedRecipients(
   } catch (error) {
     logger.warn("could not record an event's notification recipients", {
       taskKey: ref.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   return reached;

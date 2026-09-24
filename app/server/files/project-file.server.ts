@@ -1,12 +1,11 @@
-import { diagError, type FileDiagnostic } from "~/schemas/file-diagnostics";
+import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import {
   parseProjectFrontmatter,
   type ParsedProjectFile,
 } from "~/schemas/project-file.schema";
 import {
   serializeFrontmatterFile,
-  splitFrontmatter,
-  yamlMappingSchema,
+  splitFrontmatterMapping,
 } from "./frontmatter.server";
 
 /**
@@ -26,28 +25,8 @@ export function parseProjectFileContent(
   content: string,
   context: { fallbackSlug?: string } = {},
 ): ProjectFileParseResult {
-  const diagnostics: FileDiagnostic[] = [];
-  const { data, body, diagnostics: fmDiags } = splitFrontmatter(content);
-  diagnostics.push(...fmDiags);
-
-  // Frontmatter that is not a mapping (a scalar, a sequence) contributes no
-  // fields at all; the schema below then falls every field back to its default.
-  const mapping = yamlMappingSchema.safeParse(data);
-  if (!mapping.success) {
-    diagnostics.push(
-      diagError(
-        "frontmatter.not_a_map",
-        "Frontmatter is not a YAML mapping — all fields fall back to defaults.",
-        undefined,
-        true,
-      ),
-    );
-  }
-
-  const fm = parseProjectFrontmatter(
-    mapping.success ? mapping.data : {},
-    context,
-  );
+  const { data, body, diagnostics } = splitFrontmatterMapping(content);
+  const fm = parseProjectFrontmatter(data, context);
   diagnostics.push(...fm.diagnostics);
 
   return {

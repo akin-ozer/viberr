@@ -241,7 +241,7 @@ describe("StoreBrowser", () => {
 
   it("delete goes through the nested confirm; Escape closes only the top layer", async () => {
     let closed = 0;
-    const { getByText, getByLabelText, queryByRole } = renderBrowser({
+    const { getByText, getByLabelText, getByRole, queryByRole } = renderBrowser({
       onClose: () => {
         closed += 1;
       },
@@ -251,6 +251,16 @@ describe("StoreBrowser", () => {
     expect(
       getByText("The file is removed from the store. Agents lose it on their next context load."),
     ).toBeTruthy();
+    // Ruling 458(f): the shared ConfirmDialog, named by its title and stacked
+    // over the browser. Ruling 458(k): described by its body, which the
+    // hand-written card pointed at an id nothing carried.
+    const confirm = getByRole("alertdialog", { name: "Delete “overview.md”?" });
+    expect(confirm.getAttribute("data-screen-label")).toBe("Store deletion dialog");
+    expect(confirm.classList.contains("over-modal")).toBe(true);
+    const describedBy = confirm.getAttribute("aria-describedby");
+    expect(describedBy && document.getElementById(describedBy)?.textContent).toBe(
+      "The file is removed from the store. Agents lose it on their next context load.",
+    );
 
     // Escape on the topmost native <dialog> (the nested confirm) fires its
     // `cancel` event, which useDialog turns into onCancel — the confirm
@@ -408,7 +418,7 @@ describe("StoreBrowser document editor", () => {
   });
 
   it("a new document colliding with an existing file confirms before replacing", async () => {
-    const { getByText, getByPlaceholderText, getByLabelText, queryByRole } =
+    const { getByText, getByPlaceholderText, getByLabelText, getByRole, queryByRole } =
       renderBrowser();
     fireEvent.click(getByText("New document"));
     fireEvent.change(getByPlaceholderText("file-name.md"), {
@@ -423,6 +433,16 @@ describe("StoreBrowser document editor", () => {
     // overwrote with the same "saved" toast.
     expect(lastForm).toBeNull();
     expect(getByText("Replace “overview.md”?")).toBeTruthy();
+    // Ruling 458(f): the shared ConfirmDialog, named by its title and stacked
+    // over the browser. Ruling 458(k): the overwrite warning still describes
+    // it, as the hand-written card's `aria-describedby` did.
+    const confirm = getByRole("alertdialog", { name: "Replace “overview.md”?" });
+    expect(confirm.getAttribute("data-screen-label")).toBe("Replace document dialog");
+    expect(confirm.classList.contains("over-modal")).toBe(true);
+    const describedBy = confirm.getAttribute("aria-describedby");
+    expect(describedBy && document.getElementById(describedBy)?.textContent).toMatch(
+      /Saving overwrites its contents/,
+    );
 
     fireEvent(
       document.querySelector("dialog.confirm-card")!,

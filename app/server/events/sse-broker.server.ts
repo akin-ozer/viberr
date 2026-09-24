@@ -9,6 +9,7 @@ import { shutdownDatabase } from "~/server/db/sqlite.server";
 import { stopFileWatcher } from "~/server/files/file-watch.service.server";
 import { stopKbWatcher } from "~/server/files/kb-watch.service.server";
 import { logger } from "~/server/logging/logger.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * SSE broker: in-process fan-out from the event publisher to connected
@@ -273,7 +274,7 @@ function safeWrite(state: BrokerState, conn: SseConnection, chunk: string): void
   } catch (error) {
     logger.info("sse connection dropped on failed write", {
       connectionId: conn.id,
-      reason: error instanceof Error ? error.message : String(error),
+      reason: errorMessage(error),
     });
     dropConnection(state, conn);
   }
@@ -297,7 +298,7 @@ function applyReauthorization(
     // already had and try again on the next beat.
     logger.warn("sse scope re-authorization failed", {
       connectionId: conn.id,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return true;
   }

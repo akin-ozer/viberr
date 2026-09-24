@@ -9,6 +9,8 @@ import { Link } from "react-router";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
 import { formatDayDotTime, utcDayKey, formatClockUTC } from "~/shared/dates/format";
+import { observedAfter } from "~/shared/freshness";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * Insights: a read-only analytics dashboard over agent runs — totals, outcomes,
@@ -367,15 +369,6 @@ function tokenSilence(c: OversightSummary["coordination"]): string {
   return c.runs.delivery > 0 && c.tokenless.delivery === c.runs.delivery
     ? "no delivery run reported a provider token total"
     : "no operator or controller run reported a provider token total";
-}
-
-/** Is `iso` strictly newer than `thanIso`? False when either is missing or
- *  unparseable — an unreadable stamp never displaces a recorded claim. */
-function observedAfter(iso: string | undefined, thanIso: string): boolean {
-  if (!iso) return false;
-  const a = Date.parse(iso);
-  const b = Date.parse(thanIso);
-  return Number.isFinite(a) && Number.isFinite(b) && a > b;
 }
 
 /**
@@ -819,7 +812,7 @@ function DailyChart({ summary }: { summary: InsightsSummary }) {
           `.vh`; the title stays the pointer's extra. */}
       <div className="daily-chart" role="list" aria-label={`Agent runs per day over the last ${summary.windowDays} days`}>
         {summary.daily.map((d) => {
-          const day = `${d.date}: ${d.runs} run${d.runs === 1 ? "" : "s"}, ${d.cost == null ? "cost not reported" : fmtCost(d.cost)}`;
+          const day = `${d.date}: ${countLabel(d.runs, "run")}, ${d.cost == null ? "cost not reported" : fmtCost(d.cost)}`;
           return (
             <span key={d.date} className="daily-col" role="listitem" title={day}>
               <span

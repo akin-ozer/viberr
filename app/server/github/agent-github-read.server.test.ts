@@ -1,12 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore } from "../../../test-support/test-store";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import {
   fakeGithubFetch,
   unreachableFetch,
 } from "../../../test-support/fake-github";
-import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
   githubReadPersonaSection,
@@ -105,10 +104,9 @@ describe("scopeAgentGithubReadPath — the scope is the boundary", () => {
 });
 
 function configuredStore() {
-  const store = setupTestStore(ctx);
   // getProjectGithubContext reads the `projects` PROJECTION row for the repo —
   // build it from the seeded project.md before configuring the credential.
-  rebuildAll(store.db, { dataRoot: store.dataRoot });
+  const store = setupProjectedStore(ctx);
   const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
   const pat = createPat(
     store.db,
@@ -208,8 +206,7 @@ describe("runAgentGithubRead — server-mediated, token stays server-side", () =
   });
 
   it("reports the missing credential without throwing (and never hits the network)", async () => {
-    const store = setupTestStore(ctx); // repo configured, but no PAT
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx); // repo configured, but no PAT
     const gh = fakeGithubFetch({});
     const result = await runAgentGithubRead(store.db, store.slug, "pulls/1", {
       fetchImpl: gh.fetchImpl,

@@ -9,16 +9,17 @@ import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { logger } from "~/server/logging/logger.server";
-import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
+import { ANSI_CSI_RE, redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   recordBackendLogin,
+  vendorSpawnEnv,
   type BackendBinaries,
   type BackendCredentialActor,
   type LoginMethod,
 } from "./backend-credentials.server";
-import { filteredSpawnEnv, type RealBackend } from "./runtime-registry.server";
-import { ensureUserBackendHome } from "./user-homes.server";
+import type { RealBackend } from "./runtime-registry.server";
 
 /**
  * The hosted sign-in driver (ruling 127).
@@ -46,10 +47,11 @@ import { ensureUserBackendHome } from "./user-homes.server";
  *    and a 200-char clamp before anybody sees it.
  *  - It never stores or logs the pasted code. `submitBackendLoginCode` writes it
  *    to the child's stdin and forgets it; stdin receives nothing else, ever.
- *  - It never runs a shell. argv only, on `filteredSpawnEnv()` plus the ONE home
+ *  - It never runs a shell. argv only, on `vendorSpawnEnv` (the env
+ *    `runVendorLogout` spawns on too): `filteredSpawnEnv()` plus the ONE home
  *    variable, with the other vendor's home variable deleted first (an ambient
  *    `CODEX_HOME` must not make a `claude auth login` act on a directory nobody
- *    chose, the same trap `runVendorLogout` closes).
+ *    chose).
  *
  * Sessions live in a process-global map keyed by (user, backend): one live
  * sign-in per person per backend, a new one replacing (and killing) the old.
@@ -98,12 +100,9 @@ const TERMINAL_STATES: ReadonlySet<LoginState> = new Set<LoginState>([
   "cancelled",
 ]);
 
-export function isTerminalLoginState(state: LoginState): boolean {
+function isTerminalLoginState(state: LoginState): boolean {
   return TERMINAL_STATES.has(state);
 }
-
-/** Ruling 92: the backends are called "Claude" and "Codex" everywhere. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
 
 /**
  * Which sign-in flows each vendor actually offers, and the ONE home of that
@@ -122,12 +121,6 @@ export const BACKEND_SIGN_IN_METHODS = {
   claude: ["claudeai", "console"],
   codex: ["device"],
 } as const satisfies Record<RealBackend, readonly LoginMethod[]>;
-
-/** The env var each vendor binary reads its home from. */
-const HOME_ENV_KEY = {
-  claude: "CLAUDE_CONFIG_DIR",
-  codex: "CODEX_HOME",
-} as const;
 
 /**
  * How long a person has to finish a vendor sign-in before the process is torn
@@ -500,19 +493,15 @@ function pruneEndedSessions(nowMs: number): void {
 
 // ------------------------------------------------------------ stdout parsing
 
-/** ANSI CSI escapes: both CLIs colourise their prompts when they think they
- *  have a TTY, and a coloured `https://…` must still parse as a URL.
- *
- *  The leading ESC IS a control character and matching it is the point, the
- *  same waiver `git-output-redact.server.ts` carries for its copy. */
-// eslint-disable-next-line no-control-regex
-const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 /** Control characters that survive the strip (BEL from a prompt, NUL). */
 // eslint-disable-next-line no-control-regex
 const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
 
+/** Both CLIs colourise their prompts when they think they have a TTY, and a
+ *  coloured `https://…` must still parse as a URL: ANSI CSI escapes go first
+ *  (git-output-redact's `ANSI_CSI_RE`), then the stray controls. */
 function stripAnsi(chunk: string): string {
-  return chunk.replace(ANSI_RE, "").replace(CONTROL_RE, "");
+  return chunk.replace(ANSI_CSI_RE, "").replace(CONTROL_RE, "");
 }
 
 /** The first `https://` URL in a line, without the trailing punctuation a
@@ -821,13 +810,7 @@ export function startBackendLogin(
     store.delete(key);
   }
 
-  const home = ensureUserBackendHome(actor.userId, backend, deps.dataRoot);
-  const env = filteredSpawnEnv();
-  // Neither vendor home may be inherited: the child acts on the home this call
-  // names and on nothing else.
-  delete env.CLAUDE_CONFIG_DIR;
-  delete env.CODEX_HOME;
-  env[HOME_ENV_KEY[backend]] = home;
+  const env = vendorSpawnEnv(actor.userId, backend, deps.dataRoot);
 
   const timeoutMs = deps.timeoutMs ?? LOGIN_TIMEOUT_MS[backend];
   const args =

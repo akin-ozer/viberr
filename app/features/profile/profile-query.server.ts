@@ -21,9 +21,9 @@ import {
   type BackendQuotaRow,
 } from "~/server/runtimes/backend-quota.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
-import { ROLE_IDS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
-import { ROLE_RANK } from "~/shared/rbac";
+import { PROJECT_ROLES, ROLE_RANK } from "~/shared/rbac";
+import { observedAfter } from "~/shared/freshness";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import {
   mergeNotifPrefs,
@@ -133,16 +133,6 @@ export interface ProfileBackend {
   usage?: ProfileBackendUsage | null;
 }
 
-/** True when `iso` is a later instant than `thanIso`. Same comparison
- *  /insights makes (`insights-page.tsx`), so the two surfaces cannot disagree
- *  about which of two provider claims is the fresher one. */
-function observedAfter(iso: string | undefined, thanIso: string): boolean {
-  if (!iso) return false;
-  const a = Date.parse(iso);
-  const b = Date.parse(thanIso);
-  return Number.isFinite(a) && Number.isFinite(b) && a > b;
-}
-
 /**
  * Ruling 294: the viewer's OWN reading, or null.
  *
@@ -223,7 +213,7 @@ function ownRefusal(row: BackendQuotaRow | undefined, userId: string): ProfileBa
 }
 
 /** Both agent backends, in the order the panel renders them. */
-export const PROFILE_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
+const PROFILE_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
 
 /**
  * The viewer's own agent accounts. Re-derived per request (health re-probes the
@@ -231,7 +221,7 @@ export const PROFILE_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
  * `UserBackendHealth` carries a key's last four characters and never the key,
  * and a `LoginSessionView` carries only what the vendor showed the person.
  */
-export function getProfileBackends(
+function getProfileBackends(
   db: DatabaseSync,
   userId: string,
 ): ProfileBackend[] {
@@ -328,7 +318,7 @@ export function listUserMemberships(
     .all(userId) as MembershipRow[];
   return rows
     .filter((r): r is MembershipRow & { role: ProjectRole } =>
-      ROLE_IDS.some((id) => id === r.role),
+      PROJECT_ROLES.some((id) => id === r.role),
     )
     .map((r) => ({ slug: r.slug, name: r.name, role: r.role }));
 }
@@ -337,7 +327,7 @@ export function listUserMemberships(
  *  a missing/partial row reads as every category ON). Single reader of the
  *  `notifs` pref key — both the profile view and the notification-creation
  *  gate go through here. */
-export function getNotifPrefs(
+function getNotifPrefs(
   db: DatabaseSync,
   userId: string,
 ): NotifPrefs {
@@ -355,7 +345,7 @@ export function isNotifKindEnabled(
   return getNotifPrefs(db, userId)[notifCategoryForKind(kind)].app;
 }
 
-export function getTimelineDefaultPref(
+function getTimelineDefaultPref(
   db: DatabaseSync,
   userId: string,
 ): TimelineDefault {

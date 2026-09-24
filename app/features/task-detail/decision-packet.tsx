@@ -89,7 +89,7 @@ export function observationLabel(key: string): string {
   return words.length > 40 ? words.slice(0, 39).trimEnd() + "…" : words;
 }
 
-export function observationValue(key: string, value: string): string {
+function observationValue(key: string, value: string): string {
   const empty =
     value.trim() === "" ||
     value.trim().toLowerCase() === "null" ||
@@ -290,6 +290,7 @@ function PacketArchiveConfirm({
     `the open “${packetTitle}” decision`,
     ...(pending > 0
       ? [
+          // Inline plural, not `countLabel`: ruling 457 (shared/text/plural.ts).
           `${pending} pending operator recommendation${
             pending === 1 ? "" : "s"
           }`,

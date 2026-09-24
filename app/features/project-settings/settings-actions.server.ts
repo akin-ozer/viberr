@@ -19,6 +19,10 @@ import { deleteRepoHealth } from "~/server/github/repo-health.server";
 import { logger } from "~/server/logging/logger.server";
 import { interruptRun } from "~/server/runtimes/run-service.server";
 import { clearProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  repoPermissionsSchema,
+  repoWritable,
+} from "~/server/secrets/pat-validator.server";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
@@ -30,10 +34,7 @@ import { findUserByEmail } from "~/server/auth/user-store.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import type { RbacAction } from "~/shared/rbac";
-import {
-  projectDir,
-  projectFilePath,
-} from "~/server/files/file-store-root.server";
+import { projectDir } from "~/server/files/file-store-root.server";
 import {
   readProjectFile,
   updateProjectFile,
@@ -49,7 +50,7 @@ import {
 import { releaseProjectConversations } from "~/server/controller/controller-conversations.server";
 import { overlappingLeases } from "~/server/tasks/file-leases.server";
 import { invalidateRepoAccess } from "~/features/github/github-query.server";
-import { rebuildAll, rebuildPath } from "~/server/projections/rebuilder.server";
+import { rebuildAll, reprojectProject } from "~/server/projections/rebuilder.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { generateTempPassword } from "~/server/auth/password.server";
 import { stageLockReason } from "~/shared/workflow/stage-roles";
@@ -68,30 +69,18 @@ import {
 } from "~/server/tasks/required-reviewers.server";
 import type { RequiredReviewerRule } from "~/schemas/project-file.schema";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
+import { countLabel } from "~/shared/text/plural";
+import { toError } from "~/shared/errors";
 
 /**
- * F20-15: GitHub's `/repos/{owner}/{repo}` returns the `permissions` block it
- * computed for THIS token — the read-only proof of write access. A project
- * exists to push branches and open PRs, so a repo the credential can only READ
- * is not deliverable. Mirrors the (module-private) `repoWritable` in
- * pat-validator.server.ts; kept local so this file stays decoupled from it.
- *
- * `push` stays tri-state on purpose: absent or unreadable is "unknown", never a
- * refusal — only a PROVEN read-only repo (push === false) is rejected. `admin`
- * and `maintain` need no third state: either GitHub asserted one or it did not.
- */
-const repoPermissionsSchema = z.object({
-  admin: z.boolean().catch(false),
-  maintain: z.boolean().catch(false),
-  push: z.boolean().nullable().catch(null),
-});
-type RepoPermissions = z.infer<typeof repoPermissionsSchema>;
-
-/**
- * The two `GET /repos/{owner}/{repo}` fields the repair reads. `request<T>`
- * names an expected payload, it does not check one, so it is decoded here.
- * Tolerant at every level — an unreadable field reads as "unknown" and the
- * repair falls back to the same behaviour it had before the probe existed.
+ * The two `GET /repos/{owner}/{repo}` fields the repair reads, decoded by the
+ * probe's `request`. Tolerant at every level — an unreadable field reads as
+ * "unknown" and the repair falls back to the same behaviour it had before the
+ * probe existed; the object-level catch means a 2xx never comes back as a
+ * `decode` failure, so a reachable repo always reaches the write check.
+ * The `permissions` block (F20-15, the read-only proof of write access) is
+ * decoded and judged by pat-validator.server.ts's `repoPermissionsSchema` /
+ * `repoWritable`.
  */
 const repoProbeSchema = z
   .object({
@@ -99,15 +88,6 @@ const repoProbeSchema = z
     permissions: repoPermissionsSchema.nullable().catch(null),
   })
   .catch({ default_branch: null, permissions: null });
-
-function repoPushable(permissions: RepoPermissions | null): boolean | null {
-  if (!permissions) return null;
-  if (permissions.admin || permissions.maintain || permissions.push === true) {
-    return true;
-  }
-  if (permissions.push === false) return false;
-  return null;
-}
 
 /** `SELECT COUNT(*) AS n` — an aggregate with no GROUP BY, so sqlite answers
  *  with exactly one row carrying the single integer column `n`. */
@@ -195,16 +175,6 @@ function projectRef(ctx: SettingsMutationContext, projectSlug: string) {
     projectSlug,
     dataRoot: ctx.dataRoot,
   };
-}
-
-function reprojectProject(
-  db: DatabaseSync,
-  ctx: SettingsMutationContext,
-  projectSlug: string,
-): void {
-  rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
-    dataRoot: ctx.dataRoot,
-  });
 }
 
 // ----------------------------------------------------------------- identity
@@ -318,7 +288,7 @@ export async function setBranchCleanup(
 
 /** Ruling 178: the audit action ONE writer records; the activity feed's
  *  catalog and the Policy page's last-change chip both name it. */
-export const REQUIRED_REVIEWERS_AUDIT_ACTION = "project.required_reviewers.updated";
+const REQUIRED_REVIEWERS_AUDIT_ACTION = "project.required_reviewers.updated";
 
 /** One submitted rule, before validation. */
 export interface RequiredReviewerRuleInput {
@@ -386,7 +356,7 @@ export function parseFileLeasesField(
  * de-duplicated, in submitted order. Shared by the Settings form and the
  * controller's `set_required_reviewers`, so the two cannot drift.
  */
-export function validateRequiredReviewerRules(
+function validateRequiredReviewerRules(
   projectSlug: string,
   rules: readonly RequiredReviewerRuleInput[],
   ctx: SettingsMutationContext = {},
@@ -658,7 +628,7 @@ export async function setProjectFileLeases(
 /** `owner/name` from free input — tolerates a pasted GitHub URL and a
  * trailing `.git`, refuses anything that is not exactly one owner + one
  * name. */
-export function normalizeRepoInput(raw: string): string | null {
+function normalizeRepoInput(raw: string): string | null {
   let s = raw.trim();
   s = s.replace(/^https?:\/\/(www\.)?github\.com\//i, "");
   s = s.replace(/^github\.com\//i, "");
@@ -736,7 +706,7 @@ export async function repairProjectRepo(
   const footprint = repoFootprintTasks(db, input.projectSlug);
   if (footprint > 0 && !input.confirmFootprint) {
     throw AppError.validation(
-      `${footprint} task${footprint === 1 ? "" : "s"} in this project carry branch/PR records against ${from ?? "the current repo"}. Confirm the repair to proceed; those records keep their history but future sync runs against ${repo}.`,
+      `${countLabel(footprint, "task")} in this project ${footprint === 1 ? "carries" : "carry"} branch/PR records against ${from ?? "the current repo"}. Confirm the repair to proceed; those records keep their history but future sync runs against ${repo}.`,
     );
   }
 
@@ -749,20 +719,19 @@ export async function repairProjectRepo(
   let probed = false;
   let defaultBranch: string | null = null;
   if (gh.status === "ok") {
-    const res = await gh.client.request("GET", `/repos/${repo}`);
+    const res = await gh.client.request("GET", `/repos/${repo}`, repoProbeSchema);
     if (res.ok) {
-      const probe = repoProbeSchema.parse(res.data);
       // F20-15: `res.ok` proves the credential can SEE the repo, not push to it.
       // Adopting a read-only-visible repo silently defers the failure to first
       // delivery (live: repairing to a foreign public repo succeeded). Refuse a
       // PROVEN read-only target; an unknown/absent permissions block still passes.
-      if (repoPushable(probe.permissions) === false) {
+      if (repoWritable(res.data.permissions) === false) {
         throw AppError.validation(
           `The attached credential can see ${repo} but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then repair again. Nothing was changed.`,
         );
       }
       probed = true;
-      defaultBranch = probe.default_branch;
+      defaultBranch = res.data.default_branch;
     } else if (res.kind === "network") {
       throw AppError.validation(
         `GitHub is unreachable (${res.message}). The repair was NOT applied. Try again when it is.`,
@@ -996,7 +965,7 @@ export async function removeStage(
     }
     if (count > 0) {
       throw AppError.conflict(
-        `Move ${count} ${count === 1 ? "task" : "tasks"} out of ${stage.name} first`,
+        `Move ${countLabel(count, "task")} out of ${stage.name} first`,
       );
     }
     // Neighbours + the edges about to be merged, read from the PRE-removal state.
@@ -1357,7 +1326,7 @@ export async function removeMember(
   return {
     toast:
       released > 0
-        ? `${displayName} removed from ${projectName}. ${released} owned task${released === 1 ? "" : "s"} released for reassignment.`
+        ? `${displayName} removed from ${projectName}. ${countLabel(released, "owned task")} released for reassignment.`
         : `${displayName} removed from ${projectName}`,
   };
 }
@@ -1470,7 +1439,7 @@ export async function deleteProject(
       logger.warn("could not interrupt a run while deleting its project", {
         projectSlug: input.projectSlug,
         runId: run.id,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

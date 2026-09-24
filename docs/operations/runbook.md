@@ -7,7 +7,7 @@
 > `app/server/ops/health-snapshot.server.ts`, `app/server/controller/controller-ops-mcp.server.ts`,
 > `app/server/boot.server.ts`, `app/server/db/` (`sqlite.server.ts`, `self-heal.server.ts`,
 > `retention.server.ts`, `backup.server.ts`, `data-root-lock.server.ts`, `cli-lock.server.ts`),
-> `app/server/ops/`, `app/server/runtimes/`, `scripts/`.
+> `app/server/ops/`, `app/server/runtimes/`, `app/server/logging/`, `scripts/`.
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
 All commands run from the repo root. On the Docker deployment the read-only ones run
@@ -178,6 +178,36 @@ a readiness downgrade (tolerant parsing):
   (`api 529` or another 5xx on the result line, or an `overloaded` / `server_error`
   banner) is the provider's side: nothing about the account or the task is wrong, and the
   packet's options are a retry on the same backend or on the other one.
+
+## Finding a request by its id
+
+Every response the app answers carries its request's id as `X-Request-Id` (ruling
+458(d)): the browser's devtools show it under the request's response headers. For a
+failure met while moving around the app, it is the failing `.data` request's. An inbound
+`X-Request-Id`, from a proxy in front, is reused, so the proxy's access log and the app's
+records share one id. The error page shows it too, as "Request id: …", when the failure
+arrived with the document itself (a server render, or the hydration that reuses it); an
+error met on a later navigation shows none rather than an earlier request's, so read that
+one from devtools (ruling 458(n) raised the ruling-457 ceilings for the error page's id).
+
+The app logs JSON lines on stdout. To find one request's records:
+
+```bash
+docker compose logs --no-log-prefix app | grep '"requestId":"<id>"'
+```
+
+A record made inside a request carries `requestId`, `method` and `path` (never the query
+string), and `userId` once the session resolved. A run started by a request logs its own
+work (the stream, the settle, the completion effects) under its `runId` and `taskKey`
+plus the `requestId` and `userId` of the request that started it, long after that
+request answered; `grep '"runId":"<run id>"'` finds a run's records whatever started it.
+Records from boot, the watchers and the timers, and from a run they started, carry no
+`requestId`: they name their own ids.
+
+A few answers carry no header: static assets (served before the app sees the request),
+a document form post React Router refuses as cross-origin (a plain `400 Bad Request`,
+whose log record does carry an id), the route manifest, and React Router's last-resort
+answers (a document it could not render at all). Match those by time, method and path.
 
 ## A task waits on other work (ruling 131)
 
@@ -447,8 +477,8 @@ recommendation is open. Nothing is owed by anyone while it waits.
 
 ## Retention & growth
 
-`runMaintenancePass` runs at **boot**, every **6 hours** (`VIBERR_MAINTENANCE_INTERVAL_MS`)
-and on **disk pressure** (checked every 5 minutes, `VIBERR_DISK_CHECK_INTERVAL_MS`; an
+`runMaintenancePass` runs at **boot**, every **6 hours** (`VIBERR_MAINTENANCE_INTERVAL_SECONDS`)
+and on **disk pressure** (checked every 5 minutes, `VIBERR_DISK_CHECK_INTERVAL_SECONDS`; an
 extra pass at most every 30 minutes; thresholds 2 GiB low / 512 MiB critical,
 `VIBERR_DISK_LOW_FREE_MB` / `VIBERR_DISK_CRITICAL_FREE_MB`). Each pass logs
 `store maintenance pass {reason, runLogLines, auditEvents, notifications, transcripts,

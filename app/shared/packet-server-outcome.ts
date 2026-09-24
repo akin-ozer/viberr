@@ -13,7 +13,7 @@
 
 import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
 
-export const COLLISION_OUTCOMES = [
+const COLLISION_OUTCOMES = [
   /** The stale remote branch was cleared and the work re-delivered. */
   "cleared_and_delivered",
   /** Cleared, but the re-delivery did not complete; the block stays. */

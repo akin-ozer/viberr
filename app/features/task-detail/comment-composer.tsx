@@ -1,5 +1,4 @@
 import {
-  forwardRef,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -46,7 +45,6 @@ import {
 import {
   COMPOSER_LABEL,
   ComposerHint,
-  type CommentComposerHandle,
   type CommentComposerProps,
   type ComposerCarry,
 } from "./comment-composer-slot";
@@ -212,131 +210,130 @@ function ComposerKeysPlugin({
   return null;
 }
 
-export const CommentEditor = forwardRef<
-  CommentComposerHandle,
-  CommentComposerProps & { carry: RefObject<ComposerCarry | null> }
->(
-  function CommentEditor(
-    { mentionables, runPrincipal, onChange, onSubmit, carry },
-    ref,
-  ) {
-    const editorRef = useRef<LexicalEditor | null>(null);
-    const onChangeRef = useRef(onChange);
-    const onSubmitRef = useRef(onSubmit);
+export function CommentEditor({
+  mentionables,
+  runPrincipal,
+  onChange,
+  onSubmit,
+  carry,
+  ref,
+}: CommentComposerProps & { carry: RefObject<ComposerCarry | null> }) {
+  const editorRef = useRef<LexicalEditor | null>(null);
+  const onChangeRef = useRef(onChange);
+  const onSubmitRef = useRef(onSubmit);
 
-    const menu = useMentionAutocomplete(
-      mentionables,
-      (result) => {
+  const menu = useMentionAutocomplete(
+    mentionables,
+    (result) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.update(() => {
+        const paragraph = $getRoot().getFirstChild();
+        if ($isParagraphNode(paragraph)) {
+          $setParagraphPlainText(paragraph, result.text, result.caret);
+        }
+      });
+      editor.focus();
+    },
+    runPrincipal,
+  );
+  const menuRef = useRef(menu);
+  // Kept current in an effect, not during render (render must stay pure); all
+  // three are read only from deferred Lexical command / onChange handlers.
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    onSubmitRef.current = onSubmit;
+    menuRef.current = menu;
+  });
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus() {
+        editorRef.current?.focus();
+      },
+      prefillIfEmpty(text: string) {
         const editor = editorRef.current;
         if (!editor) return;
         editor.update(() => {
-          const paragraph = $getRoot().getFirstChild();
-          if ($isParagraphNode(paragraph)) {
-            $setParagraphPlainText(paragraph, result.text, result.caret);
-          }
+          if ($getRoot().getTextContent().trim()) return;
+          $replaceDraft(text);
         });
         editor.focus();
       },
-      runPrincipal,
-    );
-    const menuRef = useRef(menu);
-    // Kept current in an effect, not during render (render must stay pure); all
-    // three are read only from deferred Lexical command / onChange handlers.
-    useEffect(() => {
-      onChangeRef.current = onChange;
-      onSubmitRef.current = onSubmit;
-      menuRef.current = menu;
+      clearAfterSuccess() {
+        const editor = editorRef.current;
+        if (!editor) return;
+        editor.update(() => {
+          const root = $getRoot();
+          root.clear();
+          root.append($createParagraphNode());
+        });
+        editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
+      },
+    }),
+    [],
+  );
+
+  // Ruling 457 (CS-7): stable, since it reads only refs. OnChangePlugin
+  // registers its update listener in an effect keyed on this function, so a
+  // new one on each render (every keystroke inside an @token, every render
+  // the page made) tore the listener down and registered it again.
+  const handleChange = useCallback((editorState: EditorState) => {
+    editorState.read(() => {
+      const root = $getRoot();
+      const text = root.getTextContent();
+      const paragraph = root.getFirstChild();
+      const caret = $isParagraphNode(paragraph) ? $caretOffsetIn(paragraph) : null;
+      onChangeRef.current(text);
+      menuRef.current.refreshFrom(text, caret);
     });
+  }, []);
+  const mentionNames = useMemo(() => mentionNamesFor(mentionables), [mentionables]);
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        focus() {
-          editorRef.current?.focus();
+  return (
+    <LexicalComposer
+      initialConfig={{
+        namespace: "task-comment",
+        nodes: [MentionTextNode],
+        onError(error: Error) {
+          throw error;
         },
-        prefillIfEmpty(text: string) {
-          const editor = editorRef.current;
-          if (!editor) return;
-          editor.update(() => {
-            if ($getRoot().getTextContent().trim()) return;
-            $replaceDraft(text);
-          });
-          editor.focus();
-        },
-        clearAfterSuccess() {
-          const editor = editorRef.current;
-          if (!editor) return;
-          editor.update(() => {
-            const root = $getRoot();
-            root.clear();
-            root.append($createParagraphNode());
-          });
-          editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
-        },
-      }),
-      [],
-    );
-
-    // Ruling 457 (CS-7): stable, since it reads only refs. OnChangePlugin
-    // registers its update listener in an effect keyed on this function, so a
-    // new one on each render (every keystroke inside an @token, every render
-    // the page made) tore the listener down and registered it again.
-    const handleChange = useCallback((editorState: EditorState) => {
-      editorState.read(() => {
-        const root = $getRoot();
-        const text = root.getTextContent();
-        const paragraph = root.getFirstChild();
-        const caret = $isParagraphNode(paragraph) ? $caretOffsetIn(paragraph) : null;
-        onChangeRef.current(text);
-        menuRef.current.refreshFrom(text, caret);
-      });
-    }, []);
-    const mentionNames = useMemo(() => mentionNamesFor(mentionables), [mentionables]);
-
-    return (
-      <LexicalComposer
-        initialConfig={{
-          namespace: "task-comment",
-          nodes: [MentionTextNode],
-          onError(error: Error) {
-            throw error;
-          },
-        }}
-      >
-        <EditorBridge editorRef={editorRef} />
-        <PlainTextPlugin
-          contentEditable={
-            <ContentEditable
-              className="composer-ce"
-              role="combobox"
-              aria-label={COMPOSER_LABEL}
-              aria-expanded={menu.open}
-              aria-controls={menu.open ? menu.listId : undefined}
-              aria-activedescendant={menu.activeId}
-              aria-autocomplete="list"
-              onBlur={menu.close}
-            />
-          }
-          placeholder={<ComposerHint />}
-          ErrorBoundary={LexicalErrorBoundary}
-        />
-        <HistoryPlugin />
-        <OnChangePlugin onChange={handleChange} ignoreSelectionChange={false} />
-        <MentionHighlightPlugin names={mentionNames} />
-        <ComposerKeysPlugin menuRef={menuRef} onSubmitRef={onSubmitRef} />
-        {/* After OnChangePlugin, whose listener (a layout effect too) must
-            exist before the carried draft lands. The mention transform needs
-            no ordering: registering it re-runs it over the existing text. */}
-        <CarryInPlugin carry={carry} />
-        <MentionMenu
-          id={menu.listId}
-          items={menu.open ? menu.items : []}
-          active={menu.active}
-          query={menu.query}
-          onPick={menu.pick}
-          onHover={menu.setActive}
-        />
-      </LexicalComposer>
-    );
-  },
-);
+      }}
+    >
+      <EditorBridge editorRef={editorRef} />
+      <PlainTextPlugin
+        contentEditable={
+          <ContentEditable
+            className="composer-ce"
+            role="combobox"
+            aria-label={COMPOSER_LABEL}
+            aria-expanded={menu.open}
+            aria-controls={menu.open ? menu.listId : undefined}
+            aria-activedescendant={menu.activeId}
+            aria-autocomplete="list"
+            onBlur={menu.close}
+          />
+        }
+        placeholder={<ComposerHint />}
+        ErrorBoundary={LexicalErrorBoundary}
+      />
+      <HistoryPlugin />
+      <OnChangePlugin onChange={handleChange} ignoreSelectionChange={false} />
+      <MentionHighlightPlugin names={mentionNames} />
+      <ComposerKeysPlugin menuRef={menuRef} onSubmitRef={onSubmitRef} />
+      {/* After OnChangePlugin, whose listener (a layout effect too) must
+          exist before the carried draft lands. The mention transform needs
+          no ordering: registering it re-runs it over the existing text. */}
+      <CarryInPlugin carry={carry} />
+      <MentionMenu
+        id={menu.listId}
+        items={menu.open ? menu.items : []}
+        active={menu.active}
+        query={menu.query}
+        onPick={menu.pick}
+        onHover={menu.setActive}
+      />
+    </LexicalComposer>
+  );
+}

@@ -374,8 +374,9 @@ export function listConversations(
       // `created_at` has millisecond resolution: two threads made in the same
       // millisecond tie, and the sort index then breaks the tie by insertion
       // order ASCENDING — returning the OLDER one first. `rowid DESC` is the
-      // repo's own tie-break (operator-actions.server.ts:1627) and makes the
-      // promise a property of the store rather than of the clock.
+      // repo's own tie-break (`declinedRecommendations` in
+      // operator-actions.server.ts) and makes the promise a property of the
+      // store rather than of the clock.
       `SELECT * FROM controller_conversations
        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
        ORDER BY COALESCE(last_message_at, created_at) DESC, rowid DESC

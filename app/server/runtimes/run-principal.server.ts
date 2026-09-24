@@ -7,6 +7,7 @@ import {
   type UserBackendHealth,
 } from "./backend-credentials.server";
 import type { RealBackend } from "./runtime-registry.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 
 /**
  * Whose account a run bills (ruling 127).
@@ -58,10 +59,10 @@ export type RunPrincipalResolution =
   | { ok: true; principal: RunPrincipal; health: UserBackendHealth }
   | { ok: false; refusal: RunPrincipalRefusal };
 
-/** Ruling 92: the backends are called "Claude" and "Codex" everywhere. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
-
-const NO_PROCESS = "No agent process was started.";
+/** Every refusal sentence ends the same way, because the fact a human most
+ *  needs is that nothing was spent. The run service's own refusals end with it
+ *  too. */
+export const NO_PROCESS = "No agent process was started.";
 
 export interface RunPrincipalContext {
   /** Override the data root (tests). Defaults to env VIBERR_DATA_ROOT. */

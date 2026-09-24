@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -50,6 +49,7 @@ import {
 } from "~/server/files/goal-writer.server";
 import { recordProvenance } from "~/server/provenance/provenance-recorder.server";
 import { parseProjectFileContent } from "~/server/files/project-file.server";
+import { sha256Hex } from "~/server/files/content-hash.server";
 import { parseTaskFileContent } from "~/server/files/task-file.server";
 import {
   referenceDiagnostics,
@@ -59,6 +59,7 @@ import { logger } from "~/server/logging/logger.server";
 import { createActorResolver } from "~/shared/mapping/actor.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { agentNamesByProfile } from "~/server/runtimes/run-store.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Projection rebuilder: files → SQLite.
@@ -124,10 +125,6 @@ export interface RescanSummary {
   removed: number;
   errors: number;
   durationMs: number;
-}
-
-function sha256(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 function nowIso(): string {
@@ -299,7 +296,7 @@ function rebuildProjectFileNow(
   }
 
   const content = readFileSync(absPath, "utf8");
-  const contentHash = sha256(content);
+  const contentHash = sha256Hex(content);
   // SAFETY: `content_hash` is a single NOT NULL column on `projects`; an
   // unprojected slug yields no row, which the union already admits.
   const existing = db
@@ -472,7 +469,7 @@ function reprojectCascadedTask(
     if (!db.isTransaction) throw error;
     db.exec("ROLLBACK TO cascade_task");
     db.exec("RELEASE cascade_task");
-    reportRebuildFailure(db, rel, error instanceof Error ? error : new Error(String(error)));
+    reportRebuildFailure(db, rel, toError(error));
     return false;
   }
 }
@@ -621,7 +618,7 @@ function rebuildTaskFileNow(
   }
 
   const content = readFileSync(absPath, "utf8");
-  const contentHash = sha256(content);
+  const contentHash = sha256Hex(content);
   // SAFETY: `content_hash` is a single NOT NULL column on `task_projections`;
   // an unprojected task yields no row.
   const existing = db
@@ -1267,7 +1264,7 @@ function rebuildGoalFileNow(
   }
 
   const content = readFileSync(absPath, "utf8");
-  const contentHash = sha256(content);
+  const contentHash = sha256Hex(content);
   if (!options.force) {
     // SAFETY: `content_hash` is a single NOT NULL column on `goal_projections`;
     // an absent row yields undefined.
@@ -1458,7 +1455,7 @@ export function rebuildPath(
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
-    reportRebuildFailure(db, rel, error instanceof Error ? error : new Error(String(error)));
+    reportRebuildFailure(db, rel, toError(error));
     return { action: "error", kind: "other" };
   }
 }
@@ -1494,10 +1491,7 @@ function reportRebuildFailure(db: DatabaseSync, rel: string, error: Error): void
   } catch (provenanceError) {
     logger.warn("could not record the rebuild failure's provenance row either", {
       sourcePath: rel,
-      err:
-        provenanceError instanceof Error
-          ? provenanceError
-          : new Error(String(provenanceError)),
+      err: toError(provenanceError),
     });
   }
 }
@@ -1509,6 +1503,18 @@ function reportRebuildFailure(db: DatabaseSync, rel: string, error: Error): void
 function succeeded(rel: string, result: RebuildFileResult): RebuildFileResult {
   if (result.action !== "error") clearProjectionFault(rel);
   return result;
+}
+
+/** project.md write already happened — reproject it incrementally, through
+ *  `rebuildPath` so a failed rebuild is recorded rather than thrown. */
+export function reprojectProject(
+  db: DatabaseSync,
+  ctx: { dataRoot?: string },
+  projectSlug: string,
+): void {
+  rebuildPath(db, projectFilePath(projectSlug, ctx.dataRoot), {
+    dataRoot: ctx.dataRoot,
+  });
 }
 
 // --------------------------------------------------------- scoped rescan

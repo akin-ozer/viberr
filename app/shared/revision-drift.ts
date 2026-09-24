@@ -39,6 +39,11 @@ export interface RevisionDriftDescription {
   unreviewed: boolean;
 }
 
+/** "1 merge commit" / "2 merge commits". This module reaches the closed
+ *  controller dock's static closure (through `sse-event.schema` and
+ *  `task-file.schema`), which ruling 457 (FL-1) budgets by module count, so
+ *  it keeps this one-liner rather than importing `countLabel`
+ *  (`~/shared/text/plural`) and adding a module to every page. */
 const plural = (n: number, noun: string): string =>
   `${n} ${noun}${n === 1 ? "" : "s"}`;
 

@@ -2,17 +2,15 @@ import { execFile } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   isSdkSkillName,
@@ -22,14 +20,18 @@ import {
   skillPluginInPlace,
   stripUngovernedRepoCatalog,
 } from "./skill-mount.server";
+import { createTempDirs } from "../../../test-support/temp-dirs";
 
 const exec = promisify(execFile);
+
+const temp = createTempDirs();
+afterAll(temp.cleanup);
 
 /** A data root holding `skills/<name>/SKILL.md` (+ optional extra files). */
 function storeWithSkills(
   skills: { name: string; skillMd: string; extra?: Record<string, string> }[],
 ): string {
-  const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-skill-store-"));
+  const dataRoot = temp.make("viberr-skill-store-");
   for (const skill of skills) {
     const dir = path.join(dataRoot, "skills", skill.name);
     mkdirSync(dir, { recursive: true });
@@ -48,7 +50,7 @@ function storeWithSkills(
  * parent to sit beside.
  */
 async function gitCheckout(prefix = "viberr-ws-"): Promise<string> {
-  const root = mkdtempSync(path.join(tmpdir(), prefix));
+  const root = temp.make(prefix);
   const dir = path.join(root, "widgets");
   mkdirSync(dir);
   await exec("git", ["-C", dir, "init", "-q"]);
@@ -67,7 +69,7 @@ const pluginSkillMd = (plugin: string, name: string) =>
 
 describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
   async function gitRepoWithClaude(): Promise<string> {
-    const dir = mkdtempSync(path.join(tmpdir(), "viberr-strip-"));
+    const dir = temp.make("viberr-strip-");
     await exec("git", ["-C", dir, "init", "-q"]);
     await exec("git", ["-C", dir, "config", "user.email", "t@t.dev"]);
     await exec("git", ["-C", dir, "config", "user.name", "T"]);
@@ -105,7 +107,7 @@ describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
   });
 
   it("is a no-op when the clone has no .claude", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "viberr-strip-empty-"));
+    const dir = temp.make("viberr-strip-empty-");
     await stripUngovernedRepoCatalog(dir);
     expect(existsSync(path.join(dir, ".claude"))).toBe(false);
   });
@@ -262,7 +264,7 @@ describe("mountGrantedSkills", () => {
     removeSkillPlugin(result.plugin);
     removeSkillPlugin(null);
 
-    const stranger = mkdtempSync(path.join(tmpdir(), "viberr-not-a-plugin-"));
+    const stranger = temp.make("viberr-not-a-plugin-");
     removeSkillPlugin({ path: stranger, name: "viberr" });
     expect(existsSync(stranger)).toBe(true);
   });
@@ -366,7 +368,7 @@ describe("mountGrantedSkills", () => {
     // mounted skill is TRUSTED operating context, so the trust boundary is the
     // store — whichever mechanism carries the content to the run.
     const dataRoot = storeWithSkills([{ name: "real", skillMd: "SENTINEL-REAL\n" }]);
-    const outside = mkdtempSync(path.join(tmpdir(), "viberr-outside-"));
+    const outside = temp.make("viberr-outside-");
     writeFileSync(path.join(outside, "SKILL.md"), "SENTINEL-EVIL\n");
     symlinkSync(outside, path.join(dataRoot, "skills", "linked"), "dir");
     mkdirSync(path.join(dataRoot, "skills", "my skill (v2)"), { recursive: true });
@@ -411,7 +413,7 @@ describe("mountGrantedSkills", () => {
       runId: "run_none",
     });
     const gone = await mountGrantedSkills({
-      workspaceDir: path.join(mkdtempSync(path.join(tmpdir(), "viberr-gone-")), "widgets"),
+      workspaceDir: path.join(temp.make("viberr-gone-"), "widgets"),
       skills: ["a"],
       dataRoot,
       runId: "run_gone",

@@ -31,7 +31,6 @@ import {
   type DependencyRef,
   type DependencyReleasePayload,
 } from "~/shared/dependencies";
-import { getTaskSummary } from "~/server/projections/task-query.server";
 import {
   deadDependencies,
   dependenciesSatisfied,
@@ -42,12 +41,14 @@ import {
   loadProjectContext,
   notifyTaskWatchers,
   reprojectTask,
+  summaryOrThrow,
   taskRef,
   type TaskActor,
 } from "./task-mutation.server";
 // Type-only: the action context carries the injectable `runOperator` seam the
 // release hands the re-invoke to; no runtime edge back into task-actions.
 import type { TaskActionContext } from "./task-actions.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * Ruling 131 (pass 34, Q34-11): the ONE writer for a task's `blockedBy` list,
@@ -226,12 +227,6 @@ function actorRefOf(db: DatabaseSync, actor: TaskActor, ctx: TaskActionContext) 
     userId: actor.userId,
     nameHint: findUserById(db, actor.userId)?.name ?? null,
   };
-}
-
-function summaryOrThrow(db: DatabaseSync, slug: string, key: string): TaskSummary {
-  const summary = getTaskSummary(db, slug, key);
-  if (!summary) throw AppError.internal(`Task ${slug}/${key} vanished after write.`);
-  return summary;
 }
 
 /** Is anything ELSE owed on this task, so `waiting` must not settle to `none`? */
@@ -451,7 +446,7 @@ export async function mirrorLinkWait(
       taskKey,
       goalId: goalRef.goalId,
       linkIndex: goalRef.linkIndex,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return false;
   }
@@ -575,7 +570,7 @@ export async function announceRelease(
   } catch (error) {
     logger.warn("dependency release could not re-invoke the operator", {
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -630,11 +625,11 @@ export async function drainQueuedQuestions(
       if (question.directive === REVIEW_DEADLOCK_QUESTION) run.withholdVerdict = true;
       await startAgentRun(db, run, OPERATOR_TASK_ACTOR, opCtx);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.warn("queued reviewer question could not be put after the release", {
         taskKey,
         profileId: question.profileId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
         parsed.frontmatter.waiting = "human";
@@ -744,7 +739,7 @@ export async function releaseDependents(
   await noteDeadDependency(db, ctx, projectSlug, null).catch((error) => {
     logger.error("dead-dependency sweep failed", {
       projectSlug,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   });
   const released: string[] = [];
@@ -755,7 +750,7 @@ export async function releaseDependents(
       logger.error("dependency release failed", {
         projectSlug,
         taskKey: held.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -779,7 +774,7 @@ export function maybeReleaseDependents(db: DatabaseSync, ctx: TaskActionContext,
   void releaseDependents(db, ctx, projectSlug).catch((error) => {
     logger.error("dependency release sweep failed", {
       projectSlug,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   });
 }

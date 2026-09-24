@@ -11,8 +11,8 @@ import {
  * it runs at FULL autonomy *and* holds an explicit
  * `completion-for-acceptance: direct` grant — `gate()` refuses to promote
  * `recommend → direct` for that one capability precisely so a silent agent
- * close cannot fall out of an autonomy setting alone
- * (`operator-actions.server.ts:229`, enforced at `:1632`).
+ * close cannot fall out of an autonomy setting alone (`gate` in
+ * operator-actions.server.ts, enforced in `operatorAcceptCompletion`).
  *
  * The create modal (`home-page.tsx`) and the Policy note (`policy-page.tsx`,
  * commit 127721d) already disclose this; the Review queue — the screen where a

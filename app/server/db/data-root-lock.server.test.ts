@@ -3,6 +3,7 @@ import { hostname } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { lockPath } from "../../../test-support/data-root-lock";
 import {
   DATA_ROOT_LOCK_FILENAME,
   DataRootLockedError,
@@ -35,10 +36,6 @@ const CONTAINER: LockHolder = { pid: 1, hostname: "viberr-app-1", startedAt: "20
 
 const alive = () => true;
 const dead = () => false;
-
-function lockPath(dataRoot: string): string {
-  return path.join(dataRoot, "state", DATA_ROOT_LOCK_FILENAME);
-}
 
 function acquire(dataRoot: string, self: LockHolder, opts: { isAlive?: (pid: number) => boolean; force?: boolean } = {}) {
   return acquireDataRootLock({

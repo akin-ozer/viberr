@@ -87,7 +87,7 @@ export const SIMILAR_TITLE_THRESHOLD = 0.6;
 
 /** How many echoes a card will show. More than this is not a disclosure, it is
  *  a search result, and the board is where you search. */
-export const SIMILAR_TITLE_LIMIT = 3;
+const SIMILAR_TITLE_LIMIT = 3;
 
 /**
  * Tasks on this project whose title is close to `title`, most alike first.

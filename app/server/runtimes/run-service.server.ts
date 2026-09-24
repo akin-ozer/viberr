@@ -8,6 +8,7 @@ import type {
   RunView,
 } from "~/features/runtime/runtime-types";
 import {
+  OPERATOR_AUDIT_ACTOR,
   recordAudit,
   SYSTEM_ACTOR,
   type AuditActor,
@@ -17,6 +18,11 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
+import {
+  bindCorrelation,
+  carryCorrelation,
+  forkCorrelation,
+} from "~/server/logging/request-context.server";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
 import {
   canInterruptControllerRun,
@@ -29,6 +35,7 @@ import {
 } from "~/server/settings/instance-settings.server";
 import {
   RUN_PHASE,
+  type RunCallbacks,
   type RunHandle,
   type RunMcpServers,
   type RunSpec,
@@ -43,6 +50,7 @@ import {
 import { publishRunStateChanged } from "./run-events.server";
 import {
   projectRunsForTask,
+  SDK_LABEL,
   runLiveFacts,
   type ConsoleShipping,
   type ProjectedRunView,
@@ -84,6 +92,7 @@ import {
   type RunCredential,
 } from "./backend-credentials.server";
 import {
+  NO_PROCESS,
   principalRefusalMessage,
   type RunPrincipalRefusal,
 } from "./run-principal.server";
@@ -100,8 +109,12 @@ import {
 } from "./context-policy.server";
 import type { RunPrompt } from "./prompt-prefix.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { wholeThousands } from "~/shared/text/thousands";
+import { countLabel } from "~/shared/text/plural";
 
 import { newId } from "~/shared/ids/new-id.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The only module routes call
@@ -301,7 +314,7 @@ function fireIfAlreadyTerminal(
   } catch (error) {
     logger.error("run completion callback failed (immediate terminal fire)", {
       runId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     // C4: the effects (reply/verdict/reconcile/react + waiting flip) are lost —
     // surface it so the board doesn't show "agent working" until a restart.
@@ -373,22 +386,10 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
 
 // ---------------------------------------------- start / resume
 
-const SDK_LABEL = {
-  claude: "Claude Agent SDK",
-  codex: "Codex SDK",
-} satisfies Record<RealBackend, string>;
-
-/** The product's name for each backend, as every other human-facing string
- *  spells it ("Claude" / "Codex"). */
-const BACKEND_LABEL = {
-  claude: "Claude",
-  codex: "Codex",
-} satisfies Record<RealBackend, string>;
-
 export interface StartRunInput {
   projectSlug: string;
   taskKey: string;
-  /** Thread id within the task ("op" | "primary" | "c0"). Defaulted per kind. */
+  /** Thread id within the task ("op" | "primary" | "r0"). Defaulted per kind. */
   threadId?: string;
   role: string;
   kind: RunKind;
@@ -663,7 +664,7 @@ export function reserveRun(
     if (conflict) throw conflict;
     logger.warn("run reservation could not be written — preparing invisibly", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return null;
   }
@@ -690,7 +691,7 @@ export function reserveRun(
       } catch (error) {
         logger.warn("run preparation phase could not be persisted", {
           runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     },
@@ -717,7 +718,7 @@ export function reserveRun(
         logger.error("reserved run could not be abandoned", {
           runId,
           reason,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       } finally {
         // A freed slot may let a run parked behind the cap start now.
@@ -726,9 +727,6 @@ export function reserveRun(
     },
   };
 }
-
-/** Runs started by the operator runtime itself (scheduling reactions). */
-const OPERATOR_ACTOR: AuditActor = { userId: null, label: "operator" };
 
 const DEFAULT_THREAD = {
   operator: "op",
@@ -1108,7 +1106,9 @@ export async function startRun(
   // Phase 10 / contracts — run start + interrupt both leave audit rows).
   recordAudit(db, {
     action: "runtime.run.started",
-    actor: input.actor ?? OPERATOR_ACTOR,
+    // No actor: the operator runtime started the run itself (a scheduling
+    // reaction).
+    actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     subjectKind: "run",
     subjectId: runId,
     projectSlug: input.projectSlug,
@@ -1236,10 +1236,6 @@ function resolveRunCredential(
   return { ok: true, credential };
 }
 
-/** Every refusal sentence ends the same way, because the fact a human most
- *  needs is that nothing was spent. */
-const NO_PROCESS = "No agent process was started.";
-
 /**
  * The fallback when a caller passed `credentialUserId: null` without saying
  * why. Every caller in the product resolves a principal first
@@ -1361,14 +1357,10 @@ export interface StaleSessionFacts {
 function humanDuration(ms: number): string {
   if (!Number.isFinite(ms)) return "an unknown time";
   const minutes = Math.round(ms / 60_000);
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  if (minutes < 60) return countLabel(minutes, "minute");
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return `${hours} hour${hours === 1 ? "" : "s"}${rest ? ` ${rest} minute${rest === 1 ? "" : "s"}` : ""}`;
-}
-
-function k(n: number): string {
-  return `${(n / 1000).toFixed(0)}k`;
+  return `${countLabel(hours, "hour")}${rest ? ` ${countLabel(rest, "minute")}` : ""}`;
 }
 
 /** What the user is told when a session could not be resumed. Never "review your
@@ -1378,7 +1370,7 @@ function sessionMissingMessage(
   sessionId: string,
   reason: ContinuityLossReason,
 ): string {
-  const label = backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[backend];
   if (reason === "owner_changed") {
     return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 127). Nothing is wrong with the credential, and the transcript is not gone — it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
   }
@@ -1402,12 +1394,12 @@ function recordSessionMissing(
   stale?: StaleSessionFacts,
 ): void {
   const now = new Date().toISOString();
-  const label = run.backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[run.backend];
   // Ruling 372: a set-aside session is a DECISION, recorded as a meta line
   // under its own tag — the session is intact, nothing failed.
   const text =
     reason === "stale_large_session" && stale
-      ? `The ${label} session ${run.session_id ?? ""} was not resumed on purpose: it was ${humanDuration(stale.idleMs)} idle, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, and ${k(stale.contextTokens)} tokens large, so replaying it would have re-written the whole history as one cache write. The agent started a fresh session anchored on task.md and its last report; the transcript is intact.`
+      ? `The ${label} session ${run.session_id ?? ""} was not resumed on purpose: it was ${humanDuration(stale.idleMs)} idle, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, and ${wholeThousands(stale.contextTokens)} tokens large, so replaying it would have re-written the whole history as one cache write. The agent started a fresh session anchored on task.md and its last report; the transcript is intact.`
       : sessionMissingMessage(run.backend, run.session_id ?? "", reason);
   const raw = JSON.stringify({
     type: reason === "stale_large_session" ? "notice" : "error",
@@ -1432,7 +1424,7 @@ function recordSessionMissing(
   } catch (error) {
     logger.error("session-missing marker persist failed", {
       runId: run.id,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -1450,13 +1442,13 @@ function continuityResetPreamble(
   /** Ruling 372: a set-aside session says so, and carries the last report. */
   stale?: { facts: StaleSessionFacts; lastReport: string | null },
 ): string {
-  const label = backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[backend];
   // Ruling 99: a controller turn has no task.md — its anchors are the recent
   // conversation digest its turn prompt carries and the live tool reads.
   if (kind === "controller") {
     return stale
       ? [
-          `[continuity notice] Your previous ${label} session for this conversation was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${k(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history. None of the earlier exchange is in your context.`,
+          `[continuity notice] Your previous ${label} session for this conversation was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${wholeThousands(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history. None of the earlier exchange is in your context.`,
           `The recent-conversation digest in the prompt below carries the last stored turns, and your tools are your anchors. Say so if the request depends on context you can no longer see.`,
         ].join(" ")
       : [
@@ -1466,7 +1458,7 @@ function continuityResetPreamble(
   }
   if (stale) {
     return [
-      `[continuity notice] Your previous ${label} session for this task was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${k(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history as one cache write. None of that conversation is in your context.`,
+      `[continuity notice] Your previous ${label} session for this task was set aside on purpose: it had been idle ${humanDuration(stale.facts.idleMs)} and grown to ${wholeThousands(stale.facts.contextTokens)} tokens, so replaying it would have re-written the whole history as one cache write. None of that conversation is in your context.`,
       `Re-anchor on the canonical task file (\`task.md\` in your working directory) and the repository state before you act. Treat the request below as a fresh instruction, and say so if it depends on context you can no longer see.`,
       stale.lastReport
         ? `Your last report on this task, for orientation (the task record and the repository are the truth if they disagree):\n\n${stale.lastReport}`
@@ -1525,7 +1517,7 @@ async function noteContinuityReset(
     taskKey: run.task_key,
   };
   if (dataRoot) ref.dataRoot = dataRoot;
-  const label = run.backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[run.backend];
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({
@@ -1542,7 +1534,7 @@ async function noteContinuityReset(
         text:
           reason === "stale_large_session" && stale
             ? // Ruling 372: a decision, said as one — the session is intact.
-              `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${k(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
+              `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${wholeThousands(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
             : reason === "owner_changed"
             ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands — so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
             : reason === "transcript_damaged"
@@ -1558,7 +1550,7 @@ async function noteContinuityReset(
     logger.error("continuity-reset timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -1619,7 +1611,7 @@ export async function noteCompletionEffectsLost(
     // a person can always take.
     logger.warn("completion-replay predicate failed", {
       runId: run.id,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   const agent = run.agent_name ?? run.role;
@@ -1644,7 +1636,7 @@ export async function noteCompletionEffectsLost(
     logger.error("completion-effects-lost timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -1998,7 +1990,10 @@ function admitRun(
     return true;
   }
   const queue = state.pending[lane];
-  queue.push({ runId, launch: launchThunk, dataRoot });
+  // Ruling 458(d): a parked run is launched later by whichever run frees the
+  // slot, inside that run's correlation. It carries the correlation of the
+  // request that started it instead, so its records name that request and user.
+  queue.push({ runId, launch: carryCorrelation(launchThunk), dataRoot });
   logger.info("run queued behind the concurrency cap", {
     runId,
     lane,
@@ -2175,7 +2170,7 @@ function launch(
     } catch (error) {
       logger.error("run phase persist failed", {
         runId: spec.runId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   };
@@ -2186,7 +2181,7 @@ function launch(
   // (crashing the process in prod, failing the suite when a test's DB closes
   // before an in-flight run settles). sink.line self-catches; guard the
   // phase/finalize paths the same way.
-  const handle = adapter.start(spec, {
+  const callbacks: RunCallbacks = {
     onLine: (line) => sink.line(line),
     onPhase: (phase, step) => {
       try {
@@ -2207,7 +2202,7 @@ function launch(
       } catch (error) {
         logger.error("run phase persist failed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     },
@@ -2227,6 +2222,20 @@ function launch(
       // starts under a compaction still in flight.
       void settleRun(exit);
     },
+  };
+  // Ruling 458(d): the run's own work (its adapter stream, the sink, the settle
+  // and the completion callbacks) logs under its runId and taskKey, plus the
+  // request and user behind it. It gets its OWN copy of the correlation: every
+  // continuation of a request shares one object, and a run's completion can
+  // start the next run in the same lineage (operator → specialist → reviewer),
+  // so binding in place would re-stamp the earlier run's later records with
+  // the newest id. A run started from another run's completion logs under that
+  // run's ids until its own launch binds its own. Outside a request (boot
+  // recovery, a watcher- or timer-started run) nothing is bound; those records
+  // carry their own ids.
+  const handle = forkCorrelation(() => {
+    bindCorrelation({ runId: spec.runId, taskKey: spec.taskKey });
+    return adapter.start(spec, callbacks);
   });
   // Only track the handle if the run is still in flight. A synchronously-exiting
   // adapter (or a spawn-time crash) fires onExit DURING adapter.start(), which
@@ -2282,7 +2291,7 @@ function launch(
             } catch (error) {
               logger.error("run answered callback failed", {
                 runId: spec.runId,
-                err: error instanceof Error ? error : new Error(String(error)),
+                err: toError(error),
               });
             }
           }
@@ -2302,7 +2311,7 @@ function launch(
           void reapRunProcesses({ runIds: [compactionRunId(spec.runId)] }).catch((error) => {
             logger.warn("compaction epilogue reap failed", {
               runId: spec.runId,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
           });
           if (exit.effectiveBackend === "codex") {
@@ -2321,14 +2330,14 @@ function launch(
               const post =
                 event.postTokens === null
                   ? "a summary"
-                  : `${Math.round(event.postTokens / 1000)}k tokens`;
+                  : `${wholeThousands(event.postTokens)} tokens`;
               sink.line({
                 raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion", ...event }),
                 display: {
                   t: occurredAt.slice(11, 19),
                   ev: "meta",
                   tag: "run·compacted·completion",
-                  text: `context compacted at the end of the run · ${Math.round(event.preTokens / 1000)}k → ${post}`,
+                  text: `context compacted at the end of the run · ${wholeThousands(event.preTokens)} → ${post}`,
                 },
                 facts: { compaction: { trigger: "completion", ...event } },
                 occurredAt,
@@ -2341,7 +2350,7 @@ function launch(
       } catch (error) {
         logger.error("run finalize persist failed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
       state.handles.delete(spec.runId);
@@ -2358,7 +2367,7 @@ function launch(
       } catch (error) {
         logger.error("run queue drain failed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
       // Fire a one-shot completion callback (opaque to run-service — the
@@ -2374,7 +2383,7 @@ function launch(
         } catch (error) {
           logger.error("run completion callback failed", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
           // C4: the completion effects are lost — stamp the task so it isn't
           // stuck on "agent working" with no live run until the next restart.
@@ -2591,7 +2600,7 @@ async function noteInterrupt(
   if (run.kind === "controller") return;
   const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
   if (dataRoot) ref.dataRoot = dataRoot;
-  const backend = run.backend === "claude" ? "Claude" : "Codex";
+  const backend = BACKEND_LABEL[run.backend];
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({
@@ -2619,7 +2628,7 @@ async function noteInterrupt(
     logger.error("interrupt timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -2647,7 +2656,7 @@ async function noteRunStarted(
   if (run.kind === "controller") return;
   const ref: TaskFileRef = { projectSlug: run.project_slug, taskKey: run.task_key };
   if (dataRoot) ref.dataRoot = dataRoot;
-  const backend = run.backend === "claude" ? "Claude" : "Codex";
+  const backend = BACKEND_LABEL[run.backend];
   try {
     await updateTaskFile(ref, (parsed) => {
       parsed.timeline.unshift({
@@ -2665,7 +2674,7 @@ async function noteRunStarted(
     logger.error("run-started timeline note failed", {
       runId: run.id,
       taskKey: run.task_key,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }

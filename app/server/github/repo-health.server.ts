@@ -27,6 +27,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { logger } from "~/server/logging/logger.server";
 import type { RepoAccessResult } from "./repo-access-check.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The stored payload, parsed back into the real union at the boundary.
@@ -89,7 +90,7 @@ export function recordRepoAccess(
   } catch (error) {
     logger.warn("repository health could not be recorded", {
       projectSlug,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -155,7 +156,7 @@ export function readRepoHealthMany(
     }
   } catch (error) {
     logger.warn("repository health could not be read", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   return out;

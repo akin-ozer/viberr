@@ -31,6 +31,17 @@ const TOKEN_RE = /^[A-Za-z][\w-]*/;
  * Handles that ALWAYS route, on every task, without being in a caller's list:
  * the generic role/backend handles the server resolver honours. They count as
  * "known" so `@operator` chips even where a component has no mentionables prop.
+ *
+ * This is the ONE home of the reserved @-handles; every other list is derived
+ * from it and names its difference here. agent-reply's resolver passes these
+ * as its reserved known names; mention-notify's fan-out skips them plus
+ * {@link CONTROLLER_MENTION_HANDLE}; mention-suggestions' picker labels the
+ * role handles ({@link isRoleMentionHandle}) and offers each of the
+ * {@link BACKEND_MENTION_HANDLES} per project.
+ *
+ * The base stays one literal on purpose (ruling 457): it ships in the client's
+ * mention-spans chunk, and the lists below are server-only exports the client
+ * build drops, so none of them adds a byte to that budgeted closure.
  */
 export const RESERVED_MENTION_HANDLES = [
   "operator",
@@ -38,6 +49,37 @@ export const RESERVED_MENTION_HANDLES = [
   "claude",
   "codex",
 ] as const;
+
+type ReservedMentionHandle = (typeof RESERVED_MENTION_HANDLES)[number];
+
+/**
+ * The reserved handles that name a backend (a runtime), not a role. B-AG2: a
+ * backend handle reaches a specialist only while exactly one deployed specialist
+ * runs on that backend, so the picker offers them per project, not always.
+ */
+export const BACKEND_MENTION_HANDLES = [
+  "claude",
+  "codex",
+] as const satisfies readonly ReservedMentionHandle[];
+
+/** The reserved handles that name a role and route whatever is deployed. */
+export type RoleMentionHandle = Exclude<
+  ReservedMentionHandle,
+  (typeof BACKEND_MENTION_HANDLES)[number]
+>;
+
+export function isRoleMentionHandle(
+  handle: ReservedMentionHandle,
+): handle is RoleMentionHandle {
+  return !BACKEND_MENTION_HANDLES.some((backend) => backend === handle);
+}
+
+/**
+ * The instance controller's handle (ruling 99). It is not reserved on a task
+ * (no task resolver routes it), but it never maps to a person either, so the
+ * mention fan-out skips it with the reserved handles.
+ */
+export const CONTROLLER_MENTION_HANDLE = "controller";
 
 function boundaryBefore(text: string, at: number): boolean {
   return at === 0 || /\s/.test(text[at - 1]!);

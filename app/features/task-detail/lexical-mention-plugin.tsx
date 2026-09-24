@@ -46,11 +46,11 @@ export class MentionTextNode extends TextNode {
   }
 }
 
-export function $createMentionTextNode(text = ""): MentionTextNode {
+function $createMentionTextNode(text = ""): MentionTextNode {
   return new MentionTextNode(text);
 }
 
-export function $isMentionTextNode(
+function $isMentionTextNode(
   node: LexicalNode | null | undefined,
 ): node is MentionTextNode {
   return node instanceof MentionTextNode;
@@ -94,7 +94,7 @@ export function $caretOffsetIn(paragraph: ParagraphNode): number | null {
 }
 
 /** Place a collapsed caret at absolute offset `target` within `paragraph`. */
-export function $setCaretOffsetIn(paragraph: ParagraphNode, target: number): void {
+function $setCaretOffsetIn(paragraph: ParagraphNode, target: number): void {
   let offset = 0;
   const children = paragraph.getChildren();
   for (let i = 0; i < children.length; i += 1) {

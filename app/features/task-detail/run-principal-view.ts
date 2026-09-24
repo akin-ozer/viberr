@@ -50,6 +50,9 @@ export interface TaskRunPrincipalView {
   codex: PrincipalBackendView;
 }
 
+/** The task page's copy of `BACKEND_LABEL` (shared/text/backend-label.ts),
+ *  which the execution profile reads through `backendLabelOf`: ruling 457
+ *  keeps the shared one's chunk off the task page (why: that file). */
 const BACKEND_LABEL = {
   claude: "Claude",
   codex: "Codex",

@@ -7,7 +7,8 @@ import { Icon } from "~/ui/icon";
 import { LocalCalendarDate } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
-import { ConfirmDelete, MiniModal } from "./mini-modal";
+import { ConfirmDelete } from "./confirm-delete";
+import { MiniModal } from "./mini-modal";
 import { useOrgAction, type OrgActionData } from "./use-org-action";
 
 /**
@@ -409,7 +410,7 @@ export function ConnectionsPanel({
             // binding cascade takes branch/PR sync offline for every project
             // bound to it. The old copy named only the harmless half.
             confirm.boundProjects > 0
-              ? `This deletes the credential. ${confirm.boundProjects} project${confirm.boundProjects === 1 ? "" : "s"} bound to it lose branch and PR sync until a new credential is bound. Projects keep their repo setting; new projects can no longer select ${confirm.owner}.`
+              ? `This deletes the credential. ${countLabel(confirm.boundProjects, "project")} bound to it ${confirm.boundProjects === 1 ? "loses" : "lose"} branch and PR sync until a new credential is bound. Projects keep their repo setting; new projects can no longer select ${confirm.owner}.`
               : `Projects already created from ${confirm.owner} keep their repos; new projects can no longer select it.`
           }
           onCancel={() => setConfirm(null)}

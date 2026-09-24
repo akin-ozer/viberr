@@ -11,7 +11,6 @@ import { loadEnvFile } from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { CodexClient, CodexFactory } from "./codex-runtime.server";
-import type { ClaudeQuery } from "./claude-runtime.server";
 import type { ThreadEvent } from "@openai/codex-sdk";
 import type { RunSpec } from "./adapter.server";
 import {
@@ -25,6 +24,7 @@ import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { fakeClaudeQuery } from "../../../test-support/fake-claude-query";
 
 /**
  * Guards the hermeticity of the SUITE itself (F10-10): test-support/setup-env.ts
@@ -121,14 +121,6 @@ async function withAmbientAppConfig<T>(body: () => T | Promise<T>): Promise<T> {
     }
     resetEnvCacheForTests();
   }
-}
-
-/** A Claude SDK query as the adapter consumes it. */
-function fakeClaudeQuery(...messages: unknown[]): ClaudeQuery {
-  const gen = (async function* (): AsyncGenerator<unknown, void> {
-    for (const message of messages) yield message;
-  })();
-  return Object.assign(gen, { interrupt: async () => {} });
 }
 
 describe("test-harness hermeticity", () => {

@@ -80,6 +80,22 @@ const ICON_PATHS = {
   ring: '<circle cx="12" cy="12" r="5.5"/>',
   // Ruling 366: the product's own mark, for the console chip of a Viberr tool.
   viberr: '<path d="M5 5l7 14 7-14"/>',
+  // Ruling 458(f): the glyphs the mock drew as local SVGs (kb-browser.jsx's
+  // folder and uploads, org-settings.jsx's pencil, home.jsx's pin star) join
+  // the one set, paths verbatim. A state is its own name, as in the circle
+  // family: `folderopen` for an expanded tree row, `starfilled` for a pinned
+  // project (its path carries the fill, since the <svg> paints none).
+  folder:
+    '<path d="M3.5 7a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  folderopen:
+    '<path d="M3.5 8V6.5a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2V10M3.5 8h16.2l-1.6 9a2 2 0 0 1-2 1.6H6.6a2 2 0 0 1-2-1.6z"/>',
+  folderup:
+    '<path d="M3.5 7a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 16v-5.5M9.5 12.5L12 10l2.5 2.5"/>',
+  upload: '<path d="M12 16V5M7.5 9L12 4.5 16.5 9M5 19.5h14"/>',
+  edit: '<path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z"/><path d="M13.5 7.5l3 3"/>',
+  star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>',
+  starfilled:
+    '<path fill="currentColor" d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

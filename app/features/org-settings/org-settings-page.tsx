@@ -20,8 +20,8 @@ import {
   ControllerAdminPanel,
   type ControllerGrantRequestView,
   type ControllerConfigView,
-  type ControllerSectionLocks,
 } from "./controller-admin-panel";
+import type { ControllerSectionLocks } from "~/shared/controller-locks";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**

@@ -185,7 +185,7 @@ export interface DeliveredPrParts {
 }
 
 /** The PR-body change-summary + delivery evidence rows, from live compare stats. */
-export function deliveredStatsToPrParts(
+function deliveredStatsToPrParts(
   stats: DeliveredDiffStats,
   branch: string,
   revisionHeadSha: string | null,

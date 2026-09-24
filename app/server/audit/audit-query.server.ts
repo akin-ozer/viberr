@@ -30,12 +30,12 @@ import type { DatabaseSync } from "node:sqlite";
  */
 
 /** One completed per-task reconcile pass (changed or not). */
-export const RECONCILE_TASK_AUDIT_ACTION = "github.reconcile.task";
+const RECONCILE_TASK_AUDIT_ACTION = "github.reconcile.task";
 /** One completed project-wide sweep — a HUMAN-triggered one: the poller passes
  *  `skipProjectAudit: true` (reconcile-poller.server.ts) to keep the log
  *  readable, which is why the project-level read below unions both actions
  *  instead of trusting this one alone. */
-export const RECONCILE_PROJECT_AUDIT_ACTION = "github.reconcile.project";
+const RECONCILE_PROJECT_AUDIT_ACTION = "github.reconcile.project";
 
 /** The single aggregate column both reconcile-check reads select. */
 interface ReconcileCheckRow {

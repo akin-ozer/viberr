@@ -33,7 +33,7 @@ export const DATED_CLAUDE_ID_RE = /^claude-.*\d/;
  * arm returned the bare alias and the person who picked a 1M-context model
  * ran a 200k one.
  */
-export const CLAUDE_VARIANT_SUFFIX_RE = /\[[a-z0-9]+\]$/i;
+const CLAUDE_VARIANT_SUFFIX_RE = /\[[a-z0-9]+\]$/i;
 
 /** A family alias carrying a variant suffix: `opus[1m]`, `sonnet[1m]`. */
 export const CLAUDE_ALIAS_VARIANT_RE = /^(sonnet|opus|haiku)\[[a-z0-9]+\]$/i;

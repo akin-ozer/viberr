@@ -55,6 +55,7 @@ import {
   type ThreadResumeConfig,
 } from "./codex-app-server.server";
 import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Codex adapter — the OFFICIAL Codex SDK (`@openai/codex-sdk`, verified
@@ -502,11 +503,10 @@ function codexConfigForRun(
 
 /** The idle (inactivity) timeout for a codex run in ms — the window a single
  *  turn/tool may produce no event before the run is treated as hung. Overridable
- *  via VIBERR_CODEX_IDLE_TIMEOUT_MS; defaults to 15 minutes (owner ruling A8). */
-export function codexIdleTimeoutMs(): number {
-  const raw = getEnv().VIBERR_CODEX_IDLE_TIMEOUT_MS;
-  const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
+ *  via VIBERR_CODEX_IDLE_TIMEOUT_MS; defaults to 15 minutes (owner ruling A8;
+ *  the default and the parse live in the env schema, ruling 458(j)). */
+function codexIdleTimeoutMs(): number {
+  return getEnv().VIBERR_CODEX_IDLE_TIMEOUT_MS;
 }
 
 /**
@@ -904,7 +904,7 @@ export function createCodexAdapter(
         void reapProcesses({ runIds: [spec.runId] }).catch((error) => {
           logger.warn("codex run reap failed", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         });
       };

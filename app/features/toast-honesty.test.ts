@@ -6,8 +6,9 @@ import { describe, expect, it } from "vitest";
 /**
  * D5 — the failure-toast honesty gate.
  *
- * decisions.md §UI porting rules, stated as a rule: *"A failure toast must not
- * render the success tick — pass the toast kind explicitly."* The toast icon is
+ * decisions.md §UI porting rules, stated as a rule (as ruling 458(b) rewords
+ * it): *"A failure toast must not render the success tick: a failure passes
+ * `"error"` explicitly; success is the default kind."* The toast icon is
  * the WHOLE signal (the message text is the same for both kinds; the glyph
  * and, since P13-D-10, its colour differ — `app/ui/toast.tsx`, the `.toast`
  * icon rules in app.css), so a refusal pushed with the default `"success"` kind

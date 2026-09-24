@@ -100,7 +100,7 @@ describe("projectRunsForTask grouping", () => {
     insert({ id: "run_p", threadId: "primary", agentName: "dev", agentProfileId: "dev" });
     insert({
       id: "run_c",
-      threadId: "c0",
+      threadId: "r0",
       kind: "reviewer",
       role: "Reviewer",
       backend: "codex",
@@ -111,10 +111,10 @@ describe("projectRunsForTask grouping", () => {
     const views = projectRunsForTask(db, SLUG, TASK);
     expect(views.map((v) => v.who.name)).toEqual(["Operator", "dev", "reviewer"]);
     // Order preserved by first-seen (created_at ASC).
-    expect(views.map((v) => v.id)).toEqual(["op", "primary", "c0"]);
+    expect(views.map((v) => v.id)).toEqual(["op", "primary", "r0"]);
   });
 
-  it("groups null-identity runs of the same role together (seed op/primary/c0 shape)", () => {
+  it("groups null-identity runs of the same role together (seed op/primary/r0 shape)", () => {
     // Legacy rows with NO identity still collapse per role (kind:role key).
     insert({ id: "run_p1", threadId: "primary", role: "Primary specialist", state: "finished" });
     insert({ id: "run_p2", threadId: "primary-r1", role: "Primary specialist", state: "running" });
@@ -671,7 +671,7 @@ describe("ruling 369: the cache record on the run view", () => {
       lastPromptTokens: 180_000,
       compactions: 2,
     });
-    insert({ id: "run_bare", threadId: "c0", kind: "reviewer", agentProfileId: "critic", state: "queued" });
+    insert({ id: "run_bare", threadId: "r0", kind: "reviewer", agentProfileId: "critic", state: "queued" });
     const bare = projectRunsForTask(db, SLUG, TASK).find((v) => v.serverRunId === "run_bare")!;
     expect(bare.cache).toEqual({
       writeTokens: 0,

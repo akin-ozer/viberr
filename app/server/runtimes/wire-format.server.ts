@@ -6,13 +6,16 @@ import {
   type JsonValue,
   type LogLine,
 } from "~/features/runtime/runtime-types";
+import { formatAbsoluteUTC } from "~/shared/dates/format";
+import { wholeThousands } from "~/shared/text/thousands";
+import { countLabel } from "~/shared/text/plural";
 
 /** Normalize provider wire envelopes into console lines and persisted facts. */
 
 // ------------------------------------------------------------ helpers
 
 /** `HH:MM:SS` in the local wall clock from an ISO instant (or now). */
-export function clockOf(iso?: string): string {
+function clockOf(iso?: string): string {
   const d = iso ? new Date(iso) : new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
@@ -656,10 +659,9 @@ function projectClaude(e: ClaudeEnvelope, t: string, at: string | null): Project
         const trigger = meta?.trigger || "auto";
         const pre = meta?.pre_tokens ?? null;
         const post = meta?.post_tokens ?? null;
-        const k = (n: number) => `${(n / 1000).toFixed(0)}k`;
         const sizes =
           pre !== null
-            ? ` · ${k(pre)} → ${post !== null ? k(post) : "?"} tokens`
+            ? ` · ${wholeThousands(pre)} → ${post !== null ? wholeThousands(post) : "?"} tokens`
             : "";
         return {
           display: {
@@ -849,11 +851,12 @@ function claudeCacheFacts(e: ClaudeEnvelope): NonNullable<EnvelopeFacts["cache"]
   };
 }
 
-/** An epoch-seconds instant as absolute UTC (`2026-09-03 11:50 UTC`). */
+/** An epoch-seconds instant as absolute UTC (`2026-09-03 11:50 UTC`); the raw
+ *  number when it is not a valid instant. */
 function absoluteUtc(epochSeconds: number): string {
   const d = new Date(epochSeconds * 1000);
   if (Number.isNaN(d.getTime())) return String(epochSeconds);
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  return formatAbsoluteUTC(d.toISOString());
 }
 
 /** Human-readable summary of an assistant/user content array. */
@@ -919,9 +922,9 @@ function argumentText(value: JsonValue): string {
     case "text":
       return clippedText(v.text);
     case "list":
-      return `[${v.size} item${v.size === 1 ? "" : "s"}]`;
+      return `[${countLabel(v.size, "item")}]`;
     case "record":
-      return `{${v.size} field${v.size === 1 ? "" : "s"}}`;
+      return `{${countLabel(v.size, "field")}}`;
     default:
       return v.text;
   }
@@ -1116,5 +1119,5 @@ function cleanCommand(command: string): string {
 function summarizeChanges(changes: FileChange[]): string {
   if (!changes.length) return "no changes";
   const files = changes.length;
-  return `${files} file${files === 1 ? "" : "s"} · ${changes.map((c) => c.path).join(", ")}`;
+  return `${countLabel(files, "file")} · ${changes.map((c) => c.path).join(", ")}`;
 }

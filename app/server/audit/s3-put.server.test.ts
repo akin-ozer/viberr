@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  canonicalKeyPath,
   canonicalRequestUri,
   putObjectToS3,
   sigV4Dates,
@@ -35,19 +34,16 @@ describe("sigV4Dates", () => {
   });
 });
 
-describe("canonicalKeyPath", () => {
-  it("keeps slashes as separators and percent-encodes segments", () => {
-    expect(canonicalKeyPath("audit/2026/exports/log 1.csv")).toBe(
-      "/audit/2026/exports/log%201.csv",
-    );
-    expect(canonicalKeyPath("a+b/c&d")).toBe("/a%2Bb/c%26d");
-  });
-});
-
 // F26-7: the canonical URI must include any base path the endpoint carries, or a
 // path-style S3-compatible store (MinIO/Ceph) signs a different path than it
 // receives and rejects every push with SignatureDoesNotMatch.
 describe("canonicalRequestUri", () => {
+  it("keeps the key's slashes as separators and percent-encodes its segments", () => {
+    expect(canonicalRequestUri("", "audit/2026/exports/log 1.csv")).toBe(
+      "/audit/2026/exports/log%201.csv",
+    );
+    expect(canonicalRequestUri("", "a+b/c&d")).toBe("/a%2Bb/c%26d");
+  });
   it("is just the key path for a root (virtual-hosted) endpoint", () => {
     expect(canonicalRequestUri("/", "exports/log.csv")).toBe(
       "/exports/log.csv",

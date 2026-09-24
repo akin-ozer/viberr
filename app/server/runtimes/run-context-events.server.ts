@@ -7,8 +7,10 @@ import {
   type TaskFileRef,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { wholeThousands } from "~/shared/text/thousands";
 import type { RunSpec } from "./adapter.server";
 import type { EnvelopeFacts } from "./wire-format.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Ruling 369: a context compaction is a governed fact about a run — the
@@ -21,11 +23,7 @@ import type { EnvelopeFacts } from "./wire-format.server";
  * Best-effort like the continuity notes in the run service: a task file that
  * cannot be written must never fail the line that reported the compaction.
  */
-export const RUN_COMPACTION_AUDIT_ACTION = "task.agent.compaction";
-
-function k(n: number): string {
-  return `${(n / 1000).toFixed(0)}k`;
-}
+const RUN_COMPACTION_AUDIT_ACTION = "task.agent.compaction";
 
 /** The sentence the timeline carries. */
 export function compactionNoteText(
@@ -38,7 +36,7 @@ export function compactionNoteText(
   // never "to 0k tokens", which is what a seeded placeholder used to print.
   const sizes =
     compaction.preTokens !== null
-      ? ` from ${k(compaction.preTokens)} to ${compaction.postTokens !== null ? `${k(compaction.postTokens)} tokens` : "a summary"}`
+      ? ` from ${wholeThousands(compaction.preTokens)} to ${compaction.postTokens !== null ? `${wholeThousands(compaction.postTokens)} tokens` : "a summary"}`
       : "";
   if (compaction.trigger === "completion") {
     // Ruling 376: the run is over; the summary is what the next resume replays.
@@ -110,7 +108,7 @@ export function noteRunCompaction(
       logger.error("compaction timeline note failed", {
         runId: spec.runId,
         taskKey: spec.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     });
 }

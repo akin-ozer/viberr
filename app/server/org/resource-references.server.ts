@@ -15,6 +15,7 @@ import {
   serializeAgentProfile,
 } from "~/server/files/agent-profile-file.server";
 import { logger } from "~/server/logging/logger.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Referential integrity for agent RESOURCES (P13-KM-07).
@@ -124,7 +125,7 @@ function rewriteTemplates(
         kind,
         from,
         profileId: id,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -177,7 +178,7 @@ async function rewriteProjects(
         kind,
         from,
         projectSlug: slug,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

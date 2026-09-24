@@ -5,6 +5,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { callToolText } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
 /**
@@ -75,11 +76,9 @@ let conversationId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
 
-  const { findUserByEmail, insertUser } = await import(
-    "~/server/auth/user-store.server"
-  );
+  const { insertUser } = await import("~/server/auth/user-store.server");
   const outsider = insertUser(app.db, {
     id: "u_acc_outsider_admin",
     email: "outsider-admin@viberr.test",
@@ -93,10 +92,10 @@ beforeAll(async () => {
     role: "admin",
   });
   ids = {
-    owner: findUserByEmail(app.db, "selin@viberr.dev")!.id,
-    projectAdmin: findUserByEmail(app.db, "elif@viberr.dev")!.id,
-    orgAdmin: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    nonMember: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
+    owner: userIds.selin,
+    projectAdmin: userIds.elif,
+    orgAdmin: userIds.arda,
+    nonMember: userIds.deniz,
     outsiderAdmin: outsider.id,
     mutableAdmin: mutable.id,
   };
@@ -518,14 +517,7 @@ async function callTool(
     user: { id: user.id, email: user.email, name: user.name },
     projectSlug: SLUG,
   });
-  const tool = toolkit.tools.find((t) => t.name === toolName);
-  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
-  // SAFETY: every toolkit handler is wrapped by `run`/`runWith`, which always
-  // answers the `textResult` shape: { content: [{ type: "text", text }] }.
-  const result = (await tool!.handler(args, {})) as {
-    content: { text: string }[];
-  };
-  return result.content[0]!.text;
+  return callToolText(toolkit.tools, toolName, args);
 }
 
 /** The shape `get_github_state` answers a permitted read with. */

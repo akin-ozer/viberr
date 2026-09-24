@@ -25,6 +25,7 @@ import {
   type GithubContextOptions,
 } from "./github-context.server";
 import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * Branch sync (Phase 7): task-key execution branches
@@ -154,7 +155,7 @@ export type BranchAllocation =
  * the derived name (`pr-open`, `push-workspace`, this module). The remedy that
  * used to be a human decision is now a name nobody has to think about.
  */
-export async function allocateTaskBranchName(
+async function allocateTaskBranchName(
   client: GithubClient,
   repo: string,
   taskKey: string,
@@ -385,7 +386,7 @@ export type BranchPrepareResult =
 /** Repeats of the SAME prepare failure within this window write no second
  *  line (the operator's hook runs on every delivering dispatch, and JC-1 took
  *  three attempts in four minutes); the log still says every attempt. */
-export const PREPARE_FAILURE_REPEAT_MS = 60 * 60 * 1000;
+const PREPARE_FAILURE_REPEAT_MS = 60 * 60 * 1000;
 
 /**
  * F34-3 (pass 34): the pre-dispatch hook used to be `try { … } catch {}`
@@ -412,7 +413,7 @@ export async function ensureTaskBranchBestEffort(
   } catch (error) {
     result = {
       status: "threw",
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     };
   }
   try {
@@ -420,7 +421,7 @@ export async function ensureTaskBranchBestEffort(
   } catch (error) {
     logger.warn("branch preparation failure could not be disclosed", {
       taskKey: input.taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   return result;

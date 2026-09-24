@@ -3,12 +3,14 @@ import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { listProjectMembers } from "~/server/projections/board-query.server";
+import { POLICY_ENGINE_NOTIFY_FROM } from "~/server/tasks/task-mutation.server";
 import {
   reconcileProject,
   RECONCILE_POLL_TASK_BUDGET,
   type GithubActionContext,
   type ProjectReconcileSummary,
 } from "./github-reconciler.server";
+import { toError } from "~/shared/errors";
 
 /**
  * C7 (pass-24 fix): did this pass fail for a reason the "GitHub sync failing"
@@ -38,12 +40,7 @@ export function reconcileSummaryFailed(summary: ProjectReconcileSummary): boolea
  * status" button keeps its human audit.
  */
 
-export const RECONCILE_POLL_MS = 5 * 60_000; // 5 minutes
-
-const POLICY_ENGINE_NOTIFY_FROM = {
-  kind: "system" as const,
-  name: "Policy engine",
-};
+const RECONCILE_POLL_MS = 5 * 60_000; // 5 minutes
 
 /**
  * Nudge for tasks accepted into Done whose PR is still OPEN on GitHub — the
@@ -192,7 +189,7 @@ export function noteReconcileFailure(db: DatabaseSync, slug: string): void {
   } catch (error) {
     logger.error("could not raise github-sync-failing notification", {
       projectSlug: slug,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -251,7 +248,7 @@ export async function pollGithubReconcile(
     } catch (error) {
       logger.warn("github reconcile poll failed for a project", {
         projectSlug: slug,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       // C7: after enough consecutive failures, tell the people who can fix it
       // instead of failing silently into the log forever.
@@ -265,7 +262,7 @@ export async function pollGithubReconcile(
     nudged = await nudgeMergePendingTasks(db, ctx);
   } catch (error) {
     logger.warn("merge-pending nudge failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   if (changed > 0 || nudged > 0) {
@@ -310,7 +307,7 @@ export function startGithubReconcilePoller(db: DatabaseSync): void {
   // failure (e.g. a misconfigured PAT) is diagnosable instead of silent.
   void pollGithubReconcile(db).catch((error) => {
     logger.warn("github reconcile poller boot pass failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   });
   let running = false;
@@ -320,7 +317,7 @@ export function startGithubReconcilePoller(db: DatabaseSync): void {
     void pollGithubReconcile(db)
       .catch((error) => {
         logger.warn("github reconcile poller tick failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       .finally(() => {

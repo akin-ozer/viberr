@@ -198,16 +198,14 @@ export function createGitHubClonePlan(input: {
  * how big a repository is allowed to be.
  */
 export function cloneTimeoutMs(): number {
-  // C3 (pass 31): through the validated schema, like every other tuning knob.
-  // The coercion + fallback stay here (the schema keeps these as raw strings).
+  // C3 (pass 31): through the validated schema, like every other tuning knob;
+  // ruling 458(j): the schema owns the coercion and the 15-minute default.
   // Read LAZILY like its C3 siblings (claudeIdleTimeoutMs et al.) — a
   // module-scope getEnv() call would throw at import time on an invalid env
   // (this module sits on the clone/delivery path) and would freeze the value
   // against `resetEnvCacheForTests`, making this the one knob tests could not
   // reach.
-  const raw = getEnv().VIBERR_GIT_CLONE_TIMEOUT_MS;
-  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 900_000;
+  return getEnv().VIBERR_GIT_CLONE_TIMEOUT_MS;
 }
 
 export interface CloneFailureLogDetails {

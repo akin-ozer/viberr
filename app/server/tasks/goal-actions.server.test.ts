@@ -27,14 +27,13 @@ let orgAdminId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  contributorId = findUserByEmail(app.db, "selin@viberr.dev")!.id;
-  orgAdminId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  contributorId = userIds.selin;
+  orgAdminId = userIds.arda;
 });
 afterAll(() => app.cleanup());
 
-function actorOf(userId: string, label: string) {
+function actorWith(userId: string, label: string) {
   return { userId, label };
 }
 
@@ -87,7 +86,7 @@ describe("ruling 131(c): chain-created tasks inherit the link's declared wait", 
     const goal1 = await createGoal(
       app.db,
       { projectSlug: SLUG, title: "Foundation", links: [{ title: "Base A", goal: "A. Done when merged." }, { title: "Base B", goal: "B. Done when merged.", blockedBy: ["link 1"] }] },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       ctx,
     );
     // Ruling 398: a link's task is created when its declared wait is SATISFIED,
@@ -111,7 +110,7 @@ describe("ruling 131(c): chain-created tasks inherit the link's declared wait", 
           { title: "Needs base A", goal: "D. Done when merged.", blockedBy: [`${goal1.goalId} link 1`] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       ctx,
     );
     const first = readTaskFile({ projectSlug: SLUG, taskKey: goal2.activeTaskKey!, dataRoot: app.dataRoot })!.parsed;
@@ -136,7 +135,7 @@ describe("ruling 131(c): chain-created tasks inherit the link's declared wait", 
       createGoal(
         app.db,
         { projectSlug: SLUG, title: "Backwards", links: [{ title: "L1", goal: "x", blockedBy: ["goal-999 link 1"] }] },
-        actorOf(contributorId, "selin@viberr.dev"),
+        actorWith(contributorId, "selin@viberr.dev"),
         ctx,
       ),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("goal-999 is not a goal in this project") });
@@ -167,7 +166,7 @@ describe("chained goals", () => {
           { title: "Link three", goal: "Third deliverable. Done when merged.", blockedBy: ["link 2"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     goalId = result.goalId;
@@ -222,7 +221,7 @@ describe("chained goals", () => {
     // its list and its "Waits on other work" note until the tick).
     const { createGoal, getGoalView, reconcileGoal, updateGoal } = await import("./goal-actions.server");
     const { readTaskFile } = await import("~/server/files/task-writer.server");
-    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const actor = actorWith(contributorId, "selin@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -274,7 +273,7 @@ describe("chained goals", () => {
   it("ruling 359: listGoals resolves each link's wait with its live states", async () => {
     // Canary: drop the `waits` fill in listGoals.
     const { createGoal, listGoals, reconcileGoal, updateGoal } = await import("./goal-actions.server");
-    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const actor = actorWith(contributorId, "selin@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -355,7 +354,7 @@ describe("chained goals", () => {
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: activeTask, archived: true },
-      actorOf(orgAdminId, "arda@viberr.dev"),
+      actorWith(orgAdminId, "arda@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     // The archive hook fires and forgets; drive the engine deterministically.
@@ -378,7 +377,7 @@ describe("chained goals", () => {
     const result = await updateGoal(
       app.db,
       { projectSlug: SLUG, goalId, action: { op: "retry_link", index: 2 } },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     expect(result.status).toBe("active");
@@ -401,7 +400,7 @@ describe("chained goals", () => {
           goal: "Sharper deliverable. Done when demonstrably so.",
         },
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     expect(edited.message).toContain("updated");
@@ -419,14 +418,14 @@ describe("chained goals", () => {
           blockedBy: ["link 3"],
         },
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     expect(added.message).toContain("added");
     const removed = await updateGoal(
       app.db,
       { projectSlug: SLUG, goalId, action: { op: "remove_pending_link", index: 4 } },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     expect(removed.message).toContain("3 links");
@@ -470,7 +469,7 @@ describe("chained goals", () => {
           { title: "Second", goal: "Do the second thing. Done when done.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const goalId = created.goalId;
@@ -481,7 +480,7 @@ describe("chained goals", () => {
     const cleared = await updateGoal(
       app.db,
       { projectSlug: SLUG, goalId, action: { op: "edit_link", index: 2, blockedBy: [] } },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
 
@@ -510,7 +509,7 @@ describe("chained goals", () => {
           { title: "Second", goal: "Do the second thing. Done when done.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const grownGoalId = created.goalId;
@@ -528,7 +527,7 @@ describe("chained goals", () => {
           goalId: grownGoalId,
           action: { op: "add_link", title, goal: `Do ${title}. Done when done.`, blockedBy: ["link 2"] },
         },
-        actorOf(contributorId, "selin@viberr.dev"),
+        actorWith(contributorId, "selin@viberr.dev"),
         { dataRoot: app.dataRoot },
       );
     }
@@ -577,7 +576,7 @@ describe("chained goals", () => {
     await updateGoal(
       app.db,
       { projectSlug: SLUG, goalId, action: { op: "resume" } },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const resumed = getGoalView(SLUG, goalId, { dataRoot: app.dataRoot })!;
@@ -598,7 +597,7 @@ describe("chained goals", () => {
       updateGoal(
         app.db,
         { projectSlug: SLUG, goalId, action: { op: "pause" } },
-        actorOf(contributorId, "selin@viberr.dev"),
+        actorWith(contributorId, "selin@viberr.dev"),
         { dataRoot: app.dataRoot },
       ),
     ).rejects.toThrow(/completed/);
@@ -620,13 +619,13 @@ describe("chained goals", () => {
           { title: "Sturdy link", goal: "Should still start.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: created.activeTaskKey!, archived: true },
-      actorOf(orgAdminId, "arda@viberr.dev"),
+      actorWith(orgAdminId, "arda@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
@@ -651,7 +650,7 @@ describe("chained goals", () => {
         title: "Freeze chain",
         links: [{ title: "Only link", goal: "Some deliverable." }],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
 
@@ -672,7 +671,7 @@ describe("chained goals", () => {
         updateGoal(
           app.db,
           { projectSlug: SLUG, goalId: created.goalId, action: { op: "pause" } },
-          actorOf(contributorId, "selin@viberr.dev"),
+          actorWith(contributorId, "selin@viberr.dev"),
           { dataRoot: app.dataRoot },
         ),
       ).rejects.toThrow(/archived/i);
@@ -707,7 +706,7 @@ describe("chained goals", () => {
         description,
         links: [{ title: "Only link", goal: "Some deliverable." }],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
 
@@ -740,7 +739,7 @@ describe("chained goals", () => {
           title,
           links: [{ title: `${title} step`, goal: "Some deliverable." }],
         },
-        actorOf(contributorId, "selin@viberr.dev"),
+        actorWith(contributorId, "selin@viberr.dev"),
         { dataRoot: app.dataRoot },
       );
 
@@ -773,7 +772,7 @@ describe("chained goals", () => {
         title: "Quiet chain",
         links: [{ title: "In flight", goal: "Nothing has happened yet." }],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const file = path.join(
@@ -813,7 +812,7 @@ describe("chained goals", () => {
           { title: "Follow-on work", goal: "Carries on regardless.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const firstKey = created.activeTaskKey!;
@@ -827,7 +826,7 @@ describe("chained goals", () => {
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: firstKey, archived: true },
-      actorOf(orgAdminId, "arda@viberr.dev"),
+      actorWith(orgAdminId, "arda@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
@@ -864,7 +863,7 @@ describe("chained goals", () => {
           { title: "Second", goal: "Needs the creator's authority to start.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     await closeTaskToDone(created.activeTaskKey!);
@@ -926,14 +925,14 @@ describe("chained goals", () => {
           { title: "Later link", goal: "Must not start early.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const key = created.activeTaskKey!;
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: key, archived: true },
-      actorOf(orgAdminId, "arda@viberr.dev"),
+      actorWith(orgAdminId, "arda@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
@@ -945,7 +944,7 @@ describe("chained goals", () => {
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: key, archived: false },
-      actorOf(orgAdminId, "arda@viberr.dev"),
+      actorWith(orgAdminId, "arda@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     await reconcileGoal(app.db, SLUG, created.goalId, { dataRoot: app.dataRoot });
@@ -982,7 +981,7 @@ describe("chained goals", () => {
           { title: "Contested link", goal: "Must be started exactly once.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const before = countProjectTasks();
@@ -1013,14 +1012,14 @@ describe("chained goals", () => {
         title: "Retry race chain",
         links: [{ title: "Flaky link", goal: "Fails, then is retried twice at once." }],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const failedKey = created.activeTaskKey!;
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: failedKey, archived: true },
-      actorOf(orgAdminId, "arda@viberr.dev"),
+      actorWith(orgAdminId, "arda@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const { reconcileGoal } = await import("./goal-actions.server");
@@ -1038,7 +1037,7 @@ describe("chained goals", () => {
           goalId: created.goalId,
           action: { op: "retry_link", index: 1 },
         },
-        actorOf(contributorId, "selin@viberr.dev"),
+        actorWith(contributorId, "selin@viberr.dev"),
         { dataRoot: app.dataRoot },
       );
     // The loser sees the link is no longer `failed` and refuses; whichever
@@ -1107,7 +1106,7 @@ describe("chained goals — retry re-parks when its task cannot be created", () 
           { title: "Two", goal: "Second. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     const gid = created.goalId;
@@ -1142,7 +1141,7 @@ describe("chained goals — retry re-parks when its task cannot be created", () 
       const result = await updateGoal(
         app.db,
         { projectSlug: SLUG, goalId: gid, action: { op: "retry_link", index: 2 } },
-        actorOf(contributorId, "selin@viberr.dev"),
+        actorWith(contributorId, "selin@viberr.dev"),
         { dataRoot: app.dataRoot },
       );
       // The chain must be re-parked, not left active with a failed link.
@@ -1183,7 +1182,7 @@ describe("listGoals parses stored links instead of asserting their shape", () =>
           { title: "Second", goal: "Second. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
     // SAFETY: the projection row exists (the goal was just created) and
@@ -1235,7 +1234,7 @@ describe("ruling 243: a pending link adopts an existing task", () => {
   async function chainAndTask() {
     const { createGoal } = await import("./goal-actions.server");
     const { createTask } = await import("./task-actions.server");
-    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const actor = actorWith(contributorId, "selin@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const goal = await createGoal(
       app.db,
@@ -1339,7 +1338,7 @@ describe("ruling 243: a pending link adopts an existing task", () => {
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: made.key, archived: true },
-      actorOf(orgAdminId, "arda@viberr.dev"),
+      actorWith(orgAdminId, "arda@viberr.dev"),
       ctx,
     );
     await expect(
@@ -1359,7 +1358,7 @@ describe("remove_pending_link refuses to renumber under a live reference", () =>
     // reference denotes different work, and nothing says so.
     const { createGoal, updateGoal } = await import("./goal-actions.server");
     const { createTask } = await import("./task-actions.server");
-    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const actor = actorWith(contributorId, "selin@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const goal = await createGoal(
       app.db,
@@ -1443,7 +1442,7 @@ describe("goal link indexes stay a gapless sequence", () => {
           { title: "Link three", goal: "Third deliverable. Done when merged.", blockedBy: ["link 1"] },
         ],
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
 
@@ -1461,7 +1460,7 @@ describe("goal link indexes stay a gapless sequence", () => {
           goal: "Fourth deliverable. Done when merged.",
         },
       },
-      actorOf(contributorId, "selin@viberr.dev"),
+      actorWith(contributorId, "selin@viberr.dev"),
       { dataRoot: app.dataRoot },
     );
 
@@ -1485,7 +1484,7 @@ describe("removing a link sees another goal's PENDING wait on it", () => {
     // Canary: drop the `listGoals` loop from referencesToLinksFrom and the
     // removal below succeeds instead of naming the holder.
     const { createGoal, updateGoal } = await import("./goal-actions.server");
-    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const actor = actorWith(contributorId, "selin@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
 
     const base = await createGoal(
@@ -1549,7 +1548,7 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
     const { readTaskFile } = await import("~/server/files/task-writer.server");
     const { readGoalFile } = await import("~/server/files/goal-writer.server");
-    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const actor = actorWith(contributorId, "selin@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const base = await createGoal(
       app.db,
@@ -1634,7 +1633,7 @@ describe("ruling 155: edit_link on an active link edits its wait through the tas
   it("refuses a wait on a LATER link of the same chain, and leaves the task's list alone", async () => {
     const { createGoal, updateGoal } = await import("./goal-actions.server");
     const { readTaskFile } = await import("~/server/files/task-writer.server");
-    const actor = actorOf(contributorId, "selin@viberr.dev");
+    const actor = actorWith(contributorId, "selin@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -1689,7 +1688,7 @@ describe("ruling 192: a retry carries the failed task's own contract", () => {
     );
     const { readTaskFile } = await import("~/server/files/task-writer.server");
     const { setTaskArchived, updateTaskGoal } = await import("./task-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -1757,7 +1756,7 @@ describe("ruling 192: a retry carries the failed task's own contract", () => {
   it("a FIRST start still uses the link's declared text — nothing to carry", async () => {
     const { createGoal, getGoalView } = await import("./goal-actions.server");
     const { readTaskFile } = await import("~/server/files/task-writer.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -1792,7 +1791,7 @@ describe("ruling 194: a retry that starts nothing says so", () => {
   it("re-parks, notes the link and records the decline instead of leaving a false retry", async () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
     const { updateGoalFile } = await import("~/server/files/goal-writer.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -1841,7 +1840,7 @@ describe("ruling 194: a retry that starts nothing says so", () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
     const { updateGoalFile } = await import("~/server/files/goal-writer.server");
     const { withFileLock } = await import("~/server/files/file-mutex.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -1918,7 +1917,7 @@ describe("ruling 192: getGoalView carries the task's live goal beside the declar
   it("adds `liveGoal` only when the task's goal has actually moved", async () => {
     const { createGoal, getGoalView } = await import("./goal-actions.server");
     const { updateTaskGoal } = await import("./task-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -1992,7 +1991,7 @@ describe("ruling 192: a chain can be renamed (ruling 267: a settled one too)", (
   it("renames the chain, rewrites the description, and says what a rename does NOT reach", async () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
     const { readTaskFile } = await import("~/server/files/task-writer.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -2031,7 +2030,7 @@ describe("ruling 192: a chain can be renamed (ruling 267: a settled one too)", (
 
   it("a description-only edit does not claim anything about names", async () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -2076,7 +2075,7 @@ describe("ruling 192: a chain can be renamed (ruling 267: a settled one too)", (
    */
   it("ruling 267: a CANCELLED chain can still be renamed, and nothing else about it moves", async () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -2121,7 +2120,7 @@ describe("ruling 192: a chain can be renamed (ruling 267: a settled one too)", (
 
   it("refuses an empty title and a rename that names nothing, and no-ops a rename that changes nothing", async () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -2166,7 +2165,7 @@ describe("ruling 192(b): an edit to a FAILED link outranks the text the retry wo
     );
     const { readTaskFile } = await import("~/server/files/task-writer.server");
     const { setTaskArchived, updateTaskGoal } = await import("./task-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -2231,7 +2230,7 @@ describe("ruling 192(b): an edit to a FAILED link outranks the text the retry wo
     );
     const { readTaskFile } = await import("~/server/files/task-writer.server");
     const { setTaskArchived, updateTaskGoal } = await import("./task-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -2277,7 +2276,7 @@ describe("ruling 192(b): an edit to a FAILED link outranks the text the retry wo
 describe("ruling 192 (+335): the drift split stops claiming changes that never happened", () => {
   it("a link declared with only a title is not reported as drifted", async () => {
     const { createGoal, getGoalView } = await import("./goal-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -2299,7 +2298,7 @@ describe("ruling 192 (+335): the drift split stops claiming changes that never h
 
   it("resending the current title with a new description claims no rename", async () => {
     const { createGoal, updateGoal, getGoalView } = await import("./goal-actions.server");
-    const actor = actorOf(orgAdminId, "arda@viberr.dev");
+    const actor = actorWith(orgAdminId, "arda@viberr.dev");
     const ctx = { dataRoot: app.dataRoot };
     const chain = await createGoal(
       app.db,
@@ -2346,7 +2345,7 @@ describe("ruling 192 (+335): the drift split stops claiming changes that never h
 describe("ruling 398: links start together when nothing makes them wait", () => {
   // Shares the file's one seeded app, like every describe above it.
   const ctx = () => ({ dataRoot: app.dataRoot });
-  const actor = () => actorOf(contributorId, "selin@viberr.dev");
+  const actor = () => actorWith(contributorId, "selin@viberr.dev");
 
   async function goalWith(
     title: string,
@@ -2443,7 +2442,7 @@ describe("ruling 398: links start together when nothing makes them wait", () => 
     await setTaskArchived(
       app.db,
       { projectSlug: SLUG, taskKey: first.activeTaskKey!, archived: true },
-      actorOf(orgAdminId, "arda@viberr.dev"),
+      actorWith(orgAdminId, "arda@viberr.dev"),
       ctx(),
     );
     await reconcileGoal(app.db, SLUG, second.goalId, ctx());
@@ -2471,7 +2470,7 @@ describe("ruling 398: links start together when nothing makes them wait", () => 
  */
 describe("ruling 398(c): a link may wait on any sibling except in a cycle", () => {
   const ctx = () => ({ dataRoot: app.dataRoot });
-  const actor = () => actorOf(contributorId, "selin@viberr.dev");
+  const actor = () => actorWith(contributorId, "selin@viberr.dev");
 
   /**
    * A 400 refusal whose message matches. Not `rejects.toMatchObject({

@@ -148,7 +148,7 @@ export function siblingOptionIndex(
 }
 
 /** An English list: "SHOP-3", "SHOP-3 and SHOP-9", "SHOP-3, SHOP-9 and SHOP-24". */
-export function joinKeys(keys: readonly string[]): string {
+function joinKeys(keys: readonly string[]): string {
   if (keys.length <= 1) return keys[0] ?? "";
   return `${keys.slice(0, -1).join(", ")} and ${keys[keys.length - 1]}`;
 }

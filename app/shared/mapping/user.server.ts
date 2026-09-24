@@ -12,7 +12,7 @@ export const USER_ROLES = ["admin", "member"] as const;
 /** Coerce an arbitrary stored/legacy role string to a live UserRole. Anything
  * that isn't exactly `admin` reads as `member` — this absorbs any stray legacy
  * `viewer` row without a data migration. */
-export function coerceUserRole(raw: string | null | undefined): UserRole {
+function coerceUserRole(raw: string | null | undefined): UserRole {
   return raw === "admin" ? "admin" : "member";
 }
 

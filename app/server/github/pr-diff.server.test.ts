@@ -1,9 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore } from "../../../test-support/test-store";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
-import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { readPullRequestDiff } from "./pr-diff.server";
 
@@ -16,8 +15,7 @@ afterEach(ctx.cleanup);
 const FILES_ROUTE = "GET /repos/akin-ozer/viberr/pulls/7/files";
 
 function configuredStore() {
-  const store = setupTestStore(ctx);
-  rebuildAll(store.db, { dataRoot: store.dataRoot });
+  const store = setupProjectedStore(ctx);
   const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
   const pat = createPat(
     store.db,
@@ -247,8 +245,7 @@ describe("readPullRequestDiff — the hunks, bounded, and honest about what it c
   });
 
   it("a project with no repository or no credential says which, and calls nothing", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const gh = fakeGithubFetch({});
     const noCred = await readPullRequestDiff(store.db, store.slug, 7, {
       fetchImpl: gh.fetchImpl,

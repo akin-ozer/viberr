@@ -60,7 +60,10 @@ import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/eve
 const OPEN_KEY = "viberr.dock.open";
 const SELECTED_KEY = "viberr.dock.selected";
 const WORKING_POLL_MS = 5_000;
-/** The dock's `c` value that means "start with no conversation". */
+/** The dock's `c` value that means "start with no conversation": the same
+ *  `"new"` as `NEW_CONVERSATION_PARAM` (conversation-param.ts), spelled here
+ *  because importing that leaf adds a module to the closed dock's ruling-457
+ *  budget (controller-dock-closure.perf.test.ts). */
 const NEW_THREAD = "new";
 const USER_SCOPES = [sseScopes.user()];
 
@@ -297,7 +300,8 @@ function DockShell({ context }: { context: DockContext }) {
   // status, not the whole transcript: the step line moves from it, and the
   // view is reloaded only when the status and the view disagree about whether
   // the shown turn works (it started elsewhere, or it settled).
-  const polling = working || (open && (current?.turn.working ?? false));
+  const viewSaysWorking = current?.turn.working ?? false;
+  const polling = working || (open && viewSaysWorking);
   const statusState = useRef(status.state);
   useEffect(() => {
     statusState.current = status.state;
@@ -310,7 +314,6 @@ function DockShell({ context }: { context: DockContext }) {
     return () => clearInterval(timer);
   }, [polling, loadStatus]);
   const shownLive = liveShown !== null;
-  const viewSaysWorking = current?.turn.working ?? false;
   const lastLive = useRef<{ id: string | null; live: boolean } | null>(null);
   const viewState = useRef(view.state);
   useEffect(() => {
@@ -338,10 +341,14 @@ function DockShell({ context }: { context: DockContext }) {
       pending.current = null;
       return;
     }
-    // Ruling 259: cleared HERE, and only if the box still holds exactly what
-    // went out — somebody who started typing the next message while this one
-    // was in flight keeps it.
-    setText((cur) => (cur === pending.current ? "" : cur));
+    // Ruling 259: cleared HERE, and only if the box still holds what went out —
+    // somebody who started typing the next message while this one was in
+    // flight keeps it. What went out is the TRIMMED text, so the box is
+    // compared trimmed too: a message sent with a trailing space or newline
+    // clears like any other. `sent` is read before the ref is nulled, because
+    // React may run the updater later than the line after it.
+    const sent = pending.current;
+    setText((cur) => (cur.trim() === sent ? "" : cur));
     pending.current = null;
     const key = sentUnder.current;
     // A thread the selection does not name yet (a new one, or the scope's
