@@ -318,7 +318,7 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   to 2 and 7-10 s to 4 s, $0.03-0.04 to $0.02 warm, for a turn-1 prompt of 12.9k tokens
   instead of 5.3k (cached after the first run; a cold first run pays the cache write
   once); a reviewer went from 4 turns to 3 at the same cost. The controller's
-  `viberr_controller` (51 tools, 52 when the conversation has a knowledge base and so
+  `viberr_controller` (53 tools, 54 when the conversation has a knowledge base and so
   `read_knowledge_doc`) and `viberr_ops` stay deferred: loading them (at 41 tools)
   saved a turn but tripled turn 1 (6.0k to 18.0k tokens) and quadrupled a cold turn's cost
   ($0.05 to $0.21). The controller's prompt carries a tool manifest instead (ruling 297),
@@ -1592,7 +1592,14 @@ The shipped operator doctrine (`operator.definition.md`, upgraded in place throu
 own tool, `set_dependencies`, and never a packet (ruling 131).
 
 `ensureBaseAgentsDeployed` runs at boot: the operator is ensured on every project;
-Developer and Reviewer are backfilled only into a project with **no** specialists. Profile
+Developer and Reviewer are backfilled only into a project with **no** specialists. A new
+project gets the operator, Developer and Reviewer, unless the controller's `create_project`
+passes `agents` (ruling 464): then the operator plus exactly those library deployments, each
+built by `buildLibraryDeployment` (the deploy the Agents page makes) with its `model` and
+`effort` checked before anything is written. An empty `agents` is refused, because the
+backfill above would put the base specialists back. `remove_agent_deployment` is the
+controller's door to the Agents page's Delete (`deleteAgentProfile`), which also refuses a
+profile engaged on an open task. Profile
 files use `agentProfileFrontmatterSchema` (kind, icon default `cpu`, `resources {skills,
 mcps, kb}`); the schema is `.loose()`, so an unknown key is kept and written back, and
 raises a drift warning. Deployment overrides (`project.md` `agents[]`) carry autonomy

@@ -2,9 +2,24 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
   AgentDeployment,
+  AgentDeploymentDefinition,
   ProjectFrontmatter,
   WorkflowBoundary,
 } from "~/schemas/project-file.schema";
+import {
+  buildLibraryDeployment,
+  readLibraryTemplate,
+  type DeployOverrides,
+} from "~/features/agents/agent-profile-actions.server";
+import {
+  effectiveProfileView,
+  VIEW_WITHOUT_POLICY,
+} from "~/features/agents/agents-query.server";
+import { deploymentRuntimeIdentity } from "~/server/agents/deployment-view.server";
+import {
+  assertEffortForBackend,
+  assertModelForBackend,
+} from "~/server/runtimes/model-catalog.server";
 import { withActionWatchdog } from "~/server/actions/action-watchdog.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -370,6 +385,19 @@ export interface CreateProjectInput {
    *  (the controller's `create_project` and the New project modal) set it the
    *  same way; an existing repository makes it a no-op. */
   createRepository?: CreateRepositoryRequest;
+  /** Ruling 464: the roster a controller designed. Given, the project is
+   *  written with the operator plus exactly these deployments and no base
+   *  Developer or Reviewer; absent (the New project modal), the base roster.
+   *  Every entry is checked before anything is written. */
+  agents?: RosterEntry[];
+  /** Ruling 464: the operator's own model and effort, checked the same way. */
+  operator?: DeployOverrides;
+}
+
+/** Ruling 464: one deployment of a designed roster — a global template by its
+ *  store key (as `deploy_agent` takes it), with optional model and effort. */
+export interface RosterEntry extends DeployOverrides {
+  profileId: string;
 }
 
 /** Ruling 462: how a repository created with its project is made. */
@@ -414,7 +442,21 @@ export interface CreateProjectResult {
    * null when no creation was asked for.
    */
   repoNote: string | null;
+  /** Ruling 464: every deployment written, the operator first, with the model
+   *  and effort each resolves to, so a reply can list what was deployed. */
+  agents: DeployedAgentSummary[];
 }
+
+/** One deployment a creation wrote, as its reply names it. */
+export interface DeployedAgentSummary {
+  profileId: string;
+  name: string;
+  model: string;
+  effort: string;
+}
+
+/** The system operator's profile id; every roster carries it. */
+const OPERATOR_PROFILE_ID = "operator";
 
 /** Test overrides; production leaves every key off. `createProjectFileImpl`
  *  stands in for the project.md write (F20-1 fault injection), defaulting to
@@ -497,6 +539,10 @@ async function createProjectImpl(
   // refused shape creates nothing. The template stays the default.
   const template = GOVERNED_TEMPLATE;
   const blueprint = resolveProjectBlueprint(db, input.custom, actor.userId);
+  // Ruling 464: the roster, every template and model/effort judged BEFORE the
+  // repository probe and creation below (ruling 462), so a refused roster
+  // leaves nothing on GitHub or on disk.
+  const roster = resolveRoster(input, name, ctx.dataRoot);
   const repo = `${owner}/${repoName}`;
 
   // Resolve the selected connection so we can (a) fetch the repo's real
@@ -632,7 +678,8 @@ async function createProjectImpl(
     ],
     // Preinstall the default agent roster — the operator plus the base
     // specialists it can assign — so every project can run governed agent work.
-    agents: presetAgents(input.policy, defaultAgentDeployments()),
+    // Ruling 464: a designed roster replaces the base specialists.
+    agents: presetAgents(input.policy, roster),
     credentialPolicy: null,
     // Ship the anti-noise guardrails ON — timeline compaction + chatter
     // rejection are product defaults (PRD's #1 risk), not opt-in.
@@ -682,6 +729,8 @@ async function createProjectImpl(
       policy: input.policy,
       customStages: blueprint?.stages?.length ?? 0,
       customMembers: blueprint?.members.length ?? 0,
+      // Ruling 464: which roster was written, the base one or a designed one.
+      agents: frontmatter.agents.map((a) => a.profileId),
     },
   });
 
@@ -692,7 +741,81 @@ async function createProjectImpl(
     storePath: `${getDataRoot(ctx.dataRoot)}/projects/${slug}`,
     repoWarning,
     repoNote,
+    agents: frontmatter.agents.map((a) => {
+      const view = effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY);
+      return { profileId: a.profileId, name: view.name, model: view.model, effort: view.effort };
+    }),
   };
+}
+
+/**
+ * Ruling 464 (pass 40, F40-7): the roster a project is written with. Absent
+ * `agents`, the base one (operator, Developer, Reviewer), as every project
+ * got before. Given, the operator plus exactly the listed deployments: a
+ * controller that designed six specialists used to get the generic Developer
+ * and Reviewer beside them, dispatchable, with no tool to take them off.
+ *
+ * Every entry is the deployment `deploy_agent` would write for that template
+ * (`buildLibraryDeployment`), refused by name here, before any write: an
+ * unknown or non-specialist template, a model or effort its backend does not
+ * offer, an entry listed twice, and an empty list, which boot would refill
+ * with the base specialists (`ensureBaseAgentsDeployed` backfills a project
+ * with no specialist at all).
+ */
+function resolveRoster(
+  input: CreateProjectInput,
+  projectName: string,
+  dataRoot: string | undefined,
+): AgentDeployment[] {
+  const base = defaultAgentDeployments();
+  const operator = withOperatorOverrides(
+    base.find((a) => a.profileId === OPERATOR_PROFILE_ID),
+    input.operator,
+    dataRoot,
+  );
+  const withOperator = (rest: AgentDeployment[]) => (operator ? [operator, ...rest] : rest);
+  const specialists = base.filter((a) => a.profileId !== OPERATOR_PROFILE_ID);
+  if (!input.agents) return withOperator(specialists);
+  if (input.agents.length === 0) {
+    throw AppError.validation(
+      "Name at least one agent in `agents`, or leave it out for the base Developer and Reviewer: a project with no specialist gets the base ones back at the next restart. Nothing was created.",
+    );
+  }
+  const seen = new Set<string>();
+  const designed = input.agents.map((entry) => {
+    const id = entry.profileId.trim();
+    if (seen.has(id)) {
+      throw AppError.validation(`\`${id}\` is listed twice in \`agents\`. Nothing was created.`);
+    }
+    seen.add(id);
+    const overrides: DeployOverrides = {};
+    if (entry.model !== undefined) overrides.model = entry.model;
+    if (entry.effort !== undefined) overrides.effort = entry.effort;
+    return buildLibraryDeployment(readLibraryTemplate(id, dataRoot), overrides, projectName)
+      .deployment;
+  });
+  return withOperator(designed);
+}
+
+/** The operator's deployment with ruling 464's `operator: { model?, effort? }`
+ *  applied, each judged by name against the operator's own primary backend
+ *  before anything is written. Only the fields given are written. */
+function withOperatorOverrides(
+  operator: AgentDeployment | undefined,
+  overrides: DeployOverrides | undefined,
+  dataRoot: string | undefined,
+): AgentDeployment | undefined {
+  const model = overrides?.model?.trim() ?? "";
+  const effort = overrides?.effort?.trim() ?? "";
+  if (!operator || (!model && !effort)) return operator;
+  const backend =
+    deploymentRuntimeIdentity(operator, dataRoot).backends[0] === "codex" ? "codex" : "claude";
+  if (model) assertModelForBackend(backend, model);
+  if (effort) assertEffortForBackend(backend, effort);
+  const definition: AgentDeploymentDefinition = { ...operator.definition };
+  if (model) definition.model = model;
+  if (effort) definition.effort = effort;
+  return { ...operator, definition };
 }
 
 // ------------------------------------------------- custom shape (ruling 99)

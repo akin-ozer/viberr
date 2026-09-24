@@ -188,6 +188,14 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   the required pair and is never checked at save: a fine-grained token needs
   **Administration: Read and write** for All repositories (a classic token's `repo`
   covers it), and a token without it is refused at creation with that sentence.
+  Each row says which repositories the TOKEN reaches ("Reaches 3 repositories · 1
+  private", the list one disclosure away; ruling 463), read from `GET /user/repos`
+  whenever the token is validated, and carries **Re-check**, which validates the
+  stored token again and re-reads that list. A connection saved before the read
+  existed says it has not been read yet; a failed read says why. The account's
+  public-repo count is no longer shown: it described the account, not the token.
+  The controller reads the same facts through `list_github_connections`, open to any
+  signed-in person, without token material.
 - **Users & access**: allow access by local account (temp password shown once, reset
   forced), Google account, Google domain, or GitHub handle; edit name/email; link the
   GitHub handle of a local or Google account (ruling 154: the handle whose PR approval

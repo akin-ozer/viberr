@@ -266,8 +266,8 @@ Intents behind `project.task.tsx` are explained in
 ## 3. Instance settings intents
 
 `org.settings.tsx` checks the org admin role and CSRF, then accepts, by tab:
-connections (`connection-add`, `connection-replace`, `connection-default`,
-`connection-remove`), users (`invite-local`, `invite-github`, `invite-google`,
+connections (`connection-add`, `connection-replace`, `connection-recheck`,
+`connection-default`, `connection-remove`), users (`invite-local`, `invite-github`, `invite-google`,
 `invite-domain`, `domain-remove`, `user-role`, `user-edit`, `user-disable`,
 `user-enable`, `user-remove`, `user-reset-password`), sign-in (`oauth-save`,
 `oauth-test`, `oauth-toggle`, `oauth-remove`), resources (`kb-save`, `kb-reindex`,
@@ -275,7 +275,14 @@ connections (`connection-add`, `connection-replace`, `connection-default`,
 `store-mkdir`, `store-upload`, `store-read-doc`, `store-write-doc`, `store-delete`,
 `store-import-github`), agent templates (`agent-save`, `agent-delete`), controller
 (`controller-save`), runtime (`set-concurrency`, `set-run-spend-cap`, ruling 175),
-audit (`audit-export-s3`, `s3-config-save`, `s3-config-clear`). That is 41 intents.
+audit (`audit-export-s3`, `s3-config-save`, `s3-config-clear`). That is 42 intents.
+A GitHub connection row (ruling 463) says what its token reaches: a `<details>`
+(`.conn-reach`) whose summary reads "Reaches 3 repositories · 1 private" (or "300+"
+when the read stopped at its cap) and whose body lists each repository with a quiet
+"private" pill and "read only" where the token cannot push; a failed read says "could
+not be read" with GitHub's reason, and a connection not read yet says Re-check reads
+it. The row's **Re-check** (`connection-recheck`) carries the in-flight state of
+ruling 368 ("Checking…", the `loader` spinning where `refresh` was).
 `mcp-save` carries the MCP editor's `writeTools`, a JSON array of tool names (ruling 176):
 absent keeps the stored marks, a malformed list or a name outside the MCP alphabet is
 refused. The editor's "Write tools" section lists the probe's tool names as chips and

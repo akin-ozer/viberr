@@ -869,8 +869,8 @@ describe("governed actions record audit rows (table-driven)", () => {
           const now = new Date().toISOString();
           store.db
             .prepare(
-              `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
-               VALUES (?, ?, ?, 0, 0, ?, ?)`,
+              `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+               VALUES (?, ?, ?, 0, ?, ?)`,
             )
             .run("audit-org", "audit-org", pat.id, now, now);
           let created = false;
@@ -896,6 +896,68 @@ describe("governed actions record audit rows (table-driven)", () => {
             },
             actorArda(),
             { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+          );
+        },
+      },
+      {
+        // Ruling 463: Re-check on a GitHub connection's card re-validates the
+        // stored token and re-reads what it reaches. Instance-wide.
+        name: "recheckConnection",
+        action: "org.connection.rechecked",
+        instanceWide: true,
+        run: async () => {
+          const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+          const { createConnection, recheckConnection } = await import(
+            "~/server/org/connections.server"
+          );
+          const gh = fakeGithubFetch({
+            "GET /user": { body: { login: "audit-reach" }, headers: { "x-oauth-scopes": "repo" } },
+            "GET /users/audit-reach": { body: {} },
+            "GET /user/repos": { body: [] },
+          });
+          await createConnection(
+            store.db,
+            { owner: "audit-reach", token: "ghp_auditreach00000000000000000463", userId: store.users.arda.id },
+            actorArda(),
+            { fetchImpl: gh.fetchImpl },
+          );
+          await recheckConnection(store.db, "audit-reach", actorArda(), {
+            fetchImpl: gh.fetchImpl,
+          });
+        },
+      },
+      {
+        // Ruling 464: the controller's `remove_agent_deployment` reaches the
+        // Agents page's own removal, with its reason and the open-engagement
+        // refusal, and records the page's own audit action.
+        name: "deleteAgentProfile (the controller's removal, with a reason)",
+        action: "project.agent_profile.deleted",
+        run: async () => {
+          seedDefaultAgentAssets(store.dataRoot);
+          writeFileSync(
+            path.join(store.dataRoot, "agents", "profiles", "audit-removal.md"),
+            "---\nid: audit-removal\nkind: specialist\nname: Audit Removal\nrole: Docs\nbackends:\n  - claude\nmodel: sonnet\nstages:\n  - impl\n---\n\nA probe.\n",
+            "utf8",
+          );
+          await deployAgentProfileFromLibrary(
+            store.db,
+            { projectSlug: store.slug, profileId: "audit-removal" },
+            actorArda(),
+            fileCtx,
+          );
+          const { deleteAgentProfile } = await import(
+            "~/features/agents/agent-profile-actions.server"
+          );
+          await deleteAgentProfile(
+            store.db,
+            {
+              projectSlug: store.slug,
+              profileId: "audit-removal",
+              reason: "Not in the designed roster.",
+              refuseOpenEngagements: true,
+            },
+            actorArda(),
+            fileCtx,
           );
         },
       },
@@ -965,6 +1027,10 @@ describe("governed actions record audit rows (table-driven)", () => {
         "project.agent_profile.resources_synced",
         // Ruling 462: the repository a new project is created with.
         "project.repository.created",
+        // Ruling 463: a GitHub connection belongs to the instance.
+        "org.connection.rechecked",
+        // Ruling 464: a deployment taken off a project's roster.
+        "project.agent_profile.deleted",
       ].includes(row.action);
       if (!taskless) {
         expect(

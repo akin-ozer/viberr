@@ -333,6 +333,40 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  /**
+   * Ruling 463: `reach_json` says which repositories a connection's token
+   * reaches. Every connection reader names it, so a root that predates it
+   * would fail the Instance settings card, the New project dialog and the
+   * controller's read. NULL is the truth for an existing connection ("not
+   * read yet"), and a second boot adds nothing.
+   */
+  it("adds reach_json to an older root's connections, unread, idempotently", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-connreach-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE github_connections (
+           id TEXT PRIMARY KEY, owner TEXT NOT NULL UNIQUE, pat_id TEXT NOT NULL,
+           is_default INTEGER NOT NULL DEFAULT 0, repos_count INTEGER, expires_at TEXT,
+           created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+         INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
+           VALUES ('akin-ozer', 'akin-ozer', 'pat_1', 1, 3, '2026-09-20', '2026-09-20');`,
+      );
+      ensureBaselineColumns(db);
+      ensureBaselineColumns(db);
+      // SAFETY: the SELECT names two columns; `reach_json` is nullable TEXT.
+      const rows = db
+        .prepare(`SELECT id, reach_json FROM github_connections`)
+        .all() as { id: string; reach_json: string | null }[];
+      // CANARY: drop the `github_connections` entry from BASELINE_COLUMNS and
+      // this SELECT fails with "no such column".
+      expect(rows).toEqual([{ id: "akin-ozer", reach_json: null }]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 /**

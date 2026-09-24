@@ -132,6 +132,12 @@ describe("the tool surface itself encodes the invariants", () => {
         `no tool may carry "${banned}"`,
       ).toEqual([]);
     }
+    // Ruling 464 amends "nothing deletes" by exactly one tool: taking a
+    // specialist's deployment off a project's roster edits that roster (as
+    // `update_stages op: remove` edits a board's stages); it deletes no
+    // project, task, user, template or resource. Any other removal is a new
+    // decision. CANARY: register another `remove_*` tool.
+    expect(names.filter((n) => n.startsWith("remove_"))).toEqual(["remove_agent_deployment"]);
     // The whole surface is enumerated so a new tool is a deliberate decision.
     expect(names.length).toBeGreaterThanOrEqual(25);
     // Ruling 153 (pass 35, G35-1): the wall-clock half of setting a project
@@ -1134,8 +1140,8 @@ describe("instance scope: org-role gate on every management tool", () => {
     const now = new Date().toISOString();
     app.db
       .prepare(
-        `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
-         VALUES (?, ?, ?, 0, 0, ?, ?)`,
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 0, ?, ?)`,
       )
       .run("site-owner", "site-owner", pat.id, now, now);
     let created = false;
@@ -1185,6 +1191,273 @@ describe("instance scope: org-role gate on every management tool", () => {
     expect(row.actorUserId).toBe(ids.projectAdmin);
     expect(row.actorLabel).toBe(`${user.email} · via controller`);
     expect(row.details).toEqual({ repo: "site-owner/website", private: true });
+  });
+});
+
+/**
+ * Ruling 463 (F40-6): `create_project` refuses without a GitHub connection for
+ * the repo owner, and none of the controller's tools listed connections. Live,
+ * it wrote "Creating it also needs a GitHub connection for `akin-ozer` in
+ * Instance settings, and I can't see whether that exists from here."
+ */
+describe("ruling 463: list_github_connections", () => {
+  const TOKEN = "github_pat_ctl_reach_0000000000000000000000k3ui";
+
+  it("names every connection's owner and what its token reaches, to a non-admin, with no token material", async () => {
+    // CANARY: drop the `add(` registration and the call answers "no such
+    // tool"; spread the whole record into the reply and the masked suffix and
+    // the PAT id appear; drop `reach` and the reach assertions fail.
+    const { createConnection } = await import("~/server/org/connections.server");
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { getPatValidationRateLimiter } = await import("~/server/auth/rate-limit.server");
+    getPatValidationRateLimiter().reset(ids.orgAdmin);
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "reach-owner" } },
+      "GET /users/reach-owner": { body: {} },
+      "GET /user/repos": {
+        body: [
+          { full_name: "reach-owner/website", private: true, permissions: { push: true } },
+          { full_name: "reach-owner/blog", private: false, permissions: { push: false } },
+        ],
+      },
+    });
+    const saved = await createConnection(
+      app.db,
+      { owner: "reach-owner", token: TOKEN, userId: ids.orgAdmin },
+      { userId: ids.orgAdmin, label: "arda" },
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(saved.status).toBe("saved");
+
+    // deniz: an org MEMBER with no project at all, the same person the New
+    // project dialog shows these connections to.
+    const reply = await call(ids.nonMember, "list_github_connections", {}, null);
+    expect(reply).not.toContain("[denied]");
+    expect(reply).not.toContain(TOKEN);
+    expect(reply).not.toContain("k3ui");
+    expect(reply).not.toContain("pat_");
+    const listed = z
+      .object({
+        connections: z.array(
+          z.object({
+            owner: z.string(),
+            default: z.boolean(),
+            tokenKind: z.string(),
+            validation: z.string(),
+            reach: z.object({ status: z.string() }).loose(),
+          }).loose(),
+        ),
+      })
+      .parse(JSON.parse(reply));
+    const mine = listed.connections.find((c) => c.owner === "reach-owner")!;
+    expect(mine).toMatchObject({
+      tokenKind: "fine_grained",
+      validation: "valid",
+      missingScopes: [],
+      reach: {
+        status: "read",
+        summary: "2 repositories · 1 private",
+        total: 2,
+        private: 1,
+        capped: false,
+        repos: [
+          { fullName: "reach-owner/website", private: true, canPush: true },
+          { fullName: "reach-owner/blog", private: false, canPush: false },
+        ],
+      },
+    });
+    // A connection saved before the read existed says how it gets one.
+    const unread = listed.connections.find((c) => c.owner !== "reach-owner");
+    if (unread) expect(unread.reach.status).toBe("not_read");
+  });
+
+  it("create_project's description sends the controller to list_github_connections first", async () => {
+    // CANARY: drop the sentence from the description.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.nonMember, email: "deniz@viberr.dev", name: "Deniz" },
+      projectSlug: null,
+    });
+    const create = toolkit.tools.find((t) => t.name === "create_project")!;
+    expect(create.description).toContain("call list_github_connections FIRST");
+  });
+});
+
+/**
+ * Ruling 464 (F40-7): `create_project` wrote the base roster (operator, the
+ * generic Developer with `open-review-pr` on, Reviewer) before the controller
+ * deployed the six specialists it had designed, and the controller had no tool
+ * that removes a deployment: it moved the two generic agents to Opus and asked
+ * the owner to delete them by hand, while the operator could still engage them.
+ */
+describe("ruling 464: the controller chooses a project's roster and can take an agent off", () => {
+  /** A claude specialist template in the store. */
+  function writeTemplate(id: string, name: string) {
+    writeFileSync(
+      path.join(app.dataRoot, "agents", "profiles", `${id}.md`),
+      [
+        "---",
+        `id: ${id}`,
+        "kind: specialist",
+        `name: ${name}`,
+        "role: Implementation",
+        "backends:",
+        "  - claude",
+        "model: sonnet",
+        "stages:",
+        "  - impl",
+        "resources:",
+        "  skills: []",
+        "  mcps: []",
+        "  kb: []",
+        "---",
+        "",
+        `You are the ${name}.`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+  }
+
+  it("create_project publishes `agents` and forwards it: the designed roster is written, no Developer or Reviewer, and the reply lists it", async () => {
+    // CANARY: stop copying `args.agents` onto the input and the base roster
+    // is written; drop the field from the schema and the published check fails.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const { createPat, recordPatValidation } = await import("~/server/secrets/pat-store.server");
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    writeTemplate("roster-builder", "Roster Builder");
+    const pat = createPat(
+      app.db,
+      { userId: ids.projectAdmin, label: "connection · roster-owner", token: "ghp_ctlroster000000000000000000000464" },
+      { userId: ids.projectAdmin, label: "elif" },
+    );
+    recordPatValidation(app.db, pat.id, {
+      status: "valid",
+      checkedAt: new Date().toISOString(),
+      login: "roster-owner",
+      tokenKind: "classic",
+      expiresAt: null,
+      repo: null,
+      scopes: [],
+      missingScopes: [],
+      headerScopes: ["repo"],
+      detail: "",
+    });
+    const now = new Date().toISOString();
+    app.db
+      .prepare(
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 0, ?, ?)`,
+      )
+      .run("roster-owner", "roster-owner", pat.id, now, now);
+    const gh = fakeGithubFetch({
+      "GET /repos/roster-owner/shop": { body: { default_branch: "main", permissions: { push: true } } },
+    });
+    const user = findUserById(app.db, ids.projectAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot, fetchImpl: gh.fetchImpl },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: null,
+    });
+    const schema = z
+      .object({ properties: z.object({ agents: z.object({ description: z.string() }) }) })
+      .parse((await publishedSchemas(toolkit.mcpServers.viberr_controller)).get("create_project"));
+    expect(schema.properties.agents.description).toContain("EXACTLY these deployments");
+
+    const reply = await callToolText(toolkit.tools, "create_project", {
+      name: "Roster Shop",
+      key: "RSH",
+      owner: "roster-owner",
+      repoName: "shop",
+      policy: "balanced",
+      agents: [{ profileId: "roster-builder", model: "opus" }],
+      operator: { model: "opus" },
+    });
+    expect(reply).toContain("[done] Project Roster Shop created");
+    expect(reply).toContain("Deployed: Operator (operator, opus,");
+    expect(reply).toContain("Roster Builder (roster-builder, opus,");
+    expect(reply).not.toContain("developer");
+    const agents = readProjectFile({ projectSlug: "roster-shop", dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.map((a) => a.profileId);
+    expect(agents).toEqual(["operator", "roster-builder"]);
+  });
+
+  it("remove_agent_deployment takes a specialist off under manage-agents, audits the reason, and leaves the template", async () => {
+    // CANARY: skip the removal in deleteAgentProfile and the deployment
+    // stays; drop the reason from its audit details and the row lacks it.
+    writeTemplate("removal-probe", "Removal Probe");
+    expect(await call(ids.projectAdmin, "deploy_agent", { profileId: "removal-probe" })).toContain(
+      "[done] Removal Probe deployed",
+    );
+    const reply = await call(ids.projectAdmin, "remove_agent_deployment", {
+      profileId: "removal-probe",
+      reason: "The owner designed the roster without it.",
+    });
+    expect(reply).toContain("[done] Removal Probe (removal-probe) removed from viberr-core.");
+    expect(reply).toContain("The global template is untouched.");
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const left = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.map((a) => a.profileId);
+    expect(left).not.toContain("removal-probe");
+    // The template is a global one and stays.
+    expect(
+      readFileSync(path.join(app.dataRoot, "agents", "profiles", "removal-probe.md"), "utf8"),
+    ).toContain("Removal Probe");
+    // The Agents page's own audit action, with the instrument and the reason.
+    const row = listAuditEvents(app.db, { action: "project.agent_profile.deleted" })[0]!;
+    expect(row.subjectId).toBe("removal-probe");
+    expect(row.projectSlug).toBe(SLUG);
+    expect(row.actorUserId).toBe(ids.projectAdmin);
+    expect(row.actorLabel).toContain("via controller");
+    expect(row.details).toEqual({
+      name: "Removal Probe",
+      reason: "The owner designed the roster without it.",
+    });
+  });
+
+  it("remove_agent_deployment refuses the operator by name, an engaged profile naming its tasks, and a caller without manage-agents", async () => {
+    // CANARY: drop `refuseOpenEngagements` from the tool's call and the
+    // engaged developer is removed mid-work; gate on membership only and the
+    // maintainer's call succeeds.
+    const operator = await call(ids.projectAdmin, "remove_agent_deployment", {
+      profileId: "operator",
+      reason: "Try it.",
+    });
+    expect(operator).toBe("[denied] The Operator is a system profile and can't be deleted.");
+
+    const { listAgentDeployments } = await import("~/server/projections/agent-deployments.server");
+    const engaged = listAgentDeployments(app.db, SLUG, { dataRoot: app.dataRoot }).filter(
+      (e) => e.profileId === "developer",
+    );
+    expect(engaged.length, "the demo board engages the developer on an open task").toBeGreaterThan(0);
+    const busy = await call(ids.projectAdmin, "remove_agent_deployment", {
+      profileId: "developer",
+      reason: "Replaced by the designed roster.",
+    });
+    expect(busy).toMatch(/^\[error\] Developer is the delivering agent on /);
+    for (const e of engaged) expect(busy).toContain(e.taskKey);
+    expect(busy).toContain("Nothing was removed");
+
+    writeTemplate("gate-probe", "Gate Probe");
+    await call(ids.projectAdmin, "deploy_agent", { profileId: "gate-probe" });
+    const maintainer = await call(ids.maintainer, "remove_agent_deployment", {
+      profileId: "gate-probe",
+      reason: "Not mine to remove.",
+    });
+    expect(maintainer).toMatch(/^\[denied\]/);
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const agents = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.map((a) => a.profileId);
+    expect(agents).toEqual(expect.arrayContaining(["operator", "developer", "gate-probe"]));
+    // A non-member learns nothing about the project either.
+    expect(
+      await call(ids.nonMember, "remove_agent_deployment", { profileId: "gate-probe", reason: "x" }),
+    ).toBe(`[denied] No project "${SLUG}" is visible to you.`);
   });
 });
 
@@ -2289,6 +2562,8 @@ describe("task anchoring (ruling 121)", () => {
     });
     const names = toolkit.tools.map((t) => t.name);
     expect(names).toContain("update_task");
+    // Ruling 464: `remove_agent_deployment` edits a project's roster and is the
+    // one amendment to "no tool deletes an entity"; it removes no task.
     expect(names.some((n) => /delete|remove_task|merge|accept|force|resolve_packet/.test(n))).toBe(false);
   });
 });
@@ -2408,6 +2683,11 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     expect(def.description).not.toContain("No removal exists here");
     expect(def.description).toContain("Agents page");
     expect(def.description).toContain("Operator is a system profile");
+    // Ruling 464: the toolkit now holds the removal itself, and the sentence
+    // names it instead of sending the person to do it by hand. CANARY:
+    // restore "This toolkit does not remove a deployment".
+    expect(def.description).toContain("remove_agent_deployment takes a deployment off again");
+    expect(def.description).not.toContain("This toolkit does not remove a deployment");
   });
 
   it("ruling 264: deploy_agent reports the delivery the template actually carries", async () => {
