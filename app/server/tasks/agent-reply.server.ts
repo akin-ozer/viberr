@@ -23,7 +23,7 @@ import {
 } from "./specialist-run.server";
 import { resolveOperatorAuthority } from "./operator-actions.server";
 import type { TaskMutationContext } from "./task-actions.server";
-import { extractMentions } from "~/ui/mention-spans";
+import { extractMentions, RESERVED_MENTION_HANDLES } from "~/ui/mention-spans";
 
 /**
  * Agent-mention resolution + reply-text extraction for the
@@ -93,10 +93,6 @@ export function agentMentionHandle(agent: {
   const name = (agent.name ?? "").trim();
   return (name || id).toLowerCase();
 }
-
-/** The generic role/backend handles the resolver honours (mirrors
- *  mention-suggestions' RESERVED_ROLES and mention-notify's RESERVED_HANDLES). */
-const RESERVED_AGENT_HANDLES = ["operator", "agent", "claude", "codex"];
 
 // ------------------------------------------------------- resolved shape
 
@@ -188,7 +184,7 @@ export function ambiguousBackendHandle(
   const handles = new Set(
     mentionHandles(text, [
       ...specialists.flatMap(specialistHandles),
-      ...RESERVED_AGENT_HANDLES,
+      ...RESERVED_MENTION_HANDLES,
     ]),
   );
   if (handles.size === 0) return null;
@@ -362,7 +358,7 @@ export function unreachedAgents(
   const specialists = listDeployedSpecialists(projectSlug, ctx);
   const handles = mentionHandles(text, [
     ...specialists.flatMap(specialistHandles),
-    ...RESERVED_AGENT_HANDLES,
+    ...RESERVED_MENTION_HANDLES,
   ]);
   if (handles.length === 0) return empty;
   const handleSet = new Set(handles);
@@ -471,7 +467,7 @@ export function resolveMentionedAgent(
   // matches whole (P13-LV-11).
   const handles = mentionHandles(text, [
     ...specialists.flatMap(specialistHandles),
-    ...RESERVED_AGENT_HANDLES,
+    ...RESERVED_MENTION_HANDLES,
   ]);
   if (handles.length === 0) return null;
   const handleSet = new Set(handles);

@@ -8,7 +8,12 @@ import { resolveTaskFilePath, updateTaskFile } from "~/server/files/task-writer.
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import type { ActorRender } from "~/shared/mapping/actor.server";
-import { extractMentions, findMentionSpans } from "~/ui/mention-spans";
+import {
+  CONTROLLER_MENTION_HANDLE,
+  extractMentions,
+  findMentionSpans,
+  RESERVED_MENTION_HANDLES,
+} from "~/ui/mention-spans";
 
 /**
  * @mention → `mention`-notification fan-out, shared by EVERY comment writer
@@ -57,9 +62,13 @@ import { extractMentions, findMentionSpans } from "~/ui/mention-spans";
  * makes the handle ambiguous (guessing stays worse than a visible non-delivery).
  */
 
-/** Handles that route to agents, never to a person named e.g. "Claude". */
-// "controller" (ruling 99): the instance controller's handle never maps to a human.
-export const RESERVED_HANDLES = new Set(["agent", "operator", "codex", "claude", "controller"]);
+/** Handles that route to agents, never to a person named e.g. "Claude": the
+ *  reserved handles (their one home is ~/ui/mention-spans) plus the instance
+ *  controller's, which never maps to a human either (ruling 99). */
+export const RESERVED_HANDLES = new Set<string>([
+  ...RESERVED_MENTION_HANDLES,
+  CONTROLLER_MENTION_HANDLE,
+]);
 
 /** Cap the quoted comment inside the notification text — an agent reply can be
  *  a full report; the inbox row needs the gist, the timeline has the rest. */

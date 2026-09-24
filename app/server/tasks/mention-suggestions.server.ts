@@ -4,6 +4,12 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { listDeployedSpecialists } from "./specialist-run.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import {
+  BACKEND_MENTION_HANDLES,
+  isRoleMentionHandle,
+  RESERVED_MENTION_HANDLES,
+  type RoleMentionHandle,
+} from "~/ui/mention-spans";
 
 /**
  * Mentionable directory for the task-comment composer's @-autocomplete.
@@ -57,18 +63,23 @@ export interface Mentionables {
   reserved: MentionableReserved[];
 }
 
-/** The role handles that route regardless of what is deployed. Mirrors
- *  mention-notify.server.ts `RESERVED_HANDLES`; the backend handles are appended
- *  per project by `backendHandles` below. */
-const RESERVED_ROLES: MentionableReserved[] = [
-  { handle: "operator", label: "Operator" },
+/** The picker's label for each role handle. */
+const ROLE_LABEL = {
+  operator: "Operator",
   // F19-12: the picker subline is rendered copy, so it uses the SHIPPED
   // vocabulary — "delivering agent" (execution-profile.tsx's "Assign delivering
   // agent" / "Delivering agent" header). "Primary specialist" is retired
   // vocabulary (D9/Q17-5, INTENT §6.5): the model is `engagements[]` with one
   // `delivers: true`, and `@agent` resolves to exactly that engagement.
-  { handle: "agent", label: "Delivering agent" },
-];
+  agent: "Delivering agent",
+} satisfies Record<RoleMentionHandle, string>;
+
+/** The role handles that route regardless of what is deployed: the reserved
+ *  handles (their one home is ~/ui/mention-spans) minus the backend handles,
+ *  which `backendHandles` below appends per project. */
+const RESERVED_ROLES: MentionableReserved[] = RESERVED_MENTION_HANDLES.filter(
+  isRoleMentionHandle,
+).map((handle) => ({ handle, label: ROLE_LABEL[handle] }));
 
 /**
  * The backend handles this project can still be tagged by, with the profile
@@ -86,7 +97,7 @@ function backendHandles(
   specialists: readonly { name: string; backend: RealBackend }[],
 ): MentionableReserved[] {
   const out: MentionableReserved[] = [];
-  for (const backend of ["claude", "codex"] as const) {
+  for (const backend of BACKEND_MENTION_HANDLES) {
     const covered = specialists.filter((sp) => sp.backend === backend);
     if (covered.length > 1) continue;
     out.push({

@@ -1232,9 +1232,11 @@ write grant.
 Comments addressed to agents route by handle (`agent-reply.server.ts`): `@operator` →
 `@agent` (the deliverer) → a named specialist (name or id) → a single backend
 candidate; an ambiguous backend handle routes to nobody. Reserved handles: `operator`,
-`agent`, `claude`, `codex`. The resumed session is the latest run matching profile,
-kind and backend that is not marked session-missing; the reply preview is capped at
-1 200 chars and workspace paths are normalised.
+`agent`, `claude`, `codex`, whose one home is `RESERVED_MENTION_HANDLES`
+(`app/ui/mention-spans.ts`); the mention fan-out also skips `controller` (ruling 99). The
+resumed session is the latest run matching profile, kind and backend that is not marked
+session-missing; the reply preview is capped at 1 200 chars and workspace paths are
+normalised.
 
 ### 4.5 Scheduled runs
 

@@ -20,6 +20,7 @@ import {
   mentionNonDeliveryNote,
   nonMemberMentionNote,
   notifyMentionedUsers,
+  RESERVED_HANDLES,
   resolveMentionTargets,
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
@@ -106,6 +107,23 @@ describe("notifyMentionedUsers", () => {
       }),
     ).toEqual([]);
     expect(notificationRows(store)).toHaveLength(0);
+  });
+
+  it("skips exactly the reserved handles plus the controller's (ruling 99)", () => {
+    // Derived from the one home in ~/ui/mention-spans; this pins its members.
+    expect([...RESERVED_HANDLES].sort()).toEqual([
+      "agent",
+      "claude",
+      "codex",
+      "controller",
+      "operator",
+    ]);
+    // A person whose handles spell a reserved word is still never the target.
+    const users = [
+      { id: "u_ctl", email: "controller@viberr.test", name: "Controller" },
+      { id: "u_cla", email: "claude@viberr.test", name: "Claude" },
+    ];
+    expect(resolveMentionTargets(users, "@controller @claude look").userIds).toEqual([]);
   });
 
   it("never notifies the excluded author, and skips disabled users", () => {

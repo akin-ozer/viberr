@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { findMentionSpans } from "./mention-spans";
+import {
+  BACKEND_MENTION_HANDLES,
+  CONTROLLER_MENTION_HANDLE,
+  findMentionSpans,
+  isRoleMentionHandle,
+  RESERVED_MENTION_HANDLES,
+} from "./mention-spans";
 
 /** Slice each span's text out for readable assertions. */
 function spans(text: string, names: string[]): string[] {
@@ -41,5 +47,29 @@ describe("findMentionSpans", () => {
       "@Arda Kaya",
       "@dev",
     ]);
+  });
+});
+
+describe("the reserved handles (one home)", () => {
+  it("pins the base and every difference the derived lists name", () => {
+    // The base: the known names here and agent-reply's resolver, in this order.
+    expect(RESERVED_MENTION_HANDLES).toEqual(["operator", "agent", "claude", "codex"]);
+    // mention-suggestions: the role handles it labels, in this order…
+    expect(RESERVED_MENTION_HANDLES.filter(isRoleMentionHandle)).toEqual([
+      "operator",
+      "agent",
+    ]);
+    // …then the backend handles it offers per project (B-AG2), in this order.
+    expect(BACKEND_MENTION_HANDLES).toEqual(["claude", "codex"]);
+    // mention-notify: the base plus the controller's handle (ruling 99), which
+    // is not reserved on a task.
+    expect(CONTROLLER_MENTION_HANDLE).toBe("controller");
+    expect(RESERVED_MENTION_HANDLES).not.toContain(CONTROLLER_MENTION_HANDLE);
+  });
+
+  it("treats every reserved handle as known, and the controller's as a plain token", () => {
+    const known = (text: string) => findMentionSpans(text, []).map((s) => s.known);
+    expect(known("@operator @agent @claude @codex")).toEqual([true, true, true, true]);
+    expect(known("@controller")).toEqual([false]);
   });
 });
