@@ -56,17 +56,16 @@ let kbId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { seedDefaultAgentAssets } = await import(
     "~/server/seed/default-assets.server"
   );
   seedDefaultAgentAssets(app.dataRoot);
 
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ids = {
-    orgAdmin: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    projectAdmin: findUserByEmail(app.db, "elif@viberr.dev")!.id,
-    nonMember: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
+    orgAdmin: userIds.arda,
+    projectAdmin: userIds.elif,
+    nonMember: userIds.deniz,
   };
 
   // One project run and one controller turn, each with a readable log: the two

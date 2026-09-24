@@ -96,6 +96,23 @@ describe("demo fixture", () => {
     expect(count(`SELECT count(*) AS c FROM notifications`)).toBe(10);
   });
 
+  it("returns each seeded user's id by handle, the same ids on a re-seed", async () => {
+    // The route suites act as these ids instead of looking each user up by
+    // email, so they must be the ids the users table holds.
+    const db = ctx.makeDb();
+    const dataRoot = ctx.makeTempDir();
+    const first = await runDemoSeed(db, { dataRoot });
+    const byEmail = Object.fromEntries(
+      ["arda", "elif", "murat", "selin", "deniz"].map((handle) => [
+        handle,
+        findUserByEmail(db, `${handle}@viberr.dev`)!.id,
+      ]),
+    );
+    expect(first.userIds).toEqual(byEmail);
+    const again = await runDemoSeed(db, { dataRoot });
+    expect(again.userIds).toEqual(byEmail);
+  });
+
   it("seeds users with compliant passwords + mock avatar tones", async () => {
     const { db } = await seed();
     const arda = findUserByEmail(db, "arda@viberr.dev");

@@ -70,6 +70,9 @@ export interface DemoSeedSummary {
   notifications: number;
   agentProfiles: number;
   rescanChanged: number;
+  /** Each seeded user's id by handle, so a test acts as arda & co without
+   *  looking them up by email again. */
+  userIds: SeedUserIds;
 }
 
 async function upsertUsers(
@@ -287,7 +290,7 @@ export async function runDemoSeed(
     },
   });
 
-  const summary: DemoSeedSummary = {
+  const counts = {
     users: SEED_PEOPLE.length,
     projects: projects.length,
     tasks: tasks.length + stubTasks.length,
@@ -296,6 +299,6 @@ export async function runDemoSeed(
     agentProfiles: SEED_AGENT_PROFILES.length,
     rescanChanged: rescan.changed,
   };
-  logger.info("demo seed complete (test fixture)", { ...summary });
-  return summary;
+  logger.info("demo seed complete (test fixture)", counts);
+  return { ...counts, userIds: ids };
 }

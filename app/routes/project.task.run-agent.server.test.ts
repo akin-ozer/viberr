@@ -24,12 +24,10 @@ const PATTERN = "/projects/:slug/tasks/:key";
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  arda = findUserByEmail(app.db, "arda@viberr.dev")!.id;
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  arda = userIds.arda;
   // VIB-151 is Selin's task and a run bills the OWNER's accounts (ruling 127).
-  const selin = findUserByEmail(app.db, "selin@viberr.dev")!.id;
-  for (const userId of [arda, selin]) {
+  for (const userId of [arda, userIds.selin]) {
     await connectFakeBackend(app.db, userId, "codex");
     await connectFakeBackend(app.db, userId, "claude");
   }

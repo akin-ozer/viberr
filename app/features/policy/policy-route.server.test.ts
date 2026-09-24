@@ -5,6 +5,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type {
   loader as policyLoader,
@@ -22,15 +23,11 @@ import { PROJECT_ROLES } from "~/shared/rbac";
  */
 
 let app: AppTestContext;
-let ids: SeededUserIds;
-
-/** The seeded humans every request in this file is issued as. */
-interface SeededUserIds {
-  arda: string;
-  elif: string;
-  murat: string;
-  selin: string;
-}
+/**
+ * The seeded humans every request in this file is issued as: arda and elif
+ * are project admins, murat a maintainer, selin a contributor.
+ */
+let ids: SeedUserIds;
 
 type PolicyLoaderData = Awaited<ReturnType<typeof policyLoader>>;
 type PolicyActionData = Awaited<ReturnType<typeof policyAction>>;
@@ -59,14 +56,7 @@ interface PolicyRefusal {
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id, // project admin
-    elif: findUserByEmail(app.db, "elif@viberr.dev")!.id, // project admin
-    murat: findUserByEmail(app.db, "murat@viberr.dev")!.id, // maintainer
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // contributor
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 });
 afterAll(() => app.cleanup());
 

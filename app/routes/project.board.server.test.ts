@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import type { SeedUserIds } from "../../test-support/demo-data";
 
 /**
  * Route-level guard tests for /projects/:slug/board's action.
@@ -18,26 +19,17 @@ import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
  * not a secret from its own members.
  */
 
-/** The seeded people these cases POST as. */
-interface SeededUserIds {
-  arda: string;
-  selin: string;
-  deniz: string;
-}
-
 let app: AppTestContext;
-let ids: SeededUserIds;
+/**
+ * The seeded people these cases POST as: arda is project admin, selin a
+ * contributor, deniz a non-member.
+ */
+let ids: SeedUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id, // project admin
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // contributor
-    deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id, // non-member
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 });
 afterAll(() => app.cleanup());
 

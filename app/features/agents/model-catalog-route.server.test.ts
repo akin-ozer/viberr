@@ -29,9 +29,8 @@ let ardaId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  ardaId = userIds.arda;
   // Ruling 127: the enhanced probe needs the VIEWER's own Claude credential,
   // and the demo seed connects nobody — so the route takes the curated path by
   // construction and never spawns a live supportedModels() query. That is the

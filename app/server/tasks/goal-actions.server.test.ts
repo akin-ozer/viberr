@@ -27,10 +27,9 @@ let orgAdminId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  contributorId = findUserByEmail(app.db, "selin@viberr.dev")!.id;
-  orgAdminId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  contributorId = userIds.selin;
+  orgAdminId = userIds.arda;
 });
 afterAll(() => app.cleanup());
 

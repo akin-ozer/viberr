@@ -3,6 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
+import type { SeedUserIds } from "../../test-support/demo-data";
 import type { action as taskAction } from "~/routes/project.task";
 import type { action as policyAction } from "~/routes/project.policy";
 
@@ -18,13 +19,8 @@ import type { action as policyAction } from "~/routes/project.policy";
  */
 
 let app: AppTestContext;
-let ids: SeededUserIds;
-
 /** The seeded humans every request in this file is issued as. */
-interface SeededUserIds {
-  arda: string;
-  deniz: string;
-}
+let ids: SeedUserIds;
 
 /** What either gated action resolves to; each case narrows to the arm it drives. */
 type GatedActionData =
@@ -44,12 +40,7 @@ type GatedRouteModule = {
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 });
 afterAll(() => app.cleanup());
 

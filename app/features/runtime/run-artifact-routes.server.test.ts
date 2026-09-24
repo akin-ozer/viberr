@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 
 /**
  * F10-06 / F10-33 — authorization for the two RAW RUN ARTIFACT routes.
@@ -17,29 +18,20 @@ import { setupAppTest, type AppTestContext } from "../../../test-support/test-ap
  * checked per RUN (the run's own project), not per caller.
  */
 
-/** The seeded people these cases call the artifact routes as. */
-interface SeededUserIds {
-  arda: string;
-  deniz: string;
-}
-
 let app: AppTestContext;
-let ids: SeededUserIds;
+/**
+ * The seeded people these cases call the artifact routes as: arda is project
+ * admin on viberr-core; deniz is registered, but a member of NO project — the
+ * exact F10-06/33 subject.
+ */
+let ids: SeedUserIds;
 
 const RUN_ID = "run_authfixture";
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    // Project admin on viberr-core.
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    // Registered, but a member of NO project — the exact F10-06/33 subject.
-    deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 
   // The demo seed deliberately fabricates no runs (R7-2), so plant one.
   const { upsertRun } = await import("~/server/runtimes/run-store.server");

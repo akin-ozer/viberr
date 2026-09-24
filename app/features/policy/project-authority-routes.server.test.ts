@@ -53,10 +53,8 @@ const UNKNOWN_SLUG_404 = `No project at projects/${SLUG}.`;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail, insertUser } = await import(
-    "~/server/auth/user-store.server"
-  );
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { insertUser } = await import("~/server/auth/user-store.server");
   // A fresh ORG admin who is a member of nothing — the D2 override subject. A
   // dedicated user (rather than promoting a seeded one) keeps the override
   // audit's 60s per-(actor, project, what) collapse from making this file's
@@ -68,8 +66,8 @@ beforeAll(async () => {
     role: "admin",
   });
   ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
+    arda: userIds.arda,
+    deniz: userIds.deniz,
     orgAdmin: orgAdmin.id,
   };
 });

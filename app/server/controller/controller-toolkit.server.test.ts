@@ -51,14 +51,12 @@ let ids: Actors;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { seedDefaultAgentAssets } = await import(
     "~/server/seed/default-assets.server"
   );
   seedDefaultAgentAssets(app.dataRoot);
-  const { findUserByEmail, insertUser } = await import(
-    "~/server/auth/user-store.server"
-  );
+  const { insertUser } = await import("~/server/auth/user-store.server");
   const viewer = insertUser(app.db, {
     id: "u_ctl_viewer",
     email: "viewer@viberr.test",
@@ -80,11 +78,11 @@ beforeAll(async () => {
   const { rebuildProject } = await import("~/server/projections/rebuilder.server");
   rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
   ids = {
-    orgAdmin: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    projectAdmin: findUserByEmail(app.db, "elif@viberr.dev")!.id,
-    maintainer: findUserByEmail(app.db, "murat@viberr.dev")!.id,
-    contributor: findUserByEmail(app.db, "selin@viberr.dev")!.id,
-    nonMember: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
+    orgAdmin: userIds.arda,
+    projectAdmin: userIds.elif,
+    maintainer: userIds.murat,
+    contributor: userIds.selin,
+    nonMember: userIds.deniz,
     viewer: viewer.id,
     orgAdminOutsider: outsider.id,
   };

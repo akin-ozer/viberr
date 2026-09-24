@@ -7,6 +7,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 
 /**
@@ -19,26 +20,16 @@ import { fakeGithubFetch } from "../../../test-support/fake-github";
 
 let app: AppTestContext;
 
-/** The seeded users these cases act as. */
-interface SeededUserIds {
-  arda: string;
-  murat: string;
-  selin: string;
-  deniz: string;
-}
-let ids: SeededUserIds;
+/**
+ * The seeded users these cases act as: arda, murat (project maintainer), selin
+ * (project contributor) and deniz (NOT a member).
+ */
+let ids: SeedUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    murat: findUserByEmail(app.db, "murat@viberr.dev")!.id, // project maintainer
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // project contributor
-    deniz: findUserByEmail(app.db, "deniz@viberr.dev")!.id, // NOT a member
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 });
 afterAll(() => app.cleanup());
 

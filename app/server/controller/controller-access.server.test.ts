@@ -76,11 +76,9 @@ let conversationId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
 
-  const { findUserByEmail, insertUser } = await import(
-    "~/server/auth/user-store.server"
-  );
+  const { insertUser } = await import("~/server/auth/user-store.server");
   const outsider = insertUser(app.db, {
     id: "u_acc_outsider_admin",
     email: "outsider-admin@viberr.test",
@@ -94,10 +92,10 @@ beforeAll(async () => {
     role: "admin",
   });
   ids = {
-    owner: findUserByEmail(app.db, "selin@viberr.dev")!.id,
-    projectAdmin: findUserByEmail(app.db, "elif@viberr.dev")!.id,
-    orgAdmin: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    nonMember: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
+    owner: userIds.selin,
+    projectAdmin: userIds.elif,
+    orgAdmin: userIds.arda,
+    nonMember: userIds.deniz,
     outsiderAdmin: outsider.id,
     mutableAdmin: mutable.id,
   };

@@ -23,11 +23,10 @@ let orgAdminId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ownerId = findUserByEmail(app.db, "selin@viberr.dev")!.id;
-  otherMemberId = findUserByEmail(app.db, "murat@viberr.dev")!.id;
-  orgAdminId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  ownerId = userIds.selin;
+  otherMemberId = userIds.murat;
+  orgAdminId = userIds.arda;
   // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
   // the conversation owner has to have connected Claude for any turn in this
   // file to start. The refusal case disconnects him deliberately.

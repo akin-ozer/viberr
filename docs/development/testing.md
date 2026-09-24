@@ -94,7 +94,7 @@ seeds synthetic ones and `compose.e2e.yml` carries its own.
 | `fake-runtime.ts` | `installFakeRuntime()`, `queueFakeRun({ lines, extraFacts, backend, occurredAt, sessionId, keepRunning, outcome, gate })`, `startedRunSpecs()`, `lastRunSpec()`; completion compaction (ruling 376): `queueFakeCompaction(backend, outcome, onCompact?)`, `compactedRunSpecs()` |
 | `fake-github.ts` | `fakeGithubFetch({ "GET /user": spec \| fn })` → `{ fetchImpl, calls, callsTo }`; unmatched → 404; `unreachableFetch()`; `unreadableResponse()` → a 200 whose headers throw on read (a throw from inside a GitHub pass) |
 | `git-origin.ts` | a local GitHub stand-in for the real git paths: `createLocalOrigin(origins, { repo, files?, empty? })` → a bare repo with `advance()` (one more commit on `main`); `withLocalGithub(root, work)` rewrites `https://github.com/` to it through a temp `GIT_CONFIG_GLOBAL`; `gitOut(cwd, args)` and its sync twin `gitOutSync(cwd, args)` (runs git in `cwd`, stderr piped) → trimmed stdout |
-| `demo-seed.ts`, `demo-data.ts`, `custom-board.ts` | the demo fixture: `runDemoSeed(db, { dataRoot, reset?, adminPassword? })` (arda, elif, murat, selin, deniz, each signing in with `SEED_DEFAULT_PASSWORD` from `app/server/seed/seed-credentials.ts` unless `adminPassword` sets arda's; `viberr-core` plus the stub projects `deploy-pipeline` and `billing-service`; twelve tasks, VIB-139…168 with full timelines plus DEP-31 and BIL-9; Arda's inbox, the VIB-142 scope violation, Arda's Home pins; the demo Developer stays Codex-backed); `CUSTOM_3_STAGE_BOARD` (`todo` / `doing` / `done`) |
+| `demo-seed.ts`, `demo-data.ts`, `custom-board.ts` | the demo fixture: `runDemoSeed(db, { dataRoot, reset?, adminPassword? })` (arda, elif, murat, selin, deniz, each signing in with `SEED_DEFAULT_PASSWORD` from `app/server/seed/seed-credentials.ts` unless `adminPassword` sets arda's; `viberr-core` plus the stub projects `deploy-pipeline` and `billing-service`; twelve tasks, VIB-139…168 with full timelines plus DEP-31 and BIL-9; Arda's inbox, the VIB-142 scope violation, Arda's Home pins; the demo Developer stays Codex-backed) → the counts plus `userIds`, each seeded user's id by handle, so a test signs in as one without looking it up by email; `CUSTOM_3_STAGE_BOARD` (`todo` / `doing` / `done`) |
 | `backend-credentials.ts` | `connectFakeBackend(db, userId, backend)`, `connectFakeBackends(db, userId)`, `disconnectFakeBackend(db, userId, backend)`, `fakeBackendSecret(backend)` |
 | `fake-vendor-binary.ts` | `writeFakeVendorBinaries()` → executable `claude` / `codex` stand-ins (mode 0o755) for `deps.binaries`, with `cleanup()`; `setFakeVendorMode("success" \| "fail" \| "hang")`, `setFakeVendorLoggedOut()`, `setFakeVendorLogoutExit()`, `resetFakeVendorEnv()`; the evidence readers `fakeVendorEnv/Argv/Stdin/Terminated/Logout(home)`; `FAKE_DEVICE_CODE`, `FAKE_CLAUDE_URL`, `FAKE_CODEX_URL`, `ANSI_ESCAPE` |
 | `mcp-tool-meta.ts` | reads a mounted in-process MCP server the way a model sees it: `toolLoading(server)` (tools loaded up front vs deferred to ToolSearch), `publishedSchemas(server)` (the JSON Schema through a real MCP client, ruling 296), `publishedInstructions(server)` (ruling 297); `callToolText(tools, toolName, args)` calls one controller tool (`viberr_controller` or `viberr_ops`) by name on a toolkit the test built as its asker and returns the text reply |
@@ -114,9 +114,9 @@ takes the React Router 8 argument shape, including `url`, `pattern` and a
 ```ts
 const ctx = await setupAppTest();
 const { runDemoSeed } = await import("../../test-support/demo-seed");
-await runDemoSeed(ctx.db, { dataRoot: ctx.dataRoot });
+const { userIds } = await runDemoSeed(ctx.db, { dataRoot: ctx.dataRoot });
 const { action } = await import("~/routes/project.board");
-const { cookie, sessionId } = await ctx.cookieFor(userId);
+const { cookie, sessionId } = await ctx.cookieFor(userIds.arda);
 const request = ctx.request("/projects/viberr-core/board", {
   method: "POST",
   cookie,
