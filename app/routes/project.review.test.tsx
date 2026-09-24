@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import { createRoutesStub, Outlet } from "react-router";
+import { createRoutesStub } from "react-router";
 import type { Route } from "./+types/project.review";
 import ReviewView from "./project.review";
 
 /**
  * Interface review 2026-09-24 (writ-3): the queue's "waiting on you" is the
- * board's own flag. The route reads it from the workspace layout's loader
- * data (`routes/project`, which annotates every task with `waitingOnMe`), so
- * the queue and the board cannot disagree about the same task.
+ * board's own answer. Both loaders call `waitingOnViewer` (decisions.server.ts;
+ * ruling 457 took the board's columns out of the workspace layout), and the
+ * review loader ships the keys as `waitingOnMe`, so the queue and the board
+ * cannot disagree about the same task.
  */
 
 afterEach(cleanup);
@@ -44,30 +45,17 @@ const LOADER_DATA: Route.ComponentProps["loaderData"] = {
   total: 3,
   stageNames: { review: "Review", terminal: "Done" },
   acceptance: { operatorCanAccept: false, operatorName: "Operator" },
+  waitingOnMe: [],
 };
 
-/** The slice of the workspace layout's loader data `ReviewView` reads. */
-interface LayoutSlice {
-  board: {
-    columns: { tasks: { key: string; waitingOnMe: boolean }[] }[];
-    orphanTasks: { key: string; waitingOnMe: boolean }[];
-  };
-}
-
-function renderReview(layout: LayoutSlice | null) {
-  // SAFETY: `ReviewView` destructures `loaderData` and reads nothing else off
-  // its props, so the remainder the router supplies at runtime is unobservable.
-  const props = { loaderData: LOADER_DATA } as Route.ComponentProps;
+function renderReview(waitingOnMe: string[]) {
+  // SAFETY: ReviewView reads only `loaderData` (typed in full above); the
+  // route-module props it never touches (params, matches) are left out.
+  const props = {
+    loaderData: { ...LOADER_DATA, waitingOnMe },
+  } as Route.ComponentProps;
   const Stub = createRoutesStub([
-    {
-      id: "routes/project",
-      path: "/projects/:slug",
-      loader: () => layout,
-      Component: () => <Outlet />,
-      children: [
-        { path: "review", Component: () => <ReviewView {...props} /> },
-      ],
-    },
+    { path: "/projects/:slug/review", Component: () => <ReviewView {...props} /> },
   ]);
   return render(<Stub initialEntries={["/projects/viberr-core/review"]} />);
 }
@@ -78,20 +66,8 @@ const tagOf = (container: HTMLElement, key: string) =>
     .querySelector(".wait-tag")!.textContent;
 
 describe("ReviewView: the row tag reads the board's waitingOnMe", () => {
-  it("tags the tasks the layout flags, from the columns and the orphans alike", async () => {
-    const { container } = renderReview({
-      board: {
-        columns: [
-          {
-            tasks: [
-              { key: "VIB-150", waitingOnMe: true },
-              { key: "VIB-151", waitingOnMe: false },
-            ],
-          },
-        ],
-        orphanTasks: [{ key: "VIB-153", waitingOnMe: true }],
-      },
-    });
+  it("tags exactly the keys the loader says wait on this viewer", async () => {
+    const { container } = renderReview(["VIB-150", "VIB-153"]);
     await waitFor(() =>
       expect(container.querySelectorAll(".rq-row")).toHaveLength(3),
     );
@@ -100,8 +76,8 @@ describe("ReviewView: the row tag reads the board's waitingOnMe", () => {
     expect(tagOf(container, "VIB-153")).toContain("waiting on you");
   });
 
-  it("claims nothing for the viewer when the layout carries no board", async () => {
-    const { container } = renderReview(null);
+  it("claims nothing for the viewer when nothing waits on them", async () => {
+    const { container } = renderReview([]);
     await waitFor(() =>
       expect(container.querySelectorAll(".rq-row")).toHaveLength(3),
     );

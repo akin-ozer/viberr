@@ -42,6 +42,9 @@ export default [
 
   // Resource actions (fetcher targets, no UI).
   route("notifications/read", "routes/notifications.read.tsx"),
+  // Ruling 457: the bell popover's list, loaded by the bell on intent (pages
+  // carry only its counts).
+  route("resources/notifications", "routes/resources.notifications.ts"),
   route("prefs/theme", "routes/prefs.theme.tsx"),
   // SSE stream (Phase 6) — scoped live updates driving route revalidation.
   route("resources/events", "routes/resources.events.ts"),

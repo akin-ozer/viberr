@@ -37,10 +37,7 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     waiting: "none",
     waitingOnMe: false,
     urgent: false,
-    priority: "normal",
     labels: [],
-    dueDate: null,
-    blockedBy: [],
     archived: false,
     validation: "none",
     blockReason: null,
@@ -53,26 +50,11 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     reviewers: [],
     operator: null,
     branch: null,
-    repo: "akin-ozer/viberr",
     pr: null,
     prChecks: null,
     prReview: null,
-    commits: [],
-    otherCommits: [],
-    changed: null,
-    unownedPr: null,
-    foreignHead: null,
-    goal: "",
     packet: null,
-    eventCount: 0,
-    commentCount: 0,
-    diagnosticCount: 0,
-    createdAt: "2026-07-01T09:00:00.000Z",
-    updatedAt: "2026-07-01T09:00:00.000Z",
-    boardRank: null,
-    filePath: "projects/viberr-core/tasks/VIB-142/task.md",
-    // Gap-10: `listProjectTasks` annotates every summary with these two.
-    lastActivityAt: null,
+    // Gap-10: `listProjectTasks` annotates every summary with `quiet`.
     quiet: false,
     // D4: projected runtime-continuity fact (null = healthy).
     continuity: null,
@@ -1517,7 +1499,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
     expect(
       openConfirm({
         readiness: "input_required",
-        packet: { ...blockedPacket, type: "input", kind: "Completion report" },
+        packet: { type: "input", title: blockedPacket.title },
         blockReason: null,
       }),
     ).not.toContain("blocked decision");
@@ -2095,7 +2077,6 @@ describe("gap-10: the board says when a task has gone quiet", () => {
   const quietTask = (patch: Partial<BoardTask> = {}) =>
     task({
       waiting: "agent",
-      lastActivityAt: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
       quiet: true,
       ...patch,
     });
@@ -2466,11 +2447,8 @@ describe("ruling 172: a held task's card says `blocked`, not what it waits on", 
       readiness: "blocked",
       displayReadiness: "blocked",
       waiting: "none",
-      blockedBy: [
-        { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "done", taskKey: "JC-3", goalId: "goal-1" },
-        { ref: "goal-1 link 3", label: "goal-1 link 3", state: "open", taskKey: null, goalId: "goal-1" },
-        { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
-      ],
+      // Ruling 457 (BOARD-3): the card no longer even carries the entries the
+      // task waits on; the readiness word is the whole hold.
     });
   const waitChipOf = (root: Element) =>
     [...root.querySelectorAll(".chip")].find((p) => (p.textContent ?? "").startsWith("blocked by "));
@@ -2796,12 +2774,7 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
     const withOperator = renderBoard([
       task({
         key: "VIB-4",
-        operator: {
-          name: "Operator",
-          assignedAtStageId: "triage",
-          sinceStageIndex: 1,
-          sinceLabel: "since Triage",
-        },
+        operator: { name: "Operator" },
       }),
     ]);
     expect(seats(withOperator.container).owner).toBe("Owner: awaiting owner");

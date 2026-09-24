@@ -50,27 +50,6 @@ afterEach(cleanup);
 
 const DEAD_SESSION = "0f8b2b1e-9a44-4a1d-bb2f-7d9c2f1a55c1";
 
-/** The exact envelope `recordSessionMissing` persists for a vanished session —
- *  `session_id` is ABSENT (not null) when the writer never learned one. */
-interface SessionMissingEnvelope {
-  type: string;
-  source: string;
-  reason: string;
-  session_id?: string;
-  message: string;
-}
-
-function missingRaw(sessionId: string | null = DEAD_SESSION): string {
-  const envelope: SessionMissingEnvelope = {
-    type: "error",
-    source: "viberr",
-    reason: "session_missing",
-    message: "The Claude session no longer exists on this machine.",
-  };
-  if (sessionId) envelope.session_id = sessionId;
-  return JSON.stringify(envelope);
-}
-
 /** The err line `recordSessionMissing` projects onto the dead run. */
 const missingLine: LogLine = {
   t: "09:41:02",
@@ -123,12 +102,18 @@ function run(patch: Partial<RunView> = {}): RunView {
   };
 }
 
-/** A run group that carries the dead-session marker (dead run + fresh run). */
+/**
+ * A run group whose console window holds the dead-session marker (dead run +
+ * fresh run). Ruling 457: the projection reports the marker as `sessionMissing`
+ * (the page no longer carries every window's lines to scan); how it finds it
+ * is pinned in `run-projection.server.test.ts`.
+ */
 function brokenRun(patch: Partial<RunView> = {}): RunView {
   return run({
     lines: [plainLine, missingLine, plainLine],
-    raw: ["{}", missingRaw(), "{}"],
+    raw: [],
     lineCount: 3,
+    sessionMissing: { sessionId: DEAD_SESSION },
     ...patch,
   });
 }
@@ -183,29 +168,28 @@ describe("deriveContinuityLoss", () => {
     });
   });
 
-  it("says nothing about a session the envelope does not carry (no text scraping)", () => {
+  it("says nothing about a session the marker's envelope did not carry", () => {
     const noId = deriveContinuityLoss({
       timeline: [],
-      runtime: [brokenRun({ raw: ["{}", missingRaw(null), "{}"] })],
+      runtime: [brokenRun({ sessionMissing: { sessionId: null } })],
     });
     expect(noId!.agents[0]!.sessionId).toBeNull();
-    const unparseable = deriveContinuityLoss({
-      timeline: [],
-      runtime: [brokenRun({ raw: ["{}", "not json", "{}"] })],
-    });
-    expect(unparseable!.agents[0]!.sessionId).toBeNull();
     // …and it still reports the break: the id is a detail, the loss is the fact.
-    expect(unparseable!.agents[0]!.name).toBe("Dana");
+    expect(noId!.agents[0]!.name).toBe("Dana");
   });
 
-  it("matches every writer's marker tag by its shared suffix", () => {
-    for (const tag of ["run·session_missing", "run·error·session_missing", "error·session_missing"]) {
-      const loss = deriveContinuityLoss({
-        timeline: [],
-        runtime: [brokenRun({ lines: [{ ...missingLine, tag }], raw: [missingRaw()] })],
-      });
-      expect(loss, tag).not.toBeNull();
-    }
+  it("reads the projection's report, not the lines a payload may not carry (ruling 457)", () => {
+    // A `.data` revalidation carries no console lines; the marker is still
+    // reported. CANARY: scan `run.lines` again and this returns null.
+    const loss = deriveContinuityLoss({
+      timeline: [],
+      runtime: [brokenRun({ lines: [], raw: [] })],
+    });
+    expect(loss!.agents).toHaveLength(1);
+    // A window that holds no marker reports none, whatever its lines say.
+    expect(
+      deriveContinuityLoss({ timeline: [], runtime: [run({ lines: [missingLine], sessionMissing: null })] }),
+    ).toBeNull();
   });
 
   it("labels the engagement the way the UI names it", () => {

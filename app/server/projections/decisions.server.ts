@@ -81,6 +81,25 @@ type OpenDecisionRow = {
   recommendation_count: number;
 };
 
+/**
+ * The keys of a project's tasks whose next move is THIS viewer's: an open
+ * decision they own (R8-3), or an acceptance they can give (the review queue's
+ * viewer-scoped `ready`, UI-48). One answer for every surface that says
+ * "waiting on you": the board's chip and cards, and the review queue's row
+ * tag (interface review 2026-09-24, writ-3), so the two cannot disagree.
+ */
+export function waitingOnViewer(
+  db: DatabaseSync,
+  userId: string,
+  projectSlug: string,
+  readyKeys: Iterable<string>,
+): Set<string> {
+  return new Set([
+    ...decisionsRequiring(db, userId, { projectSlug }).mine.map((d) => d.taskKey),
+    ...readyKeys,
+  ]);
+}
+
 export function decisionsRequiring(
   db: DatabaseSync,
   userId: string,

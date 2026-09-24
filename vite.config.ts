@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { loadEnvFile } from "node:process";
 import { reactRouter } from "@react-router/dev/vite";
-import { defineConfig, searchForWorkspaceRoot } from "vite";
+import { defineConfig, searchForWorkspaceRoot, type Rolldown } from "vite";
 
 try {
   loadEnvFile();
@@ -32,8 +32,85 @@ const resolvedNodeModules = path.join(
   "..",
 );
 
+/**
+ * Ruling 457: a font file is never inlined. Vite inlines any asset under 4 KB
+ * as a base64 `data:` URI by default, which put JetBrains Mono's cyrillic-ext
+ * and vietnamese subsets (woff2 and woff, three weights) into the root
+ * stylesheet that blocks every first paint: 20 KB of its 55.6 KB gzip, fetched
+ * again after every deploy because app.css changes that sheet's hash. As files
+ * they download only when a glyph in their `unicode-range` renders, and stay
+ * cached. Every other asset keeps Vite's default (`undefined`).
+ */
+export function inlineAsset(filePath: string): false | undefined {
+  return /\.woff2?(?:$|\?)/.test(filePath) ? false : undefined;
+}
+
+const CLIENT_ENTRY = path.resolve("app/entry.client.tsx");
+const ROOT_ROUTE = path.resolve("app/root.tsx");
+// React Router builds each client route module through this query.
+const ROOT_ROUTE_ENTRY = `${ROOT_ROUTE}?__react-router-build-client-route`;
+
+/**
+ * Ruling 457: every page loads the client entry and the root route, so every
+ * route's closure already holds everything those two import statically.
+ * Rolldown cannot know that (to it, route modules are unrelated entries), so
+ * it cut that shared code into ~30 chunks by which routes import each piece,
+ * half of them under 1 KB gzip, and a cold board load queued 46 requests
+ * through HTTP/1.1's six connections (ruling 301). Here those modules go into
+ * two chunks, npm code (`vendor`, whose hash survives deploys that do not
+ * touch dependencies) and app code (`shell`). No route gains a byte it did
+ * not already load, and one compression window per chunk makes each closure
+ * smaller, not larger.
+ *
+ * The two entry modules stay entries, and CSS stays with root.tsx: a
+ * stylesheet in a chunk that lazy chunks also import is treated as dynamic.
+ */
+export function shellChunkOf(): (
+  id: string,
+  graph: { getModuleInfo(id: string): { importedIds: readonly string[] } | null },
+) => "vendor" | "shell" | null {
+  let shell: Set<string> | null = null;
+  return (id, graph) => {
+    if (!shell) {
+      shell = new Set();
+      const queue = [CLIENT_ENTRY, ROOT_ROUTE_ENTRY];
+      while (queue.length > 0) {
+        const next = queue.pop()!;
+        const info = shell.has(next) ? null : graph.getModuleInfo(next);
+        if (!info) continue;
+        shell.add(next);
+        queue.push(...info.importedIds);
+      }
+    }
+    if (id === CLIENT_ENTRY || id === ROOT_ROUTE_ENTRY || id === ROOT_ROUTE) return null;
+    if (!shell.has(id) || /\.css(?:$|\?)/.test(id)) return null;
+    return /[\\/]node_modules[\\/]/.test(id) ? "vendor" : "shell";
+  };
+}
+
+function shellChunks(): Rolldown.CodeSplittingGroup[] {
+  const chunkOf = shellChunkOf();
+  return [
+    // First, so the app group's npm dependencies already have their chunk.
+    { name: (id, ctx) => (chunkOf(id, ctx) === "vendor" ? "vendor" : null), priority: 2 },
+    { name: (id, ctx) => (chunkOf(id, ctx) === "shell" ? "shell" : null), priority: 1 },
+  ];
+}
+
 export default defineConfig({
   plugins: [reactRouter()],
+  build: {
+    assetsInlineLimit: inlineAsset,
+  },
+  environments: {
+    client: {
+      build: {
+        rolldownOptions: {
+          output: { codeSplitting: { groups: shellChunks() } },
+        },
+      },
+    },
+  },
   resolve: {
     // Vite 8 resolves the tsconfig "paths" alias (~/*) natively; the
     // vite-tsconfig-paths plugin is no longer needed.

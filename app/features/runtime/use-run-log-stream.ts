@@ -1,80 +1,50 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRevalidator } from "react-router";
 import { z } from "zod";
-import { buildEventsUrl, sseScopes } from "~/features/live-updates/event-types";
+import { onLiveFrame, useLiveStreamFailed } from "~/features/live-updates/use-live-updates";
 import {
-  isRunBoundary,
-  runBoundaryLine,
-  type LogLine,
-  type RunLogWindow,
-} from "./runtime-types";
+  createLiveRunLogStore,
+  type ConsoleThreadInput,
+  type LiveRunLogStore,
+  type RunLogSource,
+  type RunLogStore,
+  type ThreadView,
+} from "./run-log-store";
+import type { RunLiveFacts } from "./runtime-types";
+
+export type { OlderLogState, RunLogSource, RunLogStore, StreamedLine, ThreadView } from "./run-log-store";
 
 /**
- * The DEDICATED runtime-log consumer (phase-6 report §"High-frequency
- * streams", requirement (c)): its OWN EventSource on the task scope,
- * consuming `run.log-appended` directly — NOT `useLiveUpdates` revalidation
- * (which would refetch the whole task loader per log line). On a
- * `run.log-appended` for a run we're viewing, it fetches the new lines since
- * our last seq from /resources/run-log and appends them. On
- * `run.state-changed` it revalidates the task loader ONCE so the run strip /
- * pills flip (lifecycle is loader-owned).
+ * The run-log console's live half (phase-6 report §"High-frequency streams",
+ * requirement (c)): it follows the runs a page shows, line by line, without
+ * revalidating the page's loaders (which would refetch the whole task per
+ * log line).
  *
- * Two SOURCES (ruling 99): a task's runs, on the task scope as above, and a
- * controller conversation's runs, which have no task scope — their frames
- * reach the conversation owner's `user` stream as `controller.log-appended`
- * (`run-events.server.ts`). The controller channel only tails: the page it
- * serves already revalidates on `controller.updated` through `useLiveUpdates`,
- * so a lifecycle flip needs no second revalidation from here.
+ * Ruling 457 reshaped it (owner decision 2, 2026-09-24):
  *
- * Seeded from the loader's `runtime[].lines`; the append-only design means
- * `follow`/auto-scroll in the panel just works.
+ *   - the lines live in a store outside React state (`run-log-store.ts`); the
+ *     page holds the store, the console reads the thread it shows, so a line
+ *     re-renders the console and not the page (LIVE-2);
+ *   - it opens no connection of its own: the frames come from the tab's one
+ *     live stream (`onLiveFrame`, the layout's `useLiveUpdates`), which also
+ *     carries ruling 301's hidden-tab close and the reconnect catch-up
+ *     (TASK-6 / LIVE-5);
+ *   - a thread the page did not carry lines for loads with one request when
+ *     the console shows it (TASK-1), and a revalidation keeps whatever a
+ *     thread already holds unless its representative run changed (TASK-3 /
+ *     LIVE-3);
+ *   - each tail read brings the run's live facts, which the Live run strip
+ *     reads, so the page no longer revalidates on run lines (LIVE-1); a frame
+ *     for a thread whose lines are not loaded reads its facts alone (CON-1).
  *
- * P13-D-11: that seed is now a BOUNDED window (NFR5), so this hook also owns
- * the other direction — `loadOlder()` walks backwards through the history the
- * loader did not ship, prepending pages, so the console stays the agent's whole
- * history on the task (UI-53) without loading it all at once.
+ * Two SOURCES (ruling 99): a task's runs (`run.log-appended`, on the task
+ * scope) and a controller conversation's, which have no task scope — their
+ * frames reach the conversation owner's `user` stream as
+ * `controller.log-appended` (`run-events.server.ts`).
+ *
+ * P13-D-11: the page carries a BOUNDED window (NFR5), so the console also
+ * pages backwards through the history it did not ship (`loadOlder`).
  */
-
-/** What the stream follows: a task's runs, or a controller conversation's. */
-export type RunLogSource =
-  | { kind: "task"; projectSlug: string; taskKey: string }
-  | { kind: "controller"; conversationId: string };
-
-/** One console line with its display projection + exact stored envelope. */
-export interface StreamedLine {
-  display: LogLine;
-  raw: string;
-}
-
-/** P13-D-11: backward-paging state for one thread's console. */
-export interface OlderLogState {
-  /** Older lines remain — render the "load older" affordance. */
-  hasMore: boolean;
-  /** How many stored lines are NOT loaded yet (0 once everything is in). */
-  withheld: number;
-  /** A backward page is in flight. */
-  loading: boolean;
-  /** The last backward page failed; null while healthy. */
-  error: string | null;
-}
-
-export interface RunLogState {
-  /** threadId → its current log lines (seeded from the loader, tailed live). */
-  linesByThread: Record<string, StreamedLine[]>;
-  /**
-   * UI-03/UI-30: why the live tail is not running, or null while it is healthy.
-   * The stream used to fail silently — a 403 from `/resources/run-log` (or a
-   * dropped EventSource after the session expired) left the console frozen with
-   * no indication it had stopped following.
-   */
-  streamError: string | null;
-  /** P13-D-11: threadId → whether/how much older history is still withheld. */
-  olderByThread: Record<string, OlderLogState>;
-  /** P13-D-11: fetch the next page of OLDER lines for a thread and prepend it.
-   *  Deliberately manual — an agent log is scanned, not doom-scrolled, and
-   *  auto-loading upward fights the live tail at the bottom. */
-  loadOlder: (threadId: string) => void;
-}
 
 /** The two runtime frames this consumer subscribes, as the broker puts them on
  *  the wire (`app/schemas/sse-event.schema.ts`). Parsed rather than trusted: a
@@ -89,16 +59,6 @@ const runLogAppendedSchema = z.object({
   }),
 });
 
-const runStateChangedSchema = z.object({
-  data: z.object({
-    projectSlug: z.string(),
-    taskKey: z.string(),
-    runId: z.string(),
-    threadId: z.string(),
-    state: z.string(),
-  }),
-});
-
 /** The controller channel's frame: the same reference, keyed by conversation. */
 const controllerLogAppendedSchema = z.object({
   data: z.object({
@@ -109,108 +69,102 @@ const controllerLogAppendedSchema = z.object({
   }),
 });
 
-/** One phrase for "this stream is not yours", per source: the task channel's
- *  logs are project-member material, a controller turn's are the conversation
- *  owner's (and org admins'). */
-function forbiddenNote(kind: RunLogSource["kind"]): string {
-  return kind === "task"
-    ? "project-member only"
-    : "for the conversation's owner and org admins only";
+/** The run a frame names, when it belongs to `source`; null otherwise. */
+function frameFor(source: RunLogSource, raw: string): { runId: string; seq: number } | null {
+  try {
+    const json: unknown = JSON.parse(raw);
+    if (source.kind === "task") {
+      const parsed = runLogAppendedSchema.safeParse(json);
+      if (!parsed.success) return null;
+      const d = parsed.data.data;
+      return d.projectSlug === source.projectSlug && d.taskKey === source.taskKey ? d : null;
+    }
+    const parsed = controllerLogAppendedSchema.safeParse(json);
+    if (!parsed.success) return null;
+    const d = parsed.data.data;
+    // The `user` stream carries every conversation of this person; only the
+    // open one is followed.
+    return d.conversationId === source.conversationId ? d : null;
+  } catch {
+    return null;
+  }
 }
 
-/** Per-thread bookkeeping: the run id + the highest seq we hold. */
-interface ThreadCursor {
-  runId: string;
-  threadId: string;
-  headSeq: number;
-}
+/** The client-only layout effect, silent on the server (no store changes there). */
+const useClientLayoutEffect = "document" in globalThis ? useLayoutEffect : useEffect;
 
-/** P13-D-11: where the backward walk has got to, per thread. */
-interface PageCursor {
-  /** The group's run ids, oldest-first (`logWindow.runIds`). */
-  runIds: string[];
-  /** Index of the run being paged; < 0 → the whole group is loaded. */
-  runIdx: number;
-  /** Next `before` seq within that run; null → fetch that run's NEWEST page
-   *  (how the walk enters a previous run). */
-  before: number | null;
-  /** Index of the run whose block is currently TOPMOST in the console — the
-   *  run a newly prepended block needs a `── resumed ──` boundary against. */
-  topRunIdx: number;
-}
-
-/** Page size for a backward fetch. The endpoint clamps to 1…500. */
-const OLDER_PAGE_LINES = 200;
-
-/** Stored lines only — the synthetic run boundaries are not console history. */
-function storedCount(lines: StreamedLine[]): number {
-  return lines.reduce((n, l) => (isRunBoundary(l.display) ? n : n + 1), 0);
-}
-
-/** The seed paging state for a thread, straight off the loader's window. */
-function seedOlder(window: RunLogWindow, lines: StreamedLine[]): OlderLogState {
-  return {
-    hasMore: window.hasMore && window.oldest !== null,
-    withheld: Math.max(0, window.totalLines - storedCount(lines)),
-    loading: false,
-    error: null,
-  };
-}
-
-function seedPageCursor(window: RunLogWindow): PageCursor {
-  // `oldest` is the oldest line the payload carries, so the next page is
-  // everything with a SMALLER seq in that same run. `hasMore` without an
-  // `oldest` cursor is not reachable server-side, but treat it as "nothing to
-  // page" rather than guessing a cursor that would duplicate lines.
-  const runIdx = window.oldest ? window.runIds.indexOf(window.oldest.runId) : -1;
-  return {
-    runIds: window.runIds,
-    runIdx: window.hasMore ? runIdx : -1,
-    before: window.oldest ? window.oldest.seq : null,
-    topRunIdx: runIdx,
-  };
-}
+/** The run lifecycles a status poll treats as still going. */
+const LIVE_STATES = new Set(["queued", "running"]);
 
 export function useRunLogStream(input: {
   source: RunLogSource;
-  /** thread id → { runId, the loader's window of lines, its window meta }. */
-  threads: {
-    threadId: string;
-    runId: string | null;
-    lines: StreamedLine[];
-    /** P13-D-11: `RunView.logWindow` — the live-tail seed + backward cursor. */
-    window: RunLogWindow;
-  }[];
+  /** The page's run projection: one thread per agent group (a `RunView` is one). */
+  threads: readonly ConsoleThreadInput[];
   /** True while the loader shows at least one running run. Drives a bounded
-   *  safety revalidation so a `run.state-changed` finalize event MISSED during
-   *  an SSE drop (rapid reaction chains) self-heals instead of leaving a
-   *  phantom "1 agent running" strip until a manual reload (F22). */
+   *  safety revalidation, while the tab's live stream is down, so a
+   *  `run.state-changed` finalize event MISSED during an SSE outage (rapid
+   *  reaction chains) self-heals instead of leaving a phantom "1 agent
+   *  running" strip until a manual reload (F22; ruling 457, RF-6). */
   hasActiveRun?: boolean;
+  /**
+   * Ruling 457 (CTL-2): instead of the F22 revalidation, read this run's tail
+   * every `everyMs` while `runId` is set, and revalidate once when the tail
+   * says the run is no longer live. The controller page's fallback for a
+   * missed settle, which used to revalidate root, layout and page every 5 s of
+   * a turn. A null `runId` polls nothing, and the F22 net applies.
+   */
+  poll?: { runId: string | null; everyMs: number };
   /** UI-30: false for a NON-MEMBER, whose `/resources/run-log` requests 403.
-   *  Opening a stream that can only fail is worse than not opening one. */
+   *  Asking for what can only be refused is worse than not asking. */
   enabled?: boolean;
-}): RunLogState {
+}): RunLogStore {
   const { source } = input;
-  // One key per stream: what re-seeds, what re-subscribes and what freezes.
+  // One key per stream: a different task (or conversation) is a new store.
   const streamKey =
     source.kind === "task"
       ? `task:${source.projectSlug}/${source.taskKey}`
       : `controller:${source.conversationId}`;
   const enabled = input.enabled !== false;
-  // Ruling 301: a hidden tab holds no SSE connection. This is the SECOND
-  // permanent stream a task page opens (the layout's live-updates is the
-  // other), and with HTTP/1.1's six-per-origin budget two of them mean four
-  // open tabs deadlock every tab at once. The tail below resumes from its own
-  // cursor, so coming back catches up rather than losing lines.
-  const [hiddenTab, setHiddenTab] = useState(false);
+
+  // TASK-3: the store is seeded ONCE per stream, from the payload it is
+  // created with, so the server render draws the same lines the first client
+  // render does and mounting sets nothing. A different task or conversation is
+  // a different store.
+  const [held, setHeld] = useState(() => ({
+    key: streamKey,
+    store: createLiveRunLogStore(source, input.threads, enabled),
+  }));
+  let store: LiveRunLogStore = held.store;
+  if (held.key !== streamKey) {
+    const next = { key: streamKey, store: createLiveRunLogStore(source, input.threads, enabled) };
+    setHeld(next);
+    store = next.store;
+  }
+  useEffect(() => () => store.dispose(), [store]);
+  useEffect(() => store.setEnabled(enabled), [store, enabled]);
+
+  // A revalidation brought the projection again: the store keeps what each
+  // thread holds and takes only what changed (a new representative run, a
+  // head the tail has not reached, the run row's newer facts). A projection
+  // that changed nothing changes nothing in the store, and the console does
+  // not render (TASK-3 / LIVE-3). On mount this is the projection the store
+  // was seeded from, so it is a no-op too.
+  const threads = input.threads;
+  useClientLayoutEffect(() => {
+    store.reconcile(threads);
+  }, [store, threads]);
+
+  // The tab's one live stream hands the console its frames. `source` is the
+  // value `streamKey` spells, so the key is the dependency.
   useEffect(() => {
-    if (!("document" in globalThis)) return;
-    const sync = () => setHiddenTab(document.visibilityState === "hidden");
-    sync();
-    document.addEventListener("visibilitychange", sync);
-    return () => document.removeEventListener("visibilitychange", sync);
-  }, []);
-  const [streamError, setStreamError] = useState<string | null>(null);
+    if (!enabled) return;
+    const name = source.kind === "task" ? "run.log-appended" : "controller.log-appended";
+    return onLiveFrame(name, (event) => {
+      const frame = frameFor(source, event.data);
+      if (frame) store.onFrame(frame.runId, frame.seq);
+    });
+  }, [store, streamKey, enabled]);
+
   const revalidator = useRevalidator();
   const revalidateRef = useRef(revalidator.revalidate);
   useEffect(() => {
@@ -220,383 +174,83 @@ export function useRunLogStream(input: {
   // F22: while a run is shown as active, revalidate the loader on a slow safety
   // interval. `run.state-changed` normally flips the strip instantly; this only
   // covers the case where that terminal event never arrived (dropped stream /
-  // reconnect gap), bounding a stale "running" strip to one interval.
+  // reconnect gap), bounding a stale "running" strip to one interval. A page
+  // with a status poll running (below) has the cheaper net and skips this one.
+  //
+  // Ruling 457 (RF-6): only while the tab's live stream is DOWN. A connected
+  // stream delivers the event, a transient drop replays it (the browser's
+  // retry sends `Last-Event-ID`), a reopen or a return from hidden asks the
+  // broker for what it missed, and the page's first stream replays from the
+  // server render's position; so the net re-ran root, layout and task three
+  // times a minute for nothing while the stream was healthy. A failed stream
+  // (reconnecting on its backoff, or signed out) still arms it.
+  const polls = (input.poll?.runId ?? null) !== null;
+  const streamDown = useLiveStreamFailed();
   useEffect(() => {
     // The `window` probe asks the HOST what it provides, which is the question
     // this guard has: a server render has no timer to schedule on.
-    if (!input.hasActiveRun || !("window" in globalThis)) return;
+    if (polls || !input.hasActiveRun || !streamDown || !("window" in globalThis)) return;
     const id = window.setInterval(() => {
       void revalidateRef.current();
     }, 20_000);
     return () => window.clearInterval(id);
-  }, [input.hasActiveRun]);
+  }, [input.hasActiveRun, polls, streamDown]);
 
-  // Seed local lines from the loader on mount / thread-set change.
-  const [linesByThread, setLinesByThread] = useState<Record<string, StreamedLine[]>>(() =>
-    Object.fromEntries(input.threads.map((t) => [t.threadId, t.lines])),
+  // CTL-2: the status poll. Reads the run's tail (its new lines and facts
+  // included) and revalidates once the run has settled.
+  const pollRunId = input.poll?.runId ?? null;
+  const pollEvery = input.poll?.everyMs ?? 0;
+  useEffect(() => {
+    if (!pollRunId || pollEvery <= 0 || !enabled || !("window" in globalThis)) return;
+    let settled = false;
+    const id = window.setInterval(() => {
+      if (settled) return;
+      void store.poll(pollRunId).then((state) => {
+        if (state === null || LIVE_STATES.has(state) || settled) return;
+        settled = true;
+        void revalidateRef.current();
+      });
+    }, pollEvery);
+    return () => window.clearInterval(id);
+  }, [store, pollRunId, pollEvery, enabled]);
+
+  return store;
+}
+
+/** A thread of `store` as the console draws it; re-renders only when it
+ *  changes. Null while the store does not know the thread. */
+export function useConsoleThread(store: RunLogStore, threadId: string): ThreadView | null {
+  return useSyncExternalStore(
+    store.subscribe,
+    () => store.thread(threadId),
+    () => store.thread(threadId),
   );
-  const [olderByThread, setOlderByThread] = useState<Record<string, OlderLogState>>(() =>
-    Object.fromEntries(input.threads.map((t) => [t.threadId, seedOlder(t.window, t.lines)])),
+}
+
+/** A run's live facts from `store`, or null before any tail read them. */
+export function useRunFacts(store: RunLogStore | null, runId: string | null): RunLiveFacts | null {
+  return useSyncExternalStore(
+    store ? store.subscribe : noSubscribe,
+    () => (store && runId ? store.facts(runId) : null),
+    () => (store && runId ? store.facts(runId) : null),
   );
+}
 
-  // Cursors: highest seq held per run. RunId is needed to fetch the tail.
-  const cursorsRef = useRef<Map<string, ThreadCursor>>(new Map());
-  const pageCursorsRef = useRef<Map<string, PageCursor>>(new Map());
-  /**
-   * P13-D-11: threads the reader has already paged backwards in. They are
-   * FROZEN against loader re-seeds — a revalidation (any `run.state-changed`,
-   * plus the F22 safety interval) would otherwise throw away every older page
-   * they loaded, and silently open a gap in the middle of the console, because
-   * the loader's window slides forward as the run grows. The live tail keeps
-   * the bottom current from OUR cursor, so ignoring the loader's copy of lines
-   * we already hold loses nothing.
-   */
-  const pagedRef = useRef<Set<string>>(new Set());
-  const streamRef = useRef(streamKey);
-  const threadsKey =
-    `${streamKey}|` +
-    input.threads
-      .map((t) => `${t.threadId}:${t.runId ?? ""}:${t.lines.length}:${t.window.headSeq}`)
-      .join("|");
+/** What the console's bar and footer read of the store. */
+export interface ConsoleStatus {
+  /** UI-03/UI-30: why the live tail stopped, or null while it follows. */
+  streamError: string | null;
+  /** The `{ } raw` view is open. */
+  rawView: boolean;
+}
 
-  useEffect(() => {
-    // A different task (or conversation) entirely → nothing is frozen,
-    // everything re-seeds.
-    if (streamRef.current !== streamKey) {
-      streamRef.current = streamKey;
-      pagedRef.current = new Set();
-    }
-    const paged = pagedRef.current;
-    // Re-seed lines + cursors whenever the loader thread-set changes (e.g. a
-    // revalidation after a state change delivered new backfill) — except for
-    // threads the reader has paged backwards in (see `pagedRef`).
-    setLinesByThread((prev) =>
-      Object.fromEntries(
-        input.threads.map((t) => [
-          t.threadId,
-          paged.has(t.threadId) ? (prev[t.threadId] ?? t.lines) : t.lines,
-        ]),
-      ),
-    );
-    setOlderByThread((prev) =>
-      Object.fromEntries(
-        input.threads.map((t) => [
-          t.threadId,
-          paged.has(t.threadId)
-            ? (prev[t.threadId] ?? seedOlder(t.window, t.lines))
-            : seedOlder(t.window, t.lines),
-        ]),
-      ),
-    );
-    const map = new Map<string, ThreadCursor>();
-    const pages = new Map<string, PageCursor>();
-    for (const t of input.threads) {
-      if (paged.has(t.threadId)) {
-        const keptPage = pageCursorsRef.current.get(t.threadId);
-        if (keptPage) pages.set(t.threadId, keptPage);
-      } else {
-        pages.set(t.threadId, seedPageCursor(t.window));
-      }
-      if (!t.runId) continue;
-      const kept = paged.has(t.threadId) ? cursorsRef.current.get(t.runId) : undefined;
-      map.set(
-        t.runId,
-        kept ?? {
-          runId: t.runId,
-          threadId: t.threadId,
-          // P13-D-11: the representative run's real max seq. This used to be
-          // `t.lines.length - 1`, which has been wrong since UI-53 concatenated
-          // several runs (plus boundary rows) into one group: the index
-          // OVERSHOT the seq, `?since=` asked for lines that do not exist yet,
-          // and the live tail silently stalled on every resumed agent.
-          headSeq: t.window.headSeq,
-        },
-      );
-    }
-    cursorsRef.current = map;
-    pageCursorsRef.current = pages;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadsKey]);
+/** The store's stream error and raw-view flag, for the console's bar and footer. */
+export function useConsoleStatus(store: RunLogStore): ConsoleStatus {
+  const streamError = useSyncExternalStore(store.subscribe, store.streamError, store.streamError);
+  const rawView = useSyncExternalStore(store.subscribe, store.rawView, store.rawView);
+  return { streamError, rawView };
+}
 
-  // Backward pages are fired from a click, not from the SSE effect, so they get
-  // their own abort scope (torn down when the task changes / on unmount).
-  const pageAbortRef = useRef<AbortController | null>(null);
-  const pagingRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const ctl = new AbortController();
-    pageAbortRef.current = ctl;
-    return () => {
-      ctl.abort();
-      pagingRef.current = new Set();
-    };
-  }, [streamKey]);
-
-  /**
-   * P13-D-11: one page older. Walks `logWindow.runIds` backwards — page the
-   * current run with `?before=`, and when the endpoint reports `hasMore: false`
-   * (or hands back an empty page) that run is exhausted, so step to the
-   * PREVIOUS run id and fetch its newest page with a bare `?limit=`. Empty runs
-   * are skipped within the same call so a click always produces lines or
-   * genuinely runs off the front of the group.
-   */
-  const loadOlder = useCallback((threadId: string) => {
-    const cursor = pageCursorsRef.current.get(threadId);
-    if (!cursor || cursor.runIdx < 0) return;
-    if (pagingRef.current.has(threadId)) return;
-    pagingRef.current.add(threadId);
-    setOlderByThread((prev) => {
-      const cur = prev[threadId];
-      if (!cur) return prev;
-      return { ...prev, [threadId]: { ...cur, loading: true, error: null } };
-    });
-
-    const fail = (message: string) => {
-      setOlderByThread((prev) => {
-        const cur = prev[threadId];
-        if (!cur) return prev;
-        return { ...prev, [threadId]: { ...cur, loading: false, error: message } };
-      });
-    };
-
-    void (async () => {
-      try {
-        while (cursor.runIdx >= 0) {
-          const runId = cursor.runIds[cursor.runIdx]!;
-          const qs = new URLSearchParams({ runId, limit: String(OLDER_PAGE_LINES) });
-          if (cursor.before !== null) qs.set("before", String(cursor.before));
-          const res = await fetch(`/resources/run-log?${qs.toString()}`, {
-            headers: { Accept: "application/json" },
-            signal: pageAbortRef.current?.signal ?? null,
-          });
-          if (!res.ok) {
-            fail(
-              res.status === 403
-                ? `Older lines are ${forbiddenNote(source.kind)}.`
-                : `Could not load older lines: the log endpoint returned ${res.status}.`,
-            );
-            return;
-          }
-          // SAFETY: a 200 from this app's own `/resources/run-log` loader, which
-          // answers `Response.json({ data: RunLog })`; every other body it
-          // produces carries a non-200 status and returned above. `data` stays
-          // optional and is checked below, so a 200 that is not that body (a
-          // proxy interstitial) surfaces as a load failure instead of throwing.
-          const body = (await res.json()) as {
-            data?: {
-              lines: { seq: number; display: LogLine; raw: string }[];
-              oldestSeq: number;
-              hasMore: boolean;
-            };
-          };
-          const data = body.data;
-          if (!data) {
-            fail("Could not load older lines: malformed response.");
-            return;
-          }
-          const from = cursor.runIdx;
-          // Advance BEFORE prepending so an abort mid-flight can never re-fetch
-          // the same page into the console twice.
-          if (data.hasMore) {
-            cursor.before = data.oldestSeq;
-          } else {
-            cursor.runIdx -= 1;
-            cursor.before = null;
-          }
-          if (data.lines.length === 0) continue; // empty run — keep walking
-
-          const block: StreamedLine[] = data.lines.map((l) => ({
-            display: l.display,
-            raw: l.raw,
-          }));
-          // Crossing into an earlier run re-creates UI-53's boundary above the
-          // block that is currently topmost — the same rule the projection uses
-          // (a boundary precedes every contributing run but the first).
-          if (from !== cursor.topRunIdx) {
-            block.push({
-              display: runBoundaryLine(cursor.topRunIdx + 1, cursor.runIds.length),
-              raw: "",
-            });
-          }
-          cursor.topRunIdx = from;
-          pagedRef.current.add(threadId);
-          setLinesByThread((prev) => ({
-            ...prev,
-            [threadId]: [...block, ...(prev[threadId] ?? [])],
-          }));
-          setOlderByThread((prev) => {
-            const cur = prev[threadId];
-            if (!cur) return prev;
-            return {
-              ...prev,
-              [threadId]: {
-                hasMore: cursor.runIdx >= 0,
-                withheld: Math.max(0, cur.withheld - data.lines.length),
-                loading: false,
-                error: null,
-              },
-            };
-          });
-          return;
-        }
-        // Walked off the front of the group — everything is loaded.
-        setOlderByThread((prev) => {
-          const cur = prev[threadId];
-          if (!cur) return prev;
-          return { ...prev, [threadId]: { hasMore: false, withheld: 0, loading: false, error: null } };
-        });
-      } catch {
-        fail("Could not load older lines: the request failed.");
-      } finally {
-        pagingRef.current.delete(threadId);
-      }
-    })();
-  }, [source.kind]);
-
-  useEffect(() => {
-    // Live tailing is progressive enhancement: where the host provides no
-    // EventSource (a server render, a jsdom without it), the loader's window is
-    // the whole console and nothing here runs.
-    if (!("EventSource" in globalThis)) return;
-    if (!enabled) return;
-    // Ruling 301: the cleanup below closes this tab's stream when it hides.
-    if (hiddenTab) return;
-
-    // Aborts in-flight tail fetches on unmount / task change — a bare
-    // `cancelled` flag would still let the response land and be parsed.
-    const abort = new AbortController();
-    // UI-35: at most ONE tail fetch per run in flight. `headSeq` only advanced
-    // after a fetch resolved, and the sink publishes one event per console
-    // line, so a chatty run fired several overlapping fetches that each
-    // returned the same window and were concatenated blindly — every line
-    // appeared 2–3× and the "N events" counter over-counted.
-    const inFlight = new Set<string>();
-
-    const fetchTail = async (runId: string, sinceSeq: number) => {
-      if (inFlight.has(runId)) return;
-      inFlight.add(runId);
-      try {
-        const res = await fetch(
-          `/resources/run-log?runId=${encodeURIComponent(runId)}&since=${sinceSeq}`,
-          { headers: { Accept: "application/json" }, signal: abort.signal },
-        );
-        if (!res.ok) {
-          // UI-30: a 403 here means the viewer is not a project member (or, on
-          // the controller channel, not the conversation's owner). It used to
-          // be swallowed, leaving a console that silently stopped following.
-          setStreamError(
-            res.status === 403
-              ? `Live tail stopped: raw run logs are ${forbiddenNote(source.kind)}.`
-              : `Live tail stopped: the log endpoint returned ${res.status}.`,
-          );
-          return;
-        }
-        // SAFETY: same single producer as the backward page above — a 200 from
-        // our own `/resources/run-log` loader, with `data` left optional and
-        // guarded so anything else stops the tail rather than throwing.
-        const body = (await res.json()) as {
-          data?: {
-            threadId: string;
-            lines: { seq: number; display: LogLine; raw: string }[];
-            headSeq: number;
-          };
-        };
-        const data = body.data;
-        if (!data || abort.signal.aborted || data.lines.length === 0) return;
-        const cursor = cursorsRef.current.get(runId);
-        // UI-35: drop anything at or below the seq we already hold, so an
-        // overlapping window can never duplicate a line.
-        const head = cursor ? cursor.headSeq : sinceSeq;
-        const fresh = data.lines.filter((l) => l.seq > head);
-        if (cursor) cursor.headSeq = Math.max(cursor.headSeq, data.headSeq);
-        if (fresh.length === 0) return;
-        setStreamError(null);
-        setLinesByThread((prev) => {
-          const existing = prev[data.threadId] ?? [];
-          const appended = fresh.map((l) => ({ display: l.display, raw: l.raw }));
-          return { ...prev, [data.threadId]: [...existing, ...appended] };
-        });
-      } catch {
-        // Network hiccup — the next append or a revalidation recovers state.
-      } finally {
-        inFlight.delete(runId);
-      }
-    };
-
-    /** A reference to a run we hold a cursor for: fetch what is past it. */
-    const onAppended = (runId: string, seq: number) => {
-      const cursor = cursorsRef.current.get(runId);
-      const since = cursor ? cursor.headSeq : -1;
-      if (seq <= since) return;
-      void fetchTail(runId, since);
-    };
-
-    const stream = new EventSource(
-      buildEventsUrl([
-        source.kind === "task"
-          ? sseScopes.task(source.projectSlug, source.taskKey)
-          : sseScopes.user(),
-      ]),
-    );
-    // UI-03: an EventSource that receives a non-200 (an expired session 401s)
-    // FAILS the connection per spec — it never reconnects. Nothing observed
-    // that, so the console silently froze. Report it instead.
-    stream.onerror = () => {
-      if (stream.readyState === EventSource.CLOSED) {
-        setStreamError(
-          "Live tail disconnected. Reload the page to resume following.",
-        );
-      }
-    };
-    stream.onopen = () => setStreamError(null);
-    if (source.kind === "task") {
-      stream.addEventListener("run.log-appended", (event) => {
-        try {
-          const parsed = runLogAppendedSchema.safeParse(JSON.parse(event.data));
-          if (!parsed.success) return;
-          const d = parsed.data.data;
-          if (d.projectSlug !== source.projectSlug || d.taskKey !== source.taskKey) return;
-          onAppended(d.runId, d.seq);
-        } catch {
-          // Malformed frame — ignore.
-        }
-      });
-      stream.addEventListener("run.state-changed", (event) => {
-        try {
-          const parsed = runStateChangedSchema.safeParse(JSON.parse(event.data));
-          if (!parsed.success) return;
-          if (
-            parsed.data.data.projectSlug !== source.projectSlug ||
-            parsed.data.data.taskKey !== source.taskKey
-          ) {
-            return;
-          }
-          void revalidateRef.current();
-        } catch {
-          // Malformed frame — ignore.
-        }
-      });
-    } else {
-      // The `user` stream carries every conversation of this person; only the
-      // open one is tailed here.
-      stream.addEventListener("controller.log-appended", (event) => {
-        try {
-          const parsed = controllerLogAppendedSchema.safeParse(JSON.parse(event.data));
-          if (!parsed.success) return;
-          const d = parsed.data.data;
-          if (d.conversationId !== source.conversationId) return;
-          onAppended(d.runId, d.seq);
-        } catch {
-          // Malformed frame — ignore.
-        }
-      });
-    }
-
-    return () => {
-      abort.abort();
-      stream.close();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamKey, enabled, hiddenTab]);
-
-  return { linesByThread, streamError, olderByThread, loadOlder };
+function noSubscribe(): () => void {
+  return () => {};
 }

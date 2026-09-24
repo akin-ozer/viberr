@@ -134,9 +134,11 @@ describe("publishRunLogAppended", () => {
     // the project revalidating its logs on every line of somebody else's run.
     expect(own.names()).toContain("run.log-appended");
     expect(sibling.names()).not.toContain("run.log-appended");
-    // A project-scoped subscriber (the board) is a legitimate recipient: a
-    // task-keyed route matches project scope by design.
-    expect(project.names()).toContain("run.log-appended");
+    // Ruling 457 (LIVE-5): a project-scoped subscriber (the board) no longer
+    // receives a console line: nothing it renders changes per line, and the
+    // one reader, the console of the task's own page, holds the task scope.
+    // CANARY: drop `taskOnly` from publishRunLogAppended.
+    expect(project.names()).not.toContain("run.log-appended");
     expect(foreign.names()).not.toContain("run.log-appended");
     expect(inbox.names()).not.toContain("run.log-appended");
   });
@@ -146,9 +148,8 @@ describe("publishRunLogAppended", () => {
     // slug, and `run.log-appended` is one reference per LINE of run output, so
     // Home (which subscribes the firehose for its cross-project view) re-ran
     // its loaders once per line of every agent run on the instance.
-    // Project- and task-scoped delivery is deliberate and stays (above); only
-    // the firehose is excluded.
-    // Canary: drop `skipFirehose: true` from publishRunLogAppended and the
+    // Task-scoped delivery is deliberate and stays (above).
+    // Canary: drop `taskOnly: true` from publishRunLogAppended and the
     // firehose below receives it again.
     const firehose = connect([{ kind: "projects" }]);
     const own = connect([{ kind: "task", slug: "viberr-core", key: "VIB-42" }]);

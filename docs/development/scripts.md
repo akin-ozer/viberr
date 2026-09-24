@@ -51,7 +51,7 @@ Every script that imports the app's config loads `.env` from the working directo
 | `npm run restore -- --from <artefact> --file <store path>` | none | single canonical file restore; the displaced file is kept as `<file>.broken-<ts>` |
 | `npm run keys -- status` | none; reads a copy of the DB whenever `state/writer.lock` is present (ruling 158), and says so | how many sealed secrets still open only under a retired `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` key, across every registered store (`SEALED_STORES`): GitHub PATs, MCP server credentials, sign-in provider secrets, the S3 audit-export secret and personal backend API keys (`user_backend_credentials`, ruling 127; a `login` row has no box and is skipped) |
 | `npm run keys -- reseal [--dry-run]` | **writer** | re-seal them under the current key, personal backend keys included. A row it reports as unopenable is a person who must connect that backend again; the report names the backend, never the person's email |
-| `node scripts/measure-routes.mjs [routeId…]` | none | client asset closure per route (raw + gzip bytes, stable JSON) from a prior `npm run build`; not in `package.json` |
+| `node scripts/measure-routes.mjs [routeId…]` | none | client asset closure per route (raw + gzip bytes, stable JSON) from a prior `npm run build`; not in `package.json`. `--check` compares every `bundle:` entry of `test-support/perf-budgets/bundle.json` and exits 1 on a regression or an unrecorded improvement (ruling 457; a CI step) |
 
 `tools/` holds no CLI: `tools/oxlint/` is the vendored lint plugin and its manifest.
 

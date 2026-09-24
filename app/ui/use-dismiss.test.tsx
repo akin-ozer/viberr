@@ -80,6 +80,19 @@ describe("useDismiss", () => {
     expect(r.queryByTestId("pop")).toBeNull();
   });
 
+  it("focus:true also closes when the focus moves outside, and not when it moves inside", () => {
+    const plain = render(<Harness />);
+    fireEvent.focusIn(plain.getByTestId("outside"));
+    expect(plain.queryByTestId("pop"), "off by default").not.toBeNull();
+    cleanup();
+
+    const r = render(<Harness options={{ focus: true }} />);
+    fireEvent.focusIn(r.getByTestId("inside"));
+    expect(r.queryByTestId("pop")).not.toBeNull();
+    fireEvent.focusIn(r.getByTestId("outside"));
+    expect(r.queryByTestId("pop")).toBeNull();
+  });
+
   it("`also` refs count as inside, so pressing a detached trigger does not close", () => {
     const r = render(<DetachedHarness />);
     fireEvent.mouseDown(r.getByTestId("trigger"));

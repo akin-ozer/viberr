@@ -7,7 +7,6 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { useDialog } from "~/ui/use-dialog";
-import type { NotificationView } from "~/features/notifications/notification-item";
 import { TopBell } from "~/features/shell/top-bell";
 import { LivePausedStrip } from "~/features/shell/topbar";
 import { UserMenu } from "~/features/shell/user-menu";
@@ -34,8 +33,8 @@ export function HomeTopBar({
   searchRef,
   query,
   onQuery,
-  notifications,
   unread,
+  orphanUnread,
   user,
   theme,
   livePaused = false,
@@ -45,8 +44,9 @@ export function HomeTopBar({
   searchRef: RefObject<HTMLInputElement | null>;
   query: string;
   onQuery: (q: string) => void;
-  notifications: NotificationView[];
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 457). */
   unread: number;
+  orphanUnread: number;
   user: SessionUser;
   theme: ThemePreference;
   /** UI-03: the SSE stream is down — the cards are a stale snapshot. */
@@ -109,7 +109,7 @@ export function HomeTopBar({
             {modifierHint}
           </button>
         </div>
-        <TopBell notifications={notifications} unread={unread} />
+        <TopBell unread={unread} orphanUnread={orphanUnread} />
         <UserMenu
           user={{
             id: user.id,

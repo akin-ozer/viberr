@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   clampTimelineLimit,
   sliceTimeline,
+  timelineSlice,
+  timelineWindowSize,
   TIMELINE_INITIAL_SLICE,
   TIMELINE_SLICE_STEP,
 } from "./timeline-slice";
@@ -55,5 +57,18 @@ describe("sliceTimeline", () => {
   it("never slices below one event", () => {
     const slice = sliceTimeline(events, 0);
     expect(slice.events).toHaveLength(1);
+  });
+});
+
+describe("timelineSlice over a fetched window (ruling 457)", () => {
+  it("equals slicing the whole history, for every limit and length", () => {
+    const history = Array.from({ length: 75 }, (_, i) => `e${i}`);
+    for (const total of [0, 1, 9, 30, 31, 75]) {
+      const all = history.slice(0, total);
+      for (const limit of [0, 1, 29, 30, 31, 60, 75, 10_000]) {
+        const window = all.slice(0, timelineWindowSize(limit));
+        expect(timelineSlice(window, total, limit)).toEqual(sliceTimeline(all, limit));
+      }
+    }
   });
 });

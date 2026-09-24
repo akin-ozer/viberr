@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { useEffect, useRef, useState } from "react";
 import { pageTitle } from "~/shared/page-title";
 import { data, Form, redirect, useNavigation } from "react-router";
@@ -678,3 +679,6 @@ export default function Login({
     </div>
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/login");

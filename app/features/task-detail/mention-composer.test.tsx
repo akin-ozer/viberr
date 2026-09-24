@@ -8,6 +8,7 @@ import {
   $getRoot,
   $isParagraphNode,
   UNDO_COMMAND,
+  SKIP_DOM_SELECTION_TAG,
   type LexicalEditor,
 } from "lexical";
 import { ToastProvider } from "~/ui/toast";
@@ -69,7 +70,7 @@ interface LexicalHost extends HTMLElement {
   __lexicalEditor: LexicalEditor;
 }
 
-function renderComposer(opts: ComposerOptions = {}) {
+async function renderComposer(opts: ComposerOptions = {}) {
   const Host = () => {
     const [ask, setAsk] = useState(0);
     return (
@@ -104,10 +105,16 @@ function renderComposer(opts: ComposerOptions = {}) {
     },
   ]);
   const utils = render(<Stub initialEntries={["/t"]} />);
-  const ce = utils.container.querySelector<LexicalHost>(
-    '[contenteditable="true"]',
-  );
-  if (!ce) throw new Error("renderComposer: no composer rendered");
+  // Ruling 457: the editor is lazy and every mount starts as its stand-in.
+  // Pressing the stand-in fetches it at once instead of on the idle callback.
+  const standIn = utils.container.querySelector(".composer-ce");
+  if (!standIn) throw new Error("renderComposer: no composer rendered");
+  fireEvent.pointerDown(standIn);
+  const ce = await waitFor(() => {
+    const host = utils.container.querySelector<LexicalHost>("[data-lexical-editor]");
+    if (!host) throw new Error("the editor has not replaced the stand-in yet");
+    return host;
+  });
   const editor = ce.__lexicalEditor;
   expect(editor).toBeTruthy();
   return { ...utils, ce, editor };
@@ -115,7 +122,10 @@ function renderComposer(opts: ComposerOptions = {}) {
 
 /** Set the whole draft (caret at end) through a real editor update. Async:
  *  Lexical commits in a microtask, so the act must flush it before the test
- *  fires keys at the (otherwise still-empty) editor. */
+ *  fires keys at the (otherwise still-empty) editor. The update skips the DOM
+ *  selection: jsdom has no layout, and one Lexical writes comes back through a
+ *  queued selectionchange that, on a loaded machine, re-read the caret as 0
+ *  and closed the @menu mid-test. */
 async function setText(editor: LexicalEditor, text: string) {
   await act(async () => {
     editor.update(() => {
@@ -129,7 +139,7 @@ async function setText(editor: LexicalEditor, text: string) {
       const paragraph = $createParagraphNode();
       root.append(paragraph);
       $setParagraphPlainText(paragraph, text);
-    });
+    }, { tag: SKIP_DOM_SELECTION_TAG });
   });
 }
 
@@ -160,7 +170,7 @@ describe("ruling 127: the backend handles name whose account they would bill", (
     );
 
   it("marks the backend the task owner has not connected, and leaves the other alone", async () => {
-    const { editor } = renderComposer({
+    const { editor } = await renderComposer({
       runPrincipal: {
         ownerUserId: "u-ada",
         ownerName: "Ada Lovelace",
@@ -169,7 +179,10 @@ describe("ruling 127: the backend handles name whose account they would bill", (
       },
     });
     await setText(editor, "@c");
-    await waitFor(() => expect(listbox()).toBeTruthy());
+    // Wait for the rows this test reads, not just the listbox: the list can
+    // mount a render before its "@c" options do (the lazy editor, ruling 457,
+    // moves that render later under a loaded suite).
+    await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).toContain(
       "Codex not connected for Ada Lovelace",
     );
@@ -179,17 +192,23 @@ describe("ruling 127: the backend handles name whose account they would bill", (
   });
 
   it("an UNOWNED task marks both handles: there is nobody to bill", async () => {
-    const { editor } = renderComposer({ runPrincipal: null });
+    const { editor } = await renderComposer({ runPrincipal: null });
     await setText(editor, "@c");
-    await waitFor(() => expect(listbox()).toBeTruthy());
+    // Wait for the rows this test reads, not just the listbox: the list can
+    // mount a render before its "@c" options do (the lazy editor, ruling 457,
+    // moves that render later under a loaded suite).
+    await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).toContain("no task owner");
     expect(rowFor("claude")!.textContent).toContain("no task owner");
   });
 
   it("claims nothing when no principal is supplied (a surface with no task)", async () => {
-    const { editor } = renderComposer();
+    const { editor } = await renderComposer();
     await setText(editor, "@c");
-    await waitFor(() => expect(listbox()).toBeTruthy());
+    // Wait for the rows this test reads, not just the listbox: the list can
+    // mount a render before its "@c" options do (the lazy editor, ruling 457,
+    // moves that render later under a loaded suite).
+    await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).not.toContain("not connected");
     expect(rowFor("codex")!.textContent).not.toContain("no task owner");
   });
@@ -197,7 +216,7 @@ describe("ruling 127: the backend handles name whose account they would bill", (
 
 describe("comment composer @-mention autocomplete", () => {
   it("opens a dropdown listing matching agents when typing @de", async () => {
-    const { editor } = renderComposer();
+    const { editor } = await renderComposer();
     await setText(editor, "@de");
     await waitFor(() => expect(listbox()).toBeTruthy());
     const options = document.querySelectorAll('[role="option"]');
@@ -217,14 +236,14 @@ describe("comment composer @-mention autocomplete", () => {
   });
 
   it("does not open on a bare @ (needs ≥1 char)", async () => {
-    const { editor } = renderComposer();
+    const { editor } = await renderComposer();
     await setText(editor, "@");
     await new Promise((r) => setTimeout(r, 50));
     expect(listbox()).toBeFalsy();
   });
 
   it("Enter inserts the highlighted handle as @dev and closes the menu", async () => {
-    const { ce, editor } = renderComposer();
+    const { ce, editor } = await renderComposer();
     await setText(editor, "@de");
     await waitFor(() => expect(listbox()).toBeTruthy());
     fireEvent.keyDown(ce, { key: "Enter" });
@@ -233,7 +252,7 @@ describe("comment composer @-mention autocomplete", () => {
   });
 
   it("ArrowDown moves the active row before selecting", async () => {
-    const { ce, editor } = renderComposer();
+    const { ce, editor } = await renderComposer();
     // "@a" matches several rows (arda, agent, claude…) — a list.
     await setText(editor, "@a");
     await waitFor(() => expect(listbox()).toBeTruthy());
@@ -247,7 +266,7 @@ describe("comment composer @-mention autocomplete", () => {
   });
 
   it("Arrow navigation survives caret-only refreshes (no snap back to top)", async () => {
-    const { ce, editor } = renderComposer();
+    const { ce, editor } = await renderComposer();
     await setText(editor, "@a");
     await waitFor(() => expect(listbox()).toBeTruthy());
     const selectedIndex = () =>
@@ -266,7 +285,7 @@ describe("comment composer @-mention autocomplete", () => {
   });
 
   it("Escape closes the dropdown without inserting", async () => {
-    const { ce, editor } = renderComposer();
+    const { ce, editor } = await renderComposer();
     await setText(editor, "@de");
     await waitFor(() => expect(listbox()).toBeTruthy());
     fireEvent.keyDown(ce, { key: "Escape" });
@@ -275,7 +294,7 @@ describe("comment composer @-mention autocomplete", () => {
   });
 
   it("clicking a row inserts its handle", async () => {
-    const { editor } = renderComposer();
+    const { editor } = await renderComposer();
     await setText(editor, "@de");
     await waitFor(() => expect(listbox()).toBeTruthy());
     const devRow = Array.from(document.querySelectorAll('[role="option"]')).find(
@@ -286,7 +305,7 @@ describe("comment composer @-mention autocomplete", () => {
   });
 
   it("marks the input as a combobox controlling the listbox", async () => {
-    const { ce, editor } = renderComposer();
+    const { ce, editor } = await renderComposer();
     expect(ce.getAttribute("role")).toBe("combobox");
     await setText(editor, "@de");
     await waitFor(() => expect(ce.getAttribute("aria-expanded")).toBe("true"));
@@ -300,7 +319,7 @@ describe("comment composer @-mention autocomplete", () => {
 
 describe("live mention highlighting (character-editable, exact matcher)", () => {
   it("wraps a known mention in a .mention span and unwraps it when edited away", async () => {
-    const { container, editor } = renderComposer();
+    const { container, editor } = await renderComposer();
     await setText(editor, "ping @dev now");
     await waitFor(() => {
       const chip = container.querySelector(".composer-ce .mention");
@@ -315,7 +334,7 @@ describe("live mention highlighting (character-editable, exact matcher)", () => 
   });
 
   it("leaves unknown mentions as plain text", async () => {
-    const { container, editor } = renderComposer();
+    const { container, editor } = await renderComposer();
     await setText(editor, "@nobody-known hello");
     await new Promise((r) => setTimeout(r, 50));
     expect(container.querySelector(".composer-ce .mention")).toBeFalsy();
@@ -334,7 +353,7 @@ describe("plain-text submission contract (exact posted bytes)", () => {
   for (const { raw, posted } of CASES) {
     it(`posts ${JSON.stringify(raw)} as ${JSON.stringify(posted)}`, async () => {
       const texts: string[] = [];
-      const { ce, editor } = renderComposer({ onPosted: (t) => texts.push(t) });
+      const { ce, editor } = await renderComposer({ onPosted: (t) => texts.push(t) });
       await setText(editor, raw);
       await waitFor(() => expect(readText(editor)).toBe(raw));
       fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
@@ -345,7 +364,7 @@ describe("plain-text submission contract (exact posted bytes)", () => {
 
   it("whitespace-only drafts do not submit", async () => {
     const texts: string[] = [];
-    const { ce, editor } = renderComposer({ onPosted: (t) => texts.push(t) });
+    const { ce, editor } = await renderComposer({ onPosted: (t) => texts.push(t) });
     await setText(editor, "   \n  ");
     fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
     await new Promise((r) => setTimeout(r, 100));
@@ -354,7 +373,7 @@ describe("plain-text submission contract (exact posted bytes)", () => {
 
   it("Ctrl+Enter submits like ⌘+Enter", async () => {
     const texts: string[] = [];
-    const { ce, editor } = renderComposer({ onPosted: (t) => texts.push(t) });
+    const { ce, editor } = await renderComposer({ onPosted: (t) => texts.push(t) });
     await setText(editor, "ctrl works");
     fireEvent.keyDown(ce, { key: "Enter", ctrlKey: true });
     await waitFor(() => expect(texts).toEqual(["ctrl works"]));
@@ -363,7 +382,7 @@ describe("plain-text submission contract (exact posted bytes)", () => {
 
 describe("submit outcomes", () => {
   it("success clears the draft AND the undo history (⌘Z cannot resurrect it)", async () => {
-    const { ce, editor } = renderComposer();
+    const { ce, editor } = await renderComposer();
     await setText(editor, "posted away");
     fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
     await waitFor(() => expect(readText(editor)).toBe(""));
@@ -375,7 +394,7 @@ describe("submit outcomes", () => {
   });
 
   it("failure keeps the draft as typed and shows the inline error", async () => {
-    const { ce, editor, container } = renderComposer({
+    const { ce, editor, container } = await renderComposer({
       action: () => ({ ok: false, error: "Comment rejected by policy." }),
     });
     await setText(editor, "keep me safe");
@@ -391,13 +410,13 @@ describe("submit outcomes", () => {
 
 describe("Ask operator prefill", () => {
   it("prefills only a blank draft with @operator and focuses the composer", async () => {
-    const { editor, getByTestId } = renderComposer();
+    const { editor, getByTestId } = await renderComposer();
     fireEvent.click(getByTestId("bump-ask"));
     await waitFor(() => expect(readText(editor)).toBe("@operator "));
   });
 
   it("never overwrites a non-empty draft", async () => {
-    const { editor, getByTestId } = renderComposer();
+    const { editor, getByTestId } = await renderComposer();
     await setText(editor, "half-written thought");
     fireEvent.click(getByTestId("bump-ask"));
     await new Promise((r) => setTimeout(r, 50));
@@ -520,15 +539,15 @@ describe("comment composer send hint (P13-D-39)", () => {
       s.textContent?.includes("to send"),
     );
 
-  it("shows ⌘↵ on a Mac", () => {
+  it("shows ⌘↵ on a Mac", async () => {
     vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" });
-    renderComposer();
+    await renderComposer();
     expect(hint()!.textContent).toBe("⌘↵ to send");
   });
 
-  it("shows Ctrl ↵ on a keyboard that has no ⌘ key", () => {
+  it("shows Ctrl ↵ on a keyboard that has no ⌘ key", async () => {
     vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" });
-    renderComposer();
+    await renderComposer();
     expect(hint()!.textContent).toBe("Ctrl ↵ to send");
     // No hardcoded Mac glyph survives anywhere in the composer footer.
     expect(document.querySelector(".composer-foot")!.textContent).not.toContain("⌘");

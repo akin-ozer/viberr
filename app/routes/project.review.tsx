@@ -1,11 +1,12 @@
-import { data, useRouteLoaderData } from "react-router";
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
+import { data } from "react-router";
 import { pageTitle } from "~/shared/page-title";
 import type { Route } from "./+types/project.review";
-import type { loader as projectLoader } from "./project";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { getReviewQueue } from "~/server/projections/review-queue.server";
+import { waitingOnViewer } from "~/server/projections/decisions.server";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-authority.server";
 import { ReviewQueuePage } from "~/features/review/review-page";
@@ -48,9 +49,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // `completion-for-acceptance: direct` grant closes tasks itself. No policy or
   // autonomy signal reached the page at all — now it does.
   const acceptance = resolveAcceptanceAuthority(params.slug);
+  // Interface review 2026-09-24 (writ-3): a row's "waiting on you" is the
+  // board's own answer (`waitingOnViewer`, the one helper both loaders call),
+  // so the queue and the board cannot disagree about the same task.
+  const waitingOnMe = [
+    ...waitingOnViewer(db, ctx.user.id, params.slug, queue.ready.map((r) => r.key)),
+  ];
   return {
     slug: params.slug,
     ...queue,
+    waitingOnMe,
     stageNames: {
       review: nameOf(roles.reviewId) ?? "the review stage",
       terminal: nameOf(roles.terminalId) ?? "the final stage",
@@ -61,18 +69,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
 export default function ReviewView({ loaderData }: Route.ComponentProps) {
   const { slug, ready, working, total, stageNames, acceptance } = loaderData;
-  // Interface review 2026-09-24 (writ-3): the row's "waiting on you" reads the
-  // flag the workspace layout already computed for the board (decisions this
-  // viewer owns plus acceptance they can give, project.tsx), so the two
-  // surfaces cannot disagree about the same task and no second query runs.
-  const layout = useRouteLoaderData<typeof projectLoader>("routes/project");
-  const waitingOnMe = new Set(
-    layout
-      ? [...layout.board.columns.flatMap((c) => c.tasks), ...layout.board.orphanTasks]
-          .filter((t) => t.waitingOnMe)
-          .map((t) => t.key)
-      : [],
-  );
+  const waitingOnMe = new Set(loaderData.waitingOnMe);
   return (
     <ReviewQueuePage
       projectSlug={slug}
@@ -85,3 +82,6 @@ export default function ReviewView({ loaderData }: Route.ComponentProps) {
     />
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/project.review");

@@ -34,8 +34,13 @@ Run what CI runs (details in [testing.md](testing.md)):
 
 ```sh
 npm run lint && npm run typecheck && npm test && npm run build
+node scripts/measure-routes.mjs --check   # the bundle ratchet, after the build (ruling 457)
 npm run e2e     # Docker; the only gate that boots the shipped image
 ```
+
+A change that makes a perf budget move fails `npm test` in either direction: lower the
+ceiling to keep a win, or raise it with the reason beside it
+([performance.md](performance.md)).
 
 Lint has no suppression list: fix findings, never allowlist them (ruling 86). A change
 that contradicts a numbered ruling in
@@ -127,7 +132,9 @@ paths stable.
 
 The mock under `design/html-app/app/*.jsx` is the structural source; `app/app.css`
 `:root` is the only token source (no Tailwind, no inline hex, new CSS only in the marked
-appended sections). One typeface, Inter, for body and display (ruling 365). Unstyled
+appended sections). One typeface, Inter, for body and display (ruling 365); the faces a
+first paint draws are preloaded from `features/shell/font-preloads.ts`, and a
+metric-matched "Inter Fallback" face stands in until they arrive (ruling 457). Unstyled
 primitive packages are allowed only behind an `app/ui/*` boundary, rendered with classes
 `app.css` defines (ruling 166). One `Icon` component. Toast kind is passed explicitly.
 Dialogs are native `<dialog>` with Escape and scrim close. Every top-level surface

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Icon } from "~/ui/icon";
-import type { NotificationView } from "~/features/notifications/notification-item";
 import { CommandPalette } from "./command-palette";
 import { PaletteTrigger } from "./palette-trigger";
 import { useCommandPaletteShortcut } from "./use-command-palette";
@@ -67,8 +66,8 @@ export function Topbar({
   openTask,
   user,
   theme,
-  notifications,
   unread,
+  orphanUnread,
   livePaused = false,
   railOpen = false,
   onToggleRail,
@@ -82,8 +81,9 @@ export function Topbar({
   openTask: { key: string; title: string } | null;
   user: MenuUser;
   theme: ThemePreference;
-  notifications: NotificationView[];
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 457). */
   unread: number;
+  orphanUnread: number;
   /** UI-03: the SSE stream is down — everything on screen is a stale snapshot.
    *  Only the announcer lives here; the visible strip and its Retry sit under
    *  the header (layo-10). */
@@ -239,7 +239,7 @@ export function Topbar({
           the palette, across every project the viewer can open. Shared with the
           standalone-page header so the two cannot drift (`palette-trigger.tsx`). */}
       <PaletteTrigger onOpen={() => setPalette(true)} />
-      <TopBell notifications={notifications} unread={unread} />
+      <TopBell unread={unread} orphanUnread={orphanUnread} />
       <UserMenu user={user} theme={theme} showSwitchProject />
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
     </div>

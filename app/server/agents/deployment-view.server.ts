@@ -1,11 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import type {
   AgentDeployment,
   AgentDeploymentDefinition,
 } from "~/schemas/project-file.schema";
 import type { LiveAgentIdentity } from "~/shared/mapping/task.server";
-import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
+import { readAgentProfileFile } from "~/server/files/agent-profile-file.server";
 import { agentProfileFilePath } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
@@ -57,11 +56,10 @@ export function readTemplate(
   profileId: string,
   dataRoot?: string,
 ): TemplateProfile | null {
-  const absPath = agentProfileFilePath(profileId, dataRoot);
-  if (!existsSync(absPath)) return null;
-  const { parsed } = parseAgentProfileContent(readFileSync(absPath, "utf8"), {
-    fallbackId: profileId,
-  });
+  const parsed = readAgentProfileFile(
+    agentProfileFilePath(profileId, dataRoot),
+    profileId,
+  )?.parsed;
   if (!parsed) return null;
   const fm = parsed.frontmatter;
   // Ruling 99: the controller is instance machinery, never a deployable

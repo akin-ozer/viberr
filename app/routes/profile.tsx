@@ -1,3 +1,4 @@
+import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { useRef } from "react";
 import { pageTitle } from "~/shared/page-title";
 import {
@@ -322,3 +323,6 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
     </PageOverlay>
   );
 }
+
+/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+export const shouldRevalidate = revalidateWhen("routes/profile");

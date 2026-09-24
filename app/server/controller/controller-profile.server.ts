@@ -9,7 +9,7 @@ import {
 import { getEnv, type Env } from "~/server/config/env.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
-  parseAgentProfileContent,
+  readAgentProfileFile,
   serializeAgentProfile,
   type AgentProfileFrontmatter,
 } from "~/server/files/agent-profile-file.server";
@@ -136,25 +136,27 @@ interface ParsedProfile {
 
 function readControllerProfile(dataRoot?: string): ParsedProfile | null {
   const abs = agentProfileFilePath(CONTROLLER_PROFILE_ID, dataRoot);
-  if (!existsSync(abs)) return null;
-  const raw = readFileSync(abs, "utf8");
-  const { parsed } = parseAgentProfileContent(raw, {
-    fallbackId: CONTROLLER_PROFILE_ID,
-  });
+  const file = readAgentProfileFile(abs, CONTROLLER_PROFILE_ID);
+  if (!file) return null;
+  const { parsed, content: raw } = file;
   if (!parsed || parsed.frontmatter.kind !== "controller") return null;
   // C01-A10 (pass 32): the tolerant `effort` read (`.catch(undefined)`) turns a
   // hand-edited junk value (`effort: 3`, a blank) into "backend default", and
   // the next save writes that back — erasing the junk without a word. Say so
   // at the read, once, so the erasure is announced rather than silent.
-  const rawEffort = z
-    .object({ effort: z.unknown() })
-    .loose()
-    .safeParse(splitFrontmatter(raw).data).data?.effort;
-  if (rawEffort !== undefined && parsed.frontmatter.effort === undefined) {
-    logger.warn(
-      "controller profile carries an unreadable `effort:` value — it reads as the backend default and the next save will drop it",
-      { file: abs, effort: JSON.stringify(rawEffort) },
-    );
+  // Ruling 457: that check parses the frontmatter a second time, so it runs
+  // only when the typed read found no effort and the file names one at all.
+  if (parsed.frontmatter.effort === undefined && raw.includes("effort")) {
+    const rawEffort = z
+      .object({ effort: z.unknown() })
+      .loose()
+      .safeParse(splitFrontmatter(raw).data).data?.effort;
+    if (rawEffort !== undefined) {
+      logger.warn(
+        "controller profile carries an unreadable `effort:` value — it reads as the backend default and the next save will drop it",
+        { file: abs, effort: JSON.stringify(rawEffort) },
+      );
+    }
   }
   return parsed;
 }
@@ -175,12 +177,26 @@ export const NO_MODEL_PLACEHOLDER = "orchestration runtime";
  *  granted" — under a skills lock an admin could not even see the mismatch. */
 export const CONTROLLER_DEFAULT_SKILLS: readonly string[] = ["controller-guide"];
 
+/** The controller's display name: the profile's `name`, else "Controller". */
+function controllerNameOf(fm: AgentProfileFrontmatter | undefined): string {
+  return fm?.name || "Controller";
+}
+
+/**
+ * Just {@link resolveControllerConfig}'s `name`, for the surfaces that show
+ * only the name (the dock, on every load): it reads the profile and never the
+ * definition doc (ruling 457).
+ */
+export function resolveControllerName(dataRoot?: string): string {
+  return controllerNameOf(readControllerProfile(dataRoot)?.frontmatter);
+}
+
 export function resolveControllerConfig(dataRoot?: string): ControllerConfig {
   const parsed = readControllerProfile(dataRoot);
   const fm = parsed?.frontmatter;
   const storedSkills = fm?.resources.skills ?? [];
   return {
-    name: fm?.name || "Controller",
+    name: controllerNameOf(fm),
     model: fm?.model && fm.model !== NO_MODEL_PLACEHOLDER ? fm.model : "",
     effort: fm?.effort ?? "",
     skills: storedSkills.length > 0 ? storedSkills : [...CONTROLLER_DEFAULT_SKILLS],
