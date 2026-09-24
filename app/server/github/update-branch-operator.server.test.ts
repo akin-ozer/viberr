@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
@@ -503,13 +503,10 @@ describe("the operator persona teaches the branch update", () => {
     path.join(REPO_ROOT, "app/server/seed/assets/operator.definition.md"),
     "utf8",
   );
-  // The live store is gitignored data, not source — it exists on a developer's
-  // machine and not in a fresh clone, so this half is a guarded drift check.
-  const livePath = path.join(
-    REPO_ROOT,
-    "docker-data/agents/definitions/operator.md",
-  );
-  const live = existsSync(livePath) ? readFileSync(livePath, "utf8") : null;
+  // Ruling 460 moved the live store into the named volume `viberr-data`; the
+  // host's `./docker-data` is at most the pre-move fallback copy, so it is no
+  // longer compared here. The store copy is upgraded at boot from this asset
+  // by its shipped hash (`PRIOR_SHIPPED_HASHES`, default-assets.server.ts).
 
   it("names the tool and when to use it", () => {
     expect(seed).toContain("`update_branch_from_base`");
@@ -575,11 +572,6 @@ describe("the operator persona teaches the branch update", () => {
   it("F37-56: tells the operator to say 'they' rather than guess a pronoun", () => {
     expect(seed).toMatch(/Refer to a person as "they" unless they have told you otherwise/);
     expect(seed).toMatch(/you are given names, not pronouns/);
-  });
-
-  it("keeps the live store's copy in step when one is present (both copies or neither)", () => {
-    if (live === null) return;
-    expect(live).toBe(seed);
   });
 });
 
