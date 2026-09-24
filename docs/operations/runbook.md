@@ -433,12 +433,13 @@ recommendation is open. Nothing is owed by anyone while it waits.
 - Sign-in throttling keys on `email|ip`; behind a proxy set `VIBERR_TRUST_PROXY` or every
   client is `local`.
 - **Every request hangs, in every tab, with no error** (ruling 301): the browser's
-  per-origin connection pool is exhausted. Each visible task page holds two SSE streams
-  and HTTP/1.1 allows about six connections per origin, so a few visible Viberr pages
+  per-origin connection pool is exhausted. Each visible Viberr page holds at most one SSE
+  stream, except the project controller page, which holds two (the layout's and its own);
+  `/insights` has none, and the controller dock opens one there while its panel is open.
+  HTTP/1.1 allows about six connections per origin, so a handful of visible Viberr pages
   (side-by-side windows, say) are enough. Close or hide some; a hidden tab closes its
   streams and catches up when it comes back (the broker replays what it missed). The
-  server is not the problem: the same
-  endpoint answers `curl` at once.
+  server is not the problem: the same endpoint answers `curl` at once.
 
 ## Retention & growth
 
