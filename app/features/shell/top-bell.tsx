@@ -13,7 +13,7 @@ import {
   REVALIDATION_RULES,
   type Fact,
 } from "~/features/live-updates/revalidation-policy";
-import type { loader as bellListLoader } from "~/routes/resources.notifications";
+import type { clientLoader as bellListLoader } from "~/routes/resources.notifications";
 
 /**
  * Bell button + notifications popover — ONE implementation for both the
@@ -35,7 +35,8 @@ import type { loader as bellListLoader } from "~/routes/resources.notifications"
  * with different rows). A notification created or read revalidates the page
  * (its `user` scope), so the route that reads the counts hands over a new
  * loader-data object; an intent or an open then reloads the list, and an open
- * popover reloads it at once.
+ * popover reloads it at once. A failed load shows a failure row in the
+ * popover, never the page's error boundary, and the next intent retries.
  */
 
 /**
@@ -82,7 +83,8 @@ export function TopBell({
     () => ({ unread, orphanUnread, countsRead }),
     [unread, orphanUnread, countsRead],
   );
-  // The version the list was last fetched for.
+  // The version the list was last fetched for; null after a failed load, so
+  // the next intent retries.
   const fetchedFor = useRef<typeof version | null>(null);
   const loadList = list.load;
   const load = useCallback(() => {
@@ -94,6 +96,12 @@ export function TopBell({
   };
   const notifications: NotificationView[] = list.data?.notifications ?? [];
   const loading = list.data === undefined;
+  // Ruling 454: the list route's `clientLoader` answers a failed load (an
+  // outage, a 5xx) with `notifications: null`.
+  const failed = list.data !== undefined && list.data.notifications === null;
+  useEffect(() => {
+    if (failed) fetchedFor.current = null;
+  }, [failed, list.data]);
 
   const [open, setOpen] = useState(false);
   // On open, and while open whenever the page re-reads the counts.
@@ -204,6 +212,13 @@ export function TopBell({
             <div className="ntf-pop-list" aria-busy={list.state !== "idle"}>
               {loading ? (
                 <div className="empty">Loading notifications…</div>
+              ) : failed ? (
+                <div className="empty">
+                  Couldn't load notifications.
+                  <button type="button" className="btn ghost sm empty-cta" onClick={load}>
+                    Try again
+                  </button>
+                </div>
               ) : notifications.length === 0 ? (
                 <div className="empty">Nothing yet. You're caught up.</div>
               ) : null}

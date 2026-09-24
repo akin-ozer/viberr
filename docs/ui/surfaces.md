@@ -49,7 +49,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/resources/search` | `resources.search.ts` | user | ⌘K palette query (`q`) over visible projects | |
 | `/resources/model-catalog` | `resources.model-catalog.ts` | user | models and efforts per backend (Claude enhanced with the VIEWER's own account) | |
 | `/resources/controller` | `resources.controller.ts` | user; a project or task scope the viewer cannot reach answers an empty `unavailable` view (GET) or `{ ok:false }` (POST), never a thrown response, because it feeds a root-owned fetcher | the controller dock's view for the scope the person is standing in (ruling 121); `?seen=1` marks the shown transcript read (ruling 448) | `send` (`text`, `conversationId`, `project`, `task`, `surface`, `timeZone`) |
-| `/resources/notifications` | `resources.notifications.ts` | user | the bell popover's list: the viewer's newest `BELL_LIST_CAP` (100) notifications. Pages carry only the bell's counts (`bellCounts`); the bell loads this when the pointer or focus reaches it and on open, and again once the page has re-read the counts since (at once while open). It answers `shouldRevalidate` false (ruling 454) | |
+| `/resources/notifications` | `resources.notifications.ts` | user | the bell popover's list: the viewer's newest `BELL_LIST_CAP` (100) notifications. Pages carry only the bell's counts (`bellCounts`); the bell loads this when the pointer or focus reaches it and on open, and again once the page has re-read the counts since (at once while open). It answers `shouldRevalidate` false, and its `clientLoader` turns any failed load into the bell's failure row (ruling 454) | |
 | `/resources/controller-unseen` | `resources.controller-unseen.ts` | user | the dock's status: the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448); and the viewer's turns working right now, with scope, phase and step (ruling 454). Like `/resources/controller`, it answers `shouldRevalidate` false: the dock loads it itself | |
 | `/resources/backend-login` | `resources.backend-login.ts` | user | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts; an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
 | `/resources/session-export` | `resources.session-export.ts` | member / conversation owner | `?run=<id>`: resume-script download | |
@@ -90,7 +90,8 @@ Intents behind `project.task.tsx` are explained in
   `/resources/notifications`, started when the pointer or focus reaches the bell or on
   open (a first open with neither may show one "Loading notifications…" row) and reloaded
   once the page has re-read the counts since, whatever values they came back with (at
-  once while open). At the cap the list discloses it ("Showing the newest
+  once while open). A failed load shows "Couldn't load notifications." with Try again,
+  never the error page. At the cap the list discloses it ("Showing the newest
   100", UI-14) (ruling 454). The
   account menu is a Radix ARIA menu (arrows, typeahead, Home/End, focus back to the
   avatar on close; ruling 166), fetched when the pointer or focus reaches the avatar or

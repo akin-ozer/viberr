@@ -28,3 +28,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     notifications: listNotifications(getDb(), user.id, { limit: BELL_LIST_CAP }),
   };
 }
+
+/**
+ * Ruling 454: a failed load is the bell's, never the page's. React Router
+ * sends a fetcher's failed load to the error boundary of the route that owns
+ * the fetcher, so a hover during a restart, a 5xx or a dead network replaced
+ * the whole page with the root error page. Any failure answers
+ * `{ notifications: null }`: the bell shows its failure row and the next
+ * intent retries.
+ */
+export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
+  try {
+    return await serverLoader();
+  } catch {
+    return { notifications: null };
+  }
+}

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { createRoutesStub, useRevalidator } from "react-router";
+import { createRoutesStub, useRevalidator, type LoaderFunctionArgs } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { NotificationListItem } from "~/server/projections/notifications.server";
 import * as listRoute from "~/routes/resources.notifications";
@@ -10,7 +10,8 @@ import { BELL_LIST_URL, TopBell } from "./top-bell";
 /**
  * Ruling 454 (FL-4 / SRV-6): the bell loads its own list. These pin what the
  * list is allowed to be when the popover shows it: never older than the counts
- * the page last read (review finding bell-stale-list-count-key).
+ * the page last read (review finding bell-stale-list-count-key), and never a
+ * reason to lose the page (bell-hover-error-boundary).
  */
 
 afterEach(cleanup);
@@ -147,3 +148,63 @@ async function mountWorkspaceReady(server: { unread: number; list: NotificationL
   await waitFor(() => expect(bellOf(view)).toBeTruthy());
   return view;
 }
+
+/**
+ * The list route as React Router's framework mode runs it for a fetcher load
+ * (react-router `lib/dom/ssr/routes.js`, `createClientRoutes`): the module's
+ * `clientLoader` with the server call handed to it, or the server call alone
+ * when the module has none. `server` stands in for that call.
+ */
+function listLoaderOver(server: () => Promise<ListAnswer>) {
+  return (args: LoaderFunctionArgs) =>
+    listRoute.clientLoader?.({ ...args, serverLoader: server }) ?? server();
+}
+
+function mountFailing(server: () => Promise<ListAnswer>) {
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => (
+        <ToastProvider>
+          <p>PAGE CONTENT</p>
+          <TopBell unread={1} orphanUnread={0} />
+        </ToastProvider>
+      ),
+    },
+    { path: BELL_LIST_URL, loader: listLoaderOver(server), shouldRevalidate: listRoute.shouldRevalidate },
+  ]);
+  return render(<Stub initialEntries={["/"]} />);
+}
+
+describe("a failed list load stays in the bell (ruling 454)", () => {
+  for (const [failure, reject] of [
+    ["a 503 during a restart", () => Promise.reject(new Response("down", { status: 503 }))],
+    ["a network rejection", () => Promise.reject(new TypeError("Failed to fetch"))],
+  ] as const) {
+    it(`a hover that meets ${failure} keeps the page, and the open says so and retries`, async () => {
+      let calls = 0;
+      let up = false;
+      const view = mountFailing(() => {
+        calls += 1;
+        return up ? Promise.resolve({ notifications: [notification(1)] }) : reject();
+      });
+      fireEvent.pointerEnter(bellOf(view));
+      await waitFor(() => expect(calls).toBe(1));
+      // Let the failed load land.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(view.getByText("PAGE CONTENT")).toBeTruthy();
+      // The open retries the failed load and says it failed.
+      fireEvent.click(bellOf(view));
+      await waitFor(() => expect(calls).toBe(2));
+      await waitFor(() => expect(view.getByText(/Couldn't load notifications/)).toBeTruthy());
+      expect(view.getByText("PAGE CONTENT")).toBeTruthy();
+      expect(view.queryByText("Loading notifications…")).toBeNull();
+      // Back up: Try again fills the list.
+      up = true;
+      fireEvent.click(view.getByRole("button", { name: "Try again" }));
+      await waitFor(() => expect(view.getByText("Notification 1")).toBeTruthy());
+      expect(view.queryByText(/Couldn't load notifications/)).toBeNull();
+      expect(calls).toBe(3);
+    });
+  }
+});
