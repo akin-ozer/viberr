@@ -296,14 +296,19 @@ discovering each absence as an exit-127. For any other command the controller's
 
 ```bash
 cp .env.example .env        # fill in the two required secrets
+docker volume create viberr-data   # the store; external, so Compose never owns it (ruling 473)
 docker compose up -d --build
 docker compose logs -f app  # boot integrity log: dirs, migrations, counts, users, build, disk, toolchain
 curl -s localhost:3000/resources/health | grep -o '"agentIsolation":{[^}]*}'   # "status":"on"
 ```
 
-The store is the named volume `viberr-data` (ruling 460). Docker creates it on the first
-`up` and initialises it from the image's `/data` (owned `node:viberr-agents`, 0750), so
-there is no host directory to create or chown. A volume lives inside Docker, not in the
+The store is the named volume `viberr-data` (ruling 460). It is declared `external`
+(ruling 473): Compose never creates it, so `docker compose down -v` can never delete it,
+and an `up` without it fails with "external volume not found" instead of starting on an
+empty store. Create it once, before the first `up` (`docker volume create viberr-data`;
+`npm run deploy` does this itself when it is missing). Docker initialises the empty volume
+from the image's `/data` on that first `up` (owned `node:viberr-agents`, 0750), so there is
+no host directory to create or chown. A volume lives inside Docker, not in the
 repository: read a live instance through the app, `docker compose exec app …` (the
 maintenance CLIs, `ls`, `cat`) or a backup (`npm run backup`, below), never by opening
 files on the host.

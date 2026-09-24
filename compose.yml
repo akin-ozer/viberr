@@ -118,5 +118,12 @@ services:
 volumes:
   # Ruling 460: the store. Named `viberr-data` exactly (not project-prefixed),
   # so the one-time move, the backup and the runbook can name it.
+  #
+  # Ruling 473: EXTERNAL, so Compose never owns it. A volume Compose creates is
+  # one `docker compose down -v` deletes, and this one is the whole store
+  # (canonical files, the database, everyone's sealed credentials and sign-ins).
+  # `npm run deploy` creates it when it is missing; by hand it is
+  # `docker volume create viberr-data` before the first `up`.
   viberr-data:
     name: viberr-data
+    external: true
