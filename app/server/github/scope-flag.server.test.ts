@@ -12,10 +12,10 @@ import {
   policyUpdateText,
   policyViolationText,
   scopeFlagText,
-  scopeIsAdvisory,
 } from "./scope-flag.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { credentialAdvisories } from "~/server/secrets/pat-store.server";
+import { scopeIsAdvisory } from "~/shared/credential-scopes";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);

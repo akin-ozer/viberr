@@ -53,11 +53,6 @@ import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
  * runtime credential homes survive.
  */
 
-// Re-exported so every existing importer keeps working; the constant itself
-// lives in an import-free module so non-Vite consumers (playwright.config.ts)
-// can read it without pulling in the `?raw` asset imports.
-export { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
-
 export interface SeedOptions {
   dataRoot: string;
   reset?: boolean;

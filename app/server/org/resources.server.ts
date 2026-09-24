@@ -1005,11 +1005,6 @@ export function getMcpServer(
   return row ? mapMcp(row) : null;
 }
 
-export type McpProbeOutcome =
-  | { kind: "up"; latencyMs: number }
-  | { kind: "down"; reason: string }
-  | { kind: "skipped" };
-
 /**
  * Minimal child-process surface the stdio discovery needs — real
  * `child_process.spawn` satisfies it; tests inject a fake. Kept tiny on
@@ -1492,47 +1487,6 @@ function parseMcpMessage(text: string): McpMessage | null {
     return null;
   }
 }
-
-/**
- * Reachability probe for an HTTP target. Kept for the "is anything listening"
- * question; the real health signal is {@link discoverHttpMcpTools}, which
- * proves the endpoint speaks MCP. stdio targets are spawned per run → skipped.
- */
-export async function probeMcpTarget(
-  transport: "HTTP" | "stdio",
-  target: string,
-  options: McpProbeOptions = {},
-): Promise<McpProbeOutcome> {
-  if (transport !== "HTTP") return { kind: "skipped" };
-  let url: URL;
-  try {
-    url = new URL(target);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return { kind: "down", reason: "endpoint is not an http(s) URL" };
-    }
-  } catch {
-    return { kind: "down", reason: "endpoint is not a valid URL" };
-  }
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const started = Date.now();
-  try {
-    const res = await fetchImpl(url.toString(), {
-      method: "GET",
-      headers: { accept: "text/event-stream, application/json" },
-      signal: AbortSignal.timeout(options.timeoutMs ?? 2500),
-    });
-    // Headers arrived → the endpoint exists; don't hold an SSE body open.
-    res.body?.cancel().catch(() => {});
-    return { kind: "up", latencyMs: Date.now() - started };
-  } catch (error) {
-    const reason =
-      error instanceof Error && error.name === "TimeoutError"
-        ? "connection timed out"
-        : "connection refused";
-    return { kind: "down", reason };
-  }
-}
-
 
 /**
  * Real tool discovery over Streamable HTTP (P13-LV-10).

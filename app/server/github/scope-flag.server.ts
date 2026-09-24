@@ -48,14 +48,6 @@ export const POLICY_ENGINE_ACTOR = {
 };
 
 /**
- * F39-5 (pass 39): advisory vs required scopes live in `~/shared/credential-scopes`
- * so the timeline writer here and the credential card in `pat-store.server.ts`
- * read ONE list; re-exported because callers of this module expect them here.
- */
-export { ADVISORY_SCOPES, scopeIsAdvisory } from "~/shared/credential-scopes";
-
-
-/**
  * The sentence for a refusal on a scope the project REQUIRES — a genuine
  * violation, under the shield. `scopeFlagText` picks between this and the
  * advisory wording; call that instead of choosing here.

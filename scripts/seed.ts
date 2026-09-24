@@ -23,7 +23,8 @@ import { getEnv } from "../app/server/config/env.server";
 import { runWithDataRootWriterLock } from "../app/server/db/cli-lock.server";
 import { getDb } from "../app/server/db/sqlite.server";
 import { seedOrgResources } from "../app/server/org/org-seed.server";
-import { runSeed, SEED_DEFAULT_PASSWORD } from "../app/server/seed/seed.server";
+import { SEED_DEFAULT_PASSWORD } from "../app/server/seed/seed-credentials";
+import { runSeed } from "../app/server/seed/seed.server";
 
 const env = getEnv();
 const reset = process.argv.includes("--reset");

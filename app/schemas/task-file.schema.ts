@@ -7,7 +7,7 @@ import {
   type FileDiagnostic,
 } from "./file-diagnostics";
 import { canonicalDependencyRef } from "~/shared/dependencies";
-import { headCarriesRevision, type RefreshLink, type RevisionDrift } from "~/shared/revision-drift";
+import { headCarriesRevision, type RefreshLink } from "~/shared/revision-drift";
 
 /**
  * Zod schemas + tolerant parser for the `task.md` frontmatter and packet
@@ -740,10 +740,6 @@ export const prRefSchema = z
 export type PrRef = z.infer<typeof prRefSchema>;
 export type UnpushedRevision = NonNullable<PrRef["unpushedRevision"]>;
 export type PrClosure = NonNullable<PrRef["closure"]>;
-
-/** The stored `pr.revisionDrift`, typed as the shared drift record so the
- *  file and the sentence builder can never disagree on the shape. */
-export type StoredRevisionDrift = RevisionDrift;
 
 /**
  * Ruling 135: the recorded unpushed-revision fact, when it still describes the

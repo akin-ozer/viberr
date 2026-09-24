@@ -29,7 +29,6 @@ import {
   markMcpServerUnreachableFromRun,
   type McpSpawn,
   listMcpServers,
-  probeMcpTarget,
   reindexKnowledgeBase,
   reindexKnowledgeBaseByDir,
   saveKnowledgeBase,
@@ -743,25 +742,6 @@ describe("mcp servers", () => {
     }
     // The refusal is the whole story: nothing was written on the way out.
     expect(listMcpServers(db)).toEqual([]);
-  });
-
-  it("probe is honest: any HTTP response = up, network error = down, stdio = skipped", async () => {
-    expect(
-      await probeMcpTarget("HTTP", "https://mcp.internal:1/sse", {
-        fetchImpl: respondingFetch,
-      }),
-    ).toMatchObject({ kind: "up" });
-    expect(
-      await probeMcpTarget("HTTP", "https://mcp.internal:1/sse", {
-        fetchImpl: unreachableFetch(),
-      }),
-    ).toMatchObject({ kind: "down" });
-    expect(await probeMcpTarget("stdio", "npx -y whatever")).toEqual({
-      kind: "skipped",
-    });
-    expect(
-      await probeMcpTarget("HTTP", "not a url", { fetchImpl: respondingFetch }),
-    ).toMatchObject({ kind: "down" });
   });
 
   it("save runs a REAL MCP handshake on HTTP targets and never fabricates counts", async () => {
