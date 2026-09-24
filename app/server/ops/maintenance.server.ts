@@ -259,11 +259,15 @@ function recordPass(reason: MaintenanceReason, freedBytes: number): void {
   lastFreedBytes = freedBytes;
 }
 
+/** The two maintenance periods belong to env.server.ts's C01-A6 live-env
+ *  group: read from the raw env rather than `getEnv()` so an operator can flip
+ *  them without the process-lifetime env cache pinning the old answer. */
 export function maintenanceIntervalMs(): number {
   const raw = Number(process.env.VIBERR_MAINTENANCE_INTERVAL_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAINTENANCE_INTERVAL_MS;
 }
 
+/** A raw env read for the same C01-A6 reason as {@link maintenanceIntervalMs}. */
 export function diskCheckIntervalMs(): number {
   const raw = Number(process.env.VIBERR_DISK_CHECK_INTERVAL_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DISK_CHECK_INTERVAL_MS;

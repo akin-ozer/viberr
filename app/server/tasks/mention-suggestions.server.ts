@@ -58,7 +58,7 @@ export interface Mentionables {
 }
 
 /** The role handles that route regardless of what is deployed. Mirrors
- *  task-actions.server.ts `RESERVED_HANDLES`; the backend handles are appended
+ *  mention-notify.server.ts `RESERVED_HANDLES`; the backend handles are appended
  *  per project by `backendHandles` below. */
 const RESERVED_ROLES: MentionableReserved[] = [
   { handle: "operator", label: "Operator" },

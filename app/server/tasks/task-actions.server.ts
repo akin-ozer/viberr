@@ -1760,8 +1760,8 @@ function anchorClamp(text: string, max: number): string {
  * explicitly says is "never the sole source of truth". Edit the goal, comment
  * "@dev continue", and the dev worked the stale goal — while the product
  * asserted the guarantee in three places (the agents page's "Continuity:
- * Re-anchors on task.md" row, the goal-edit event text below at :541, and the
- * `set_goal` tool description) and the shipped reviewer persona was told to
+ * Re-anchors on task.md" row, the goal-edit event text in `updateTaskGoal`, and
+ * the `set_goal` tool description) and the shipped reviewer persona was told to
  * "Re-anchor on the canonical task goal before you judge anything" with no
  * channel to do so.
  *
@@ -6524,7 +6524,7 @@ const ownedTaskKeyRow = z.object({ task_key: z.string() });
  * GHOST owner and review/acceptance stalled on a seat nobody could fill, while
  * both removal dialogs promised the seat was handled ("returns to the operator
  * for reassignment") — it was not touched at all. Ownership is a HUMAN seat that
- * `assignOwner` keeps deliberately orthogonal to the operator, so the honest
+ * `setOwner` keeps deliberately orthogonal to the operator, so the honest
  * response is to RELEASE the seat — the same clear-to-null `releaseOwner`
  * performs — so a contributor+ can take it. Returns how many tasks were freed.
  *
@@ -7705,7 +7705,8 @@ export async function performDelivery(
         // cannot see. Git's own words are what make a protected branch, a push
         // ruleset or a pre-receive hook actionable, so the untruncated block
         // rides the timeline event, in the same shape the clone failure already
-        // uses (`specialist-run.server.ts:1004`).
+        // uses (the "Workspace checkout failed" note in `dispatchAgentRun`,
+        // specialist-run.server.ts).
         push.stderrExcerpt
           ? `\n\nWhat the push reported:\n\n\`\`\`\n${push.stderrExcerpt}\n\`\`\``
           : undefined,

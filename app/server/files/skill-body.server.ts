@@ -14,23 +14,25 @@ import { logger } from "~/server/logging/logger.server";
  * declared skills through here, so there is ONE containment rule, ONE budget and
  * ONE honesty rule.
  *
- * BUDGET (P14-KM-03, then C2/pass-16). Knowledge bases have been budgeted since
- * F9; skills first got a cap in P14-KM-03 — but a PER-SKILL one, applied fresh
- * on every per-skill read inside the caller's loop. N skills × 24 k is
- * unbounded, which is precisely the failure the KB budget exists to prevent, so
+ * BUDGET (P14-KM-03, then C2/pass-16). Knowledge bases were budgeted from F9
+ * until ruling 283 replaced their injected text with an index; skills first got
+ * a cap in P14-KM-03 — but a PER-SKILL one, applied fresh on every per-skill
+ * read inside the caller's loop. N skills × 24 k is unbounded, which is
+ * precisely the failure the KB budget existed to prevent, so
  * {@link readSkillBodies} spends ONE shared budget across the whole declared
- * list exactly as the KB leg does — including the "omitted entirely" marker for
- * a skill that no longer fits, so a squeezed-out skill announces itself instead
- * of vanishing from the prompt.
+ * list exactly as the KB leg then did — including the "omitted entirely" marker
+ * for a skill that no longer fits, so a squeezed-out skill announces itself
+ * instead of vanishing from the prompt.
  *
  * CONTAINMENT (A5/pass-16). A skill body is injected as TRUSTED persona material
  * — the run is explicitly told to treat it as authoritative operating context,
- * not as untrusted input. `readKbBody` has refused to follow symlinks out of the
- * store since F9, and every other store path agreed with it after P14-RV-02 —
- * except this reader, which dereferenced a symlinked `SKILL.md` (or a symlinked
- * skill FOLDER) and handed the target's content to the model as trusted
- * instructions. The store is a real directory that humans, uploads, imports and
- * agents all write into, so that is a reachable trust-boundary crossing.
+ * not as untrusted input. The KB reader (`readKbIndexDetailed` today) has
+ * refused to follow symlinks out of the store since F9, and every other store
+ * path agreed with it after P14-RV-02 — except this reader, which dereferenced
+ * a symlinked `SKILL.md` (or a symlinked skill FOLDER) and handed the target's
+ * content to the model as trusted instructions. The store is a real directory
+ * that humans, uploads, imports and agents all write into, so that is a
+ * reachable trust-boundary crossing.
  * Symlinks are refused here exactly the way `collectKbDocs` refuses them.
  */
 

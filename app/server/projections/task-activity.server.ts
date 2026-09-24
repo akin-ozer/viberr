@@ -10,10 +10,11 @@ import type { Waiting } from "~/schemas/task-file.schema";
  * sets `frontmatter.updatedAt = now` on EVERY write (task-writer.server.ts),
  * and several of those writes are bookkeeping nobody performed:
  *   · the background GitHub reconcile poller runs every 5 minutes over every
- *     branched task and `patchTaskFrontmatter`s the refreshed `pr`/`github`
- *     cache (reconcile-poller.server.ts, github-reconciler.server.ts:510), so a
- *     CI check flipping pending→passing, or the base branch moving under a
- *     task's `github.sync` counters, re-stamps a task nobody has touched;
+ *     branched task and writes back the refreshed `pr`/`github` cache
+ *     (reconcile-poller.server.ts → `reconcileTaskUnlocked` in
+ *     github-reconciler.server.ts), so a CI check flipping pending→passing, or
+ *     the base branch moving under a task's `github.sync` counters, re-stamps
+ *     a task nobody has touched;
  *   · `schedule.server.ts` marks a scheduled entry fired;
  *   · a board drag writes `boardRank`.
  * A task that has been dead for a week but still has an open PR therefore reads

@@ -79,7 +79,7 @@ const TOKENIZABLE_HANDLE_RE = /^[A-Za-z][\w-]*$/;
  * packet's "Agent: @…" observation could name a handle that resolves to nobody.
  *
  * The profile id is preferred because it is BOTH resolvable
- * (`handleMatchesSpecialist` matches it) and tokenizable by the bare `@word`
+ * (`handleNamesSpecialist` matches it) and tokenizable by the bare `@word`
  * grammar, so it routes even when the reader passes no known names. A profile id
  * that is not a bare token (hand-edited store) falls back to the display name,
  * which the shared span-finder still matches whole.
@@ -95,7 +95,7 @@ export function agentMentionHandle(agent: {
 }
 
 /** The generic role/backend handles the resolver honours (mirrors
- *  mention-suggestions' RESERVED and mention-notify's RESERVED_HANDLES). */
+ *  mention-suggestions' RESERVED_ROLES and mention-notify's RESERVED_HANDLES). */
 const RESERVED_AGENT_HANDLES = ["operator", "agent", "claude", "codex"];
 
 // ------------------------------------------------------- resolved shape

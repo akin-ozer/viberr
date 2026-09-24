@@ -793,10 +793,11 @@ Every value in `resources:` is a **store folder name, never a display name**. Fo
 `skills:` and `mcps:` the slug *is* the folder, so the two coincide. For `kb:` they do
 not: a knowledge base has a display name and a directory as separate columns, and the
 grant resolves against `${VIBERR_DATA_ROOT}/kb/<dir>`. A `kb:` entry written as the
-display name resolves to nothing — `readKbBody` returns an empty string with only a
-`logger.warn`, so the run proceeds *without* the knowledge base while every UI still shows
-it attached. Use the directory. (Renaming a KB's directory orphans existing grants for the
-same reason; re-attach them.)
+display name resolves to nothing — `readKbIndexDetailed` returns an empty index with a
+`logger.warn` and an unresolved-grant row (which the run's prompt names), so the run
+proceeds *without* the knowledge base while every UI still shows it attached. Use the
+directory. (Renaming a KB's directory orphans existing grants for the same reason;
+re-attach them.)
 
 ## 5. What is deliberately NOT in files
 

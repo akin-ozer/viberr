@@ -1696,7 +1696,7 @@ describe("knowledge-base doc counts", () => {
     writeFileSync(path.join(dir, "overview.md"), "# text");
     writeFileSync(path.join(dir, "notes.txt"), "text");
     // A KB of PDFs used to advertise a healthy "N docs" and inject nothing —
-    // the count and `readKbBody` now answer the same question.
+    // the count and `readKbIndexDetailed` now answer the same question.
     writeFileSync(path.join(dir, "contract.pdf"), "%PDF-1.7");
     writeFileSync(path.join(dir, "diagram.png"), "png");
 

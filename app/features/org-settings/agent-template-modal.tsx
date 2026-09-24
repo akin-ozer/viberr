@@ -112,9 +112,10 @@ export function AgentModal({
   const skillNames = skills.map((s) => s.name);
   const mcpNames = mcps.map((m) => m.name);
   // P13-KM-01: a KB grant is stored — and resolved at run time — by its store
-  // DIRECTORY (`readKbBody` reads `${DATA_ROOT}/kb/<dir>`). This picker used to
-  // key on the display NAME, so granting "P13 facts" wrote `kb: ["P13 facts"]`
-  // and every run silently got zero bytes while both UIs showed it attached.
+  // DIRECTORY (`readKbIndexDetailed` reads `${DATA_ROOT}/kb/<dir>`). This
+  // picker used to key on the display NAME, so granting "P13 facts" wrote
+  // `kb: ["P13 facts"]` and every run silently got zero bytes while both UIs
+  // showed it attached.
   // `kbDirsOf` also repairs an existing display-name grant on open.
 
   const [name, setName] = useState(initial ? initial.name : "");

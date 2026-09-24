@@ -427,15 +427,16 @@ function ResGroup({
  *    describes only a run already in flight. What the next run gets is ruling
  *    26 (R15-7): a profile that can no longer be resolved is FULLY conservative
  *    — `resolveUndeployedDisallowedTools()` and `withheldAgentGrants()`
- *    (`specialist-run.server.ts:760`, `:833`), i.e. no delivery, no comments,
- *    no ask-human, no evidence. The thread runs and produces nothing anyone can
- *    act on, which is the opposite of the continuity the copy promised.
+ *    (both applied in `dispatchAgentRun`, specialist-run.server.ts), i.e. no
+ *    delivery, no comments, no ask-human, no evidence. The thread runs and
+ *    produces nothing anyone can act on, which is the opposite of the
+ *    continuity the copy promised.
  *  - "until the operator reassigns them" describes an automatic recovery that
- *    nothing initiates. `deleteAgentProfile`
- *    (`agent-profile-actions.server.ts:605-650`) edits `project.md`, reprojects
- *    and audits — it queues no operator run, writes no task timeline event and
- *    sends no notification. Reassignment is real (`assignSpecialist`), but only
- *    if a human goes and does it, so the dialog names it as their next step.
+ *    nothing initiates. `deleteAgentProfile` (agent-profile-actions.server.ts)
+ *    edits `project.md`, reprojects and audits — it queues no operator run,
+ *    writes no task timeline event and sends no notification. Reassignment is
+ *    real (`assignSpecialist`), but only if a human goes and does it, so the
+ *    dialog names it as their next step.
  */
 function DeleteConfirm({
   a,

@@ -2139,8 +2139,9 @@ describe("clearWaitingToHuman", () => {
  * (it has to stay one sentence), so the full excerpt reached nobody the
  * maintainer can actually read. A protected branch, a push ruleset or a
  * pre-receive hook is diagnosable only from those lines. Same shape the clone
- * failure already uses (`specialist-run.server.ts:1004`): a fenced block under
- * a "What the … reported" heading, appended to the timeline event ONLY — the
+ * failure already uses (the "Workspace checkout failed" note in
+ * `dispatchAgentRun`, specialist-run.server.ts): a fenced block under a "What
+ * the … reported" heading, appended to the timeline event ONLY — the
  * notification body stays the one-sentence summary.
  */
 describe("F19-18: the delivery push failure surfaces git's redacted stderr", () => {

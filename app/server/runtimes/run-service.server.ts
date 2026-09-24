@@ -378,7 +378,7 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
 export interface StartRunInput {
   projectSlug: string;
   taskKey: string;
-  /** Thread id within the task ("op" | "primary" | "c0"). Defaulted per kind. */
+  /** Thread id within the task ("op" | "primary" | "r0"). Defaulted per kind. */
   threadId?: string;
   role: string;
   kind: RunKind;

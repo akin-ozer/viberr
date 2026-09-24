@@ -93,7 +93,7 @@ describe("capabilitiesToActionLabels — verdict outcomes follow the verdict (F1
 
 /**
  * F20-9 / R20-7 (D1): the display buckets must mirror the runtime acceptance
- * gate (`operator-actions.server.ts:2580`,
+ * gate (`operatorAcceptCompletion` in operator-actions.server.ts,
  * `authority.autonomy !== "full" || gate(...) !== "direct"`). A supervised
  * operator holding `completion-for-acceptance: direct` renders it under ACTS
  * DIRECTLY — authority the server refuses — unless the autonomy ceiling is

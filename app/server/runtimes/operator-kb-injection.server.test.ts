@@ -274,14 +274,11 @@ describe("buildOperatorSystemPrompt — shared skill budget (C2)", () => {
 });
 
 /**
- * T5 (pass 31) — the KB twin of C2. `kb-injection.server.test.ts` proves
- * `readKbBodies` spends ONE budget across the grant list and hands back the
- * omission marker; nothing proved the OPERATOR prompt then carries it. The
- * budget is hardcoded inside `buildOperatorSystemPrompt`, so this assembly is
- * the only layer where "each KB re-armed the cap" or "the marker was filtered
- * out of the emitted sections" is observable.
- */
-/**
+ * T5 (pass 31) — the KB twin of C2. `kb-injection.server.test.ts` proved that
+ * the KB reader spent ONE budget across the grant list and handed back the
+ * omission marker; this describe proved the OPERATOR prompt carried it, since
+ * the budget was hardcoded inside `buildOperatorSystemPrompt`.
+ *
  * Ruling 283 replaced this describe's subject. There WAS a shared character
  * budget here, and this test pinned the honest behaviour of spending it: a
  * second KB could not re-arm what the first had taken, and the prompt said so.

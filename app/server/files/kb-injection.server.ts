@@ -442,15 +442,16 @@ export const KB_INDEX_NOTE =
  * either run which source outranks the other. Two agents on one repo must not
  * be able to derive two house styles from the same evidence.
  *
- * It lives HERE, beside {@link readKbBodies}, because it is a property of the
- * KB injection itself — not of either runtime. Both runtimes (specialist +
- * operator) import this one constant and push it immediately before the bodies
- * it ranks, so the rule cannot drift between them; the operator used to import
- * a prompt constant from the specialist runtime, which put the rule in the
- * wrong place and made one runtime depend on the other for it.
+ * It lives HERE, beside {@link readKbIndexes}, because it is a property of the
+ * KB injection itself — not of any runtime. Every runtime that injects
+ * knowledge bases (specialist, operator, controller) imports this one constant
+ * and pushes it immediately before the indexes it ranks, so the rule cannot
+ * drift between them; the operator used to import a prompt constant from the
+ * specialist runtime, which put the rule in the wrong place and made one
+ * runtime depend on the other for it.
  *
- * Emitted only alongside REAL KB text (`kbSet.parts.length > 0`), so a run with
- * no knowledge base never carries a rule about a resource it does not have.
+ * Emitted only alongside a REAL KB index (`kbSet.parts.length > 0`), so a run
+ * with no knowledge base never carries a rule about a resource it does not have.
  */
 export const KB_PRECEDENCE_NOTE =
   "\n\n---\n# Which source wins (knowledge bases vs the repository)\n\n" +

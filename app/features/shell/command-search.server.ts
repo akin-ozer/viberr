@@ -66,13 +66,13 @@ type TaskRow = {
  * F19-8/R14-3: an archived task is a terminal disposition that "leaves every
  * default view" — the board card and list row swap their live state for a
  * neutral `archived` pill, home/decisions/review drop it via `listProjectTasks`
- * (board-query.server.ts:164), and db/migrations/0001_baseline.sql states the
+ * (board-query.server.ts), and db/migrations/0001_baseline.sql states the
  * contract outright ("each of them has to hide archived tasks"). This is the
  * one reader that goes straight to `task_projections`, so it inherited none of
  * it and ranked a just-archived task FIRST (updated_at DESC), indistinguishable
  * from live work. It is not excluded — the palette is a legitimate way back to
  * archived work, the same reason the board keeps its Archived filter
- * (board-page.tsx:820-822) — it is LABELLED, with the board's own word.
+ * (`FILTERS` in board-page.tsx) — it is LABELLED, with the board's own word.
  */
 function archivedSub(sub: string, row: TaskRow): string {
   return withArchived(sub, row.archived !== 0);
@@ -225,10 +225,11 @@ export function searchWorkspace(
         // (`sel = searchParams.get("profile") ?? "operator"`, agents-page.tsx)
         // and nothing naming what was searched for — deterministically the
         // wrong agent, on every agent hit. `agent.id` is `resolved.profileId`
-        // (specialist-run.server.ts:2162), the same key the roster resolves
-        // against and the same deep link "open this profile" already uses from
-        // the Policy page (policy-page.tsx:611). The agent hit was the only
-        // hit kind that threw away identity its destination can consume.
+        // (`listDeployedSpecialists`, specialist-run.server.ts), the same key
+        // the roster resolves against and the same deep link "open this
+        // profile" already uses from the Policy page (`PolicyPage`'s
+        // `onOpenProfile`, policy-page.tsx). The agent hit was the only hit
+        // kind that threw away identity its destination can consume.
         href: `/projects/${project.slug}/agents?profile=${encodeURIComponent(agent.id)}`,
       });
     }

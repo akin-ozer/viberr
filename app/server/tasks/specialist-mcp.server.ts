@@ -315,10 +315,10 @@ export function resolveSpecialistMcpServersDetailed(
  * Best-effort and idempotent: a registry read failure returns the resolution
  * unchanged, and a healthy server is left exactly as it was mounted.
  *
- * Wired into the specialist run path (`specialist-run.server.ts`, both the
- * fresh mount and the resume mount). The operator caller
- * (`operator-run.server.ts`) resolves org MCP the same way and should call this
- * after resolving too — see the TODO left at its mount site.
+ * Wired into every run path that mounts org MCP: the specialist runtime
+ * (`specialist-run.server.ts`, both the fresh mount and the resume mount), the
+ * operator (`operatorMcpResolution` in `operator-run.server.ts`, F21-3) and the
+ * controller (`controller-run.server.ts`).
  */
 export async function verifyStdioMcpMountsForRun(
   db: DatabaseSync,

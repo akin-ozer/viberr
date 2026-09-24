@@ -112,10 +112,11 @@ function diskNameFromId(id: string): string | null {
  *
  * C5/pass-16: this used `statSync`, which DEREFERENCES — so `kb/notes` pointing
  * at `/etc` was listed as a first-class knowledge base, browsable in the store
- * browser, counted in its doc count, and (before the matching guard in
- * `readKbBodyDetailed`) injected into runs as trusted agent context. Every
- * other store path refuses to follow a link out of the store (P14-RV-02);
- * `lstatSync` does not dereference, so a linked entry is simply not a resource.
+ * browser, counted in its doc count, and (before the matching guard in the KB
+ * reader, now `readKbIndexDetailed`) injected into runs as trusted agent
+ * context. Every other store path refuses to follow a link out of the store
+ * (P14-RV-02); `lstatSync` does not dereference, so a linked entry is simply
+ * not a resource.
  */
 export function subDirNames(root: string): string[] {
   try {
@@ -161,10 +162,10 @@ function unionDiskAndRows(rowKeys: string[], diskNames: string[]): string[] {
 // re-scans only ("manual").
 //
 // P13-KM-15 — what this mode does NOT do: it controls the DOC-COUNT/freshness
-// metadata only. Agents always read the live folder at run time (readKbBody
-// walks the real directory), so "manual" never pins the CONTENT a run sees. The
-// KB modal's copy says exactly this so the toggle can't be mistaken for a
-// content freeze.
+// metadata only. Agents always read the live folder at run time
+// (`readKbIndexDetailed` walks the real directory and `readKbDoc` reads from
+// it), so "manual" never pins the CONTENT a run sees. The KB modal's copy says
+// exactly this so the toggle can't be mistaken for a content freeze.
 export const KB_REFRESH_MODES = ["on change", "manual"] as const;
 export type KbRefreshMode = (typeof KB_REFRESH_MODES)[number];
 export const DEFAULT_KB_REFRESH: KbRefreshMode = "on change";
@@ -229,7 +230,8 @@ function buildKb(
   };
 }
 
-/** Recursive count of the files `readKbBody` would inject (P14-KM-13). */
+/** Recursive count of the documents a run can read from this KB — the same
+ *  `isInjectableKbDoc` test `readKbIndexDetailed` counts with (P14-KM-13). */
 function countInjectableDocs(nodes: StoreNode[]): number {
   return nodes.reduce(
     (sum, node) =>

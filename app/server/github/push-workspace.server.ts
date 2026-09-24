@@ -522,7 +522,9 @@ async function commitsAheadOfDefault(
 }
 
 /** A local branch belonging to THIS task: the canonical `taskBranchName` form
- *  (`vib-1`) or the legacy `<key>-<slug>` one (`vib-1-normalize`). */
+ *  (`vib-1`) or any name that extends it with `-` — ruling 122's suffixed
+ *  allocation (`vib-1-3f9a`, `taskBranchCandidate` in branch-sync.server.ts)
+ *  and the legacy `<key>-<slug>` form (`vib-1-normalize`) alike. */
 function isTaskBranchName(name: string, taskKey: string): boolean {
   const canonical = taskBranchName(taskKey);
   return name === canonical || name.startsWith(`${canonical}-`);

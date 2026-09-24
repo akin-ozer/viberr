@@ -2,9 +2,9 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 
 /**
- * Per-user UI preference store (`user_prefs`, migration 0004): JSON values
- * under string keys. Personal UI state only (Home pins, grid/list view) —
- * never governed state, so callers may update it optimistically.
+ * Per-user UI preference store (`user_prefs`, db/migrations/0001_baseline.sql):
+ * JSON values under string keys. Personal UI state only (Home pins, grid/list
+ * view) — never governed state, so callers may update it optimistically.
  *
  * Phase 9's profile preferences (notification routing, motion, timeline
  * default) live under their own keys here. (The "nudge" preference was

@@ -3289,8 +3289,9 @@ describe("buildSpecialistPersona — attached resources", () => {
   /**
    * A5/pass-16 — the skill body sits under the "trusted — configured for you"
    * banner, so a symlinked SKILL.md was a way to put arbitrary host content into
-   * the model's context AS TRUSTED PERSONA. `readKbBody` has refused links since
-   * F9; the skill reader now agrees, and the refusal is visible in the prompt.
+   * the model's context AS TRUSTED PERSONA. The KB reader (`readKbIndexDetailed`
+   * today) has refused links since F9; the skill reader now agrees, and the
+   * refusal is visible in the prompt.
    */
   it("a symlinked SKILL.md never becomes trusted persona material", () => {
     const dataRoot = tempRoot();

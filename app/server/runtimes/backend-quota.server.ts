@@ -119,7 +119,7 @@ export type BackendQuotaExhaustion = z.infer<typeof exhaustionSchema>;
  * exhaustion: derived from the failed run, carrying its id and the provider's
  * own sentence; retired by the next run that COMPLETES on the backend (the real
  * run is the re-probe) or by the person it names changing that credential
- * (ruling 165, `retireBackendRefusalsFor`), and by nothing else — a dead
+ * (ruling 165, `retireBackendRecordsFor`), and by nothing else — a dead
  * credential does not heal with time.
  */
 const credentialRefusalSchema = z.object({

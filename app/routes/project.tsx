@@ -161,10 +161,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 /**
  * Pass-19 UX coherence audit, finding #15 — the archived banner used to tell
  * EVERY reader to "restore it from Settings → Danger zone". Q-V1 (pass-18 owner
- * ruling, project-settings/settings-page.tsx:1596) renders that panel only when
- * the reader holds `edit-policy`, so a maintainer, contributor or viewer
- * followed an exact named path to a panel that is not on their Settings page —
- * and nothing anywhere told them who CAN restore it (the in-panel deny note is
+ * ruling; `SettingsPage`'s `DangerZone` gate in
+ * project-settings/settings-page.tsx) renders that panel only when the reader
+ * holds `edit-policy`, so a maintainer, contributor or viewer followed an exact
+ * named path to a panel that is not on their Settings page — and nothing
+ * anywhere told them who CAN restore it (the in-panel deny note is
  * unreachable, since the gate and the note test the same grant). Name the route
  * only to the reader who has it; everyone else gets the authority instead,
  * which is the same shape the four Settings lock notes already use.

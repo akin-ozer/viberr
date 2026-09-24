@@ -734,10 +734,11 @@ describe("the `manual` refresh pin (C5)", () => {
 });
 
 /**
- * C5/pass-16 — containment consistency. `readKbBody` has refused to follow
- * links out of the store since F9 and every write path since P14-RV-02; the
- * LISTINGS were the odd one out (`subDirNames` used dereferencing `statSync`),
- * so a symlinked folder was a first-class, browsable, injectable resource.
+ * C5/pass-16 — containment consistency. The KB reader (`readKbIndexDetailed`
+ * today) has refused to follow links out of the store since F9 and every write
+ * path since P14-RV-02; the LISTINGS were the odd one out (`subDirNames` used
+ * dereferencing `statSync`), so a symlinked folder was a first-class,
+ * browsable, injectable resource.
  */
 describe("store listings never follow links out of the store (C5)", () => {
   it("a symlinked KB folder is not a knowledge base", () => {

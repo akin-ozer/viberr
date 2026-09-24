@@ -59,7 +59,7 @@ export interface RunSpec {
   runId: string;
   projectSlug: string;
   taskKey: string;
-  /** Thread id within the task ("op" | "primary" | "c0"). */
+  /** Thread id within the task ("op" | "primary" | "r0"). */
   threadId: string;
   role: string;
   kind: RunKind;

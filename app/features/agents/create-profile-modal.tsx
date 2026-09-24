@@ -272,10 +272,11 @@ export function useModelCatalog(
  * F19 UX-13 — the modes the SERVER refuses to store as submitted.
  *
  * Two rewrites happen unconditionally in `agent-profile-actions.server.ts`:
- *  - `:185` (edit) / `:239` (create) — every id in `ALWAYS_HUMAN_CAPABILITY_IDS`
- *    is coerced to `human` "whatever the submitted form says";
- *  - `:180` (edit) / `:249` (create) — `report-validation-verdict` persists
- *    `direct` iff the form said `direct`, and `off` for every other value.
+ *  - `grantsFor` (edit) / `createModalGrants` (create) — every id in
+ *    `ALWAYS_HUMAN_CAPABILITY_IDS` is coerced to `human` "whatever the
+ *    submitted form says";
+ *  - the same two functions — `report-validation-verdict` persists `direct`
+ *    iff the form said `direct`, and `off` for every other value.
  *
  * The picker used to offer the rewritten modes anyway: an admin could set
  * "Merge a pull request" to Allowed, get a success toast, and find it back on
@@ -283,15 +284,16 @@ export function useModelCatalog(
  * the policy surfaces then count in a different bucket than the one chosen. The
  * control now refuses what the server refuses instead of accepting and
  * discarding it — the same locked treatment (`.cap-seg.locked`) the Policy sheet
- * already uses for its human-authorized boundary (policy-page.tsx:471).
+ * already uses for its human-authorized boundary (`WorkflowRules` in
+ * policy-page.tsx).
  */
 const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
 const VERDICT_CAP_ID = "report-validation-verdict";
 
 /** Dot class + fallback word per mode for the collapsed group summary.
- *  `off` uses the SAME `.d.off` swatch as the capability matrix's "Not granted"
- *  legend entry (capability-matrix-modal.tsx:118) — the modal used to draw it in
- *  a `.d.none` grey the one legend in the product never showed. */
+ *  `off` uses the SAME `.d.off` swatch as the capability matrix's `off` legend
+ *  entry (`.mx-legend` in `CapabilityMatrixModal`) — the modal used to draw it
+ *  in a `.d.none` grey the one legend in the product never showed. */
 const SUMMARY_MODES: readonly { id: CapMode; word: string }[] = [
   { id: "direct", word: "Direct" },
   { id: "recommend", word: "Recommend" },
@@ -866,8 +868,9 @@ function CapabilityGrants({
               {/* F19-35: the disclosure state lived in the `open` CSS class
                   alone — the chevron rotates, and a screen reader learns
                   nothing. `aria-expanded` is the house pattern for every other
-                  collapsible trigger in the app (settings-page.tsx:450,
-                  runs-panels.tsx:98, timeline.tsx:93). */}
+                  collapsible trigger in the app (`StageMoveMenu` in
+                  settings-page.tsx, `AgentPicker` in runs-panels.tsx,
+                  `CollapsibleComment` in timeline.tsx). */}
               <button
                 type="button"
                 className={"cap-mghead" + (open ? " open" : "")}
@@ -876,8 +879,8 @@ function CapabilityGrants({
                 // (`.cap-mghead.open .cap-chev` rotation) alone, so a screen
                 // reader could not tell a collapsed group from an expanded one
                 // — and all groups after the first START collapsed. A dangling
-                // `aria-controls` is worse than none (command-palette.tsx:153),
-                // so it is set only while the body exists.
+                // `aria-controls` is worse than none (`CommandPalette`'s input,
+                // command-palette.tsx), so it is set only while the body exists.
                 aria-expanded={open}
                 aria-controls={open ? bodyId : undefined}
                 onClick={() =>
@@ -893,8 +896,8 @@ function CapabilityGrants({
                     the expanded segment below uses for that mode on this
                     profile kind (Allowed/Human-only/Off for a specialist,
                     Direct/Recommend/Human/Off for the operator), the way the
-                    Policy page's identical strip already reads
-                    (policy-page.tsx:309-322). */}
+                    Policy page's identical strip already reads (`.pcap-counts`
+                    in policy-page.tsx's `AgentCapability`). */}
                 <span className="cap-msum">
                   {SUMMARY_MODES.filter((m) => c[m.id] > 0).map((m) => (
                     <span className="cs" key={m.id}>
@@ -921,9 +924,9 @@ function CapabilityGrants({
                     // UX-13: the server rewrites these two classes of row
                     // unconditionally, so the picker no longer offers what it
                     // will discard. Always-human ids get the locked seg the
-                    // Policy sheet uses (policy-page.tsx:471); the verdict row
-                    // drops "Human-only", which persists `off` — it is an
-                    // explicit-`direct`-or-nothing grant.
+                    // Policy sheet uses (`WorkflowRules` in policy-page.tsx);
+                    // the verdict row drops "Human-only", which persists `off`
+                    // — it is an explicit-`direct`-or-nothing grant.
                     const locked = ALWAYS_HUMAN.has(capDef.id);
                     // Browser→egress coupling: while the browser is Allowed,
                     // the egress row is pinned to Allowed — `coupleGrants`
@@ -1001,11 +1004,14 @@ function CapabilityGrants({
                             one a screen reader could not read.
                             UX-19: it was brought along as far as the ROLE and
                             stopped there. A radiogroup promises arrow-key
-                            traversal (roving-radio.ts), which UXA-7 wired into
-                            the twin at policy-page.tsx:158/:474 and not into
-                            this one — so the group announced an interaction
-                            model it did not have, and every radio was its own
-                            tab stop (15 instead of 5 for Collaboration). */}
+                            traversal (a hand-rolled helper then; Radix behind
+                            `RadioSeg` since ruling 166), which UXA-7 wired into
+                            the twins on the Policy sheet (`HumanAccess`'s role
+                            group and `WorkflowRules`' boundary group) and not
+                            into this one — so the group announced an
+                            interaction model it did not have, and every radio
+                            was its own tab stop (15 instead of 5 for
+                            Collaboration). */}
                         <RadioSeg
                           className={
                             "cap-seg" + (locked || pinned ? " locked" : "")

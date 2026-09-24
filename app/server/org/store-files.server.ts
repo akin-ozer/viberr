@@ -172,8 +172,9 @@ function assertInsideRoot(rootAbs: string, absPath: string): void {
   // real folder users manage outside the app, and uploads/imports/agents all
   // write there) points wherever it likes: a link named `notes.md` served an
   // arbitrary host file through the in-app reader, and a write through one would
-  // have clobbered the link's target. `readKbBody` has refused to follow
-  // symlinks since F9 (`kb-injection.server.ts`) — every store path now agrees.
+  // have clobbered the link's target. The KB reader has refused to follow
+  // symlinks since F9 (`readKbIndexDetailed`, `kb-injection.server.ts`) — every
+  // store path now agrees.
   // Resolved with `realpathSync` so an intermediate symlinked DIRECTORY is
   // caught too, and only on parts that exist (creates resolve their parent).
   const existing = existsSync(absPath) ? absPath : path.dirname(absPath);

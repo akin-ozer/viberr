@@ -85,8 +85,8 @@ export interface CapabilityActionLabels {
 }
 
 /**
- * F20-9 / R20-7: the AUTONOMY CEILING, the display twin of the runtime gate at
- * `operator-actions.server.ts:2580`
+ * F20-9 / R20-7: the AUTONOMY CEILING, the display twin of the runtime gate in
+ * `operatorAcceptCompletion` (operator-actions.server.ts)
  * (`authority.autonomy !== "full" || gate(...) !== "direct"`). `completion-for-
  * acceptance` only ACTS DIRECTLY when the operator runs at FULL autonomy; under a
  * supervised project the runtime posts a recommendation card a human applies, so

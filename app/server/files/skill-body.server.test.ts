@@ -73,10 +73,11 @@ describe("readSkillBodyDetailed — the body", () => {
 /**
  * A5/pass-16 — a skill body is injected under the "Attached resources (trusted
  * — configured for you)" banner, i.e. the run is explicitly told to follow its
- * instructions. `readKbBody` has refused to follow symlinks out of the store
- * since F9 and every other store path agreed after P14-RV-02; this reader
- * dereferenced them, so a symlinked SKILL.md (or skill folder) put arbitrary
- * host content into the model's context AS TRUSTED PERSONA.
+ * instructions. The KB reader (`readKbIndexDetailed` today) has refused to
+ * follow symlinks out of the store since F9 and every other store path agreed
+ * after P14-RV-02; this reader dereferenced them, so a symlinked SKILL.md (or
+ * skill folder) put arbitrary host content into the model's context AS TRUSTED
+ * PERSONA.
  */
 describe("readSkillBodyDetailed — store containment (A5)", () => {
   function outsideFile(body: string): string {

@@ -3796,9 +3796,10 @@ function readOperatorDefinition(dataRoot?: string): string {
 // operator and specialists resolve declared skills identically — one code path,
 // one missing-skill warning.
 
-// readKbBody now lives in ~/server/files/kb-injection.server (shared with the
-// specialist runtime): recursive tree walk + all text-doc extensions, so
-// imported/nested/non-.md KB docs actually reach the operator's context.
+// The KB reader (`readKbIndexes`, `readKbDocForRun`) lives in
+// ~/server/files/kb-injection.server (shared with the specialist runtime):
+// recursive tree walk + all text-doc extensions, so imported/nested/non-.md KB
+// docs actually reach the operator's context.
 
 /**
  * What the operator's declared org MCP grants ACTUALLY resolved to (B8) — the

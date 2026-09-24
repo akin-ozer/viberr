@@ -1006,9 +1006,10 @@ export function PolicyPage({
   // P14-UI-58: ONE `canManage` gated both segs on `edit-policy`, but the two
   // actions behind them are different rows of the canonical matrix —
   // `set-role` enforces `manage-members`, `set-boundary` enforces
-  // `edit-policy` (policy-actions.server.ts:101,185). They resolve to the same
-  // role set today, so the bug was latent, and that is exactly the drift the
-  // single-source matrix exists to prevent: each control asks for ITS action.
+  // `edit-policy` (`setMemberRole` / `setTransitionBoundary` in
+  // policy-actions.server.ts). They resolve to the same role set today, so the
+  // bug was latent, and that is exactly the drift the single-source matrix
+  // exists to prevent: each control asks for ITS action.
   const canSetRole = roleCan(myRole, "manage-members");
   const canEditPolicy = roleCan(myRole, "edit-policy");
   const busy =

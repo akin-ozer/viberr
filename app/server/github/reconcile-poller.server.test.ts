@@ -247,8 +247,8 @@ describe("pollGithubReconcile (P11-14)", () => {
     // rows, not wrong nudges. What this pins is the QUERY's semantics (the two
     // counts below diverge, and the poller follows the structural one), so the
     // day the redundant re-check is refactored away the blob match cannot come
-    // back with it. `decisions.server.ts:138` already reads this column with
-    // json_extract — this makes the two agree.
+    // back with it. `decisionsRequiring` (decisions.server.ts) already reads
+    // this column with json_extract — this makes the two agree.
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {

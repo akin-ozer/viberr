@@ -3083,10 +3083,11 @@ function prAnchor(
   return { number, url: repo ? `https://github.com/${repo}/pull/${number}` : null };
 }
 
-// readKbBody now lives in ~/server/files/kb-injection.server (shared with the
-// operator runtime): it walks the KB tree recursively and matches every text-doc
-// extension, so GitHub-imported / folder-uploaded / non-.md docs actually reach
-// the agent instead of being silently dropped.
+// The KB reader (`readKbIndexes`, `readKbDocForRun`) lives in
+// ~/server/files/kb-injection.server (shared with the operator runtime): it
+// walks the KB tree recursively and matches every text-doc extension, so
+// GitHub-imported / folder-uploaded / non-.md docs actually reach the agent
+// instead of being silently dropped.
 
 // ----------------------------------------------------------------- prompt/script
 
