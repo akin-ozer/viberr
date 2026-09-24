@@ -136,18 +136,42 @@ export class UpstreamSignInNeeded extends UpstreamConnectError {
 }
 
 /**
+ * A request that was not processed because this connection is no longer the
+ * right one: the gateway opens a new connection and sends it again, once.
+ * Thrown from the transport's own `fetch`, so it reaches the caller as itself
+ * rather than as an SDK error string.
+ */
+export class UpstreamReconnectNeeded extends UpstreamConnectError {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "UpstreamReconnectNeeded";
+  }
+}
+
+/**
  * R-gateway-3 (2026-09-25): the server answered a request on a session it no
  * longer has (a restart, a redeploy, an idle expiry). The MCP spec's signal is
  * a 404 to a request carrying `Mcp-Session-Id`; servers built from the SDK's
  * examples answer 400, and a legacy SSE server refuses a POST to its forgotten
- * session URL the same way. The request was not processed, so the gateway
- * opens a new session and sends it again. Thrown from the transport's `fetch`,
- * so it reaches the caller as itself rather than as an SDK error string.
+ * session URL the same way.
  */
-export class UpstreamSessionLost extends UpstreamConnectError {
+export class UpstreamSessionLost extends UpstreamReconnectNeeded {
   constructor(status: number) {
     super(`the server ended its MCP session (HTTP ${status})`);
     this.name = "UpstreamSessionLost";
+  }
+}
+
+/**
+ * R-oauth-1 (2026-09-25): the registry row no longer points where this
+ * connection was opened. An OAuth sign-in's token is for the endpoint it was
+ * issued to and a connection's endpoint is fixed, so nothing more goes out on
+ * this one: its token source throws this before a request is sent.
+ */
+export class UpstreamEndpointChanged extends UpstreamReconnectNeeded {
+  constructor() {
+    super("its endpoint changed in the org MCP registry after this connection opened");
+    this.name = "UpstreamEndpointChanged";
   }
 }
 

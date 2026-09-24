@@ -1503,7 +1503,9 @@ runtime's answer for a missing grant.
   request is sent again, once; the run's own session never notices. An HTTP server an org admin **signed in with
   OAuth** (ruling 469) takes the same road: its tokens are sealed beside the registry row
   (`oauth_ref`), and the gateway (and the health probe) ask
-  `mcpOAuthTokenSource` for the access token on every request — renewed with the refresh
+  `mcpOAuthTokenSource` — bound to the endpoint its connection was opened against, so a
+  connection to an endpoint the row no longer names is handed nothing and the gateway
+  reconnects to the new one — for the access token on every request — renewed with the refresh
   token when it is within a minute of running out and once after an upstream 401
   (single-flight per server, so two runs spend a rotating refresh token once), then
   re-sealed. A renewal the authorization server refuses ends the sign-in: the tokens are

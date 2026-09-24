@@ -56,7 +56,7 @@ import {
   UPSTREAM_CONNECT_TIMEOUT_MS,
   UpstreamConnectError,
   upstreamFailureReason,
-  UpstreamSessionLost,
+  UpstreamReconnectNeeded,
   type UpstreamConnection,
 } from "./upstream.server";
 
@@ -683,7 +683,8 @@ async function openConnection(
   const token = credential.state === "ok" ? credential.token : null;
   // Ruling 469: an OAuth sign-in's access token is asked for on every request
   // (renewed when it has run out, and once after a 401), never handed over.
-  const auth = credential.state === "oauth" ? mcpOAuthTokenSource(grant.db, row.id) : undefined;
+  const auth =
+    credential.state === "oauth" ? mcpOAuthTokenSource(grant.db, row.id, row.target) : undefined;
   const timeoutMs = state.timeouts.connectMs;
   const connection =
     row.transport === "stdio"
@@ -792,12 +793,18 @@ function reconnectUpstream(
 
 /**
  * Send one request upstream, answering a failure as a named error. When the
- * server says it no longer has the session the request rode on — a restart, a
- * redeploy, an idle expiry — nothing was processed, and the MCP spec asks the
- * client to start a new session: the gateway reconnects (once, however many
- * calls met it) and sends the request again. Before this the upstream kept
- * its dead session for the rest of the run, and a run that re-initialized was
- * handed the same one (R-gateway-3, 2026-09-25).
+ * connection is no longer the right one, nothing was processed and the gateway
+ * reconnects (once, however many calls met it) and sends the request again:
+ *
+ *  - the server says it no longer has the session the request rode on — a
+ *    restart, a redeploy, an idle expiry — and the MCP spec asks the client to
+ *    start a new one. Before, the upstream kept its dead session for the rest
+ *    of the run, and a run that re-initialized was handed the same one
+ *    (R-gateway-3, 2026-09-25);
+ *  - the registry row was re-pointed since the connection opened. Before, an
+ *    OAuth connection's token source followed the row, so a later sign-in's
+ *    token went to the old endpoint (R-oauth-1, 2026-09-25); now the new
+ *    connection goes where the row points, with its own sign-in.
  */
 async function forward<T>(
   grant: RunGrant,
@@ -808,14 +815,14 @@ async function forward<T>(
   try {
     return await send(connection.client);
   } catch (error) {
-    if (!(error instanceof UpstreamSessionLost)) throw namedError(upstream.server, error, connection);
+    if (!(error instanceof UpstreamReconnectNeeded)) throw namedError(upstream.server, error, connection);
     let fresh: UpstreamConnection;
     try {
       fresh = await reconnectUpstream(grant, upstream, connection, error.reason);
     } catch (reconnect) {
       throw new GatewayRpcError(
         UPSTREAM_UNREACHABLE_CODE,
-        `MCP server "${upstream.server}" failed through Viberr's gateway: ${error.reason}, and a new session could not be opened: ${upstreamFailureReason(reconnect)}`,
+        `MCP server "${upstream.server}" failed through Viberr's gateway: ${error.reason}, and a new connection could not be opened: ${upstreamFailureReason(reconnect)}`,
       );
     }
     try {

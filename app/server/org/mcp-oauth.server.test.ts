@@ -102,7 +102,7 @@ function rawRow(): { cred_ref: string | null; oauth_ref: string | null; oauth_js
 /** What a tool call through the token source's upstream sends and gets. */
 async function callWhoami(): Promise<string> {
   const connection = await connectHttpUpstream(server.url, {
-    auth: mcpOAuthTokenSource(db, MCP_ID),
+    auth: mcpOAuthTokenSource(db, MCP_ID, server.url),
     timeoutMs: 5_000,
   });
   try {
@@ -303,7 +303,7 @@ describe("the token upstream: use, renew, expire (ruling 469)", () => {
     await startServer({ accessTokenTtlSec: 5 });
     await signIn();
     server.options.accessTokenTtlSec = 3600;
-    const source = mcpOAuthTokenSource(db, MCP_ID);
+    const source = mcpOAuthTokenSource(db, MCP_ID, server.url);
     const [a, b] = await Promise.all([source.accessToken(), source.accessToken()]);
     expect(a).toBe(b);
     expect(server.tokenRequests.filter((request) => request.grant === "refresh_token")).toHaveLength(1);

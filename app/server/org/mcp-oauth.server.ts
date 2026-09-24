@@ -30,6 +30,7 @@ import {
   OAUTH_NEEDS_SIGN_IN,
   OAUTH_SIGN_IN_EXPIRED,
   UpstreamConnectError,
+  UpstreamEndpointChanged,
   type McpFetch,
   type UpstreamTokenSource,
 } from "~/server/mcp-proxy/upstream.server";
@@ -677,15 +678,24 @@ function expiredByClock(tokens: StoredTokens, now: number = Date.now()): boolean
  * The access token for one connection, as the gateway and the probe attach it
  * upstream. Read from the row on every request, so a sign-out, a new sign-in
  * or a renewal by another run takes effect on the next request.
+ *
+ * `target` is the endpoint the connection it serves was opened against, and
+ * the source is bound to it: once the row points anywhere else, it hands over
+ * nothing (`UpstreamEndpointChanged`, and the gateway reconnects to where the
+ * row points). Following the row alone let a connection held open to the old
+ * endpoint send a later sign-in's tokens there, whose 401 then spent the new
+ * refresh token and ended the new sign-in (R-oauth-1, 2026-09-25).
  */
 export function mcpOAuthTokenSource(
   db: DatabaseSync,
   mcpId: string,
+  target: string,
   options: { fetchImpl?: McpFetch } = {},
 ): UpstreamTokenSource {
   const current = (): LiveSignIn => {
     const row = rowById(db, mcpId);
     if (!row) throw new UpstreamConnectError("it is no longer in the org MCP registry");
+    if (row.target !== target || row.transport !== "HTTP") throw new UpstreamEndpointChanged();
     const opened = openOAuth(db, row);
     if (opened.state === "unreadable") throw new UpstreamConnectError(opened.reason);
     const tokens = opened.state === "ok" ? opened.sealed.tokens : null;

@@ -1646,7 +1646,7 @@ export async function saveMcpServer(
     );
   }
   const oauthAuth =
-    signedIn && !repointed && input.id ? mcpOAuthTokenSource(db, input.id) : undefined;
+    signedIn && !repointed && input.id ? mcpOAuthTokenSource(db, input.id, target) : undefined;
 
   // SAFETY: `id` is the TEXT PRIMARY KEY of `org_mcp_servers`
   // (0001_baseline.sql), so a matching row hands back a string.
@@ -1906,7 +1906,7 @@ export async function testMcpServer(
   // Ruling 469: a signed-in server is probed with its sign-in; one that needs
   // a sign-in it does not have says so instead of blaming the endpoint.
   const oauth = sealed?.cred_ref ? null : mcpOAuthCredential(db, id);
-  const auth = oauth?.state === "signed_in" ? mcpOAuthTokenSource(db, id) : undefined;
+  const auth = oauth?.state === "signed_in" ? mcpOAuthTokenSource(db, id, existing.target) : undefined;
   const disc =
     existing.transport === "stdio"
       ? await discoverStdioMcpTools(existing.target, { ...options, token })
