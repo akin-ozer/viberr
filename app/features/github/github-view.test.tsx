@@ -1398,11 +1398,13 @@ describe("ruling 368: the GitHub page's requests in flight", () => {
     );
     const update = button(container, "Updating…");
     expect(update.disabled).toBe(true);
-    expect(update.querySelector("svg.ico.spin")).not.toBeNull();
+    // Ruling 459: the loader is always drawn in the glyph's cell (GlyphSwap),
+    // so "spinning" is the cell having traded the resting glyph for it.
+    expect(update.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
     const recheck = button(container, "Re-check scopes");
     expect(recheck.disabled).toBe(true);
     expect(recheck.hasAttribute("aria-busy")).toBe(false);
-    expect(recheck.querySelector(".spin")).toBeNull();
+    expect(recheck.querySelector(".copy-glyph[data-copied]")).toBeNull();
 
     held.answer();
     await waitFor(() => expect(button(container, "Update status")).toBeTruthy());
@@ -1416,7 +1418,7 @@ describe("ruling 368: the GitHub page's requests in flight", () => {
     await waitFor(() =>
       expect(button(container, "Checking…").getAttribute("aria-busy")).toBe("true"),
     );
-    expect(button(container, "Checking…").querySelector("svg.ico.spin")).not.toBeNull();
+    expect(button(container, "Checking…").querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
     const update = button(container, "Update status");
     expect(update.disabled).toBe(true);
     expect(update.hasAttribute("aria-busy")).toBe(false);
@@ -1453,7 +1455,7 @@ describe("ruling 368: CredentialManageActions names the request in flight", () =
     expect(attach.textContent).toBe("Attaching…");
     expect(attach.getAttribute("aria-busy")).toBe("true");
     expect(attach.disabled).toBe(true);
-    expect(attach.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(attach.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
   });
 
   it("a removal in flight: Removing… on Remove, Rotate only waits", () => {

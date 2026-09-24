@@ -1,5 +1,6 @@
 import type { ConversationTurnState } from "~/server/controller/controller-run.server";
 import { readableStep } from "~/features/runtime/readable-step";
+import { useFreshLine } from "~/ui/use-fresh-line";
 
 export { readableStep };
 
@@ -26,11 +27,20 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
   // sits beside already says that, so only a phase that means something else
   // ("Preparing workspace") is worth the row.
   const detail = [turn.phase, turn.step].filter(Boolean).join(" · ");
+  // Before the early return: a turn with no step yet is the first paint too.
+  const fresh = useFreshLine(detail);
   if (!detail) return null;
   // Ruling 451(a): keyed on the step, so a new step is a new line that rises
   // in (the sheet's `swap-in`) instead of words changing under the reader.
+  // Ruling 459: only a step that replaces the one on screen when the page or
+  // dock opened rises (`data-fresh`); that first one stands still.
   return (
-    <span key={detail} className="ctl-working-step mono" title={detail}>
+    <span
+      key={detail}
+      className="ctl-working-step mono"
+      title={detail}
+      data-fresh={fresh ? "true" : undefined}
+    >
       {readableStep(detail)}
     </span>
   );

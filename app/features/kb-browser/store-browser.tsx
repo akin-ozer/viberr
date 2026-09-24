@@ -11,6 +11,7 @@ import { countLabel } from "~/shared/text/plural";
 import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -217,10 +218,7 @@ function BrowserToolbar({
             disabled={importing}
             aria-busy={importing || undefined}
           >
-            <Icon
-              name={importing ? "refresh" : "arrow"}
-              className={importing ? "spin" : ""}
-            />
+            <GlyphSwap rest="arrow" alt="loader" on={importing} spinAlt />
             {importing ? "Importing…" : "Import"}
           </button>
         </div>
@@ -1000,7 +998,8 @@ export function StoreBrowser({
       intent: "store-delete",
       path: JSON.stringify([...path, node.name]),
     });
-    setConfirm(null);
+    // No setConfirm(null): the confirm plays its exit, then its onCancel
+    // clears it (ruling 459).
   };
 
   const nFiles = countKbFiles(nodes);
@@ -1263,10 +1262,7 @@ export function StoreBrowser({
         <ReplaceConfirm
           path={[...doc.dir, doc.name.trim()].join("/")}
           onCancel={() => editor.setConfirmReplace(false)}
-          onConfirm={() => {
-            editor.setConfirmReplace(false);
-            editor.save(true);
-          }}
+          onConfirm={() => editor.save(true)}
         />
       )}
     </>

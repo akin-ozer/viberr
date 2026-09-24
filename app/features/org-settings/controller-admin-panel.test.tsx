@@ -522,3 +522,29 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     });
   });
 });
+
+/**
+ * Ruling 459: a grant chip's check is always drawn, and the sheet fades it in
+ * on `.on`. It mounted and unmounted, so each toggle popped it in and widened
+ * the chip by the glyph and its gap, re-wrapping every later chip in the row.
+ */
+describe("ruling 459: a grant chip keeps its check as it toggles", () => {
+  it("draws the check on a granted and an ungranted chip alike, and the same node trades in place", () => {
+    // CANARY: put back `{granted.has(o.id) && <Icon name="check" />}` and the
+    // ungranted chip has no check to fade in.
+    const { getByRole } = renderPanel();
+    const granted = getByRole("button", { name: /controller-guide/ });
+    const chip = getByRole("button", { name: /developer-expertise/ });
+    expect(granted.firstElementChild!.matches("svg.ico.pc-check")).toBe(true);
+    const check = chip.firstElementChild!;
+    expect(check.matches("svg.ico.pc-check")).toBe(true);
+    expect(chip.className).not.toContain(" on");
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    expect(chip.className).toContain(" on");
+    expect(chip.firstElementChild).toBe(check);
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    expect(chip.firstElementChild).toBe(check);
+  });
+});

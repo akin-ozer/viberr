@@ -4,6 +4,7 @@ import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import type { SessionUser } from "~/server/auth/require-user.server";
 import { countLabel } from "~/shared/text/plural";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { useDialog } from "~/ui/use-dialog";
@@ -632,7 +633,9 @@ export function StoreStrip({
         {/* Ruling 368: each request shows itself on the button that started
             it (busy, the loader spinning, the label naming the work) and
             cannot be pressed again mid-flight: Rebuild used to stay live and
-            reopen its confirm while the rebuild it had started was running. */}
+            reopen its confirm while the rebuild it had started was running.
+            Ruling 459: the loader cross-fades in for the resting glyph
+            (`GlyphSwap`) instead of replacing it in one frame. */}
         <button
           type="button"
           className="btn ghost sm"
@@ -641,7 +644,7 @@ export function StoreStrip({
           aria-busy={scanning || undefined}
           title="Re-read the task files and update any board row that drifted from them"
         >
-          <Icon name={scanning ? "loader" : "refresh"} className={scanning ? "spin" : ""} />
+          <GlyphSwap rest="refresh" alt="loader" on={scanning} spinAlt />
           {scanning ? "Scanning…" : "Re-scan store"}
         </button>
         <button
@@ -652,7 +655,7 @@ export function StoreStrip({
           aria-busy={rebuilding || undefined}
           title="Recovery: drop every projection row and re-project the whole store from files"
         >
-          <Icon name={rebuilding ? "loader" : "memory"} className={rebuilding ? "spin" : ""} />
+          <GlyphSwap rest="memory" alt="loader" on={rebuilding} spinAlt />
           {rebuilding ? "Rebuilding…" : "Rebuild projections…"}
         </button>
       </span>
@@ -672,7 +675,8 @@ export function RebuildConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  const { ref, close, commit } = useDialog(onCancel);
   return (
     // Native <dialog>; role="alertdialog" kept for the stronger semantics.
     // Escape + backdrop-click close come from showModal() + useDialog.
@@ -703,7 +707,7 @@ export function RebuildConfirm({
         {/* The trigger is tertiary-destructive; inside the confirmation the
             commit IS the primary action, so it carries the danger tone here —
             not out on the page (skill: destructive placement). */}
-        <button type="button" className="btn danger" onClick={onConfirm}>
+        <button type="button" className="btn danger" onClick={() => commit(onConfirm)}>
           Rebuild projections
         </button>
       </div>

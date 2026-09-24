@@ -108,10 +108,12 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   },
   // TASK-4 (console half): 254 while the console and the run card
   // re-reconciled on identical data; neither renders now (the stable run
-  // projection, memoised panels). The 51 left are the page's other panels
-  // (54 before the timeline and composer memos of perf/journeys-pass).
+  // projection, memoised panels). The 49 left are the page's other panels
+  // (54 before the timeline and composer memos of perf/journeys-pass; 51
+  // before ruling 459's memoised GlyphSwap took the run start's and Archive's
+  // glyphs out of the re-render).
   "console:task-page.renders-per-noop-revalidation": {
-    ceiling: 51,
+    ceiling: 49,
     unit: "count",
     journey: "live-run",
     fixture: `${TASK_PAGE}; 400 rows; component renders for a structuredClone of the same props`,

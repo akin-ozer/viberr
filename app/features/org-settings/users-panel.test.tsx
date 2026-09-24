@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
+import { Icon } from "~/ui/icon";
 import { ToastProvider } from "~/ui/toast";
 import { UsersPanel } from "./users-panel";
 
@@ -467,6 +468,67 @@ describe("ruling 149: Disable takes the destructive row treatment", () => {
 });
 
 /**
+ * Ruling 459 (better-ui icons): the Google mark was a typed ExtraBold "G" in
+ * the identity chip, the Allow-access tile and the domain row, beside the
+ * set's outline GitHub and lock glyphs. It is the set's `google` glyph now,
+ * hidden from assistive tech like every Icon, so the names read "Google",
+ * not "GGoogle".
+ */
+describe("ruling 459: the Google mark is the icon set's glyph", () => {
+  it("draws it in the chip, the Allow-access tile and the domain row, and no letter stands in", () => {
+    // Canary: put the typed "G" span back in the identity chip.
+    const googleUser: OrgUserView = {
+      ...ME,
+      id: "u_gul",
+      name: "Gul Demir",
+      email: "gul@acme.dev",
+      initials: "GD",
+      idp: "google",
+    };
+    const domains: DomainRecord[] = [
+      { id: "d_acme", domain: "acme.dev", role: "member", createdAt: "2026-09-01T00:00:00Z" },
+    ];
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <UsersPanel
+              users={[ME, googleUser]}
+              domains={domains}
+              meId="u_arda"
+              providers={{ github: false, google: true }}
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container, getByText } = render(<Stub initialEntries={["/org/settings"]} />);
+    const mark = (() => {
+      const probe = render(<Icon name="google" />);
+      const inner = probe.container.querySelector("svg")!.innerHTML;
+      probe.unmount();
+      return inner;
+    })();
+    const isMark = (el: Element | null) =>
+      el !== null && el.matches("svg.ico[aria-hidden='true']") && el.innerHTML === mark;
+
+    const chip = [...container.querySelectorAll(".idp-chip")].find((c) => c.textContent!.includes("Google"))!;
+    expect(chip.textContent).toBe("Google");
+    expect(isMark(chip.firstElementChild)).toBe(true);
+
+    const row = getByText("acme.dev").closest(".member-row")!;
+    expect(isMark(row.querySelector(".dom-ic")!.firstElementChild)).toBe(true);
+    expect(row.querySelector(".dom-ic")!.textContent).toBe("");
+
+    fireEvent.click(getByText("Allow access"));
+    const tile = [...container.querySelectorAll<HTMLButtonElement>(".be-opt")][1]!;
+    expect(tile.textContent).toMatch(/^Google/);
+    expect(isMark(tile.querySelector(".be-ic")!.firstElementChild)).toBe(true);
+  });
+});
+
+/**
  * Ruling 368: the password reset in flight shows itself on its button — busy,
  * the loader spinning where the lock was, and a label naming the work — rather
  * than dimming to the .45 refused step with its resting label.
@@ -505,6 +567,6 @@ describe("ruling 368: the reset in flight", () => {
     await waitFor(() => expect(reset.getAttribute("aria-busy")).toBe("true"));
     expect(reset.textContent).toBe("Resetting…");
     expect(reset.disabled).toBe(true);
-    expect(reset.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(reset.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
   });
 });

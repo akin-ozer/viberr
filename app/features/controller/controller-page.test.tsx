@@ -1459,6 +1459,22 @@ describe("ruling 451: the page's conversation motion", () => {
     expect(row.querySelector(".ctl-working-step")).not.toBe(step);
     expect(row.querySelector(".ctl-working-step")!.textContent).toBe("Read · app/app.css");
   });
+
+  it("ruling 459: the step on screen when the page opens stands still; the next one is marked to rise", async () => {
+    // CANARY: set TurnStep's `data-fresh` unconditionally and the step a
+    // person finds on opening the page mid-turn rises as if it had just changed.
+    const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step });
+    const at = (step: string) =>
+      view({ conversation, messages: [message("m1", "Go", "user")], viewerOwnsActive: true, turn: turn(step) });
+    const { update } = renderLive(at("Bash · npm test"));
+    const row = await screen.findByRole("status");
+    expect(row.querySelector(".ctl-working-step")!.hasAttribute("data-fresh")).toBe(false);
+    update(at("Read · app/app.css"));
+    expect(row.querySelector(".ctl-working-step")!.getAttribute("data-fresh")).toBe("true");
+    // A latch: the first words coming back are a new step too.
+    update(at("Bash · npm test"));
+    expect(row.querySelector(".ctl-working-step")!.getAttribute("data-fresh")).toBe("true");
+  });
 });
 
 /**

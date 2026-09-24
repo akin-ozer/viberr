@@ -196,9 +196,14 @@ function ActiveBadge({
    *  refuses before it starts, so "idle" alone is a half-truth. */
   unusable?: string | undefined;
 }) {
+  // Ruling 455 names the count in words; ruling 459's violet working dot
+  // leads them, as on every other agent-at-work surface.
   if (count > 0)
     return (
-      <span className="ag-active">{count} running</span>
+      <span className="ag-active">
+        <span className="working" />
+        {count} running
+      </span>
     );
   if (unusable)
     return (
@@ -443,9 +448,9 @@ function ResGroup({
  *    dialog names it as their next step.
  */
 function DeleteConfirm({
-  a,
+  a: current,
   projectName,
-  activeCount,
+  activeCount: currentCount,
   onCancel,
   onConfirm,
 }: {
@@ -455,6 +460,10 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  // Ruling 459: the confirm plays its exit after the delete lands, and the
+  // page then selects another profile, so the words are the ones it opened
+  // with; the exit never names the next profile.
+  const [{ a, activeCount }] = useState(() => ({ a: current, activeCount: currentCount }));
   // The shared `ConfirmDialog` (ruling 458(f)): a native <dialog> whose
   // backdrop click and Escape dismiss come from useDialog.
   return (
@@ -621,6 +630,7 @@ export function LibraryPicker({
   workflow,
   projectName,
   busy,
+  done = false,
   onClose,
   onAdd,
 }: {
@@ -635,10 +645,16 @@ export function LibraryPicker({
   workflow: WorkflowEdgeView[];
   projectName: string;
   busy: boolean;
+  /** The deploy landed: the picker plays its exit, then onClose unmounts it
+   *  (ruling 459). */
+  done?: boolean;
   onClose: () => void;
   onAdd: (profileId: string) => void;
 }) {
   const { ref: dialogRef, close } = useDialog(onClose);
+  useEffect(() => {
+    if (done) close();
+  }, [done, close]);
   return (
     <dialog className="modal-card" aria-label="Add from library" ref={dialogRef}>
       <div className="modal-head">
@@ -680,7 +696,7 @@ export function LibraryPicker({
                   type="button"
                   className="deploy-row"
                   key={t.id}
-                  disabled={busy}
+                  disabled={busy || done}
                   onClick={() => onAdd(t.id)}
                 >
                   <span className="deploy-eng">
@@ -857,10 +873,7 @@ export function ProfileDetail({
           projectName={projectName}
           activeCount={activeKeys.length}
           onCancel={() => setConfirm(false)}
-          onConfirm={() => {
-            setConfirm(false);
-            onDelete(a.id);
-          }}
+          onConfirm={() => onDelete(a.id)}
         />
       )}
       <div className="ag-hero">
@@ -878,6 +891,7 @@ export function ProfileDetail({
             </Pill>
             {runningKeys.length > 0 ? (
               <span className="ag-running">
+                <span className="working" />
                 running on {countLabel(runningKeys.length, "task")}
               </span>
             ) : backendMissing ? (
@@ -988,6 +1002,7 @@ export function ProfileDetail({
                 Advisory only · {countLabel(advisory.length, "line")} the runtime
                 does not read
               </span>
+              <Icon name="chevron" className="disc-chev" />
             </summary>
             <div className="cap-advisory-body">
               <p>
@@ -1536,6 +1551,9 @@ export function AgentsPage({
   const [creating, setCreating] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [editing, setEditing] = useState<AgentProfileView | null>(null);
+  // Ruling 459: a save or deploy that lands plays the open modal's exit; the
+  // modal's onClose then unmounts it and clears this.
+  const [modalDone, setModalDone] = useState(false);
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -1603,9 +1621,7 @@ export function AgentsPage({
       if (d.governanceNotice) {
         push(d.governanceNotice.message);
       }
-      setCreating(false);
-      setLibraryOpen(false);
-      setEditing(null);
+      if (creating || editing || libraryOpen) setModalDone(true);
       setFormError(null);
       if (d.profileId) setSel(d.profileId);
     } else if (creating || editing) {
@@ -1845,11 +1861,13 @@ export function AgentsPage({
           stages={stages}
           projectName={projectName}
           busy={fetcher.state !== "idle"}
+          done={modalDone}
           error={formError}
           {...(resourceCatalog ? { resourceCatalog } : {})}
           {...(viewerConnected ? { viewerConnected } : {})}
           onClose={() => {
             setCreating(false);
+            setModalDone(false);
             setFormError(null);
           }}
           onSubmit={submitProfile}
@@ -1862,11 +1880,13 @@ export function AgentsPage({
           stages={stages}
           projectName={projectName}
           busy={fetcher.state !== "idle"}
+          done={modalDone}
           error={formError}
           {...(resourceCatalog ? { resourceCatalog } : {})}
           {...(viewerConnected ? { viewerConnected } : {})}
           onClose={() => {
             setEditing(null);
+            setModalDone(false);
             setFormError(null);
           }}
           onSubmit={submitProfile}
@@ -1879,7 +1899,11 @@ export function AgentsPage({
           workflow={workflow}
           projectName={projectName}
           busy={fetcher.state !== "idle"}
-          onClose={() => setLibraryOpen(false)}
+          done={modalDone}
+          onClose={() => {
+            setLibraryOpen(false);
+            setModalDone(false);
+          }}
           onAdd={deployFromLibrary}
         />
       )}

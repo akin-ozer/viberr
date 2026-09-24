@@ -24,6 +24,7 @@ import { MoveBackConfirm } from "./move-back-confirm";
 import { DiagnosticsPanel, TaskHero } from "./task-main-sections";
 import type { DiagnosticRecord } from "~/server/projections/task-query.server";
 import { ReleaseConfirm } from "./release-confirm";
+import { ArchiveConfirm } from "./archive-confirm";
 import type { ActionResult } from "./task-detail-hooks";
 import { TimelineItem } from "./timeline";
 import {
@@ -2386,6 +2387,34 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(onResolve).not.toHaveBeenCalled();
   });
 
+  it("leaves the refusal's dim to the sheet, which also stills its hover and press (ruling 459)", () => {
+    // The blocked option and the refused Confirm each carried an inline .55
+    // of their own, off the house .45 step, and the sheet's `:not(:disabled)`
+    // hover and press still matched both. The attribute is now the whole
+    // contract: `.opt[aria-disabled="true"]` and `.btn[aria-disabled="true"]`
+    // dim them in app.css, which pins those rules.
+    const { container } = render(
+      <DecisionPacket
+        packet={goalPacket}
+        busy={false}
+        canResolve
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive
+        onResolveCustom={() => {}} onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const blocked = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
+    const confirm = container.querySelector<HTMLButtonElement>(
+      ".packet-actions .btn.primary",
+    )!;
+    for (const el of [blocked, confirm]) {
+      expect(el.getAttribute("aria-disabled")).toBe("true");
+      expect(el.getAttribute("style")).toBeNull();
+    }
+  });
+
   it("offers edit_goal normally to a maintainer", () => {
     const { container } = render(
       <DecisionPacket
@@ -2743,6 +2772,7 @@ describe("E4: the blocked Confirm button gives its reason to everybody", () => {
     fireEvent.click(confirm);
     expect(onResolve).not.toHaveBeenCalled();
   });
+
 
   it("drops the reason — and resolves — the moment an allowed option is selected", () => {
     const onResolve = vi.fn();
@@ -3281,7 +3311,7 @@ describe("DecisionPacket — pass-20 governance", () => {
     )!;
     expect(send.getAttribute("aria-busy")).toBe("true");
     expect(send.disabled).toBe(true);
-    expect(send.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(send.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
   });
 
   it("F20-18: no escalation when at least one option is within reach", () => {
@@ -4235,11 +4265,151 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
   });
 });
 
+/* ------------------------------------------ ruling 459: primary-action exits */
+
+/**
+ * Ruling 459: a dialog's primary action leaves the way Cancel does, through
+ * `useDialog`'s `commit`: the action runs, the dialog plays its exit, and only
+ * then its onCancel unmounts it. jsdom reads no stylesheet, so each test gives
+ * the dialog the sheet's closing clock itself; the exit then waits for the
+ * dialog's own transitionend, as it does in a browser.
+ */
+describe("ruling 459: a confirm's primary action plays the same exit as Cancel", () => {
+  const slow = (dialog: HTMLElement) => {
+    dialog.style.transitionDuration = "0.15s";
+  };
+
+  it("the hand-written confirms commit, then leave, then unmount", () => {
+    // CANARY: put any of these primaries back on the raw `onConfirm` (or the
+    // hand-off chip back on `onCancel(); onOwner(...)`): nothing is marked
+    // closing, and the order below breaks.
+    const task = taskFixture("u-arda", "Arda Kaya");
+    const cases: { name: string; primary: string; ui: (log: string[]) => ReactNode }[] = [
+      {
+        name: "ArchiveConfirm",
+        primary: "Archive VIB-151",
+        ui: (log) => (
+          <ArchiveConfirm
+            task={heroTask()}
+            pendingRecommendations={0}
+            busy={false}
+            onCancel={() => log.push("cancel")}
+            onConfirm={() => log.push("confirm")}
+          />
+        ),
+      },
+      {
+        name: "ReleaseConfirm",
+        primary: "Release",
+        ui: (log) => (
+          <ReleaseConfirm
+            task={task}
+            me={{ id: "u-arda", name: "Arda Kaya" }}
+            members={membersFixture}
+            busy={false}
+            onCancel={() => log.push("cancel")}
+            onConfirm={() => log.push("confirm")}
+            onOwner={() => log.push("owner")}
+          />
+        ),
+      },
+    ];
+    for (const c of cases) {
+      const log: string[] = [];
+      const { container, unmount } = render(<>{c.ui(log)}</>);
+      const dialog = container.querySelector("dialog")!;
+      slow(dialog);
+      const button = [...dialog.querySelectorAll("button")].find(
+        (b) => b.textContent?.trim() === c.primary,
+      )!;
+      expect(button, c.name).toBeTruthy();
+      fireEvent.click(button);
+      expect(log, c.name).toEqual(["confirm"]);
+      expect(dialog.hasAttribute("data-closing"), c.name).toBe(true);
+      fireEvent.transitionEnd(dialog);
+      expect(log, c.name).toEqual(["confirm", "cancel"]);
+      unmount();
+    }
+  });
+
+  it("the release dialog's hand-off chip hands off, then leaves the same way", () => {
+    const log: string[] = [];
+    const { container } = render(
+      <ReleaseConfirm
+        task={taskFixture("u-selin", "Selin Aksoy")}
+        me={{ id: "u-arda", name: "Arda Kaya" }}
+        members={membersFixture}
+        busy={false}
+        onCancel={() => log.push("cancel")}
+        onConfirm={() => log.push("confirm")}
+        onOwner={(action) => log.push("owner:" + action)}
+      />,
+    );
+    const dialog = container.querySelector("dialog")!;
+    slow(dialog);
+    fireEvent.click(container.querySelector(".handoff-chip")!);
+    expect(log).toEqual(["owner:take"]);
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    fireEvent.transitionEnd(dialog);
+    expect(log).toEqual(["owner:take", "cancel"]);
+  });
+
+  it("the move-back confirm sends its reason once, even on a second click during the exit", () => {
+    const log: string[] = [];
+    const { container, getByText } = render(
+      <MoveBackConfirm
+        taskKey="VIB-151"
+        taskTitle="Compress long-running task timelines"
+        fromStageName="Review"
+        toStageName="Build"
+        busy={false}
+        onCancel={() => log.push("cancel")}
+        onConfirm={(reason) => log.push("confirm:" + reason)}
+      />,
+    );
+    const dialog = container.querySelector("dialog")!;
+    slow(dialog);
+    fireEvent.change(container.querySelector("textarea")!, {
+      target: { value: "  add the race test  " },
+    });
+    fireEvent.click(getByText("Move back"));
+    fireEvent.click(getByText("Move back"));
+    expect(log).toEqual(["confirm:add the race test"]);
+    fireEvent.transitionEnd(dialog);
+    expect(log).toEqual(["confirm:add the race test", "cancel"]);
+  });
+
+  it("a caller leaves the unmount to the dialog: the schedule confirm stays up through its exit", () => {
+    // CANARY: put `setConfirmCancel(null)` back in execution-profile's
+    // onConfirm, and the card is gone in the same commit as the click.
+    const { container, onCancelSchedule } = renderExec(execTask(), {
+      schedules: [
+        schedule({ id: "sch-ag", action: "run-agent", profileId: "developer", prompt: "polish the diff" }),
+      ],
+    });
+    fireEvent.click(container.querySelector<HTMLButtonElement>(".agent-run .sched-cancel")!);
+    const dialog = container.querySelector<HTMLDialogElement>('dialog[aria-label="Cancel this scheduled run?"]')!;
+    slow(dialog);
+    fireEvent.click(
+      [...dialog.querySelectorAll("button")].find((b) => b.textContent?.includes("Cancel run"))!,
+    );
+    expect(onCancelSchedule).toHaveBeenCalledWith("sch-ag");
+    expect(dialog.isConnected).toBe(true);
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    fireEvent.transitionEnd(dialog);
+    expect(dialog.isConnected).toBe(false);
+    expect(onCancelSchedule).toHaveBeenCalledTimes(1);
+  });
+});
+
 /**
  * Ruling 368 on the GitHub trace: Complete merge and Force accept share the
  * task page's run fetcher with interrupt and retry, so both went `disabled`
  * (the .45 refused step) for ANY of them, their own included, with their
  * resting labels. Deliver named its work but kept the branch glyph at .45.
+ * Ruling 459: each glyph trades for the loader in its GlyphSwap cell, where the
+ * loader is always drawn (spinning, paused while it rests hidden), so "the
+ * loader shows" is the cell's `data-copied`, not the presence of a `.spin`.
  * Canary: drop `aria-busy={forcing || undefined}` in task-side-panels.tsx.
  */
 describe("ruling 368: the GitHub trace's requests in flight", () => {
@@ -4260,13 +4430,16 @@ describe("ruling 368: the GitHub trace's requests in flight", () => {
     Array.from(c.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
       b.textContent?.includes(text),
     );
+  /** The spinning loader, shown: its cell has traded the resting glyph for it. */
+  const loaderShown = (b: HTMLElement) =>
+    b.querySelector(".copy-glyph[data-copied] > svg.ico.spin:last-child") !== null;
 
   it("a force-accept in flight reads Force-accepting…", () => {
     const c = trace({ runIntent: "force-accept" });
     const b = button(c, "Force-accepting…")!;
     expect(b.getAttribute("aria-busy")).toBe("true");
     expect(b.disabled).toBe(true);
-    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(loaderShown(b)).toBe(true);
   });
 
   it("an interrupt in flight leaves Force accept waiting, claiming nothing", () => {
@@ -4274,14 +4447,16 @@ describe("ruling 368: the GitHub trace's requests in flight", () => {
     const b = button(c, "Force accept")!;
     expect(b.disabled).toBe(true);
     expect(b.hasAttribute("aria-busy")).toBe(false);
-    expect(b.querySelector(".spin")).toBeNull();
+    // The shield stays; the loader rests hidden in its cell.
+    expect(loaderShown(b)).toBe(false);
+    expect(b.querySelector(".copy-glyph")!.hasAttribute("data-copied")).toBe(false);
   });
 
   it("a delivery in flight reads Delivering…, busy, the loader spinning", () => {
     const c = trace({ onDeliver: () => {}, delivering: true });
     const b = button(c, "Delivering…")!;
     expect(b.getAttribute("aria-busy")).toBe("true");
-    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(loaderShown(b)).toBe(true);
   });
 });
 
@@ -4307,5 +4482,59 @@ describe("ruling 368: the move-back dialog waits without claiming the move", () 
     const b = getByText("Move back").closest("button")!;
     expect(b.disabled).toBe(true);
     expect(b.hasAttribute("aria-busy")).toBe(false);
+  });
+});
+
+/**
+ * Ruling 459 over ruling 368: a run start's glyph changes twice (Run → Schedule
+ * with the when-picker, resting → loader while its own request is in flight),
+ * and both go through one cell. The resting mark and the clock trade in the
+ * inner GlyphSwap; that whole resting cell trades for the one spinning loader
+ * on the outer cell's `data-copied`. Nothing is swapped in a frame, and the
+ * button never draws two loaders.
+ * Canary: put a start back on `<Icon name={busy ? "loader" : delay === "now" ? "bolt" : "clock"} …/>`.
+ */
+describe("ruling 459 over 368: a run start trades its glyphs in one cell", () => {
+  const starts = (c: HTMLElement) => [
+    ["When the operator run starts", c.querySelector<HTMLButtonElement>(".op-run:not(.agent-run) > .run-go")!],
+    ["When the agent run starts", c.querySelector<HTMLButtonElement>(".op-run.agent-run > .run-go")!],
+  ] as const;
+  const cells = (b: HTMLButtonElement) => {
+    const outer = b.querySelector(":scope > .copy-glyph")!;
+    return { outer, inner: outer.firstElementChild!, loader: outer.lastElementChild! };
+  };
+
+  it("at rest the mark shows, and Schedule trades it for the clock in place, the loader resting hidden", () => {
+    const { container } = renderExec(execTask());
+    for (const [picker, b] of starts(container)) {
+      const { outer, inner, loader } = cells(b);
+      expect(outer.hasAttribute("data-copied"), picker).toBe(false);
+      expect(inner.matches(".copy-glyph:not([data-copied])"), picker).toBe(true);
+      expect(loader.matches("svg.ico.spin"), picker).toBe(true);
+      expect(b.querySelectorAll(".spin"), picker).toHaveLength(1);
+      fireEvent.change(container.querySelector<HTMLSelectElement>(`select[aria-label="${picker}"]`)!, {
+        target: { value: "60" },
+      });
+      expect(b.textContent, picker).toBe("Schedule");
+      // The same cells; only the inner mark moved.
+      expect(cells(b).outer, picker).toBe(outer);
+      expect(cells(b).inner, picker).toBe(inner);
+      expect(inner.getAttribute("data-copied"), picker).toBe("true");
+      expect(outer.hasAttribute("data-copied"), picker).toBe(false);
+    }
+  });
+
+  it("the start whose request is in flight shows the loader, busy, with its work's name", () => {
+    const { container } = renderExec(execTask(), { operatorInFlight: "schedule", runInFlight: "run" });
+    const [[, operator], [, agent]] = starts(container);
+    expect(operator.textContent).toBe("Scheduling…");
+    expect(agent.textContent).toBe("Starting…");
+    for (const b of [operator, agent]) {
+      expect(b.getAttribute("aria-busy")).toBe("true");
+      const { outer, loader } = cells(b);
+      expect(outer.getAttribute("data-copied")).toBe("true");
+      expect(loader.matches("svg.ico.spin")).toBe(true);
+      expect(b.querySelectorAll(".spin")).toHaveLength(1);
+    }
   });
 });

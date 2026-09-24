@@ -698,7 +698,7 @@ describe("ruling 368: the run controls name the request in flight", () => {
     expect(b.textContent).toBe("Scheduling…");
     expect(b.getAttribute("aria-busy")).toBe("true");
     expect(b.disabled).toBe(true);
-    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
     // The agent control's request is not this one.
     expect(agentButton(container).hasAttribute("aria-busy")).toBe(false);
   });
@@ -722,7 +722,7 @@ describe("ruling 368: the run controls name the request in flight", () => {
     const b = agentButton(run.container);
     expect(b.textContent).toBe("Starting…");
     expect(b.getAttribute("aria-busy")).toBe("true");
-    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
     expect(operatorButton(run.container).hasAttribute("aria-busy")).toBe(false);
     cleanup();
 

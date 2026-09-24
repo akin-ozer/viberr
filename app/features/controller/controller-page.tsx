@@ -412,10 +412,7 @@ function ConversationRuntime({
           confirmLabel="Interrupt turn"
           busy={stopping}
           onCancel={() => setConfirmInterrupt(null)}
-          onConfirm={() => {
-            onInterrupt(confirmInterrupt);
-            setConfirmInterrupt(null);
-          }}
+          onConfirm={() => onInterrupt(confirmInterrupt)}
         />
       )}
     </TurnStoreContext.Provider>
@@ -860,6 +857,7 @@ function LinkWaits({
       <summary>
         {summary}
         {dead > 0 && <span className="ctl-wait-dead"> · {dead} can never finish</span>}
+        <Icon name="chevron" className="disc-chev" />
       </summary>
       <ul>
         {[...open, ...done].map((e) => {
@@ -1080,6 +1078,7 @@ function GoalCard({
             {done} of {goal.links.length} done
             {skipped > 0 && ` · ${skipped} skipped`}
           </span>
+          <Icon name="chevron" className="disc-chev" />
         </span>
         <strong className="ctl-goal-title">{goal.title}</strong>
       </summary>
@@ -1161,7 +1160,10 @@ function GoalCard({
           pause, a skip and a cancel's reason are recorded. */}
       {(goal.description.trim() || goal.history.length > 0) && (
         <details className="ctl-goal-more">
-          <summary>About this chain</summary>
+          <summary>
+            About this chain
+            <Icon name="chevron" className="disc-chev" />
+          </summary>
           {goal.description.trim() && (
             <div className="md-body ctl-goal-desc">
               <Markdown text={goal.description} />
@@ -1256,7 +1258,6 @@ function GoalCard({
           onConfirm={() => {
             const why = reason.trim();
             act(why ? { op: "cancel", reason: why } : { op: "cancel" });
-            setConfirm(null);
           }}
         >
           {reasonField}
@@ -1278,7 +1279,6 @@ function GoalCard({
             const why = reason.trim();
             const index = String(confirm.index);
             act(why ? { op: "skip_link", index, reason: why } : { op: "skip_link", index });
-            setConfirm(null);
           }}
         >
           {reasonField}

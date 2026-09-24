@@ -4,6 +4,7 @@ import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server
 import { UPLOADABLE_EXTENSIONS } from "~/shared/attachment-kinds";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { prettySize } from "~/features/kb-browser/tree";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { AttachmentThumb } from "./attachment-image";
@@ -181,9 +182,11 @@ function AttachFile() {
   return (
     <div className="attach-add">
       {/* Ruling 368: the upload in flight is `aria-busy` (the sheet's .7 busy
-          step) with the loader spinning, the same shape as every busy button. */}
+          step) with the loader spinning, the same shape as every busy button.
+          Ruling 459: the file mark and the loader share one cell (GlyphSwap)
+          and trade in place. */}
       <label className={`btn ghost sm${busy ? " busy" : ""}`} aria-busy={busy || undefined}>
-        <Icon name={busy ? "loader" : "file"} className={busy ? "spin" : ""} />
+        <GlyphSwap rest="file" alt="loader" on={busy} spinAlt />
         {busy ? "Attaching…" : "Attach a file"}
         <input
           ref={input}

@@ -13,12 +13,13 @@ import NumberFlow, { NumberFlowGroup } from "@number-flow/react";
 import { ThinkingOrb } from "thinking-orbs";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import { AgentGlyph } from "~/ui/identity";
-import { CopyGlyph } from "~/ui/copy-glyph";
+import { CopyGlyph, GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { NumberTicker } from "~/ui/number-ticker";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { useHydrated } from "~/ui/local-time";
 import { useDismiss } from "~/ui/use-dismiss";
+import { useFreshLine } from "~/ui/use-fresh-line";
 import { useLiveStreamFailed } from "~/features/live-updates/use-live-updates";
 // Ruling 457: backend labels and count plurals are spelled inline here, not
 // through `BACKEND_LABEL` / `countLabel` (why: shared/text/backend-label.ts,
@@ -417,7 +418,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
               aria-busy={stoppingThis || undefined}
               onClick={() => onInterrupt(run.id)}
             >
-              <Icon name={stoppingThis ? "loader" : "hand"} className={stoppingThis ? "spin" : ""} />
+              <GlyphSwap rest="hand" alt="loader" on={stoppingThis} spinAlt />
               {stoppingThis ? "Interrupting…" : "Interrupt"}
             </button>
           )}
@@ -435,7 +436,9 @@ export const LiveRunPanel = memo(function LiveRunPanel({
  * console's store, whose every tail read carries the run's current facts, over
  * what the page loaded; the page used to revalidate root, layout and task
  * every 2 s during a run only to move these. The clock is its own leaf
- * (LIVE-11), so a second ticks without re-rendering the rest.
+ * (LIVE-11), so a second ticks without re-rendering the rest. Its own
+ * component, so its hooks mount with the strip that shows a run, after
+ * LiveRunPanel's no-run early return.
  */
 const RunStripFacts = memo(function RunStripFacts({
   run,
@@ -445,28 +448,36 @@ const RunStripFacts = memo(function RunStripFacts({
   store: RunLogStore | null;
 }) {
   const f = useRunFacts(store, run.serverRunId) ?? run;
+  // R21-4 / FR28: the phase and step are real now (both adapters emit them,
+  // and the run pipeline emits "Preparing workspace" before the provider
+  // starts). A run can still be between updates — a resumed row before its
+  // first message, a legacy row — so the heading falls back to the one thing
+  // that IS known from the row's state rather than rendering an empty bold
+  // line, and the step row is omitted entirely when there is no step.
+  const phase = f.phase ?? "Working";
+  // Ruling 451(a): phase and step are keyed on their text, so a new one is a
+  // new line that rises in (the sheet's `swap-in`) rather than words changing
+  // under the reader. Ruling 459: only a line that REPLACES the first one
+  // rises (`data-fresh`); the words on screen when the strip opens stand still.
+  const phaseFresh = useFreshLine(phase);
+  const stepFresh = useFreshLine(f.step ?? "");
   return (
     <>
       <div className="run-phase">
         <span className="run-spin" aria-hidden="true" />
         <span>
-          {/* R21-4 / FR28: the phase and step are real now (both adapters
-              emit them, and the run pipeline emits "Preparing workspace"
-              before the provider starts). A run can still be between
-              updates — a resumed row before its first message, a legacy row
-              — so the heading falls back to the one thing that IS known from
-              the row's state rather than rendering an empty bold line, and
-              the step row is omitted entirely when there is no step. */}
-          {/* Ruling 451(a): phase and step are keyed on their text, so a
-              new one is a new line that rises in (the sheet's `swap-in`)
-              rather than words changing under the reader. */}
-          <div key={"ph:" + (f.phase ?? "Working")} className="ph">
-            {f.phase ?? "Working"}
+          <div key={"ph:" + phase} className="ph" data-fresh={phaseFresh ? "true" : undefined}>
+            {phase}
           </div>
           {/* U39-26: read as words, as the conversation's working row
               reads it; the stored step stays on hover. */}
           {f.step ? (
-            <div key={"step:" + f.step} className="step mono" title={f.step}>
+            <div
+              key={"step:" + f.step}
+              className="step mono"
+              title={f.step}
+              data-fresh={stepFresh ? "true" : undefined}
+            >
               {readableStep(f.step)}
             </div>
           ) : null}
@@ -824,6 +835,12 @@ function WaitRow({
   const ticking = live && reported !== null && at !== null;
   const clock = (t: string) => (hydrated ? localLogClock(t, startedAt) : t);
   const n = lines.length;
+  // Ruling 459: a row seen live keeps its orb once the wait ends, paused and
+  // hidden, so the sheet can trade it for the clock in place instead of
+  // swapping a 20px canvas for a 14px glyph in one frame. A row first drawn
+  // ended never mounts one. Same set-state-in-render latch as `useFreshLine`.
+  const [seenLive, setSeenLive] = useState(live);
+  if (live && !seenLive) setSeenLive(true);
   return (
     <>
       <div className={"log-line meta wait" + (live ? " lw-live" : "")}>
@@ -831,22 +848,25 @@ function WaitRow({
         <span className="ltag">{last.tag}</span>
         <span className="lx">
           <span className="log-wait">
-            {live ? (
-              // Pinned to its dark ink: the console paints its own near-black
-              // fill in BOTH app themes, and `auto` would read the light
-              // theme's `data-theme` off `:root` and draw dark dots on it.
-              // Decorative — the words beside it carry the state, so it is
-              // hidden from assistive tech.
-              <ThinkingOrb
-                state={who.kind === "viberr" ? "connecting" : "working"}
-                size={20}
-                theme="dark"
-                className="log-orb"
-                aria-hidden="true"
-              />
-            ) : (
+            <span className="lw-glyph" data-live={live ? "true" : undefined} aria-hidden="true">
+              {seenLive && (
+                // Pinned to its dark ink: the console paints its own near-black
+                // fill in BOTH app themes, and `auto` would read the light
+                // theme's `data-theme` off `:root` and draw dark dots on it.
+                // Decorative — the words beside it carry the state, so it is
+                // hidden from assistive tech. Paused once the wait ends, so a
+                // hidden orb draws no more frames.
+                <ThinkingOrb
+                  state={who.kind === "viberr" ? "connecting" : "working"}
+                  size={20}
+                  theme="dark"
+                  paused={!live}
+                  className="log-orb"
+                  aria-hidden="true"
+                />
+              )}
               <Icon name="clock" />
-            )}
+            </span>
             <span className={"log-chip" + (who.kind === "viberr" ? " vb" : "")}>
               <ToolName who={who} />
             </span>
@@ -1782,7 +1802,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
             onClick={() => onRetryBackend!(altBackend!, cur)}
             title={`Re-run the ${cur.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}
           >
-            <Icon name={retryingThis ? "loader" : "refresh"} className={retryingThis ? "spin" : ""} />
+            <GlyphSwap rest="refresh" alt="loader" on={retryingThis} spinAlt />
             {retryingThis ? `Retrying on ${altLabel}…` : `Retry on ${altLabel}`}
           </button>
         )}

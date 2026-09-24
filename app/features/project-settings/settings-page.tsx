@@ -22,6 +22,7 @@ import { z } from "zod";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
@@ -1078,10 +1079,7 @@ export function StagesPanel({
           }
           confirmLabel="Remove stage"
           onCancel={() => setConfirmRemove(null)}
-          onConfirm={() => {
-            onRemove(confirmRemove.id);
-            setConfirmRemove(null);
-          }}
+          onConfirm={() => onRemove(confirmRemove.id)}
         />
       )}
     </div>
@@ -1553,6 +1551,8 @@ function InviteMemberModal({
   const name = nm.trim();
   const email = em.trim().toLowerCase();
   const canSave = name !== "" && email.includes("@");
+  // Ruling 459: an invite plays the modal's exit, then onClose unmounts it.
+  const [done, setDone] = useState(false);
 
   const save = () => {
     if (members.some((m) => m.email.toLowerCase() === email)) {
@@ -1564,7 +1564,7 @@ function InviteMemberModal({
       return;
     }
     onInvite(name, email);
-    onClose();
+    setDone(true);
   };
   const edit =
     (field: InviteField, set: (value: string) => void) => (value: string) => {
@@ -1584,6 +1584,7 @@ function InviteMemberModal({
       onClose={onClose}
       canSave={canSave}
       busy={busy}
+      done={done}
       saveLabel="Add member"
       unmetHint="Enter a name and a valid email."
       focusUnmet={() => {
@@ -1652,6 +1653,7 @@ export function MembersPanel({
   projectName,
   canManage,
   busy,
+  removing = null,
   onInvite,
   onRemove,
   onNavPolicy,
@@ -1661,6 +1663,9 @@ export function MembersPanel({
   projectName: string;
   canManage: boolean;
   busy: boolean;
+  /** The member whose removal is in flight (ruling 368): only that row's ✕
+   *  reads busy; the others, and every row during an invite, only wait. */
+  removing?: string | null;
   onInvite: (name: string, email: string) => void;
   onRemove: (member: MembershipView) => void;
   onNavPolicy: () => void;
@@ -1779,6 +1784,9 @@ export function MembersPanel({
                     : "Remove member"
                 }
                 disabled={busy}
+                // Ruling 459's busy step (.7) on the row whose own removal is
+                // in flight; ruling 368: a row that only waits claims nothing.
+                aria-busy={removing === m.userId || undefined}
                 onClick={() => remove(m)}
               >
                 <Icon name="x" />
@@ -1816,10 +1824,7 @@ export function MembersPanel({
           confirmLabel="Remove member"
           busy={busy}
           onCancel={() => setConfirmRemove(null)}
-          onConfirm={() => {
-            onRemove(confirmRemove);
-            setConfirmRemove(null);
-          }}
+          onConfirm={() => onRemove(confirmRemove)}
         />
       )}
     </div>
@@ -1841,6 +1846,7 @@ function RepairRepoDialog({
   hasCredential,
   busy,
   result,
+  done,
   onCancel,
   onSubmit,
 }: {
@@ -1849,10 +1855,16 @@ function RepairRepoDialog({
   hasCredential: boolean;
   busy: boolean;
   result: { ok: boolean; error?: string } | undefined;
+  /** The repair landed: the dialog plays its exit, then onCancel unmounts it
+   *  (ruling 459). */
+  done: boolean;
   onCancel: () => void;
   onSubmit: (repo: string, confirmFootprint: boolean) => void;
 }) {
   const { ref, close } = useDialog(onCancel);
+  useEffect(() => {
+    if (done) close();
+  }, [done, close]);
   const [repo, setRepo] = useState("");
   const [ack, setAck] = useState(false);
   const [sent, setSent] = useState(false);
@@ -1868,7 +1880,7 @@ function RepairRepoDialog({
     repo.trim().length <= 2 ? "repo" : footprintTasks > 0 && !ack ? "ack" : null;
   const error = sent && !busy && result && !result.ok ? result.error : null;
   const submit = () => {
-    if (busy) return;
+    if (busy || done) return;
     if (missing) {
       setRefused((n) => n + 1);
       (missing === "repo" ? repoRef : ackRef).current?.focus();
@@ -2018,11 +2030,14 @@ export function RepoPanel({
   const rechecking = inFlight === "grant-scope";
   // Close the dialog only when a repair SUCCEEDS — a probe refusal keeps it
   // open with the typed reason so the owner can correct the input.
+  // Ruling 459: through the dialog's exit (`repairDone`), then its onCancel
+  // unmounts it.
+  const [repairDone, setRepairDone] = useState(false);
   const settled = useRef<unknown>(repairResult);
   useEffect(() => {
     if (!repairResult || settled.current === repairResult) return;
     settled.current = repairResult;
-    if (repairResult.ok) setRepairing(false);
+    if (repairResult.ok) setRepairDone(true);
   }, [repairResult]);
   return (
     <div className="panel">
@@ -2060,7 +2075,12 @@ export function RepoPanel({
               <button
                 type="button"
                 className="btn ghost sm repair-btn"
-                onClick={() => setRepairing(true)}
+                onClick={() => {
+                  // A repair that landed after a Cancel must not close the
+                  // next opening at once.
+                  setRepairDone(false);
+                  setRepairing(true);
+                }}
                 title="Fix a repository that was misconfigured at creation. The fix is verified against the attached credential before anything changes"
               >
                 Repair…
@@ -2104,7 +2124,11 @@ export function RepoPanel({
           hasCredential={credential.source === "pat"}
           busy={repairBusy}
           result={repairResult}
-          onCancel={() => setRepairing(false)}
+          done={repairDone}
+          onCancel={() => {
+            setRepairing(false);
+            setRepairDone(false);
+          }}
           onSubmit={onRepair}
         />
       )}
@@ -2135,7 +2159,7 @@ export function RepoPanel({
                 aria-busy={rechecking || undefined}
                 title="Re-check the credential's scopes against GitHub"
               >
-                <Icon name={rechecking ? "loader" : "check"} className={rechecking ? "spin" : ""} />
+                <GlyphSwap rest="check" alt="loader" on={rechecking} spinAlt />
                 {rechecking ? "Checking…" : "Re-check scopes"}
               </button>
             ) : undefined
@@ -2178,7 +2202,8 @@ function DeleteProjectDialog({
   onCancel: () => void;
   onConfirm: (confirmName: string) => void;
 }) {
-  const { ref: dialogRef, close } = useDialog(onCancel);
+  // Ruling 459: the delete leaves the way Cancel does (`commit`).
+  const { ref: dialogRef, close, commit } = useDialog(onCancel);
   const [confirmName, setConfirmName] = useState("");
   const matches = confirmName.trim() === projectName;
   return (
@@ -2222,7 +2247,7 @@ function DeleteProjectDialog({
           className="btn danger"
           disabled={!matches || busy}
           style={!matches ? { opacity: 0.5, pointerEvents: "none" } : undefined}
-          onClick={() => onConfirm(confirmName)}
+          onClick={() => commit(() => onConfirm(confirmName))}
         >
           <Icon name="x" />
           Delete project
@@ -2350,10 +2375,7 @@ export function DangerZone({
           projectName={projectName}
           busy={busy}
           onCancel={() => setConfirming(false)}
-          onConfirm={(confirmName) => {
-            setConfirming(false);
-            onDelete(confirmName);
-          }}
+          onConfirm={onDelete}
         />
       )}
     </div>
@@ -2540,6 +2562,11 @@ export function SettingsPage({
             projectName={data.project.name}
             canManage={canManageMembers}
             busy={memberFetcher.state !== "idle"}
+            removing={
+              inFlightIntent(memberFetcher) === "remove-member"
+                ? String(memberFetcher.formData?.get("userId") ?? "")
+                : null
+            }
             onInvite={(name, email) =>
               memberFetcher.submit(
                 { intent: "invite", _csrf: csrf, name, email },

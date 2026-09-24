@@ -11,6 +11,7 @@ import {
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
 import { Pill } from "~/ui/pill";
@@ -226,7 +227,7 @@ export function GithubTrace({
               : "Admin override: accept this task into Done past the review gate. Audited."
           }
         >
-          <Icon name={forcing ? "loader" : "shield"} className={forcing ? "spin" : ""} />
+          <GlyphSwap rest="shield" alt="loader" on={forcing} spinAlt />
           {forcing
             ? "Force-accepting…"
             : skipsStages
@@ -488,7 +489,7 @@ export function GithubTrace({
                     : "Push the delivering agent's branch and open the review PR (audited)"
             }
           >
-            <Icon name={delivering ? "loader" : "branch"} className={delivering ? "spin" : ""} />
+            <GlyphSwap rest="branch" alt="loader" on={delivering} spinAlt />
             {pushOffer
               ? delivering
                 ? "Pushing…"
@@ -514,10 +515,7 @@ export function GithubTrace({
             onClick={onCompleteMerge}
             title={`Review and run the real GitHub merge for PR #${task.pr.number} (needs a valid project credential)`}
           >
-            <Icon
-              name={completingMerge ? "loader" : "check"}
-              className={completingMerge ? "spin" : ""}
-            />
+            <GlyphSwap rest="check" alt="loader" on={completingMerge} spinAlt />
             {completingMerge ? "Merging…" : "Complete merge"}
           </button>
         )}
@@ -1109,7 +1107,7 @@ export function CurrentStatePanel({
                 aria-busy={accepting || undefined}
                 onClick={onAccept}
               >
-                <Icon name={accepting ? "loader" : "check"} className={accepting ? "spin" : ""} />
+                <GlyphSwap rest="check" alt="loader" on={accepting} spinAlt />
                 {/* Ruling 368: only the acceptance's own request reads as it;
                     an archive or a refresh in flight leaves this waiting. */}
                 {accepting
@@ -1171,10 +1169,12 @@ export function CurrentStatePanel({
             aria-busy={dispositionBusy || undefined}
             onClick={onArchive}
           >
-            <Icon
-              name={dispositionBusy ? "loader" : archived ? "refresh" : "lock"}
-              className={dispositionBusy ? "spin" : ""}
-            />
+            {/* Ruling 459 over ruling 368: the lock trades for the restore mark
+                with the task's state, and that resting cell trades for the
+                spinning loader while the disposition is in flight (GlyphSwap's
+                `busy`), so neither change is a hard swap and there is only
+                ever one loader. */}
+            <GlyphSwap rest="lock" alt="refresh" on={archived} busy={dispositionBusy} />
             {archived
               ? dispositionBusy
                 ? "Restoring…"

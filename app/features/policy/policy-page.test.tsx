@@ -729,7 +729,7 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     const remove = getByText("Removing…").closest("button")!;
     expect(remove.getAttribute("aria-busy")).toBe("true");
     expect(remove.disabled).toBe(true);
-    expect(remove.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(remove.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
     const apply = getByText("Apply").closest("button")!;
     expect(apply.disabled).toBe(true);
     expect(apply.hasAttribute("aria-busy")).toBe(false);

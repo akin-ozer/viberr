@@ -30,7 +30,8 @@ export function ArchiveConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref: panelRef, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  const { ref: panelRef, close, commit } = useDialog(onCancel);
   // Ruling 148: the same words as the stage menu and the board row, and never
   // the raw internal id (the F19-36 defect below, second axis).
   const stageName = stageLabel(task.stages.find((s) => s.id === task.stage));
@@ -132,7 +133,7 @@ export function ArchiveConfirm({
             type="button"
             className="btn danger"
             disabled={busy}
-            onClick={onConfirm}
+            onClick={() => commit(onConfirm)}
           >
             <Icon name="lock" />
             Archive {task.key}

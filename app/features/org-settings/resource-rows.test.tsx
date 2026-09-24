@@ -63,11 +63,12 @@ describe("resource rows: the probe in flight", () => {
     expect(busy.getAttribute("aria-busy")).toBe("true");
     expect(busy.hasAttribute("disabled")).toBe(true);
     expect(busy.getAttribute("title")).toBe("Testing…");
-    expect(busy.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(busy.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
     const idle = getByLabelText("Test linear-mcp");
     expect(idle.hasAttribute("aria-busy")).toBe(false);
     expect(idle.hasAttribute("disabled")).toBe(false);
-    expect(idle.querySelector(".spin")).toBeNull();
+    // Ruling 459: the loader rests hidden in the glyph's cell (GlyphSwap).
+    expect(idle.querySelector(".copy-glyph[data-copied]")).toBeNull();
   });
 
   it("a knowledge-base re-scan in flight: Re-scanning, busy, the loader spinning", () => {
@@ -86,6 +87,6 @@ describe("resource rows: the probe in flight", () => {
     const busy = getByLabelText("Re-scanning Architecture");
     expect(busy.getAttribute("aria-busy")).toBe("true");
     expect(busy.hasAttribute("disabled")).toBe(true);
-    expect(busy.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(busy.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
   });
 });

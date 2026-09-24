@@ -412,6 +412,8 @@ function S3TargetModal({
   /** The field a refused save named; null on a pristine form (147(c)). */
   const [flagged, setFlagged] = useState<S3Field | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  const [done, setDone] = useState(false);
   const push = useToast();
   // `useOrgAction` returns EARLY once `onResult` is supplied, so the server's
   // success and failure toasts are pushed HERE or they are lost. Closing on the
@@ -422,7 +424,7 @@ function S3TargetModal({
       if (d.ok) {
         // The toast host lives in the root provider — safe to push, then unmount.
         if (d.toast) push(d.toast);
-        onClose();
+        setDone(true);
         return;
       }
       setErr(d.error);
@@ -461,6 +463,7 @@ function S3TargetModal({
       onClose={onClose}
       canSave={!missing}
       busy={busy}
+      done={done}
       saveLabel="Save target"
       unmetHint={missing ? S3_UNMET[missing] : undefined}
       focusUnmet={() => {

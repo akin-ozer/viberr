@@ -66,10 +66,15 @@ export function ConfirmDialog({
   /** Classes added to `.confirm-card`. The KB browser's confirms pass
    *  `over-modal`, since they open on top of the browser's own dialog. */
   className?: string;
+  /** Unmounts the dialog: after Cancel, and after a confirm's exit too. */
   onCancel: () => void;
+  /** The mutation only. The dialog closes itself afterwards (ruling 459). */
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  // Ruling 459: the confirm leaves the way Cancel does. `commit` runs
+  // onConfirm, then the animated close, which calls onCancel to unmount, so a
+  // caller's onConfirm does not clear its own state (onCancel does that).
+  const { ref, close, commit } = useDialog(onCancel);
   // Ruling 458(k): the WAI-ARIA alertdialog pattern — the body is the dialog's
   // description, so a screen reader reads the consequence with the title
   // instead of only the title.
@@ -102,7 +107,7 @@ export function ConfirmDialog({
           className={"btn " + tone}
           disabled={busy}
           aria-disabled={busy}
-          onClick={onConfirm}
+          onClick={() => commit(onConfirm)}
         >
           {confirmIcon && <Icon name={confirmIcon} />}
           {confirmLabel}

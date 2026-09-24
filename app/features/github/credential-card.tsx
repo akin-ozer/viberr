@@ -4,6 +4,7 @@ import type {
   ScopeChip,
 } from "~/server/secrets/pat-store.server";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 
 /**
@@ -250,10 +251,10 @@ export function CredentialManageActions({
             : "Bind the default connection's PAT to this project"
         }
       >
-        <Icon
-          name={setting ? "loader" : configured ? "refresh" : "lock"}
-          className={setting ? "spin" : ""}
-        />
+        {/* Ruling 459 over ruling 368: the lock trades for the rotate mark
+            once a credential is bound, and that resting cell trades for the
+            spinning loader while this button's own request is in flight. */}
+        <GlyphSwap rest="lock" alt="refresh" on={configured} busy={setting} />
         {configured
           ? setting
             ? "Rotating…"
@@ -273,17 +274,14 @@ export function CredentialManageActions({
           aria-busy={clearing || undefined}
           title="Unbind the credential from this project"
         >
-          <Icon name={clearing ? "loader" : "x"} className={clearing ? "spin" : ""} />
+          <GlyphSwap rest="x" alt="loader" on={clearing} spinAlt />
           {clearing ? "Removing…" : "Remove credential"}
         </button>
       )}
       {confirming && (
         <RemoveCredentialDialog
           onCancel={() => setConfirming(false)}
-          onConfirm={() => {
-            setConfirming(false);
-            onClear();
-          }}
+          onConfirm={onClear}
         />
       )}
     </div>

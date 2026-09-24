@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
+import { Icon, type IconName } from "~/ui/icon";
 import Login from "./login";
 
 afterEach(cleanup);
@@ -310,5 +311,62 @@ describe("the forced set-new-password step names its field the same way", () => 
       expect(npw2.getAttribute("aria-describedby")).toBe("npw-err");
       expect(document.activeElement).toBe(npw2);
     });
+  });
+});
+
+/**
+ * Ruling 459 (better-ui icons): one icon library per surface, one glyph per
+ * meaning. Google's button led with a typed ExtraBold "G" beside GitHub's
+ * outline glyph (its accessible name read "GContinue with Google"), and both
+ * buttons spun the `refresh` arrow while the sign-in was in flight, where the
+ * set's busy glyph is `loader`.
+ */
+describe("ruling 459: the provider buttons draw the icon set's glyphs", () => {
+  /** The path markup a glyph renders, to tell two `svg.ico`s apart. */
+  const glyph = (name: IconName) => {
+    const { container, unmount } = render(<Icon name={name} />);
+    const inner = container.querySelector("svg")!.innerHTML;
+    unmount();
+    return inner;
+  };
+
+  it("leads each button with its mark as an svg glyph, so the name is the label alone", () => {
+    // Canary: put the typed "G" span back in front of the Google label.
+    const { getByRole } = renderLogin({ github: true, google: true });
+    for (const [name, mark] of [
+      ["Continue with GitHub", "github"],
+      ["Continue with Google", "google"],
+    ] as const) {
+      const button = getByRole("button", { name });
+      expect(button.textContent).toBe(name);
+      // Ruling 459: the mark leads in its GlyphSwap cell, the loader resting
+      // hidden behind it until the sign-in is in flight.
+      const cell = button.firstElementChild!;
+      expect(cell.matches(".copy-glyph[aria-hidden='true']:not([data-copied])"), name).toBe(true);
+      const svg = cell.firstElementChild!;
+      expect(svg.matches("svg.ico"), name).toBe(true);
+      expect(svg.innerHTML, name).toBe(glyph(mark));
+    }
+  });
+
+  it("spins the loader, not the refresh arrow, while a sign-in is in flight", () => {
+    // Canary: put the Google button back on `alt="refresh"`.
+    const origFetch = globalThis.fetch;
+    // SAFETY: the provider click awaits fetch(url, init) and nothing else; a
+    // promise that never settles holds the button in its busy state.
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+    try {
+      const { getByRole } = renderLogin({ github: true, google: true });
+      const button = getByRole("button", { name: "Continue with Google" });
+      fireEvent.click(button);
+      expect(button.getAttribute("aria-busy")).toBe("true");
+      expect(button.textContent).toBe("Checking whitelist…");
+      // The spinning loader trades in for the mark, in the same cell.
+      expect(button.querySelector(".copy-glyph")!.getAttribute("data-copied")).toBe("true");
+      const spinner = button.querySelector(".copy-glyph > svg.ico.spin:last-child")!;
+      expect(spinner.innerHTML).toBe(glyph("loader"));
+    } finally {
+      globalThis.fetch = origFetch;
+    }
   });
 });

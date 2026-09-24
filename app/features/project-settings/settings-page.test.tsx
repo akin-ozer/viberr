@@ -742,6 +742,26 @@ describe("MembersPanel", () => {
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 
+  it("only the row whose removal is in flight reads busy; the others wait (ruling 368 over 459)", () => {
+    // Canary: put `aria-busy={busy || undefined}` back on the row's ✕ and
+    // every row claims the removal.
+    const { container, rerender } = render(
+      <MembersPanel {...base} busy removing="u_elif" onInvite={() => {}} onRemove={() => {}} />,
+    );
+    const rows = [...container.querySelectorAll<HTMLButtonElement>(".member-row .stg-x")];
+    expect(rows).toHaveLength(MEMBERS.length);
+    const elif = MEMBERS.findIndex((m) => m.userId === "u_elif");
+    rows.forEach((b, i) => {
+      expect(b.disabled).toBe(true);
+      expect(b.getAttribute("aria-busy")).toBe(i === elif ? "true" : null);
+    });
+    // An invite in flight: every ✕ waits, none claims it.
+    rerender(<MembersPanel {...base} busy onInvite={() => {}} onRemove={() => {}} />);
+    for (const b of container.querySelectorAll(".member-row .stg-x")) {
+      expect(b.hasAttribute("aria-busy")).toBe(false);
+    }
+  });
+
   /**
    * Ruling 148(b): the invite form is no longer served under the member list —
    * "Add member" in the panel head opens the shared `MiniModal`. Ruling 147
@@ -1981,7 +2001,7 @@ describe("ruling 368: Settings' requests in flight", () => {
     const b = getByText("Checking…").closest("button")!;
     expect(b.getAttribute("aria-busy")).toBe("true");
     expect(b.disabled).toBe(true);
-    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
   });
 
   it("a branch-cleanup write in flight leaves Re-check waiting, claiming nothing", () => {

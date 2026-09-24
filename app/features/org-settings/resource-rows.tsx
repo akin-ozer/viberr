@@ -1,6 +1,7 @@
 import type { GagentView } from "~/server/org/gagents.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { rel, updatedLabel } from "./resource-helpers";
@@ -122,10 +123,7 @@ export function KbPanel({
                 aria-busy={reindexing === kb.id || undefined}
                 onClick={() => onReindex(kb)}
               >
-                <Icon
-                  name={reindexing === kb.id ? "loader" : "refresh"}
-                  className={reindexing === kb.id ? "spin" : ""}
-                />
+                <GlyphSwap rest="refresh" alt="loader" on={reindexing === kb.id} spinAlt />
               </button>
               <button
                 type="button"
@@ -342,10 +340,7 @@ export function McpPanel({
                 aria-busy={testing === m.id || undefined}
                 onClick={() => onTest(m)}
               >
-                <Icon
-                  name={testing === m.id ? "loader" : "refresh"}
-                  className={testing === m.id ? "spin" : ""}
-                />
+                <GlyphSwap rest="refresh" alt="loader" on={testing === m.id} spinAlt />
               </button>
               <button
                 type="button"

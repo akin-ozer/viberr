@@ -409,15 +409,20 @@ describe("the create request in flight", () => {
     });
     const create = primary(container);
     expect(create.textContent!.trim()).toBe("Create project");
-    expect(create.querySelector("svg.ico.spin")).toBeNull();
+    // Ruling 459: the plus and the loader share one cell (GlyphSwap) and trade
+    // on `data-copied`; at rest the plus shows and the loader rests hidden.
+    const cell = create.querySelector(".copy-glyph")!;
+    expect(cell.hasAttribute("data-copied")).toBe(false);
+    expect(cell.querySelectorAll("svg.ico")).toHaveLength(2);
 
     fireEvent.click(create);
     await waitFor(() => expect(create.getAttribute("aria-busy")).toBe("true"));
     expect(create.disabled).toBe(true);
     expect(create.textContent!.trim()).toBe("Creating project…");
-    // One glyph, and it is the spinning loader, not the plus.
-    expect(create.querySelectorAll("svg.ico")).toHaveLength(1);
-    expect(create.querySelector("svg.ico.spin")).not.toBeNull();
+    // The spinning loader trades in for the plus, in the same cell.
+    expect(cell.getAttribute("data-copied")).toBe("true");
+    expect(cell.lastElementChild!.matches("svg.ico.spin")).toBe(true);
+    expect(create.querySelector(".copy-glyph")).toBe(cell);
 
     await act(async () => {
       server.answer({ ok: false, error: "refused for the test" });
@@ -429,7 +434,6 @@ describe("the create request in flight", () => {
     expect(create.getAttribute("aria-busy")).not.toBe("true");
     expect(create.disabled).toBe(false);
     expect(create.textContent!.trim()).toBe("Create project");
-    expect(create.querySelector("svg.ico.spin")).toBeNull();
-    expect(create.querySelectorAll("svg.ico")).toHaveLength(1);
+    expect(cell.hasAttribute("data-copied")).toBe(false);
   });
 });

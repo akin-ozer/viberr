@@ -183,7 +183,9 @@ export function AgentModal({
   // refuses ("already deployed in this project"). Unchecked by default: a
   // copy is its own record, and the org admin decides per save.
   const [propagate, setPropagate] = useState(false);
-  const { action, err, setErr } = useModalAction(() => onClose());
+  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  const [done, setDone] = useState(false);
+  const { action, err, setErr } = useModalAction(() => setDone(true));
 
   const stageOpts = stages.filter((s) => s.id !== "done");
   const canSave =
@@ -201,6 +203,7 @@ export function AgentModal({
       onClose={onClose}
       canSave={canSave}
       busy={action.busy}
+      done={done}
       saveLabel={initial ? "Save changes" : "Create profile"}
       footHint={
         initial && initial.used > 0

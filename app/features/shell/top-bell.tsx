@@ -108,6 +108,17 @@ export function TopBell({
   useEffect(() => {
     if (open && fetchedFor.current !== version) load();
   }, [open, version, load]);
+  // Ruling 459: the badge pulses when the count RISES while this bell is on
+  // screen. Not on first paint (SSR included), not when a layout change
+  // remounts the bell (Home, the workspace and the standalone pages each mount
+  // their own), and not when reading lowers it (R19-15). Derived during render
+  // from the last count seen, so the pulse starts with the new digit.
+  const [seenUnread, setSeenUnread] = useState(unread);
+  const [arrivals, setArrivals] = useState(0);
+  if (unread !== seenUnread) {
+    setSeenUnread(unread);
+    if (unread > seenUnread) setArrivals(arrivals + 1);
+  }
   const navigate = useNavigate();
   const location = useLocation();
   const readFetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -248,7 +259,7 @@ export function TopBell({
                 }}
               >
                 See all
-                <Icon name="arrow" />
+                <Icon name="arrow" className="ico-end" />
               </button>
             </div>
           </dialog>
@@ -269,8 +280,13 @@ export function TopBell({
       >
         <Icon name="bell" />
         {unread > 0 && (
-          // key re-mounts on count change so the pulse animation re-fires.
-          <span className="bell-badge" key={unread}>
+          // Keyed on arrivals, not the count: each rise remounts it so the
+          // pulse replays; a fall only changes the digit.
+          <span
+            className="bell-badge"
+            key={arrivals}
+            data-arrived={arrivals > 0 ? "" : undefined}
+          >
             {unread}
           </span>
         )}

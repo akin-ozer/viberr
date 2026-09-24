@@ -175,7 +175,8 @@ export function ResourcesPanel({
     if (kind === "mcp") rowAction.submit({ intent: "mcp-delete", mcpId: item.id });
     if (kind === "skill") rowAction.submit({ intent: "skill-delete", skillId: item.id });
     if (kind === "agent") rowAction.submit({ intent: "agent-delete", profileId: item.id });
-    setConfirm(null);
+    // No setConfirm(null): the dialog plays its exit, then its onCancel
+    // clears it (ruling 459).
   };
 
   const browsingKb = browsing?.kind === "kb" ? (kbs.find((k) => k.id === browsing.id) ?? null) : null;

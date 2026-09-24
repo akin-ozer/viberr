@@ -634,6 +634,13 @@ describe("AgentLogsPanel", () => {
     expect(past.className).not.toContain("lw-live");
     expect(past.querySelector("canvas")).toBeNull();
     expect(past.querySelector(".ico")).not.toBeNull();
+    // Ruling 459: the sheet sizes and greys the ended row's clock as
+    // `.lw-glyph > .ico`, so the clock must stay a direct child of the row's
+    // glyph cell. That the rule never reaches the Viberr chip's V mark is the
+    // sheet's side, pinned in app.css.test.ts by "(F47) the wait row's rule
+    // reaches its own clock, never the Viberr chip's mark".
+    // Canary: wrap the clock in a span and this line goes red.
+    expect(past.querySelectorAll(".lw-glyph > .ico")).toHaveLength(1);
     expect(past.textContent).toContain("ran past 1m");
 
     // `raw` is authoritative: every heartbeat verbatim, no fold, no chip.
@@ -1685,6 +1692,51 @@ describe("ruling 451(c): copy controls trade their glyph in place", () => {
 });
 
 /**
+ * Ruling 459 (amending 451(a)): the status line on screen when the strip opens
+ * is not news, so it stands still; only a line that replaces it carries
+ * `data-fresh`, the mark the sheet's `swap-in` reads. A latch, so a line that
+ * repeats the first words later (Working, Compacting context, Working) still
+ * rises.
+ */
+describe("ruling 459: the live strip's first line stands still", () => {
+  const panel = (run: RunView) => (
+    <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />
+  );
+  const fresh = (container: HTMLElement, part: "ph" | "step") =>
+    container.querySelector(`.run-phase .${part}`)?.getAttribute("data-fresh") ?? null;
+
+  it("paints the phase and step it opens on without the mark", () => {
+    // CANARY: set `data-fresh` unconditionally and the step on screen when a
+    // task opens mid-run rises as if it had just changed.
+    const { container } = render(panel(mkRun({})));
+    expect(fresh(container, "ph")).toBeNull();
+    expect(fresh(container, "step")).toBeNull();
+  });
+
+  it("marks each line that replaces the first, and keeps marking after a return to the first words", () => {
+    // CANARY: compare with the first words instead of latching
+    // (`return line !== first` with no setFirst) and the return below stands still.
+    const { container, rerender } = render(panel(mkRun({})));
+    rerender(panel(mkRun({ step: "Read · app/app.css" })));
+    expect(fresh(container, "step")).toBe("true");
+    // The phase did not change: its node still stands, unmarked.
+    expect(fresh(container, "ph")).toBeNull();
+    rerender(panel(mkRun({ step: "Bash · npm test" })));
+    expect(container.querySelector(".run-phase .step")!.textContent).toBe("Bash · npm test");
+    expect(fresh(container, "step")).toBe("true");
+    rerender(panel(mkRun({ phase: "Compacting context" })));
+    expect(fresh(container, "ph")).toBe("true");
+  });
+
+  it("a step that appears where there was none is news", () => {
+    const { container, rerender } = render(panel(mkRun({ step: null })));
+    expect(container.querySelector(".run-phase .step")).toBeNull();
+    rerender(panel(mkRun({ step: "Bash · npm test" })));
+    expect(fresh(container, "step")).toBe("true");
+  });
+});
+
+/**
  * Ruling 457: the console reads a live store (`createLiveRunLogStore`, the one
  * `useRunLogStream` holds) rather than lines handed down by the page.
  */
@@ -1989,12 +2041,69 @@ describe("the console on a live store (ruling 457)", () => {
 });
 
 /**
+ * Ruling 459: a wait row's orb and clock share one cell and trade in place
+ * as the wait ends. React swapped the 20px canvas for the 14px clock in one
+ * frame, so the tool chip beside it jumped 6px left.
+ */
+describe("ruling 459: the wait row's orb trades for the clock in place", () => {
+  const beat = (n: number, elapsed: number): StreamedLine => ({
+    display: {
+      t: `10:0${n}:00`, ev: "meta", tag: "tool_progress", name: "Bash",
+      text: `Bash still running · ${elapsed}s`,
+      progress: { call: "toolu_1", elapsed, heartbeat: true, at: null },
+    },
+    raw: `{"type":"tool_progress","elapsed_time_seconds":${elapsed}}`,
+  });
+  const call: StreamedLine = {
+    display: { t: "10:00:00", ev: "tool", tag: "tool_use", name: "Bash", text: "npm test" },
+    raw: '{"type":"assistant"}',
+  };
+  const done: StreamedLine = {
+    display: { t: "10:03:00", ev: "out", tag: "tool_result", text: "ok" },
+    raw: '{"type":"user"}',
+  };
+  const panel = (lines: StreamedLine[]) => (
+    <Logs runtime={[mkRun({ lineCount: lines.length })]} sel="primary" onSel={() => {}} linesByThread={{ primary: lines }} />
+  );
+
+  it("keeps the orb it watched live, marked ended, so the sheet fades it out as the clock comes in", () => {
+    // CANARY: render `{live ? <ThinkingOrb … /> : <Icon name="clock" />}`
+    // again and the canvas is gone the moment the wait ends.
+    const { container, rerender } = render(panel([call, beat(1, 30), beat(2, 60)]));
+    const cell = container.querySelector(".log-line.wait .lw-glyph")!;
+    expect(cell.getAttribute("aria-hidden")).toBe("true");
+    expect(cell.getAttribute("data-live")).toBe("true");
+    const orb = cell.querySelector(":scope > canvas.log-orb")!;
+    const clock = cell.querySelector(":scope > svg.ico")!;
+    expect(orb).not.toBeNull();
+    expect(clock).not.toBeNull();
+
+    rerender(panel([call, beat(1, 30), beat(2, 60), done]));
+    // The same cell and the same two glyphs; only the mark moved.
+    expect(container.querySelector(".log-line.wait .lw-glyph")).toBe(cell);
+    expect(cell.hasAttribute("data-live")).toBe(false);
+    expect(cell.querySelector(":scope > canvas.log-orb")).toBe(orb);
+    expect(cell.querySelector(":scope > svg.ico")).toBe(clock);
+  });
+
+  it("a row first drawn ended mounts no orb at all", () => {
+    const { container } = render(panel([call, beat(1, 30), beat(2, 60), done]));
+    const cell = container.querySelector(".log-line.wait .lw-glyph")!;
+    expect(cell.hasAttribute("data-live")).toBe(false);
+    expect(cell.querySelector("canvas")).toBeNull();
+    expect(cell.querySelectorAll(":scope > svg.ico")).toHaveLength(1);
+  });
+});
+
+/**
  * Ruling 368: a run request shows itself on the button that started it. The
  * task page's run fetcher carries interrupts, retries and merges alike, so
  * Interrupt and Retry used to go `disabled` for ANY of them with their resting
  * glyph and label: the one that was pressed painted the .45 refused step and
  * said nothing. The page now names the run (or agent) in flight; that button
- * carries `aria-busy`, the loader spinning and the work's own name.
+ * carries `aria-busy`, the loader spinning and the work's own name. Ruling
+ * 459: the loader trades in for the resting glyph in its GlyphSwap cell, where
+ * it is always drawn, so "shown" is the cell's `data-copied`.
  * Canary: drop `aria-busy` from Interrupt in `runs-panels.tsx`.
  */
 describe("ruling 368: run requests in flight", () => {
@@ -2012,7 +2121,7 @@ describe("ruling 368: run requests in flight", () => {
     const b = getByText("Interrupting…").closest("button")!;
     expect(b.getAttribute("aria-busy")).toBe("true");
     expect(b.disabled).toBe(true);
-    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin:last-child")).not.toBeNull();
   });
 
   it("another request in flight leaves Interrupt waiting, claiming nothing", () => {
@@ -2029,6 +2138,7 @@ describe("ruling 368: run requests in flight", () => {
     const b = getByText("Interrupt").closest("button")!;
     expect(b.disabled).toBe(true);
     expect(b.hasAttribute("aria-busy")).toBe(false);
+    expect(b.querySelector(".copy-glyph")!.hasAttribute("data-copied")).toBe(false);
   });
 
   it("Retry reads Retrying on Codex… when the shown agent's retry is in flight", () => {
@@ -2051,12 +2161,13 @@ describe("ruling 368: run requests in flight", () => {
     const { getByText, rerender } = render(<Logs {...props} retryingProfileId="developer" />);
     const b = getByText("Retrying on Codex…").closest("button")!;
     expect(b.getAttribute("aria-busy")).toBe("true");
-    expect(b.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin:last-child")).not.toBeNull();
 
     // Another agent's retry (or any other run request): this one only waits.
     rerender(<Logs {...props} retryingProfileId="reviewer" />);
     const waiting = getByText("Retry on Codex").closest("button")!;
     expect(waiting.disabled).toBe(true);
     expect(waiting.hasAttribute("aria-busy")).toBe(false);
+    expect(waiting.querySelector(".copy-glyph")!.hasAttribute("data-copied")).toBe(false);
   });
 });

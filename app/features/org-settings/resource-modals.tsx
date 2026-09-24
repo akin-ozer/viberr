@@ -33,9 +33,15 @@ export function KBModal({
   // create is identical — the mode only changes where the human ends up.
   const [mode, setMode] = useState<"empty" | "files">("empty");
   const filesMode = !initial && mode === "files";
+  // Ruling 459: a save plays the modal's exit (`done`). The files-mode hand-off
+  // stays instant on purpose: it opens the store browser's own dialog, and a
+  // modal still fading under it would restore the page's scroll on unmount.
+  const [done, setDone] = useState(false);
   const { action, err, setErr } = useModalAction(() => {
-    onClose();
-    if (filesMode) onFilesCreated(slugify(name));
+    if (filesMode) {
+      onClose();
+      onFilesCreated(slugify(name));
+    } else setDone(true);
   });
   const canSave = name.trim().length > 1;
   return (
@@ -43,6 +49,7 @@ export function KBModal({
       icon={<Icon name="memory" />}
       title={initial ? "Edit knowledge base" : "New knowledge base"}
       busy={action.busy}
+      done={done}
       sub="A folder in the store. Drop docs in, or let agents append"
       onClose={onClose}
       canSave={canSave}
@@ -197,13 +204,16 @@ export function McpModal({
     if (!marked.includes(tool)) setMarked((list) => [...list, tool]);
     setDraftTool("");
   };
-  const { action, err, setErr } = useModalAction(() => onClose());
+  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  const [done, setDone] = useState(false);
+  const { action, err, setErr } = useModalAction(() => setDone(true));
   const canSave = slugify(name).length > 1 && target.trim().length > 3;
   return (
     <MiniModal
       icon={<Icon name="cpu" />}
       title={initial ? "Edit MCP server" : "Add MCP server"}
       busy={action.busy}
+      done={done}
       sub="Tools become loadable context for agent profiles"
       onClose={onClose}
       canSave={canSave}
@@ -475,9 +485,14 @@ export function SkillModal({
   // New document). Edit mode keeps the classic editor only.
   const [mode, setMode] = useState<"write" | "files">("write");
   const filesMode = !initial && mode === "files";
+  // Ruling 459: as the knowledge-base modal, a save plays the exit and the
+  // files-mode hand-off to the store browser stays instant.
+  const [done, setDone] = useState(false);
   const { action, err, setErr } = useModalAction(() => {
-    onClose();
-    if (filesMode) onFilesCreated(slugify(name));
+    if (filesMode) {
+      onClose();
+      onFilesCreated(slugify(name));
+    } else setDone(true);
   });
   const canSave =
     slugify(name).length > 1 && (filesMode || summary.trim().length > 3);
@@ -486,6 +501,7 @@ export function SkillModal({
       icon={<Icon name="bolt" />}
       title={initial ? "Edit skill" : "New skill"}
       busy={action.busy}
+      done={done}
       sub="Reusable instructions an agent loads on demand"
       onClose={onClose}
       canSave={canSave}

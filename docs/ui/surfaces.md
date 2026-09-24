@@ -158,7 +158,10 @@ Intents behind `project.task.tsx` are explained in
   loader's: while a save is out, the menu item's label, the step its next press cycles
   from and the profile page's selected segment all follow the choice the save carries
   (the fetcher's form data). Two quick presses from Light land on System, not on Dark
-  twice. A refused save puts the controls and the page back on the confirmed theme.
+  twice. A refused save puts the controls and the page back on the confirmed theme. React renders `<html
+  data-theme>` once and freezes it: the server renders the preference, and in the browser
+  React keeps the value already on `<html>`, so it never rewrites it on a revalidation or an
+  error-boundary remount (ruling 459).
 - **Motion, materials and type** (ruling 453). The board's drop flight is a critically
   damped spring (`ui/spring.ts`) that leaves at the pointer's release velocity. A
   dialog, page overlay or the dock closed while its entrance is still playing leaves
@@ -169,6 +172,18 @@ Intents behind `project.task.tsx` are explained in
   the two lighter text rungs onto `--muted`, and the translucent chrome solid, as
   reduced transparency does. Headings track by size (`--track-title`,
   `--track-section`, `--track-page`: -.011, -.017 and -.021em at 16, 20 and 28px).
+- **Polish** (ruling 459, the better-ui pass). Nested corners are concentric (outer =
+  inner + inset, on the radius scale). A control's glyph side pads 2px less than its text
+  side, and a glyph's stroke follows its label's weight (2 beside 500–600, 2.5 beside
+  700–800; the set's 1.7 otherwise). Every press belongs to the element pressed and eases
+  on `--ease-out` at .96 (controls) or .99 (surfaces); what cannot act neither hovers nor
+  presses, and hover changes colour, never position, on anything hovered all day.
+  Floating surfaces take their edge from the translucent `--shadow-ring` over a transparent
+  border; images carry `--image-outline`. Dialogs travel a fixed 8px in and 6px out, and a
+  primary action plays that exit too (`useDialog`'s `commit`). The drawer's scrim fades. A
+  live status line rises only when it replaces the line first painted. A glyph that changes
+  with its control (busy loaders, Run → Schedule, a copy check) cross-fades in place
+  through `GlyphSwap` (`ui/copy-glyph.tsx`).
 - **Responsive**: same surface, reflowed; the rail collapses at ≤ 720 px, the topbar
   trims at ≤ 760 px. There is no review-first mobile mode. Under the breakpoint
   the rail is a drawer: opening it moves focus to the `nav`, sets `inert` on

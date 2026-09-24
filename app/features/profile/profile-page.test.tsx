@@ -408,6 +408,6 @@ describe("ruling 368: GitHub Connect in flight", () => {
     expect(connect.getAttribute("aria-busy")).toBe("true");
     expect(connect.textContent).toBe("Connecting…");
     expect(connect.disabled).toBe(true);
-    expect(connect.querySelector("svg.ico.spin")).not.toBeNull();
+    expect(connect.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import { useFetcher, useNavigate } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
@@ -535,7 +536,7 @@ export function GithubViewPage({
           aria-busy={rechecking || undefined}
           title="Re-check the credential's scopes against GitHub"
         >
-          <Icon name={rechecking ? "loader" : "check"} className={rechecking ? "spin" : ""} />
+          <GlyphSwap rest="check" alt="loader" on={rechecking} spinAlt />
           {rechecking ? "Checking…" : "Re-check scopes"}
         </button>
       )}
@@ -662,7 +663,7 @@ export function GithubViewPage({
               aria-busy={reconciling || undefined}
               title="Update branch/PR status from GitHub now"
             >
-              <Icon name={reconciling ? "loader" : "refresh"} className={reconciling ? "spin" : ""} />
+              <GlyphSwap rest="refresh" alt="loader" on={reconciling} spinAlt />
               {reconciling ? "Updating…" : "Update status"}
             </button>
           )}

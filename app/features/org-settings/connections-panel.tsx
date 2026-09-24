@@ -38,13 +38,15 @@ function ConnectionModal({
   const [owner, setOwner] = useState(initial ? initial.owner : "");
   const [token, setToken] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  const [done, setDone] = useState(false);
   const push = useToast();
   const action = useOrgAction({
     onResult: (d: OrgActionData) => {
       if (d.ok) {
         // Toast lives in the root provider — safe to push, then unmount.
         if (d.toast) push(d.toast);
-        onClose();
+        setDone(true);
         return;
       }
       setErr(d.error);
@@ -56,8 +58,9 @@ function ConnectionModal({
     token.trim().length > 0;
 
   const apply = () => {
-    // Enter in a field reaches this directly, so the busy guard lives here too.
-    if (!canSave || checking) return;
+    // Enter in a field reaches this directly, so the busy guard lives here
+    // too, and so does the one for a save that landed and is leaving.
+    if (!canSave || checking || done) return;
     const o = owner.trim();
     if (!initial && existing.some((c) => c.id === slugify(o))) {
       setErr("That connection already exists.");
@@ -79,6 +82,7 @@ function ConnectionModal({
       icon={<Icon name="github" />}
       title={initial ? "Update token for " + initial.owner : "New GitHub connection"}
       busy={checking}
+      done={done}
       sub={
         initial
           ? "The current token is never shown. Paste a replacement"
@@ -415,7 +419,6 @@ export function ConnectionsPanel({
               intent: "connection-remove",
               connectionId: confirm.id,
             });
-            setConfirm(null);
           }}
         />
       )}

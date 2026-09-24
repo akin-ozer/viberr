@@ -3,6 +3,7 @@ import { useFetcher, useNavigate } from "react-router";
 import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon, storeIcon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { LocalDayDotTime } from "~/ui/local-time";
@@ -908,17 +909,15 @@ export function Guardrails({
                       aria-busy={(inFlight?.id === g.id && inFlight.op === "remove") || undefined}
                       onClick={() => onSet(g.id, "remove")}
                     >
-                      {inFlight?.id === g.id && inFlight.op === "remove" ? (
-                        <>
-                          <Icon name="loader" className="spin" />
-                          Removing…
-                        </>
-                      ) : (
-                        <>
-                          <Icon name="x" />
-                          Remove
-                        </>
-                      )}
+                      {/* Ruling 459 over ruling 368: the ✕ trades for the
+                          spinning loader in place (GlyphSwap), not in one frame. */}
+                      <GlyphSwap
+                        rest="x"
+                        alt="loader"
+                        on={inFlight?.id === g.id && inFlight.op === "remove"}
+                        spinAlt
+                      />
+                      {inFlight?.id === g.id && inFlight.op === "remove" ? "Removing…" : "Remove"}
                     </button>
                   )}
                 </span>

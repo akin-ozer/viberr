@@ -209,8 +209,8 @@ export function HomePage({
       );
     }
   }, [rebuildFetcher.state, rebuildFetcher.data, push]);
+  // Runs from the confirm's commit, which then closes it (ruling 459).
   const rebuild = () => {
-    setRebuildConfirm(false);
     if (rebuilding) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);

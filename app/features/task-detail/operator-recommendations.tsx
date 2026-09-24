@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon, type IconName } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
@@ -217,17 +218,17 @@ export function OperatorRecommendations({
                         : "Apply the operator's recommendation"
                   }
                 >
-                  {inFlight?.recId === r.id && inFlight.action === "apply" ? (
-                    <>
-                      <Icon name="loader" className="spin" />
-                      {reachesAcceptance(r, terminalStageId) ? "Accepting…" : "Applying…"}
-                    </>
-                  ) : (
-                    <>
-                      <Icon name="check" />
-                      Apply
-                    </>
-                  )}
+                  <GlyphSwap
+                    rest="check"
+                    alt="loader"
+                    on={inFlight?.recId === r.id && inFlight.action === "apply"}
+                    spinAlt
+                  />
+                  {inFlight?.recId === r.id && inFlight.action === "apply"
+                    ? reachesAcceptance(r, terminalStageId)
+                      ? "Accepting…"
+                      : "Applying…"
+                    : "Apply"}
                 </button>
                 <button
                   type="button"

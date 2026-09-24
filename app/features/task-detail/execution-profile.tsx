@@ -4,6 +4,7 @@ import type { TaskSummary } from "~/shared/mapping/task.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { holdEntriesSentence, holdRefusal, type DependencyRender } from "~/shared/dependencies";
 import { AgentGlyph } from "~/ui/identity";
@@ -334,10 +335,7 @@ function PendingSchedules({
           cancelLabel="Keep it"
           busy={busy}
           onCancel={() => setConfirmCancel(null)}
-          onConfirm={() => {
-            onCancel(confirmCancel.id);
-            setConfirmCancel(null);
-          }}
+          onConfirm={() => onCancel(confirmCancel.id)}
         />
       )}
     </>
@@ -510,10 +508,11 @@ function OperatorRunControl({
               : "Schedule this operator run")
         }
       >
-        <Icon
-          name={busy ? "loader" : delay === "now" ? "shield" : "clock"}
-          className={busy ? "spin" : ""}
-        />
+        {/* Ruling 459 over ruling 368: the resting mark trades for the clock
+            when the when-picker leaves Now, and that whole cell trades for
+            the spinning loader while this control's own request is in flight
+            (GlyphSwap's `busy`). */}
+        <GlyphSwap rest="shield" alt="clock" on={delay !== "now"} busy={busy} />
         {inFlight === "schedule"
           ? "Scheduling…"
           : inFlight === "run"
@@ -817,10 +816,11 @@ function AgentRunControl({
                 : `Schedule a ${selected.name} run`
         }
       >
-        <Icon
-          name={busy ? "loader" : delay === "now" ? "bolt" : "clock"}
-          className={busy ? "spin" : ""}
-        />
+        {/* Ruling 459 over ruling 368: the resting mark trades for the clock
+            when the when-picker leaves Now, and that whole cell trades for
+            the spinning loader while this control's own request is in flight
+            (GlyphSwap's `busy`). */}
+        <GlyphSwap rest="bolt" alt="clock" on={delay !== "now"} busy={busy} />
         {inFlight === "schedule"
           ? "Scheduling…"
           : inFlight === "run"

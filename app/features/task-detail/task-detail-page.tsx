@@ -1043,11 +1043,7 @@ export function TaskDetailPage({
           toStageName={stageName(task.stages, confirmMoveBack)}
           busy={transitionBusy}
           onCancel={() => setConfirmMoveBack(null)}
-          onConfirm={(reason) => {
-            const to = confirmMoveBack;
-            setConfirmMoveBack(null);
-            submitTransition(to, undefined, reason);
-          }}
+          onConfirm={(reason) => submitTransition(confirmMoveBack, undefined, reason)}
         />
       )}
       {confirmAccept && (
@@ -1139,16 +1135,12 @@ export function TaskDetailPage({
           // other doors are answering a decision someone already framed.
           {...(confirmAccept.mode === "accept"
             ? {
-                onRefreshFirst: () => {
-                  setConfirmAccept(null);
-                  submitRefreshFirst();
-                },
+                onRefreshFirst: submitRefreshFirst,
               }
             : {})}
           onCancel={() => setConfirmAccept(null)}
           onConfirm={(disclosure) => {
             const pending = confirmAccept;
-            setConfirmAccept(null);
             // Ruling 88: EVERY acceptance intent carries this dialog's own echo
             // of what it displayed. `apply-recommendation` and `resolve-packet`
             // included: their server-side pins (the recommendation id, the
@@ -1177,10 +1169,7 @@ export function TaskDetailPage({
           pendingRecommendations={recommendations.length}
           busy={archiveBusy}
           onCancel={() => setArchiving(false)}
-          onConfirm={() => {
-            setArchiving(false);
-            submitArchive(true);
-          }}
+          onConfirm={() => submitArchive(true)}
         />
       )}
 
@@ -1191,10 +1180,7 @@ export function TaskDetailPage({
           members={members}
           busy={ownerBusy}
           onCancel={() => setReleasing(false)}
-          onConfirm={() => {
-            setReleasing(false);
-            onOwner("release");
-          }}
+          onConfirm={() => onOwner("release")}
           onOwner={onOwner}
         />
       )}
@@ -1222,10 +1208,7 @@ export function TaskDetailPage({
           confirmLabel="Interrupt run"
           busy={runBusy}
           onCancel={() => setConfirmInterrupt(null)}
-          onConfirm={() => {
-            onInterrupt(confirmInterrupt);
-            setConfirmInterrupt(null);
-          }}
+          onConfirm={() => onInterrupt(confirmInterrupt)}
         />
       )}
 
@@ -1252,10 +1235,7 @@ export function TaskDetailPage({
           icon="shield"
           busy={recBusy}
           onCancel={() => setConfirmDismiss(null)}
-          onConfirm={() => {
-            submitDismissRec(confirmDismiss.recId);
-            setConfirmDismiss(null);
-          }}
+          onConfirm={() => submitDismissRec(confirmDismiss.recId)}
         />
       )}
     </div>

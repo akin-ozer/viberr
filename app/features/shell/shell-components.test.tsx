@@ -720,3 +720,60 @@ describe("ruling 145: the standalone-page header", () => {
     expect(getByLabelText(/Account/)).toBeTruthy();
   });
 });
+
+describe("ruling 459: the bell badge pulses on an arrival, not on a paint", () => {
+  /** The bell with its count driven from outside, as SSE revalidation does. */
+  function Harness({ start }: { start: number }) {
+    const [unread, setUnread] = useState(start);
+    return (
+      <>
+        <TopBell unread={unread} orphanUnread={0} />
+        <button type="button" onClick={() => setUnread((n) => n + 1)}>
+          arrive
+        </button>
+        <button type="button" onClick={() => setUnread((n) => n - 1)}>
+          read
+        </button>
+      </>
+    );
+  }
+  const badge = (container: HTMLElement) => container.querySelector(".bell-badge");
+
+  it("stands still on first paint, and on every remount of the bell", () => {
+    // CANARY: key the badge on the count again and mark every one arrived
+    // (`data-arrived` always set): the pulse plays on every page load.
+    const { container, unmount } = renderIn(<Harness start={3} />);
+    expect(badge(container)?.textContent).toBe("3");
+    expect(badge(container)?.hasAttribute("data-arrived")).toBe(false);
+    unmount();
+    // Home, the workspace and the standalone pages each mount their own bell.
+    const again = renderIn(<Harness start={3} />);
+    expect(badge(again.container)?.hasAttribute("data-arrived")).toBe(false);
+  });
+
+  it("pulses on a rise, again on the next rise, and not when reading lowers the count", () => {
+    // CANARY: bump `arrivals` on any change (`unread !== seenUnread`) and the
+    // fall below remounts the badge, replaying the pulse.
+    const { container, getByText } = renderIn(<Harness start={3} />);
+    const first = badge(container)!;
+    fireEvent.click(getByText("arrive"));
+    const risen = badge(container)!;
+    // A new node, so the one-shot keyframe replays; marked, so it plays at all.
+    expect(risen).not.toBe(first);
+    expect(risen.textContent).toBe("4");
+    expect(risen.getAttribute("data-arrived")).toBe("");
+    fireEvent.click(getByText("read"));
+    expect(badge(container)).toBe(risen);
+    expect(badge(container)!.textContent).toBe("3");
+    fireEvent.click(getByText("arrive"));
+    expect(badge(container)).not.toBe(risen);
+    expect(badge(container)!.getAttribute("data-arrived")).toBe("");
+  });
+
+  it("pulses when the first notification arrives on an empty bell", () => {
+    const { container, getByText } = renderIn(<Harness start={0} />);
+    expect(badge(container)).toBeNull();
+    fireEvent.click(getByText("arrive"));
+    expect(badge(container)?.getAttribute("data-arrived")).toBe("");
+  });
+});
