@@ -30,7 +30,10 @@ import {
   isReservedTaskPrefix,
   RESERVED_TASK_PREFIX_REFUSAL,
 } from "~/shared/dependencies";
-import { getConnection } from "~/server/org/connections.server";
+import {
+  getConnection,
+  recordCreatedRepositoryInReach,
+} from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { recordRepoAccess } from "~/server/github/repo-health.server";
@@ -170,7 +173,13 @@ function presetAgents(
  * to create, so an answer it cannot give refuses instead.
  */
 type RepoProbe =
-  | { status: "ok"; defaultBranch: string | null; empty: boolean }
+  | {
+      status: "ok";
+      defaultBranch: string | null;
+      empty: boolean;
+      /** `repoWritable`: true, or null when GitHub sent no permissions block. */
+      canPush: boolean | null;
+    }
   | { status: "read_only"; defaultBranch: string | null; empty: boolean }
   | { status: "not_found" }
   | { status: "forbidden" }
@@ -226,10 +235,11 @@ async function probeRemoteRepo(
     // F20-14/F20-15: Repair refuses a repo the credential can only read; the same
     // check belongs at create time (live: creating against a read-only-visible
     // repo was silently accepted and failed only at first delivery).
-    if (repoWritable(data.permissions) === false) {
+    const canPush = repoWritable(data.permissions);
+    if (canPush === false) {
       return { status: "read_only", defaultBranch, empty };
     }
-    return { status: "ok", defaultBranch, empty };
+    return { status: "ok", defaultBranch, empty, canPush };
   } catch {
     return { status: "unreachable" };
   }
@@ -305,6 +315,8 @@ async function createRepositoryWhenMissing(
     probe: RepoProbe;
     token: string;
     patId: string;
+    /** The connection whose token makes it: its stored reach gains it. */
+    connectionId: string;
     owner: string;
     repoName: string;
     slug: string;
@@ -349,12 +361,19 @@ async function createRepositoryWhenMissing(
     { body, retryServerError: false },
   );
   const made = `Created ${repo} on GitHub (${request.private ? "private" : "public"})`;
+  // Ruling 463's dated note (R-seams-4): the token that made the repository
+  // reaches it, so the connection's stored reach lists it from now on.
+  const reachIt = (after: RepoProbe) =>
+    recordCreatedRepositoryInReach(db, target.connectionId, {
+      fullName: repo,
+      private: request.private,
+      canPush: after.status === "ok" ? after.canPush : after.status === "read_only" ? false : null,
+    });
   if (created.ok) {
     recordRepositoryCreated(db, target.slug, repo, request.private, actor);
-    return {
-      probe: await probeRemoteRepo(token, repo, fetchImpl),
-      note: `${made}.`,
-    };
+    const after = await probeRemoteRepo(token, repo, fetchImpl);
+    reachIt(after);
+    return { probe: after, note: `${made}.` };
   }
   // A 5xx or a dropped connection does not say whether GitHub made it (a slow
   // `auto_init` create can outlive the gateway), so GitHub is asked. The probe
@@ -365,6 +384,7 @@ async function createRepositoryWhenMissing(
     const after = await probeRemoteRepo(token, repo, fetchImpl);
     if (after.status === "ok" || after.status === "read_only") {
       recordRepositoryCreated(db, target.slug, repo, request.private, actor);
+      reachIt(after);
       const answer =
         created.kind === "network"
           ? "the connection dropped before GitHub answered"
@@ -626,6 +646,7 @@ async function createProjectImpl(
             probe,
             token,
             patId: connection.patId,
+            connectionId: connection.id,
             owner,
             repoName,
             slug,

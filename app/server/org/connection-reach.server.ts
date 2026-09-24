@@ -62,9 +62,9 @@ const storedReachSchema = z.discriminatedUnion("status", [
 ]);
 export type StoredReach = z.infer<typeof storedReachSchema>;
 
-/** The stored column, read tolerantly: NULL, or a value this code did not
- *  write, is "not read yet" (null), never an empty reach. */
-export function parseConnectionReach(raw: string | null): ConnectionReach | null {
+/** The stored column as written, or null for NULL or a value this code did
+ *  not write. */
+export function parseStoredReach(raw: string | null): StoredReach | null {
   if (!raw) return null;
   let json: unknown;
   try {
@@ -73,8 +73,29 @@ export function parseConnectionReach(raw: string | null): ConnectionReach | null
     return null;
   }
   const parsed = storedReachSchema.safeParse(json);
-  if (!parsed.success) return null;
-  const stored = parsed.data;
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Ruling 463's dated note (pre-merge review R-seams-4): a repository Viberr
+ * has just created through this token (ruling 462) is one the token reaches,
+ * so a `read` reach gains it; `list_github_connections` says a repository
+ * missing from a read reach is one the token cannot see. An `unknown` reach
+ * stays unknown (one entry is not a count), and one already listing it
+ * (compared without case, as GitHub names do) needs nothing: both answer null.
+ */
+export function withCreatedRepository(stored: StoredReach, repo: ReachedRepo): StoredReach | null {
+  if (stored.status !== "read") return null;
+  const name = repo.fullName.toLowerCase();
+  if (stored.repos.some((r) => r.fullName.toLowerCase() === name)) return null;
+  return { ...stored, repos: [...stored.repos, repo] };
+}
+
+/** The stored column, read tolerantly: NULL, or a value this code did not
+ *  write, is "not read yet" (null), never an empty reach. */
+export function parseConnectionReach(raw: string | null): ConnectionReach | null {
+  const stored = parseStoredReach(raw);
+  if (!stored) return null;
   if (stored.status === "unknown") return stored;
   return {
     ...stored,

@@ -742,6 +742,60 @@ describe("ruling 462: createRepository creates the repository before the project
     );
   });
 
+  it("the repository it creates joins the connection's stored reach; an unknown reach stays unknown (R-seams-4)", async () => {
+    // CANARY: drop the reach update and `list_github_connections` (which reads
+    // this record) says the token cannot see the repository it just made.
+    const { getConnection } = await import("~/server/org/connections.server");
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const readAt = "2026-09-24T20:00:00.000Z";
+    store.db
+      .prepare(`UPDATE github_connections SET reach_json = ? WHERE id = 'akin-ozer'`)
+      .run(
+        JSON.stringify({
+          status: "read",
+          readAt,
+          repos: [{ fullName: "akin-ozer/viberr", private: false, canPush: true }],
+          capped: false,
+        }),
+      );
+    const gh = missingThenCreated("akin-ozer", "website", {
+      status: 201,
+      body: { full_name: "akin-ozer/website", default_branch: "main" },
+    });
+
+    await createProject(store.db, website(), ACTOR, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
+
+    expect(getConnection(store.db, "akin-ozer")?.reach).toEqual({
+      status: "read",
+      readAt,
+      repos: [
+        { fullName: "akin-ozer/viberr", private: false, canPush: true },
+        { fullName: "akin-ozer/website", private: true, canPush: true },
+      ],
+      capped: false,
+      total: 2,
+      privateCount: 1,
+    });
+
+    // A reach that could not be read is not made into a one-repository count.
+    const unknown = { status: "unknown", readAt, reason: "GitHub answered 403 on /user/repos (no)" };
+    store.db
+      .prepare(`UPDATE github_connections SET reach_json = ? WHERE id = 'akin-ozer'`)
+      .run(JSON.stringify(unknown));
+    const again = missingThenCreated("akin-ozer", "docs", {
+      status: 201,
+      body: { full_name: "akin-ozer/docs", default_branch: "main" },
+    });
+    await createProject(
+      store.db,
+      website({ name: "Docs", key: "DOC", repoName: "docs" }),
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: again.fetchImpl },
+    );
+    expect(getConnection(store.db, "akin-ozer")?.reach).toEqual(unknown);
+  });
+
   it("a create whose connection dropped is read back the same way (R-repo-1)", async () => {
     const store = setupTestStore(ctx);
     seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");

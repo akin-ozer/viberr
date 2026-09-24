@@ -31,7 +31,9 @@ through `repoWritable`) as `reach_json`. A fine-grained token lists exactly the
 repositories it was granted. A failed read is stored as `unknown` with GitHub's reason,
 never as zero; a token whose validation just failed gets an `unknown` reach without a
 read; NULL means the connection has not been validated since the read existed, and
-Re-check reads it. The card says "Reaches 3 repositories · 1 private" with the list one
+Re-check reads it. A repository Viberr creates through the token (ruling 462) joins a
+`read` reach at once (`recordCreatedRepositoryInReach`, no GitHub call, `readAt` kept); an
+unread or `unknown` reach is left for the next validation. The card says "Reaches 3 repositories · 1 private" with the list one
 disclosure away. The account's public-repo count (`GET /users/{owner}` →
 `public_repos`) is no longer read or stored: it said nothing about the token.
 `GET /users/{owner}` is still the owner-existence check. Re-check (`connection-recheck`,
