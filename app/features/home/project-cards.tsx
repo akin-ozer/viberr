@@ -17,7 +17,10 @@ import type { HomeMember, HomeProjectCard } from "./home-query.server";
  * copy change).
  */
 
-/* ---------- local icon (not in the shared set — mock keeps it local) ---- */
+/* ---------- local icon ----------------------------------------------------
+   Ruling 458(f) moves it onto the shared `Icon` / `ICON_PATHS`; the move
+   waits on ruling 457, since `ICON_PATHS` ships in the shell chunk every page
+   loads (ruling 458's 2026-09-24 note). */
 export function StarIco({ on }: { on?: boolean }) {
   return (
     <svg

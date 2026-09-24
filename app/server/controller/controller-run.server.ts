@@ -1031,7 +1031,7 @@ export function buildTurnPrompt(
 }
 
 /** Bounded transcript digest, oldest first. */
-export function transcriptDigest(messages: ControllerMessage[]): string {
+function transcriptDigest(messages: ControllerMessage[]): string {
   const clipped = messages.map(
     (m) =>
       `${m.author === "user" ? "Person" : "Controller"}: ${

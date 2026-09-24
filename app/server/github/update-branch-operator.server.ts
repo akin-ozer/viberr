@@ -139,7 +139,7 @@ function remoteSentence(branch: string, remote: RemoteBranchState): string {
 }
 
 /** The capability id that gates the operator's branch-update tool. */
-export const UPDATE_BRANCH_CAPABILITY = "update-task-branch";
+const UPDATE_BRANCH_CAPABILITY = "update-task-branch";
 
 type Gate = "direct" | "recommend" | "deny";
 

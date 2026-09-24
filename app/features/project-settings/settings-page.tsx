@@ -2168,11 +2168,14 @@ function DeleteProjectDialog({
   return (
     // Native <dialog>: Escape, backdrop-click light-dismiss, scroll lock, and
     // focus restore come from useDialog + showModal(); role="alertdialog"
-    // keeps the stronger semantics.
+    // keeps the stronger semantics. Ruling 458(l): it stays hand-written, since
+    // its confirm waits on the typed name, and carries the screen label every
+    // dialog does (surfaces.md §4).
     <dialog
       className="confirm-card"
       role="alertdialog"
       aria-label="Delete project"
+      data-screen-label="Delete project dialog"
       ref={dialogRef}
     >
       <div className="confirm-icon">

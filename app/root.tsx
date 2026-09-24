@@ -55,7 +55,9 @@ export const links: Route.LinksFunction = () => [
  * `logger.*` call from any loader, action or nested route carries it with no
  * call-site work. `entry.server.tsx` reuses the id bound here rather than
  * minting a second one, so the render and the data phase share it. Ruling
- * 458(d): it also answers every response with the id as `X-Request-Id`.
+ * 458(d): it also stamps the id on every response it wraps, as `X-Request-Id`.
+ * The error page below does not show the id yet: that costs 139 B gzip on this
+ * route's ruling-457 budget (ruling 458's 2026-09-24 note).
  *
  * The architecture doc promised "structured JSON logs with request/job
  * correlation identifiers" from the start. The affordance shipped once as an

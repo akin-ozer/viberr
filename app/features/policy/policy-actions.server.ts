@@ -252,7 +252,7 @@ export async function setTransitionBoundary(
 // ---------------------------------------------------------------- guardrails
 
 /** What the Guardrails card can do to one project.md `guardrails` row. */
-export const GUARDRAIL_OPS = ["on", "off", "value", "remove"] as const;
+const GUARDRAIL_OPS = ["on", "off", "value", "remove"] as const;
 export type GuardrailOp = (typeof GUARDRAIL_OPS)[number];
 
 interface GuardrailBefore {

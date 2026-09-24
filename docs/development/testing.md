@@ -109,6 +109,10 @@ seeds synthetic ones and `compose.e2e.yml` carries its own.
 | `delivery-operator.ts` | `deployDeliveryOperator(store, "full" \| "supervised")` → the store's project deploys ONLY an operator with a direct `deliver-review-pr` grant and that autonomy (repo `akin-ozer/viberr`), then re-projects |
 | `data-root-lock.ts` | `lockPath(dataRoot)` → `<dataRoot>/state/writer.lock`, the single-writer lock file (B-FD1) |
 
+A `test-support/` helper has no test of its own: the tests that use it are its coverage
+(ruling 458(m)). A helper that breaks fails the suites built on it, and the collected tree
+(`app/**`) does not reach `test-support/` anyway.
+
 Import route modules **after** `setupAppTest()` so they see the test env. A route action
 takes the React Router 8 argument shape, including `url`, `pattern` and a
 `RouterContextProvider`:

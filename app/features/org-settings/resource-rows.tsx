@@ -416,8 +416,8 @@ export function SkillPanel({
                 {s.summary}
               </span>
               <span className="sub mono">
-                store://skills/{s.name}/ · {s.fileCount} file
-                {s.fileCount === 1 ? "" : "s"} · {updatedLabel(s.updatedAt)}
+                store://skills/{s.name}/ · {countLabel(s.fileCount, "file")} ·{" "}
+                {updatedLabel(s.updatedAt)}
                 {usedBy(s.name) > 0
                   ? " · " + countLabel(usedBy(s.name), "template")
                   : ""}
@@ -516,8 +516,8 @@ export function AgentPanel({
                   {BACKEND_LABEL[a.backend]} ·{" "}
                   {/* P14-WL-06: the row right below already pluralizes
                       ("project"/"projects"); this one always said "resources". */}
-                  {stageNames || "no stages"} · {res} context resource
-                  {res === 1 ? "" : "s"} ·{" "}
+                  {stageNames || "no stages"} ·{" "}
+                  {countLabel(res, "context resource")} ·{" "}
                   {a.used > 0
                     ? "used in " + countLabel(a.used, "project")
                     : "not deployed"}

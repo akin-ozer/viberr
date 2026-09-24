@@ -64,7 +64,7 @@ import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
-import { stageLabel, stageName } from "~/shared/workflow/stage-roles";
+import { stageLabel } from "~/shared/workflow/stage-label";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
@@ -2808,7 +2808,13 @@ export function BoardPage({
         <AcceptOnBoardConfirm
           task={pendingAcceptTask}
           stages={stages}
-          fromStageName={stageName(stages, pendingAcceptTask.stage)}
+          fromStageName={
+            // `stageName`'s fallback, spelled here: importing stage-roles.ts
+            // would put its whole chunk on the board for this one line
+            // (ruling 457).
+            stages.find((s) => s.id === pendingAcceptTask.stage)?.name ??
+            pendingAcceptTask.stage
+          }
           defaultBranch={defaultBranch}
           busy={transitionFetcher.state !== "idle"}
           onCancel={() => setPendingAccept(null)}

@@ -1,6 +1,8 @@
 /**
- * Local SVGs from kb-browser.jsx (verbatim paths) — NOT part of the shared
- * Icon set. FolderIco is exported for org-settings row buttons.
+ * Local SVGs from kb-browser.jsx (verbatim paths). Ruling 458(f) moves them
+ * onto the shared `Icon` / `ICON_PATHS`; the move waits on ruling 457, since
+ * `ICON_PATHS` ships in the shell chunk every page loads (ruling 458's
+ * 2026-09-24 note). FolderIco is exported for org-settings row buttons.
  */
 
 export function FolderIco({ open }: { open?: boolean }) {

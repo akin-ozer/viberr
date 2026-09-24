@@ -271,13 +271,15 @@ the project settings page), `Store strip`, `New project modal`, `Board`, `Empty 
 `Settings · Users & access`, `Settings · GitHub connections`, `Settings · Sign-in &
 SSO`, `Settings · Agent resources`, `Controller settings`, `Audit log`, `Controller
 dock` (the panel, ruling 121), `Insights`, `Capability matrix modal`, `Agent profile
-modal`, `S3 export target dialog` and `Add member dialog` (both ruling 148(b)), and the
-fifteen confirms the shared `ConfirmDialog` names: `Resource removal dialog`, `Stage
-removal dialog`, `Member removal dialog`, `Schedule cancel dialog`, `Interrupt run
-dialog`, `Dismiss recommendation dialog`, `Interrupt turn dialog`, `Cancel goal dialog`
-and `Skip link dialog` (ruling 419), and `Disable user dialog`, `Credential removal
-dialog`, `Rebuild projections dialog`, `Store deletion dialog`, `Replace document dialog`
-and `Profile deletion dialog` (the hand-written confirms ruling 458(f) moved onto it).
+modal`, `S3 export target dialog` and `Add member dialog` (both ruling 148(b)), `Delete
+project dialog` (ruling 458(l)), `Rebuild projections dialog` (Home's hand-written confirm,
+ruling 458's 2026-09-24 note), and the fourteen confirms the shared `ConfirmDialog`
+names: `Resource removal dialog`, `Stage removal dialog`, `Member removal dialog`,
+`Schedule cancel dialog`, `Interrupt run dialog`, `Dismiss recommendation dialog`,
+`Interrupt turn dialog`, `Cancel goal dialog` and `Skip link dialog` (ruling 419), and
+`Disable user dialog`, `Credential removal dialog`, `Store deletion dialog`, `Replace
+document dialog` and `Profile deletion dialog` (the hand-written confirms ruling 458(f)
+moved onto it).
 `screenLabel` is a required prop on `ConfirmDialog`, so a new call site cannot ship
 unlabelled; the typecheck refuses it.
 

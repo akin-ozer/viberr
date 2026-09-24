@@ -61,7 +61,7 @@ export { AUTH_BASE_PATH };
  * must cover those too: getSession (require-user) and signOut (logout).
  * "/error" stays reachable because a failed OAuth callback redirects there.
  */
-export const ALLOWED_AUTH_PATHS = new Set<string>([
+const ALLOWED_AUTH_PATHS = new Set<string>([
   "/sign-in/email", // app login form
   "/sign-in/social", // OAuth start (login page buttons)
   "/callback/:id", // OAuth provider redirect back
@@ -99,7 +99,7 @@ export interface AuthEndpointContext {
  * Returns null when the provider cannot be read; `isOAuthWhitelisted` fails
  * closed on null (no domain admission), which is the safe direction.
  */
-export function oauthProviderOf(
+function oauthProviderOf(
   context: AuthEndpointContext | null | undefined,
 ): OAuthProvider | null {
   const path = context?.path ?? "";

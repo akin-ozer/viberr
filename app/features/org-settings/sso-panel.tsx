@@ -6,7 +6,8 @@ import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
-import { ConfirmDelete, MiniModal } from "./mini-modal";
+import { ConfirmDelete } from "./confirm-delete";
+import { MiniModal } from "./mini-modal";
 import { useOrgAction, type OrgActionData } from "./use-org-action";
 
 /**

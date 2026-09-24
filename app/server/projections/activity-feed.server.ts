@@ -48,7 +48,7 @@ export interface ActivityStreamRow {
   text: string;
 }
 
-export const ACTIVITY_STREAM_LIMIT = 200;
+const ACTIVITY_STREAM_LIMIT = 200;
 
 /* ------------------------------------------------------- feed filters (P21)
  * Owner request 2026-08-20: both panels get their own search + filters. The
@@ -235,7 +235,7 @@ export interface AuditLogEntry {
   resolvedBy: string | null;
 }
 
-export const AUDIT_LOG_LIMIT = 60;
+const AUDIT_LOG_LIMIT = 60;
 
 /** audit_events actions surfaced in the panel, mapped to display kinds.
  * A deliberate whitelist of the project-scoped GOVERNANCE families —
@@ -611,7 +611,7 @@ export interface AuditFilters {
 /** How many governance rows a rendered-text search will scan per leg. Audit
  *  tables hold project-scoped governance events (not the task stream), so this
  *  is a generous ceiling, stated rather than silent. */
-export const AUDIT_SCAN_CAP = 1000;
+const AUDIT_SCAN_CAP = 1000;
 
 function auditFiltersActive(f: AuditFilters): boolean {
   return Boolean(

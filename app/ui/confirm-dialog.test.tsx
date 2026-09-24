@@ -40,6 +40,23 @@ describe("ConfirmDialog", () => {
     expect(dialog.className).toBe("confirm-card");
   });
 
+  it("is described by its body (ruling 458(k))", () => {
+    const { getByRole, getByText } = renderDialog();
+    const dialog = getByRole("alertdialog", { name: "Remove the thing?" });
+    const body = getByText("The thing goes away.");
+    expect(body.id).not.toBe("");
+    expect(dialog.getAttribute("aria-describedby")).toBe(body.id);
+  });
+
+  it("gives each open confirm its own description id", () => {
+    const first = renderDialog();
+    const second = renderDialog({ title: "Remove the other thing?" });
+    const ids = [first.container, second.container].map((c) =>
+      c.querySelector("dialog")!.getAttribute("aria-describedby"),
+    );
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it("appends a caller's className to the card", () => {
     const { getByRole } = renderDialog({ className: "over-modal" });
     expect(getByRole("alertdialog").className).toBe("confirm-card over-modal");

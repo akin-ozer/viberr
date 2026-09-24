@@ -155,7 +155,7 @@ export type BranchAllocation =
  * the derived name (`pr-open`, `push-workspace`, this module). The remedy that
  * used to be a human decision is now a name nobody has to think about.
  */
-export async function allocateTaskBranchName(
+async function allocateTaskBranchName(
   client: GithubClient,
   repo: string,
   taskKey: string,
@@ -386,7 +386,7 @@ export type BranchPrepareResult =
 /** Repeats of the SAME prepare failure within this window write no second
  *  line (the operator's hook runs on every delivering dispatch, and JC-1 took
  *  three attempts in four minutes); the log still says every attempt. */
-export const PREPARE_FAILURE_REPEAT_MS = 60 * 60 * 1000;
+const PREPARE_FAILURE_REPEAT_MS = 60 * 60 * 1000;
 
 /**
  * F34-3 (pass 34): the pre-dispatch hook used to be `try { … } catch {}`

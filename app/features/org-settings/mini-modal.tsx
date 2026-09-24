@@ -1,5 +1,4 @@
 import { useState, type ReactNode } from "react";
-import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
@@ -134,39 +133,9 @@ export function MiniModal({
   );
 }
 
-export function ConfirmDelete({
-  what,
-  detail,
-  confirmLabel,
-  onCancel,
-  onConfirm,
-}: {
-  what: string;
-  detail: string;
-  /** C6: the confirm button named a bare "Remove" — the only destructive
-   *  guardrail in org-settings whose button did not name what it removes,
-   *  against the hand-written ceremonies that say "Archive VIB-4". Each caller
-   *  now passes the outcome ("Remove MCP server"); the blast radius stays in
-   *  `detail` (resources-panel already counts the grants that drop). */
-  confirmLabel?: string;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  // Delegates to the shared consequence-confirm (D6) so org-settings and the
-  // task/project confirmation sites share one grammar and one chrome.
-  return (
-    <ConfirmDialog
-      screenLabel="Resource removal dialog"
-      title={`Remove ${what}?`}
-      body={detail}
-      confirmLabel={confirmLabel ?? `Remove ${what}`}
-      onCancel={onCancel}
-      onConfirm={onConfirm}
-    />
-  );
-}
-
-/** Local pencil SVG (org-settings.jsx — not in the shared Icon set). */
+/** Local pencil SVG (org-settings.jsx). Ruling 458(f) moves it onto the shared
+ *  `Icon` / `ICON_PATHS`; the move waits on ruling 457, since `ICON_PATHS`
+ *  ships in the shell chunk every page loads (ruling 458's 2026-09-24 note). */
 export function EditIco() {
   return (
     <svg

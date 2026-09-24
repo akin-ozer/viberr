@@ -94,12 +94,12 @@ export function isInjectableKbDoc(fileName: string): boolean {
 
 /** Heading outline per KB, shared across its docs. Past it, documents are still
  *  NAMED — the index's whole job is that the run can ask for any of them. */
-export const KB_INDEX_OUTLINE_BUDGET = 4_000;
+const KB_INDEX_OUTLINE_BUDGET = 4_000;
 
 /** Docs listed per KB. A folder with more says how many it did not name; no
  *  real knowledge base is near this, and an index that walks 10,000 files is
  *  the prompt problem this ruling exists to remove. */
-export const KB_INDEX_MAX_DOCS = 200;
+const KB_INDEX_MAX_DOCS = 200;
 
 /** Cap on ONE `read_knowledge_doc` call. Generous — the point of the pull is
  *  that a document arrives whole — but not unbounded. */
@@ -363,7 +363,7 @@ export function readKbIndexes(
 /** Ruling 286: the sentence that separates a BINDING index from an optional
  *  one, on the index itself — so it is read with the document list rather than
  *  in a note the run may have scrolled past. */
-export const RULINGS_BINDING_LINE =
+const RULINGS_BINDING_LINE =
   "**BINDING on this run.** This is the project's settled rulings knowledge base " +
   "(ruling 239): an administrator made it binding on every run this project makes, " +
   "you included. Read it — the obligation is not conditional on your finding it " +

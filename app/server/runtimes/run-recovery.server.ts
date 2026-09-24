@@ -710,7 +710,7 @@ export async function settleAbandonedWaits(
  * `runIdExpr` is the SQL expression naming the run: a column in the sweep
  * (`r.id`), a bound `?` for one run.
  */
-export function replyNeverLandedSql(runIdExpr: string): string {
+function replyNeverLandedSql(runIdExpr: string): string {
   return (
     `NOT EXISTS (
             SELECT 1 FROM audit_events a

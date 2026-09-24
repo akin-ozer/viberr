@@ -19,7 +19,7 @@ import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
-import { stageLabel } from "~/shared/workflow/stage-roles";
+import { stageLabel } from "~/shared/workflow/stage-label";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { checksPill, checksUnreadPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";

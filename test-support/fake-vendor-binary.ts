@@ -36,10 +36,10 @@ import type { BackendBinaries } from "~/server/runtimes/backend-credentials.serv
 /** How the fake binaries behave for the next sign-in. */
 export type FakeVendorMode = "success" | "fail" | "hang";
 
-export const FAKE_VENDOR_MODE_ENV = "VIBERR_FAKE_VENDOR_MODE";
-export const FAKE_VENDOR_STATUS_ENV = "VIBERR_FAKE_VENDOR_STATUS";
-export const FAKE_VENDOR_DELAY_ENV = "VIBERR_FAKE_VENDOR_DELAY_MS";
-export const FAKE_VENDOR_LOGOUT_EXIT_ENV = "VIBERR_FAKE_VENDOR_LOGOUT_EXIT";
+const FAKE_VENDOR_MODE_ENV = "VIBERR_FAKE_VENDOR_MODE";
+const FAKE_VENDOR_STATUS_ENV = "VIBERR_FAKE_VENDOR_STATUS";
+const FAKE_VENDOR_DELAY_ENV = "VIBERR_FAKE_VENDOR_DELAY_MS";
+const FAKE_VENDOR_LOGOUT_EXIT_ENV = "VIBERR_FAKE_VENDOR_LOGOUT_EXIT";
 
 /** The device code the fake Codex prints, in OpenAI's own format. */
 export const FAKE_DEVICE_CODE = "WDJB-MJHT";

@@ -283,8 +283,8 @@ booleans are `0/1` in SQLite.
 | `attachments/` | one **completion-time prune** (ruling 105): when a run finishes (and no sibling run on the task is live), the machine-stamped non-visual artifacts its browser MCP wrote (a short lowercase prefix plus the MCP's dashed-ISO stamp, such as `page-*.yml` and `console-*.log`; png/jpg/webp/gif/pdf are always kept) are deleted unless the exact filename is cited in the run's reply, its evidence rows or the timeline since it started. Deliberately named files, every screenshot or PDF and every person's upload stay. No age- or size-based retention beyond that: the rest of the directory rides with the task | `pruneBrowserWorkingArtifacts` (`app/server/files/task-attachments.server.ts`, driven from `applyAgentCompletionEffects`); archive/delete of the task |
 
 The maintenance pass (`runMaintenancePass`: retention, transcript pruning, workspace reclaim)
-runs at boot and then every `VIBERR_MAINTENANCE_INTERVAL_MS` (default 6 h). A disk check runs
-every `VIBERR_DISK_CHECK_INTERVAL_MS` (default 5 min), logs each transition between `ok`,
+runs at boot and then every `VIBERR_MAINTENANCE_INTERVAL_SECONDS` (default 6 h). A disk check runs
+every `VIBERR_DISK_CHECK_INTERVAL_SECONDS` (default 5 min), logs each transition between `ok`,
 `low` and `critical`, and while the status is not `ok` triggers an extra pass at most every
 30 minutes. Every pass logs `store maintenance pass` even when it removed nothing, which is
 how an operator confirms the timer is alive; `/resources/health` reports

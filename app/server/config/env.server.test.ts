@@ -152,30 +152,82 @@ describe("parseEnv", () => {
     ).toThrowError(/VIBERR_SEED_ADMIN_EMAIL/);
   });
 
-  /**
-   * C3 (pass 31): three knobs the app has always honoured were read straight
-   * off `process.env` and declared nowhere, so the validated surface — the one
-   * an operator (and `.env.example`) treats as the list of what is
-   * configurable — denied they existed. They carry through as raw strings; the
-   * call sites keep their own coercion and defaults.
-   */
-  it("carries the runtime tuning knobs through as raw strings", () => {
+});
+
+/**
+ * C3 (pass 31) declared the runtime tuning knobs, which the app has always
+ * honoured, so the validated surface stopped denying they existed. Ruling
+ * 458(j): the schema also parses them, as 458(c) does for the C01-A6 knobs, so
+ * a value their call sites used to replace with the default in silence fails
+ * boot instead.
+ */
+describe("the runtime tuning knobs (ruling 458(j))", () => {
+  it("applies the documented defaults when unset or empty", () => {
+    const keys = [
+      "VIBERR_CLAUDE_MAX_TURNS",
+      "VIBERR_CLAUDE_IDLE_TIMEOUT_MS",
+      "VIBERR_CODEX_IDLE_TIMEOUT_MS",
+      "VIBERR_GIT_CLONE_TIMEOUT_MS",
+      "VIBERR_TRANSCRIPT_RETENTION_DAYS",
+      "VIBERR_SESSION_HOME_RETENTION_DAYS",
+    ];
+    for (const env of [
+      parseEnv(REQUIRED_ENV),
+      parseEnv({
+        ...REQUIRED_ENV,
+        ...Object.fromEntries(keys.map((key) => [key, ""])),
+      }),
+    ]) {
+      expect(env.VIBERR_CLAUDE_MAX_TURNS).toBe(2000);
+      expect(env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS).toBe(15 * 60_000);
+      expect(env.VIBERR_CODEX_IDLE_TIMEOUT_MS).toBe(15 * 60_000);
+      expect(env.VIBERR_GIT_CLONE_TIMEOUT_MS).toBe(15 * 60_000);
+      expect(env.VIBERR_TRANSCRIPT_RETENTION_DAYS).toBe(30);
+      expect(env.VIBERR_SESSION_HOME_RETENTION_DAYS).toBe(30);
+    }
+  });
+
+  it("coerces a set value the way the call sites did", () => {
     const env = parseEnv({
       ...REQUIRED_ENV,
+      VIBERR_CLAUDE_MAX_TURNS: "500.9",
+      VIBERR_CLAUDE_IDLE_TIMEOUT_MS: "10",
+      VIBERR_CODEX_IDLE_TIMEOUT_MS: " 1e3 ",
       VIBERR_GIT_CLONE_TIMEOUT_MS: "1800000",
       VIBERR_TRANSCRIPT_RETENTION_DAYS: "7",
       VIBERR_SESSION_HOME_RETENTION_DAYS: "0",
     });
-    expect(env.VIBERR_GIT_CLONE_TIMEOUT_MS).toBe("1800000");
-    expect(env.VIBERR_TRANSCRIPT_RETENTION_DAYS).toBe("7");
-    // "0" is a real setting (keep forever), not an absent one — so the schema
-    // must not coerce, and the empty-string-is-missing rule must not eat it.
-    expect(env.VIBERR_SESSION_HOME_RETENTION_DAYS).toBe("0");
+    // Rounded down, as `resolveMaxTurns` did.
+    expect(env.VIBERR_CLAUDE_MAX_TURNS).toBe(500);
+    expect(env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS).toBe(10);
+    expect(env.VIBERR_CODEX_IDLE_TIMEOUT_MS).toBe(1_000);
+    expect(env.VIBERR_GIT_CLONE_TIMEOUT_MS).toBe(1_800_000);
+    expect(env.VIBERR_TRANSCRIPT_RETENTION_DAYS).toBe(7);
+    // "0" is a real setting (keep forever), not an absent one: the
+    // empty-string-is-missing rule must not eat it, and it must not fail.
+    expect(env.VIBERR_SESSION_HOME_RETENTION_DAYS).toBe(0);
+  });
 
-    const bare = parseEnv(REQUIRED_ENV);
-    expect(bare.VIBERR_GIT_CLONE_TIMEOUT_MS).toBeUndefined();
-    expect(bare.VIBERR_TRANSCRIPT_RETENTION_DAYS).toBeUndefined();
-    expect(bare.VIBERR_SESSION_HOME_RETENTION_DAYS).toBeUndefined();
+  it("fails boot on a value the call sites used to replace with the default", () => {
+    const refused: [string, string[], string][] = [
+      // 0.5 used to round down to a cap of 0 turns.
+      ["VIBERR_CLAUDE_MAX_TURNS", ["many", "0", "-1", "0.5", "Infinity"], "must be a number of turns, 1 or more"],
+      ["VIBERR_CLAUDE_IDLE_TIMEOUT_MS", ["soon", "0", "-5", "Infinity"], "must be a positive number of ms"],
+      ["VIBERR_CODEX_IDLE_TIMEOUT_MS", ["soon", "0", "-5", "Infinity"], "must be a positive number of ms"],
+      ["VIBERR_GIT_CLONE_TIMEOUT_MS", ["soon", "0", "-5", "900000abc"], "must be a positive number of ms"],
+      ["VIBERR_TRANSCRIPT_RETENTION_DAYS", ["forever", "-1", "Infinity"], "must be a number of days, 0 or more"],
+      ["VIBERR_SESSION_HOME_RETENTION_DAYS", ["forever", "-1", "Infinity"], "must be a number of days, 0 or more"],
+    ];
+    for (const [key, values, message] of refused) {
+      for (const value of values) {
+        expect(
+          () => parseEnv({ ...REQUIRED_ENV, [key]: value }),
+          `${key}=${value}`,
+        ).toThrowError(
+          new RegExp(`^Invalid environment configuration:[\\s\\S]*${key}: ${message}`),
+        );
+      }
+    }
   });
 });
 
@@ -185,11 +237,15 @@ describe("parseEnv", () => {
  * a mistyped threshold or interval was silently ignored. The schema now applies
  * the same `Number()` coercion and the same defaults, and a value outside what
  * the modules accepted fails boot with the rest of the invalid variables.
+ * Ruling 458(i): the two periods are set in seconds, at most a day, and the
+ * `_MS` names they replace are refused with the new name.
  */
-describe("the C01-A6 knobs (ruling 458(c))", () => {
-  const NUMERIC = [
-    "VIBERR_MAINTENANCE_INTERVAL_MS",
-    "VIBERR_DISK_CHECK_INTERVAL_MS",
+describe("the C01-A6 knobs (rulings 458(c) and 458(i))", () => {
+  const PERIODS = [
+    "VIBERR_MAINTENANCE_INTERVAL_SECONDS",
+    "VIBERR_DISK_CHECK_INTERVAL_SECONDS",
+  ] as const;
+  const THRESHOLDS = [
     "VIBERR_DISK_LOW_FREE_MB",
     "VIBERR_DISK_CRITICAL_FREE_MB",
   ] as const;
@@ -200,12 +256,15 @@ describe("the C01-A6 knobs (ruling 458(c))", () => {
       parseEnv({
         ...REQUIRED_ENV,
         ...Object.fromEntries(
-          [...NUMERIC, "VIBERR_GITHUB_WRITE_PROBE"].map((key) => [key, ""]),
+          [...PERIODS, ...THRESHOLDS, "VIBERR_GITHUB_WRITE_PROBE"].map((key) => [
+            key,
+            "",
+          ]),
         ),
       }),
     ]) {
-      expect(env.VIBERR_MAINTENANCE_INTERVAL_MS).toBe(6 * 3_600_000);
-      expect(env.VIBERR_DISK_CHECK_INTERVAL_MS).toBe(5 * 60_000);
+      expect(env.VIBERR_MAINTENANCE_INTERVAL_SECONDS).toBe(21_600);
+      expect(env.VIBERR_DISK_CHECK_INTERVAL_SECONDS).toBe(300);
       expect(env.VIBERR_DISK_LOW_FREE_MB).toBe(2048);
       expect(env.VIBERR_DISK_CRITICAL_FREE_MB).toBe(512);
       expect(env.VIBERR_GITHUB_WRITE_PROBE).toBe(false);
@@ -215,30 +274,69 @@ describe("the C01-A6 knobs (ruling 458(c))", () => {
   it("coerces a positive number the way the modules did", () => {
     const env = parseEnv({
       ...REQUIRED_ENV,
-      VIBERR_MAINTENANCE_INTERVAL_MS: "60000",
-      VIBERR_DISK_CHECK_INTERVAL_MS: " 1e3 ",
+      VIBERR_MAINTENANCE_INTERVAL_SECONDS: "60",
+      VIBERR_DISK_CHECK_INTERVAL_SECONDS: " 1e1 ",
       VIBERR_DISK_LOW_FREE_MB: "10",
       VIBERR_DISK_CRITICAL_FREE_MB: "1.5",
     });
-    expect(env.VIBERR_MAINTENANCE_INTERVAL_MS).toBe(60_000);
-    expect(env.VIBERR_DISK_CHECK_INTERVAL_MS).toBe(1_000);
+    expect(env.VIBERR_MAINTENANCE_INTERVAL_SECONDS).toBe(60);
+    expect(env.VIBERR_DISK_CHECK_INTERVAL_SECONDS).toBe(10);
     expect(env.VIBERR_DISK_LOW_FREE_MB).toBe(10);
     expect(env.VIBERR_DISK_CRITICAL_FREE_MB).toBe(1.5);
   });
 
+  it("takes a period of exactly a day and refuses a longer one", () => {
+    for (const key of PERIODS) {
+      expect(parseEnv({ ...REQUIRED_ENV, [key]: "86400" })[key]).toBe(86_400);
+      expect(() => parseEnv({ ...REQUIRED_ENV, [key]: "86401" })).toThrowError(
+        new RegExp(
+          `${key}: must be a number of seconds above 0 and at most 86400 \\(24 hours\\)`,
+        ),
+      );
+    }
+  });
+
   it("fails boot on a value the modules used to replace with the default", () => {
-    for (const key of NUMERIC) {
-      for (const value of ["not-a-number", "0", "-5", "Infinity"]) {
-        expect(
-          () => parseEnv({ ...REQUIRED_ENV, [key]: value }),
-          `${key}=${value}`,
-        ).toThrowError(
-          new RegExp(
-            `^Invalid environment configuration:[\\s\\S]*${key}: must be a positive number of`,
-          ),
-        );
+    const refused: [readonly string[], string][] = [
+      [PERIODS, "must be a number of seconds above 0"],
+      [THRESHOLDS, "must be a positive number of"],
+    ];
+    for (const [keys, message] of refused) {
+      for (const key of keys) {
+        for (const value of ["not-a-number", "0", "-5", "Infinity"]) {
+          expect(
+            () => parseEnv({ ...REQUIRED_ENV, [key]: value }),
+            `${key}=${value}`,
+          ).toThrowError(
+            new RegExp(
+              `^Invalid environment configuration:[\\s\\S]*${key}: ${message}`,
+            ),
+          );
+        }
       }
     }
+  });
+
+  it("refuses the retired _MS period names, naming the replacement", () => {
+    for (const [retired, replacement] of [
+      ["VIBERR_MAINTENANCE_INTERVAL_MS", "VIBERR_MAINTENANCE_INTERVAL_SECONDS"],
+      ["VIBERR_DISK_CHECK_INTERVAL_MS", "VIBERR_DISK_CHECK_INTERVAL_SECONDS"],
+    ] as const) {
+      // Even a value the old name would have taken: the app no longer reads it.
+      expect(() => parseEnv({ ...REQUIRED_ENV, [retired]: "60000" })).toThrowError(
+        new RegExp(
+          `^Invalid environment configuration:[\\s\\S]*${retired}: retired; set ${replacement} instead`,
+        ),
+      );
+    }
+    // Listed with the schema's own problems, not instead of them.
+    expect(() =>
+      parseEnv({
+        ...REQUIRED_ENV,
+        PORT: "not-a-port",
+        VIBERR_MAINTENANCE_INTERVAL_MS: "60000",
+      }),
+    ).toThrowError(/PORT[\s\S]*VIBERR_MAINTENANCE_INTERVAL_MS: retired/);
   });
 
   it("reads the write probe's spellings: 1/true/yes on, 0/false/no off", () => {

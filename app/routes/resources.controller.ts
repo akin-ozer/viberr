@@ -14,9 +14,9 @@ import {
   runControllerTurn,
 } from "~/server/controller/controller-run.server";
 import { userBackendHealth } from "~/server/runtimes/backend-credentials.server";
+import { NEW_CONVERSATION_PARAM } from "~/features/controller/conversation-param";
 import {
   conversationMatchesScope,
-  DOCK_NEW_CONVERSATION,
   dockTaskExists,
   getControllerDock,
   unavailableDockView,
@@ -136,7 +136,7 @@ export async function action({ request }: Route.ActionArgs) {
     // U39-24: the reader's zone; normalized by the engine.
     const timeZone = textField.parse(formData.get("timeZone")) || null;
     let conversationId = textField.parse(formData.get("conversationId")).trim();
-    if (!conversationId || conversationId === DOCK_NEW_CONVERSATION) {
+    if (!conversationId || conversationId === NEW_CONVERSATION_PARAM) {
       // U35-4 (pass 35): the dock disables its composer for a person with no
       // Claude connected (ruling 127), and this door used to answer 200 anyway,
       // creating a thread whose only reply was the refusal. Refuse here, with

@@ -112,7 +112,7 @@ export function HumanAccess({
         <Icon name="user" />
         <h2>Human access · RBAC</h2>
         <span className="right sub fine">
-          {live.length} member{live.length === 1 ? "" : "s"}
+          {countLabel(live.length, "member")}
           {stale.length > 0
             ? ` · ${countLabel(stale.length, "removed account")}`
             : ""}

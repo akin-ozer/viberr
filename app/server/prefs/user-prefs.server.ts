@@ -11,7 +11,7 @@ import { z } from "zod";
  * retired with the metadata-nudge rework — pass 27; nothing reads it.)
  */
 
-export const HOME_PREFS_KEY = "home";
+const HOME_PREFS_KEY = "home";
 
 export type HomePrefs = {
   view: "grid" | "list";

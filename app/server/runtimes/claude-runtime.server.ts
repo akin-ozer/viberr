@@ -323,7 +323,8 @@ export function resolveClaudeEffort(effort?: string): string | undefined {
  * Idle (inactivity) timeout for a claude run in ms — the window a single
  * turn/tool may produce no message before the run is treated as hung.
  * Overridable via VIBERR_CLAUDE_IDLE_TIMEOUT_MS; defaults to 15 minutes, the
- * same window the Codex adapter uses (owner ruling A8).
+ * same window the Codex adapter uses (owner ruling A8; the default and the
+ * parse live in the env schema, ruling 458(j)).
  *
  * P13-RT-11: Claude had NO timer of any kind. `maxTurns` bounds turns, not
  * wall-clock or idle time, and a `for await` over a stalled SDK stream never
@@ -336,14 +337,11 @@ export function resolveClaudeEffort(effort?: string): string | undefined {
  * "another workstream" that owned the env schema — an ownership fact, not a
  * technical reason, and the schema has declared this variable since. It reads
  * the validated env now, like its Codex twin (`codexIdleTimeoutMs`) and
- * `claudeMaxTurns`. A test that sets the variable must call
+ * `resolveMaxTurns`. A test that sets the variable must call
  * `resetEnvCacheForTests()`, because `getEnv()` caches per process.
  */
-const DEFAULT_CLAUDE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 function claudeIdleTimeoutMs(): number {
-  const raw = getEnv().VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
-  const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_CLAUDE_IDLE_TIMEOUT_MS;
+  return getEnv().VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
 }
 
 /**
@@ -742,16 +740,12 @@ type ClaudeFailureKind =
   | "session_missing"
   | "unknown";
 
-/** Turn cap for a claude run — a RUNAWAY guard, not a work budget. The old
- *  hard-coded 50 cut off legitimate dev runs mid-delivery (observed live:
- *  a completed implementation died at turn 51 on `gh --version`). Default is
- *  deliberately huge (owner ruling 2026-07-17) — real runs should never hit
- *  it; deployments tune it with VIBERR_CLAUDE_MAX_TURNS in .env. */
-const DEFAULT_CLAUDE_MAX_TURNS = 2000;
+/** Turn cap for a claude run — a RUNAWAY guard, not a work budget; deployments
+ *  tune it with VIBERR_CLAUDE_MAX_TURNS in .env. Why the default of 2000 is
+ *  deliberately huge, and the parse of a set value, live in the env schema
+ *  (ruling 458(j)). */
 function resolveMaxTurns(): number {
-  const raw = getEnv().VIBERR_CLAUDE_MAX_TURNS;
-  const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CLAUDE_MAX_TURNS;
+  return getEnv().VIBERR_CLAUDE_MAX_TURNS;
 }
 
 /** The classifier's whole output: the routing class, the canonical sentence a

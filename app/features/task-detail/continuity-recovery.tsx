@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { RunView } from "~/features/runtime/runtime-types";
-import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { Icon } from "~/ui/icon";
 import { LocalRelative } from "~/ui/local-time";
 import { Pill, type PillKind } from "~/ui/pill";
@@ -115,6 +114,11 @@ export interface ContinuityLoss {
   agents: ContinuityAgent[];
 }
 
+/** Spelled here, not `BACKEND_LABEL`: ruling 457 (shared/text/backend-label.ts). */
+function backendLabel(backend: "claude" | "codex"): string {
+  return backend === "claude" ? "Claude" : "Codex";
+}
+
 function roleLabelOf(run: RunView): string {
   if (run.op || run.kind === "operator") return "Operator";
   return run.kind === "reviewer" ? "Reviewer" : "Delivering agent";
@@ -145,7 +149,7 @@ export function deriveContinuityLoss(input: {
       threadId: run.id,
       name: run.who.name,
       roleLabel: roleLabelOf(run),
-      backendLabel: BACKEND_LABEL[run.backend],
+      backendLabel: backendLabel(run.backend),
       sessionId: run.sessionMissing.sessionId,
       progress: progressOf(run),
     });

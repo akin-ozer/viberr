@@ -395,7 +395,7 @@ export interface OperatorAuthorityOverrides {
  * lookup below and the authority resolver read it, so a change to the picking
  * rule cannot land in one place and miss the other.
  */
-export function deploymentBackend(view: { backends: readonly string[] }): RealBackend {
+function deploymentBackend(view: { backends: readonly string[] }): RealBackend {
   return view.backends.find((b) => b === "claude" || b === "codex") === "codex"
     ? "codex"
     : "claude";
@@ -1215,7 +1215,7 @@ function retryOtherBackendDefaults(
  * `askedBy`. One predicate for the refusal and for the snapshot that warns
  * about it, so the two cannot disagree.
  */
-export function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">): boolean {
+function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">): boolean {
   return packet.from === "operator" && !packet.askedBy;
 }
 
@@ -1224,7 +1224,7 @@ export function packetIsOperators(packet: Pick<TaskPacket, "from" | "askedBy">):
  * Ruling 161: the one sentence naming why a `discard_branch` option cannot be
  * offered, from the fact that says the revision left the workspace.
  */
-export function revisionDepartureSentence(
+function revisionDepartureSentence(
   departure: RevisionDeparture,
   taskKey: string,
   branch: string | null,
@@ -2025,7 +2025,7 @@ export interface ContextConflict {
  * The event states the RULING as its first words, because the record is also
  * what the next agent re-anchors on: the repository won, and here is what lost.
  */
-export function contextConflictEvent(
+function contextConflictEvent(
   actor: TaskFileEvent["actor"],
   conflict: ContextConflict,
 ): TaskFileEvent {
@@ -3113,7 +3113,7 @@ function findUnansweredRefusal(
 }
 
 /** Ruling 415: how many of a task's human decisions the snapshot carries. */
-export const HUMAN_DECISIONS_MAX = 5;
+const HUMAN_DECISIONS_MAX = 5;
 /** Ruling 285: the window cuts an entry here for an operator that can read
  *  the rest with `read_timeline_entry`. */
 const TIMELINE_ENTRY_CAP = 1500;

@@ -136,7 +136,7 @@ function cleanSegment(segment: string): string | null {
 }
 
 /** Sanitizes a directory path (array of segments). Throws on traversal. */
-export function sanitizeDirPath(segments: string[]): string[] {
+function sanitizeDirPath(segments: string[]): string[] {
   const out: string[] = [];
   for (const raw of segments) {
     if (raw.includes("..")) {
@@ -596,10 +596,10 @@ export function deleteStoreNode(
 // ---------------------------------------------------------- GitHub import
 
 /** Mock URL contract (§4.3) + a branch capture for real fetching. */
-export const GITHUB_IMPORT_URL_RE =
+const GITHUB_IMPORT_URL_RE =
   /github\.com\/([\w.-]+)\/([\w.-]+)(?:\/(?:tree|blob)\/([\w.-]+)\/?(.*))?/;
 
-export const GITHUB_IMPORT_URL_ERROR =
+const GITHUB_IMPORT_URL_ERROR =
   "Paste a GitHub link: a repo, a folder (…/tree/main/docs), or a single file (…/blob/main/SKILL.md).";
 
 const IMPORT_MAX_FILES = 100;

@@ -61,7 +61,7 @@ import { toError } from "~/shared/errors";
 
 /** Floor between disk-pressure-triggered passes, so a wedged low-space
  *  condition cannot turn the disk check into a busy loop of sweeps. */
-export const MIN_PRESSURE_PASS_GAP_MS = 30 * 60_000;
+const MIN_PRESSURE_PASS_GAP_MS = 30 * 60_000;
 
 export type MaintenanceReason = "boot" | "interval" | "disk-pressure";
 
@@ -252,14 +252,21 @@ function recordPass(reason: MaintenanceReason, freedBytes: number): void {
   lastFreedBytes = freedBytes;
 }
 
-/** What /resources/health reports about maintenance — proof the timer is live.
- *  The two periods are the env schema's (defaults, and the refusal of a value
- *  that does not parse, live there: ruling 458(c)). */
-export function maintenanceState(): MaintenanceState {
+/** The two timer periods in ms. The env schema owns them in seconds (defaults,
+ *  the one-day cap and the refusal of a value that does not parse live there:
+ *  rulings 458(c) and 458(i)). */
+function configuredPeriodsMs(): Pick<MaintenanceState, "intervalMs" | "diskCheckIntervalMs"> {
   const env = getEnv();
   return {
-    intervalMs: env.VIBERR_MAINTENANCE_INTERVAL_MS,
-    diskCheckIntervalMs: env.VIBERR_DISK_CHECK_INTERVAL_MS,
+    intervalMs: env.VIBERR_MAINTENANCE_INTERVAL_SECONDS * 1000,
+    diskCheckIntervalMs: env.VIBERR_DISK_CHECK_INTERVAL_SECONDS * 1000,
+  };
+}
+
+/** What /resources/health reports about maintenance — proof the timer is live. */
+export function maintenanceState(): MaintenanceState {
+  return {
+    ...configuredPeriodsMs(),
     lastPassAt,
     lastPassReason,
     lastFreedBytes,
@@ -370,9 +377,9 @@ export function startMaintenanceScheduler(
 ): void {
   if (timers().length > 0) return;
 
-  const env = getEnv();
-  const intervalMs = options.intervalMs ?? env.VIBERR_MAINTENANCE_INTERVAL_MS;
-  const diskMs = options.diskCheckIntervalMs ?? env.VIBERR_DISK_CHECK_INTERVAL_MS;
+  const configured = configuredPeriodsMs();
+  const intervalMs = options.intervalMs ?? configured.intervalMs;
+  const diskMs = options.diskCheckIntervalMs ?? configured.diskCheckIntervalMs;
   const rootOption = options.dataRoot ? { dataRoot: options.dataRoot } : {};
 
   let passRunning = false;

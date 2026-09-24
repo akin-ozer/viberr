@@ -32,7 +32,7 @@ import { toError } from "~/shared/errors";
  *   reload reuses the running watcher instead of stacking a duplicate.
  */
 
-export const WATCH_DEBOUNCE_MS = 250;
+const WATCH_DEBOUNCE_MS = 250;
 
 /** The single column the removal reconcile below selects from each table:
  *  `task_projections.task_key` is TEXT NOT NULL, `projects.slug` is its

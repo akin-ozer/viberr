@@ -15,7 +15,6 @@ import {
   backendRunMark,
   type TaskRunPrincipalView,
 } from "./run-principal-view";
-import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { AgentGlyph } from "~/ui/identity";
 
 /**
@@ -62,7 +61,8 @@ function toOptions(
     kind: "agent",
     handle: a.id,
     name: a.name,
-    sub: `${a.role} · ${BACKEND_LABEL[a.backend]}`,
+    // Spelled here, not `BACKEND_LABEL`: ruling 457 (shared/text/backend-label.ts).
+    sub: `${a.role} · ${a.backend === "claude" ? "Claude" : "Codex"}`,
     backend: a.backend,
     id: a.id,
     noRepoWrite: a.capabilities?.delivery === false,

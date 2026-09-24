@@ -67,7 +67,7 @@ export interface ToastStack {
 
 type Timer = ReturnType<typeof setTimeout>;
 
-export function useToasts(): ToastStack {
+function useToasts(): ToastStack {
   const [toasts, setToasts] = useState<Toast[]>([]);
   /** Success toasts still waiting to leave, by id: the armed timer, or null
    *  while the stack is held. Errors never get an entry. */

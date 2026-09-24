@@ -100,7 +100,7 @@ export function clearProjectionFault(sourcePath: string): void {
 }
 
 /** Every standing fault, newest last (insertion order). */
-export function projectionFaults(): ProjectionFault[] {
+function projectionFaults(): ProjectionFault[] {
   return [...faults().values()];
 }
 

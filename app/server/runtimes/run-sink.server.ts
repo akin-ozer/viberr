@@ -63,7 +63,7 @@ export function runPersistDrained(db: DatabaseSync): boolean {
  * exited. The recorded human intervention lost to a race with the thing it was
  * stopping. Precedence, not ordering, decides now.
  */
-export function resolveTerminalState(
+function resolveTerminalState(
   current: RunState | null,
   desired: RunState,
 ): RunState {
@@ -96,7 +96,7 @@ function currentRunState(db: DatabaseSync, runId: string): RunState | null {
 /** The `err` tag marking a run whose DB projection is missing lines the raw
  *  `.jsonl` has. Mirrors `run·session_missing`: a durable classified line, no
  *  column, no migration. */
-export const LINE_LOST_TAG = "run·line_lost";
+const LINE_LOST_TAG = "run·line_lost";
 
 /**
  * The RunSink turns adapter callbacks into durable state + live SSE. For

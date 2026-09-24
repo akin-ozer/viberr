@@ -173,6 +173,11 @@ export const SSE_REOPEN_BACKOFF_MS = [2_000, 5_000, 15_000, 30_000] as const;
  *
  * Two, not one: a single failure is the ordinary transient case the first
  * backoff step already handles, and the probe costs a round-trip.
+ *
+ * Exported with no importer on purpose: exported, the build inlines it at its
+ * one use; module-local, it ships as a variable in the shell chunk every route
+ * loads, which moves every ruling-457 closure budget (measured for ruling
+ * 458(g); the same reason as `ROUTE_PENDING_DELAY_MS`).
  */
 export const SSE_SESSION_PROBE_AFTER = 2;
 

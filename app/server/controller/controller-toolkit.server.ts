@@ -269,7 +269,7 @@ export interface ControllerToolkit {
   tools: SdkMcpToolDefinition<any>[];
 }
 
-export const CONTROLLER_TOOLKIT_INSTRUCTIONS =
+const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "Viberr controller tools. Every action runs under the ASKING PERSON's own permissions, " +
   "checked by the server per call: instance tools follow their org role, board tools follow " +
   "their role in that project. A [denied] answer is final — relay it with its reason. Reads " +

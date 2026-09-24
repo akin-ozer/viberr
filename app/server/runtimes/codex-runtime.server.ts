@@ -503,11 +503,10 @@ function codexConfigForRun(
 
 /** The idle (inactivity) timeout for a codex run in ms — the window a single
  *  turn/tool may produce no event before the run is treated as hung. Overridable
- *  via VIBERR_CODEX_IDLE_TIMEOUT_MS; defaults to 15 minutes (owner ruling A8). */
+ *  via VIBERR_CODEX_IDLE_TIMEOUT_MS; defaults to 15 minutes (owner ruling A8;
+ *  the default and the parse live in the env schema, ruling 458(j)). */
 function codexIdleTimeoutMs(): number {
-  const raw = getEnv().VIBERR_CODEX_IDLE_TIMEOUT_MS;
-  const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : 15 * 60 * 1000;
+  return getEnv().VIBERR_CODEX_IDLE_TIMEOUT_MS;
 }
 
 /**

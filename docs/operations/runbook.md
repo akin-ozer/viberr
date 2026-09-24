@@ -185,7 +185,9 @@ Every response the app answers carries its request's id as `X-Request-Id` (rulin
 458(d)): the browser's devtools show it under the request's response headers. For a
 failure met while moving around the app, it is the failing `.data` request's. An inbound
 `X-Request-Id`, from a proxy in front, is reused, so the proxy's access log and the app's
-records share one id.
+records share one id. The error page does not show the id yet: that part of 458(d) waits
+on ruling 457's root budget (ruling 458's 2026-09-24 note), so a person reporting a
+failure reads it from devtools.
 
 The app logs JSON lines on stdout. To find one request's records:
 
@@ -474,8 +476,8 @@ recommendation is open. Nothing is owed by anyone while it waits.
 
 ## Retention & growth
 
-`runMaintenancePass` runs at **boot**, every **6 hours** (`VIBERR_MAINTENANCE_INTERVAL_MS`)
-and on **disk pressure** (checked every 5 minutes, `VIBERR_DISK_CHECK_INTERVAL_MS`; an
+`runMaintenancePass` runs at **boot**, every **6 hours** (`VIBERR_MAINTENANCE_INTERVAL_SECONDS`)
+and on **disk pressure** (checked every 5 minutes, `VIBERR_DISK_CHECK_INTERVAL_SECONDS`; an
 extra pass at most every 30 minutes; thresholds 2 GiB low / 512 MiB critical,
 `VIBERR_DISK_LOW_FREE_MB` / `VIBERR_DISK_CRITICAL_FREE_MB`). Each pass logs
 `store maintenance pass {reason, runLogLines, auditEvents, notifications, transcripts,

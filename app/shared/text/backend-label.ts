@@ -11,5 +11,12 @@
  * No imports and no `.server` suffix: the runtime, the mapping layer and the
  * file-store codec all read it without closing an import cycle, and a browser
  * module can import it too.
+ *
+ * Ruling 457 keeps the task page and the controller page off it. This module
+ * ships as its own chunk, and importing it from a module those pages load adds
+ * ~70 B gzip to two budgets that have no room. So the run console
+ * (`runs-panels.tsx`), the task page's run controls (`execution-profile.tsx`,
+ * `agent-select.tsx`, `continuity-recovery.tsx`) and `run-principal-view.ts`'s
+ * `backendLabelOf` spell the two labels themselves.
  */
 export const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;

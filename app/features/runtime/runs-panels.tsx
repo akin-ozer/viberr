@@ -17,11 +17,12 @@ import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { NumberTicker } from "~/ui/number-ticker";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
-import { countLabel } from "~/shared/text/plural";
-import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { useHydrated } from "~/ui/local-time";
 import { useDismiss } from "~/ui/use-dismiss";
 import { useLiveStreamFailed } from "~/features/live-updates/use-live-updates";
+// Ruling 457: backend labels and count plurals are spelled inline here, not
+// through `BACKEND_LABEL` / `countLabel` (why: shared/text/backend-label.ts,
+// shared/text/plural.ts).
 
 /** P13-UI-57: the projection ships the ISO so the CLIENT renders the clock in
  *  the viewer's zone. During SSR + hydration the UTC form is rendered instead
@@ -1451,7 +1452,7 @@ const ConsoleView = memo(function ConsoleView({
               <span className="log-more-note">
                 {older.error
                   ? " · " + older.error
-                  : ` · ${countLabel(older.withheld, "earlier line")} not loaded`}
+                  : ` · ${older.withheld} earlier line${older.withheld === 1 ? "" : "s"} not loaded`}
               </span>
             </span>
           </div>
@@ -1598,6 +1599,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
     altBackend !== null &&
     (retryBackends?.includes(altBackend) ?? false);
   const canRetryBackend = retryPossible && !!onRetryBackend;
+  const altLabel = altBackend === "codex" ? "Codex" : "Claude";
   // Ruling 127: the offer, and when there is none, WHY there is none. A run
   // that failed on quota with an owner who never connected the other backend
   // gets no button on any surface (the blocked packet withholds
@@ -1611,11 +1613,11 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
   // credential fact that was often false and always irrelevant.
   const retryOffered = cur.kind === "primary" || cur.kind === "reviewer";
   const retryClause = canRetryBackend
-    ? `. Retry on ${BACKEND_LABEL[altBackend]}`
+    ? `. Retry on ${altLabel}`
     : retryPossible
       ? ". A maintainer can retry it on the other backend"
       : retryOffered && altBackend !== null && retryBackends !== undefined
-        ? `. ${BACKEND_LABEL[altBackend]} isn't connected for the task owner, so there is no other backend to retry on`
+        ? `. ${altLabel} isn't connected for the task owner, so there is no other backend to retry on`
         : "";
   const footer =
     cur.state === "running"
@@ -1694,17 +1696,17 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
               ? // Ruling 130(a): the SENTENCE follows the classified failure
                 // for every run kind; the retry clause follows the OFFER.
                 cur.failureKind === "quota"
-                ? `${BACKEND_LABEL[cur.backend]} refused this run: the account's usage window is spent (the error line names the reset and the account remedy)${retryClause}`
+                ? `${cur.backend === "codex" ? "Codex" : "Claude"} refused this run: the account's usage window is spent (the error line names the reset and the account remedy)${retryClause}`
                 : cur.failureKind === "auth"
-                  ? `${BACKEND_LABEL[cur.backend]} refused this run: the account was rejected by the provider (an organization restriction or a rejected credential; the error line names the remedy)${retryClause}`
+                  ? `${cur.backend === "codex" ? "Codex" : "Claude"} refused this run: the account was rejected by the provider (an organization restriction or a rejected credential; the error line names the remedy)${retryClause}`
                   : cur.failureKind === "overloaded"
                   ? // The provider's side, not the account's: the sentence
                     // must not send the reader to a quota or account remedy.
                     // U35-11: unless the request never reached the provider,
                     // which is this deployment's network path, not its side.
                     cur.failureOrigin === "local"
-                    ? `${BACKEND_LABEL[cur.backend]} could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes${retryClause}`
-                    : `${BACKEND_LABEL[cur.backend]} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`
+                    ? `${cur.backend === "codex" ? "Codex" : "Claude"} could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes${retryClause}`
+                    : `${cur.backend === "codex" ? "Codex" : "Claude"} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`
                   : cur.failureKind === "max_budget"
                     ? // Ruling 175 / ruling 350: the pill above already says "cut off ·
                       // spending cap"; the footer said "continuity error" beneath it.
@@ -1727,7 +1729,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
                   // no retry to advertise, and the run's own error line
                   // carries the real remedy (own the task, connect the
                   // account).
-                  `${BACKEND_LABEL[cur.backend]} could not run this (quota, rate limit, or an account that cannot run it)${retryClause}`
+                  `${cur.backend === "codex" ? "Codex" : "Claude"} could not run this (quota, rate limit, or an account that cannot run it)${retryClause}`
                 : // Ruling 350: only a specialist's failure raises the packet the
                   // old sentence pointed at; an operator drive or a controller
                   // turn is sent to the record it does have.
@@ -1764,10 +1766,10 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
             className="btn sm"
             disabled={retrying}
             onClick={() => onRetryBackend!(altBackend!, cur)}
-            title={`Re-run the ${cur.kind === "reviewer" ? "reviewer" : "specialist"} on ${BACKEND_LABEL[altBackend]}. The current backend was unavailable`}
+            title={`Re-run the ${cur.kind === "reviewer" ? "reviewer" : "specialist"} on ${altLabel}. The current backend was unavailable`}
           >
             <Icon name="refresh" />
-            Retry on {BACKEND_LABEL[altBackend]}
+            Retry on {altLabel}
           </button>
         )}
         {/* UI-57: both toggles carry their state for assistive tech, not just

@@ -2648,7 +2648,7 @@ export function isDispatchHeld(cause: unknown): cause is DispatchHeldError {
  * so instead of "No run started" and "wait, then start another", which a
  * person who obeyed turned into a second delivery of the same words.
  */
-export class AgentBusyError extends AppError {
+class AgentBusyError extends AppError {
   /** The profile whose run is live; ruling 203 delivers to that profile only. */
   readonly busyProfileId: string | null;
   constructor(userMessage: string, busyProfileId: string | null) {

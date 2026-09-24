@@ -9,7 +9,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import {
-  DEFAULT_MAINTENANCE_INTERVAL_MS,
+  DEFAULT_MAINTENANCE_INTERVAL_SECONDS,
   resetEnvCacheForTests,
 } from "~/server/config/env.server";
 import { taskDir } from "~/server/files/file-store-root.server";
@@ -209,7 +209,7 @@ describe("runMaintenancePass (gaps 15 + 20)", () => {
     const state = maintenanceState();
     expect(state.lastPassAt).not.toBeNull();
     expect(state.lastPassReason).toBe("interval");
-    expect(state.intervalMs).toBe(DEFAULT_MAINTENANCE_INTERVAL_MS);
+    expect(state.intervalMs).toBe(DEFAULT_MAINTENANCE_INTERVAL_SECONDS * 1000);
   });
 });
 

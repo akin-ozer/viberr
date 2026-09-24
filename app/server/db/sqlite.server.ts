@@ -327,7 +327,7 @@ export function getDb(): DatabaseSync {
  * the index exists to prevent — and that failure is warned, not fatal: the
  * rows finish or are interrupted, and the next boot creates the index.
  */
-export function ensureSingleFlightIndexes(db: DatabaseSync): void {
+function ensureSingleFlightIndexes(db: DatabaseSync): void {
   try {
     db.exec(
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runs__one_live_per_support

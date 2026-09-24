@@ -140,7 +140,7 @@ export function dfReading(path: string): RawDiskReading | null {
   return { totalBytes: totalKb * 1024, freeBytes: Math.max(0, availKb) * 1024 };
 }
 
-export function statfsReading(path: string): RawDiskReading | null {
+function statfsReading(path: string): RawDiskReading | null {
   let stats;
   try {
     stats = statfsSync(path);
@@ -187,7 +187,7 @@ export function measureDataRootSpace(
 }
 
 /** How long a measurement is reused (the health probe is unauthenticated). */
-export const DISK_MEASUREMENT_TTL_MS = 5_000;
+const DISK_MEASUREMENT_TTL_MS = 5_000;
 
 let snapshot: { at: number; value: DiskSpace | null } | null = null;
 

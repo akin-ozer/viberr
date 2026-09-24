@@ -1506,7 +1506,7 @@ function parseMcpMessage(text: string): McpMessage | null {
  * A credentialed server is probed WITH its credential (P13-KM-05), so a server
  * that works in a run doesn't report "unreachable" in Settings.
  */
-export async function discoverHttpMcpTools(
+async function discoverHttpMcpTools(
   target: string,
   options: McpProbeOptions & { token?: string | null } = {},
 ): Promise<StdioDiscovery> {

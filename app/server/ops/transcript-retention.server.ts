@@ -63,12 +63,6 @@ import { toError } from "~/shared/errors";
  * Set `VIBERR_SESSION_HOME_RETENTION_DAYS=0` to keep session homes forever.
  */
 
-/** Raw run transcripts: aligned with RUN_LOG_RETENTION_DAYS so the file and its
- *  projection disappear together instead of contradicting each other. */
-export const DEFAULT_TRANSCRIPT_RETENTION_DAYS = 30;
-/** Provider session homes: the window the providers themselves keep. */
-export const DEFAULT_SESSION_HOME_RETENTION_DAYS = 30;
-
 const BACKENDS: RunBackend[] = ["claude", "codex"];
 
 export interface TranscriptReclamation {
@@ -80,30 +74,19 @@ export interface TranscriptReclamation {
   bytes: number;
 }
 
-/** C3 (pass 31): both windows now come off the VALIDATED env (`getEnv`) rather
+/** C3 (pass 31): both windows come off the VALIDATED env (`getEnv`) rather
  *  than a `process.env[name]` lookup by string — the schema declares them, so a
  *  typo in the variable name is a compile error here instead of a silent
- *  fallback to the default. The coercion is unchanged: a non-numeric or
- *  negative value reads as "unset" (the default), and `0` is a real value
- *  meaning "keep forever". */
-function days(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || raw === "") return fallback;
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : fallback;
-}
-
+ *  fallback to the default. Ruling 458(j): the schema also owns the defaults
+ *  (`DEFAULT_TRANSCRIPT_RETENTION_DAYS`, `DEFAULT_SESSION_HOME_RETENTION_DAYS`)
+ *  and the coercion. `0` is a real value meaning "keep forever", and a
+ *  negative or non-numeric value fails boot where it used to read as unset. */
 export function transcriptRetentionDays(): number {
-  return days(
-    getEnv().VIBERR_TRANSCRIPT_RETENTION_DAYS,
-    DEFAULT_TRANSCRIPT_RETENTION_DAYS,
-  );
+  return getEnv().VIBERR_TRANSCRIPT_RETENTION_DAYS;
 }
 
 export function sessionHomeRetentionDays(): number {
-  return days(
-    getEnv().VIBERR_SESSION_HOME_RETENTION_DAYS,
-    DEFAULT_SESSION_HOME_RETENTION_DAYS,
-  );
+  return getEnv().VIBERR_SESSION_HOME_RETENTION_DAYS;
 }
 
 function entries(dir: string): Dirent[] {

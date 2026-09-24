@@ -288,7 +288,7 @@ export async function setBranchCleanup(
 
 /** Ruling 178: the audit action ONE writer records; the activity feed's
  *  catalog and the Policy page's last-change chip both name it. */
-export const REQUIRED_REVIEWERS_AUDIT_ACTION = "project.required_reviewers.updated";
+const REQUIRED_REVIEWERS_AUDIT_ACTION = "project.required_reviewers.updated";
 
 /** One submitted rule, before validation. */
 export interface RequiredReviewerRuleInput {
@@ -356,7 +356,7 @@ export function parseFileLeasesField(
  * de-duplicated, in submitted order. Shared by the Settings form and the
  * controller's `set_required_reviewers`, so the two cannot drift.
  */
-export function validateRequiredReviewerRules(
+function validateRequiredReviewerRules(
   projectSlug: string,
   rules: readonly RequiredReviewerRuleInput[],
   ctx: SettingsMutationContext = {},
@@ -628,7 +628,7 @@ export async function setProjectFileLeases(
 /** `owner/name` from free input — tolerates a pasted GitHub URL and a
  * trailing `.git`, refuses anything that is not exactly one owner + one
  * name. */
-export function normalizeRepoInput(raw: string): string | null {
+function normalizeRepoInput(raw: string): string | null {
   let s = raw.trim();
   s = s.replace(/^https?:\/\/(www\.)?github\.com\//i, "");
   s = s.replace(/^github\.com\//i, "");
@@ -965,7 +965,7 @@ export async function removeStage(
     }
     if (count > 0) {
       throw AppError.conflict(
-        `Move ${count} ${count === 1 ? "task" : "tasks"} out of ${stage.name} first`,
+        `Move ${countLabel(count, "task")} out of ${stage.name} first`,
       );
     }
     // Neighbours + the edges about to be merged, read from the PRE-removal state.

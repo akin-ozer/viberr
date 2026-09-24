@@ -122,7 +122,7 @@ export function agentProfilesDir(dataRoot?: string): string {
 /** `agents/definitions/` — the shipped doctrine files (operator, controller).
  *  C01-A11 (pass 32): built here like every other store path, not by walking
  *  `..` out of the profiles dir. */
-export function agentDefinitionsDir(dataRoot?: string): string {
+function agentDefinitionsDir(dataRoot?: string): string {
   return path.join(getDataRoot(dataRoot), "agents", "definitions");
 }
 

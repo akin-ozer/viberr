@@ -51,7 +51,7 @@ import { toError } from "../../shared/errors";
 export const DATA_ROOT_LOCK_FILENAME = "writer.lock";
 
 /** The env var that forces a takeover of a live-looking lock. */
-export const FORCE_LOCK_ENV = "VIBERR_FORCE_DATA_ROOT_LOCK";
+const FORCE_LOCK_ENV = "VIBERR_FORCE_DATA_ROOT_LOCK";
 
 /** A type alias, not an interface, so the takeover/steal log lines can carry the
  *  holder as a structured field (only a type alias gets the implicit index
@@ -196,7 +196,7 @@ interface BootIdSlot {
   [BOOT_ID_KEY]?: string;
 }
 
-export function processBootId(): string {
+function processBootId(): string {
   // SAFETY: as above — the key is module-private and this function is the only
   // writer of it, storing the `randomUUID()` string on the line below.
   const slot = globalThis as BootIdSlot;
@@ -608,7 +608,7 @@ export function acquireDataRootLock(
 
 /** Ownership re-check cadence. Cheap (one fstat + one stat + one small read),
  *  unref'd, so 20 s is comfortable while still catching a steal within a tick. */
-export const DATA_ROOT_LOCK_GUARD_INTERVAL_MS = 20_000;
+const DATA_ROOT_LOCK_GUARD_INTERVAL_MS = 20_000;
 
 /** HMR-safe singleton handle — same global-symbol pattern as the reconcile
  *  poller / file watcher, so a dev reload never stacks a second interval. */

@@ -7,7 +7,7 @@ import type { StageDef } from "~/schemas/project-file.schema";
 import { countLabel } from "~/shared/text/plural";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
-import { ConfirmDelete } from "./mini-modal";
+import { ConfirmDelete } from "./confirm-delete";
 import { useOrgAction } from "./use-org-action";
 import { useBusyRow, rel, updatedLabel } from "./resource-helpers";
 import { KBModal, McpModal, SkillModal } from "./resource-modals";

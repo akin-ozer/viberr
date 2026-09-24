@@ -106,7 +106,7 @@ function statusOf(user: UserRecord): OrgUserStatus {
   return "active";
 }
 
-export function toOrgUserView(user: UserRecord): OrgUserView {
+function toOrgUserView(user: UserRecord): OrgUserView {
   const status = statusOf(user);
   return {
     id: user.id,

@@ -1210,7 +1210,10 @@ describe("DangerZone", () => {
       />,
     );
     fireEvent.click(container.querySelector(".dz-row .btn.danger:not(.ghost)")!);
-    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    // Ruling 458(l): the one dialog in the family that had no screen label.
+    expect(
+      container.querySelector('[role="alertdialog"]')!.getAttribute("data-screen-label"),
+    ).toBe("Delete project dialog");
 
     const confirmButton = Array.from(
       container.querySelectorAll<HTMLButtonElement>(".confirm-actions .btn.danger"),

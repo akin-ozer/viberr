@@ -100,7 +100,7 @@ const TERMINAL_STATES: ReadonlySet<LoginState> = new Set<LoginState>([
   "cancelled",
 ]);
 
-export function isTerminalLoginState(state: LoginState): boolean {
+function isTerminalLoginState(state: LoginState): boolean {
   return TERMINAL_STATES.has(state);
 }
 

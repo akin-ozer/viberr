@@ -7,7 +7,8 @@ import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
-import { ConfirmDelete, EditIco, MiniModal } from "./mini-modal";
+import { ConfirmDelete } from "./confirm-delete";
+import { EditIco, MiniModal } from "./mini-modal";
 import { useOrgAction, type OrgActionData } from "./use-org-action";
 
 /**

@@ -2,8 +2,9 @@ import { z } from "zod";
 import type { PillKind } from "~/ui/pill";
 import { useClock } from "~/ui/use-clock";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
-import { countLabel } from "~/shared/text/plural";
 import type { ConsoleEntry } from "./log-noise";
+// Ruling 457: count plurals are spelled inline here, not through `countLabel`
+// (why: shared/text/plural.ts).
 import {
   ARGUMENT_CLIP,
   isRunBoundary,
@@ -548,14 +549,14 @@ export function hiddenArguments(line: LogLine): HiddenArguments | null {
     }
     if (Array.isArray(value)) {
       if (value.length) {
-        hidden.push({ key, label: `${key} (${countLabel(value.length, "item")})` });
+        hidden.push({ key, label: `${key} (${value.length} item${value.length === 1 ? "" : "s"})` });
       }
       continue;
     }
     const rec = recordValue.safeParse(value);
     if (rec.success) {
       const n = Object.keys(rec.data).length;
-      if (n) hidden.push({ key, label: `${key} (${countLabel(n, "field")})` });
+      if (n) hidden.push({ key, label: `${key} (${n} field${n === 1 ? "" : "s"})` });
     }
   }
   if (!hidden.length) return null;
@@ -610,7 +611,7 @@ function clockSeconds(t: string): number | null {
  * the block and read the timestamps that produced it.
  */
 export function thoughtLabel(lines: readonly { display: LogLine }[]): string {
-  const steps = countLabel(lines.length, "step");
+  const steps = `${lines.length} step${lines.length === 1 ? "" : "s"}`;
   const first = clockSeconds(lines[0]!.display.t);
   const last = clockSeconds(lines[lines.length - 1]!.display.t);
   if (first === null || last === null) return `Thought · ${steps}`;

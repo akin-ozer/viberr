@@ -199,7 +199,7 @@ export function listUserRuntimeRoots(
  * Everything here is synchronous and throws only from `prepare`: a run whose
  * home cannot be built must not start, while a settle must never throw.
  */
-export const CODEX_RUN_HOMES_DIR = "runs";
+const CODEX_RUN_HOMES_DIR = "runs";
 
 /** The state directories a run shares with the person's home, by link. */
 export const CODEX_HOME_SHARED_DIRS = ["sessions", "skills", "memories"] as const;

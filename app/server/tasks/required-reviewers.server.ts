@@ -45,7 +45,7 @@ export interface RequiredReviewerView {
 
 /** The display name a deployment resolves to — its own definition, else the
  *  org template it deploys, else the bare profile id. */
-export function deployedAgentName(
+function deployedAgentName(
   deployment: AgentDeployment | undefined,
   profileId: string,
   dataRoot?: string,

@@ -17,13 +17,10 @@
  * started" clause, because nothing has been started here yet — but they must
  * never tell a DIFFERENT story, so the wording tracks that builder.
  *
- * This module carries no JSX and imports only the backend labels (a module that
- * itself imports nothing), so the execution profile, the agent selector and the
- * mention menu can all read it without the import cycle a shared helper inside
- * `execution-profile.tsx` would create.
+ * This module carries no JSX and imports nothing, so the execution profile,
+ * the agent selector and the mention menu can all read it without the import
+ * cycle a shared helper inside `execution-profile.tsx` would create.
  */
-
-import { BACKEND_LABEL } from "~/shared/text/backend-label";
 
 /** The two real agent backends, as the client side names them. */
 export type ViewBackend = "claude" | "codex";
@@ -51,6 +48,19 @@ export interface TaskRunPrincipalView {
   ownerName: string;
   claude: PrincipalBackendView;
   codex: PrincipalBackendView;
+}
+
+/** The task page's copy of `BACKEND_LABEL` (shared/text/backend-label.ts),
+ *  which the execution profile reads through `backendLabelOf`: ruling 457
+ *  keeps the shared one's chunk off the task page (why: that file). */
+const BACKEND_LABEL = {
+  claude: "Claude",
+  codex: "Codex",
+} satisfies Record<ViewBackend, string>;
+
+/** Ruling 92: the label is "Claude", never "Claude Code". */
+export function backendLabelOf(backend: ViewBackend): string {
+  return BACKEND_LABEL[backend];
 }
 
 /**

@@ -199,7 +199,7 @@ interface RequestHeaders {
 
 /** Per-request budget for a GitHub API call (P13-UI-04). Generous enough for a
  *  slow tree/blob fetch, short enough that a hung endpoint surfaces. */
-export const GITHUB_REQUEST_TIMEOUT_MS = 20_000;
+const GITHUB_REQUEST_TIMEOUT_MS = 20_000;
 
 export function createGithubClient(options: GithubClientOptions): GithubClient {
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -375,7 +375,7 @@ export function encodeRefPath(ref: string): string {
 }
 
 /** Convenience header read used by the PAT validator. */
-export function tokenExpirationFrom(headers: Headers): string | null {
+function tokenExpirationFrom(headers: Headers): string | null {
   const raw = headers.get("github-authentication-token-expiration");
   if (!raw) return null;
   const date = new Date(raw);

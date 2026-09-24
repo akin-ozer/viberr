@@ -78,7 +78,7 @@ import { toError } from "~/shared/errors";
  * There is NO delete anywhere: completed and cancelled chains stay readable.
  */
 
-export const GOAL_MAX_LINKS = 20;
+const GOAL_MAX_LINKS = 20;
 
 export interface GoalLinkInput {
   title: string;
@@ -146,7 +146,7 @@ function linkGoalText(
  *  carried the previous link, have both moved on). */
 const CHAIN_HEADER_RE = /^Part of goal [^\n]*\n\n/;
 
-export function stripChainHeader(goal: string): string {
+function stripChainHeader(goal: string): string {
   return goal.replace(CHAIN_HEADER_RE, "").trim();
 }
 
@@ -1579,7 +1579,7 @@ const activeGoalRowSchema = z.object({
  * saw) still advances its chain. Cheap: a projection query, then per-goal
  * file reads only for the few live chains.
  */
-export async function reconcileAllGoals(
+async function reconcileAllGoals(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},
 ): Promise<number> {
@@ -1755,7 +1755,7 @@ export function getGoalView(
   return view;
 }
 
-export function toGoalView(parsed: ParsedGoalFile): GoalView {
+function toGoalView(parsed: ParsedGoalFile): GoalView {
   const fm = parsed.frontmatter;
   return {
     id: fm.id,

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { stageLabel } from "~/shared/workflow/stage-roles";
+import { stageLabel } from "~/shared/workflow/stage-label";
 import { Icon } from "./icon";
 import { useDismiss } from "./use-dismiss";
 

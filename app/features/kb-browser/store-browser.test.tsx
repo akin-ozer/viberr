@@ -251,12 +251,16 @@ describe("StoreBrowser", () => {
     expect(
       getByText("The file is removed from the store. Agents lose it on their next context load."),
     ).toBeTruthy();
-    // Ruling 458(f): the shared ConfirmDialog, named by its title, stacked over
-    // the browser, and no longer described by an id nothing carries.
+    // Ruling 458(f): the shared ConfirmDialog, named by its title and stacked
+    // over the browser. Ruling 458(k): described by its body, which the
+    // hand-written card pointed at an id nothing carried.
     const confirm = getByRole("alertdialog", { name: "Delete “overview.md”?" });
     expect(confirm.getAttribute("data-screen-label")).toBe("Store deletion dialog");
     expect(confirm.classList.contains("over-modal")).toBe(true);
-    expect(confirm.hasAttribute("aria-describedby")).toBe(false);
+    const describedBy = confirm.getAttribute("aria-describedby");
+    expect(describedBy && document.getElementById(describedBy)?.textContent).toBe(
+      "The file is removed from the store. Agents lose it on their next context load.",
+    );
 
     // Escape on the topmost native <dialog> (the nested confirm) fires its
     // `cancel` event, which useDialog turns into onCancel — the confirm
@@ -430,10 +434,15 @@ describe("StoreBrowser document editor", () => {
     expect(lastForm).toBeNull();
     expect(getByText("Replace “overview.md”?")).toBeTruthy();
     // Ruling 458(f): the shared ConfirmDialog, named by its title and stacked
-    // over the browser.
+    // over the browser. Ruling 458(k): the overwrite warning still describes
+    // it, as the hand-written card's `aria-describedby` did.
     const confirm = getByRole("alertdialog", { name: "Replace “overview.md”?" });
     expect(confirm.getAttribute("data-screen-label")).toBe("Replace document dialog");
     expect(confirm.classList.contains("over-modal")).toBe(true);
+    const describedBy = confirm.getAttribute("aria-describedby");
+    expect(describedBy && document.getElementById(describedBy)?.textContent).toMatch(
+      /Saving overwrites its contents/,
+    );
 
     fireEvent(
       document.querySelector("dialog.confirm-card")!,

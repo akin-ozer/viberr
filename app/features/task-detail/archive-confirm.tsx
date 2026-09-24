@@ -1,7 +1,6 @@
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import { prStatePill } from "~/features/github/github-pills";
-import { countLabel } from "~/shared/text/plural";
-import { stageLabel } from "~/shared/workflow/stage-roles";
+import { stageLabel } from "~/shared/workflow/stage-label";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -45,7 +44,12 @@ export function ArchiveConfirm({
   const withdrawn = [
     ...(task.packet ? [`the open “${task.packet.title}” decision`] : []),
     ...(pendingRecommendations > 0
-      ? [countLabel(pendingRecommendations, "pending operator recommendation")]
+      ? [
+          // Inline plural, not `countLabel`: ruling 457 (shared/text/plural.ts).
+          `${pendingRecommendations} pending operator recommendation${
+            pendingRecommendations === 1 ? "" : "s"
+          }`,
+        ]
       : []),
   ];
 

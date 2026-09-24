@@ -169,7 +169,7 @@ const taskFactsRowSchema = z.object({
   readiness: z.enum(READINESS_VALUES),
 });
 
-export function readTaskFacts(
+function readTaskFacts(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,

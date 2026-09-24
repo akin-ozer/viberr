@@ -3724,7 +3724,7 @@ function deadlockAgentNames(
  * said. The full text is never lost - the agent's own report is on the same
  * timeline, untruncated - so the marker's job is to send the reader there.
  */
-export const VERDICT_REASON_MAX_CHARS = 2_000;
+const VERDICT_REASON_MAX_CHARS = 2_000;
 
 function clipVerdictReason(text: string): string {
   const reason = text.trim();
@@ -7425,7 +7425,7 @@ function conflictDeparture(
  * revision left the workspace, and by what" — and says what the branch IS
  * before it says what to do to it.
  */
-export function pushConflictRemedy(input: {
+function pushConflictRemedy(input: {
   taskKey: string;
   branch: string;
   reason: string;
@@ -8557,7 +8557,7 @@ async function surfaceDeliveryEvent(
 
 /** Audit fact for the F19-1 server-recorded next step (same `github.delivery.*`
  *  family as the manual/operator delivery rows). */
-export const DELIVERY_NEXT_STEP_AUDIT_ACTION = "github.delivery.next_step";
+const DELIVERY_NEXT_STEP_AUDIT_ACTION = "github.delivery.next_step";
 
 /**
  * F19-1 — after a SUCCESSFUL delivery, guarantee the task carries an actionable
@@ -9506,7 +9506,7 @@ export async function setTaskArchived(
  *
  * Neither sentence was updated. This is the reader that keeps them honest.
  */
-export function createTaskHoldsDecider(
+function createTaskHoldsDecider(
   spec: PacketOption["newTask"] | undefined,
   taskKey: string,
 ): boolean {
@@ -9751,7 +9751,7 @@ const CONTRACT_DECISION_RE = new RegExp(
  * after round (the review deadlock, "… has requested changes 3 times
  * running") only changes its count.
  */
-export function contractHoldsDecision(goal: string, question: string, answer: string): boolean {
+function contractHoldsDecision(goal: string, question: string, answer: string): boolean {
   const asked = (title: string) => title.replace(/\d+/g, "#");
   const wanted = asked(question);
   for (const block of goal.matchAll(CONTRACT_DECISION_RE)) {
@@ -12572,7 +12572,7 @@ export interface ForceAcceptDisclosure {
  * single-reason gate would have picked first; `skippedStageIds` mirrors the
  * dialog's "Skips <stages>" row; `withdrawnPacket` its "Withdraws" row.
  */
-export function forceAcceptDisclosure(
+function forceAcceptDisclosure(
   project: ProjectContext,
   parsed: { frontmatter: TaskFrontmatter; packet: TaskPacket | null },
   taskKey: string,

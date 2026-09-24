@@ -23,10 +23,10 @@ import {
   conversationMatchesScope,
   describeDockScope,
   dockTaskExists,
-  DOCK_NEW_CONVERSATION,
   getControllerDock,
   unavailableDockView,
 } from "./controller-dock-query.server";
+import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 
 /**
  * Ruling 121 — the controller dock's view.
@@ -246,7 +246,7 @@ describe("getControllerDock — the dock lists one place's threads", () => {
     const blank = dock(store, selin, {
       projectSlug: SLUG,
       taskKey: null,
-      conversationId: DOCK_NEW_CONVERSATION,
+      conversationId: NEW_CONVERSATION_PARAM,
     });
     expect(blank.conversation).toBeNull();
     expect(blank.messages).toEqual([]);

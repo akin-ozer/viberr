@@ -39,8 +39,9 @@ type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
    inline-style constants here, in policy-page.tsx and in settings-page.tsx —
    three private copies of two declarations the sheet already owns (`.fine`,
    and `.pol-note.after` / `.pol-note.last`), and they had already drifted
-   (this file's note sat at .9rem, settings' at .8rem, the sheet's at .85rem). Ruling 14: shared single implementations, never fork
-   per surface. The count is `right sub fine`, the same three classes seven
+   (this file's note sat at .9rem, settings' at .8rem, the sheet's at
+   .85rem). Ruling 14: shared single implementations, never fork per
+   surface. The count is `right sub fine`, the same three classes seven
    other panel heads use; the note is `pol-note after last`. */
 
 export function RepositoryPanel({
