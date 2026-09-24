@@ -1,16 +1,26 @@
-import { execFile, type ExecFileOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
-import { z } from "zod";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { leaseConflictFor, leaseRefusal } from "~/shared/file-leases";
 import { activeFileLeases } from "~/server/tasks/file-leases.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
-import { createGitHubAskpassEnv } from "~/server/tasks/git-clone-auth.server";
+import {
+  createGitHubAskpassEnv,
+  githubRepositoryUrl,
+} from "~/server/tasks/git-clone-auth.server";
+import { withServerStage } from "~/server/tasks/repo-mirror.server";
+import {
+  serverExec,
+  taskWorkspaceGit,
+  workspaceExecWhenIsolationOff,
+  workspaceUploadPack,
+  type Exec,
+  type ExecOutcome,
+} from "~/server/tasks/workspace-git.server";
+import type { AgentLaunch } from "~/server/runtimes/agent-isolation.server";
 import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import {
   getPatToken,
@@ -37,9 +47,15 @@ import { errorMessage } from "~/shared/errors";
  * pushes the workspace's task branch to origin, so the remote branch carries the
  * real diff the PR needs. Best-effort and never throws — a missing PAT, missing
  * workspace, or offline remote degrades to a typed reason the caller surfaces.
+ *
+ * Pass 40 review (R-seams-1): the workspace's own git — reading the branch,
+ * the delivery commit, the history reads the gates take — runs as the task's
+ * person (`taskWorkspaceGit`), never as the server. The PAT touches only a
+ * repository the server owns: the branch is fetched out of the workspace into
+ * a stage (`withServerStage`) and `ls-remote` and the push run there, against
+ * the project's own GitHub URL rather than whatever `origin` the checkout's
+ * config names.
  */
-
-const execFileAsync = promisify(execFile);
 
 /**
  * F19-21 — what the server ACTUALLY saw in a workspace whose HEAD sits on the
@@ -233,65 +249,96 @@ function pushFailed(reason: string, detail: string): PushWorkspaceResult {
   return failure;
 }
 
-export interface ExecOutcome {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  /** The child was KILLED (timeout), not merely unsuccessful. */
-  timedOut?: boolean;
-}
+export type { Exec, ExecOutcome } from "~/server/tasks/workspace-git.server";
 
-export interface Exec {
-  (
-    file: string,
-    args: string[],
-    opts: { cwd: string; timeoutMs: number; env?: NodeJS.ProcessEnv },
-  ): Promise<ExecOutcome>;
-}
+/** The server's own git (`serverExec`: `serverGitEnv()` unless the caller
+ *  hands a credentialed env built on it). Exported ONLY so its timeout
+ *  detection can be proven against a really-killed child. Injecting a fake
+ *  `exec` in a test proves the classification above but says nothing about
+ *  whether a kill is detected at all. */
+export const defaultExec: Exec = serverExec;
 
 /**
- * What a rejected `execFile` promise carries. Node hangs these fields on the
- * error object, so each is decoded on its own: a rejection whose `stderr` came
- * back as a Buffer must still yield the kill signal, which is the only thing
- * that separates a timeout from an ordinary non-zero exit.
+ * The two runners a delivery takes: the workspace's own git (as the task's
+ * person) and the server's (a stage the server owns). A test that injects one
+ * `exec` answers both; production resolves the person's git here, and a
+ * refusal (isolation on, the task has no owner) throws into the caller's
+ * catch, which reports it the way it reports a git failure.
  */
-const execFileRejection = z
-  .object({
-    stdout: z.string().catch(""),
-    stderr: z.string().catch(""),
-    killed: z.boolean().catch(false),
-    signal: z.string().nullable().catch(null),
-  })
-  .catch(() => ({ stdout: "", stderr: "", killed: false, signal: null }));
+export interface DeliveryRunners {
+  /** The workspace's own git, as the task's person. */
+  workspace: Exec;
+  /** The server's git, in a repository it owns. */
+  server: Exec;
+  /** Who the workspace's git runs as (null: the server's user, isolation off). */
+  launch: AgentLaunch | null;
+}
 
-/** Exported ONLY so its timeout detection can be proven against a really-killed
- *  child. Injecting a fake `exec` in a test proves the classification above but
- *  says nothing about whether a kill is detected at all. */
-export const defaultExec: Exec = async (file, args, opts) => {
-  const options: ExecFileOptions = {
-    cwd: opts.cwd,
-    timeout: opts.timeoutMs,
-    maxBuffer: 4 * 1024 * 1024,
-  };
-  if (opts.env) options.env = opts.env;
-  try {
-    const { stdout, stderr } = await execFileAsync(file, args, options);
-    return { ok: true, stdout: stdout.toString(), stderr: stderr.toString() };
-  } catch (error) {
-    const rejection = execFileRejection.parse(error);
-    const outcome: ExecOutcome = {
-      ok: false,
-      stdout: rejection.stdout,
-      stderr: rejection.stderr,
-    };
-    // A timeout is a KILL, not a non-zero exit, and saying "returned non-zero"
-    // about a process that never returned sends the reader looking for a git
-    // error that was never printed. Same failure the clone path had, one pipe
-    // over: the true cause was "we did not wait long enough".
-    if (rejection.killed || rejection.signal !== null) outcome.timedOut = true;
-    return outcome;
-  }
-};
+export function deliveryRunners(
+  db: DatabaseSync,
+  ref: { projectSlug: string; taskKey: string; dataRoot?: string | undefined },
+  injected: { exec?: Exec | undefined; serverExec?: Exec | undefined },
+): DeliveryRunners {
+  const server = injected.serverExec ?? injected.exec ?? serverExec;
+  if (injected.exec) return { workspace: injected.exec, server, launch: null };
+  const git = taskWorkspaceGit(db, {
+    projectSlug: ref.projectSlug,
+    taskKey: ref.taskKey,
+    dataRoot: ref.dataRoot,
+  });
+  return { workspace: git.exec, server, launch: git.launch };
+}
+
+/** What moved the branch to GitHub, or what stopped it. */
+export type PublishOutcome =
+  /** The workspace's branch could not be read into the stage (nothing was
+   *  pushed). */
+  | { phase: "handoff"; result: ExecOutcome }
+  /** The push ran; `result` is its outcome. */
+  | { phase: "push"; result: ExecOutcome };
+
+/**
+ * Pass 40 review (R-seams-1): publish `branch` from a workspace through a
+ * repository the SERVER owns. The branch is fetched out of the workspace into
+ * `stage` over git's transport — `git-upload-pack` runs as the person
+ * (`workspaceUploadPack`), no credential in its environment — and pushed from
+ * the stage with `askpassEnv`. `sha`, when known, is what is pushed: the
+ * commit the gates read, never a head the branch was moved to in between.
+ */
+export async function publishFromWorkspace(input: {
+  exec: Exec;
+  stage: string;
+  launch: AgentLaunch | null;
+  repoDir: string;
+  branch: string;
+  sha: string;
+  remoteUrl: string;
+  askpassEnv: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}): Promise<PublishOutcome> {
+  const { exec, stage, branch } = input;
+  const uploadPack = workspaceUploadPack(input.launch);
+  const handoff = await exec(
+    "git",
+    [
+      `--git-dir=${stage}`,
+      "fetch",
+      "--no-tags",
+      ...uploadPack.args,
+      input.repoDir,
+      `+refs/heads/${branch}:refs/heads/${branch}`,
+    ],
+    { cwd: stage, timeoutMs: input.timeoutMs, env: uploadPack.env },
+  );
+  if (!handoff.ok) return { phase: "handoff", result: handoff };
+  const source = input.sha || `refs/heads/${branch}`;
+  const push = await exec(
+    "git",
+    [`--git-dir=${stage}`, "push", input.remoteUrl, `${source}:refs/heads/${branch}`],
+    { cwd: stage, timeoutMs: input.timeoutMs, env: input.askpassEnv },
+  );
+  return { phase: "push", result: push };
+}
 
 /**
  * Ruling 144(c): GitHub's refusal of a workflow-file push for a token without
@@ -667,8 +714,11 @@ export interface PushWorkspaceBranchInput {
    * denylist and could otherwise write + have its dirty tree auto-committed.
    */
   canCommitPush?: boolean;
-  /** Injected runner (tests). */
+  /** Injected runner (tests): the workspace's git and, unless `serverExec` is
+   *  given too, the server's. */
   exec?: Exec;
+  /** Injected runner for the server's own git in its stage (tests). */
+  serverExec?: Exec;
 }
 
 /**
@@ -690,7 +740,6 @@ export async function pushWorkspaceBranch(
   input: PushWorkspaceBranchInput,
 ): Promise<PushWorkspaceResult> {
   const { db, projectSlug, taskKey, dataRoot } = input;
-  const exec = input.exec ?? defaultExec;
   // F19-18: hoisted so BOTH the push-failure branch and the outer catch can
   // scrub git's words by value before anyone reads them.
   let token = "";
@@ -727,6 +776,9 @@ export async function pushWorkspaceBranch(
     if (!repoDir) {
       return { status: "no_workspace", reason: "no workspace git repo" };
     }
+    // R-seams-1: `exec` is the workspace's own git, as the task's person.
+    const runners = deliveryRunners(db, { projectSlug, taskKey, dataRoot }, input);
+    const exec = runners.workspace;
 
     // The branch HEAD is on (a real task branch, not the default branch).
     const headRes = await exec(
@@ -912,196 +964,229 @@ export async function pushWorkspaceBranch(
     if (!token) return { status: "no_pat", reason: "no project credential" };
 
     const askpass = createGitHubAskpassEnv({ token });
+    // R-seams-1: the project's own GitHub URL, never the `origin` a checkout's
+    // agent-writable config names (an `insteadOf` or `pushurl` there would
+    // have carried the PAT to a host of the agent's choosing).
+    const remoteUrl = githubRepositoryUrl(repo);
     let pushedHead = "";
     let pushedRemoteBefore: string | null = null;
     let pushedWorkflowFiles: string[] | null = null;
     try {
-      // Ruling 134: what does origin hold for this branch right now? Read
-      // BEFORE the push so the delivery can say what moved, and skip the push
-      // entirely when origin already carries the workspace head.
-      const headSha = await revParse(exec, repoDir, "HEAD");
-      pushedHead = headSha;
-      let remoteHeadBefore: string | null = null;
-      if (headSha) {
-        const remoteRes = await exec(
-          "git",
-          ["-C", repoDir, "ls-remote", "--heads", "origin", branch],
-          { cwd: repoDir, timeoutMs: LS_REMOTE_TIMEOUT_MS, env: askpass.env },
-        );
-        if (remoteRes.ok) {
-          const remoteSha = remoteRes.stdout.trim().split(/\s+/)[0] ?? "";
-          remoteHeadBefore = /^[0-9a-f]{40}$/i.test(remoteSha) ? remoteSha : null;
-          pushedRemoteBefore = remoteHeadBefore;
-          if (remoteHeadBefore === headSha) {
-            logger.info("workspace branch already on origin — no push needed", {
-              taskKey,
-              branch,
-            });
-            return { status: "up_to_date", branch, headSha };
-          }
-        } else {
-          // An unreadable remote never blocks the push: the push itself is the
-          // authority, and a non-fast-forward is still classified below.
-          logger.info("could not read origin's head for the branch before pushing", {
-            taskKey,
-            branch,
-            detail: redactGitOutput(remoteRes.stderr, { token }),
-          });
-        }
-      }
-      // Ruling 144(b): the workflow files this push would change, measured
-      // as GitHub measures them (origin's head for the branch; the base only
-      // on a first push). A classic token whose published list lacks
-      // `workflow` is refused HERE, with the remedy named, before GitHub is
-      // asked; a fine-grained token (no list to read) pushes and lets GitHub
-      // answer, classified below.
-      const workflowFiles = await changedWorkflowFiles(exec, repoDir, pushedRemoteBefore, defaultBranch);
-      pushedWorkflowFiles = workflowFiles;
-      if (workflowFiles === null) {
-        // Nothing to refuse on and nothing to prove with: the push goes ahead
-        // and GitHub's own answer classifies it (ruling 144(c)).
-        logger.info("could not measure the workflow files this push changes", {
-          taskKey,
-          branch,
-        });
-      }
-      // Ruling 245 (F37-74): a file another task LEASES is refused here, for
-      // ruling 144's own reason and at its own seam — this is the moment the
-      // change would become published history, and the last one at which
-      // refusing costs nothing. Measured, never assumed: a `null` read means
-      // history could not answer, and waving the push through on that would
-      // defeat the gate, so an unmeasurable diff refuses nothing and says so in
-      // the log exactly as ruling 144(c) does.
-      {
-        // Ruling 245(b): the RESOLVED list. A lease whose holder has merged or
-        // been archived binds nobody, and reading the raw frontmatter here let
-        // a completed task fence off a file forever.
-        const leases = activeFileLeases(projectSlug, dataRoot ? { dataRoot } : {});
-        if (leases.length > 0) {
-          // Ruling 353: the BRANCH's files, not this push's delta — a lease
-          // declared after the path first reached origin still binds.
-          const changed = await changedFilesOnBranch(exec, repoDir, defaultBranch);
-          if (changed === null) {
-            logger.info("could not measure the files this push changes; no lease gate", {
-              taskKey,
-              branch,
-            });
-          } else {
-            const conflict = leaseConflictFor(changed, leases, taskKey);
-            if (conflict) {
-              const reason = leaseRefusal(taskKey, conflict, "delivering it for review");
-              logger.info("workspace branch push refused before GitHub: file lease", {
+      const stopped = await withServerStage(
+        { projectSlug, repo, dataRoot },
+        async (stage): Promise<PushWorkspaceResult | null> => {
+          // Ruling 134: what does origin hold for this branch right now? Read
+          // BEFORE the push so the delivery can say what moved, and skip the push
+          // entirely when origin already carries the workspace head.
+          const headSha = await revParse(exec, repoDir, "HEAD");
+          pushedHead = headSha;
+          let remoteHeadBefore: string | null = null;
+          if (headSha) {
+            const remoteRes = await runners.server(
+              "git",
+              [`--git-dir=${stage}`, "ls-remote", "--heads", remoteUrl, branch],
+              { cwd: stage, timeoutMs: LS_REMOTE_TIMEOUT_MS, env: askpass.env },
+            );
+            if (remoteRes.ok) {
+              const remoteSha = remoteRes.stdout.trim().split(/\s+/)[0] ?? "";
+              remoteHeadBefore = /^[0-9a-f]{40}$/i.test(remoteSha) ? remoteSha : null;
+              pushedRemoteBefore = remoteHeadBefore;
+              if (remoteHeadBefore === headSha) {
+                logger.info("workspace branch already on origin — no push needed", {
+                  taskKey,
+                  branch,
+                });
+                return { status: "up_to_date", branch, headSha };
+              }
+            } else {
+              // An unreadable remote never blocks the push: the push itself is the
+              // authority, and a non-fast-forward is still classified below.
+              logger.info("could not read origin's head for the branch before pushing", {
                 taskKey,
                 branch,
-                path: conflict.path,
-                holder: conflict.lease.taskKey,
+                detail: redactGitOutput(remoteRes.stderr, { token }),
               });
-              return {
-                status: "lease_held",
-                branch,
-                reason,
-                path: conflict.path,
-                holder: conflict.lease.taskKey,
-              };
             }
           }
-        }
-      }
-      const validation = credential?.validation ?? null;
-      if (
-        workflowFiles !== null &&
-        workflowFiles.length > 0 &&
-        validation?.tokenKind === "classic" &&
-        validation.headerScopes !== null &&
-        !validation.headerScopes.includes("workflow")
-      ) {
-        logger.info("workspace branch push refused before GitHub: workflow scope", {
-          taskKey,
-          branch,
-          files: workflowFiles,
-        });
-        return {
-          status: "push_refused_scope",
-          branch,
-          scope: "workflow",
-          phase: "before_push",
-          files: workflowFiles,
-          reason: `the project's classic token has no \`workflow\` scope, and this push changes ${workflowFiles.map((f) => `\`${f}\``).join(", ")}`,
-        };
-      }
-      const pushRes = await exec(
-        "git",
-        ["-C", repoDir, "push", "origin", `HEAD:refs/heads/${branch}`],
-        { cwd: repoDir, timeoutMs: PUSH_TIMEOUT_MS, env: askpass.env },
+          // Ruling 144(b): the workflow files this push would change, measured
+          // as GitHub measures them (origin's head for the branch; the base only
+          // on a first push). A classic token whose published list lacks
+          // `workflow` is refused HERE, with the remedy named, before GitHub is
+          // asked; a fine-grained token (no list to read) pushes and lets GitHub
+          // answer, classified below.
+          const workflowFiles = await changedWorkflowFiles(exec, repoDir, pushedRemoteBefore, defaultBranch);
+          pushedWorkflowFiles = workflowFiles;
+          if (workflowFiles === null) {
+            // Nothing to refuse on and nothing to prove with: the push goes ahead
+            // and GitHub's own answer classifies it (ruling 144(c)).
+            logger.info("could not measure the workflow files this push changes", {
+              taskKey,
+              branch,
+            });
+          }
+          // Ruling 245 (F37-74): a file another task LEASES is refused here, for
+          // ruling 144's own reason and at its own seam — this is the moment the
+          // change would become published history, and the last one at which
+          // refusing costs nothing. Measured, never assumed: a `null` read means
+          // history could not answer, and waving the push through on that would
+          // defeat the gate, so an unmeasurable diff refuses nothing and says so in
+          // the log exactly as ruling 144(c) does.
+          {
+            // Ruling 245(b): the RESOLVED list. A lease whose holder has merged or
+            // been archived binds nobody, and reading the raw frontmatter here let
+            // a completed task fence off a file forever.
+            const leases = activeFileLeases(projectSlug, dataRoot ? { dataRoot } : {});
+            if (leases.length > 0) {
+              // Ruling 353: the BRANCH's files, not this push's delta — a lease
+              // declared after the path first reached origin still binds.
+              const changed = await changedFilesOnBranch(exec, repoDir, defaultBranch);
+              if (changed === null) {
+                logger.info("could not measure the files this push changes; no lease gate", {
+                  taskKey,
+                  branch,
+                });
+              } else {
+                const conflict = leaseConflictFor(changed, leases, taskKey);
+                if (conflict) {
+                  const reason = leaseRefusal(taskKey, conflict, "delivering it for review");
+                  logger.info("workspace branch push refused before GitHub: file lease", {
+                    taskKey,
+                    branch,
+                    path: conflict.path,
+                    holder: conflict.lease.taskKey,
+                  });
+                  return {
+                    status: "lease_held",
+                    branch,
+                    reason,
+                    path: conflict.path,
+                    holder: conflict.lease.taskKey,
+                  };
+                }
+              }
+            }
+          }
+          const validation = credential?.validation ?? null;
+          if (
+            workflowFiles !== null &&
+            workflowFiles.length > 0 &&
+            validation?.tokenKind === "classic" &&
+            validation.headerScopes !== null &&
+            !validation.headerScopes.includes("workflow")
+          ) {
+            logger.info("workspace branch push refused before GitHub: workflow scope", {
+              taskKey,
+              branch,
+              files: workflowFiles,
+            });
+            return {
+              status: "push_refused_scope",
+              branch,
+              scope: "workflow",
+              phase: "before_push",
+              files: workflowFiles,
+              reason: `the project's classic token has no \`workflow\` scope, and this push changes ${workflowFiles.map((f) => `\`${f}\``).join(", ")}`,
+            };
+          }
+          // R-seams-1: out of the workspace into the stage (as the person), then
+          // to GitHub from the stage (as the server, with the PAT).
+          const published = await publishFromWorkspace({
+            exec: runners.server,
+            stage,
+            launch: runners.launch,
+            repoDir,
+            branch,
+            sha: headSha,
+            remoteUrl,
+            askpassEnv: askpass.env,
+            timeoutMs: PUSH_TIMEOUT_MS,
+          });
+          if (published.phase === "handoff") {
+            const detail = redactGitOutput(published.result.stderr, { token });
+            const fields: GitLogFields = { taskKey, branch };
+            if (published.result.timedOut) fields.timedOut = true;
+            if (detail) fields.detail = detail;
+            logger.warn("workspace branch could not be read out of the workspace for the push", fields);
+            return pushFailed(
+              detail
+                ? `the branch could not be read out of the workspace for the push (git said: ${oneLine(detail)})`
+                : "the branch could not be read out of the workspace for the push, and git printed nothing to explain it",
+              detail,
+            );
+          }
+          const pushRes = published.result;
+          if (!pushRes.ok) {
+            // Ruling 144(c): GitHub's own refusal of a workflow-file push, on any
+            // token kind, is a scope fact and never the generic failure bucket.
+            if (isWorkflowScopeRejection(pushRes.stderr)) {
+              logger.info("workspace branch push refused by GitHub: workflow scope", {
+                taskKey,
+                branch,
+                files: workflowFiles ?? [],
+              });
+              return {
+                status: "push_refused_scope",
+                branch,
+                scope: "workflow",
+                phase: "github",
+                files: workflowFiles ?? [],
+                reason: oneLine(redactGitOutput(pushRes.stderr, { token })) || "GitHub refused the workflow-file push",
+              };
+            }
+            // B-GH1/F15-15: a NON-FAST-FORWARD rejection is a history divergence
+            // (the remote branch carries commits the local delivery does not — a
+            // pre-existing branch under the task key, a rebase, a reused
+            // workspace), and it must never be reported as a credential problem.
+            // git names it deterministically on stderr; classify before redacting.
+            if (isNonFastForwardStderr(pushRes.stderr)) {
+              logger.info("workspace branch push rejected non-fast-forward", {
+                taskKey,
+                branch,
+              });
+              return {
+                status: "push_conflict",
+                branch,
+                reason:
+                  `the remote branch \`${branch}\` holds commits that are not in ` +
+                  `the local delivery (non-fast-forward)`,
+              };
+            }
+            // F19-18: the residual bucket — a protected branch, a push ruleset, a
+            // pre-receive hook, a 403, DNS — used to collapse to the fixed string
+            // "git push returned non-zero", and git's stderr was retained NOWHERE:
+            // not on the timeline event `performDelivery` builds from this reason,
+            // not in this log line, not in any run log. The maintainer had to
+            // reproduce the push by hand outside Viberr to learn the cause, which
+            // is exactly the failure the UX spec calls make-or-break.
+            //
+            // git's stderr is SCRUBBED, not dropped: the PAT reaches git only
+            // through the askpass env (`createGitHubAskpassEnv`), never argv and
+            // never the remote URL, so `redactGitOutput` scrubs BY VALUE and keeps
+            // git's diagnosis — the only text that can name the cause.
+            //
+            // WARN, not info, for the same reason the clone path is: a delivery that
+            // did not happen changes what the review PR would have contained.
+            const detail = redactGitOutput(pushRes.stderr, { token });
+            const fields: GitLogFields = { taskKey, branch };
+            if (pushRes.timedOut) fields.timedOut = true;
+            if (detail) fields.detail = detail;
+            logger.warn("workspace branch push failed", fields);
+            return pushFailed(
+              // `performDelivery` interpolates this INSIDE a sentence, so the
+              // human-facing form is one line; the untouched multi-line excerpt
+              // rides the structured field and the log line.
+              pushRes.timedOut
+                ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
+                : detail
+                  ? `git push failed (git said: ${oneLine(detail)})`
+                  : "git push returned non-zero, and git printed nothing to explain it",
+              detail,
+            );
+          }
+          return null;
+        },
       );
-      if (!pushRes.ok) {
-        // Ruling 144(c): GitHub's own refusal of a workflow-file push, on any
-        // token kind, is a scope fact and never the generic failure bucket.
-        if (isWorkflowScopeRejection(pushRes.stderr)) {
-          logger.info("workspace branch push refused by GitHub: workflow scope", {
-            taskKey,
-            branch,
-            files: workflowFiles ?? [],
-          });
-          return {
-            status: "push_refused_scope",
-            branch,
-            scope: "workflow",
-            phase: "github",
-            files: workflowFiles ?? [],
-            reason: oneLine(redactGitOutput(pushRes.stderr, { token })) || "GitHub refused the workflow-file push",
-          };
-        }
-        // B-GH1/F15-15: a NON-FAST-FORWARD rejection is a history divergence
-        // (the remote branch carries commits the local delivery does not — a
-        // pre-existing branch under the task key, a rebase, a reused
-        // workspace), and it must never be reported as a credential problem.
-        // git names it deterministically on stderr; classify before redacting.
-        if (isNonFastForwardStderr(pushRes.stderr)) {
-          logger.info("workspace branch push rejected non-fast-forward", {
-            taskKey,
-            branch,
-          });
-          return {
-            status: "push_conflict",
-            branch,
-            reason:
-              `the remote branch \`${branch}\` holds commits that are not in ` +
-              `the local delivery (non-fast-forward)`,
-          };
-        }
-        // F19-18: the residual bucket — a protected branch, a push ruleset, a
-        // pre-receive hook, a 403, DNS — used to collapse to the fixed string
-        // "git push returned non-zero", and git's stderr was retained NOWHERE:
-        // not on the timeline event `performDelivery` builds from this reason,
-        // not in this log line, not in any run log. The maintainer had to
-        // reproduce the push by hand outside Viberr to learn the cause, which
-        // is exactly the failure the UX spec calls make-or-break.
-        //
-        // git's stderr is SCRUBBED, not dropped: the PAT reaches git only
-        // through the askpass env (`createGitHubAskpassEnv`), never argv and
-        // never the remote URL, so `redactGitOutput` scrubs BY VALUE and keeps
-        // git's diagnosis — the only text that can name the cause.
-        //
-        // WARN, not info, for the same reason the clone path is: a delivery that
-        // did not happen changes what the review PR would have contained.
-        const detail = redactGitOutput(pushRes.stderr, { token });
-        const fields: GitLogFields = { taskKey, branch };
-        if (pushRes.timedOut) fields.timedOut = true;
-        if (detail) fields.detail = detail;
-        logger.warn("workspace branch push failed", fields);
-        return pushFailed(
-          // `performDelivery` interpolates this INSIDE a sentence, so the
-          // human-facing form is one line; the untouched multi-line excerpt
-          // rides the structured field and the log line.
-          pushRes.timedOut
-            ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
-            : detail
-              ? `git push failed (git said: ${oneLine(detail)})`
-              : "git push returned non-zero, and git printed nothing to explain it",
-          detail,
-        );
-      }
+      if (stopped) return stopped;
     } finally {
       askpass.dispose();
     }
@@ -1180,10 +1265,12 @@ export async function discardLocalTaskBranch(input: {
   db?: DatabaseSync;
   dataRoot?: string;
   workdir?: string | null;
+  /** Injected runner (tests): the workspace's git and, unless `serverExec` is
+   *  given too, the server's. */
   exec?: Exec;
+  serverExec?: Exec;
 }): Promise<DiscardBranchOutcome> {
   const { projectSlug, taskKey, branch, defaultBranch, dataRoot } = input;
-  const exec = input.exec ?? defaultExec;
   try {
     const projectFile = readProjectFile({ projectSlug, dataRoot });
     const repo = projectFile?.parsed.frontmatter.repo ?? null;
@@ -1196,6 +1283,15 @@ export async function discardLocalTaskBranch(input: {
       input.workdir,
     );
     if (!repoDir) return { status: "no_workspace", branch };
+    // R-seams-1: the workspace's git as the task's person; without a db (a
+    // test) only where no agent is launched.
+    const runners = input.db
+      ? deliveryRunners(input.db, { projectSlug, taskKey, dataRoot }, input)
+      : {
+          workspace: input.exec ?? workspaceExecWhenIsolationOff(),
+          server: input.serverExec ?? input.exec ?? serverExec,
+        };
+    const exec = runners.workspace;
 
     // Read the branch sha BEFORE any deletion — the outcome must name what it
     // destroyed. An empty answer means the branch is not in this workspace.
@@ -1238,13 +1334,22 @@ export async function discardLocalTaskBranch(input: {
     // cases separate cleanly on `ok` + stdout — the same read the delivery
     // push above performs.
     if (hasOrigin) {
-      let remote;
+      let remote: ExecOutcome;
       try {
-        remote = await exec(
-          "git",
-          ["-C", repoDir, "ls-remote", "--heads", "origin", branch],
-          { cwd: repoDir, timeoutMs: 30_000, env: askpass.env },
-        );
+        // R-seams-1: asked by the server, in a stage of its own, of the
+        // project's own GitHub URL — never through the workspace's config,
+        // which an agent writes.
+        remote = repo
+          ? await withServerStage(
+              { projectSlug, repo, dataRoot },
+              (stage) =>
+                runners.server(
+                  "git",
+                  [`--git-dir=${stage}`, "ls-remote", "--heads", githubRepositoryUrl(repo), branch],
+                  { cwd: stage, timeoutMs: 30_000, env: askpass.env },
+                ),
+            )
+          : { ok: false, stdout: "", stderr: "the project names no repository to ask" };
       } finally {
         askpass.dispose();
       }

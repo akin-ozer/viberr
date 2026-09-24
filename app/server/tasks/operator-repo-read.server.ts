@@ -2,6 +2,12 @@ import { execFile } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { refreshProjectMirror } from "./repo-mirror.server";
+import { serverGitEnv } from "./git-clone-auth.server";
+import {
+  taskWorkspaceGit,
+  workspaceGitWhenIsolationOff,
+  type WorkspaceGit,
+} from "./workspace-git.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   gitErrorText,
@@ -48,6 +54,13 @@ import { countLabel } from "~/shared/text/plural";
  * Never throws — every failure is a typed arm the tool turns into prose, because
  * a thrown tool error is exactly the ambiguity that sends the model back to
  * reading the tree.
+ *
+ * Pass 40 review (R-seams-1): the two reads that touch the CHECKOUT — which
+ * repository its `origin` names, and the clone-time fallback's `git show` —
+ * run as the task's person, never as the server: the checkout is
+ * agent-writable, and a `.git` an agent planted (a gitfile, an alternates
+ * file) would otherwise have the server read wherever it points. The mirror's
+ * `git show` is the server's own, in its own repository.
  */
 
 const execFileAsync = promisify(execFile);
@@ -233,13 +246,12 @@ const GITHUB_REMOTE_RE = /github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/i;
  * (`setOriginUrlArgs`). Null when git cannot say, or when the remote is not a
  * GitHub `owner/repo` — the read then falls back to the checkout's own ref.
  */
-async function checkoutRepoSlug(dir: string): Promise<string | null> {
+async function checkoutRepoSlug(dir: string, git: WorkspaceGit | null): Promise<string | null> {
+  if (!git) return null;
   try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["-C", dir, "config", "--get", "remote.origin.url"],
-      { timeout: GIT_CONFIG_TIMEOUT_MS },
-    );
+    const { stdout } = await git.run(["-C", dir, "config", "--get", "remote.origin.url"], {
+      timeoutMs: GIT_CONFIG_TIMEOUT_MS,
+    });
     const match = GITHUB_REMOTE_RE.exec(stdout.trim());
     const owner = match?.[1];
     const name = match?.[2];
@@ -257,6 +269,8 @@ interface ReadSource {
   ref: string;
   /** Whether this store was brought up to date with the remote for this read. */
   refreshed: boolean;
+  /** The task checkout (read as its person), not the server's mirror. */
+  inWorkspace: boolean;
 }
 
 /**
@@ -272,13 +286,15 @@ async function resolveReadSource(
   db: DatabaseSync,
   input: { projectSlug: string; dir: string; defaultBranch: string; dataRoot?: string },
   repoPath: string,
+  git: WorkspaceGit | null,
 ): Promise<ReadSource> {
   const checkoutRef = {
     dir: input.dir,
     ref: `origin/${input.defaultBranch}:${repoPath}`,
     refreshed: false,
+    inWorkspace: true,
   };
-  const repo = await checkoutRepoSlug(input.dir);
+  const repo = await checkoutRepoSlug(input.dir, git);
   if (!repo) return checkoutRef;
   const request: Parameters<typeof refreshProjectMirror>[0] = {
     projectSlug: input.projectSlug,
@@ -303,7 +319,26 @@ async function resolveReadSource(
     dir: mirror.dir,
     ref: `${input.defaultBranch}:${repoPath}`,
     refreshed: mirror.refreshed,
+    inWorkspace: false,
   };
+}
+
+/** The checkout's git as the task's person, or null when it cannot run as
+ *  them (with isolation off and no task named: the server's own user). */
+function checkoutGit(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey?: string | undefined; dataRoot?: string | undefined },
+): WorkspaceGit | null {
+  if (!input.taskKey) return workspaceGitWhenIsolationOff();
+  try {
+    return taskWorkspaceGit(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      dataRoot: input.dataRoot,
+    });
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -325,6 +360,8 @@ export async function readDefaultBranchFile(
     fromLine?: number;
     /** Test seam; production callers resolve the configured store root. */
     dataRoot?: string;
+    /** R-seams-1: the task whose person reads the checkout. */
+    taskKey?: string;
   },
 ): Promise<DefaultBranchRead> {
   if (!pathIsReadable(input.path)) {
@@ -335,16 +372,33 @@ export async function readDefaultBranchFile(
         "with no leading slash, no `..` segment and no `ref:path` prefix",
     };
   }
-  const source = await resolveReadSource(db, input, input.path.trim());
+  const git = checkoutGit(db, input);
+  const source = await resolveReadSource(db, input, input.path.trim(), git);
   try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["-C", source.dir, "show", source.ref],
-      {
-        timeout: GIT_SHOW_TIMEOUT_MS,
-        maxBuffer: DEFAULT_BRANCH_READ_MAX_BLOB_BYTES,
-      },
-    );
+    const args = ["-C", source.dir, "show", source.ref];
+    let stdout: string;
+    if (source.inWorkspace) {
+      if (!git) {
+        return {
+          kind: "unavailable",
+          reason: "the project has no mirror, and the checkout cannot be read as its task's person",
+        };
+      }
+      stdout = (
+        await git.run(args, {
+          timeoutMs: GIT_SHOW_TIMEOUT_MS,
+          maxBuffer: DEFAULT_BRANCH_READ_MAX_BLOB_BYTES,
+        })
+      ).stdout;
+    } else {
+      stdout = (
+        await execFileAsync("git", args, {
+          timeout: GIT_SHOW_TIMEOUT_MS,
+          maxBuffer: DEFAULT_BRANCH_READ_MAX_BLOB_BYTES,
+          env: serverGitEnv(),
+        })
+      ).stdout;
+    }
     return pagedRead(stdout, input.fromLine, source.refreshed);
   } catch (error) {
     const detail = redactGitOutput(gitErrorText(error));
@@ -440,7 +494,11 @@ export async function readProjectDefaultBranchFile(
     const { stdout } = await execFileAsync(
       "git",
       ["-C", mirror.dir, "show", `${input.defaultBranch}:${repoPath}`],
-      { timeout: GIT_SHOW_TIMEOUT_MS, maxBuffer: DEFAULT_BRANCH_READ_MAX_BLOB_BYTES },
+      {
+        timeout: GIT_SHOW_TIMEOUT_MS,
+        maxBuffer: DEFAULT_BRANCH_READ_MAX_BLOB_BYTES,
+        env: serverGitEnv(),
+      },
     );
     return pagedRead(stdout, input.fromLine, mirror.refreshed);
   } catch (error) {

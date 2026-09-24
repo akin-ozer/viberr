@@ -4,7 +4,6 @@ import {
 } from "~/server/files/project-rulings.server";
 import { activeFileLeases } from "./file-leases.server";
 import { type ReviewSubject, reviewSubjectSha } from "~/shared/revision-drift";
-import { execFile } from "node:child_process";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import {
   describeWorkspaceRefresh,
@@ -14,8 +13,12 @@ import {
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
+import {
+  taskWorkspaceGit,
+  workspaceGitWhenIsolationOff,
+  type WorkspaceGit,
+} from "./workspace-git.server";
 import {
   activeWorkRevision,
   deliveringEngagement,
@@ -189,9 +192,27 @@ type SkillMountInput = Parameters<typeof mountGrantedSkills>[0];
  * sessions". Mirrors the transition/interrupt project-membership check.
  */
 
-const execFileAsync = promisify(execFile);
-
 // ----------------------------------------------------------------- helpers
+
+/** Pass 40 review (R-seams-1): the task checkout's git as the task's person,
+ *  or null when it cannot run as them (the caller skips its git step). */
+function personGitOrNull(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+  dataRoot: string | undefined,
+): WorkspaceGit | null {
+  try {
+    return taskWorkspaceGit(db, { projectSlug, taskKey, dataRoot });
+  } catch (error) {
+    logger.warn("the task checkout's git cannot run as its person; its git step is skipped", {
+      projectSlug,
+      taskKey,
+      err: toError(error),
+    });
+    return null;
+  }
+}
 
 /** A deployed specialist resolved from project.md `agents:` for a run. */
 export interface ResolvedSpecialist {
@@ -1740,6 +1761,7 @@ async function dispatchAgentRun(
     };
     // Omitted on the default store — the mount resolves its own root then.
     if (ctx.dataRoot) mountInput.dataRoot = ctx.dataRoot;
+    mountInput.git = personGitOrNull(db, input.projectSlug, input.taskKey, ctx.dataRoot);
     skillMount = await mountGrantedSkills(mountInput);
     pending.skillPlugin = skillMount.plugin;
   }
@@ -3679,6 +3701,7 @@ export async function resolveResumeConfinement(
       };
       // Omitted on the default store — the mount resolves its own root then.
       if (ctx.dataRoot) mountInput.dataRoot = ctx.dataRoot;
+      mountInput.git = personGitOrNull(db, input.projectSlug, input.taskKey, ctx.dataRoot);
       skillMount = await mountGrantedSkills(mountInput);
     }
     // R19-19: the browser re-mounts on resume from the same grants — a resumed
@@ -3996,11 +4019,14 @@ function defaultBranchForRefresh(input: { projectSlug: string; dataRoot?: string
  * Never throws: a reviewer that cannot be pinned still runs, and the
  * disclosure says the revision is missing.
  *
- * Exported for its test: the behaviour is real git, not a string.
+ * Exported for its test: the behaviour is real git, not a string. Pass 40
+ * review (R-seams-1): the git runs as the task's person (`git`); with no
+ * person to name and isolation on, nothing is pinned and the sentence says so.
  */
 export async function pinSupportCheckout(
   dir: string,
   subject: ReviewSubject | null,
+  git: WorkspaceGit | null = workspaceGitWhenIsolationOff(),
 ): Promise<string | null> {
   const sha = subject?.sha ?? null;
   if (!sha) return null;
@@ -4013,8 +4039,9 @@ export async function pinSupportCheckout(
   const what = subject?.rePinned
     ? `the reviewed revision \`${subject.rePinned.reviewedSha.slice(0, 7)}\` on its refreshed base, at \`${short}\` (${countLabel(subject.rePinned.baseRefresh.merges, "merge commit")}, ${countLabel(subject.rePinned.baseRefresh.commits, "base commit")}, and no authored work since the review \u2014 ruling 238)`
     : `the revision under review \`${short}\``;
+  if (!git) return `${what} could not be checked out; HEAD was left as it is`;
   try {
-    await execFileAsync("git", ["-C", dir, "cat-file", "-e", `${sha}^{commit}`], { timeout: 5_000 });
+    await git.run(["-C", dir, "cat-file", "-e", `${sha}^{commit}`], { timeoutMs: 5_000 });
   } catch {
     logger.warn("support checkout: the revision under review is not in the clone; HEAD was left as it is", {
       dir,
@@ -4023,9 +4050,9 @@ export async function pinSupportCheckout(
     return `${what} is not in this checkout (origin has not been read since it appeared); HEAD was left as it is`;
   }
   try {
-    const head = (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"], { timeout: 5_000 })).stdout.trim();
+    const head = (await git.run(["-C", dir, "rev-parse", "HEAD"], { timeoutMs: 5_000 })).stdout.trim();
     if (head === sha) return `checked out at ${what}`;
-    await execFileAsync("git", ["-C", dir, "checkout", "-q", "--detach", sha], { timeout: 30_000 });
+    await git.run(["-C", dir, "checkout", "-q", "--detach", sha], { timeoutMs: 30_000 });
     return `detached at ${what} (the delivering tree stood at \`${head.slice(0, 7)}\`)`;
   } catch (error) {
     logger.warn("support checkout: could not detach at the revision under review", {
@@ -4077,11 +4104,24 @@ async function cloneRepo(
   // never reaches argv or the remote URL (askpass env only), so this literal
   // scrub plus the userinfo patterns is the whole redaction surface.
   let token: string | null = null;
+  // Pass 40 review (R-seams-1): every git in the checkout — the supporting
+  // clone of the delivering tree, the origin rewrite, the identity, the
+  // strip, the refresh, the pin — runs as the task's person, never as the
+  // server. Resolved lazily so a refusal lands in the catch below.
+  let workspaceGit: WorkspaceGit | null = null;
+  const personGit = (): WorkspaceGit => {
+    workspaceGit ??= taskWorkspaceGit(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      dataRoot: input.dataRoot,
+    });
+    return workspaceGit;
+  };
   const setIdentity = async (dir: string) => {
     if (!input.identity) return;
     try {
-      await execFileAsync("git", ["-C", dir, "config", "user.name", input.identity.name], { timeout: 5_000 });
-      await execFileAsync("git", ["-C", dir, "config", "user.email", input.identity.email], { timeout: 5_000 });
+      await personGit().run(["-C", dir, "config", "user.name", input.identity.name], { timeoutMs: 5_000 });
+      await personGit().run(["-C", dir, "config", "user.email", input.identity.email], { timeoutMs: 5_000 });
     } catch {
       // Non-fatal: the run env's GIT_AUTHOR_*/GIT_COMMITTER_* still stamps the
       // agent's own commits; this only benefits the server-side auto-commit.
@@ -4113,9 +4153,9 @@ async function cloneRepo(
         // never about a credential, and saying it was sent a human (and an
         // operator, live on SHOP-5) to re-provision one that already worked.
         credential = "not_involved";
-        // Ruling 460: the checkout is cloned by the server and edited by
-        // agents running as their own users; what is created below the
-        // shared root stays in the agent group.
+        // Ruling 460: the checkout is edited by agents running as their own
+        // users; what is created below the shared root stays in the agent
+        // group.
         shareDirWithAgents(workspaceRoot);
         mkdirSync(path.dirname(dir), { recursive: true });
         try {
@@ -4127,14 +4167,14 @@ async function cloneRepo(
           // the first agent commit lost its checkout. `--no-local` also never
           // trusts that agent-writable directory's layout on disk (git refuses
           // a symlinked object with `--local` for the same reason).
-          await execFileAsync("git", ["clone", "--no-local", deliveringDir, dir], {
-            timeout: cloneTimeoutMs(),
+          // R-seams-1: and as the task's person, never the server — the
+          // delivering checkout is agent-written, so reading it is theirs.
+          await personGit().run(["clone", "--no-local", deliveringDir, dir], {
+            timeoutMs: cloneTimeoutMs(),
           });
-          await execFileAsync(
-            "git",
-            githubRemoteSanitizationArgs(input.repo, dir),
-            { timeout: 10_000 },
-          );
+          await personGit().run(githubRemoteSanitizationArgs(input.repo, dir), {
+            timeoutMs: 10_000,
+          });
           // Ruling 129: the supporting checkout keeps its fetch-only refresh,
           // now through the SAME function the delivering one uses.
           const supportRefresh: WorkspaceRefreshInput = {
@@ -4143,12 +4183,13 @@ async function cloneRepo(
             dir,
             defaultBranch: defaultBranchForRefresh(input),
             fastForward: false,
+            taskKey: input.taskKey,
           };
           if (input.dataRoot) supportRefresh.dataRoot = input.dataRoot;
           await refreshWorkspaceFromMirror(db, supportRefresh);
           await setIdentity(dir);
-          await stripUngovernedRepoCatalog(dir);
-          const pinned = await pinSupportCheckout(dir, input.pinSubject ?? null);
+          await stripUngovernedRepoCatalog(dir, personGit());
+          const pinned = await pinSupportCheckout(dir, input.pinSubject ?? null, personGit());
           return pinned ? { dir, refreshed: pinned } : { dir };
         } finally {
           if (!existsSync(path.join(dir, ".git", "HEAD"))) {
@@ -4163,17 +4204,15 @@ async function cloneRepo(
       // Already cloned for this task — scrub URLs produced by older Viberr
       // versions before reuse. `--replace-all` removes every prior origin URL,
       // including a legacy `x-access-token:<PAT>@github.com` value.
-      await execFileAsync(
-        "git",
-        githubRemoteSanitizationArgs(input.repo, dir),
-        { timeout: 10_000 },
-      );
+      await personGit().run(githubRemoteSanitizationArgs(input.repo, dir), {
+        timeoutMs: 10_000,
+      });
       await setIdentity(dir);
       // This is the reuse path, so a run may ALREADY be executing in this
       // workspace. Its skills live in its own plugin beside the checkout
       // (ruling 180), so stripping the repo's `.claude` here takes nothing
       // from it.
-      await stripUngovernedRepoCatalog(dir);
+      await stripUngovernedRepoCatalog(dir, personGit());
       // Ruling 129 (pass 34, Q34-5): THIS is the stale-checkout window. A
       // workspace cloned once, from a repository that was still empty, was
       // reused as it stood by every later run — agents hold no credential, so
@@ -4191,6 +4230,7 @@ async function cloneRepo(
         defaultBranch: defaultBranchForRefresh(input),
         fastForward: !input.support,
         taskBranch: input.taskBranch ?? null,
+        taskKey: input.taskKey,
       };
       if (input.dataRoot) refreshInput.dataRoot = input.dataRoot;
       const refresh = await refreshWorkspaceFromMirror(db, refreshInput);
@@ -4225,11 +4265,13 @@ async function cloneRepo(
       if (input.onCloneProgress) cloneInput.onCloneProgress = input.onCloneProgress;
       await cloneWorkspaceRepo(cloneInput);
       await setIdentity(dir);
-      await stripUngovernedRepoCatalog(dir);
+      await stripUngovernedRepoCatalog(dir, personGit());
       // Ruling 179: a supporting run that reached here (no delivering checkout
       // to clone from) still judges the revision under review when the fresh
       // clone carries it.
-      const freshPin = input.support ? await pinSupportCheckout(dir, input.pinSubject ?? null) : null;
+      const freshPin = input.support
+        ? await pinSupportCheckout(dir, input.pinSubject ?? null, personGit())
+        : null;
       return freshPin ? { dir, refreshed: freshPin } : { dir };
     } finally {
       // A clone killed mid-transfer can leave a partial tree behind. Left in

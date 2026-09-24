@@ -37,6 +37,8 @@ import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { serverGitEnv } from "~/server/tasks/git-clone-auth.server";
+import { taskWorkspaceGit, type WorkspaceGit } from "~/server/tasks/workspace-git.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 import type { PrCacheState } from "./pr-linker.server";
 import { POLICY_ENGINE_ACTOR } from "./scope-flag.server";
@@ -112,12 +114,17 @@ const execFileRejection = z
   })
   .catch(() => ({ stdout: "", stderr: null, code: null }));
 
-const defaultExec: CommandExec = async (file, args, opts) => {
+async function runCommand(
+  file: string,
+  args: string[],
+  opts: { cwd: string; timeoutMs: number; env: NodeJS.ProcessEnv },
+): Promise<ExecResult> {
   try {
     const { stdout } = await execFileAsync(file, args, {
       cwd: opts.cwd,
       timeout: opts.timeoutMs,
       maxBuffer: 4 * 1024 * 1024,
+      env: opts.env,
     });
     return { ok: true, stdout: stdout.toString() };
   } catch (error) {
@@ -131,7 +138,42 @@ const defaultExec: CommandExec = async (file, args, opts) => {
       code: rejection.code,
     };
   }
-};
+}
+
+/** `gh`'s own sign-in, when a deployment configured one in the environment:
+ *  the only names `gh` reads that the credential-free base drops. */
+const GH_ENV_NAMES = [
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
+  "GH_HOST",
+  "GH_CONFIG_DIR",
+] as const;
+
+/**
+ * Pass 40 review (R-seams-1): the reconciler's two commands, split by who runs
+ * them. `git` reads the workspace, so it runs as the task's person (`git`);
+ * `gh` is the server's own tool, so it runs as the server but in `serverDir` —
+ * never with an agent-writable checkout as its working repository (it runs
+ * git there itself) — on the credential-free base plus its own sign-in.
+ */
+function reconcileExec(git: WorkspaceGit, serverDir: string): CommandExec {
+  return async (file, args, opts) => {
+    if (file === "git") {
+      const res = await git.exec("git", args, opts);
+      return res.ok
+        ? { ok: true, stdout: res.stdout }
+        : { ok: false, stdout: res.stdout, stderr: res.stderr, code: null };
+    }
+    const env: NodeJS.ProcessEnv = serverGitEnv();
+    for (const name of GH_ENV_NAMES) {
+      const value = process.env[name];
+      if (value) env[name] = value;
+    }
+    return runCommand(file, args, { cwd: serverDir, timeoutMs: opts.timeoutMs, env });
+  };
+}
 
 // ------------------------------------------------------------------- input
 
@@ -316,7 +358,6 @@ export async function reconcileWorkspaceDelivery(
     projectSlug,
     taskKey,
     dataRoot,
-    exec = defaultExec,
     backend = "claude",
     // U12: "specialist" is retired display vocabulary — this default flows into
     // the RENDERED timeline actor role (roleHint → actor-ref). Mirrors
@@ -378,6 +419,22 @@ export async function reconcileWorkspaceDelivery(
     const repoDir = candidates.find((c) => existsSync(path.join(c, ".git")));
     if (!repoDir) {
       return noop("no_workspace", "no workspace git repo found");
+    }
+    // R-seams-1: the workspace's git as the task's person; `gh` as the server
+    // in the task's own (server-owned) directory. A refusal is a quiet skip,
+    // like every other reason this best-effort pass does nothing.
+    let exec: CommandExec;
+    if (input.exec) {
+      exec = input.exec;
+    } else {
+      try {
+        exec = reconcileExec(
+          taskWorkspaceGit(db, { projectSlug, taskKey, dataRoot }),
+          taskDir(projectSlug, taskKey, dataRoot),
+        );
+      } catch (error) {
+        return noop("skipped", `the workspace's git cannot run as its person: ${errorMessage(error)}`);
+      }
     }
 
     const actor: FileActorRef = {

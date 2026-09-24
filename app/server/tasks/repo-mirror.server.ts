@@ -1,16 +1,22 @@
 import { execFile } from "node:child_process";
 import {
+  chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
+  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { projectDir } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
+import { shareTreeBuiltForAgents } from "~/server/runtimes/agent-isolation.server";
 import {
   gitErrorText,
   redactGitOutput,
@@ -20,6 +26,7 @@ import {
   createGitHubAskpassEnv,
   createGitHubClonePlan,
   githubRepositoryUrl,
+  serverGitEnv,
   setOriginUrlArgs,
   type GitHubAskpassEnv,
 } from "./git-clone-auth.server";
@@ -457,7 +464,7 @@ async function ensureProjectMirror(input: {
         "remote.origin.fetch",
         MIRROR_FETCH_REFSPEC,
       ],
-      { timeout: 10_000 },
+      { timeout: 10_000, env: serverGitEnv() },
     );
     rmSync(mirrorDir, { recursive: true, force: true });
     renameSync(building, mirrorDir);
@@ -528,6 +535,115 @@ export function refreshProjectMirror(
   });
 }
 
+// ------------------------------------------------------------------ the stage
+
+/**
+ * Pass 40 review (R-seams-1): where the server does git work that needs a
+ * repository of its OWN — the delivery push, the branch update's fetches from
+ * GitHub, a checkout built before it is handed to a workspace. Beside the
+ * mirror (`projects/<slug>/.repo-stage/`), outside every task workspace, so no
+ * agent can write it; dot-prefixed, so the file watcher never walks it.
+ */
+function stageRoot(projectSlug: string, dataRoot?: string): string {
+  return path.join(projectDir(projectSlug, dataRoot), ".repo-stage");
+}
+
+/** A stage older than this was left by a process that died mid-way. */
+const STALE_STAGE_MS = 6 * 60 * 60 * 1000;
+
+/** A fresh, uniquely named directory under the project's stage root, with
+ *  stages a killed process left behind swept first. */
+function newStageDir(projectSlug: string, prefix: string, dataRoot?: string): string {
+  const root = stageRoot(projectSlug, dataRoot);
+  mkdirSync(root, { recursive: true });
+  try {
+    const cutoff = Date.now() - STALE_STAGE_MS;
+    for (const entry of readdirSync(root)) {
+      const full = path.join(root, entry);
+      if (statSync(full).mtimeMs < cutoff) rmSync(full, { recursive: true, force: true });
+    }
+  } catch {
+    // Tidying is best effort; a stage that cannot be swept costs disk only.
+  }
+  return mkdtempSync(path.join(root, prefix));
+}
+
+/**
+ * Run `work` in a BARE repository the server owns, removed afterwards: the
+ * PAT's only workplace outside the mirror (pass 40 review, R-seams-1). The
+ * stage borrows the mirror's objects through `objects/info/alternates` when a
+ * complete mirror exists, so a fetch into it moves only what the mirror lacks
+ * (a task branch's own commits, the base's newest), and the mirror is held
+ * under its lock for the stage's whole life, so a rebuild can never pull
+ * those objects out from under it. The stage is readable by the agent group
+ * (never writable): a workspace fetches GitHub's refs from it as its person.
+ */
+export async function withServerStage<T>(
+  input: { projectSlug: string; repo: string; dataRoot?: string | undefined },
+  work: (stage: string) => Promise<T>,
+): Promise<T> {
+  const mirrorDir = projectRepoMirrorDir(input.projectSlug, input.repo, input.dataRoot);
+  const body = async (): Promise<T> => {
+    const stage = newStageDir(input.projectSlug, "git-", input.dataRoot);
+    try {
+      chmodSync(stage, 0o755);
+      await execFileAsync("git", ["init", "--bare", "--quiet", stage], {
+        timeout: 10_000,
+        env: serverGitEnv(),
+      });
+      if (mirrorDir && mirrorIsComplete(mirrorDir)) {
+        const info = path.join(stage, "objects", "info");
+        mkdirSync(info, { recursive: true });
+        writeFileSync(path.join(info, "alternates"), `${path.join(mirrorDir, "objects")}\n`);
+      }
+      return await work(stage);
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
+  };
+  return mirrorDir ? withMirrorLock(mirrorDir, body) : body();
+}
+
+/**
+ * Build a checkout in a stage the server owns and only then move it to
+ * `destination` (pass 40 review, R-seams-1). A workspace is writable by every
+ * agent uid from the moment it exists, so a clone made IN it would have the
+ * server's git read a `.git` an agent could write mid-clone (a filter driver
+ * a checkout runs, say). Here the server's clone and its origin rewrite run in
+ * a directory no agent can reach; the finished tree is handed to the agent
+ * group (a file linked from the mirror stays read-only) and renamed into
+ * place, and the server's git never touches it again. `clone` makes the
+ * repository at the path it is given.
+ */
+async function cloneThroughStage(
+  input: { projectSlug: string; repo: string; destination: string; dataRoot?: string | undefined },
+  clone: (target: string) => Promise<void>,
+): Promise<void> {
+  const stage = newStageDir(input.projectSlug, "clone-", input.dataRoot);
+  try {
+    const target = path.join(stage, "checkout");
+    await clone(target);
+    // The tree must never be handed on pointing at a local path: every fetch
+    // and push after this one is the server's, against the GitHub URL.
+    await execFileAsync("git", setOriginUrlArgs(target, githubRepositoryUrl(input.repo)), {
+      timeout: 10_000,
+      env: serverGitEnv(),
+    });
+    shareTreeBuiltForAgents(target);
+    mkdirSync(path.dirname(input.destination), { recursive: true });
+    try {
+      renameSync(target, input.destination);
+    } catch (error) {
+      // A destination on another filesystem (never the store's own layout,
+      // where both sit under the data root): copied instead of moved.
+      if (!(error instanceof Error && "code" in error && error.code === "EXDEV")) throw error;
+      cpSync(target, input.destination, { recursive: true, verbatimSymlinks: true });
+    }
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
+}
+
 /** Drop mirrors for repositories this project no longer points at — otherwise a
  *  repo change leaves a full copy of the old one on disk forever. This is also
  *  what reclaims a `<mirror>.building` sidecar abandoned by a killed build.
@@ -578,7 +694,6 @@ export async function cloneWorkspaceRepo(
   input: WorkspaceCloneInput,
 ): Promise<WorkspaceCloneResult> {
   const token = input.token ?? null;
-  const remoteUrl = githubRepositoryUrl(input.repo);
   const mirrorRequest: ProjectMirrorRequest = {
     projectSlug: input.projectSlug,
     repo: input.repo,
@@ -614,21 +729,26 @@ export async function cloneWorkspaceRepo(
     );
   }
 
+  // R-seams-1: both arms clone into a stage the server owns and move the
+  // finished tree into place (`cloneThroughStage`); a half-written tree never
+  // reaches the destination.
+  const staged = {
+    projectSlug: input.projectSlug,
+    repo: input.repo,
+    destination: input.destination,
+    dataRoot: input.dataRoot,
+  };
   if (usable) {
     try {
       // Local clone ⇒ git hardlinks the object store: seconds and ~no disk,
       // with no alternates file, so this tree outlives the mirror. No
       // credential is involved at all — this step never leaves the disk — and
       // the prompt suppression is belt and braces against a hang.
-      await execFileAsync("git", ["clone", usable.dir, input.destination], {
-        timeout: cloneTimeoutMs(),
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      });
-      // The tree must never be handed on pointing at a local path: every
-      // fetch/push after this one talks to GitHub with the project's
-      // credential.
-      await execFileAsync("git", setOriginUrlArgs(input.destination, remoteUrl), {
-        timeout: 10_000,
+      await cloneThroughStage(staged, async (target) => {
+        await execFileAsync("git", ["clone", usable.dir, target], {
+          timeout: cloneTimeoutMs(),
+          env: serverGitEnv(),
+        });
       });
       return { viaMirror: true };
     } catch (error) {
@@ -637,35 +757,38 @@ export async function cloneWorkspaceRepo(
         { projectSlug: input.projectSlug, repo: input.repo },
         redactGitOutput(gitErrorText(error), { token }),
       );
-      // A half-written tree would make `git clone` refuse the destination.
+      // Whatever stood in the way (a half-moved tree, a directory already
+      // there) would make the move below refuse the destination too.
       rmSync(input.destination, { recursive: true, force: true });
     }
   }
 
   // No credential ⇒ no `token` key at all: the plan's askpass leg keys off the
   // property's presence, so a public-repo clone must not carry an empty one.
-  const planInput: Parameters<typeof createGitHubClonePlan>[0] = {
-    repo: input.repo,
-    destination: input.destination,
-  };
-  if (token) planInput.token = token;
-  const plan = createGitHubClonePlan(planInput);
-  try {
-    // F27-U1: the fallback is also a full network clone (the mirror was
-    // unavailable), so it too streams progress. `--progress` goes right after
-    // the `clone` subcommand the plan opens with; if the plan ever led with
-    // something else, the flag is simply omitted and the clone still runs.
-    const progressArgs =
-      plan.args[0] === "clone"
-        ? ["clone", "--progress", ...plan.args.slice(1)]
-        : plan.args;
-    await runGitCloneWithProgress(
-      progressArgs,
-      { timeout: cloneTimeoutMs(), env: plan.env },
-      input.onCloneProgress,
-    );
-    return { viaMirror: false };
-  } finally {
-    plan.dispose();
-  }
+  await cloneThroughStage(staged, async (target) => {
+    const planInput: Parameters<typeof createGitHubClonePlan>[0] = {
+      repo: input.repo,
+      destination: target,
+    };
+    if (token) planInput.token = token;
+    const plan = createGitHubClonePlan(planInput);
+    try {
+      // F27-U1: the fallback is also a full network clone (the mirror was
+      // unavailable), so it too streams progress. `--progress` goes right after
+      // the `clone` subcommand the plan opens with; if the plan ever led with
+      // something else, the flag is simply omitted and the clone still runs.
+      const progressArgs =
+        plan.args[0] === "clone"
+          ? ["clone", "--progress", ...plan.args.slice(1)]
+          : plan.args;
+      await runGitCloneWithProgress(
+        progressArgs,
+        { timeout: cloneTimeoutMs(), env: plan.env },
+        input.onCloneProgress,
+      );
+    } finally {
+      plan.dispose();
+    }
+  });
+  return { viaMirror: false };
 }

@@ -1,14 +1,11 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { getProjectGithubContext } from "~/server/github/github-context.server";
 import { ensureDefaultBranch } from "~/server/github/repo-bootstrap.server";
 import { logger } from "~/server/logging/logger.server";
 import { toError } from "~/shared/errors";
+import { taskWorkspaceGit } from "./workspace-git.server";
 import { refreshWorkspaceFromMirror, type WorkspaceRefreshInput } from "./workspace-refresh.server";
-
-const execFileAsync = promisify(execFile);
 
 /** Ruling 468: the bootstrap's actor, as the branch preparation names it. */
 const DELIVERY_ACTOR: AuditActor = { userId: null, label: "system:delivery" };
@@ -46,17 +43,34 @@ export type UnbornCheckoutOutcome =
  * moves the unborn checkout onto it through ruling 129's refresh, which
  * refuses a checkout with staged changes or files the move would overwrite.
  *
- * One `git rev-parse` for every other checkout. Never throws: a checkout that
- * could not be initialized is used as it stands and the run proceeds.
+ * One `git rev-parse` for every other checkout — as the task's person, like
+ * every git in a workspace (pass 40 review, R-seams-1). Never throws: a
+ * checkout that could not be initialized is used as it stands and the run
+ * proceeds.
  */
 export async function initializeUnbornCheckout(
   db: DatabaseSync,
   input: UnbornCheckoutInput,
   options: { fetchImpl?: typeof fetch } = {},
 ): Promise<UnbornCheckoutOutcome> {
+  let git: ReturnType<typeof taskWorkspaceGit>;
   try {
-    await execFileAsync("git", ["-C", input.dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"], {
-      timeout: 10_000,
+    git = taskWorkspaceGit(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      dataRoot: input.dataRoot,
+    });
+  } catch (error) {
+    logger.warn("the operator's checkout could not be read as its person; it is used as it stands", {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      err: toError(error),
+    });
+    return "unchanged";
+  }
+  try {
+    await git.run(["-C", input.dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"], {
+      timeoutMs: 10_000,
     });
     return "born";
   } catch {
@@ -92,6 +106,7 @@ export async function initializeUnbornCheckout(
       defaultBranch: input.defaultBranch,
       fastForward: true,
       createMirror: true,
+      taskKey: input.taskKey,
     };
     if (input.dataRoot) refresh.dataRoot = input.dataRoot;
     const moved = await refreshWorkspaceFromMirror(db, refresh);

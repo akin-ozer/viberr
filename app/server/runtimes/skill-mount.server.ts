@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -9,7 +8,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import {
   serializeFrontmatterFile,
   splitFrontmatter,
@@ -19,6 +17,10 @@ import {
   skillFrontmatterSchema,
 } from "~/server/files/skill-body.server";
 import { logger } from "~/server/logging/logger.server";
+import {
+  workspaceGitWhenIsolationOff,
+  type WorkspaceGit,
+} from "~/server/tasks/workspace-git.server";
 import { toError } from "~/shared/errors";
 
 /**
@@ -57,8 +59,6 @@ import { toError } from "~/shared/errors";
  * race the old in-checkout mount needed a per-process marker to survive).
  */
 
-const execFileAsync = promisify(execFile);
-
 /** The plugin name the CLI qualifies skills with: `viberr:<skill>`. */
 const SKILL_PLUGIN_NAME = "viberr";
 /** The directory beside a checkout that holds every run's plugin. */
@@ -82,23 +82,29 @@ const SKILL_PLUGINS_DIR = ".viberr-plugins";
  *
  * Since ruling 180 nothing of Viberr's lives in this directory, so the strip
  * is whole: every entry goes, on every call.
+ *
+ * Pass 40 review (R-seams-1): the two git reads run as the task's person
+ * (`git`), never as the server — the checkout is agent-writable. A caller
+ * with no person to name gets the server's own user only where no agent is
+ * launched; with isolation on the git step is skipped (the catalog is still
+ * removed, and at worst a tracked `.claude` deletion shows in a diff).
  */
-export async function stripUngovernedRepoCatalog(repoDir: string): Promise<void> {
+export async function stripUngovernedRepoCatalog(
+  repoDir: string,
+  git: WorkspaceGit | null = workspaceGitWhenIsolationOff(),
+): Promise<void> {
   const catalog = path.join(repoDir, ".claude");
   if (!existsSync(catalog)) return;
   try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["-C", repoDir, "ls-files", "-z", "--", ".claude"],
-      { timeout: 10_000 },
-    );
+    if (!git) throw new Error("no person to run the checkout's git as");
+    const { stdout } = await git.run(["-C", repoDir, "ls-files", "-z", "--", ".claude"], {
+      timeoutMs: 10_000,
+    });
     const tracked = stdout.split("\0").filter(Boolean);
     if (tracked.length) {
-      await execFileAsync(
-        "git",
-        ["-C", repoDir, "update-index", "--skip-worktree", "--", ...tracked],
-        { timeout: 10_000 },
-      );
+      await git.run(["-C", repoDir, "update-index", "--skip-worktree", "--", ...tracked], {
+        timeoutMs: 10_000,
+      });
     }
   } catch (error) {
     // Non-fatal: governance still wins — we strip the catalog regardless. The
@@ -196,6 +202,9 @@ export async function mountGrantedSkills(input: {
    *  directory's name. */
   runId: string;
   dataRoot?: string;
+  /** Pass 40 review (R-seams-1): the checkout's git as the task's person, for
+   *  the strip below. */
+  git?: WorkspaceGit | null;
 }): Promise<SkillMount> {
   const names = [...new Set(input.skills)];
   if (names.length === 0) {
@@ -215,7 +224,7 @@ export async function mountGrantedSkills(input: {
   // whose hooks a project settings source would execute. No run opens that
   // source any more (ruling 180), and the working tree still must not carry
   // an ungoverned catalog for the model to read by hand.
-  await stripUngovernedRepoCatalog(dir);
+  await stripUngovernedRepoCatalog(dir, input.git === undefined ? workspaceGitWhenIsolationOff() : input.git);
 
   const pluginRoot = skillPluginDir(dir, input.runId);
   const skillsRoot = path.join(pluginRoot, "skills");

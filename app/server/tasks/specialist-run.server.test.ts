@@ -5675,7 +5675,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     const source = readFileSync("app/server/tasks/specialist-run.server.ts", "utf8");
     expect(source).toContain("pinSubject: support");
     expect(source).toContain("activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha");
-    expect(source).toContain("await pinSupportCheckout(dir, input.pinSubject ?? null)");
+    expect(source).toContain("await pinSupportCheckout(dir, input.pinSubject ?? null, personGit())");
     // ...and the disclosure rides the same `refreshed` field the run contract
     // already renders ("Before this run Viberr ...").
     expect(source).toContain("return pinned ? { dir, refreshed: pinned } : { dir }");

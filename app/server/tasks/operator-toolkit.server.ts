@@ -462,6 +462,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             dir: workspace.dir,
             defaultBranch: workspace.defaultBranch,
             path: args.path,
+            // Pass 40 review (R-seams-1): the checkout is read as this
+            // task's person, never as the server.
+            taskKey,
           };
           if (args.fromLine !== undefined) request.fromLine = args.fromLine;
           const read = await readDefaultBranchFile(db, request);

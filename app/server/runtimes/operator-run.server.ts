@@ -43,6 +43,7 @@ import {
 import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { stripUngovernedRepoCatalog } from "./skill-mount.server";
 import { initializeUnbornCheckout } from "~/server/tasks/unborn-checkout.server";
+import { taskWorkspaceGit } from "~/server/tasks/workspace-git.server";
 import {
   RULING_NAMESPACE_NOTE,
   attachedResourcesBlock,
@@ -1618,7 +1619,15 @@ export async function ensureOperatorRepoCheckout(
         rmSync(dir, { recursive: true, force: true });
       }
     }
-    await stripUngovernedRepoCatalog(dir);
+    // Pass 40 review (R-seams-1): the checkout's git as the task's person.
+    await stripUngovernedRepoCatalog(
+      dir,
+      taskWorkspaceGit(db, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        dataRoot: input.dataRoot,
+      }),
+    );
     logger.info("cloned the task repository for the operator (read-only view)", {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
