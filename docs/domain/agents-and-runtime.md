@@ -698,7 +698,9 @@ Panel's input) and the failure class, read from the representative's own newest 
 takes its frames from the layout's live stream (`onLiveFrame`, no `EventSource` of its
 own), fetches since the thread's cursor on each reference, fills a thread the payload did
 not carry with one `window=1` request when the console shows it, pages backwards 200
-lines at a time, and revalidates every 20 s while a run is active. Its controller channel
+lines at a time, and revalidates every 20 s while a run is active and the tab's live
+stream is down (F22; with the stream up the terminal event arrives or is replayed,
+ruling 454). Its controller channel
 (`source: { kind: "controller", conversationId }`) tails `controller.log-appended` frames
 for the open conversation only, off the `user` stream the page holds: a controller run
 has no task scope, so the sink resolves the conversation owner once per run

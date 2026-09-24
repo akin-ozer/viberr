@@ -255,26 +255,84 @@ dropped and `projects` is expanded to their memberships; an empty result is a 40
 first message sets `retry: 5000` and sends `stream.open`. A 25-second heartbeat
 (`: hb`) also **re-authorizes** every connection, dropping ones whose scopes vanished (a
 throw keeps the existing scopes: a check that could not run must neither widen access
-nor tear down a healthy stream). A 256-event ring buffer replays after a reconnect with
-`Last-Event-ID`; an id older than the buffer, or a restart, sends `stream.resync` and
-the client revalidates once. Queue backpressure caps at 1024 chunks per connection; a
-failed write drops the connection. The broker also owns the process shutdown hook
+nor tear down a healthy stream). A 256-event ring buffer replays, on the new
+connection's scopes, every event after the position a connection names: the browser's
+own `Last-Event-ID` header when it retries a source, or the `lastEventId` query param a
+new `EventSource` carries (ruling 454; the header wins). An id older than the buffer, or
+a restart, sends `stream.resync` and the client revalidates once. Root's
+`liveHeadMiddleware` reads the head before any loader of a request runs, and a document
+load hands it to the page as root's `liveHead`, so the page's first stream replays what
+was published between the server render and hydration. Queue backpressure caps at 1024
+chunks per connection; a failed write drops the connection. The broker also owns the
+process shutdown hook
 (`runProcessShutdown`): close streams, stop both watchers and the lock guard, close the
 DB and release the writer lock.
 
 **The client** (`useLiveUpdates`): subscribes the current surface to its scopes (Home:
 `user` + `projects`; a project page: `project:<slug>` + `user`, plus `task:<slug>/<key>`
 when a task is open; the controller page: `user`, plus `project:<slug>` on a project;
-the controller dock, Instance settings and notifications: `user`), revalidates the active
-React Router loaders on any data event or `stream.resync` (debounced 300 ms; never on a
-stream event; `controller.updated`, a **conversation event**
-(`SSE_CONVERSATION_EVENTS`), only on the two controller pages, which render the
-conversation and pass `{ conversations: true }`: every other surface hands it, debounced
-the same way, to the controller dock as the window event `CONTROLLER_UPDATED_EVENT`, and
-the dock reloads its own resources, ruling 454), and revalidates once on any connect that
-follows a previous stream (handing the dock the same catch-up). A
-hidden tab holds no stream: the hook closes on `visibilitychange` and reopens on return
-(ruling 301). A failed stream flips `paused` (the topbar's "live updates paused" chip),
+the controller dock, Instance settings and notifications: `user`), and revalidates on
+data events and `stream.resync` (debounced 300 ms; never on a stream event;
+`controller.updated`, a **conversation event** (`SSE_CONVERSATION_EVENTS`), only on the
+two controller pages, which render the conversation and pass `{ conversations: true }`:
+every other surface hands it, debounced the same way, to the controller dock as the
+window event `CONTROLLER_UPDATED_EVENT`, and the dock reloads its own resources, ruling
+454).
+
+**Which loaders re-run** (`revalidation-policy.ts`, ruling 454). Single fetch asks every
+route on screen to re-run after every navigation, action and `revalidate()`; every route
+with a loader answers through `shouldRevalidate = revalidateWhen("<route id>")`, from one
+rule table that says what each loader reads: its path params, its search params, and the
+facts its data depends on (`domain`, `run`, `bell`, `conversation`, `theme`,
+`session`). Each tab keeps a **ledger** of what its loaders owe: every live event as it
+arrives (a run's state is a `run` fact, a notification a `bell` fact, a conversation a
+`conversation` fact, anything else `domain`), every action as it is submitted (by the
+path it posts to: `/notifications/read` changes the bell, `/prefs/theme` the theme, sign-in,
+sign-out and `/profile` everything, a page's own action `domain` and `run`), and every
+`revalidate()` that is not the live hook's own (the F22 net, a settle, a panel's poll:
+everything but root). When a route's data lands, it covers what was recorded before the
+load that brought it started. That is the watermark: the server publishes an event after
+its write commits, so a load the browser sent after receiving the event was answered from
+data that holds it. A route re-runs when it owes something it reads, when a navigation
+changed a param or search param its loader reads, or on a navigation to the URL already
+on screen. The flush revalidates once, and only if a route on screen still owes a live
+event, and it waits for a load in flight to land first. So:
+
+| Trigger | Re-runs |
+|---|---|
+| A keystroke, chip or view toggle in the board filter | nothing (no loader reads `q`, `filter`, `label`, `view`) |
+| `?events` on a task page (show older) | the task loader |
+| `?c=` / `?all=` on a controller page | that controller page |
+| Any search param on Activity | Activity |
+| A navigation inside a project | the new page; the workspace layout only when the slug changed; never root |
+| A page's own action (comment, drop, transition) | the workspace layout and that page; the action's own SSE echo, received before that load was sent, then re-runs nothing |
+| The bell's mark-read | what draws the bell's counts or list: the shells, Home and the notifications page |
+| A theme change | root and the profile page |
+| Sign-in, sign-out, a profile change | everything |
+| `task.updated`, `project.updated`, `violation.updated`, … | the shell and every page on screen |
+| `run.state-changed` (any task) | the pages, not the shells (the task page renders instance run facts another task's run can change: model availability, the owner's backend health) |
+| `notification.created` / `.read` | the shells, Home and the notifications page |
+| `controller.updated` | the controller pages (elsewhere it goes to the dock) |
+| `stream.resync`, or a `revalidate()` | every page and shell, not root |
+
+An action React Router does not revalidate after (a 4xx or 5xx answer, or a caller that
+opts out, like the dock's send) re-runs nothing; an event its write published still does.
+A 403 re-runs root alone: it is how a stale CSRF token answers (a sign-in in another tab
+gave the session a new id), and root no longer re-reads the session on every live event.
+A trigger that interrupts a load in flight finds that load's obligations still in the
+ledger and loads them itself, so nothing a person has not seen is skipped.
+
+**Reconnects replay** (ruling 454, RF-1). Every stream records the id it stands at: the
+hello's head, then each event. A reopen names that position (`lastEventId`), and the
+broker replays what the tab missed on the new scopes, which revalidates like any event;
+only a reconnect that could not say where it stood pulls every loader once. So a
+deliberate re-scope (opening, switching or closing a task) and a quiet return from a
+hidden tab reload nothing, and a return after events, or a failure recovered on the
+backoff, reloads what those events concern. An event the closing stream had delivered
+but not yet flushed (a hide or a re-scope inside the 300 ms window) is still in the
+ledger, and the reopened stream flushes it. A hidden tab holds no stream: the hook
+closes on `visibilitychange` and reopens on return (ruling 301), and the replay is its
+catch-up. A failed stream flips `paused` (the topbar's "live updates paused" chip),
 reopens on a 2 / 5 / 15 / 30 s backoff, probes the session after two consecutive
 failures and stops on a 401 until the user retries; while it is down the tab's consoles
 say so in their footer (`useLiveStreamFailed`). There is no optimistic UI for
@@ -288,7 +346,7 @@ loop, the one the agents run on.)
 connection of its own: it takes its frames from the tab's one live stream through
 `onLiveFrame`, so a task tab holds ONE `EventSource` (ruling 301 had named merging the
 console's second stream "the next cut"), and the layout's hidden-tab close and reconnect
-catch-up cover it. On the task scope it tails `run.log-appended`; for a controller
+replay cover it. On the task scope it tails `run.log-appended`; for a controller
 conversation, `controller.log-appended` on the `user` scope. Its lines live in an external
 store the console reads with `useSyncExternalStore`, so a line re-renders the console and
 not the page. Per frame it fetches the lines since its cursor from `/resources/run-log`
@@ -302,10 +360,12 @@ revalidation or a client navigation carries each thread's window facts
 `/resources/run-log?window=1` request, and the stored envelopes load when the raw view
 opens. A revalidation keeps what a thread holds unless its representative run changed; a
 head the loader saw past the cursor (a missed frame, a tab back from hidden) is read as a
-gap. The console pages older history on demand and revalidates every 20 s while a run is
-shown active (a missed terminal event cannot leave the strip "running"); the controller
-page reads the working turn's tail every 5 s instead and revalidates once the tail says
-the run ended (CTL-2). `run.state-changed` revalidates through the layout's stream, once.
+gap. The console pages older history on demand and, while a run is shown active and the
+tab's stream is DOWN, revalidates every 20 s (F22: a missed terminal event cannot leave
+the strip "running"; with the stream up the event arrives or is replayed, ruling 454,
+RF-6); the controller page reads the working turn's tail every 5 s instead and
+revalidates once the tail says the run ended (CTL-2). `run.state-changed` revalidates
+through the layout's stream, once.
 
 ## 6. Provenance and freshness
 

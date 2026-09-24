@@ -157,7 +157,8 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   `controller.updated`. Any surface streaming the `user` scope hands that event to the
   dock, debounced 300 ms, as the window event `CONTROLLER_UPDATED_EVENT` instead of
   revalidating its own loaders (only the two controller pages, which render the
-  conversation, revalidate on it); a reconnect or a `stream.resync` hands it one too.
+  conversation, revalidate on it); a reconnect replays a missed one (ruling 454), and a
+  `stream.resync` hands it one too.
   While a turn works the dock polls the STATUS every 5 s, open or closed: the working dot
   and the open panel's step line move from it, and the view reloads only when the status
   and the view disagree about whether the shown turn works. Before this, a closed dock

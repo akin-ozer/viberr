@@ -125,7 +125,7 @@ the route table is `app/routes.ts`.
 | `notifications/` | The inbox page and the shared notification row. |
 | `profile/` | Identity, notification routing, appearance, access view, GitHub identity, password change, and the **Agent accounts** panel (ruling 127): one card per backend with the hosted sign-in, the paste forms and Disconnect, polling `/resources/backend-login` while a sign-in is live. |
 | `insights/` | Read-only run analytics dashboard (oversight cards, backend quota, prompt cache, breakdowns, daily chart). |
-| `live-updates/` | `useLiveUpdates`: SSE subscription → debounced loader revalidation; `event-types.ts` mirrors the wire contract. |
+| `live-updates/` | `useLiveUpdates`: SSE subscription → debounced loader revalidation, replaying what a reconnect missed; `revalidation-policy.ts`: which loader re-runs on which trigger (every route's `shouldRevalidate`, and the tab's ledger of what its loaders owe, ruling 454); `event-types.ts` mirrors the wire contract. |
 
 Also under `features/`, five copy and behaviour pins: `copy-ban.test.ts` (the "govern*"
 word is banned from rendered copy), `retired-vocabulary.test.tsx` ("primary specialist"

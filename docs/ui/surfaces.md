@@ -108,11 +108,15 @@ Intents behind `project.task.tsx` are explained in
   scrolls inside itself.
 - **Live updates** are mounted by the workspace layout, Home, Notifications, Org
   settings and the controller page; every governed change arrives by loader
-  revalidation. A task tab holds ONE stream, the layout's: the run-log console takes its
-  frames from it (`onLiveFrame`) instead of opening a second one, and a console line
-  revalidates nothing (ruling 454). A hidden tab holds no stream: `useLiveUpdates`
-  closes on `visibilitychange` and reopens, revalidating, on return, and the console
-  reads whatever it missed as one gap (ruling 301). While the stream is down, the workspace header and Home both
+  revalidation, of the loaders that read what changed (`revalidation-policy.ts`,
+  ruling 454: a board filter keystroke, the echo of one's own action and root's theme
+  and csrf on a live event re-run nothing). A task tab holds ONE stream, the layout's:
+  the run-log console takes its frames from it (`onLiveFrame`) instead of opening a
+  second one, and a console line revalidates nothing (ruling 454). A hidden tab holds no
+  stream: `useLiveUpdates` closes on `visibilitychange` and reopens on return from the
+  last event id it saw, the broker replays what it missed (or answers `stream.resync`,
+  which pulls every loader once), and the console reads whatever it missed as one gap
+  (ruling 301). While the stream is down, the workspace header and Home both
   show a "live updates paused" chip (a plain span: a pill has no cursor and no hover, so
   it is the sentence, not a control) beside a `Retry` button, rendered only when the
   surface really has a reconnect to offer. The sentence is also announced through a
