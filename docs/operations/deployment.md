@@ -526,15 +526,17 @@ COLUMN`s each missing entry of `BASELINE_COLUMNS` — on `agent_runs`
 `dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`,
 `interrupted_reason`, `usage_final`, `no_checkout`, `verdict_withheld` and the eleven
 prompt-cache columns of ruling 369; `controller_conversations.task_key` and `seen_seq`;
-`controller_messages.surface` and `reply_to`; `org_mcp_servers.tool_policy_json` and `tool_names_json`;
+`controller_messages.surface`, `reply_to` and `unlinked_history`; `org_mcp_servers.tool_policy_json` and `tool_names_json`;
 `projects.required_reviewers_json`; `task_projections.recommendation_kinds` — creates the
 `BASELINE_TABLES` (`project_github_health`, `user_backend_credentials`) and indexes it
 lacks, and logs `added a baseline column this data root predated`. A column whose DEFAULT
 would be WRONG for the rows that predate it carries a one-time backfill run in the same
 step (`usage_final = 1` on the `finished` runs, whose token columns held the provider's own
 figures; `seen_seq` set to each conversation's newest message so a deploy does not mark
-every old thread unread; `reply_to` linked by replaying the controller's FIFO, so boot
-recovery does not note every old message as unanswered); a backfill that cannot run is
+every old thread unread; `unlinked_history`'s walk linking `reply_to` where the
+controller's FIFO proves it and marking the rest earlier history, so boot recovery does
+not note old messages as unanswered, and a root the first `reply_to` backfill already
+linked is walked again when it gains the column); a backfill that cannot run is
 logged as a warn. A failure to
 ALTER is warned, not fatal, and retried next boot.
 

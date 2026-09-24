@@ -268,15 +268,22 @@ Storage is app-owned SQLite, the same family as notifications and sessions:
 `controller_conversations(id, user_id, user_label, project_slug, task_key, title,
 created_at, updated_at, last_message_at, seen_seq)` with `CHECK (task_key IS NULL OR
 project_slug IS NOT NULL)` and `controller_messages(id, conversation_id, seq, author
-user|controller, user_id, text, run_id, surface, created_at, reply_to)` with `UNIQUE
-(conversation_id, seq)` and `ON DELETE CASCADE` to the conversation. `reply_to` (ruling 465)
-is, on a controller row, the user message it answers: a turn's reply (posted early or by
-the settle), every refusal (no Claude, a full queue, a turn that could not start), the
-queued-start failure and each message it dropped, and the restart notes all set it; only a
-released project's note answers nothing. A user message takes its `seq` when it is
-recorded, which for a message sent mid-turn is when it is QUEUED, so `seq` alone cannot pair
-a reply with its message. An older data root gains the column with a backfill that replays
-the writers' order (`backfillControllerReplyLinks`).
+user|controller, user_id, text, run_id, surface, created_at, reply_to, unlinked_history)`
+with `UNIQUE (conversation_id, seq)` and `ON DELETE CASCADE` to the conversation. `reply_to`
+(ruling 465) is, on a controller row, the user message it answers: a turn's reply (posted
+early or by the settle), every refusal (no Claude, a full queue, a turn that could not
+start), both start failures and each message they dropped, and the restart notes all set
+it; only a released project's note answers nothing. A user message takes its `seq` when it
+is recorded, which for a message sent mid-turn is when it is QUEUED, so `seq` alone cannot
+pair a reply with its message. An older data root gains both columns in one healer pass,
+and `backfillControllerReplyLinks` replays the writers' order, linking only what that order
+proves: it resets at every event that empties the real queue (a start failure, a restart,
+a boot another conversation's restart note dates) and never guesses past a message lost
+without a row. A user message it cannot link (lost to a restart or a failed start, or
+waiting while the walk was out of step) gets `unlinked_history = 1`: earlier history, not
+linked, which boot recovery does not note. A root whose `reply_to` the first version of the
+backfill already linked is walked again when it gains `unlinked_history` (ruling 465's
+dated note of 2026-09-25).
 
 A conversation's **scope** (ruling 121) is fixed at creation: instance (`project_slug`
 and `task_key` null), board (slug alone) or task (slug + key). `listConversations`
@@ -425,7 +432,8 @@ a notification row: replies stay out of the bell (§8).
 6. `settleTurn` records the reply (or a failure note naming quota/auth/other) under the
    message it answers, releases the lease and starts the next queued message. When that
    start fails, the note goes under the message it tried and every message dropped behind
-   it gets its own note (ruling 465).
+   it gets its own note (ruling 465). A FIRST turn whose start fails does the same for any
+   message another surface queued while the start awaited.
 
 Everything the run machinery gives every other run applies: raw NDJSON transcript,
 line redaction, token accounting, the run's input disclosure (`recordRunInputs`, on the
@@ -434,7 +442,8 @@ fresh path and every resume; ruling 344), the run-log console (owner or org admi
 apply; rendered on the controller pages, §2.2), the interrupt (`canInterruptControllerRun`,
 §2.2) and boot orphan finalization. Boot also writes an honest "interrupted by a server
 restart" note under every user message no reply answers in a conversation no live turn
-holds (`recoverControllerConversations`, ruling 465): the turn whose run died (its note
+holds and the backfill did not mark earlier history (`recoverControllerConversations`,
+ruling 465): the turn whose run died (its note
 carries the run id, which settles that run, and answers the oldest waiting message), a
 message whose run never started, and the messages the lost in-memory queue still held. The task-scoped run stream cannot carry a controller
 run (the wire schema's non-empty-slug rule, and an empty slug would match every `projects`

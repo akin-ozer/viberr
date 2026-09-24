@@ -446,6 +446,60 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         fail: "q2",
         rel: null,
       });
+      // Ruling 465 (2026-09-25): and q3 is earlier history, not linked, so
+      // boot recovery does not write a restart note under it.
+      // SAFETY: the SELECT names one TEXT column.
+      const history = db
+        .prepare(`SELECT id FROM controller_messages WHERE unlinked_history = 1`)
+        .all() as { id: string }[];
+      expect(history.map((r) => r.id)).toEqual(["q3"]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Ruling 465 (2026-09-25): a root the first backfill already linked (the
+   * owner's, deployed 2026-09-24 21:50 UTC) has `reply_to` and lacks
+   * `unlinked_history`. Adding that column runs the corrected walk there once,
+   * which replaces the links the first one shifted past a lost message.
+   */
+  it("walks a root the first reply_to backfill already linked once more, when unlinked_history arrives", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlrelink-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE controller_conversations (
+           id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_label TEXT NOT NULL,
+           project_slug TEXT, task_key TEXT, title TEXT NOT NULL DEFAULT '',
+           created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_message_at TEXT,
+           seen_seq INTEGER NOT NULL DEFAULT 0);
+         CREATE TABLE controller_messages (
+           id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL,
+           author TEXT NOT NULL, user_id TEXT, text TEXT NOT NULL, run_id TEXT,
+           surface TEXT, created_at TEXT NOT NULL, reply_to TEXT, UNIQUE (conversation_id, seq));
+         INSERT INTO controller_conversations (id, user_id, user_label, created_at, updated_at)
+           VALUES ('c1', 'u1', 'a@b.dev', '2026-09-20', '2026-09-20');
+         INSERT INTO controller_messages (id, conversation_id, seq, author, user_id, text, run_id, reply_to, created_at) VALUES
+           ('A', 'c1', 1, 'user', 'u1', 'a', NULL, NULL, '2026-09-20T10:00:00.000Z'),
+           ('B', 'c1', 2, 'user', 'u1', 'b', NULL, NULL, '2026-09-20T10:01:00.000Z'),
+           ('n1', 'c1', 3, 'controller', NULL, 'This turn was interrupted by a server restart before I could answer. Say it again and I will pick it up.', 'run_1', 'A', '2026-09-20T10:30:00.000Z'),
+           ('C', 'c1', 4, 'user', 'u1', 'c', NULL, NULL, '2026-09-20T10:40:00.000Z'),
+           ('rC', 'c1', 5, 'controller', NULL, 'answer c', 'run_3', 'B', '2026-09-20T10:41:00.000Z');`,
+      );
+      ensureBaselineColumns(db);
+      // SAFETY: both columns are selected by name; `id` is NOT NULL TEXT.
+      const links = Object.fromEntries(
+        (
+          db
+            .prepare(`SELECT id, reply_to FROM controller_messages WHERE author = 'controller'`)
+            .all() as { id: string; reply_to: string | null }[]
+        ).map((r) => [r.id, r.reply_to]),
+      );
+      // CANARY: drop `backfillWith` from `unlinked_history` and rC keeps the
+      // first backfill's B.
+      expect(links).toEqual({ n1: "A", rC: "C" });
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

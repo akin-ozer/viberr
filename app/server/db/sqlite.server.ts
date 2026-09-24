@@ -485,8 +485,21 @@ const BASELINE_COLUMNS: readonly {
       // Ruling 465: the user message a controller row answers. NULL is WRONG
       // for the replies an older root already holds: boot recovery notes every
       // user message no reply names, so it would write a restart note under
-      // each old one. The backfill replays the writers' FIFO order.
-      { name: "reply_to", ddl: "reply_to TEXT", backfillWith: backfillControllerReplyLinks },
+      // each old one. Its backfill is `unlinked_history`'s, added right after
+      // it in the same pass: one walk writes both columns.
+      { name: "reply_to", ddl: "reply_to TEXT" },
+      // Ruling 465 (dated 2026-09-25): 1 on an old user message whose answer
+      // the backfill cannot prove (a restart or a failed start lost it, or the
+      // order stopped proving anything): earlier history, not linked, which
+      // recovery never notes. Its backfill links what the writers' order
+      // proves and marks the rest. A root the first backfill already linked
+      // gains this column too, so the walk runs there once more and corrects
+      // the FIFO links that first backfill wrote past a lost message.
+      {
+        name: "unlinked_history",
+        ddl: "unlinked_history INTEGER NOT NULL DEFAULT 0",
+        backfillWith: backfillControllerReplyLinks,
+      },
     ],
   },
   // Ruling 463: which repositories a connection's token reaches. Every
