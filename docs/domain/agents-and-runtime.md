@@ -1514,7 +1514,11 @@ runtime's answer for a missing grant.
   removed), `tools/call` (a withheld one refused with `mcpWriteToolDenyReason`),
   resources and prompts when the upstream declares them, and `list_changed`
   notifications; a timeout (5 minutes a call, reset by progress) or an upstream error
-  comes back as a JSON-RPC error naming the server. Every forwarded call is logged at
+  comes back as a JSON-RPC error naming the server. A stdio server that exits mid-call
+  answers the call with its own exit and stderr (the run's session then 404s and it
+  re-initializes onto a fresh process), and one that prints a single message over the
+  SDK's 10 MiB stdio line limit is stopped and its calls fail saying so — nothing a
+  child prints can throw out of the server's stream listener. Every forwarded call is logged at
   info (run id, server, tool, duration, outcome; never arguments or results), and a call
   to a tool an admin marked as a write tool is audited `task.agent.mcp_write_call` under
   the run's actor (the agent, the operator, or the asker as the controller's

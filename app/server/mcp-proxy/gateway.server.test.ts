@@ -348,6 +348,62 @@ describe("the gateway against a stdio upstream the server spawns", () => {
     revokeRunMcpGateway(runId);
     expect(await gone(pid)).toBe(true);
   });
+
+  function addStdioPg(): void {
+    addMcp("pg", "stdio", writeStdioUpstream(ctx.makeTempDir("viberr-gw-stdio-")), SECRET);
+  }
+
+  /** The credentialed stdio server mounted on a fresh run, the run's client
+   *  and the pid of the process the gateway spawned for it. */
+  async function stdioRun(runId: string): Promise<{ client: Client; pid: number }> {
+    const resolution = resolveSpecialistMcpServersDetailed(db, ["pg"]);
+    const servers = bindRunToMcpGateway({
+      db,
+      runId,
+      servers: resolution.servers,
+      toolDenials: resolution.toolDenials,
+      actor: { userId: null, label: "operator" },
+      projectSlug: "acme",
+      taskKey: "VIB-1",
+      isLive: () => true,
+    });
+    const client = await connect(servers.pg);
+    const pid = Number(textResult.parse(await client.callTool({ name: "pid", arguments: {} })).content[0]?.text);
+    return { client, pid };
+  }
+
+  it("R-gateway-1: an answer over the 10 MiB stdio line limit fails that call by name, stops the process and leaves the server up", async () => {
+    // Before the fix the SDK's ReadBuffer threw inside the stdout listener: an
+    // uncaughtException that exits the whole Viberr process. CANARY: drop the
+    // try/catch around the append and vitest reports the unhandled error while
+    // this call only times out.
+    addStdioPg();
+    const { client, pid } = await stdioRun("run_gw_huge");
+    await expect(client.callTool({ name: "huge", arguments: {} }, undefined, { timeout: 10_000 })).rejects.toThrow(
+      /MCP server "pg" failed through Viberr's gateway: stopped: it sent one message over the 10 MiB stdio limit/,
+    );
+    expect(await gone(pid)).toBe(true);
+    // The run's session went with the process; a new one gets a new process.
+    const again = await stdioRun("run_gw_huge_2");
+    expect(again.pid).not.toBe(pid);
+  });
+
+  it("R-gateway-2: a process that dies mid-call answers the call with its own exit, not a hang", async () => {
+    // CANARY: close the sessions in the upstream's onclose (before the SDK
+    // rejects the calls in flight) and the answer is never written: the
+    // run's client hears nothing until its own timeout.
+    addStdioPg();
+    const { client, pid } = await stdioRun("run_gw_exit");
+    await expect(client.callTool({ name: "exit", arguments: {} }, undefined, { timeout: 5_000 })).rejects.toThrow(
+      /MCP server "pg" failed through Viberr's gateway: exited \(exit code 3\)/,
+    );
+    expect(await gone(pid)).toBe(true);
+    // The session is gone with the upstream, so the run's next request is a
+    // 404 and it re-initializes onto a fresh process.
+    await expect(client.listTools()).rejects.toMatchObject({ code: 404 });
+    const again = await stdioRun("run_gw_exit_2");
+    expect(again.pid).not.toBe(pid);
+  });
 });
 
 describe("what counts as a gateway mount", () => {

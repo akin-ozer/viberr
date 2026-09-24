@@ -1,4 +1,8 @@
-import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
+import {
+  ReadBuffer,
+  serializeMessage,
+  STDIO_DEFAULT_MAX_BUFFER_SIZE,
+} from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -19,6 +23,9 @@ import {
   type UpstreamConnection,
 } from "./upstream.server";
 
+/** The longest single JSON-RPC line a stdio server may print (10 MiB). */
+export const MCP_STDIO_MAX_LINE_BYTES = STDIO_DEFAULT_MAX_BUFFER_SIZE;
+
 /**
  * Ruling 461: a credentialed STDIO org server is started by the SERVER, never
  * by the agent's CLI.
@@ -34,6 +41,12 @@ import {
  * with its own environment and signals only the direct child, which orphans an
  * `npx` → node tree. This is the same newline-delimited JSON-RPC framing over
  * the spawn Viberr already owns.
+ *
+ * Every byte the child prints is handled inside a stream listener of the
+ * server process, where a throw is an uncaughtException that exits the whole
+ * instance (R-gateway-1, 2026-09-25). So nothing a child prints may throw out
+ * of the listener: a line over the stdio limit stops that process, as the
+ * SDK's own transport does, and fails its calls with the reason.
  */
 export class McpChildTransport implements Transport {
   onclose?: () => void;
@@ -41,12 +54,16 @@ export class McpChildTransport implements Transport {
   onmessage?: <T extends JSONRPCMessage>(message: T) => void;
 
   private child: McpChild | null = null;
-  private readonly buffer = new ReadBuffer();
+  /** The SDK's limit, the one the CLI's own stdio transport applied before
+   *  ruling 461 moved the process here: a larger single line stops the child. */
+  private readonly buffer = new ReadBuffer({ maxBufferSize: MCP_STDIO_MAX_LINE_BYTES });
   private closed = false;
   /** The tail of what the command printed on stderr, for a failure's reason. */
   private stderr = "";
   /** How the child ended, when it did. */
   private ended: string | null = null;
+  /** Why Viberr stopped the child itself: it outranks the signal that did it. */
+  private stopped: string | null = null;
 
   private readonly command: string;
   private readonly args: readonly string[];
@@ -70,7 +87,16 @@ export class McpChildTransport implements Transport {
     const child = this.spawnImpl(this.command, [...this.args], this.token);
     this.child = child;
     child.stdout?.on("data", (chunk) => {
-      this.buffer.append(Buffer.from(chunk));
+      if (this.closed) return;
+      try {
+        this.buffer.append(Buffer.from(chunk));
+      } catch (error) {
+        // `ReadBuffer` throws once one unfinished line passes its limit.
+        this.stopped ??= `stopped: it sent one message over the ${MCP_STDIO_MAX_LINE_BYTES / (1024 * 1024)} MiB stdio limit`;
+        this.onerror?.(toError(error));
+        void this.close();
+        return;
+      }
       this.drain();
     });
     child.stderr?.on("data", (chunk) => {
@@ -108,13 +134,14 @@ export class McpChildTransport implements Transport {
 
   /** Why the process is gone, with its own words (credential scrubbed). */
   describeExit(): string | null {
+    if (this.stopped) return this.stopped;
     if (!this.ended) return null;
     const detail = redactGitOutput(this.stderr, { token: this.token });
     return detail ? `${this.ended}: ${detail}` : this.ended;
   }
 
   private drain(): void {
-    for (;;) {
+    while (!this.closed) {
       let message: JSONRPCMessage | null;
       try {
         message = this.buffer.readMessage();
@@ -125,7 +152,12 @@ export class McpChildTransport implements Transport {
         continue;
       }
       if (message === null) return;
-      this.onmessage?.(message);
+      try {
+        this.onmessage?.(message);
+      } catch (error) {
+        // Still inside the stdout listener: a throw here would end the server.
+        this.onerror?.(toError(error));
+      }
     }
   }
 
@@ -158,5 +190,5 @@ export async function connectStdioUpstream(
       cause: error,
     });
   }
-  return { client, transport: "stdio" };
+  return { client, transport: "stdio", closedReason: () => transport.describeExit() };
 }

@@ -154,10 +154,15 @@ export async function startSseUpstream(token: string): Promise<UpstreamHandle> {
   };
 }
 
+/** How far past the SDK's 10 MiB stdio line limit `huge` answers. */
+const HUGE_ANSWER_BYTES = 11 * 1024 * 1024;
+
 /**
  * A stdio MCP server as a plain Node script: `read_credential` answers with the
- * `MCP_CREDENTIAL` in its environment, `pid` with its process id. Returns the
- * registry command line that starts it.
+ * `MCP_CREDENTIAL` in its environment, `pid` with its process id, `huge` with
+ * one JSON-RPC line of 11 MiB (past the SDK's 10 MiB stdio limit), and `exit`
+ * never answers: it prints a sentence on stderr and exits 3 mid-call. Returns
+ * the registry command line that starts it.
  */
 export function writeStdioUpstream(dir: string): string {
   const script = path.join(dir, "stdio-upstream.cjs");
@@ -183,11 +188,17 @@ process.stdin.on("data", (chunk) => {
       send({ jsonrpc: "2.0", id: message.id, result: { tools: [
         { name: "read_credential", inputSchema: { type: "object" } },
         { name: "pid", inputSchema: { type: "object" } },
+        { name: "huge", inputSchema: { type: "object" } },
+        { name: "exit", inputSchema: { type: "object" } },
       ] } });
+    } else if (message.method === "tools/call" && message.params.name === "exit") {
+      process.stderr.write("the database went away\\n", () => process.exit(3));
     } else if (message.method === "tools/call") {
       const text = message.params.name === "pid"
         ? String(process.pid)
-        : (process.env.MCP_CREDENTIAL ?? "<none>");
+        : message.params.name === "huge"
+          ? "x".repeat(${HUGE_ANSWER_BYTES})
+          : (process.env.MCP_CREDENTIAL ?? "<none>");
       send({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text }] } });
     } else if (message.id !== undefined) {
       send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "not found" } });

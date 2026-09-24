@@ -139,6 +139,8 @@ interface Upstream {
   server: string;
   client: Client;
   transport: "streamable-http" | "sse" | "stdio";
+  /** Why the connection closed, in the upstream's words when it has any. */
+  closedReason: () => string | null;
   /** Ruling 176's marks as the registry held them at connect: the calls
    *  audited as write calls. */
   writeTools: ReadonlySet<string>;
@@ -429,6 +431,25 @@ function closeSession(session: Session): void {
   void session.mcp.close().catch(() => undefined);
 }
 
+/**
+ * A session whose upstream closed under it. It stops routing now, so the
+ * run's next request is a 404 and it re-initializes (a fresh upstream), as the
+ * Streamable HTTP spec asks of a client. It CLOSES only once the calls in
+ * flight have answered: the SDK runs an upstream's `onclose` before it rejects
+ * the requests still waiting on it, and closing the session there aborted
+ * their handlers, so a call on a stdio server that died mid-call was never
+ * answered at all (R-gateway-2, 2026-09-25). Those rejections and the error
+ * answers they turn into are microtasks, so the close waits one macrotask.
+ */
+function retireSession(session: Session): void {
+  const state = getState();
+  if (session.id) state.sessions.delete(session.id);
+  session.upstream.sessions.delete(session);
+  setImmediate(() => {
+    void session.mcp.close().catch(() => undefined);
+  });
+}
+
 // ------------------------------------------------------------- HTTP
 
 function sendJsonRpcError(
@@ -654,6 +675,7 @@ async function connectUpstream(grant: RunGrant, server: string, key: string): Pr
     server,
     client: connection.client,
     transport: connection.transport,
+    closedReason: connection.closedReason ?? (() => null),
     writeTools: new Set(row.writeTools),
     sessions: new Set(),
   };
@@ -667,10 +689,7 @@ async function connectUpstream(grant: RunGrant, server: string, key: string): Pr
   client.onclose = () => {
     const entry = state.upstreams.get(key);
     if (entry?.ready === upstream) state.upstreams.delete(key);
-    // The run's sessions on a dead upstream are closed, so the CLI's next
-    // request is a 404 and it re-initializes (a fresh upstream) as the
-    // Streamable HTTP spec asks of a client.
-    for (const session of Array.from(upstream.sessions)) closeSession(session);
+    for (const session of Array.from(upstream.sessions)) retireSession(session);
   };
   const broadcast = (send: (session: Session) => Promise<void>) => {
     for (const session of upstream.sessions) {
@@ -711,8 +730,12 @@ class GatewayRpcError extends Error {
   }
 }
 
-/** An upstream error as the run reads it: the server named, the code kept. */
-function namedError(server: string, cause: unknown): GatewayRpcError {
+/**
+ * An upstream error as the run reads it: the server named, the code kept. A
+ * connection that closed under the call says why when it can — a stdio
+ * process's exit and its stderr beat the SDK's "Connection closed".
+ */
+function namedError(server: string, cause: unknown, upstream: Upstream): GatewayRpcError {
   if (cause instanceof McpError && cause.code !== ErrorCode.ConnectionClosed) {
     const message = cause.message.replace(/^(?:MCP error -?\d+: )+/, "");
     const timedOut = cause.code === ErrorCode.RequestTimeout;
@@ -723,9 +746,10 @@ function namedError(server: string, cause: unknown): GatewayRpcError {
         : `MCP server "${server}": ${message}`,
     );
   }
+  const closed = cause instanceof McpError ? upstream.closedReason() : null;
   return new GatewayRpcError(
     UPSTREAM_UNREACHABLE_CODE,
-    `MCP server "${server}" failed through Viberr's gateway: ${errorMessage(cause)}`,
+    `MCP server "${server}" failed through Viberr's gateway: ${closed ?? errorMessage(cause)}`,
   );
 }
 
@@ -769,7 +793,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
         // Ruling 176: a withheld write tool is not offered at all.
         return { ...result, tools: result.tools.filter((tool) => !withheld.has(tool.name)) };
       } catch (error) {
-        throw namedError(server, error);
+        throw namedError(server, error, upstream);
       }
     });
     mcp.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
@@ -809,7 +833,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
         outcome = result.isError ? "tool_error" : "ok";
         return result;
       } catch (error) {
-        throw namedError(server, error);
+        throw namedError(server, error, upstream);
       } finally {
         const durationMs = Date.now() - started;
         // Ruling 461(5): every forwarded call, never its arguments or result.
@@ -838,7 +862,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
           timeout: listMs,
         });
       } catch (error) {
-        throw namedError(server, error);
+        throw namedError(server, error, upstream);
       }
     });
     mcp.setRequestHandler(ListResourceTemplatesRequestSchema, async (request, extra) => {
@@ -849,7 +873,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
           { signal: extra.signal, timeout: listMs },
         );
       } catch (error) {
-        throw namedError(server, error);
+        throw namedError(server, error, upstream);
       }
     });
     mcp.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
@@ -859,7 +883,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
           timeout: callMs,
         });
       } catch (error) {
-        throw namedError(server, error);
+        throw namedError(server, error, upstream);
       }
     });
   }
@@ -871,7 +895,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
           timeout: listMs,
         });
       } catch (error) {
-        throw namedError(server, error);
+        throw namedError(server, error, upstream);
       }
     });
     mcp.setRequestHandler(GetPromptRequestSchema, async (request, extra) => {
@@ -881,7 +905,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
           timeout: listMs,
         });
       } catch (error) {
-        throw namedError(server, error);
+        throw namedError(server, error, upstream);
       }
     });
   }

@@ -104,6 +104,9 @@ interface HttpTransportOptions {
 export interface UpstreamConnection {
   client: Client;
   transport: "streamable-http" | "sse" | "stdio";
+  /** Once the connection has closed, why, in the upstream's own words when it
+   *  has any (a stdio process's exit and stderr); null while it is open. */
+  closedReason?: () => string | null;
 }
 
 /** A connection that failed, with the reason in words a human can act on. */
