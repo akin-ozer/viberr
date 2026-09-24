@@ -57,10 +57,16 @@ export const sseScopes = {
   task: (slug: string, key: string) => `task:${slug}/${key}`,
 };
 
-/** Builds the stream URL for a set of scopes. */
-export function buildEventsUrl(scopes: readonly string[]): string {
-  const params = scopes
-    .map((scope) => `scope=${encodeURIComponent(scope)}`)
-    .join("&");
-  return `${SSE_ENDPOINT}?${params}`;
+/**
+ * Builds the stream URL for a set of scopes. `lastEventId` is where this tab
+ * stands in the broker's event ids: the broker replays what the tab missed
+ * since then, on the new connection's scopes, or answers `stream.resync` when
+ * its buffer no longer reaches back that far (ruling 454). A new EventSource
+ * cannot send the `Last-Event-ID` header itself; the browser's own retry of
+ * the same source does, and the header wins.
+ */
+export function buildEventsUrl(scopes: readonly string[], lastEventId: number | null = null): string {
+  const params = scopes.map((scope) => `scope=${encodeURIComponent(scope)}`);
+  if (lastEventId !== null) params.push(`lastEventId=${lastEventId}`);
+  return `${SSE_ENDPOINT}?${params.join("&")}`;
 }

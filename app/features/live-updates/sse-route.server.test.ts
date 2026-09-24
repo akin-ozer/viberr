@@ -223,4 +223,65 @@ describe("/resources/events", () => {
     expect(text).toContain("VIB-1");
     await reader.cancel();
   });
+
+  /** Reads the stream until `until` appears (or it ends), then cancels it. */
+  async function readUntil(res: Response, until: string): Promise<string> {
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    while (!text.includes(until)) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      text += decoder.decode(chunk.value);
+    }
+    await reader.cancel();
+    return text;
+  }
+
+  async function publishTaskUpdated(taskKey: string) {
+    const { publishSseEvent } = await import("~/server/events/sse-broker.server");
+    return publishSseEvent(
+      {
+        type: "task.updated",
+        entityId: `viberr-core/${taskKey}`,
+        occurredAt: new Date().toISOString(),
+        data: { projectSlug: "viberr-core", taskKey, stage: "impl", readiness: "ready" },
+      },
+      { projectSlug: "viberr-core", taskKey },
+    );
+  }
+
+  it("replays from the lastEventId a new EventSource names on its URL (ruling 454, RF-1)", async () => {
+    const { getSseBrokerStats } = await import("~/server/events/sse-broker.server");
+    const head = getSseBrokerStats().headId;
+    await publishTaskUpdated("VIB-7");
+
+    const { cookie } = await app.cookieFor(userId);
+    const res = await callLoader(
+      `/resources/events?scope=project:viberr-core&lastEventId=${head}`,
+      { cookie },
+    );
+    const text = await readUntil(res, "VIB-7");
+    expect(text).toContain("event: task.updated");
+    expect(text).toContain("VIB-7");
+  });
+
+  it("the browser's own Last-Event-ID header wins over the URL's position", async () => {
+    const { getSseBrokerStats } = await import("~/server/events/sse-broker.server");
+    const before = getSseBrokerStats().headId;
+    await publishTaskUpdated("VIB-8");
+    const after = getSseBrokerStats().headId;
+    await publishTaskUpdated("VIB-9");
+
+    const { cookie } = await app.cookieFor(userId);
+    // The source was created at `before` and has since seen VIB-8: its retry
+    // sends `after` in the header, and only VIB-9 is replayed.
+    const res = await callLoader(
+      `/resources/events?scope=project:viberr-core&lastEventId=${before}`,
+      { cookie, headers: { "Last-Event-ID": String(after) } },
+    );
+    const text = await readUntil(res, "VIB-9");
+    expect(text).toContain("VIB-9");
+    expect(text).not.toContain("VIB-8");
+  });
 });
