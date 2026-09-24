@@ -4393,9 +4393,11 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
     background: var(--surface);
   }
   /* Open: the slide takes .2s (ruling 459) and the drawer shows at once
-     (acce-13: no delay, and a discrete visibility step toward `visible` is
-     visible for the whole of its duration). */
-  .app[data-rail-open="true"] .rail { transform: none; visibility: visible; transition-duration: .2s; transition-delay: 0s; }
+     (acce-13). The durations pair with the base list (transform, visibility),
+     so visibility steps in 0s: a visibility transition of any length starts
+     at its `hidden` end, and the toggle moves focus into the nav on the same
+     frame, which a hidden element refuses (e2e "mobile rail overlay"). */
+  .app[data-rail-open="true"] .rail { transform: none; visibility: visible; transition-duration: .2s, 0s; transition-delay: 0s; }
   /* Always laid out under the breakpoint so it can fade; the base rule keeps
      it invisible and click-through until the drawer opens (ruling 459). */
   .rail-scrim {

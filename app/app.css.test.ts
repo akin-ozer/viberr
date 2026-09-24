@@ -5382,7 +5382,9 @@ describe("app.css ruling 459: the better-ui pass — enter and exit", () => {
       "transform .15s var(--ease-out), visibility 0s linear .15s",
     );
     const opening = own(phone, '.app[data-rail-open="true"] .rail');
-    expect(opening.get("transition-duration")).toBe(".2s");
+    // Transform over .2s; visibility at once, or the nav the toggle focuses
+    // on the opening frame is still hidden and refuses focus.
+    expect(opening.get("transition-duration")).toBe(".2s, 0s");
     expect(opening.has("transition")).toBe(false);
     expect(opening.has("transition-property")).toBe(false);
     expect(own(reduced, ".rail").get("transition")).toBe("none");

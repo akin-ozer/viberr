@@ -285,9 +285,11 @@ test.describe("signed out", () => {
       await setTheme(page, theme);
       await page.reload();
       await expect(page.locator('input[name="email"]')).toBeVisible();
-      // The login card plays an entry animation; axe samples computed colors,
-      // so let every animation settle instead of auditing a mid-fade frame.
-      await settle(page, ".login-card");
+      // The login card plays an entry animation, and beside it the pitch
+      // staggers in over about .6s (ruling 459); axe samples computed colors,
+      // so let every animation on the page settle instead of auditing a
+      // mid-fade frame.
+      await settle(page, ".login-wrap");
 
       const results = await audit(page).analyze();
       expect(report(results), `login · ${theme}`).toBe("");
