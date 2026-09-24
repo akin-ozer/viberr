@@ -8,7 +8,7 @@ import { readWorkspace } from "./project-workspace.server";
 import { requireUser } from "~/server/auth/require-user.server";
 import { getDb } from "~/server/db/sqlite.server";
 import { readRepoHealth } from "~/server/github/repo-health.server";
-import { decisionsRequiring } from "~/server/projections/decisions.server";
+import { waitingOnViewer } from "~/server/projections/decisions.server";
 import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { withLiveRun } from "~/shared/mapping/task.server";
 import type { TaskActivitySummary } from "~/server/projections/board-query.server";
@@ -86,12 +86,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // Union the two predicates here so both surfaces read one answer; the review
   // queue's `ready` list is already viewer-scoped by acceptance authority.
   // U35-5: the queue is read ONCE per request, with the layout's rail badge.
-  const myDecisions = new Set([
-    ...decisionsRequiring(db, user.id, { projectSlug: params.slug }).mine.map(
-      (d) => d.taskKey,
-    ),
-    ...reviewQueue.ready.map((r) => r.key),
-  ]);
+  const myDecisions = waitingOnViewer(
+    db,
+    user.id,
+    params.slug,
+    reviewQueue.ready.map((r) => r.key),
+  );
   // Ruling 349: a card says "agent queued" for a run the cap parked; the fact
   // is on the run row, read once for the project.
   const liveRuns = liveRunStateByTask(db, params.slug);

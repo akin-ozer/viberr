@@ -127,7 +127,7 @@ access share; `app/shared/rbac.test.ts` holds this table to it row by row:
 | `run-agents`: run agents | ✓ | ✓ | | |
 | `reorder-board`: reorder the board | ✓ | ✓ | | |
 | `reconcile-github`: reconcile GitHub state | ✓ | ✓ | | |
-| `grant-github-scope`: grant GitHub scope, and set or clear the project credential | ✓ | ✓ | | |
+| `grant-github-scope`: manage the GitHub credential (re-check its scopes, set or clear it) | ✓ | ✓ | | |
 | `rescan-project`: re-scan project files and projections | ✓ | ✓ | | |
 | `release-any-ownership`: release any task owner | ✓ | | | |
 | `manage-members`: manage members and roles | ✓ | | | |

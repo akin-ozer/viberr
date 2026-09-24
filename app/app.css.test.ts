@@ -979,7 +979,7 @@ const BREAKPOINTS = {
   "max-width: 1080px": "topbar tier 1 — brand wordmark, root crumb, shortcut chip",
   "max-width: 1000px": "settings tab rail goes horizontal",
   "max-width: 900px": "home topbar collapses to the palette; project-row stats drop",
-  "min-width: 900px": "the login page earns its brand aside (the one min-width)",
+  "min-width: 900px": "the login page's brand aside moves beside the card (the one min-width)",
   "max-width: 760px": "topbar tier 2 — the middle crumb",
   "max-width: 720px": "MOBILE SHELL — the project rail becomes an overlay",
   "max-width: 560px": "phone-width home rows — the pipeline meter yields",
@@ -4178,11 +4178,151 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
     expect(CODE).toMatch(/body:has\(\.ctl-wrap\.standalone\)\s*\{[^}]*overflow:\s*auto/);
   });
 
+  it("the credential card's green footer wraps like its warn box, so the re-check can take its own line", () => {
+    // The card puts its Re-check scopes slot in `.cred-ok` while an advisory is
+    // open. CANARY: drop `flex-wrap` and the button squeezes the sentence at
+    // 320px; drop the basis and the sentence falls under its own glyph.
+    expect(cascade(plain, ".cred-ok").get("flex-wrap")).toBe("wrap");
+    // Measured at 320px: a bare 12rem basis put the glyph on a line of its own
+    // (202px row on the card, 160px in the profile dialog). The cap is the row
+    // minus the glyph and the gap, so the pair always shares the first line.
+    for (const box of [".cred-ok", ".cred-warn"]) {
+      const sentence = cascade(plain, `${box} > span:not(.warn-acts)`);
+      expect(sentence.get("flex"), box).toBe("1 1 min(12rem, 100% - 14px - .5rem)");
+      expect(sentence.get("min-width"), box).toBe("0");
+      expect(cascade(plain, `${box} .ico`).get("width"), box).toBe("14px");
+      expect(cascade(plain, box).get("gap"), box).toBe(".5rem");
+    }
+    // A dismiss stays beside the sentence it dismisses, and the action pair may
+    // wrap its buttons rather than run past the card (266px in a 202px row).
+    expect(cascade(plain, ".cred-ok:has(> .modal-close)").get("flex-wrap")).toBe("nowrap");
+    const acts = cascade(plain, ".warn-acts");
+    expect(acts.get("flex-wrap")).toBe("wrap");
+    expect(acts.get("flex")).toBe("0 1 auto");
+  });
+
   it("layo-8 / ui-3: a flipped stage menu and the closing dock button have reduced-motion answers", () => {
     expect(cascade(plain, '.stage-menu-pop[data-side="top"]').get("animation-name")).toBe("menu-in-up");
     expect(cascade(plain, ".stage-menu-pop").get("overflow-y")).toBe("auto");
     // The data-side rule outranks `.stage-menu-pop`, so it needs its own entry.
     expect(cascade(reduce, '.stage-menu-pop[data-side="top"]').get("animation")).toMatch(/^fade-in\b/);
     expect(cascade(reduce, ".dock:has(.dock-panel[data-closing]) .dock-fab").get("transition")).toBe("none");
+  });
+});
+
+/**
+ * Interface review 2026-09-24, the MEDIUM findings (the owner: "fix the 12
+ * MEDIUM findings too"). The sheet-side halves; the markup halves are pinned
+ * by the GitHub view, store browser and login suites.
+ */
+describe("interface review 2026-09-24: the MEDIUM fixes", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
+  const plain = RULES.filter((r) => r.at.length === 0);
+  const collapse = within(/max-width: 1100px/);
+  const wide = within(/min-width: 900px/);
+  /** What the cascade leaves `selector` among `rules`: later declarations win. */
+  const cascade = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const decls = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) decls.set(k, v);
+    return decls;
+  };
+
+  it("colo-4: a locked policy row takes one opacity step, and its chosen value keeps full strength", () => {
+    // CANARY: put `opacity: .55` back on `.cap-seg.locked`. Every option in a
+    // locked group is also disabled, so the two steps composited to .25.
+    const locked = cascade(plain, ".cap-seg.locked");
+    expect(locked.has("opacity")).toBe(false);
+    // The rule stays: it is the only one that defines `locked`.
+    expect(locked.get("pointer-events")).toBe("none");
+    expect(cascade(plain, ".cap-seg button:disabled").get("opacity")).toBe(".45");
+    expect(cascade(plain, ".cap-seg button.on:disabled").get("opacity")).toBe("1");
+  });
+
+  it("colo-8: today is a bold numeral with no ring, so only the selected day has ring and fill", () => {
+    const today = cascade(plain, ".cal-day.today:not(.sel)");
+    expect(today.has("box-shadow")).toBe(false);
+    expect(today.get("font-weight")).toBe("700");
+    const selected = cascade(plain, ".cal-day.sel");
+    expect(selected.get("box-shadow")).toBe("inset 0 0 0 1px var(--blue)");
+    expect(selected.get("background")).toBe("var(--blue-soft)");
+  });
+
+  it("typo-2 / colo-11: a commit subject wraps instead of ellipsizing, and its static SHA is not link-blue", () => {
+    const msg = cascade(plain, ".commit .msg");
+    for (const prop of ["overflow", "text-overflow", "white-space"]) {
+      expect(msg.has(prop), `.commit .msg ${prop}`).toBe(false);
+    }
+    expect(msg.get("overflow-wrap")).toBe("anywhere");
+    expect(cascade(plain, ".commit").get("align-items")).toBe("baseline");
+    expect(cascade(plain, ".commit .sha").has("color")).toBe(false);
+  });
+
+  it("colo-12: a branch trace takes the base ink, not the teal ready/OK one", () => {
+    expect(CODE).not.toMatch(/\.trace\.ok\b/);
+    expect(cascade(plain, ".trace").get("color")).toBe("var(--faint)");
+  });
+
+  it("layo-6: under 1100px a queue row's title takes line 1 by basis, not a 220px floor", () => {
+    // CANARY: put `min-width: 220px` back. It overflowed the Notifications
+    // panel at 320px and held titles at 220px beside the pills up to 1100px.
+    const main = cascade(collapse, ".rq-main");
+    expect(main.has("min-width")).toBe(false);
+    expect(main.get("flex")).toBe("1 1 calc(100% - 62px - 1rem)");
+    // The basis subtracts the key column and the row gap; they move together.
+    expect(cascade(plain, ".rq-key").get("width")).toBe("62px");
+    expect(cascade(plain, ".rq-row").get("gap")).toBe("1rem");
+  });
+
+  it("acce-27: below 900px the login aside stacks under the card instead of disappearing", () => {
+    // CANARY: put `.login-aside { display: none }` back outside the query. At
+    // 720px (200% zoom) and 320px the heading and the three claims, which
+    // appear nowhere else, were gone for everyone.
+    const aside = cascade(plain, ".login-aside");
+    expect(aside.get("display")).toBe("flex");
+    expect(aside.get("order")).toBe("1");
+    for (const selector of [".login-aside h2", ".login-aside p", ".login-aside-points", ".login-aside-points li"]) {
+      expect(cascade(plain, selector).get("display") ?? "", selector).not.toBe("none");
+    }
+    // The card right above shows the same mark, so the stacked aside drops it.
+    expect(cascade(plain, ".login-aside-mark").get("display")).toBe("none");
+    const beside = cascade(wide, ".login-aside");
+    expect(beside.get("order")).toBe("0");
+    expect(beside.get("animation")).toMatch(/^rise\b/);
+    expect(cascade(wide, ".login-aside-mark").get("display")).toBe("inline-grid");
+    const wrap = cascade(plain, ".login-wrap");
+    expect(wrap.get("gap")).toBe("1.5rem");
+    expect(wrap.get("align-content")).toBe("center");
+  });
+
+  it("acce-32: the store tree's open control is a bare button laid out as the row was", () => {
+    const open = cascade(plain, ".fm-open");
+    expect(open.get("display")).toBe("flex");
+    expect(open.get("flex-wrap")).toBe("wrap");
+    // A zero-basis button whose name keeps a 5rem basis inside it: at 320px the
+    // twist, glyph and name hold line 1 and the actions keep the row's line. A
+    // 12rem button basis dropped them to a third line (rows 85-101px, now 51-83).
+    expect(open.get("flex")).toBe("1 1 0");
+    expect(cascade(plain, ".fm-open .fm-name").get("flex")).toBe("1 1 5rem");
+    expect(cascade(plain, ".fm-name").get("flex")).toBe("1 1 9rem");
+    expect(open.get("min-width")).toBe("0");
+    expect(open.get("padding")).toBe("0");
+    expect(open.get("border")).toBe("0");
+    expect(open.get("text-align")).toBe("start");
+    // No cursor (the span on a file that cannot open must not show a hand) and
+    // no outline (the app ring draws its focus).
+    expect(open.has("cursor")).toBe(false);
+    expect(open.has("outline")).toBe(false);
+    // The glyph moved into the button; the new-folder row still has it bare.
+    expect(cascade(plain, ".fm-open > .ico").get("color")).toBe("var(--faint)");
+    expect(cascade(plain, ".fm-row.dir .fm-open > .ico").get("color")).toBe("var(--muted)");
+    expect(cascade(plain, ".fm-row.dir > .ico").get("color")).toBe("var(--muted)");
+    // The hand is the button's: the row's padding and gutter open nothing.
+    for (const selector of [".fm-row.dir", ".fm-row.openable"]) {
+      expect(plain.some((r) => parts(r).includes(selector) && r.decls.has("cursor")), selector).toBe(false);
+    }
+    expect(cascade(plain, ".fm-row.dir .fm-open").get("cursor")).toBe("pointer");
   });
 });

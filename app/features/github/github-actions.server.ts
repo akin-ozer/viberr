@@ -113,7 +113,7 @@ export async function runReconcile(
 }
 
 /**
- * Grant scope / re-check (settings spec §5.4, surfaced here until Phase 9
+ * Re-check scopes (settings spec §5.4, surfaced here until Phase 9
  * ships the Settings card): revalidateProjectCredential resolves every open
  * violation the fresh validation clears and writes the typed `policy`
  * event to each violation's own task — this wrapper only picks the toast.

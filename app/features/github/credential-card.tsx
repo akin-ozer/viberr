@@ -10,7 +10,7 @@ import { Icon } from "~/ui/icon";
  * THE credential card (github-view spec §7.12: one component, used by the
  * GitHub view now and Settings → RepoSettings in Phase 9, so the two can't
  * drift). Markup is the mock's `.cred-card` verbatim; the footer action
- * slot is the only variation point ("Fix in Settings" here, "Grant scope"
+ * slot is the only variation point ("Fix in Settings" here, "Re-check scopes"
  * in Settings — this page currently renders both, see the phase report).
  *
  * States:
@@ -38,7 +38,8 @@ export function CredentialCard({
   credential: CredentialCardData;
   /** Opens the flagged task (the cred-warn `.keybtn`). */
   onOpenTask: (taskKey: string) => void;
-  /** Right-aligned footer action slot (Fix in Settings / Grant scope). */
+  /** Right-aligned footer action slot (Fix in Settings / Re-check scopes).
+   * The green footer carries it only while an advisory is open. */
   warnActions?: ReactNode;
   /** Always-visible manage row (attach / rotate / remove the credential). */
   manageActions?: ReactNode;
@@ -154,16 +155,25 @@ export function CredentialCard({
             {unproven.length > 0
               ? ` (${unproven.map((s) => s.id).join(", ")})`
               : ""}
-            . Run Grant scope to validate.
+            . Use Re-check scopes to verify them.
           </span>
           {warnActions}
         </div>
       ) : (
         <div className="cred-ok">
           <Icon name="check" />
-          {unproven.length > 0
-            ? "Every provable scope verified. Secrets stay isolated from task records and timelines."
-            : "All required scopes proven. Secrets stay isolated from task records and timelines."}
+          <span>
+            {unproven.length > 0
+              ? "Every provable scope verified. Secrets stay isolated from task records and timelines."
+              : "All required scopes proven. Secrets stay isolated from task records and timelines."}
+          </span>
+          {/* An advisory's scope (`workflow`, `checks:read`) is never required,
+              so a card whose only problem is an advisory lands here. Its copy
+              and the delivery remedies send the person to Re-check, and the
+              pre-push refusal reads the cached header scopes: without the slot
+              here, granting the scope on GitHub changed nothing short of
+              rotating the credential. */}
+          {credential.advisories.length > 0 && warnActions}
         </div>
       )}
       {manageActions}

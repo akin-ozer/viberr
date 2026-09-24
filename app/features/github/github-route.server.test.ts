@@ -342,7 +342,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     });
     expect(outcome).toEqual({
       ok: true,
-      toast: "Scope granted · VIB-142 policy flag resolved",
+      toast: "Scopes re-checked · VIB-142 policy flag resolved",
       result: "resolved",
     });
 

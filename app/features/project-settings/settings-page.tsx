@@ -55,7 +55,7 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * Project settings: project identity and workflow-stages editor
  * (rename / HTML5-DnD reorder / add / remove with triage+done locks),
  * members panel (invite/remove — roles live in Policy), repository &
- * credentials (shared CredentialCard + the real Grant-scope flow), danger
+ * credentials (shared CredentialCard + the real Re-check scopes flow), danger
  * zone. All governed state comes from the loader; every mutation is a
  * route-action POST (no optimistic UI). Client-side guard toasts mirror
  * the mock; the server re-checks every guard.
@@ -796,6 +796,14 @@ function StageRow({
         title={locked ? `${stage.name} is fixed: ${locked}` : undefined}
       >
         {locked && <Icon name="lock" />}
+        {/* Interface review 2026-09-24 (acce-5): the title is a mouse extra —
+            it never opens for keyboard, touch or a screen reader, and the
+            disabled remove ✕ below can show nothing at all. */}
+        {locked && (
+          <span className="vh">
+            {stage.name} is fixed: {locked}. It can't be moved or removed.
+          </span>
+        )}
       </span>
       <StageColorMenu stage={stage} disabled={!canManage} onPick={onRecolor} />
       {editing ? (
@@ -1022,6 +1030,10 @@ export function StagesPanel({
           {canManage ? (
             <>
               Drag a row to reorder, or use its Move menu · click a name to rename.
+              {/* acce-5: the lock's reason, visibly — `title` never opens on
+                  the disabled remove ✕ or for touch. */}
+              {stages.length > 1 &&
+                ` ${stages[0]!.name} (the entry point) and ${stages.at(-1)!.name} (human acceptance) are fixed.`}{" "}
               Adding or removing a stage re-wires the transition chain around it.
               The new hop inherits the boundary it replaced. Loosen or tighten a
               boundary in{" "}
@@ -2097,7 +2109,7 @@ export function RepoPanel({
           credential={credential}
           onOpenTask={onOpenTask}
           warnActions={
-            // "Grant scope" re-checks a credential — on the no-credential card
+            // "Re-check scopes" re-validates a credential — on the no-credential card
             // it can only no-op into a toast, so it doesn't render there.
             credential.source !== "none" ? (
               <button
@@ -2108,7 +2120,7 @@ export function RepoPanel({
                 title="Re-check the credential's scopes against GitHub"
               >
                 <Icon name="check" />
-                Grant scope
+                Re-check scopes
               </button>
             ) : undefined
           }
@@ -2126,9 +2138,10 @@ export function RepoPanel({
         <div className="pol-note after last">
           <Icon name="lock" />
           <span>
-            Credential details need the <strong>Grant GitHub scope</strong>{" "}
-            grant (project admin or maintainer). The project GitHub page still
-            shows whether this repository is reachable.
+            Credential details need the{" "}
+            <strong>Manage the GitHub credential</strong> grant (project admin
+            or maintainer). The project GitHub page still shows whether this
+            repository is reachable.
           </span>
         </div>
       )}

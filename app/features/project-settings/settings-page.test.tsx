@@ -324,6 +324,27 @@ describe("StagesPanel", () => {
     expect(container.querySelectorAll(".stg-x:disabled")).toHaveLength(2);
   });
 
+  // acce-5 (interface review 2026-09-24): `title` never opens for keyboard,
+  // touch or a screen reader, and never on the disabled ✕ at all — so the lock
+  // reason is also real text: a `.vh` sentence in the locked row's handle, and
+  // a visible line in the manager's note.
+  it("says why the entry/terminal stages are locked, outside the title", () => {
+    const { container } = render(
+      <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
+    );
+    const reasons = Array.from(
+      container.querySelectorAll(".stg-handle .vh"),
+      (el) => el.textContent,
+    );
+    expect(reasons).toEqual([
+      "Triage is fixed: it's the entry point. It can't be moved or removed.",
+      "Done is fixed: human acceptance stays terminal. It can't be moved or removed.",
+    ]);
+    expect(container.querySelector(".pol-note")!.textContent).toContain(
+      "Triage (the entry point) and Done (human acceptance) are fixed.",
+    );
+  });
+
   it("locked/non-empty removals stop client-side; empty unlocked ones dispatch", () => {
     const onRemove = vi.fn();
     const { container } = render(
@@ -925,7 +946,7 @@ describe("settings panels take count + note styling from the sheet (F19-33)", ()
 });
 
 describe("RepoPanel", () => {
-  it("renders repo facts and the shared CredentialCard with Grant scope", () => {
+  it("renders repo facts and the shared CredentialCard with Re-check scopes", () => {
     const onGrant = vi.fn();
     const onSet = vi.fn();
     const onOpenTask = vi.fn();
@@ -961,7 +982,7 @@ describe("RepoPanel", () => {
     expect(container.querySelector(".cred-warn")).not.toBeNull();
     fireEvent.click(getByText("VIB-142"));
     expect(onOpenTask).toHaveBeenCalledWith("VIB-142");
-    fireEvent.click(getByText("Grant scope"));
+    fireEvent.click(getByText("Re-check scopes"));
     expect(onGrant).toHaveBeenCalled();
 
     // A bound PAT → Rotate (managed by `configured`, not the removed
@@ -1169,7 +1190,7 @@ describe("RepoPanel", () => {
     expect(withheld.container.querySelector(".scope-chip")).toBeNull();
     expect(withheld.container.textContent).not.toContain(CREDENTIAL.masked);
     expect(withheld.container.textContent).not.toContain(CREDENTIAL.label);
-    expect(withheld.container.textContent).toContain("Grant GitHub scope");
+    expect(withheld.container.textContent).toContain("Manage the GitHub credential");
     // …and the rest of the panel really did render, so the absences above are
     // the gate rather than a blank component.
   });
@@ -1401,7 +1422,7 @@ describe("SettingsPage — each panel gates on the action its own server guard c
       ),
       credential: Boolean(
         Array.from(container.querySelectorAll("button")).find(
-          (b) => b.textContent?.trim() === "Grant scope",
+          (b) => b.textContent?.trim() === "Re-check scopes",
         ),
       ),
       // Ruling 178: the required-reviewer table rides `edit-policy`
@@ -1569,7 +1590,7 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     expect(container.textContent).not.toContain(CREDENTIAL.masked);
     expect(container.textContent).not.toContain(CREDENTIAL.label);
     expect(container.querySelector(".scope-chip")).toBeNull();
-    expect(container.textContent).toContain("Grant GitHub scope");
+    expect(container.textContent).toContain("Manage the GitHub credential");
   });
 
   it("a contributor — full task authority, no project lifecycle — gets none either", () => {

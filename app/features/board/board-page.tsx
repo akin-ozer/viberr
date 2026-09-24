@@ -324,7 +324,10 @@ function TraceMark({ task }: { task: BoardTask }) {
   if (task.pr) {
     return (
       <span className="trace pr" title={"Pull request #" + task.pr.number}>
-        <Icon name="pr" />#{task.pr.number}
+        {/* Interface review 2026-09-24 (acce-5): the title is the pointer's
+            extra; the words reach the accessibility tree through `.vh`. */}
+        <Icon name="pr" />
+        <span className="vh">Pull request </span>#{task.pr.number}
       </span>
     );
   }
@@ -409,6 +412,9 @@ function ProblemChips({ task }: { task: BoardTask }) {
       {folded.length > 0 && (
         <span className="chip more" title={folded.map((p) => p.label).join(" · ")}>
           +{folded.length}
+          {/* Interface review 2026-09-24 (acce-5): the folded problems by name
+              for touch, keyboard and screen readers, as `LabelChips` does. */}
+          <span className="vh">{" " + folded.map((p) => p.label).join(", ")}</span>
         </span>
       )}
     </>

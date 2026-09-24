@@ -571,7 +571,7 @@ export interface RevalidateContext {
 export const REVALIDATE_COOLDOWN_MS = 60_000;
 
 /**
- * The real "Grant scope" / "Re-check scopes" backend (settings spec §5.4):
+ * The real "Re-check scopes" backend (settings spec §5.4):
  * re-validates the project credential and resolves every open scope
  * violation whose scope the fresh validation now reports granted
  * (header/probe ok, or `assumed` for unverifiable fine-grained write

@@ -322,9 +322,9 @@ function StoreTree({
 
   const newFolderRow = (path: string[], depth: number) => (
     // The row is a text field in a row shell, not an activatable directory row:
-    // it carries no role, tabIndex or handler, so it must not offer a real
-    // row's hand cursor and hover fill (`.editing` drops both, `.dir` keeps the
-    // folder glyph's weight).
+    // it carries no `.fm-open` button or handler, so it must not offer a real
+    // row's hover fill (`.editing` drops it, and the hand lives on `.fm-open`;
+    // `.dir` keeps the folder glyph's weight).
     <div
       className="fm-row dir editing"
       style={{ paddingLeft: `${0.6 + depth * 1.3}rem` }}
@@ -384,6 +384,31 @@ function StoreTree({
             : openable
               ? () => onOpenDoc(r.path, r.node.name)
               : undefined;
+        const rowFace = (
+          <>
+            <span className="twist">
+              {r.node.type === "dir" && (
+                <Icon name="chevron" className={r.open ? "r90" : ""} />
+              )}
+            </span>
+            {r.node.type === "dir" ? (
+              <FolderIco open={r.open} />
+            ) : (
+              <Icon name="file" />
+            )}
+            <span className="fm-name">{r.node.name}</span>
+            {r.node.type === "dir" ? (
+              <span className="fm-meta">
+                {countLabel(countKbFiles(r.node.children), "file")}
+              </span>
+            ) : (
+              <span className="fm-meta">
+                {prettySize(r.node.sizeBytes)}
+                <FileMtime iso={r.node.mtime} />
+              </span>
+            )}
+          </>
+        );
         return (
           <Fragment key={r.key + (r.node.type || "")}>
             <div
@@ -398,22 +423,6 @@ function StoreTree({
                   : "")
               }
               style={{ paddingLeft: `${0.6 + r.depth * 1.3}rem` }}
-              role={activate ? "button" : undefined}
-              tabIndex={activate ? 0 : undefined}
-              aria-expanded={r.node.type === "dir" ? r.open : undefined}
-              aria-label={openable ? "Open " + r.node.name : undefined}
-              onClick={activate}
-              onKeyDown={
-                activate
-                  ? (e) => {
-                      if (e.target !== e.currentTarget) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        activate();
-                      }
-                    }
-                  : undefined
-              }
               onDragOver={(e) =>
                 overDir(e, r.node.type === "dir" ? r.key : r.path.join("/"))
               }
@@ -424,26 +433,24 @@ function StoreTree({
                 )
               }
             >
-              <span className="twist">
-                {r.node.type === "dir" && (
-                  <Icon name="chevron" className={r.open ? "r90" : ""} />
-                )}
-              </span>
-              {r.node.type === "dir" ? (
-                <FolderIco open={r.open} />
+              {activate ? (
+                // Interface review 2026-09-24 (acce-32): the activation is a
+                // native button BESIDE the row actions, not a role="button"
+                // row around them — children of a button are presentational,
+                // and the folder row was named "decisions 3 files Upload into
+                // decisions New folder in decisions Delete decisions" while it
+                // only expanded. Same fix as notifications-page's UI-54 row.
+                <button
+                  type="button"
+                  className="fm-open"
+                  aria-expanded={r.node.type === "dir" ? r.open : undefined}
+                  aria-label={openable ? "Open " + r.node.name : undefined}
+                  onClick={activate}
+                >
+                  {rowFace}
+                </button>
               ) : (
-                <Icon name="file" />
-              )}
-              <span className="fm-name">{r.node.name}</span>
-              {r.node.type === "dir" ? (
-                <span className="fm-meta">
-                  {countLabel(countKbFiles(r.node.children), "file")}
-                </span>
-              ) : (
-                <span className="fm-meta">
-                  {prettySize(r.node.sizeBytes)}
-                  <FileMtime iso={r.node.mtime} />
-                </span>
+                <span className="fm-open">{rowFace}</span>
               )}
               {/* Row actions are ALWAYS drawn (pass 16). `.fm-acts` faded them
                   in on `:hover`/`:focus-within`, which is a mouse-only reveal —
@@ -454,7 +461,7 @@ function StoreTree({
                   action wrapper the org-settings resource rows already use, so
                   this is also the app's one row-action shape rather than a
                   third. (`.fm-acts` has since been deleted from app.css, P16-UI-25.) */}
-              <span className="rsrc-acts" onClick={(e) => e.stopPropagation()}>
+              <span className="rsrc-acts">
                 {r.node.type === "dir" && (
                   <>
                     <button

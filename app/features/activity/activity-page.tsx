@@ -267,6 +267,11 @@ function AuditRow({
 }) {
   const m = PEV_META[entry.kind] ?? PEV_META.change!;
   const resolved = entry.status === "resolved";
+  // What the pill's one word does not say: who resolved it and when, or how to.
+  const verdictDetail = resolved
+    ? (entry.resolvedBy ? ` by ${entry.resolvedBy}` : "") +
+      (entry.resolvedAt ? ` · ${timeLabel(entry.resolvedAt)}` : "")
+    : ": grant the missing scope to resolve";
   return (
     <div className={sub ? "pol-ev pev-sub" : "pol-ev"}>
       <span className={"pev-ico " + m.cls}>
@@ -289,20 +294,14 @@ function AuditRow({
         {entry.kind === "violation" && (
           <>
             {" "}
-            <span
-              title={
-                resolved
-                  ? "Resolved" +
-                    (entry.resolvedBy ? ` by ${entry.resolvedBy}` : "") +
-                    (entry.resolvedAt
-                      ? ` · ${timeLabel(entry.resolvedAt)}`
-                      : "")
-                  : "Open: grant the missing scope to resolve"
-              }
-            >
+            <span title={(resolved ? "Resolved" : "Open") + verdictDetail}>
               <Pill kind={resolved ? "done" : "input"} sm>
                 {resolved ? "resolved" : "open"}
               </Pill>
+              {/* Interface review 2026-09-24 (acce-5): the title is the
+                  pointer's extra; the rest of the sentence reaches touch,
+                  keyboard and screen readers as `.vh` after the pill. */}
+              {verdictDetail && <span className="vh">{verdictDetail}</span>}
             </span>
           </>
         )}
