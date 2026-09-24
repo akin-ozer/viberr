@@ -129,8 +129,9 @@ The mock under `design/html-app/app/*.jsx` is the structural source; `app/app.cs
 `:root` is the only token source (no Tailwind, no inline hex, new CSS only in the marked
 appended sections). One typeface, Inter, for body and display (ruling 365). Unstyled
 primitive packages are allowed only behind an `app/ui/*` boundary, rendered with classes
-`app.css` defines (ruling 166). One `Icon` component. Toast kind is passed explicitly.
-Dialogs are native `<dialog>` with Escape and scrim close. Every top-level surface
+`app.css` defines (ruling 166). One `Icon` component. A failure toast passes `"error"`
+explicitly; success is the default kind (ruling 455(b)). Dialogs are native `<dialog>`
+with Escape and scrim close. Every top-level surface
 carries a `data-screen-label`. WCAG 2.2 AA in both themes is an e2e gate. Full list in
 [../architecture/decisions.md#ui-porting-rules](../architecture/decisions.md#ui-porting-rules)
 and [../ui/surfaces.md](../ui/surfaces.md).

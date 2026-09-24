@@ -141,11 +141,19 @@ files) · **C** cache/operational (safe to lose).
 |---|---|---|
 | `projects` | D | One row per `project.md`: `slug`, `name`, `archived`, `repo`, `default_branch`, `task_prefix`, `description`, JSON copies `stages_json`, `workflow_json`, `agent_policy_json`, `credential_policy_json`, `guardrails_json`, `required_reviewers_json` (ruling 178: the required-reviewer rules RESOLVED to stage and agent names at project-rebuild time, so the task walk prints the acceptance gate's sentence from the row), `source_path`, `content_hash`, `parsed_at`. |
 | `project_members` | D | `members[]` from `project.md`: (`project_slug`, `user_id`) → `role` (`admin \| maintainer \| contributor \| viewer`). |
-| `task_projections` | D | One row per `task.md`, keyed (`project_slug`, `task_key`): `title`, `stage`, **derived** `readiness` plus `stored_readiness`, `waiting` (CHECK mirrors `WAITING_VALUES`, including the projection-only `schedule`, ruling 225), `urgent`, `priority`, `labels_json`, `due_date`, `blocked_by_json` (ruling 131: the task's `blockedBy` list verbatim; entry states are resolved at read time, never stored), `archived`, derived `validation` (CHECK mirrors `VALIDATION_VALUES`), `validation_block_reason`, `acceptance` (`forced`), `continuity` (`degraded`), `owner_user_id`, the engagement snapshots `specialist_json` / `reviewers_json` / `operator_json`, `branch`, `repo` (always the project's), `pr_json`, `github_json`, `work_revision_sha`, `goal`, `packet_json`, `recommendation_count` and `recommendation_kinds` (the distinct kinds of the pending recommendations, sorted and comma-joined), `schedules_json`, `event_count`, `comment_count`, `diagnostic_count`, `goal_id` / `goal_link_index`, `created_at`, `updated_at`, `source_path`, `content_hash`, `parsed_at`, `board_rank`. |
+| `task_projections` | D | One row per `task.md`, keyed (`project_slug`, `task_key`): `title`, `stage`, **derived** `readiness` plus `stored_readiness`, `waiting` (CHECK mirrors `WAITING_VALUES`, including the projection-only `schedule`, ruling 225), `urgent`, `priority`, `labels_json`, `due_date`, `blocked_by_json` (ruling 131: the task's `blockedBy` list verbatim; entry states are resolved at read time, never stored), `archived`, derived `validation` (CHECK mirrors `VALIDATION_VALUES`), `validation_block_reason`, `acceptance` (`forced`), `continuity` (`degraded`), `owner_user_id`, the engagement snapshots `specialist_json` (the delivering engagement) / `reviewers_json` (the supporting engagements) / `operator_json` (the operator assignment), `branch`, `repo` (always the project's), `pr_json`, `github_json`, `work_revision_sha`, `goal`, `packet_json`, `recommendation_count` and `recommendation_kinds` (the distinct kinds of the pending recommendations, sorted and comma-joined), `schedules_json`, `event_count`, `comment_count`, `diagnostic_count`, `goal_id` / `goal_link_index`, `created_at`, `updated_at`, `source_path`, `content_hash`, `parsed_at`, `board_rank`. |
 | `task_events` | D | The task timeline, one row per entry: `id`, `project_slug`, `task_key`, `position` (0 = newest), `occurred_at`, `type`, `actor_kind` (`human \| agent \| operator \| controller \| system`; an unrecognized author projects as `system`), `actor_ref` (a user id, `agent/<profileId>`, `operator`, `controller`, or a system id), a denormalized `actor_json` snapshot, `title`, `text`, `to_agent`, `evidence_json`, `attachments_json`. Replaced wholesale per task on every re-project. |
 | `goal_projections` | D | One row per goal file, keyed (`project_slug`, `goal_id`): `title`, `status`, `created_by`, `created_by_label`, `on_failure`, `links_json` with link statuses **reconciled against live task rows**, `description`, `current_index`, `links_total`, `links_done`, `created_at`, `updated_at`, `source_path`, `content_hash`, `parsed_at`. |
 | `diagnostics` | D | Parse findings per source path: `id`, `project_slug`, `task_key`, `source_path`, `severity` (`info \| warning \| error`), `code`, `path`, `message`, `hard_stop`, `observed_at`. |
 | `provenance` | C | Observational log of what the projector and reconciler saw: `id`, `source_path`, `content_hash`, `observed_at`, `action` (`projected \| removed \| error \| rescan`, `github.reconcile`, `github.merge`), `details_json`. No retention; prune by hand. |
+
+`specialist_json` and `reviewers_json` keep the names of the static delivering and reviewer
+slots that ruling 98 replaced with dynamic dispatch (ruling 455(e)); they hold engagements.
+`specialist_json` is the delivering engagement (`deliveringEngagement`, NULL while the task
+has none) and `reviewers_json` every supporting engagement in `engagements[]` order
+(`supportingEngagements`), whatever its role. A supporting run's `thread_id` starts `r<n>`,
+its index into `reviewers_json`; that is how `agent-deployments.server.ts` joins a run to its
+engagement.
 
 ### GitHub and secrets
 
@@ -186,7 +194,9 @@ registers for key rotation: `github_pats.encrypted_token`, `org_mcp_servers.cred
 - `kind` is a **delivery axis**, not a role: `operator` is the operator's own run,
   `primary` a delivering engagement, `reviewer` any supporting run whatever its role, and
   `controller` a controller turn. Controller turns use `project_slug = ''` and
-  `task_key = <conversation id>`, so no task-scoped query matches them.
+  `task_key = <conversation id>`, so no task-scoped query matches them. `primary` and
+  `reviewer` are slot-era names kept by ruling 455(e): `agent_runs` is a primary table, so
+  no rescan can rewrite its rows, and the two single-flight indexes below are keyed on them.
 - `usage_final` (F35-1) is 1 once a provider usage figure landed; while it is 0 the token
   columns hold the Claude adapter's live estimate or nothing, which the Live run panel prints
   as an estimate and Insights leaves out of its token sums. A stopped or errored run never
