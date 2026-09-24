@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -6,9 +7,11 @@ import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { gone } from "../../../test-support/process-liveness";
+import { waitFor } from "../../../test-support/polling";
 import {
   startHttpUpstream,
   startSseUpstream,
+  writeSilentStdioUpstream,
   writeStdioUpstream,
   type UpstreamHandle,
 } from "../../../test-support/mcp-upstream";
@@ -403,6 +406,25 @@ describe("the gateway against a stdio upstream the server spawns", () => {
     await expect(client.listTools()).rejects.toMatchObject({ code: 404 });
     const again = await stdioRun("run_gw_exit_2");
     expect(again.pid).not.toBe(pid);
+  });
+
+  it("R-gateway-5: a shutdown while a stdio upstream is still in its handshake kills that process at once", async () => {
+    // A handshake clock far longer than the check below, so only the stop
+    // itself can end the process in time. CANARY: leave a connecting
+    // upstream to `pending.then(close)` and it outlives the shutdown until
+    // this 20 s timeout fires.
+    await stopMcpGateway();
+    await startMcpGateway({ port: 0, connectTimeoutMs: 20_000 });
+    const { command, pidFile } = writeSilentStdioUpstream(ctx.makeTempDir("viberr-gw-silent-"));
+    addMcp("slow", "stdio", command, SECRET);
+    const mount = gatewayConfig.parse(mountRun(["slow"]).servers.slow);
+    const answered = rawInitialize(mount.url, mount.headers.Authorization).catch(() => null);
+    await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, "utf8") !== "", "the stdio process to start");
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    // What `runProcessShutdown` does right before it re-raises the signal.
+    void stopMcpGateway();
+    expect(await gone(pid, 1_000)).toBe(true);
+    await answered;
   });
 });
 

@@ -176,14 +176,14 @@ export class McpChildTransport implements Transport {
  */
 export async function connectStdioUpstream(
   commandLine: string,
-  options: { token?: string | null; spawnImpl?: McpSpawn; timeoutMs?: number } = {},
+  options: { token?: string | null; spawnImpl?: McpSpawn; timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<UpstreamConnection> {
   const [command, ...args] = splitMcpCommand(commandLine);
   if (!command) throw new UpstreamConnectError("the registered stdio command is empty");
   const transport = new McpChildTransport(command, args, options.token ?? null, options.spawnImpl);
   const client = newUpstreamClient();
   try {
-    await connectWithin(client, transport, options.timeoutMs ?? UPSTREAM_CONNECT_TIMEOUT_MS);
+    await connectWithin(client, transport, options.timeoutMs ?? UPSTREAM_CONNECT_TIMEOUT_MS, options.signal);
   } catch (error) {
     // The process's own account of itself beats "Connection closed".
     throw new UpstreamConnectError(transport.describeExit() ?? upstreamFailureReason(error), {

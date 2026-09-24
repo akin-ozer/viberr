@@ -209,3 +209,26 @@ process.stdin.on("data", (chunk) => {
   );
   return `"${process.execPath}" "${script}"`;
 }
+
+/** A stdio fixture's registry command line and where it writes its pid. */
+export interface StdioFixture {
+  command: string;
+  pidFile: string;
+}
+
+/**
+ * A stdio MCP server that never finishes its handshake: it writes its pid to
+ * `pidFile` and reads stdin without ever answering, the way a cold `npx -y`
+ * install holds `initialize` open. For a shutdown that lands mid-handshake.
+ */
+export function writeSilentStdioUpstream(dir: string): StdioFixture {
+  const script = path.join(dir, "silent-upstream.cjs");
+  const pidFile = path.join(dir, "silent-upstream.pid");
+  writeFileSync(
+    script,
+    `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+process.stdin.on("data", () => {});
+`,
+  );
+  return { command: `"${process.execPath}" "${script}"`, pidFile };
+}

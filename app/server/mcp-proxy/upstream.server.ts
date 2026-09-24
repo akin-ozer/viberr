@@ -66,6 +66,8 @@ export interface UpstreamHttpOptions {
   auth?: UpstreamTokenSource;
   fetchImpl?: McpFetch;
   timeoutMs?: number;
+  /** Aborts the connect while it is in flight (`connectWithin`). */
+  signal?: AbortSignal;
 }
 
 /**
@@ -159,29 +161,47 @@ export function newUpstreamClient(): Client {
   return client;
 }
 
+/** What an aborted connect rejects with. */
+const CLOSED_BEFORE_OPEN = "the connection was closed before it opened";
+
 /**
  * Connect `client` over `transport` inside `timeoutMs`, or close it and throw.
  * The SDK's own request timeout covers `initialize` but not the transport's
  * start, and a legacy SSE server that never sends its `endpoint` event would
  * otherwise hold the connect open for ever.
+ *
+ * `signal` aborts a connect in flight. The client is closed from the abort
+ * listener itself, which reaches the transport's close before its first await,
+ * so a stdio process still in its handshake is killed before `abort()` returns
+ * — what a shutdown needs, since it re-raises the signal right after
+ * (R-gateway-5, 2026-09-25).
  */
 export async function connectWithin(
   client: Client,
   transport: Transport,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) throw new UpstreamConnectError(CLOSED_BEFORE_OPEN);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
+  let onAbort: (() => void) | undefined;
+  const stopped = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new UpstreamTimeoutError(timeoutMs)), timeoutMs);
     timer.unref?.();
+    onAbort = () => {
+      void client.close().catch(() => undefined);
+      reject(new UpstreamConnectError(CLOSED_BEFORE_OPEN));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
   try {
-    await Promise.race([client.connect(transport, { timeout: timeoutMs }), timeout]);
+    await Promise.race([client.connect(transport, { timeout: timeoutMs }), stopped]);
   } catch (error) {
     await client.close().catch(() => undefined);
     throw error;
   } finally {
     clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -304,13 +324,14 @@ export async function connectHttpUpstream(
       streamable,
       new StreamableHTTPClientTransport(url, transportOptions),
       timeoutMs,
+      options.signal,
     );
     return { client: streamable, transport: "streamable-http" };
   } catch (primary) {
-    if (!fallsBackToSse(primary)) throw failure(primary);
+    if (!fallsBackToSse(primary) || options.signal?.aborted) throw failure(primary);
     const sse = newUpstreamClient();
     try {
-      await connectWithin(sse, new SSEClientTransport(url, transportOptions), timeoutMs);
+      await connectWithin(sse, new SSEClientTransport(url, transportOptions), timeoutMs, options.signal);
       return { client: sse, transport: "sse" };
     } catch {
       // The Streamable HTTP answer is the one worth reporting: the SSE attempt

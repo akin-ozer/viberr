@@ -150,7 +150,14 @@ interface Upstream {
 /** An upstream connecting (`ready` null) or connected. */
 interface UpstreamEntry {
   pending: Promise<Upstream>;
+  /** Set the moment the connect has an upstream, in the same synchronous
+   *  stretch, so no close ever finds a live connection it cannot reach. */
   ready: Upstream | null;
+  /** Aborted by a close that finds the upstream still connecting: its
+   *  transport closes at once — a stdio process still in its handshake is
+   *  killed before the close returns — instead of after the handshake,
+   *  which a shutdown never waits for (R-gateway-5). */
+  abort: AbortController;
 }
 
 interface Session {
@@ -171,8 +178,9 @@ interface GatewayState {
   /** runId → sha256(token). */
   byRun: Map<string, string>;
   /** `${runId}\0${server}` → the upstream, connecting (`ready` null) or
-   *  connected. `ready` is what lets a shutdown close a live upstream — and
-   *  kill a spawned stdio process — synchronously, before the signal lands. */
+   *  connected. `ready` and `abort` are what let a shutdown close an upstream
+   *  — and kill a spawned stdio process, connected or still in its handshake —
+   *  synchronously, before the signal lands. */
   upstreams: Map<string, UpstreamEntry>;
   /** MCP session id → session. */
   sessions: Map<string, Session>;
@@ -409,6 +417,7 @@ function closeUpstreamByKey(key: string): void {
   const entry = state.upstreams.get(key);
   if (!entry) return;
   state.upstreams.delete(key);
+  entry.abort.abort();
   const close = (upstream: Upstream): Promise<void> => {
     for (const session of Array.from(upstream.sessions)) closeSession(session);
     // `Client.close` reaches the transport's close — the stdio process-group
@@ -636,24 +645,29 @@ function upstreamFor(grant: RunGrant, server: string): Promise<Upstream> {
   const key = `${grant.runId}${SEP}${server}`;
   const existing = state.upstreams.get(key);
   if (existing) return existing.pending;
+  const abort = new AbortController();
   const entry: UpstreamEntry = {
-    pending: connectUpstream(grant, server, key),
+    pending: connectUpstream(grant, server, key, abort.signal, (upstream) => {
+      entry.ready = upstream;
+    }),
     ready: null,
+    abort,
   };
   state.upstreams.set(key, entry);
-  entry.pending.then(
-    (upstream) => {
-      entry.ready = upstream;
-    },
-    () => {
-      // A failed connect is not cached: the run's next initialize retries.
-      if (state.upstreams.get(key) === entry) state.upstreams.delete(key);
-    },
-  );
+  entry.pending.catch(() => {
+    // A failed connect is not cached: the run's next initialize retries.
+    if (state.upstreams.get(key) === entry) state.upstreams.delete(key);
+  });
   return entry.pending;
 }
 
-async function connectUpstream(grant: RunGrant, server: string, key: string): Promise<Upstream> {
+async function connectUpstream(
+  grant: RunGrant,
+  server: string,
+  key: string,
+  signal: AbortSignal,
+  onReady: (upstream: Upstream) => void,
+): Promise<Upstream> {
   const state = getState();
   const row = listMcpServers(grant.db).find((entry) => entry.name === server);
   if (!row) throw new UpstreamConnectError("it is no longer in the org MCP registry");
@@ -665,10 +679,11 @@ async function connectUpstream(grant: RunGrant, server: string, key: string): Pr
   // Ruling 469: an OAuth sign-in's access token is asked for on every request
   // (renewed when it has run out, and once after a 401), never handed over.
   const auth = credential.state === "oauth" ? mcpOAuthTokenSource(grant.db, row.id) : undefined;
+  const timeoutMs = state.timeouts.connectMs;
   const connection =
     row.transport === "stdio"
-      ? await connectStdioUpstream(row.target, { token, timeoutMs: state.timeouts.connectMs })
-      : await connectHttpUpstream(row.target, { token, auth, timeoutMs: state.timeouts.connectMs });
+      ? await connectStdioUpstream(row.target, { token, timeoutMs, signal })
+      : await connectHttpUpstream(row.target, { token, auth, timeoutMs, signal });
   const upstream: Upstream = {
     key,
     runId: grant.runId,
@@ -679,12 +694,13 @@ async function connectUpstream(grant: RunGrant, server: string, key: string): Pr
     writeTools: new Set(row.writeTools),
     sessions: new Set(),
   };
-  // A revoke that landed while this connected finds nothing to close yet, so
-  // the connection closes itself here.
-  if (!state.byRun.has(grant.runId)) {
+  // A revoke or a stop that landed while this connected finds nothing to
+  // close yet, so the connection closes itself here.
+  if (!state.byRun.has(grant.runId) || signal.aborted) {
     await connection.client.close().catch(() => undefined);
     throw new UpstreamConnectError("the run has ended");
   }
+  onReady(upstream);
   const client = connection.client;
   client.onclose = () => {
     const entry = state.upstreams.get(key);
