@@ -1306,20 +1306,26 @@ const ConsoleView = memo(function ConsoleView({
   const rows = folder.fold(lines, raw, thread?.epoch ?? 0);
   /**
    * The disclosures the reader opened (P19-G11 run inputs, P19-RC1 thoughts,
-   * ruling 366(d) heartbeat folds and argument lists), keyed `kind|row key`.
-   * A row's key is its first line's `consoleLineKey`, which survives
-   * streaming, folding and backward paging; it used to be the stored envelope,
-   * which a console now holds only while its raw view is open.
+   * ruling 366(d) heartbeat folds and argument lists), keyed
+   * `thread|kind|row key`. A row's key is its first line's `consoleLineKey`,
+   * which survives streaming, folding and backward paging; it used to be the
+   * stored envelope, which a console now holds only while its raw view is
+   * open. Ruling 454 (CON-6): every thread's first line is `0:0`, and this
+   * view outlives an agent switch, so the thread is part of the key; a
+   * disclosure the reader opened stays with its own agent.
    */
   const [open, setOpen] = useState(NONE_OPEN);
-  const onToggle = useCallback((what: Disclosure, key: string) => {
-    setOpen((prev) => {
-      const next = new Set(prev);
-      const id = `${what}|${key}`;
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-  }, []);
+  const onToggle = useCallback(
+    (what: Disclosure, key: string) => {
+      setOpen((prev) => {
+        const next = new Set(prev);
+        const id = `${threadId}|${what}|${key}`;
+        if (!next.delete(id)) next.add(id);
+        return next;
+      });
+    },
+    [threadId],
+  );
   /**
    * P13-D-11: the console's scroll geometry captured at the moment "load older"
    * was pressed. Prepending content pushes everything the reader was looking at
@@ -1424,7 +1430,7 @@ const ConsoleView = memo(function ConsoleView({
               hydrated={hydrated}
               backend={backend}
               kind={kind}
-              open={what !== null && open.has(`${what}|${row.key}`)}
+              open={what !== null && open.has(`${threadId}|${what}|${row.key}`)}
               onToggle={onToggle}
             />
           );

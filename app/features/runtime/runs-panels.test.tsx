@@ -1218,6 +1218,26 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
     expect(tags[1]).toBe("system·init");
   });
 
+  it("keeps an opened disclosure with its own agent (CON-6)", () => {
+    // Every thread's first line is `0:0`, so a disclosure keyed by the row
+    // alone opened the same row of whichever agent the picker showed next.
+    const op = mkRun({ id: "op", serverRunId: "run_op", state: "idle", lifecycle: "finished" });
+    const spec = mkRun({ id: "spec", serverRunId: "run_spec", state: "idle", lifecycle: "finished" });
+    const linesByThread = { op: [{ ...line, key: "0:0" }], spec: [{ ...line, key: "0:0" }] };
+    const { getByText, queryByText, rerender } = render(
+      <Logs runtime={[op, spec]} sel="op" onSel={() => {}} linesByThread={linesByThread} />,
+    );
+    fireEvent.click(getByText("show what this run was given"));
+    expect(getByText("hide what this run was given")).toBeTruthy();
+    rerender(<Logs runtime={[op, spec]} sel="spec" onSel={() => {}} linesByThread={linesByThread} />);
+    // CANARY: key the open set by `kind|row key` alone and this row opens.
+    expect(queryByText("hide what this run was given")).toBeNull();
+    expect(getByText("show what this run was given")).toBeTruthy();
+    // The operator's row is still open when the reader comes back to it.
+    rerender(<Logs runtime={[op, spec]} sel="op" onSel={() => {}} linesByThread={linesByThread} />);
+    expect(getByText("hide what this run was given")).toBeTruthy();
+  });
+
   it("yields to the raw toggle like every other line", () => {
     // The `{ } raw` contract is "the stored envelope, verbatim" — a viberr line
     // does not get to keep its friendly rendering there.
