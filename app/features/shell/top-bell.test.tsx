@@ -213,3 +213,25 @@ describe("a failed list load stays in the bell (ruling 457)", () => {
     });
   }
 });
+
+/**
+ * Better-ui review 2026-09-24: the bell showed no open state while its popover
+ * was up, unlike the account trigger beside it. `app.css` draws it from
+ * `.bell-btn[aria-expanded="true"]`, so the attribute has to follow the
+ * popover both ways. Canary: pin `aria-expanded` to `false`.
+ */
+describe("the bell says it is open while its popover is up", () => {
+  it("holds aria-expanded for exactly as long as the popover shows", async () => {
+    const view = await mountWorkspaceReady({ unread: 1, list: [notification(1)] });
+    const bell = bellOf(view);
+    expect(bell.classList.contains("bell-btn")).toBe(true);
+    expect(bell.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(bell);
+    await listSettled(view);
+    expect(bell.getAttribute("aria-expanded")).toBe("true");
+    // The scrim closes it, as a click anywhere outside does.
+    fireEvent.click(view.container.querySelector(".menu-scrim")!);
+    expect(view.container.querySelector(".ntf-pop")).toBeNull();
+    expect(bell.getAttribute("aria-expanded")).toBe("false");
+  });
+});

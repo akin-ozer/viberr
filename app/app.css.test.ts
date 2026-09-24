@@ -4341,3 +4341,65 @@ describe("interface review 2026-09-24: the MEDIUM fixes", () => {
     expect(cascade(plain, ".fm-row.dir .fm-open").get("cursor")).toBe("pointer");
   });
 });
+
+/**
+ * Better-ui review 2026-09-24, five small leftovers it filed. Two were already
+ * fixed by the interface review (ruling 455): the locked policy row's stacked
+ * opacity is pinned by colo-4 above, and the GitHub bar's neutral pill is
+ * pinned here, because the sweep only sees that pair while its rule exists.
+ * The move-back glyph and the markup halves of the other two are pinned by
+ * the task-disposition, execution-profile and top-bell suites.
+ */
+describe("better-ui review 2026-09-24: the small leftovers", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const plain = RULES.filter((r) => r.at.length === 0);
+  /** What the cascade leaves `selector` among `rules`: later declarations win. */
+  const cascade = (rules: CssRule[], selector: string) => {
+    const hit = rules.filter((r) => parts(r).includes(selector));
+    expect(hit.length, `${selector} must have a rule`).toBeGreaterThan(0);
+    const decls = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) decls.set(k, v);
+    return decls;
+  };
+
+  it("the GitHub bar's neutral pill keeps a fill of its own and clears AA on the bar, in both themes", () => {
+    // CANARY: delete `.gh-bar .pill.neutral`. The sweep stays green, because it
+    // then measures only the base pill (--muted on --tint-press) against the
+    // page; on the inverted bar that pair drew at 2.48:1 light, 1.62:1 dark.
+    const onBar = SWEEP.pairs.filter((p) => p.selector === ".gh-bar .pill.neutral");
+    expect(onBar.map((p) => p.theme).sort()).toEqual(["dark", "light"]);
+    const barPaint = cascade(plain, ".gh-bar").get("background")!;
+    for (const p of onBar) {
+      expect(p.ratio, `${p.theme} ink on the pill`).toBeGreaterThanOrEqual(4.5);
+      // "Lost its fill" was a --fg tint on a --fg ground: the pill's own fill
+      // has to stand a visible step off the bar it sits on.
+      const tokens = THEMES.find(([theme]) => theme === p.theme)![1];
+      const bar = asHex(resolveColor(barPaint, tokens)!.rgb);
+      expect(contrastRatio(p.bg, bar), `${p.theme} fill against the bar`).toBeGreaterThan(1.25);
+    }
+  });
+
+  it("a run control's start holds the width of its widest label", () => {
+    // CANARY: drop the min-width, and the when-picker slides 21px (operator)
+    // or 32px (dispatch) under the pointer that just switched it to Schedule,
+    // and the row shifts again when the start reads "Scheduling…" (ruling 368).
+    // One floor serves both starts: "Scheduling…" is the widest label on each.
+    expect(cascade(plain, ".op-run > .run-go").get("min-width")).toBe("7.4rem");
+    // The widths were measured at these metrics; a change here re-opens them.
+    const sm = cascade(plain, ".btn.sm");
+    expect(sm.get("font-size")).toBe(".75rem");
+    expect(sm.get("padding")).toBe(".375rem .5rem");
+    expect(cascade(plain, ".btn").get("gap")).toBe(".375rem");
+  });
+
+  it("the open bell holds the icon-button family's pressed look", () => {
+    // CANARY: delete the rule, and the bell reads the same with its popover up
+    // as at rest while the account trigger beside it rings.
+    const open = cascade(plain, '.bell-btn[aria-expanded="true"]');
+    const pressed = cascade(plain, '.dock-head-acts .icon-btn[aria-pressed="true"]');
+    for (const prop of ["background", "color", "border-color"]) {
+      expect(open.get(prop), prop).toBe(pressed.get(prop));
+    }
+    expect(open.get("border-color")).toBe("var(--border)");
+  });
+});

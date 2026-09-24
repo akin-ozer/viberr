@@ -741,3 +741,35 @@ describe("ruling 368: the run controls name the request in flight", () => {
     expect(agentButton(container).textContent).toBe("Run");
   });
 });
+
+/**
+ * Better-ui review 2026-09-24: the when-picker turns a start into "Schedule",
+ * and the button's new width slid the picker under the pointer that had just
+ * used it. `app.css` holds each start at the width of its widest label (the
+ * in-flight "Scheduling…" since ruling 368), keyed on `.op-run > .run-go`,
+ * which the dispatch's `.op-run.agent-run` row matches too. This pins that the
+ * rendered starts are what that selector selects, on both sides of the
+ * switch. Canary: drop `run-go` from either button.
+ */
+describe("a run control's start keeps its width rule across Run and Schedule", () => {
+  it("the operator's and the dispatch's starts are the elements the width rules select", () => {
+    const { container } = renderExec({ task: ownedTask(), runPrincipal: connectedPrincipal() });
+    const operatorStart = () =>
+      container.querySelector<HTMLButtonElement>(".op-run:not(.agent-run) > .run-go")!;
+    const dispatchStart = () =>
+      container.querySelector<HTMLButtonElement>(".op-run.agent-run > .run-go")!;
+    expect(operatorStart().textContent).toBe("Run operator");
+    expect(dispatchStart().textContent).toBe("Run");
+    for (const [picker, start] of [
+      ["When the operator run starts", operatorStart],
+      ["When the agent run starts", dispatchStart],
+    ] as const) {
+      fireEvent.change(container.querySelector<HTMLSelectElement>(`select[aria-label="${picker}"]`)!, {
+        target: { value: "60" },
+      });
+      expect(start().textContent).toBe("Schedule");
+    }
+    // The rule sizes the two starts and nothing else in the panel.
+    expect(container.querySelectorAll(".run-go")).toHaveLength(2);
+  });
+});

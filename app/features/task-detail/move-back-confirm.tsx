@@ -47,7 +47,10 @@ export function MoveBackConfirm({
     >
       <div className="modal-head">
         <span className="agent-glyph lg">
-          <Icon name="arrow" />
+          {/* The arrow points back, the way the move goes (better-ui review
+              2026-09-24): it was the forward arrow. `r180` is the same turn
+              the controller's back link uses. */}
+          <Icon name="arrow" className="r180" />
         </span>
         <div className="mh-main">
           <h2>Move back to {toStageName}?</h2>

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, data } from "react-router";
+import { isThemePreference, type ThemePreference } from "~/server/theme/theme-cookie.server";
 import { ToastProvider } from "~/ui/toast";
 import { staticPackagesOf } from "../../../test-support/static-imports";
 import { UserMenu } from "./user-menu";
@@ -221,6 +222,122 @@ describe("a press before the menu arrives can be taken back (ruling 457)", () =>
     fireEvent.pointerDown(plain, { button: 0 });
     await arrived(container);
     expect(container.querySelector('[role="menu"]')).not.toBeNull();
+  });
+});
+
+/**
+ * The page flips theme at the press, but the root loader confirms the new
+ * value only when the save's revalidation lands. The item used to read that
+ * confirmed value, so its label lagged a step behind the page, and a second
+ * quick press cycled from the stale value: light, press, press landed on Dark
+ * again instead of System. Each save below is held at the server until the
+ * test releases it, which is the window a quick second press falls into.
+ */
+describe("the theme item reads the theme on screen, not the confirmed one", () => {
+  const originalMatchMedia = window.matchMedia;
+  beforeEach(() => {
+    document.documentElement.dataset.theme = "light";
+    // jsdom has no matchMedia, and "system" resolves through it: an OS in light.
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+    });
+  });
+  afterEach(() => {
+    delete document.documentElement.dataset.theme;
+    Object.defineProperty(window, "matchMedia", { configurable: true, value: originalMatchMedia });
+  });
+
+  /** The menu under a loader that confirms whatever /prefs/theme last saved
+   *  (Light to start), with every save held until `release`. */
+  async function mountSaving({ refuse = false } = {}) {
+    let saved: ThemePreference = "light";
+    const posted: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        loader: () => ({ theme: saved }),
+        Component: ({ loaderData }: { loaderData: { theme: ThemePreference } }) => (
+          <ToastProvider>
+            <UserMenu
+              user={{ id: "u", name: "Arda Kaya", email: "arda@viberr.dev", role: "admin", avatarTone: "" }}
+              theme={loaderData.theme}
+            />
+          </ToastProvider>
+        ),
+      },
+      {
+        path: "/prefs/theme",
+        action: async ({ request }) => {
+          const theme = String((await request.formData()).get("theme"));
+          if (!isThemePreference(theme)) throw new Error(`not a theme: ${theme}`);
+          posted.push(theme);
+          await held;
+          if (refuse) {
+            return data({ ok: false, error: "Session expired. Reload the page." }, { status: 403 });
+          }
+          saved = theme;
+          return { ok: true, theme };
+        },
+      },
+    ]);
+    const view = render(<Stub initialEntries={["/"]} />);
+    // Open it on the Radix trigger: once an earlier test has fetched the menu,
+    // the plain trigger is swapped out as soon as it mounts.
+    fireEvent.pointerEnter(await view.findByLabelText("Account menu"));
+    fireEvent.pointerDown(await radixTrigger(view.container), { button: 0 });
+    const item = await view.findByText(/Switch theme/);
+    const label = () => item.querySelector(".faint")!.textContent;
+    const page = () => document.documentElement.dataset.theme;
+    return { ...view, item, label, page, posted, release, saved: () => saved };
+  }
+
+  it("names the theme a save is carrying, before the loader confirms it", async () => {
+    const { item, label, page, posted, release, findByText, saved } = await mountSaving();
+    expect(label()).toBe("Light");
+    fireEvent.click(item);
+    // CANARY: read the loader's `theme` for the label and this says "Light".
+    expect(label()).toBe("Dark");
+    expect(page()).toBe("dark");
+    await waitFor(() => expect(posted).toEqual(["dark"]));
+    expect(label(), "still saving").toBe("Dark");
+    act(release);
+    await findByText("Theme · Dark");
+    expect(saved()).toBe("dark");
+    expect(label(), "confirmed").toBe("Dark");
+  });
+
+  it("two quick presses cycle light → dark → system", async () => {
+    const { item, label, page, posted, release, findByText, saved } = await mountSaving();
+    fireEvent.click(item);
+    // The first save has reached the server and is still out.
+    await waitFor(() => expect(posted).toEqual(["dark"]));
+    fireEvent.click(item);
+    // CANARY: cycle from the loader's `theme` and this posts "dark" again.
+    await waitFor(() => expect(posted).toEqual(["dark", "system"]));
+    expect(label()).toBe("System");
+    expect(page(), "System on an OS in light").toBe("light");
+    act(release);
+    await findByText("Theme · System (follows your OS)");
+    expect(saved()).toBe("system");
+    expect(label()).toBe("System");
+    expect(page()).toBe("light");
+  });
+
+  it("a refused save puts the label and the page back on the confirmed theme", async () => {
+    const { item, label, page, release, findByText } = await mountSaving({ refuse: true });
+    fireEvent.click(item);
+    expect(label()).toBe("Dark");
+    expect(page()).toBe("dark");
+    act(release);
+    await findByText("Session expired. Reload the page.");
+    expect(label()).toBe("Light");
+    // CANARY: drop the rollback in the menu's result handler and this stays dark.
+    expect(page()).toBe("light");
   });
 });
 

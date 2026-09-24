@@ -495,7 +495,7 @@ function OperatorRunControl({
           primary is the decision-stakes commit of the current state. */}
       <button
         type="button"
-        className="btn sm"
+        className="btn sm run-go"
         disabled={off}
         aria-busy={busy || undefined}
         onClick={run}
@@ -801,7 +801,7 @@ function AgentRunControl({
       />
       <button
         type="button"
-        className="btn sm"
+        className="btn sm run-go"
         disabled={off}
         aria-busy={busy || undefined}
         onClick={run}
