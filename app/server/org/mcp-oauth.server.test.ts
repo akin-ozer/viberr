@@ -14,6 +14,7 @@ import {
   OAUTH_SIGN_IN_EXPIRED,
   connectHttpUpstream,
   listAllTools,
+  type McpFetch,
 } from "~/server/mcp-proxy/upstream.server";
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
@@ -387,6 +388,83 @@ describe("health, runs and sign-out (ruling 469)", () => {
     expect(repointed.mcp.oauth).toBeNull();
     expect(rawRow().oauth_ref).toBeNull();
     expect(listAuditEvents(db, { action: "org.mcp.updated" })[0]?.details).toMatchObject({ oauthDropped: true });
+  });
+});
+
+describe("a sign-in ended or landed while a request was on the wire (R-oauth-3)", () => {
+  /** A `fetch` that, the first time it carries `grant`, lets `meanwhile`
+   *  land first — what an admin's other tab does inside one round trip. */
+  function landingDuring(grant: string, meanwhile: () => Promise<void>): McpFetch {
+    let landed = false;
+    return async (url, init) => {
+      if (!landed && String(init?.body ?? "").includes(`grant_type=${grant}`)) {
+        landed = true;
+        await meanwhile();
+      }
+      return fetch(url, init);
+    };
+  }
+
+  it("a renewal refused after a new sign-in landed leaves the new sign-in alone", async () => {
+    // CANARY: expire whatever was read before the refresh, and the admin's
+    // fresh sign-in is wiped to "sign-in expired" with the old registration.
+    await startServer({ refresh: "invalid_grant" });
+    await signIn();
+    const [firstAccess] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
+    const signInAgain = async () => {
+      await signIn();
+    };
+    const source = mcpOAuthTokenSource(db, MCP_ID, server.url, { fetchImpl: landingDuring("refresh_token", signInAgain) });
+    const token = await source.renewAfterRefusal(firstAccess ?? "");
+    const [, secondAccess] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
+    expect(token).toBe(secondAccess);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("signed_in");
+    expect(listAuditEvents(db, { action: "org.mcp.oauth_failed" })).toEqual([]);
+  });
+
+  it("a renewed token refused after the sign-in moved on ends nothing; the stored one refused does", async () => {
+    // CANARY: expire whatever `current()` holds, whatever token was refused.
+    await startServer();
+    await signIn();
+    const [stale] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
+    await signIn();
+    const [, live] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
+    const source = mcpOAuthTokenSource(db, MCP_ID, server.url);
+    await source.refusedAfterRenewal(stale ?? "");
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("signed_in");
+    const ended = await source.refusedAfterRenewal(live ?? "");
+    expect(ended.reason).toBe(OAUTH_SIGN_IN_EXPIRED);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
+  });
+
+  it("a callback whose row was re-pointed during the code exchange writes nothing and keeps the credential that save pasted", async () => {
+    // CANARY: write after the exchange without reading the row again, and a
+    // sign-in for the old endpoint lands on the re-pointed row and erases
+    // the credential its save just pasted.
+    await startServer();
+    const started = await startMcpOAuthSignIn(db, {
+      mcpId: MCP_ID,
+      redirectUri: REDIRECT,
+      userId: ADMIN.userId,
+      sessionId: ADMIN.sessionId,
+      actor: ADMIN.actor,
+    });
+    const back = await consentAt(started.authorizationUrl);
+    const repoint = async () => {
+      await saveMcpServer(
+        db,
+        { id: MCP_ID, name: "cloudflare-api", transport: "HTTP", target: `${server.origin}/other`, cred: "a-pasted-token-123" },
+        ADMIN.actor,
+      );
+    };
+    const result = await completeMcpOAuthSignIn(db, {
+      ...callbackInput(back),
+      fetchImpl: landingDuring("authorization_code", repoint),
+    });
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining("endpoint changed") });
+    expect(rawRow().cred_ref).not.toBeNull();
+    expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });
+    expect(getMcpServer(db, MCP_ID)?.target).toBe(`${server.origin}/other`);
   });
 });
 

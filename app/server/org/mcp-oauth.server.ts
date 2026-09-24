@@ -530,15 +530,20 @@ export async function completeMcpOAuthSignIn(
   if (!input.code) {
     return failed("authorization", "the callback carried no code", `${entry.name} was not signed in: the callback carried no code.`);
   }
-  const row = rowById(db, entry.mcpId);
-  if (!row) return { ok: false, name: entry.name, message: `${entry.name} was removed while you were signing in.` };
-  if (row.target !== entry.target || row.transport !== "HTTP") {
-    return failed(
+  const removed: CompleteMcpOAuthResult = {
+    ok: false,
+    name: entry.name,
+    message: `${entry.name} was removed while you were signing in.`,
+  };
+  const moved = (): CompleteMcpOAuthResult =>
+    failed(
       "state",
       "its endpoint changed during the sign-in",
       `${entry.name}'s endpoint changed while you were signing in. Sign in again.`,
     );
-  }
+  const before = rowById(db, entry.mcpId);
+  if (!before) return removed;
+  if (before.target !== entry.target || before.transport !== "HTTP") return moved();
   let tokens: OAuthTokens;
   try {
     tokens = await exchangeMcpOAuthCode(entry.discovery, entry.client, input.code, entry.codeVerifier, input.fetchImpl);
@@ -546,6 +551,15 @@ export async function completeMcpOAuthSignIn(
     const reason = oauthFailureReason(error);
     return failed("token", reason, `${entry.name} was not signed in: ${reason}.`);
   }
+  // Read again after the exchange, and written in the same synchronous
+  // stretch: a save that re-pointed (or removed) the row while the code was
+  // on the wire wins. Checking only before the await let a sign-in for the
+  // old endpoint land on the re-pointed row and erase the credential that
+  // save had just pasted (R-oauth-3, 2026-09-25). The tokens are dropped
+  // unrevoked, as a re-point's are.
+  const row = rowById(db, entry.mcpId);
+  if (!row) return removed;
+  if (row.target !== entry.target || row.transport !== "HTTP") return moved();
   const stored = storedTokens(tokens);
   const sealed: SealedOAuth = {
     v: 1,
@@ -707,9 +721,22 @@ export function mcpOAuthTokenSource(
     return { row, sealed: opened.sealed, tokens };
   };
 
-  /** End the sign-in: the tokens are dropped (the registration is kept for
-   *  the next sign-in), the row reads "sign-in expired" with the reason. */
-  const expire = (row: OAuthRow, sealed: SealedOAuth, reason: string): UpstreamConnectError => {
+  /**
+   * End the sign-in whose stored tokens `refused` recognizes: the tokens are
+   * dropped (the registration is kept for the next sign-in), the row reads
+   * "sign-in expired" with the reason. The row is read again and written in
+   * one synchronous stretch, and only while it still holds the tokens that
+   * were refused: a sign-out, a new sign-in or another renewal that landed
+   * while the refusal was on the wire wins, as it does on the renewal's
+   * success path. Ending whatever was read before the await wiped a fresh
+   * sign-in and put the old registration back (R-oauth-3, 2026-09-25).
+   * Null when the stored tokens are not the refused ones.
+   */
+  const expireIf = (refused: (stored: StoredTokens) => boolean, reason: string): UpstreamConnectError | null => {
+    const row = rowById(db, mcpId);
+    const opened = row ? openOAuth(db, row) : null;
+    if (!row || opened?.state !== "ok" || !opened.sealed.tokens || !refused(opened.sealed.tokens)) return null;
+    const sealed = opened.sealed;
     const scrubbed = scrubSecrets(reason, secretsOf(sealed));
     const pub = readPublic(row.oauth_json);
     writeOAuth(db, row.id, { ...sealed, tokens: null }, {
@@ -730,13 +757,25 @@ export function mcpOAuthTokenSource(
     const { row, sealed, tokens } = current();
     // Another request renewed it already: use what it stored.
     if (tokens.access_token !== rejected && !expiredByClock(tokens)) return tokens.access_token;
-    if (!tokens.refresh_token) throw expire(row, sealed, "the server issued no refresh token, so the sign-in cannot renew itself");
+    /** The pair this renewal set out from can no longer renew: end it — or,
+     *  when something else was stored meanwhile, use that. */
+    const endOrUseNewer = (reason: string): string => {
+      const ended = expireIf(
+        (stored) => stored.access_token === tokens.access_token && stored.refresh_token === tokens.refresh_token,
+        reason,
+      );
+      if (ended) throw ended;
+      return current().tokens.access_token;
+    };
+    if (!tokens.refresh_token) {
+      return endOrUseNewer("the server issued no refresh token, so the sign-in cannot renew itself");
+    }
     let fresh: OAuthTokens;
     try {
       fresh = await refreshMcpOAuthTokens(discoveryOf(sealed), sealed.client, tokens.refresh_token, options.fetchImpl);
     } catch (error) {
       const reason = oauthFailureReason(error);
-      if (isDefinitiveRefusal(error)) throw expire(row, sealed, reason);
+      if (isDefinitiveRefusal(error)) return endOrUseNewer(reason);
       const scrubbed = scrubSecrets(reason, secretsOf(sealed));
       logger.warn("mcp oauth token could not be renewed now", { mcp: row.name, reason: scrubbed });
       throw new UpstreamConnectError(`could not renew the OAuth sign-in: ${scrubbed}`);
@@ -772,13 +811,23 @@ export function mcpOAuthTokenSource(
       return expiredByClock(tokens) ? renewOnce(tokens.access_token) : tokens.access_token;
     },
     renewAfterRefusal: (rejected) => renewOnce(rejected),
-    refusedAfterRenewal: async () => {
+    refusedAfterRenewal: async (rejected) => {
+      const ended = expireIf(
+        (stored) => stored.access_token === rejected,
+        "the server refused a freshly renewed token",
+      );
+      if (ended) return ended;
+      // The refused token is no longer the stored one: a sign-out, a new
+      // sign-in or another renewal landed while this request was in flight.
+      // This request fails; the next one reads what is stored now.
       try {
-        const { row, sealed } = current();
-        return expire(row, sealed, "the server refused a freshly renewed token");
+        current();
       } catch (error) {
-        return error instanceof UpstreamConnectError ? error : new UpstreamConnectError(OAUTH_SIGN_IN_EXPIRED);
+        if (error instanceof UpstreamConnectError) return error;
       }
+      return new UpstreamConnectError(
+        "the server refused a freshly renewed OAuth token while the sign-in changed; the next request uses the new one",
+      );
     },
   };
 }

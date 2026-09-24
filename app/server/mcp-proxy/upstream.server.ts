@@ -82,9 +82,9 @@ export interface UpstreamTokenSource {
   accessToken(): Promise<string>;
   /** The server answered `rejected` with a 401: the token to retry with, once. */
   renewAfterRefusal(rejected: string): Promise<string>;
-  /** The renewed token was refused as well: record it, and return the error
-   *  the request fails with. */
-  refusedAfterRenewal(): Promise<UpstreamConnectError>;
+  /** The renewed token `rejected` was refused as well: record it (only while
+   *  it is still the stored one), and return the error the request fails with. */
+  refusedAfterRenewal(rejected: string): Promise<UpstreamConnectError>;
 }
 
 /** Ruling 469: what a server with no credential says when it asks for an
@@ -308,7 +308,7 @@ function bearerFetch(source: UpstreamTokenSource, base: McpFetch): McpFetch {
     const retry = await send(renewed);
     if (retry.status !== 401) return retry;
     await retry.body?.cancel().catch(() => undefined);
-    throw await source.refusedAfterRenewal();
+    throw await source.refusedAfterRenewal(renewed);
   };
 }
 
