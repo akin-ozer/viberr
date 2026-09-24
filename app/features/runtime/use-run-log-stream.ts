@@ -34,7 +34,8 @@ export type { OlderLogState, RunLogSource, RunLogStore, StreamedLine, ThreadView
  *     thread already holds unless its representative run changed (TASK-3 /
  *     LIVE-3);
  *   - each tail read brings the run's live facts, which the Live run strip
- *     reads, so the page no longer revalidates on run lines (LIVE-1).
+ *     reads, so the page no longer revalidates on run lines (LIVE-1); a frame
+ *     for a thread whose lines are not loaded reads its facts alone (CON-1).
  *
  * Two SOURCES (ruling 99): a task's runs (`run.log-appended`, on the task
  * scope) and a controller conversation's, which have no task scope — their

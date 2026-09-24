@@ -351,24 +351,27 @@ conversation, `controller.log-appended` on the `user` scope. Its lines live in a
 store the console reads with `useSyncExternalStore`, so a line re-renders the console and
 not the page. Per frame it fetches the lines since its cursor from `/resources/run-log`
 (one read in flight per thread, read again when a frame announced a line the read did not
-bring), and every answer carries the run row's live facts (`RunLiveFacts`: phase, step,
-turns, tokens, cache), which the Live run strip and the controller's working row read, so
-nothing revalidates per line. Each read of the facts, a tail's or a revalidation's, is
-stamped with the row's `updated_at` (`factsAt`), and the console keeps the newer one
-whichever lands last. Owner decision 2 (2026-09-24): a page's payload carries
-console lines only on a document load, and only the shown agent's display lines; a
-revalidation or a client navigation carries each thread's window facts
+bring; a thread whose lines are not loaded reads the run's facts alone, so the strip moves
+for an agent whose console was never opened), and every answer carries the run row's live
+facts (`RunLiveFacts`: phase, step, turns, tokens, cache), which the Live run strip and
+the controller's working row read, so nothing revalidates per line. Each read of the
+facts, a tail's or a revalidation's, is stamped with the row's `updated_at` (`factsAt`),
+and the console keeps the newer one whichever lands last. Owner decision 2 (2026-09-24): a
+page's payload carries console lines only on a document load, and only the shown agent's
+display lines; a revalidation or a client navigation carries each thread's window facts
 (`logWindow.loaded: false`), the console fills the thread it shows with ONE
 `/resources/run-log?window=1` request, and the stored envelopes load when the raw view
-opens. A revalidation keeps what a thread holds unless its representative run changed; a
-head the loader saw past the cursor (a missed frame, a tab back from hidden) is read as a
-gap, and a gap wider than one window (`RUN_LOG_WINDOW_LINES`, 400) loads the window
-instead, so a catch-up never outgrows what a fresh load ships. The console pages older history on demand and, while a run is shown active and the
-tab's stream is DOWN, revalidates every 20 s (F22: a missed terminal event cannot leave
-the strip "running"; with the stream up the event arrives or is replayed, ruling 454,
-RF-6); the controller page reads the working turn's tail every 5 s instead and
-revalidates once the tail says the run ended (CTL-2). `run.state-changed` revalidates
-through the layout's stream, once.
+opens. A revalidation keeps what a thread holds unless its representative run changed, and
+a console on screen whose run did change keeps its lines until the new run's window
+replaces them; a head the loader saw past the cursor (a missed frame, a tab back from
+hidden) is read as a gap, and a gap wider than one window (`RUN_LOG_WINDOW_LINES`, 400)
+loads the window instead, so a catch-up never outgrows what a fresh load ships. The
+console pages older history on demand and, while a run is shown active and the tab's
+stream is DOWN, revalidates every 20 s (F22: a missed terminal event cannot leave the
+strip "running"; with the stream up the event arrives or is replayed, ruling 454, RF-6);
+the controller page reads the working turn's tail every 5 s instead and revalidates once
+the tail says the run ended (CTL-2). `run.state-changed` revalidates through the layout's
+stream, once.
 
 ## 6. Provenance and freshness
 
