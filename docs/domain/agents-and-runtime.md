@@ -189,7 +189,12 @@ defaultEffort } }` to the profile editor (unknown backend → claude; `requireUs
 The route resolves the viewer's own `runCredentialFor(db, user.id, "claude")` and passes
 it to the catalog; a viewer who has not connected Claude gets the curated list and no
 probe is spawned, and one person's live list is never served to another (the cache entry
-carries the home that produced it). Each returned model is stamped with its availability
+carries the home that produced it). The probe's CLI runs against the viewer's own
+`claude-home`, where a token refresh rewrites their sign-in, so wherever the server
+launches agents it runs as the viewer through the launcher like their runs (the route
+passes `userId`; `spawnClaudeCodeProcess` = `spawnClaudeCli` with `agentLaunchFor`'s
+launch; the home is handed back when it exits), and with no viewer to run as the curated
+list is served instead (ruling 460 note (l), R-launcher-1). Each returned model is stamped with its availability
 mark on every request, after the cache. A template (`agents/profiles/<id>.md`) may carry
 its own default `model` and `effort` (ruling 153, pass 35 G35-2): `save_global_agent`
 takes both, checked by name against the template's backend (a backend switch whose stored
@@ -1584,20 +1589,46 @@ runtime's answer for a missing grant.
   (`shareDirWithAgents`, called where each is created; boot hands an older tree over once,
   recursively). setgid keeps whatever either side creates inside in the agent group; the
   agent's umask is 0007 (the launcher sets it) and the server's is 0002 (set at boot when the
-  launcher exists), so a file the server's git checks out is one an agent can edit and a
-  file an agent writes is one the server's delivery can commit. Nothing else the server
+  launcher exists), so a file the server's clone checks out is one an agent can edit and a
+  file one agent writes is one the delivery (the owner's uid) can commit. Nothing else the server
   writes is in the agent group (its own files are `node:node`), so the canonical
   `task.md`, `project.md`, knowledge bases and skills stay readable and unwritable to an
   agent. Git refuses a repository another uid owns, so the image's SYSTEM git config
   (`/etc/gitconfig`, root-owned, which no agent can edit) carries `safe.directory=*` and
   `core.sharedRepository=group`; it binds the server's git, an agent's shell and a tool that
-  clears its environment alike. Everything the server does itself — clone, fetch, merge,
-  push, the stdio MCP probes, reading transcripts — stays `node`.
+  clears its environment alike.
+- **Who runs git (pass 40 review, R-seams-1).** The server never executes git with an
+  agent-writable repository as its working repository under its own uid: an agent can write
+  any checkout's `.git` (hooks, `core.fsmonitor`, a filter or credential helper,
+  `url.insteadOf`), and the server's git there ran them as `node` with the server's
+  environment. So every git IN a workspace — the pre-run refresh (ruling 129), the unborn
+  checkout's check (ruling 468), the supporting clone of the delivering checkout, the
+  origin rewrite and identity, the `.claude` strip, the review pin, the delivery's
+  status/add/commit and gate reads, the branch update's merge and abort, the reconcile's
+  reads, the discard, the operator's default-branch fallback read — runs as the task
+  owner's agent uid through the launcher (`taskWorkspaceGit` → `agentGitLaunchFor`, the
+  agent's `$HOME`, no credential in its env); with no launcher (dev, tests) the same git
+  runs as the server, as before, and with isolation on and no owner to name it refuses
+  rather than fall back. What needs the PAT runs as the server in a repository it owns:
+  the mirror, or a per-operation bare **stage** (`withServerStage`,
+  `projects/<slug>/.repo-stage/`, readable by agents, never writable, borrowing the
+  mirror's objects under its lock), which fetches GitHub's refs for the workspace to fetch
+  from and takes the delivered branch out of the workspace through the launcher's
+  `git-upload-pack` before pushing it (github-delivery §1). A new checkout is cloned by
+  the server into a stage of its own, handed to the agent group (a file hardlinked from
+  the mirror stays read-only) and renamed into place (`cloneThroughStage`). Every git the
+  server spawns, as itself or as a person, carries `core.hooksPath=/dev/null` and
+  `core.fsmonitor=false` at command-line precedence on a `filteredSpawnEnv()` base
+  (`serverGitEnv`); an agent's own git keeps its hooks. `gh` (the reconcile's PR lookup)
+  runs as the server but in the task's directory, never the checkout. The server's own
+  non-git work — the stdio MCP probes, reading transcripts — stays `node`.
 - Mirror (ruling 87): bare `projects/<slug>/.repo-mirror/<owner>__<repo>.git`, `fetch
   --prune` with a heads-to-heads refspec before each clone (timeout 120 s, rebuilt after
-  2 consecutive failures), then a local hardlinked clone with `origin` rewritten to the
-  credential-free `https://github.com/<repo>.git`; a shallow direct clone is the
-  fallback.
+  2 consecutive failures), then a local hardlinked clone (in a stage, then moved into the
+  workspace) with `origin` rewritten to the credential-free
+  `https://github.com/<repo>.git`; a shallow direct clone (into a stage too) is the
+  fallback. The mirror is the server's alone: boot takes group and other write off every
+  mirror file, and a hand-over never widens a file with a second link.
 - Credentials never touch argv or `.git/config`: the PAT is delivered through
   `GIT_ASKPASS` (`x-access-token`), `GIT_TERMINAL_PROMPT=0`, credential helper reset.
   Clone timeout 15 min (`VIBERR_GIT_CLONE_TIMEOUT_MS`); progress is streamed to the run

@@ -6,11 +6,14 @@ import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
 import { getPatToken, getProjectCredential } from "~/server/secrets/pat-store.server";
 import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
+import { githubRepositoryUrl } from "./git-clone-auth.server";
 import {
   mirrorGitEnv,
   refreshProjectMirror,
+  withServerStage,
   type ProjectMirrorRequest,
 } from "./repo-mirror.server";
+import { taskWorkspaceGit, type WorkspaceGit } from "./workspace-git.server";
 
 const execFileAsync = promisify(execFile);
 const FETCH_TIMEOUT_MS = 60_000;
@@ -35,6 +38,13 @@ const FETCH_TIMEOUT_MS = 60_000;
  * diverged task branch); a branch sharing NO history with the default branch
  * is NAMED (`unrelated`) so the damage is disclosed rather than silently left.
  * A failed refresh degrades with a warning: a cache never blocks a task.
+ *
+ * Pass 40 review (R-seams-1): every git in the checkout runs as the task's
+ * person (`taskWorkspaceGit`), never as the server — the checkout is
+ * agent-writable, and `status` alone runs its `core.fsmonitor`, `checkout` its
+ * hooks. The credentialed fallback (no mirror) fetches GitHub's heads into a
+ * stage the server owns and the checkout fetches them from there, so the PAT
+ * never enters a workspace's git.
  */
 export type WorkspaceRefreshHead =
   /** HEAD was already `origin/<default>`. */
@@ -104,25 +114,10 @@ export interface WorkspaceRefreshInput {
    *  branch is left as it is (the delivery's non-fast-forward refusal and a
    *  person own that). */
   taskBranch?: string | null;
-}
-
-async function git(dir: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string> {
-  const out = await execFileAsync("git", ["-C", dir, ...args], {
-    timeout: FETCH_TIMEOUT_MS,
-    env: { ...(env ?? process.env), GIT_TERMINAL_PROMPT: "0" },
-    maxBuffer: 4 * 1024 * 1024,
-  });
-  return out.stdout.trim();
-}
-
-/** `git <args>` as a yes/no question (exit 0 = yes). */
-async function gitOk(dir: string, args: string[]): Promise<boolean> {
-  try {
-    await git(dir, args);
-    return true;
-  } catch {
-    return false;
-  }
+  /** R-seams-1: the task whose person the checkout's git runs as. Required
+   *  when this server launches agents (a refresh without one then refuses,
+   *  never runs as the server). */
+  taskKey?: string | null;
 }
 
 export async function refreshWorkspaceFromMirror(
@@ -132,6 +127,33 @@ export async function refreshWorkspaceFromMirror(
   if (!existsSync(path.join(input.dir, ".git"))) {
     return { status: "fetch_failed", message: "the checkout has no .git directory" };
   }
+  let workspace: WorkspaceGit;
+  try {
+    workspace = taskWorkspaceGit(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey ?? null,
+      dataRoot: input.dataRoot,
+    });
+  } catch (error) {
+    const message = gitErrorText(error) || "the checkout's git could not run as its person";
+    logger.warn("workspace refresh: the checkout's git cannot run as its person; the run proceeds on the checkout as it stands", {
+      projectSlug: input.projectSlug,
+      dir: input.dir,
+      message,
+    });
+    return { status: "fetch_failed", message };
+  }
+  const git = async (dir: string, args: string[]): Promise<string> =>
+    (await workspace.run(["-C", dir, ...args], { timeoutMs: FETCH_TIMEOUT_MS })).stdout.trim();
+  /** `git <args>` as a yes/no question (exit 0 = yes). */
+  const gitOk = async (dir: string, args: string[]): Promise<boolean> => {
+    try {
+      await git(dir, args);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const cred = getProjectCredential(db, input.projectSlug);
   const token = cred ? getPatToken(db, cred.id) : null;
   const request: ProjectMirrorRequest = {
@@ -150,16 +172,34 @@ export async function refreshWorkspaceFromMirror(
       mirrorRefreshed = mirror.refreshed;
       await git(input.dir, ["fetch", "--quiet", mirror.dir, "+refs/heads/*:refs/remotes/origin/*"]);
     } else {
-      // No cache and none could be built: fetch the remote heads directly with
-      // the project's credential through the askpass env (never argv or the
-      // remote URL). The checkout's `origin` is the sanitized GitHub URL.
+      // No cache and none could be built: fetch the remote heads with the
+      // project's credential through the askpass env (never argv or the remote
+      // URL) — into a stage the SERVER owns (R-seams-1: the PAT never enters a
+      // workspace's git), from which the checkout fetches them as its person.
       if (!token) return { status: "no_mirror" };
       const auth = mirrorGitEnv(token);
       try {
-        await git(
-          input.dir,
-          ["fetch", "--quiet", "origin", "+refs/heads/*:refs/remotes/origin/*"],
-          auth.env,
+        await withServerStage(
+          {
+            projectSlug: input.projectSlug,
+            repo: input.repo,
+            dataRoot: input.dataRoot,
+          },
+          async (stage) => {
+            await execFileAsync(
+              "git",
+              [
+                `--git-dir=${stage}`,
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                githubRepositoryUrl(input.repo),
+                "+refs/heads/*:refs/heads/*",
+              ],
+              { cwd: stage, timeout: FETCH_TIMEOUT_MS, env: auth.env, maxBuffer: 4 * 1024 * 1024 },
+            );
+            await git(input.dir, ["fetch", "--quiet", stage, "+refs/heads/*:refs/remotes/origin/*"]);
+          },
         );
         mirrorRefreshed = true;
       } finally {

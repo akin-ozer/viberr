@@ -305,6 +305,31 @@ export function agentLaunchFor(
   return { uid, launcher: launcherPath, launchHome: backendHome, home };
 }
 
+/**
+ * Pass 40 review (R-seams-1): what a git in a task workspace runs as — the
+ * person the work bills, through the launcher, like their runs — or null when
+ * this server launches no agents (`off`). A workspace is written by agent uids
+ * (it is `node:viberr-agents` 2770), so its `.git` holds hooks and config an
+ * agent planted; the server running git there as itself would run them with
+ * the server's authority. Only the runtime root and the agent `$HOME` are
+ * prepared (a git has no vendor home to hand back). Throws the same
+ * `run_unavailable` AppError as {@link agentLaunchFor}.
+ */
+export function agentGitLaunchFor(
+  db: DatabaseSync,
+  userId: string,
+  dataRoot?: string,
+): AgentLaunch | null {
+  if (!launchesAgents()) return null;
+  const uid = agentUidFor(db, userId);
+  const root = userRuntimeRoot(userId, dataRoot);
+  const home = path.join(root, AGENT_HOME_DIR);
+  for (const dir of [root, home]) {
+    if (!ownedBy(uid, dir)) prepareAgentPath(uid, dir);
+  }
+  return { uid, launcher: launcherPath, home };
+}
+
 /** An absolute path for `command`: as given when it names a path, else the
  *  first executable of that name on `PATH`. The launcher execs only absolute
  *  paths, so a bare `node` must be resolved here. */
@@ -475,6 +500,13 @@ function shareTreeWithAgents(dir: string, gid: number): number {
       return;
     }
     if (st.isSymbolicLink() || st.uid !== serverUid) return;
+    // Pass 40 review (R-seams-1): a file with another link is shared with
+    // whatever holds that link — a checkout's objects are hardlinked from the
+    // project's mirror — and group write on it would let any agent rewrite
+    // the mirror's copy, which every later checkout is cut from. Git never
+    // writes an object in place, so it stays as it is: readable, never ours
+    // to widen.
+    if (st.isFile() && st.nlink > 1) return;
     const shared = shareEntry(entry, gid, (seen) =>
       seen.isDirectory() ? (seen.mode & 0o777) | 0o2070 : (seen.mode & 0o777) | 0o060,
     );
@@ -489,6 +521,66 @@ function shareTreeWithAgents(dir: string, gid: number): number {
     for (const name of names) visit(path.join(entry, name), depth + 1);
   };
   visit(dir, 0);
+  return changed;
+}
+
+/**
+ * Pass 40 review (R-seams-1): hand a tree the server built in a place of its
+ * own (a checkout staged in the project's `.repo-stage/`) to the agent group
+ * before it is moved into a workspace: group, setgid on directories, group
+ * read and write on files — except a file with another link (an object
+ * hardlinked from the project mirror), which stays read-only. A no-op when
+ * this server launches no agents. Returns how many entries changed.
+ */
+export function shareTreeBuiltForAgents(dir: string, deps: { gid?: number } = {}): number {
+  if (deps.gid === undefined && !launchesAgents()) return 0;
+  return shareTreeWithAgents(dir, deps.gid ?? AGENT_GID);
+}
+
+/**
+ * Pass 40 review (R-seams-1): the project mirrors stay the server's alone. A
+ * workspace cloned from a mirror shares its object files (hardlinks), and the
+ * boot hand-over of a pre-460 workspace used to add group write to them,
+ * which reached the mirror's inode too. Every server-owned file under
+ * `projects/<slug>/.repo-mirror/` loses group and other write (the server,
+ * their owner, never needs them). Returns how many entries changed.
+ */
+function revokeMirrorWrites(root: string): number {
+  let changed = 0;
+  const serverUid = process.getuid?.() ?? -1;
+  const visit = (entry: string, depth: number) => {
+    let st: Stats;
+    try {
+      st = lstatSync(entry);
+    } catch {
+      return;
+    }
+    if (st.isSymbolicLink() || st.uid !== serverUid) return;
+    if (st.isFile()) {
+      if ((st.mode & 0o022) !== 0 && shareEntry(entry, st.gid, (seen) => seen.mode & 0o755)) {
+        changed += 1;
+      }
+      return;
+    }
+    if (!st.isDirectory() || depth > 64) return;
+    let names: string[];
+    try {
+      names = readdirSync(entry);
+    } catch {
+      return;
+    }
+    for (const name of names) visit(path.join(entry, name), depth + 1);
+  };
+  let slugs: string[];
+  try {
+    slugs = readdirSync(path.join(root, "projects"));
+  } catch {
+    return 0;
+  }
+  for (const slug of slugs) {
+    const mirrors = path.join(root, "projects", slug, ".repo-mirror");
+    if (existsSync(mirrors)) visit(mirrors, 0);
+  }
   return changed;
 }
 
@@ -514,6 +606,8 @@ export interface LayoutReport {
   sharedEntries: number;
   /** Person runtime roots handed to their uid. */
   homes: number;
+  /** Mirror files that had group or other write (pass 40 review, R-seams-1). */
+  mirrorWritesRevoked: number;
   /** What could not be set, by path. */
   failures: string[];
 }
@@ -543,7 +637,13 @@ const TASK_SHARED_DIRS = ["workspace", "attachments", ".operator-scratch"] as co
 export function enforceStoreLayout(dataRoot?: string, deps: LayoutDeps = {}): LayoutReport {
   const root = getDataRoot(dataRoot);
   const gid = deps.gid ?? AGENT_GID;
-  const report: LayoutReport = { sharedTrees: 0, sharedEntries: 0, homes: 0, failures: [] };
+  const report: LayoutReport = {
+    sharedTrees: 0,
+    sharedEntries: 0,
+    homes: 0,
+    mirrorWritesRevoked: 0,
+    failures: [],
+  };
   const attempt = (target: string, action: () => void) => {
     try {
       action();
@@ -582,6 +682,11 @@ export function enforceStoreLayout(dataRoot?: string, deps: LayoutDeps = {}): La
       if (existsSync(target)) attempt(target, () => shareOnce(target));
     }
   }
+  // After the hand-over above, which no longer widens a linked file but did
+  // before pass 40's review: the mirrors a checkout's objects link to.
+  attempt(path.join(root, "projects"), () => {
+    report.mirrorWritesRevoked = revokeMirrorWrites(root);
+  });
   if (deps.prepareHome) {
     let people: string[] = [];
     try {
@@ -651,11 +756,12 @@ export function bootAgentIsolation(db: DatabaseSync, dataRoot?: string): AgentIs
       }
     },
   });
-  if (report.sharedTrees > 0 || report.homes > 0) {
+  if (report.sharedTrees > 0 || report.homes > 0 || report.mirrorWritesRevoked > 0) {
     logger.info("store layout enforced for agent isolation", {
       sharedTrees: report.sharedTrees,
       sharedEntries: report.sharedEntries,
       homes: report.homes,
+      mirrorWritesRevoked: report.mirrorWritesRevoked,
     });
   }
   return measureAgentIsolation({ dataRoot });

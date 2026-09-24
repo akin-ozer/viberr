@@ -346,7 +346,10 @@ Playwright (`npm run e2e -- e2e/01-home-board.spec.ts`).
    kernel's side of the isolation is asserted: as two throwaway agent uids through the
    real setuid launcher it checks the server's `/proc/<pid>/environ`, the projection
    database and another person's home are refused, its own home and a shared workspace
-   are writable, the launcher relays SIGTERM, SIGUSR2 kills the agent's group with a
+   are writable, an agent's own git runs the hooks it planted while a workspace git
+   launched with the server's overrides runs none, the server's own git cannot read a
+   checkout only its agent can while a fetch through the launcher's `git-upload-pack`
+   can (pass 40 review, R-seams-1), the launcher relays SIGTERM, SIGUSR2 kills the agent's group with a
    grandchild, PDEATHSIG takes the agent down with its server, `--reap` finds a detached
    process by marker, and every refusal (a uid below the floor, uid 0, a relative exec, a
    home outside `runtimes/users/`, a `..`, another agent's home, a malformed marker, an

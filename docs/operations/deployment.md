@@ -704,7 +704,9 @@ leftover stack, runs `up --build --wait`, waits for `/resources/health`, require
 `agentIsolation.status` to be `on` and runs `scripts/check-agent-isolation.sh` inside the
 app container (ruling 460: as a launched agent uid the server's `/proc/<pid>/environ`, the
 projection database and another person's home are refused, its own home and a shared
-workspace are writable, the launcher relays SIGTERM, SIGUSR2 kills the group grandchild
+workspace are writable, a workspace git launched with the server's overrides runs nothing
+an agent planted and a branch is fetched out of an agent-only checkout through the
+launcher's `git-upload-pack`, the launcher relays SIGTERM, SIGUSR2 kills the group grandchild
 included, PDEATHSIG takes the agent down with the server, `--reap` finds a detached process
 by its marker, and every refusal holds), passes the base URL to Playwright as
 `VIBERR_E2E_BASE_URL`, and tears the stack down with its volume afterwards unless

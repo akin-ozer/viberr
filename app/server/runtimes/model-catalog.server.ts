@@ -17,6 +17,12 @@ import type {
   ClaudeQueryFn,
   ClaudeQueryOptions,
 } from "./claude-runtime.server";
+import {
+  agentLaunchFor,
+  launchesAgents,
+  type AgentLaunch,
+} from "./agent-isolation.server";
+import { spawnClaudeCli } from "./claude-spawn.server";
 import { errorMessage } from "~/shared/errors";
 
 /**
@@ -511,6 +517,11 @@ interface CatalogDeps {
    *  changes takes effect on the next call with NO cache invalidation — the
    *  TTL live cache never freezes an availability mark. */
   db?: DatabaseSync;
+  /** Pass 40 review (R-launcher-1): the viewer, whose own OS user the live
+   *  probe runs as when this server launches agents (ruling 460). Without it
+   *  (or without `db`) a launching server serves the curated catalog rather
+   *  than run the probe as itself. */
+  userId?: string;
 }
 
 /**
@@ -651,14 +662,32 @@ async function realQueryFn(): Promise<ClaudeQueryFn> {
  */
 export function claudeProbeOptions(
   credential: RunCredential,
+  launch: AgentLaunch | null = null,
 ): ClaudeQueryOptions {
-  return {
-    env: { ...filteredSpawnEnv(), ...credential.env },
+  const env = { ...filteredSpawnEnv(), ...credential.env };
+  const options: ClaudeQueryOptions = {
+    env,
     settingSources: [],
     skills: [],
     plugins: [],
     maxTurns: 1,
   };
+  // Pass 40 review (R-launcher-1): the probe runs the vendored CLI against the
+  // viewer's own `claude-home`, and a CLI whose OAuth token has expired
+  // refreshes it and rewrites `.credentials.json` there (0600). Run as the
+  // server, that left a `node:node` file the viewer's agent uid could not
+  // read, and their next run failed as signed out. So it runs as the viewer,
+  // through the launcher, exactly like their runs: the CLI is spawned by
+  // `spawnClaudeCli` with the launch, `$HOME` is their agent home, and the
+  // launcher hands the vendor home back once the probe exits. A throwaway
+  // copy of the home would not do: the CLI ROTATES the refresh token when it
+  // refreshes, so a refresh in a copy would spend the one in the real home.
+  if (launch) {
+    if (launch.home) env.HOME = launch.home;
+    options.spawnClaudeCodeProcess = (request) =>
+      spawnClaudeCli(request, undefined, undefined, launch).process;
+  }
+  return options;
 }
 
 /** The probe surface of an SDK query object. `ClaudeQuery` describes the
@@ -677,10 +706,11 @@ async function fetchLiveClaudeModels(
   queryFn: ClaudeQueryFn,
   credential: RunCredential,
   timeoutMs: number,
+  launch: AgentLaunch | null,
 ): Promise<SdkModelInfo[]> {
   const q: ModelProbeQuery = queryFn({
     prompt: "",
-    options: claudeProbeOptions(credential),
+    options: claudeProbeOptions(credential, launch),
   });
   if (!q.supportedModels) {
     throw new Error("query() has no supportedModels()");
@@ -749,10 +779,29 @@ export async function getModelCatalog(
     return stamp(cloneCatalog(hit.catalog));
   }
 
+  // R-launcher-1: with isolation on, the probe runs as the viewer or not at
+  // all (ruling 460(h): never a silent fallback to the server's own user).
+  let launch: AgentLaunch | null = null;
+  if (launchesAgents()) {
+    if (!deps.db || !deps.userId) {
+      logger.info("model catalog live fetch skipped — no viewer to run the probe as", { backend });
+      return stamp(curatedCatalog("claude"));
+    }
+    try {
+      launch = agentLaunchFor(deps.db, deps.userId, credential.homeDir);
+    } catch (error) {
+      logger.info("model catalog live fetch skipped — the probe cannot run as the viewer", {
+        backend,
+        err: errorMessage(error),
+      });
+      return stamp(curatedCatalog("claude"));
+    }
+  }
+
   try {
     const queryFn = deps.claudeQueryFn ?? (await realQueryFn());
     const timeoutMs = deps.timeoutMs ?? LIVE_TIMEOUT_MS;
-    const live = await fetchLiveClaudeModels(queryFn, credential, timeoutMs);
+    const live = await fetchLiveClaudeModels(queryFn, credential, timeoutMs, launch);
     if (!Array.isArray(live) || live.length === 0) {
       return stamp(curatedCatalog("claude"));
     }

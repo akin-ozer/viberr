@@ -87,6 +87,24 @@ secret, and each person's agent-backend API keys (`user_backend_credentials`, ru
 **The token never reaches argv or a remote URL.** Git runs with a temporary
 `GIT_ASKPASS` helper fed from env (`createGitHubAskpassEnv`), `credential.helper`
 reset, `GIT_TERMINAL_PROMPT=0`; clone URLs are the plain `https://github.com/<owner>/<repo>.git`.
+
+**The token never enters a workspace's git either** (pass 40 review, R-seams-1; ruling
+460). A task workspace is writable by every agent uid, so its `.git` can hold hooks,
+`core.fsmonitor`, a credential helper or `url.<x>.insteadOf` an agent planted. The
+server therefore never runs git with a workspace as its working repository under its own
+uid: the workspace's own git (status, add, commit, merge, the reads the gates take) runs
+as the task owner's agent uid through the launcher, with no credential in its
+environment (`taskWorkspaceGit`, `workspace-git.server.ts`); everything that needs the
+PAT runs as the server in a bare **stage** it owns (`withServerStage`,
+`projects/<slug>/.repo-stage/`, borrowing the mirror's objects through `alternates`
+under the mirror's lock, removed afterwards), against the PROJECT's URL rather than the
+`origin` a checkout's config names. A branch leaves a workspace by the server's `git
+fetch` into the stage, whose `git-upload-pack` is the launcher running as the person
+(`workspaceUploadPack`), so the server's side only parses a pack. Every git the server
+spawns, as itself or as the person, is built on `filteredSpawnEnv()` (never
+`process.env`) and carries `core.hooksPath=/dev/null` and `core.fsmonitor=false` at
+command-line precedence (`serverGitEnv`, `GIT_CONFIG_COUNT`); an agent's own git keeps
+its hooks.
 `redactGitOutput` scrubs any git or provider text before it reaches a human: by value,
 URL userinfo, token-shaped patterns (`gh*_`, `github_pat_`, `sk-`), control
 characters; last 8 lines, 600 characters.
@@ -222,7 +240,9 @@ steps below, with the hold sentence on the timeline (ruling 240).
    workspace; HEAD must be a task branch (the default branch means `no_branch`, with
    evidence from three read-only probes); auto-commit a dirty tree as `[KEY] deliver
    working-tree changes from the agent run`; count commits ahead of `origin/<default>`
-   (0 → `no_commits`). Then, in order:
+   (0 → `no_commits`). All of that is the workspace's git, run as the task owner's
+   agent uid; from `ls-remote` on, the PAT's steps run in the server's stage (§1).
+   Then, in order:
    - **Store layout** (ruling 159): the tree at HEAD is read under the store's own
      prefix (`git ls-tree -r -z --name-only HEAD -- projects/<slug>/tasks/`,
      NUL-delimited so a path git would quote for its non-ASCII bytes cannot read as an
@@ -233,9 +253,9 @@ steps below, with the hold sentence on the timeline (ruling 240).
      timeline line, a policy notification), and the operator's `deliver_for_review`
      reply says to re-prompt the delivering agent to remove the folder. An unreadable
      tree is not a measurement and the push answers for itself.
-   - **Origin's head**: `git ls-remote --heads origin <branch>` under the askpass env
-     (30 s); equal to the workspace HEAD → `up_to_date`, no push (ruling 134). An
-     unreadable `ls-remote` never blocks the push.
+   - **Origin's head**: `git ls-remote --heads <project URL> <branch>` from the stage
+     under the askpass env (30 s); equal to the workspace HEAD → `up_to_date`, no push
+     (ruling 134). An unreadable `ls-remote` never blocks the push.
    - **Workflow files** (ruling 144(b)): the files under `.github/workflows/` the push
      changes as GitHub measures them (`git log --format= --name-only <origin
      head>..HEAD`, falling back to the base only on a first push, so a workflow file
@@ -256,8 +276,11 @@ steps below, with the hold sentence on the timeline (ruling 240).
      (`push_refused_scope`, `before_push`); GitHub's own refusal of such a push, on any
      token kind, is classified the same way (`github`), never as a generic
      `push_failed`.
-   - **Push** `HEAD:refs/heads/<branch>` under the askpass env with a 120-second
-     timeout; `pushed` carries the head it published and the remote head it replaced. A
+   - **Push**: the branch is fetched out of the workspace into the stage (the
+     launcher's `git-upload-pack` as the person, no credential), then the head read for
+     the origin compare is pushed from the stage as `<sha>:refs/heads/<branch>` under the
+     askpass env with a 120-second timeout (a branch moved after that read cannot slip a
+     different head into the push); `pushed` carries the head it published and the remote head it replaced. A
      non-fast-forward is a `push_conflict` (a branch collision, never a credential
      error) whose timeline remedy first names what is on the branch (ruling 321): this
      task's own review PR (deleting the branch closes it, force-pushing rewrites what
@@ -375,7 +398,7 @@ paths overlap this task's (`prPathOverlaps`, ruling 413), the same fact the revi
 |---|---|---|
 | `resolve_remote_collision` packet option | Refused before anything is written while the task waits on other work (ruling 354; the packet stays open). Deletes the stale remote branch first, closes the recorded unowned PR (audit `github.pr.closed_unowned` when Viberr's close went through), re-delivers this task's local work, lifts `readiness` from `blocked`. The ceremony writes ONE `github` event naming the PR's fate in every arm (U36-7): "Branch collision cleared: closed PR #N and deleted branch `b`" when the close answered 200; after a refused close it re-reads the PR and says what GitHub shows — "is closed on GitHub with its head", "still shows open on GitHub — close it there", or "could not be re-read" — with the refusal quoted. Ruling 136: the ceremony ends with exactly ONE hand-off (the `delivered` re-queue when the re-delivery fired it, else a `packet-resolved` re-queue carrying the outcome in its own `serverOutcome` field); a refusal because the PR on the ref is this task's OWN open PR is no collision: a behind or absent remote gets the delivery that pushes the work and the block lifts, a diverged remote keeps the block and prints `DIVERGED_BRANCH_REMEDY`; every other refusal keeps the block and hands the operator its typed reason. One audit row per ceremony: `github.collision.resolved {outcome, reason, prNumber, delivered, blockLifted}`. | `approve-transition` |
 | `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Ruling 161: the operator may author it until the revision has LEFT the workspace (`revisionLeftWorkspace`: a PR tracks the branch, an unowned PR stands on the name, or a push stamped `workRevision.pushedAt`); a revision the agent merely reported does not block it, and the refusal names the real reason. A confirmed discard retires the reported revision (`workRevision.kind: discarded`, verdicts kept as history, `validation: none`), says so in the outcome note ("Revision `rev_…` is retired with it") and records `retiredRevisionId` on `task.branch.discarded` (`localSha`, `remoteSha: null`, `basis: local_only`). | `approve-transition` |
-| `update_branch_from_base` (operator, capability `update-task-branch`) | `updateWorkspaceBranchFromBase` (`update-branch.server.ts`) merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, and `recordBranchRefresh` records the refresh in `baseRefreshes` (with `onto`, the head it merged onto, ruling 439), stamps `pushedAt`, and reconciles at once (ruling 132). Before fetching it refuses a branch that carries the store layout (`store_layout`, ruling 159(b)) or changes a path another task leases (`lease_held`, ruling 428); nothing is merged or pushed. It reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)); `already_current` is reported as done, not a refusal (ruling 229). A conflict or push conflict opens a human `blocked` packet whose options can all execute (ruling 133(b)): "Have <deliverer> resolve the conflict" is offered and recommended only when the task's delivering engagement is deployed with a repo-write grant (a person routing the conflict to it is the one case the operator directs an agent to merge `origin/<base>` in its workspace, ruling 438); otherwise "Resolve the branch yourself" is recommended, the body says why (no deliverer, undeployed, grant withdrawn), a "Delivering agent" observation names it or "none", and the `github.branch_update.operator` audit row records `resolver`. Refused at the acceptance-boundary stage and past it (`acceptanceBoundaryRefusal`, ruling 162: the acceptance ceremony refreshes once) unless the PR is `conflicting` at its current head or the work is still in its review loop (`validation` `failing` or `changed`, ruling 429); the operator snapshot carries the same refusal as `notRefreshableReason` (ruling 424). The redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 163). A drive that refreshed the branch and then left the task idle is resumed once (ruling 442). | operator gate; `recommend` is refused outright |
+| `update_branch_from_base` (operator, capability `update-task-branch`) | `updateWorkspaceBranchFromBase` (`update-branch.server.ts`) merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force; the merge and its abort run as the task owner's agent uid, GitHub's base and origin's copy of the branch are fetched with the PAT into the server's stage and fetched from there by the workspace, and the push goes out from the stage — §1, R-seams-1), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, and `recordBranchRefresh` records the refresh in `baseRefreshes` (with `onto`, the head it merged onto, ruling 439), stamps `pushedAt`, and reconciles at once (ruling 132). Before fetching it refuses a branch that carries the store layout (`store_layout`, ruling 159(b)) or changes a path another task leases (`lease_held`, ruling 428); nothing is merged or pushed. It reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)); `already_current` is reported as done, not a refusal (ruling 229). A conflict or push conflict opens a human `blocked` packet whose options can all execute (ruling 133(b)): "Have <deliverer> resolve the conflict" is offered and recommended only when the task's delivering engagement is deployed with a repo-write grant (a person routing the conflict to it is the one case the operator directs an agent to merge `origin/<base>` in its workspace, ruling 438); otherwise "Resolve the branch yourself" is recommended, the body says why (no deliverer, undeployed, grant withdrawn), a "Delivering agent" observation names it or "none", and the `github.branch_update.operator` audit row records `resolver`. Refused at the acceptance-boundary stage and past it (`acceptanceBoundaryRefusal`, ruling 162: the acceptance ceremony refreshes once) unless the PR is `conflicting` at its current head or the work is still in its review loop (`validation` `failing` or `changed`, ruling 429); the operator snapshot carries the same refusal as `notRefreshableReason` (ruling 424). The redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 163). A drive that refreshed the branch and then left the task idle is resumed once (ruling 442). | operator gate; `recommend` is refused outright |
 | Branch cleanup | `deleteTaskRemoteBranch`, after a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Ruling 136(c): a CACHED open PR is re-confirmed against GitHub before it can refuse (a pass with the divergence notification and the operator wake suppressed); a PR GitHub reports closed or merged lets the delete proceed on the refreshed file, a PR still open refuses (`own_pr_open`), and every degraded or unexpected reconcile status refuses as `unconfirmed` ("GitHub could not confirm"), never deleting on an unconfirmed state. The archive and empty-branch doors inherit the same check and sentence. Ruling 161: the ref's head is read before the DELETE and recorded (`github.branch.deleted {sha}`, "Deleted branch … Its head was `sha`"); the archive's local cleanup records both heads on `task.branch.discarded {localSha, remoteSha, basis: archive_cleanup}`, and the archive dialog says what origin holds when the reconciler recorded `github.foreignHead` ("origin's `branch` carries commits this task did not author; deleting it removes them too"). Only GitHub's explicit "does not exist" answer counts as `already_gone`; any other refusal of the DELETE (a protected branch, a ruleset) is `github_refused` (ruling 207(d)). | human `userId` required |
 
 ## 5. Revisions, verdicts and acceptance

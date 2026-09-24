@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   statSync,
@@ -22,6 +23,7 @@ import {
   enforceStoreLayout,
   measureAgentIsolation,
   resetAgentIsolationForTests,
+  shareTreeBuiltForAgents,
 } from "./agent-isolation.server";
 
 /**
@@ -179,6 +181,52 @@ describe("enforceStoreLayout: the store layout asserted at boot (ruling 460)", (
     const root = preRulingStore();
     enforceStoreLayout(root, { gid });
     expect(enforceStoreLayout(root, { gid }).sharedTrees).toBe(0);
+  });
+
+  /**
+   * Pass 40 review (R-seams-1): a checkout cloned from the project mirror
+   * shares its object files with the mirror (hardlinks). The hand-over used to
+   * add group write to them, which reached the MIRROR's inode, so any agent
+   * could rewrite an object every later checkout is cut from. A linked file is
+   * never widened now, and boot takes group and other write back off every
+   * mirror file.
+   */
+  it("never widens a file linked from the mirror, and takes back a write an earlier hand-over gave", () => {
+    // Canaries: drop the `nlink > 1` skip in `shareTreeWithAgents` (the
+    // linked object gains group write) or make `revokeMirrorWrites` a no-op
+    // (the widened mirror file keeps it).
+    const root = preRulingStore();
+    const mirrorObject = path.join(root, "projects/demo/.repo-mirror/acme__app.git/objects/ab/cdef");
+    mkdirSync(path.dirname(mirrorObject), { recursive: true });
+    writeFileSync(mirrorObject, "object\n", { mode: 0o444 });
+    chmodSync(mirrorObject, 0o444);
+    const linked = path.join(root, "projects/demo/tasks/DEMO-1/workspace/repo/.git/objects/ab/cdef");
+    mkdirSync(path.dirname(linked), { recursive: true });
+    linkSync(mirrorObject, linked);
+    // A mirror file an earlier hand-over widened (0444 | 060).
+    const widened = path.join(root, "projects/demo/.repo-mirror/acme__app.git/objects/ab/widened");
+    writeFileSync(widened, "object\n");
+    chmodSync(widened, 0o464);
+
+    const report = enforceStoreLayout(root, { gid });
+
+    expect(report.failures).toEqual([]);
+    // The checkout's own file is handed over; the linked object is not.
+    expect(mode(path.join(root, "projects/demo/tasks/DEMO-1/workspace/repo/README.md")) & 0o060).toBe(0o060);
+    expect(mode(linked)).toBe(0o444);
+    expect(mode(mirrorObject)).toBe(0o444);
+    expect(mode(widened)).toBe(0o444);
+    expect(report.mirrorWritesRevoked).toBe(1);
+
+    // The same rule for a checkout built in a stage and moved in.
+    const staged = path.join(root, "staged");
+    mkdirSync(path.join(staged, "objects"), { recursive: true });
+    writeFileSync(path.join(staged, "config"), "[core]\n", { mode: 0o644 });
+    linkSync(mirrorObject, path.join(staged, "objects", "cdef"));
+    shareTreeBuiltForAgents(staged, { gid });
+    expect(mode(path.join(staged, "config")) & 0o060).toBe(0o060);
+    expect(mode(path.join(staged, "objects", "cdef"))).toBe(0o444);
+    expect(mode(staged) & 0o2070).toBe(0o2070);
   });
 });
 

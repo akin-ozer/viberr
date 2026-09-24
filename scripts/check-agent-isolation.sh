@@ -27,6 +27,7 @@ HOME_B="$DATA/runtimes/users/$TAG-b"
 # the server's file watcher follows.
 WS="$DATA/runtimes/$TAG-workspace"
 failures=0
+STAGE=""
 helpers=""
 
 pass() { echo "ok    $*"; }
@@ -59,7 +60,8 @@ wait_gone() {
 cleanup() {
   for pid in $helpers; do kill -KILL "$pid" 2>/dev/null; done
   "$LAUNCH" --reap KILL "run_${TAG}_reap" >/dev/null 2>&1
-  rm -rf "$HOME_A" "$HOME_B" "$WS" 2>/dev/null
+  [ -d "$WS/repo" ] && as_agent "$UID_A" "rm -rf '$WS/repo'" >/dev/null 2>&1
+  rm -rf "$HOME_A" "$HOME_B" "$WS" ${STAGE:+"$STAGE"} 2>/dev/null
 }
 trap cleanup EXIT
 
@@ -205,6 +207,60 @@ if as_agent "$UID_A" "git config --system core.x y" >/dev/null 2>&1; then
 else
   pass "an agent cannot write the system git config"
 fi
+
+# --- git in a workspace (pass 40 review, R-seams-1) ----------------------------
+# The server never runs git with an agent-writable repository as its working
+# repository under its own uid. A workspace's git runs as the person through
+# the launcher, with hooks and fsmonitor off at command-line precedence
+# (GIT_CONFIG_*), and the delivery reads a branch OUT of a workspace into a
+# repository of its own with git-upload-pack launched as the person. This is
+# the kernel's half of what `workspace-git.server.test.ts` pins in the code.
+REPO="$WS/repo"
+PLANTED="$WS/planted-ran"
+OFF="GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false"
+GIT_BIN=$(command -v git)
+UPLOAD_PACK=$(command -v git-upload-pack || echo "$(git --exec-path)/git-upload-pack")
+as_agent "$UID_A" "git init -q -b main '$REPO' && git -C '$REPO' -c user.email=a@t -c user.name=a commit -q --allow-empty -m one"
+# What any agent can write into any checkout: hooks and an fsmonitor command.
+as_agent "$UID_A" "printf '#!/bin/sh\nid -u >> $PLANTED\n' > '$REPO/.git/planted.sh' && chmod 755 '$REPO/.git/planted.sh' \
+  && for h in pre-commit post-commit post-checkout reference-transaction; do cp '$REPO/.git/planted.sh' '$REPO/.git/hooks/'\$h; done \
+  && git -C '$REPO' config core.fsmonitor '$REPO/.git/planted.sh'"
+as_agent "$UID_A" "git -C '$REPO' -c user.email=a@t -c user.name=a commit -q --allow-empty -m two && git -C '$REPO' status --porcelain" >/dev/null
+if grep -qx "$UID_A" "$PLANTED" 2>/dev/null; then
+  pass "an agent's own git runs the hooks it planted (the overrides are not global)"
+else
+  fail "an agent's own git did not run its hooks"
+fi
+planted_before=$(wc -l <"$PLANTED" 2>/dev/null || echo 0)
+env $OFF VIBERR_LAUNCH_UID=$UID_B VIBERR_LAUNCH_EXEC="$GIT_BIN" "$LAUNCH" -C "$REPO" status --porcelain >/dev/null 2>&1
+env $OFF VIBERR_LAUNCH_UID=$UID_B VIBERR_LAUNCH_EXEC="$GIT_BIN" "$LAUNCH" -C "$REPO" \
+  -c user.email=s@t -c user.name=s commit -q --allow-empty -m three >/dev/null 2>&1
+if [ "$(as_agent "$UID_A" "git -C '$REPO' log -1 --format=%s")" = "three" ] \
+  && [ "$(wc -l <"$PLANTED")" = "$planted_before" ]; then
+  pass "a workspace git launched as a person with hooks and fsmonitor off runs nothing planted"
+else
+  fail "a launched workspace git ran what an agent planted, or did not commit"
+fi
+STAGE=$(mktemp -d)
+git init -q --bare "$STAGE/stage.git"
+# Only its agent can read the checkout now: the server's own git cannot.
+as_agent "$UID_A" "chmod 700 '$REPO'"
+if env $OFF git --git-dir="$STAGE/stage.git" fetch -q --no-tags "$REPO" +refs/heads/main:refs/heads/main >/dev/null 2>&1; then
+  fail "the server read a checkout only its agent can read"
+else
+  pass "the server's own git cannot read a checkout only its agent can read"
+fi
+if env $OFF VIBERR_LAUNCH_UID=$UID_A VIBERR_LAUNCH_EXEC="$UPLOAD_PACK" \
+  git --git-dir="$STAGE/stage.git" fetch -q --no-tags --upload-pack="$LAUNCH" "$REPO" +refs/heads/main:refs/heads/main \
+  && [ "$(git --git-dir="$STAGE/stage.git" rev-parse refs/heads/main)" = "$(as_agent "$UID_A" "git -C '$REPO' rev-parse HEAD")" ] \
+  && [ "$(wc -l <"$PLANTED")" = "$planted_before" ]; then
+  pass "the server fetches a branch out of a checkout with git-upload-pack launched as its person"
+else
+  fail "the server could not fetch through the launcher's git-upload-pack"
+fi
+rm -rf "$STAGE"
+# The checkout is its agent's alone now, so its agent removes it.
+as_agent "$UID_A" "rm -rf '$REPO'"
 
 # --- signals -------------------------------------------------------------------------
 VIBERR_LAUNCH_HOME="$HOME_A" VIBERR_LAUNCH_UID=$UID_A VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c \

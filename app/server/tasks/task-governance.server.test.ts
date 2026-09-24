@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
-import { gitOutSync } from "../../../test-support/git-origin";
+import { gitOutSync, withLocalGithub } from "../../../test-support/git-origin";
 import { taskDir } from "~/server/files/file-store-root.server";
 import {
   actorOf,
@@ -2437,7 +2437,10 @@ describe("resolvePacket kind matrix", () => {
     gitOutSync(repoDir, ["commit", "-q", "-m", "work"]);
     gitOutSync(repoDir, ["checkout", "-q", "main"]);
     if (opts.onRemote) {
-      const remoteDir = path.join(store.dataRoot, "bare-origin.git");
+      // The PROJECT's repository (`akin-ozer/viberr`) stood in for on disk
+      // under `origins/`: pass 40 review (R-seams-1) asks GitHub by the
+      // project's own URL, never through the checkout's config.
+      const remoteDir = path.join(store.dataRoot, "origins", "akin-ozer", "viberr.git");
       mkdirSync(remoteDir, { recursive: true });
       gitOutSync(remoteDir, ["init", "-q", "--bare"]);
       gitOutSync(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -2595,11 +2598,13 @@ describe("resolvePacket kind matrix", () => {
       DISCARD_PACKET,
     );
     initTaskWorkspace(store, { onRemote: true });
-    const { task } = await resolvePacket(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actorOf(store.users.murat),
-      { dataRoot: store.dataRoot },
+    const { task } = await withLocalGithub(path.join(store.dataRoot, "origins"), () =>
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actorOf(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
     );
     // The packet resolves in every case (the discard is best-effort after it).
     expect(task.packet).toBeNull();

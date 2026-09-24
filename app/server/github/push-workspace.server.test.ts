@@ -9,7 +9,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { gitOutSync } from "../../../test-support/git-origin";
+import { gitOutSync, withLocalGithub } from "../../../test-support/git-origin";
 import { createPat, recordPatValidation, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { PatValidation } from "~/schemas/github-pat.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
@@ -187,6 +187,10 @@ function fakeGit(opts: {
       return { ok: true, stdout: opts.shallow ? "true" : "false", stderr: "" };
     }
     if (args.includes("fetch")) {
+      // Pass 40 review (R-seams-1): the deepen is the workspace's own fetch
+      // from origin; the delivery's hand-off (the server's stage fetching the
+      // branch OUT of the workspace) is local and answers on its own.
+      if (!args.includes("--deepen")) return { ok: true, stdout: "", stderr: "" };
       return opts.deepenOk === false
         ? { ok: false, stdout: "", stderr: "could not resolve host" }
         : { ok: true, stdout: "", stderr: "" };
@@ -242,8 +246,23 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       remoteHeadBefore: "b".repeat(40),
     workflowFiles: [],
     });
+    // Pass 40 review (R-seams-1): the push runs in the server's own stage,
+    // never in the agent-writable workspace, to the project's GitHub URL
+    // (never the checkout's `origin`), and publishes the head it compared with origin.
     const pushCall = git.calls.find((c) => c.includes("push"));
-    expect(pushCall).toEqual(["-C", expect.any(String), "push", "origin", "HEAD:refs/heads/vib-1-work"]);
+    expect(pushCall).toEqual([
+      expect.stringMatching(/^--git-dir=.*\.repo-stage/),
+      "push",
+      "https://github.com/akin-ozer/viberr.git",
+      `${"a".repeat(40)}:refs/heads/vib-1-work`,
+    ]);
+    // …after the branch was fetched OUT of the workspace into that stage.
+    const handoff = git.calls.find((c) => c.includes("fetch") && !c.includes("--deepen"));
+    expect(handoff?.[0]).toBe(pushCall?.[0]);
+    expect(handoff).toContain("+refs/heads/vib-1-work:refs/heads/vib-1-work");
+    expect(handoff).toContain(
+      path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "viberr"),
+    );
   });
 
   /**
@@ -263,7 +282,14 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       expect(git.calls.some((c) => c.includes("push"))).toBe(false);
       // The remote was read under the askpass env, the same channel the push uses.
       const ls = git.calls.find((c) => c.includes("ls-remote"))!;
-      expect(ls).toEqual(["-C", expect.any(String), "ls-remote", "--heads", "origin", "vib-1-work"]);
+      // R-seams-1: asked from the server's stage, of the project's URL.
+      expect(ls).toEqual([
+        expect.stringMatching(/^--git-dir=.*\.repo-stage/),
+        "ls-remote",
+        "--heads",
+        "https://github.com/akin-ozer/viberr.git",
+        "vib-1-work",
+      ]);
       const lsEnv = git.envs.find((e) => e.args.includes("ls-remote"))!.env;
       expect(lsEnv?.GIT_TERMINAL_PROMPT).toBe("0");
       expect(lsEnv?.GIT_CONFIG_KEY_0).toBe("credential.helper");
@@ -949,18 +975,24 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
 
   it("ruling 17: refuses a branch that exists on the remote and keeps it local", async () => {
     const repoDir = initWorkspaceRepo(true);
-    const remoteDir = path.join(store.dataRoot, "bare-origin.git");
+    // The PROJECT's repository (`akin-ozer/viberr`), stood in for on disk:
+    // pass 40 review (R-seams-1) asks GitHub by the project's own URL, from
+    // the server's stage, never through the checkout's agent-writable config.
+    const origins = path.join(store.dataRoot, "origins");
+    const remoteDir = path.join(origins, "akin-ozer", "viberr.git");
     mkdirSync(remoteDir, { recursive: true });
     gitOutSync(remoteDir, ["init", "-q", "--bare"]);
     gitOutSync(repoDir, ["remote", "add", "origin", remoteDir]);
     gitOutSync(repoDir, ["push", "-q", "origin", "vib-1-work"]);
-    const out = await discardLocalTaskBranch({
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      branch: "vib-1-work",
-      defaultBranch: "main",
-      dataRoot: store.dataRoot,
-    });
+    const out = await withLocalGithub(origins, () =>
+      discardLocalTaskBranch({
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        branch: "vib-1-work",
+        defaultBranch: "main",
+        dataRoot: store.dataRoot,
+      }),
+    );
     expect(out.status).toBe("on_remote");
     // A refused discard leaves the local branch intact.
     expect(() =>

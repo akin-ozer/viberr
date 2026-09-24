@@ -3,10 +3,65 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { getEnv } from "~/server/config/env.server";
+import { filteredSpawnEnv } from "~/server/runtimes/spawn-env.server";
 import {
   gitErrorText,
   redactGitOutput,
 } from "~/server/secrets/git-output-redact.server";
+
+/**
+ * Pass 40 review (R-seams-1): what every git the server spawns carries at
+ * COMMAND-LINE precedence, above any config file a repository could hold.
+ *
+ * The rule is that the server never runs git with an agent-writable repository
+ * as its working repository under its own uid (`workspace-git.server.ts`), so
+ * no repository config of an agent's should ever be read by a server git. This
+ * is the defense in depth behind it: a hook (`core.hooksPath`) and the
+ * file-system monitor (`core.fsmonitor`) are the two ways a repository makes
+ * git EXECUTE something on commands as ordinary as `status`, `fetch` and
+ * `checkout`, and both are switched off here whatever a config file says.
+ * Only the git the server spawns gets them: they go in the child's environment
+ * (`GIT_CONFIG_COUNT`/`_KEY_n`/`_VALUE_n`), never in `process.env` and never in
+ * `filteredSpawnEnv()`, so an agent's own git keeps its hooks.
+ */
+export const SERVER_GIT_CONFIG: ReadonlyArray<readonly [string, string]> = [
+  ["core.hooksPath", "/dev/null"],
+  ["core.fsmonitor", "false"],
+];
+
+/**
+ * `env` with `entries` appended to its `GIT_CONFIG_COUNT` list (after any
+ * entries it already carries), as a new object.
+ */
+export function withGitConfig(
+  env: NodeJS.ProcessEnv,
+  entries: ReadonlyArray<readonly [string, string]>,
+): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env };
+  const existing = Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10);
+  let count = Number.isInteger(existing) && existing > 0 ? existing : 0;
+  for (const [key, value] of entries) {
+    out[`GIT_CONFIG_KEY_${count}`] = key;
+    out[`GIT_CONFIG_VALUE_${count}`] = value;
+    count += 1;
+  }
+  out.GIT_CONFIG_COUNT = String(count);
+  return out;
+}
+
+/**
+ * The environment of a git the server spawns: the credential-free base every
+ * child starts from (`filteredSpawnEnv`, never `process.env`, so the server's
+ * secret-encryption key and session secret reach no git), no terminal prompt,
+ * and {@link SERVER_GIT_CONFIG}. A credentialed git builds on the same base
+ * through {@link createGitHubAskpassEnv}.
+ */
+export function serverGitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...filteredSpawnEnv(), GIT_TERMINAL_PROMPT: "0" };
+  delete env.GIT_ASKPASS;
+  delete env.SSH_ASKPASS;
+  return withGitConfig(env, SERVER_GIT_CONFIG);
+}
 
 const ASKPASS_USERNAME_ENV = "VIBERR_GIT_ASKPASS_USERNAME";
 const ASKPASS_PASSWORD_ENV = "VIBERR_GIT_ASKPASS_PASSWORD";
@@ -50,15 +105,11 @@ export function createGitHubAskpassEnv(input: {
    *  helper-free environment with no askpass program at all (a public-repo
    *  fetch must not carry an empty credential). */
   token?: string;
+  /** Test seam; production callers build on `filteredSpawnEnv()` (pass 40
+   *  review R-seams-1: never `process.env`, which holds the server's secrets). */
   baseEnv?: NodeJS.ProcessEnv;
 }): GitHubAskpassEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...(input.baseEnv ?? process.env),
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "credential.helper",
-    GIT_CONFIG_VALUE_0: "",
-  };
+  const env: NodeJS.ProcessEnv = credentialedGitEnv(input.baseEnv);
   delete env.GIT_ASKPASS;
   delete env.SSH_ASKPASS;
 
@@ -85,6 +136,19 @@ export function createGitHubAskpassEnv(input: {
       if (askpassDir) rmSync(askpassDir, { recursive: true, force: true });
     },
   };
+}
+
+/**
+ * The base of a git that may carry a credential: no prompt, the ambient
+ * credential helper list reset (an empty `credential.helper` at command-line
+ * precedence clears every helper a config file names, so no helper can be
+ * handed the password or store it), and {@link SERVER_GIT_CONFIG}.
+ */
+function credentialedGitEnv(baseEnv: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
+  return withGitConfig(
+    { ...(baseEnv ?? filteredSpawnEnv()), GIT_TERMINAL_PROMPT: "0" },
+    [["credential.helper", ""], ...SERVER_GIT_CONFIG],
+  );
 }
 
 /** The credential-free URL that Git persists as `remote.origin.url`. */
@@ -134,19 +198,13 @@ export function createGitHubClonePlan(input: {
   repo: string;
   destination: string;
   token?: string;
-  /** Test seam; production callers inherit the server process environment. */
+  /** Test seam; production callers build on `filteredSpawnEnv()`. */
   baseEnv?: NodeJS.ProcessEnv;
 }): GitHubClonePlan {
   const url = githubRepositoryUrl(input.repo);
-  const env: NodeJS.ProcessEnv = {
-    ...(input.baseEnv ?? process.env),
-    GIT_TERMINAL_PROMPT: "0",
-    // An empty helper resets any lower-priority helper list for this one Git
-    // process. These environment-backed config entries are never persisted.
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "credential.helper",
-    GIT_CONFIG_VALUE_0: "",
-  };
+  // An empty helper resets any lower-priority helper list for this one Git
+  // process. These environment-backed config entries are never persisted.
+  const env: NodeJS.ProcessEnv = credentialedGitEnv(input.baseEnv);
 
   // Never reuse an ambient askpass program for a project clone.
   delete env.GIT_ASKPASS;
