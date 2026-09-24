@@ -579,7 +579,12 @@ as intended).
   write is refused whole with both versions named, and the reply says how many bytes a
   replace destroyed. `doc.append: true` adds to the end (creating the file when absent)
   and needs no version, so a long document is built a section at a time; append and
-  replace together are refused.
+  replace together are refused. An append concatenates EXACTLY the text sent, nothing
+  trimmed and no separator inserted, so the caller owns the newlines and a part may end
+  mid-table or inside a fenced block (ruling 466, F40-13). Every size a store, KB or
+  skill write reports or audits (`org.store.doc_written`'s `bytes`, the reply's
+  "Appended N bytes", "its previous N bytes are gone", `read_knowledge_base_doc`'s
+  `bytes`) is a UTF-8 byte count (ruling 466).
 - **A SKILL.md body is judged before it is written** (ruling 183). `save_skill` is one of
   the writers `assertSkillBodyWellFormed` guards (`skill-body.server.ts`; the others are
   the org-settings editor, an upload and the store browser's document editor). A body that

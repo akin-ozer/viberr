@@ -106,6 +106,7 @@ import {
   readStoreDoc,
   scanStoreTree,
   storeDocVersion,
+  utf8Bytes,
   writeStoreDoc,
 } from "~/server/org/store-files.server";
 import { getInsightsSummary } from "~/server/insights/insights-query.server";
@@ -775,7 +776,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         }
         return json({
           path: args.path,
-          bytes: doc.text.length,
+          // Ruling 466: UTF-8 bytes, the unit the write replies use.
+          bytes: utf8Bytes(doc.text),
           truncated: doc.truncated,
           // Ruling 305: hand back the version this text IS, so a replace can
           // say which one it is replacing and Viberr can refuse when the
@@ -791,7 +793,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole).",
+      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 466), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
       {
         id: z
           .string()
@@ -817,7 +819,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               .boolean()
               .optional()
               .describe(
-                "F39-1: add `content` to the END of the document instead of replacing it, creating the file when it is absent. Destroys nothing, so no `replace`/`replaces` is needed (passing either with this is refused). Use it to build a long document in bounded calls rather than one large one.",
+                "F39-1: add `content` to the END of the document instead of replacing it, creating the file when it is absent. Destroys nothing, so no `replace`/`replaces` is needed (passing either with this is refused). Use it to build a long document in bounded calls rather than one large one. Ruling 466: `content` is appended byte for byte, with no trimming and no separator, so end a part with a newline if the next part starts a new line.",
               ),
             replace: z
               .boolean()
@@ -876,7 +878,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // refused once the folder has a metadata row), and the project's
             // rulings KB — injected into EVERY run on the project — is one call
             // away from being erased by a model writing the obvious filename.
-            const before = readStoreDoc(target, [args.doc.path]);
             // F39-1: APPEND. It cannot destroy anything, so rulings 257 and
             // 305 (the collision guard and the version check) do not apply —
             // they exist to stop a whole-document replace deleting text the
@@ -891,24 +892,28 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                   "a replace overwrites the whole document. Send one or the other."
                 );
               }
-              const joined = before
-                ? `${before.text.replace(/\s+$/, "")}\n\n${args.doc.content.trim()}\n`
-                : `${args.doc.content.trim()}\n`;
+              // Ruling 466 (F40-13): the writer concatenates EXACTLY what was
+              // sent. This used to trim the part and force a blank line before
+              // it, so a part boundary inside a markdown table split the table
+              // in two (live, the controller rewrote the whole document to
+              // mend it), and it rebuilt the file from the editor's capped
+              // read, so a document past the cap lost its tail.
               const appended = writeStoreDoc(
                 db,
                 target,
                 [],
                 args.doc.path,
-                joined,
+                args.doc.content,
                 auditActor,
-                { overwrite: true },
+                { append: true },
               );
               return (
-                `${head} Appended ${args.doc.content.trim().length} bytes to ` +
-                `${appended.path.join("/")}${before ? "" : " (created)"}; it is now ` +
+                `${head} Appended ${appended.appendedBytes ?? 0} bytes to ` +
+                `${appended.path.join("/")}${appended.previousBytes === null ? " (created)" : ""}; it is now ` +
                 `${appended.bytes} bytes. Nothing was replaced.`
               );
             }
+            const before = readStoreDoc(target, [args.doc.path]);
             // Ruling 305: a whole-document replace names the version it read.
             // `writeStoreDoc`'s own collision guard (ruling 257) asks whether
             // the file EXISTS; this asks whether it is still the one you read.
@@ -946,7 +951,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               { overwrite: args.doc.replace === true },
             );
             docNote = written.replaced
-              ? ` Document ${written.path.join("/")} REPLACED: its previous ${before?.text.length ?? "unknown"} bytes are gone, ${written.bytes} written.`
+              ? ` Document ${written.path.join("/")} REPLACED: its previous ${written.previousBytes ?? 0} bytes are gone, ${written.bytes} written.`
               : ` Document ${written.path.join("/")} saved (${written.bytes} bytes).`;
           }
           return `${head}${docNote}`;

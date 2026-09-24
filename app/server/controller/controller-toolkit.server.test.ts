@@ -622,6 +622,54 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
+   * Ruling 466 (F40-9, F40-13): an append adds EXACTLY the text sent, and every
+   * size the reply names is UTF-8 bytes. Live, the controller built a KB
+   * document in parts; the tool trimmed each part and forced a blank line
+   * between them, so a table whose rows straddled a part boundary split in
+   * two, and a non-ASCII document was reported 50 bytes short.
+   */
+  it("ruling 466: two appends that split a table are one table, and the reply counts bytes", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", { name: "append-exact" });
+    const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kb, created).toBeTruthy();
+    const first = "| Karar | Yıl |\n|---|---|\n| Açık ";
+    const second = "kaynak | 2026 |\n| Şeffaflık | 2025 |\n";
+    const one = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb!,
+      name: "append-exact",
+      doc: { path: "rulings.md", content: first, append: true },
+    });
+    const two = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb!,
+      name: "append-exact",
+      doc: { path: "rulings.md", content: second, append: true },
+    });
+    // CANARY: count `content.length` and both replies fall short in bytes.
+    expect(one).toContain(`Appended ${Buffer.byteLength(first)} bytes to rulings.md (created)`);
+    expect(two).toContain(
+      `Appended ${Buffer.byteLength(second)} bytes to rulings.md; it is now ${Buffer.byteLength(first + second)} bytes`,
+    );
+    // SAFETY: `read_knowledge_base_doc` answers the JSON it built, whose
+    // `text`, `bytes` and `version` are its own fields.
+    const read = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "rulings.md" }),
+    ) as { text: string; bytes: number; version: string };
+    // CANARY: trim the part or put the "\n\n" separator back and the table
+    // splits (the bytes differ).
+    expect(read.text).toBe(first + second);
+    expect(read.bytes).toBe(Buffer.byteLength(first + second));
+    // A replace names the bytes it destroyed, in bytes (ruling 257).
+    const replaced = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb!,
+      name: "append-exact",
+      doc: { path: "rulings.md", content: "ş", replace: true, replaces: read.version },
+    });
+    expect(replaced).toContain(
+      `REPLACED: its previous ${Buffer.byteLength(first + second)} bytes are gone, 2 written.`,
+    );
+  });
+
+  /**
    * F39-4 (pass 39): `get_project` never shapes ADVISORY persona guidance like
    * an authority.
    *
