@@ -61,7 +61,7 @@ export function MentionMenu({
   onPick,
   onHover,
 }: {
-  /** Listbox id (the textarea's aria-controls / aria-activedescendant root). */
+  /** Listbox id (the composer's aria-controls / aria-activedescendant root). */
   id: string;
   items: MentionSuggestion[];
   /** Index of the active (highlighted) row. */
@@ -90,7 +90,7 @@ export function MentionMenu({
           role="option"
           aria-selected={i === active}
           className={"rsel-item" + (i === active ? " on" : "")}
-          // Keep the textarea focused: prevent the mousedown blur, insert on click.
+          // Keep the composer focused: prevent the mousedown blur, insert on click.
           onMouseDown={(e) => e.preventDefault()}
           onMouseEnter={() => onHover(i)}
           onClick={() => onPick(s)}

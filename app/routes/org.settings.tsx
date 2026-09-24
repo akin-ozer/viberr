@@ -1,6 +1,7 @@
 import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
 import { data } from "react-router";
 import { pageTitle } from "~/shared/page-title";
+import { countLabel } from "~/shared/text/plural";
 import { z } from "zod";
 import type { Route } from "./+types/org.settings";
 import { OrgSettingsPage } from "~/features/org-settings/org-settings-page";
@@ -103,6 +104,7 @@ import {
   writeStoreFiles,
   type UploadFileInput,
 } from "~/server/org/store-files.server";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * /org/settings — the instance-level admin surface (org-settings spec),
@@ -380,9 +382,7 @@ export async function action({ request }: Route.ActionArgs) {
           });
         } catch (error) {
           return fail(
-            `S3 upload failed: could not reach the bucket. ${
-              error instanceof Error ? error.message : String(error)
-            }`.slice(0, 240),
+            `S3 upload failed: could not reach the bucket. ${errorMessage(error)}`.slice(0, 240),
           );
         }
         if (!result.ok) {
@@ -727,18 +727,18 @@ export async function action({ request }: Route.ActionArgs) {
         if (result.added === 0) {
           return ok(
             skipped > 0
-              ? `Nothing uploaded to ${atPath}. ${skipped} hidden file${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`
+              ? `Nothing uploaded to ${atPath}. ${countLabel(skipped, "hidden file")} skipped (names starting with “.” are never stored).`
               : `Nothing uploaded: that selection had no files.`,
           );
         }
         const skippedNote =
           skipped > 0
-            ? ` · ${skipped} hidden file${skipped === 1 ? "" : "s"} skipped`
+            ? ` · ${countLabel(skipped, "hidden file")} skipped`
             : "";
         const toast =
           (field("mode") === "folder" && result.topLevelDirs.length > 0
-            ? `Folder “${result.topLevelDirs.join(", ")}” uploaded as-is · ${result.added} file${result.added === 1 ? "" : "s"}`
-            : `${result.added} file${result.added === 1 ? "" : "s"} added to ${atPath}`) +
+            ? `Folder “${result.topLevelDirs.join(", ")}” uploaded as-is · ${countLabel(result.added, "file")}`
+            : `${countLabel(result.added, "file")} added to ${atPath}`) +
           skippedNote;
         const uploaded: SettingsOkPayload = {};
         if (result.capturedSkillMd)

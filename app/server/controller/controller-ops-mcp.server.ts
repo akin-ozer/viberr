@@ -8,6 +8,7 @@ import {
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
 import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
+import { mountedToolName } from "~/server/runtimes/tool-manifest.server";
 import {
   recordAudit,
   type AuditDetails,
@@ -50,6 +51,7 @@ import {
   NotVisibleError,
   type ControllerToolUser,
 } from "./controller-tool-guards.server";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * `viberr_ops` — the controller's built-in diagnostics server (ruling 107).
@@ -99,7 +101,7 @@ export interface ControllerOpsMcp {
  *  can never disagree about what this server is called. */
 export const CONTROLLER_OPS_MCP_NAME = "viberr_ops";
 
-export const CONTROLLER_OPS_INSTRUCTIONS =
+const CONTROLLER_OPS_INSTRUCTIONS =
   "Viberr built-in diagnostics. READ-ONLY: nothing here changes the instance. Every call is " +
   "checked against the ASKING PERSON's own permissions, so a [denied] answer is final — relay " +
   "it with its reason. Use these to answer questions about how the instance and its runs are " +
@@ -213,7 +215,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const add = (t: SdkMcpToolDefinition<any>, name: string) => {
     tools.push(t);
-    allowed.push(`mcp__${CONTROLLER_OPS_MCP_NAME}__${name}`);
+    // Ruling 347: the manifest's spelling of the mounted name.
+    allowed.push(mountedToolName(CONTROLLER_OPS_MCP_NAME, name));
   };
 
   /**
@@ -377,7 +380,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     if (total <= shown) return {};
     return {
       truncated:
-        `${total - shown} more run${total - shown === 1 ? "" : "s"} matched and ` +
+        `${countLabel(total - shown, "more run")} matched and ` +
         `${shown} are shown, newest first. Pass limit up to ${MAX_RUN_ROWS} for the rest.`,
     };
   };

@@ -1,4 +1,3 @@
-import { getEnv } from "../config/env.server";
 import {
   DataRootLockedError,
   acquireDataRootLock,
@@ -86,7 +85,7 @@ export function cliLockRefusalMessage(
  * `releaseOnExit` is on: the lock file is removed when the command finishes,
  * however it finishes.
  */
-export function acquireCliWriterLock(
+function acquireCliWriterLock(
   options: Pick<CliLockOptions, "dataRoot" | "force"> = {},
 ): DataRootLock {
   const request: AcquireDataRootLockOptions = {
@@ -130,9 +129,4 @@ export async function runWithDataRootWriterLock<T>(
   } finally {
     lock.release();
   }
-}
-
-/** The data root these CLIs operate on (resolved once, for messages). */
-export function cliDataRoot(): string {
-  return getEnv().VIBERR_DATA_ROOT;
 }

@@ -167,7 +167,8 @@ scopes, grant couplings), `acceptance-disclosure.ts` (the accept echo contract),
 `dependencies.ts` (the `blockedBy` vocabulary, ruling 131), `file-leases.ts` (ruling
 245), `credential-scopes.ts` (violation vs advisory GitHub scopes, ruling 380(b)),
 `github-handle.ts` (ruling 154), `names.ts`, `attachment-kinds.ts`, `page-title.ts`
-(one title grammar), `packet-goal-draft.ts` (ruling 138), `packet-server-outcome.ts`
+(one title grammar), `errors.ts` (`toError` / `errorMessage`, the one normalization of a
+caught value), `packet-goal-draft.ts` (ruling 138), `packet-server-outcome.ts`
 (ruling 136(a)), `provider-marker.ts`, `revision-drift.ts` (ruling 132), `run-failure.ts`
 (the failed-run vocabulary, ruling 130(a)), `task-key-links.ts`,
 `workflow/` (templates, transitions chain maintenance, stage roles, stage eligibility,
@@ -177,7 +178,8 @@ stage colour presets (ruling 364), packet option kinds (ruling 164), the re-verd
 actors, notifications; `deriveDisplayReadiness` and the live-backend overlay live in
 `task.server.ts`), `dates/` (`format.ts`, the one timestamp formatter; `time-zone.ts`,
 the viewer's zone for the controller's prose), `ids/` (`newId` in `new-id.server.ts`,
-`slugify`), `text/` (`plural`, store text extensions), `auth/` (auth paths, password
+`slugify`), `text/` (`plural`, store text extensions, `BACKEND_LABEL` (ruling 92),
+`escapeRegExp`, `endSentence`, `wholeThousands`), `auth/` (auth paths, password
 policy), `docs/` (six tests: `design/prd.md` against the canon PRD, `file-formats.md`
 against `PACKET_OPTION_KINDS`, the rulings supersession markers, the runbook's
 database-read rules, the vendored anti-slop tree against its manifest, the vitest

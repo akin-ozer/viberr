@@ -103,7 +103,7 @@ export function formatDueDate(due: string): string {
 }
 
 /** Today as a plain `YYYY-MM-DD` calendar date (local wall clock). */
-export function todayISO(): string {
+function todayISO(): string {
   const d = new Date();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -147,16 +147,5 @@ export function DueDatePill({
       <Icon name="clock" />
       {overdue ? `overdue · ${formatDueDate(dueDate)}` : `due ${formatDueDate(dueDate)}`}
     </Pill>
-  );
-}
-
-/** True when a task carries any non-default metadata worth a dedicated row. */
-export function hasVisibleMeta(task: {
-  priority: TaskPriority;
-  labels: readonly string[];
-  dueDate: string | null;
-}): boolean {
-  return (
-    task.priority !== "normal" || task.labels.length > 0 || task.dueDate != null
   );
 }

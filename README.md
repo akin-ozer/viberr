@@ -341,7 +341,7 @@ Deliberate scope boundaries, documented rather than half-built (verified against
 - **Retention windows are compile-time constants.** Run log lines are deleted after 30
   days, audit events after 90 (each expiring row is first exported to
   `<data root>/audit-exports/*.jsonl`), and notifications are trimmed to the newest 500
-  per user; the pass runs at boot, every 6 hours (`VIBERR_MAINTENANCE_INTERVAL_MS`) and
+  per user; the pass runs at boot, every 6 hours (`VIBERR_MAINTENANCE_INTERVAL_SECONDS`) and
   on disk pressure. Only the transcript and session-home windows
   (`VIBERR_TRANSCRIPT_RETENTION_DAYS`, `VIBERR_SESSION_HOME_RETENTION_DAYS`) are
   env-configurable.

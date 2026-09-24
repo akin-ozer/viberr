@@ -50,14 +50,18 @@ export const TOKEN_PATTERN_SOURCE = [
 const URL_USERINFO_RE = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*:[^\s/@]*@/gi;
 
 /** ANSI CSI escape sequences (`ESC [ … m` and friends): git colourises
- *  `error:`/`hint:` when it thinks it has a TTY.
+ *  `error:`/`hint:` when it thinks it has a TTY, and so do the vendor CLIs'
+ *  sign-in prompts (`backend-login.server.ts` strips them with this too).
+ *
+ *  Global, so use it ONLY with `.replace`, which resets `lastIndex` itself;
+ *  a `.test`/`.exec` on this shared instance would carry state between calls.
  *
  *  The leading ESC IS a control character, and matching it is the entire point
  *  of the pattern — the same waiver `C0_CONTROL_RE` below already carries.
  *  Stated rather than dodged: assembling ESC at runtime to hide it from the
  *  linter would buy nothing and cost the reader the pattern. */
 // eslint-disable-next-line no-control-regex
-const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+export const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
 /** C0 control characters that survive the line split (NUL, BEL, …). `\t` (	)
  *  is spared; `\r`/`\n` are consumed by the split, so they never reach here. */

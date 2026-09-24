@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useFetcher, useNavigate, useSearchParams } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { capabilityById, isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
@@ -8,17 +8,20 @@ import {
 } from "~/server/tasks/specialist-tool-policy";
 import { resolveDeclaredStages } from "~/shared/workflow/stage-eligibility";
 import { countLabel } from "~/shared/text/plural";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   BOUNDARIES,
   TRANSITION_TO_DONE_CAPABILITY_ID,
   TRANSITION_TO_DONE_EXCEPTION,
 } from "~/features/policy/policy-data";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName, storeIcon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
   deploymentDot,
   deploymentStatusKind,
@@ -119,7 +122,7 @@ function BackendChip({
   b,
   health,
 }: {
-  b: string;
+  b: "codex" | "claude";
   /** Undefined = not probed on this surface; nothing is claimed. */
   health?: BackendConnectionSummary | undefined;
 }) {
@@ -135,7 +138,7 @@ function BackendChip({
   return (
     <span className="be-chip">
       <AgentGlyph backend={b} decorative />
-      {b === "claude" ? "Claude" : "Codex"}
+      {BACKEND_LABEL[b]}
       {missing && (
         <span className="model-sub" title={notConnectedNote(b)}>
           <Icon name="alert" />
@@ -148,9 +151,8 @@ function BackendChip({
 
 /** Ruling 127: what a person who has not connected a backend must do, in one
  *  sentence, addressed to them. */
-function notConnectedNote(backend: string): string {
-  const label = backend === "claude" ? "Claude" : "Codex";
-  return `You haven't connected ${label}. Connect it on your Profile → Agent accounts to run this profile on your tasks.`;
+function notConnectedNote(backend: "codex" | "claude"): string {
+  return `You haven't connected ${BACKEND_LABEL[backend]}. Connect it on your Profile → Agent accounts to run this profile on your tasks.`;
 }
 
 /**
@@ -165,7 +167,7 @@ function notConnectedNote(backend: string): string {
  * Codex is a project where this profile runs on that person's tasks.
  */
 function runsUseOwnerNote(health: BackendConnectionSummary): string {
-  const label = health.backend === "claude" ? "Claude" : "Codex";
+  const label = BACKEND_LABEL[health.backend];
   return (
     `Runs use the task owner's ${label} account · ` +
     `${health.membersConnected} of ${health.membersTotal} members connected`
@@ -429,15 +431,16 @@ function ResGroup({
  *    describes only a run already in flight. What the next run gets is ruling
  *    26 (R15-7): a profile that can no longer be resolved is FULLY conservative
  *    — `resolveUndeployedDisallowedTools()` and `withheldAgentGrants()`
- *    (`specialist-run.server.ts:760`, `:833`), i.e. no delivery, no comments,
- *    no ask-human, no evidence. The thread runs and produces nothing anyone can
- *    act on, which is the opposite of the continuity the copy promised.
+ *    (both applied in `dispatchAgentRun`, specialist-run.server.ts), i.e. no
+ *    delivery, no comments, no ask-human, no evidence. The thread runs and
+ *    produces nothing anyone can act on, which is the opposite of the
+ *    continuity the copy promised.
  *  - "until the operator reassigns them" describes an automatic recovery that
- *    nothing initiates. `deleteAgentProfile`
- *    (`agent-profile-actions.server.ts:605-650`) edits `project.md`, reprojects
- *    and audits — it queues no operator run, writes no task timeline event and
- *    sends no notification. Reassignment is real (`assignSpecialist`), but only
- *    if a human goes and does it, so the dialog names it as their next step.
+ *    nothing initiates. `deleteAgentProfile` (agent-profile-actions.server.ts)
+ *    edits `project.md`, reprojects and audits — it queues no operator run,
+ *    writes no task timeline event and sends no notification. Reassignment is
+ *    real (`assignSpecialist`), but only if a human goes and does it, so the
+ *    dialog names it as their next step.
  */
 function DeleteConfirm({
   a,
@@ -452,49 +455,38 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref: dialogRef, close } = useDialog(onCancel);
-  // Native <dialog>: backdrop click and Escape dismiss are handled by
-  // useDialog; the ::backdrop pseudo-element renders the scrim.
+  // The shared `ConfirmDialog` (ruling 458(f)): a native <dialog> whose
+  // backdrop click and Escape dismiss come from useDialog.
   return (
-    <dialog
-      className="confirm-card"
-      role="alertdialog"
-      aria-label="Delete profile"
-      ref={dialogRef}
-    >
-      <div className="confirm-icon">
-        <Icon name="alert" />
-      </div>
-      <h3>Delete the {a.name} profile?</h3>
-      <p>
-        This removes <strong>{a.name}</strong> from {projectName}'s approved
-        profiles. It can't be assigned to new tasks.
-        {activeCount > 0 ? (
-          <>
-            {" "}
-            It is currently engaged on{" "}
-            <strong>
-              {activeCount} active task{activeCount > 1 ? "s" : ""}
-            </strong>
-            . Those engagements stay on the tasks, and nothing reassigns them
-            for you. Until someone assigns a replacement from each task's
-            Execution profile, runs there can't deliver, comment, ask a question
-            or attach evidence.
-          </>
-        ) : (
-          <> The global base definition is unaffected.</>
-        )}
-      </p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
-          <Icon name="x" />
-          Delete profile
-        </button>
-      </div>
-    </dialog>
+    <ConfirmDialog
+      screenLabel="Profile deletion dialog"
+      title={`Delete the ${a.name} profile?`}
+      body={
+        <>
+          This removes <strong>{a.name}</strong> from {projectName}'s approved
+          profiles. It can't be assigned to new tasks.
+          {activeCount > 0 ? (
+            <>
+              {" "}
+              It is currently engaged on{" "}
+              <strong>
+                {activeCount} active task{activeCount > 1 ? "s" : ""}
+              </strong>
+              . Those engagements stay on the tasks, and nothing reassigns them
+              for you. Until someone assigns a replacement from each task's
+              Execution profile, runs there can't deliver, comment, ask a question
+              or attach evidence.
+            </>
+          ) : (
+            <> The global base definition is unaffected.</>
+          )}
+        </>
+      }
+      confirmLabel="Delete profile"
+      confirmIcon="x"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -529,7 +521,7 @@ function DeleteConfirm({
  * board, "the stages above" would name a scope that does not exist and
  * contradict the R14-1 note two lines below.
  */
-export function StageEligibility({
+function StageEligibility({
   a,
   stages,
   workflow,
@@ -703,7 +695,7 @@ export function LibraryPicker({
                   <Pill kind="neutral" sm>
                     {everywhere
                       ? "every stage here"
-                      : `${here.length} stage${here.length === 1 ? "" : "s"} here`}
+                      : `${countLabel(here.length, "stage")} here`}
                   </Pill>
                 </button>
               );
@@ -789,7 +781,7 @@ export function ProfileDetail({
   // Ruling 127: the second claim is now about the VIEWER's own account — they
   // are the person who would press Run.
   const backendMissing = runHealth !== null && !runHealth.viewerConnected;
-  const backendLabel = runHealth?.backend === "claude" ? "Claude" : "Codex";
+  const backendLabel = runHealth ? BACKEND_LABEL[runHealth.backend] : "Codex";
   // F15-05/F15-06: the capability columns show GOVERNED policy only — the same
   // partition the matrix draws between its curated groups and "Other actions".
   // A grant with no runtime consumer (advisory catalog id, bespoke extra) is
@@ -1376,8 +1368,8 @@ export function LiveRoster({
               <span className="live-be">
                 {isOp
                   ? "orchestration"
-                  : d.backend === "claude"
-                    ? "Claude"
+                  : d.backend
+                    ? BACKEND_LABEL[d.backend]
                     : "Codex"}
               </span>
               <span className="live-task">
@@ -1599,12 +1591,7 @@ export function AgentsPage({
 
   // One handled-result effect (phase-5/7 pattern): toast, close on success,
   // keep the modal open with the server error otherwise.
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    const d = fetcher.data;
+  useFetcherResult(fetcher, (d) => {
     if (d.ok) {
       push(d.toast);
       for (const notice of d.notices ?? []) {
@@ -1628,7 +1615,7 @@ export function AgentsPage({
       // rendered under a green tick.
       push(d.error, "error");
     }
-  }, [fetcher.state, fetcher.data, push, creating, editing]);
+  });
 
   const submitProfile = (payload: ProfileFormPayload) => {
     setFormError(null);

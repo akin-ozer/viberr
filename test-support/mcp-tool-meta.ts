@@ -1,4 +1,8 @@
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  McpSdkServerConfigWithInstance,
+  SdkMcpToolDefinition,
+} from "@anthropic-ai/claude-agent-sdk";
+import { expect } from "vitest";
 import { z } from "zod";
 import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
 import type { JsonValue } from "~/features/runtime/runtime-types";
@@ -41,6 +45,28 @@ export function toolLoading(
   const loaded = tools.filter(([, t]) => t._meta?.["anthropic/alwaysLoad"] === true);
   const deferred = tools.filter(([, t]) => t._meta?.["anthropic/alwaysLoad"] !== true);
   return { loaded: loaded.map(([name]) => name), deferred: deferred.map(([name]) => name) };
+}
+
+/**
+ * Call one of a controller server's tools (`viberr_controller` or `viberr_ops`)
+ * by name and return its text reply. The caller builds the toolkit AS the
+ * asking user and passes its `tools`; a name that is not there fails the test.
+ */
+export async function callToolText(
+  tools: SdkMcpToolDefinition<any>[],
+  toolName: string,
+  args: Record<string, JsonValue>,
+): Promise<string> {
+  const tool = tools.find((t) => t.name === toolName);
+  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
+  // SAFETY: every controller handler is wrapped by `controllerToolGuards`'
+  // `run`/`runWith`, which always answers through `textResult`
+  // (app/server/runtimes/strict-tool.server.ts):
+  // { content: [{ type: "text", text }] }.
+  const result = (await tool!.handler(args, {})) as {
+    content: { text: string }[];
+  };
+  return result.content[0]!.text;
 }
 
 /**

@@ -26,7 +26,7 @@ import { parseStoreFile } from "./parse-memo.server";
  * The markdown body is the profile description (mock `desc`).
  */
 
-export const agentProfileFrontmatterSchema = z
+const agentProfileFrontmatterSchema = z
   .object({
     id: z.string().min(1),
     // "controller" is the instance-level conversational agent (one per

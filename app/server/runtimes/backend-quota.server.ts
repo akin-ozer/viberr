@@ -119,7 +119,7 @@ export type BackendQuotaExhaustion = z.infer<typeof exhaustionSchema>;
  * exhaustion: derived from the failed run, carrying its id and the provider's
  * own sentence; retired by the next run that COMPLETES on the backend (the real
  * run is the re-probe) or by the person it names changing that credential
- * (ruling 165, `retireBackendRefusalsFor`), and by nothing else — a dead
+ * (ruling 165, `retireBackendRecordsFor`), and by nothing else — a dead
  * credential does not heal with time.
  */
 const credentialRefusalSchema = z.object({
@@ -178,6 +178,7 @@ const USAGE_LIMIT_RE =
 // no edge into the task layer (the import cycle the old private copy avoided),
 // and no second literal to drift.
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
+import { toError } from "~/shared/errors";
 
 /**
  * The provider's OWN sentence inside a failure line, or the whole line when the
@@ -390,7 +391,7 @@ export function recordBackendRateLimit(
   } catch (error) {
     logger.warn("backend rate-limit reading not recorded", {
       backend,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -408,7 +409,7 @@ export function recordBackendQuotaExhaustion(
   } catch (error) {
     logger.warn("backend quota exhaustion not recorded", {
       backend,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -428,7 +429,7 @@ export function clearBackendQuotaExhaustion(
   } catch (error) {
     logger.warn("backend quota exhaustion not cleared", {
       backend,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -445,7 +446,7 @@ export function recordBackendCredentialRefusal(
   } catch (error) {
     logger.warn("backend credential refusal not recorded", {
       backend,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -461,7 +462,7 @@ export function clearBackendCredentialRefusal(
   } catch (error) {
     logger.warn("backend credential refusal not cleared", {
       backend,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -532,7 +533,7 @@ export function retireBackendRecordsFor(
   } catch (error) {
     logger.warn("backend refusal records not retired on credential change", {
       backend,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }

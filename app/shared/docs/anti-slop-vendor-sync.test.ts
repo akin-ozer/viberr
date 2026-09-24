@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { sha256Hex } from "~/server/files/content-hash.server";
 
 /**
  * B06-T11 (pass 32): `tools/oxlint/anti-slop/` is a VENDORED copy of the
@@ -69,9 +69,7 @@ describe("tools/oxlint/anti-slop mirrors the install-anti-slop skill assets (B06
     const manifest = manifestSchema.parse(JSON.parse(readFileSync(MANIFEST, "utf8")));
     expect(walk(VENDORED)).toEqual(Object.keys(manifest).sort());
     for (const [rel, sha] of Object.entries(manifest)) {
-      const actual = createHash("sha256")
-        .update(readFileSync(path.join(VENDORED, rel)))
-        .digest("hex");
+      const actual = sha256Hex(readFileSync(path.join(VENDORED, rel)));
       expect(actual, `${rel} drifted from the manifest — re-pin with scripts/anti-slop-manifest.mjs`).toBe(sha);
     }
   });

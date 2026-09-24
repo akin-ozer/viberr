@@ -12,6 +12,7 @@ import {
   resolveScopeViolation,
 } from "./policy-violations.server";
 import { rebuildAll } from "./rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import {
   countActivityStream,
   countAuditLog,
@@ -168,8 +169,7 @@ describe("listActivityStream", () => {
   });
 
   it("is empty for a project with no events", () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     expect(listActivityStream(store.db, store.slug)).toEqual([]);
   });
 

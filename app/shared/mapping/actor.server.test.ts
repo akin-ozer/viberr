@@ -109,9 +109,24 @@ describe("agentNamesByProfile (NEW-5)", () => {
   });
 });
 
+describe("createActorResolver — human initials", () => {
+  it("takes the first letters of the first two words, uppercased", () => {
+    // The resolver shares the avatar's one `initialsOf`; a name the users table
+    // no longer holds renders from the ref's snapshot the same way.
+    const db = ctx.makeDb();
+    const resolve = createActorResolver(db);
+    const human = (nameHint: string) =>
+      resolve({ kind: "human", userId: "u_gone", nameHint });
+    expect(human("Deniz Şahin")).toMatchObject({ name: "Deniz Şahin", initials: "DŞ" });
+    expect(human("  arda   kaya  second")).toMatchObject({ initials: "AK" });
+    expect(human("élodie ünal")).toMatchObject({ initials: "ÉÜ" });
+  });
+});
+
 /**
- * C5 (pass 34, U34-4): the controller instrument has ONE spelling, shared by
- * both producers and by the Activity column that decodes it.
+ * C5 (pass 34, U34-4): the controller instrument has ONE spelling, ONE encoder
+ * and ONE decoder, shared by both producers and by the readers that decode it
+ * (the Activity column and `actorProseName`).
  */
 describe("controller instrument (C5)", () => {
   it("round-trips a person's label, and decodes nothing from a plain one", () => {
@@ -122,5 +137,6 @@ describe("controller instrument (C5)", () => {
     expect(decodeControllerInstrument(encoded)).toBe("arda@viberr.dev");
     expect(decodeControllerInstrument("arda@viberr.dev")).toBeNull();
     expect(decodeControllerInstrument("agent:claude/dev (Implementation)")).toBeNull();
+    expect(decodeControllerInstrument("system:policy-engine")).toBeNull();
   });
 });

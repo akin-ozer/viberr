@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Icon, type IconName } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 
@@ -17,7 +17,11 @@ import { useDialog } from "~/ui/use-dialog";
  * one grammar, an outcome-naming `confirmLabel` (never a bare "Remove"), reusing
  * the existing `.confirm-card` chrome and `useDialog` behaviors (Escape,
  * backdrop-click close, focus trap, focus restore). `org-settings`' `ConfirmDelete`
- * delegates here (C6); the D6 sites render it directly.
+ * delegates here (C6); the D6 sites render it directly. Ruling 458(f) moved the
+ * hand-written copies of this card here too: the user disable, the credential
+ * removal, the KB browser's delete and replace, and the agent profile delete.
+ * Home's projection-rebuild confirm stays hand-written under ruling 457 (see
+ * `RebuildConfirm`).
  */
 export function ConfirmDialog({
   title,
@@ -26,8 +30,10 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   tone = "danger",
   icon = "alert",
+  confirmIcon,
   busy = false,
   screenLabel,
+  className,
   onCancel,
   onConfirm,
   children,
@@ -44,6 +50,9 @@ export function ConfirmDialog({
   cancelLabel?: string;
   tone?: "danger" | "primary";
   icon?: IconName;
+  /** A glyph inside the confirm button, before its label (the agent profile
+   *  delete carries `x`). */
+  confirmIcon?: IconName;
   /** Disables the confirm while its mutation is in flight (double-submit guard). */
   busy?: boolean;
   /** Pass-33 D33-2: the `data-screen-label` every other dialog in the product
@@ -54,17 +63,25 @@ export function ConfirmDialog({
    *  project delete, was the one family with no name. Required, so a new call
    *  site cannot quietly rejoin the gap. */
   screenLabel: string;
+  /** Classes added to `.confirm-card`. The KB browser's confirms pass
+   *  `over-modal`, since they open on top of the browser's own dialog. */
+  className?: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { ref, close } = useDialog(onCancel);
+  // Ruling 458(k): the WAI-ARIA alertdialog pattern — the body is the dialog's
+  // description, so a screen reader reads the consequence with the title
+  // instead of only the title.
+  const bodyId = useId();
   return (
     // role="alertdialog" on a native <dialog> keeps the stronger semantics.
     <dialog
       ref={ref}
-      className="confirm-card"
+      className={className ? "confirm-card " + className : "confirm-card"}
       role="alertdialog"
       aria-label={title}
+      aria-describedby={bodyId}
       data-screen-label={screenLabel}
     >
       {/* Interface review 2026-09-24 (colo-7): the icon wash follows the tone —
@@ -74,7 +91,7 @@ export function ConfirmDialog({
         <Icon name={icon} />
       </div>
       <h3>{title}</h3>
-      <p>{body}</p>
+      <p id={bodyId}>{body}</p>
       {children}
       <div className="confirm-actions">
         <button type="button" className="btn ghost" onClick={close}>
@@ -87,6 +104,7 @@ export function ConfirmDialog({
           aria-disabled={busy}
           onClick={onConfirm}
         >
+          {confirmIcon && <Icon name={confirmIcon} />}
           {confirmLabel}
         </button>
       </div>

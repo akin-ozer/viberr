@@ -138,10 +138,10 @@ against stale copies — `design/support.js` alone accounted for 45 phantom
   `dispatchGh({ type: "err", err: d.error })`. `dispatchGh` is a `useReducer` dispatch
   surfaced through the `useStoreOps` hook (NOT a parent callback prop), and its argument
   `d.error` is `ghFetcher.data` (a fetcher result), NOT this component's own state — so
-  the rule's "lift state up" refactor is inapplicable. Guarded once-per-result by the
-  `handledGh` ref, same fetcher-result idiom as the entries above. Verify the called
-  function is a reducer dispatch / hook setter and the argument is fetcher data, not local
-  `useState`.
+  the rule's "lift state up" refactor is inapplicable. Guarded once-per-result by
+  `useFetcherResult(ghFetcher, …)`, the shared form of the fetcher-result idiom above.
+  Verify the called function is a reducer dispatch / hook setter and the argument is
+  fetcher data, not local `useState`.
 
 - `react-doctor/no-unsafe-json-parse` — `JSON.parse(row.*_json)` / `JSON.parse(
   project.*_json)` read straight off the app's OWN SQLite projection columns
@@ -153,11 +153,11 @@ against stale copies — `design/support.js` alone accounted for 45 phantom
   request body, external API response, or file the user can hand-edit — those must be
   wrapped and shape-checked.
 
-- `react-doctor/only-export-components` — decision-packet.tsx `observationLabel` /
-  `observationValue`: P13 rendering helpers co-owned by the component that are also
-  imported by jsdom tests and sibling packet renderers; the module IS the packet's
-  public surface, and moving two pure one-liners to a satellite file to appease Fast
-  Refresh would split one concern across two files. Verify the flagged exports are
+- `react-doctor/only-export-components` — decision-packet.tsx `observationLabel`: a P13
+  rendering helper co-owned by the component that the jsdom tests also import (its
+  sibling `observationValue` is module-local, ruling 458(g)); the module IS the packet's
+  public surface, and moving a pure formatting function to a satellite file to appease
+  Fast Refresh would split one concern across two files. Verify the flagged exports are
   pure formatting helpers colocated with their sole component consumer — hooks or
   stateful exports do not qualify.
 

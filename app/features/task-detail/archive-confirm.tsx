@@ -1,5 +1,6 @@
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import { prStatePill } from "~/features/github/github-pills";
+import { stageLabel } from "~/shared/workflow/stage-label";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -32,8 +33,7 @@ export function ArchiveConfirm({
   const { ref: panelRef, close } = useDialog(onCancel);
   // Ruling 148: the same words as the stage menu and the board row, and never
   // the raw internal id (the F19-36 defect below, second axis).
-  const stageName =
-    task.stages.find((s) => s.id === task.stage)?.name ?? "unknown stage";
+  const stageName = stageLabel(task.stages.find((s) => s.id === task.stage));
   // F19-36: this printed the raw internal state token — "PR #12 accepted" for a
   // PR that is really merge-pending, "PR #12 review" for one in review — while
   // every other surface renders the canonical label from the ONE PR-state map
@@ -45,6 +45,7 @@ export function ArchiveConfirm({
     ...(task.packet ? [`the open “${task.packet.title}” decision`] : []),
     ...(pendingRecommendations > 0
       ? [
+          // Inline plural, not `countLabel`: ruling 457 (shared/text/plural.ts).
           `${pendingRecommendations} pending operator recommendation${
             pendingRecommendations === 1 ? "" : "s"
           }`,

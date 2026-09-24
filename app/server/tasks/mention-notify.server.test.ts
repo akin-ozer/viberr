@@ -20,6 +20,7 @@ import {
   mentionNonDeliveryNote,
   nonMemberMentionNote,
   notifyMentionedUsers,
+  RESERVED_HANDLES,
   resolveMentionTargets,
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
@@ -106,6 +107,23 @@ describe("notifyMentionedUsers", () => {
       }),
     ).toEqual([]);
     expect(notificationRows(store)).toHaveLength(0);
+  });
+
+  it("skips exactly the reserved handles plus the controller's (ruling 99)", () => {
+    // Derived from the one home in ~/ui/mention-spans; this pins its members.
+    expect([...RESERVED_HANDLES].sort()).toEqual([
+      "agent",
+      "claude",
+      "codex",
+      "controller",
+      "operator",
+    ]);
+    // A person whose handles spell a reserved word is still never the target.
+    const users = [
+      { id: "u_ctl", email: "controller@viberr.test", name: "Controller" },
+      { id: "u_cla", email: "claude@viberr.test", name: "Claude" },
+    ];
+    expect(resolveMentionTargets(users, "@controller @claude look").userIds).toEqual([]);
   });
 
   it("never notifies the excluded author, and skips disabled users", () => {
@@ -443,9 +461,9 @@ describe("mentions stay inside the project (F33-9)", () => {
   });
 
   it("the human comment path writes the non-delivery next to the comment", async () => {
-    // The seam, not the note: `appendComment` used to call
-    // `ambiguousMentionHandles(db, text)` with no project, so the F33-9 half of
-    // the report never reached the author — proven live before this test existed
+    // The seam, not the note: `appendComment` used to ask only for the ambiguous
+    // handles, with no project, so the F33-9 half of the report never reached
+    // the author — proven live before this test existed
     // (the comment landed, the notification was correctly withheld, and nothing
     // on the page said the tag had gone nowhere).
     const store = setupTestStore(ctx);

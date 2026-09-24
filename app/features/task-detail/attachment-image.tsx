@@ -21,7 +21,7 @@ import { Icon } from "~/ui/icon";
  * replaces this placeholder's own label, so a screen reader would announce a
  * broken tile exactly like a working one.
  */
-export function AttachmentImage({
+function AttachmentImage({
   src,
   alt,
   onFailedChange,

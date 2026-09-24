@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, statfsSync } from "node:fs";
+import { getEnv } from "~/server/config/env.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 
 /**
@@ -30,9 +31,9 @@ import { getDataRoot } from "~/server/files/file-store-root.server";
  *  - CRITICAL (512 MiB free) — one clone-heavy run plus a WAL checkpoint can
  *    plausibly exhaust the volume from here. Logged at error level.
  *
- * `VIBERR_DISK_LOW_FREE_MB` / `VIBERR_DISK_CRITICAL_FREE_MB` override them
- * (raw process.env with numeric coercion + fallback, the same shape as
- * `VIBERR_GIT_CLONE_TIMEOUT_MS`).
+ * `VIBERR_DISK_LOW_FREE_MB` / `VIBERR_DISK_CRITICAL_FREE_MB` override them,
+ * read through `getEnv()`: the env schema holds the defaults and fails boot on
+ * a value that is not a positive number (ruling 458(c)).
  *
  * An unmeasurable volume returns `null`, NEVER a fabricated zero: "we could not
  * measure" and "there is no space" must not render the same (R17-5 — a
@@ -41,11 +42,6 @@ import { getDataRoot } from "~/server/files/file-store-root.server";
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
-
-/** Default: below this the deployment is degraded but still working. */
-export const DEFAULT_DISK_LOW_FREE_BYTES = 2 * GB;
-/** Default: below this a single run can plausibly fill the volume. */
-export const DEFAULT_DISK_CRITICAL_FREE_BYTES = 512 * MB;
 
 export type DiskStatus = "ok" | "low" | "critical";
 
@@ -62,13 +58,6 @@ export interface DiskSpace {
   criticalThresholdBytes: number;
 }
 
-function envBytes(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const mb = Number(raw);
-  return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * MB) : fallback;
-}
-
 /** The free-space thresholds in force, in bytes (`critical` <= `low`). */
 export interface DiskThresholds {
   low: number;
@@ -76,11 +65,9 @@ export interface DiskThresholds {
 }
 
 export function diskThresholds(): DiskThresholds {
-  const low = envBytes("VIBERR_DISK_LOW_FREE_MB", DEFAULT_DISK_LOW_FREE_BYTES);
-  const critical = envBytes(
-    "VIBERR_DISK_CRITICAL_FREE_MB",
-    DEFAULT_DISK_CRITICAL_FREE_BYTES,
-  );
+  const env = getEnv();
+  const low = Math.floor(env.VIBERR_DISK_LOW_FREE_MB * MB);
+  const critical = Math.floor(env.VIBERR_DISK_CRITICAL_FREE_MB * MB);
   // A critical threshold above the low one would make "low" unreachable; the
   // configured pair is clamped rather than trusted blindly.
   return { low: Math.max(low, critical), critical };
@@ -153,7 +140,7 @@ export function dfReading(path: string): RawDiskReading | null {
   return { totalBytes: totalKb * 1024, freeBytes: Math.max(0, availKb) * 1024 };
 }
 
-export function statfsReading(path: string): RawDiskReading | null {
+function statfsReading(path: string): RawDiskReading | null {
   let stats;
   try {
     stats = statfsSync(path);
@@ -200,7 +187,7 @@ export function measureDataRootSpace(
 }
 
 /** How long a measurement is reused (the health probe is unauthenticated). */
-export const DISK_MEASUREMENT_TTL_MS = 5_000;
+const DISK_MEASUREMENT_TTL_MS = 5_000;
 
 let snapshot: { at: number; value: DiskSpace | null } | null = null;
 

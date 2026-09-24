@@ -5,7 +5,7 @@ import {
   type AppTestContext,
 } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { toolLoading } from "../../../test-support/mcp-tool-meta";
+import { callToolText, toolLoading } from "../../../test-support/mcp-tool-meta";
 import { runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
@@ -56,17 +56,16 @@ let kbId: string;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   const { seedDefaultAgentAssets } = await import(
     "~/server/seed/default-assets.server"
   );
   seedDefaultAgentAssets(app.dataRoot);
 
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
   ids = {
-    orgAdmin: findUserByEmail(app.db, "arda@viberr.dev")!.id,
-    projectAdmin: findUserByEmail(app.db, "elif@viberr.dev")!.id,
-    nonMember: findUserByEmail(app.db, "deniz@viberr.dev")!.id,
+    orgAdmin: userIds.arda,
+    projectAdmin: userIds.elif,
+    nonMember: userIds.deniz,
   };
 
   // One project run and one controller turn, each with a readable log: the two
@@ -186,14 +185,7 @@ async function call(
     ctx: { dataRoot: app.dataRoot },
     user: { id: user.id, email: user.email, name: user.name },
   });
-  const tool = ops.tools.find((t) => t.name === toolName);
-  expect(tool, `tool ${toolName} must exist`).toBeTruthy();
-  // SAFETY: every ops handler is wrapped by the shared `run`, which always
-  // returns the text shape: { content: [{ type: "text", text }] }.
-  const result = (await tool!.handler(args, {})) as {
-    content: { text: string }[];
-  };
-  return result.content[0]!.text;
+  return callToolText(ops.tools, toolName, args);
 }
 
 /**

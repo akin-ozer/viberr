@@ -29,7 +29,8 @@ import { logger } from "~/server/logging/logger.server";
 import { createNotification } from "~/server/projections/notifications.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { SEED_AGENT_PROFILES } from "~/server/seed/agent-catalog.server";
-import { resetStore, SEED_DEFAULT_PASSWORD } from "~/server/seed/seed.server";
+import { SEED_DEFAULT_PASSWORD } from "~/server/seed/seed-credentials";
+import { resetStore } from "~/server/seed/seed.server";
 import { newId } from "~/shared/ids/new-id.server";
 import {
   SEED_PEOPLE,
@@ -54,8 +55,6 @@ import {
  * `--reset` wipes via the product seed's resetStore first.
  */
 
-export { SEED_DEFAULT_PASSWORD };
-
 export interface DemoSeedOptions {
   dataRoot: string;
   reset?: boolean;
@@ -71,6 +70,9 @@ export interface DemoSeedSummary {
   notifications: number;
   agentProfiles: number;
   rescanChanged: number;
+  /** Each seeded user's id by handle, so a test acts as arda & co without
+   *  looking them up by email again. */
+  userIds: SeedUserIds;
 }
 
 async function upsertUsers(
@@ -288,7 +290,7 @@ export async function runDemoSeed(
     },
   });
 
-  const summary: DemoSeedSummary = {
+  const counts = {
     users: SEED_PEOPLE.length,
     projects: projects.length,
     tasks: tasks.length + stubTasks.length,
@@ -297,6 +299,6 @@ export async function runDemoSeed(
     agentProfiles: SEED_AGENT_PROFILES.length,
     rescanChanged: rescan.changed,
   };
-  logger.info("demo seed complete (test fixture)", { ...summary });
-  return summary;
+  logger.info("demo seed complete (test fixture)", counts);
+  return { ...counts, userIds: ids };
 }

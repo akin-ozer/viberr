@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
 import type { McpProbeOptions } from "./resources.server";
+import { toError } from "~/shared/errors";
 
 /**
  * R19-18 (owner ruling) — FIRST-RUN INSTALLS FINISH IN THE BACKGROUND.
@@ -32,7 +33,7 @@ import type { McpProbeOptions } from "./resources.server";
 
 /** Owner ruling: 15 minutes covers the heavy real-world case without letting a
  *  wedged install sit forever. */
-export const WARMUP_CAP_MS = 15 * 60 * 1000;
+const WARMUP_CAP_MS = 15 * 60 * 1000;
 
 /** Server ids with a warm-up in flight IN THIS PROCESS. */
 const inFlight = new Set<string>();
@@ -45,11 +46,6 @@ type WarmupArgs = Parameters<typeof startMcpWarmup>;
  *  installing flag — leaving the re-pointed command never warmed and only a
  *  manual retest able to recover it. */
 const pending = new Map<string, { input: WarmupArgs[1]; options: WarmupArgs[2] }>();
-
-/** True while this server has a background install running here. */
-export function isWarming(id: string): boolean {
-  return inFlight.has(id);
-}
 
 /** Test seam — the suite must never leave a real warm-up armed. */
 export function resetWarmupsForTest(): void {
@@ -147,7 +143,7 @@ export function startMcpWarmup(
       markWarming(db, input.id, null);
       logger.error("mcp background install crashed", {
         mcp: input.name,
-        err: err instanceof Error ? err : new Error(String(err)),
+        err: toError(err),
       });
     } finally {
       // The flag means "a warm-up is running HERE", and one no longer is —

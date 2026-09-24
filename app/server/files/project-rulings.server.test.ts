@@ -50,9 +50,9 @@ describe("projectRulingsKb", () => {
 describe("withProjectRulings", () => {
   it("appends the rulings KB, never displacing the profile's own grants", () => {
     setRulings("team-rulings");
-    // CANARY: prepend instead of append. `readKbBodies` spends one shared
-    // character budget in order, so a rulings KB in front silently takes
-    // context from the thing the profile was deployed to do.
+    // CANARY: prepend instead of append. `readKbIndexes` emits the indexes in
+    // this order, and ruling 239 reads a profile's own grants first and the
+    // project's rulings last.
     expect(withProjectRulings(["mine", "inherited"], store.slug, { dataRoot: store.dataRoot })).toEqual([
       "mine",
       "inherited",

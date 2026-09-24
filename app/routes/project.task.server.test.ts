@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RouterContextProvider } from "react-router";
 import { z } from "zod";
+import type { SeedUserIds } from "../../test-support/demo-data";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import type { TaskLinks } from "~/shared/task-key-links";
 
@@ -22,14 +23,12 @@ import type { TaskLinks } from "~/shared/task-key-links";
  */
 
 let app: AppTestContext;
-let ardaId: string;
+let ids: SeedUserIds;
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 });
 afterAll(() => app.cleanup());
 
@@ -54,7 +53,7 @@ interface ThrownRefusal {
 
 async function loadTask(taskKey: string): Promise<TaskLoaderData> {
   const { loader } = await import("~/routes/project.task");
-  const { cookie } = await app.cookieFor(ardaId);
+  const { cookie } = await app.cookieFor(ids.arda);
   const request = app.request(`/projects/viberr-core/tasks/${taskKey}`, {
     cookie,
   });
@@ -143,15 +142,13 @@ describe("R19-15: GETting the task route auto-reads the viewer's notifications",
     const { createNotification } = await import(
       "~/server/projections/notifications.server"
     );
-    const { findUserByEmail } = await import("~/server/auth/user-store.server");
-    const elifId = findUserByEmail(app.db, "elif@viberr.dev")!.id;
     // Fresh rows (the seed's arda rows may already be read by earlier loads):
     // two kinds for the viewer on the viewed task, one for ANOTHER user on the
     // same task, one for the viewer on a DIFFERENT task.
-    createNotification(app.db, { id: "r19v_mine_m", userId: ardaId, kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
-    createNotification(app.db, { id: "r19v_mine_p", userId: ardaId, kind: "policy", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
-    createNotification(app.db, { id: "r19v_theirs", userId: elifId, kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
-    createNotification(app.db, { id: "r19v_other_task", userId: ardaId, kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-148" });
+    createNotification(app.db, { id: "r19v_mine_m", userId: ids.arda, kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(app.db, { id: "r19v_mine_p", userId: ids.arda, kind: "policy", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(app.db, { id: "r19v_theirs", userId: ids.elif, kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(app.db, { id: "r19v_other_task", userId: ids.arda, kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-148" });
 
     await loadTask("VIB-142");
 
@@ -177,13 +174,11 @@ describe("R19-15: GETting the task route auto-reads the viewer's notifications",
     const { createNotification } = await import(
       "~/server/projections/notifications.server"
     );
-    const { findUserByEmail } = await import("~/server/auth/user-store.server");
-    const denizId = findUserByEmail(app.db, "deniz@viberr.dev")!.id;
     // A stale row a FORMER member could plausibly still hold.
-    createNotification(app.db, { id: "r19v_probe", userId: denizId, kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    createNotification(app.db, { id: "r19v_probe", userId: ids.deniz, kind: "mention", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
 
     const { loader } = await import("~/routes/project.task");
-    const { cookie } = await app.cookieFor(denizId);
+    const { cookie } = await app.cookieFor(ids.deniz);
     const request = app.request("/projects/viberr-core/tasks/VIB-142", {
       cookie,
     });

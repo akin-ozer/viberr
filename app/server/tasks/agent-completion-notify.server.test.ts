@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -279,18 +280,14 @@ describe("the completion path attributes and preserves the agent's question (P13
       },
     );
 
-    const audit = store.db
-      .prepare(
-        `SELECT actor_label, details_json FROM audit_events WHERE action = 'task.agent.packet_opened'`,
-      )
-      .get()!;
+    const audit = listAuditEvents(store.db, {
+      action: "task.agent.packet_opened",
+    })[0]!;
     // Was OPERATOR_AUDIT_ACTOR ("operator") on this transport, so an
     // actor-filtered audit view credited every Codex agent's question to the
     // operator — the exact misreporting P11-23 fixed on the Claude transport.
-    expect(audit.actor_label).toMatch(/^agent:codex\/docs-writer/);
-    expect(JSON.parse(String(audit.details_json)).actorRef).toMatch(
-      /^agent:codex\/docs-writer/,
-    );
+    expect(audit.actorLabel).toMatch(/^agent:codex\/docs-writer/);
+    expect(audit.details!.actorRef).toMatch(/^agent:codex\/docs-writer/);
   });
 
   it("records a question it could not open, instead of dropping it silently", async () => {

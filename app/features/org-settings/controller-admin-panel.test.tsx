@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, render, fireEvent, waitFor } from "@testing-library/react";
-import { CONTROLLER_UNLOCK_ENV } from "~/shared/controller-locks";
+import {
+  CONTROLLER_UNLOCK_ENV,
+  type ControllerSectionLocks,
+} from "~/shared/controller-locks";
 import { createRoutesStub } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -10,7 +13,6 @@ import {
   ControllerAdminPanel,
   type ControllerGrantRequestView,
   type ControllerConfigView,
-  type ControllerSectionLocks,
 } from "./controller-admin-panel";
 
 /**

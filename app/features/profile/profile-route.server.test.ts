@@ -33,10 +33,9 @@ let fake: FakeVendorBinaries;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
-  murId = findUserByEmail(app.db, "murat@viberr.dev")!.id;
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  ardaId = userIds.arda;
+  murId = userIds.murat;
   // Ruling 127: the route resolves its OWN vendor binaries (a form action must
   // not take an executable path from its caller), so the only way to exercise
   // the sign-in intents without spawning the real `claude auth login` is the

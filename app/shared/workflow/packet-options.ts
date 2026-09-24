@@ -1,4 +1,5 @@
 import type { PacketOptionKind } from "~/schemas/task-file.schema";
+import { escapeRegExp } from "~/shared/text/regexp";
 
 /**
  * Ruling 164 (pass 35, F35-14) — an option title is a promise the resolution
@@ -40,7 +41,7 @@ export interface PacketStage {
  *  the decision and hand the task back to the agent side. Nothing they do can
  *  accept, move or reconfigure anything, so their titles are the ones the
  *  authoring guard reads. */
-export const SEND_BACK_OPTION_KINDS: readonly PacketOptionKind[] = [
+const SEND_BACK_OPTION_KINDS: readonly PacketOptionKind[] = [
   "request_edit",
   "redirect",
   "custom",
@@ -78,14 +79,10 @@ const PROFILE_EDIT =
 
 const FORCE_ACCEPT = /\bforce[\s-]*accept/i;
 
-function escapeForRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function promisesMoveTo(text: string, stage: PacketStage): boolean {
   const target = [stage.name, stage.id]
     .filter((value) => value.trim().length > 1)
-    .map(escapeForRegex)
+    .map(escapeRegExp)
     .join("|");
   if (!target) return false;
   const bound = `(?:back\\s+)?(?:to|into)\\s+(?:the\\s+)?(?:stage\\s+)?(?:${target})\\b`;

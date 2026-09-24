@@ -5,12 +5,14 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import type {
   loader as policyLoader,
   action as policyAction,
 } from "~/routes/project.policy";
-import { RBAC_ROWS, ROLE_IDS } from "./policy-data";
+import { RBAC_ROWS } from "./policy-data";
+import { PROJECT_ROLES } from "~/shared/rbac";
 
 /**
  * Route-level tests for /projects/:slug/policy: loader read model from the
@@ -21,15 +23,11 @@ import { RBAC_ROWS, ROLE_IDS } from "./policy-data";
  */
 
 let app: AppTestContext;
-let ids: SeededUserIds;
-
-/** The seeded humans every request in this file is issued as. */
-interface SeededUserIds {
-  arda: string;
-  elif: string;
-  murat: string;
-  selin: string;
-}
+/**
+ * The seeded humans every request in this file is issued as: arda and elif
+ * are project admins, murat a maintainer, selin a contributor.
+ */
+let ids: SeedUserIds;
 
 type PolicyLoaderData = Awaited<ReturnType<typeof policyLoader>>;
 type PolicyActionData = Awaited<ReturnType<typeof policyAction>>;
@@ -58,14 +56,7 @@ interface PolicyRefusal {
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id, // project admin
-    elif: findUserByEmail(app.db, "elif@viberr.dev")!.id, // project admin
-    murat: findUserByEmail(app.db, "murat@viberr.dev")!.id, // maintainer
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // contributor
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 });
 afterAll(() => app.cleanup());
 
@@ -126,7 +117,7 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
       "Edit workflow & policy",
       "Force-accept past the review gate",
     ]);
-    expect(ROLE_IDS).toEqual(["admin", "maintainer", "contributor", "viewer"]);
+    expect(PROJECT_ROLES).toEqual(["admin", "maintainer", "contributor", "viewer"]);
     // Admin holds everything. Q5 clean tiering: a viewer is strictly read +
     // comment; the contributor tier adds "Create tasks" AND task ownership.
     // R8-4: reconcile-github is now maintainer+ (was contributor+).
@@ -136,7 +127,7 @@ describe("RBAC grant table (derived from PROJECT_CAP_MATRIX)", () => {
     // nothing in this table can render as membership-free.
     expect(RBAC_ROWS.every((r) => Object.keys(r.grant).length === 4)).toBe(true);
     expect(
-      RBAC_ROWS.filter((r) => ROLE_IDS.every((role) => r.grant[role] === 1)).map(
+      RBAC_ROWS.filter((r) => PROJECT_ROLES.every((role) => r.grant[role] === 1)).map(
         (r) => r.action,
       ),
     ).toEqual(["View board, tasks & timelines", "Comment on tasks"]);

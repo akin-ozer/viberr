@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -61,10 +62,6 @@ import { promisify } from "node:util";
 
 let ctx: TestDbContext;
 let store: TestStore;
-
-function actor(user: { id: string; email: string }) {
-  return { userId: user.id, label: user.email };
-}
 
 /** Poll until predicate holds (the run's realistic cadence is not a microtask). */
 async function waitFor(
@@ -186,7 +183,7 @@ afterEach(async () => {
         await interruptRun(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", runId: run.id, dataRoot: store.dataRoot },
-          actor(store.users.arda),
+          actorOf(store.users.arda),
         );
       } catch {
         // ignore
@@ -644,7 +641,7 @@ describe("resolveMentionedAgent", () => {
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // Wait until the run has folded a session id onto its row.
@@ -1084,7 +1081,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@rev please re-check" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.agent?.profileId).toBe("rev");
@@ -1116,7 +1113,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev one more thing" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBeNull();
@@ -1148,7 +1145,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev carry on" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBeNull();
@@ -1171,7 +1168,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev please continue" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("resumed");
@@ -1193,7 +1190,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@rev one more look?" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBeNull();
@@ -1245,7 +1242,7 @@ describe("ruling 157: an @mention that RESUMES a session lifts a packet-less hol
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev try again" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("resumed");
@@ -1320,7 +1317,7 @@ describe("ruling 152(c): an @mention that RESUMES a session is held like any oth
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev try again" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBeNull();
@@ -1388,7 +1385,7 @@ describe("ruling 152(c): an @mention that RESUMES a session is held like any oth
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev try again" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("resumed");
@@ -1400,7 +1397,7 @@ describe("commentToAgent", () => {
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "looks good to me" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.agent).toBeNull();
@@ -1415,7 +1412,7 @@ describe("commentToAgent", () => {
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev please re-check the parser" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.agent).toMatchObject({ profileId: "dev", name: "dev" });
@@ -1431,7 +1428,7 @@ describe("commentToAgent", () => {
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev kick things off" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("started");
@@ -1486,7 +1483,7 @@ describe("commentToAgent", () => {
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev take a look" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -1544,7 +1541,7 @@ describe("commentToAgent", () => {
     const refused = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev stop patching symptoms — fix the class" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(refused.triggered).toBeNull();
@@ -1595,7 +1592,7 @@ describe("commentToAgent", () => {
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await waitFor(() =>
@@ -1611,7 +1608,7 @@ describe("commentToAgent", () => {
     const refused = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev one more thing before you finish" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(refused.triggered).toBeNull();
@@ -1623,7 +1620,7 @@ describe("commentToAgent", () => {
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: live.id, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
     await waitFor(
       () => listRunsForTaskRows(store.db, store.slug, "VIB-1").length > before,
@@ -1674,7 +1671,7 @@ describe("commentToAgent", () => {
       const refused = await commentToAgent(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", text },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       expect(refused.triggered).toBeNull();
@@ -1745,7 +1742,7 @@ describe("commentToAgent", () => {
     const refused = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@reviewer please re-check the migration" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(refused.agent).toMatchObject({ profileId: "reviewer" });
@@ -1773,7 +1770,7 @@ describe("commentToAgent", () => {
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await waitFor(() =>
@@ -1792,7 +1789,7 @@ describe("commentToAgent", () => {
         await interruptRun(
           store.db,
           { projectSlug: store.slug, taskKey: "VIB-1", runId: run.id, dataRoot: store.dataRoot },
-          actor(store.users.arda),
+          actorOf(store.users.arda),
         );
       }
     }
@@ -1820,7 +1817,7 @@ describe("commentToAgent", () => {
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev one more thing please" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("resumed");
@@ -1906,7 +1903,7 @@ describe("commentToAgent", () => {
         optionIndex: 0,
         note: "staging only, production needs sign-off",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2025,7 +2022,7 @@ describe("commentToAgent", () => {
         optionIndex: 0,
         note: "Operator: bring the branch up to date with main first.",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // CANARY: drop the `routedTo` branch and the developer is resumed with an
@@ -2092,7 +2089,7 @@ describe("commentToAgent", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // CANARY: scan `option.d` again and the answer is routed to the operator.
@@ -2121,7 +2118,7 @@ describe("commentToAgent", () => {
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: `@dev ${question}` },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("started"); // the fresh branch, not a resume
@@ -2137,7 +2134,7 @@ describe("commentToAgent", () => {
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev kick things off" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("started");
@@ -2154,7 +2151,7 @@ describe("commentToAgent", () => {
     const plain = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "just a plain note" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(plain.logThreadId).toBeNull();
@@ -2197,7 +2194,7 @@ describe("commentToAgent", () => {
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@claude please look at this" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.agent).toBeNull();
@@ -2224,7 +2221,7 @@ describe("commentToAgent", () => {
     const named = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@security-reviewer take a look" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(named.agent).toMatchObject({ profileId: "security-reviewer" });
@@ -2237,7 +2234,7 @@ describe("commentToAgent", () => {
       const result = await commentToAgent(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev can you look?" },
-        actor(user),
+        actorOf(user),
         { dataRoot: store.dataRoot },
       );
       expect(result.runtimeDenied).toBe(true);
@@ -2281,7 +2278,7 @@ describe("mention routing keeps each agent on its OWN session (regression)", () 
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await waitFor(() =>
@@ -2309,7 +2306,7 @@ describe("mention routing keeps each agent on its OWN session (regression)", () 
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@analyst take a look" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("started");
@@ -2386,7 +2383,7 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev one more thing please" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(result.triggered).toBe("resumed");
@@ -2539,7 +2536,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
         taskKey: "VIB-1",
         text: `@${handle} can you take acceptance once the dev is done?`,
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2571,7 +2568,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
         taskKey: "VIB-1",
         text: "@operator what is holding this up?",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2634,7 +2631,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
         optionIndex: 0,
         note: "staging only, production needs sign-off",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -2678,7 +2675,7 @@ describe("F37-66 — the undelivered-mention withdrawal survives the early retur
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     await waitFor(() =>
@@ -2694,7 +2691,7 @@ describe("F37-66 — the undelivered-mention withdrawal survives the early retur
     const refused = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev also drop the dead flag" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(refused.triggered).toBeNull();
@@ -2713,7 +2710,7 @@ describe("F37-66 — the undelivered-mention withdrawal survives the early retur
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: live.id, dataRoot: store.dataRoot },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
     );
 
     const timeline = () =>

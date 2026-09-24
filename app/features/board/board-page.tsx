@@ -64,10 +64,12 @@ import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
+import { stageLabel } from "~/shared/workflow/stage-label";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useStableRows } from "~/ui/use-stable-rows";
 import {
   boardEmptyCopy,
@@ -893,10 +895,7 @@ const ListRow = memo(function ListRow({
 }) {
   const archived = isArchived(task);
   const rowRef = useRovingStageMenu(roving);
-  // Ruling 148: one fact, one wording — the stage menu and the task page say
-  // "unknown stage" too, and the raw internal id is not rendered copy.
-  const stageName =
-    stages.find((s) => s.id === task.stage)?.name ?? "unknown stage";
+  const stage = stages.find((s) => s.id === task.stage);
   const to = `/projects/${task.projectSlug}/tasks/${task.key}`;
   return (
     <div className="card list-row" role="listitem" ref={rowRef}>
@@ -933,11 +932,11 @@ const ListRow = memo(function ListRow({
         // Same read-only rendering the task page uses (stage-colored dot +
         // name), not a bare neutral pill — one fact, one treatment.
         <span className="stage-static">
-          <span
-            className="col-stage-dot sm"
-            data-stage-color={stages.find((s) => s.id === task.stage)?.color}
-          />
-          {stageName}
+          <span className="col-stage-dot sm" data-stage-color={stage?.color} />
+          {/* Ruling 148: one fact, one wording — the stage menu and the task
+              page say "unknown stage" too, and the raw internal id is not
+              rendered copy. */}
+          {stageLabel(stage)}
         </span>
       )}
       <ListAgent task={task} />
@@ -1476,8 +1475,8 @@ function BoardHeader({
   // (deliberate — see the `waitingHuman` comment below).
   const countLine =
     shownCount === taskCount
-      ? `${taskCount} task${taskCount === 1 ? "" : "s"}`
-      : `${shownCount} of ${taskCount} task${taskCount === 1 ? "" : "s"}`;
+      ? countLabel(taskCount, "task")
+      : `${shownCount} of ${countLabel(taskCount, "task")}`;
   return (
     <div className="board-head">
       <div>
@@ -2074,7 +2073,6 @@ export function BoardPage({
     beforeKey: string;
   } | null>(null);
   const finalStageId = columns[columns.length - 1]?.stage.id;
-  const moveDone = useRef<unknown>(null);
   /**
    * D9 (WCAG 2.2 / UX spec §Accessibility Strategy) — the board's polite
    * announcement region. Board drag is pointer-only and keyboard users move via
@@ -2321,11 +2319,7 @@ export function BoardPage({
   }, [inFlight]);
 
   // Toast on completion (and drop the pulse if the move was rejected).
-  useEffect(() => {
-    if (transitionFetcher.state !== "idle" || !transitionFetcher.data) return;
-    if (moveDone.current === transitionFetcher.data) return;
-    moveDone.current = transitionFetcher.data;
-    const d = transitionFetcher.data;
+  useFetcherResult(transitionFetcher, (d) => {
     // The answer is in and the loader has revalidated: the real card stands
     // where the landing preview stood (and pulses), or is back in its lane.
     setInFlight(null);
@@ -2342,7 +2336,7 @@ export function BoardPage({
       // consequential state change a screen-reader user must hear, not only see.
       setAnnounce(`Move refused: ${d.error}`);
     }
-  }, [transitionFetcher.state, transitionFetcher.data, push, inFlight]);
+  });
 
   // Retire the arrival pulse after it plays.
   useEffect(() => {
@@ -2815,6 +2809,9 @@ export function BoardPage({
           task={pendingAcceptTask}
           stages={stages}
           fromStageName={
+            // `stageName`'s fallback, spelled here: importing stage-roles.ts
+            // would put its whole chunk on the board for this one line
+            // (ruling 457).
             stages.find((s) => s.id === pendingAcceptTask.stage)?.name ??
             pendingAcceptTask.stage
           }

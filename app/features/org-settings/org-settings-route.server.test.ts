@@ -6,6 +6,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import type {
   loader as orgLoader,
@@ -20,13 +21,11 @@ import type {
  */
 
 let app: AppTestContext;
-let ids: SeededUserIds;
-
-/** The seeded humans every request in this file is issued as. */
-interface SeededUserIds {
-  arda: string;
-  selin: string;
-}
+/**
+ * The seeded humans every request in this file is issued as: arda is an org
+ * admin, selin an org member.
+ */
+let ids: SeedUserIds;
 
 type SettingsActionData = Awaited<ReturnType<typeof orgAction>>;
 type SettingsOkReply = Extract<SettingsActionData, { ok: true }>;
@@ -45,7 +44,7 @@ type SettingsReply = Omit<SettingsOkReply, "ok"> & {
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
   const { seedOrgResources } = await import("~/server/org/org-seed.server");
   seedOrgResources(app.db, { dataRoot: app.dataRoot });
   // Ships the *-expertise skill folders to disk (no DB rows) — the org view
@@ -54,11 +53,6 @@ beforeAll(async () => {
     "~/server/seed/default-assets.server"
   );
   seedDefaultAgentAssets(app.dataRoot);
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ids = {
-    arda: findUserByEmail(app.db, "arda@viberr.dev")!.id, // org admin
-    selin: findUserByEmail(app.db, "selin@viberr.dev")!.id, // org member
-  };
 });
 afterAll(() => app.cleanup());
 

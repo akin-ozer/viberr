@@ -547,6 +547,17 @@ describe("F13: the home footer says what it is", () => {
     fireEvent.click(getByText("Rebuild projections…").closest("button")!);
     const dialog = container.querySelector("dialog.confirm-card")!;
     expect(dialog.textContent).toContain("Rebuild all projections?");
+    // Named by its title, and labelled for tests and agents (surfaces.md §4).
+    // It stays hand-written under ruling 457 (ruling 458's 2026-09-24 note).
+    expect(dialog.getAttribute("aria-labelledby")).toBe("rebuild-confirm-title");
+    expect(dialog.querySelector("#rebuild-confirm-title")!.textContent).toBe(
+      "Rebuild all projections?",
+    );
+    expect(dialog.getAttribute("data-screen-label")).toBe("Rebuild projections dialog");
+    expect(Array.from(dialog.querySelectorAll("p"), (p) => p.textContent)).toEqual([
+      "Drops every derived board/task row and re-projects the whole store from the files on disk. Nothing is lost: task files, repositories and pull requests are never touched, and every row here is rebuilt from them.",
+      "This is a recovery action. Day-to-day drift only needs Re-scan store. Use it when the board disagrees with the files.",
+    ]);
     // Honest about the blast radius in both directions.
     expect(dialog.textContent).toContain("Drops every derived board/task row");
     expect(dialog.textContent).toContain("never touched");

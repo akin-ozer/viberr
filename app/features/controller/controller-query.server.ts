@@ -26,6 +26,7 @@ import type { RunView } from "~/features/runtime/runtime-types";
 import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-actions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { taskKeyLinks } from "~/server/projections/task-key-links.server";
+import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own
@@ -84,6 +85,40 @@ export interface ConversationListItem {
   /** O39-d: the viewer's own thread holds a controller reply they have not
    *  seen. Never set on someone else's thread (?all=1). */
   unread: boolean;
+}
+
+/**
+ * U33-8: which thread a visit to either controller page opens.
+ *
+ * The dock's continuity rule (ruling 121) is "the newest thread of the scope
+ * you are standing in"; the pages answered a blank composer instead, so one
+ * person on one scope got two different answers from the two entry points.
+ * Same rule here: no `?c=` opens this scope's newest thread, `?c=new` is the
+ * blank composer the New link asks for, and an explicit id still wins —
+ * `getControllerSurface` is what judges whether that id is theirs and in
+ * scope, and still 404s when it belongs to another scope or another person.
+ *
+ * "This scope" is what the rail lists: `projectSlug: null` is the instance's
+ * threads; a slug is the board's threads AND the threads anchored to its
+ * tasks — same `projectSlug`, which is the boundary the query enforces. The
+ * default is drawn from the viewer's OWN threads, exactly as the dock's is:
+ * an org admin reading everyone's (`?all=1`) lands on a thread they can
+ * actually talk in rather than on someone else's read-only transcript.
+ */
+export function selectedConversationId(
+  db: DatabaseSync,
+  url: URL,
+  binding: { userId: string; projectSlug: string | null },
+): string | null {
+  const requested = url.searchParams.get("c");
+  if (requested === NEW_CONVERSATION_PARAM) return null;
+  if (requested !== null) return requested;
+  const newest = listConversations(db, {
+    userId: binding.userId,
+    projectSlug: binding.projectSlug,
+    limit: 1,
+  })[0];
+  return newest?.id ?? null;
 }
 
 export function getControllerSurface(

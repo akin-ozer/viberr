@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { ProjectRole } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { removedAccountLabel } from "~/server/projections/board-query.server";
-import { initialsOfName } from "~/shared/mapping/actor.server";
+import { initialsOf } from "~/ui/initials";
 
 /**
  * Membership read model for the Settings + Policy panels.
@@ -69,7 +69,7 @@ export function listMembershipViews(
       role: member.role,
       name,
       email: user?.email ?? "",
-      initials: user ? initialsOfName(user.name) : "?",
+      initials: user ? initialsOf(user.name) : "?",
       tone: user?.avatar_tone ?? "",
       missing: user === undefined,
       disabled: user?.disabled === 1,

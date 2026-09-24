@@ -16,7 +16,7 @@ import { Icon } from "~/ui/icon";
  * and taking these from `controller-page.tsx` put the whole controller page,
  * its run console and their packages into every route's first download.
  */
-export const CLAUDE_NOT_CONNECTED =
+const CLAUDE_NOT_CONNECTED =
   "The controller runs on your own Claude account, and Claude isn't connected " +
   "for you yet. Connect it on your Profile → Agent accounts, then send your " +
   "message again.";

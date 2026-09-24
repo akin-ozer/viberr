@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
-  setupTestStore,
   writeProject,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -11,6 +10,7 @@ import { fakeGithubFetch } from "../../../test-support/fake-github";
 import type { ProjectFrontmatter } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import {
   createPat,
   deletePat,
@@ -41,13 +41,6 @@ const ACTOR = { userId: "u_test", label: "arda@viberr.test" };
  * call, because `markWriteScopeProven` (F28-U2b) stamps "proven" onto exactly
  * that id.
  */
-
-/** setupTestStore seeds `viberr-core` with repo akin-ozer/viberr on `main`. */
-function seeded(): TestStore {
-  const store = setupTestStore(ctx);
-  rebuildAll(store.db, { dataRoot: store.dataRoot });
-  return store;
-}
 
 /** Rewrites the seeded project.md with fields changed, then re-projects. */
 function reproject(store: TestStore, patch: Partial<ProjectFrontmatter>): void {
@@ -110,7 +103,7 @@ describe("getProjectGithubContext — degraded: no repository", () => {
     // are legitimate (R17-2 / the no-change-completion `no_repo` basis), and such
     // a project must never be reported as a CREDENTIAL problem — that sends an
     // admin off to mint a PAT for a project that will never talk to GitHub.
-    const store = seeded();
+    const store = setupProjectedStore(ctx);
     bindPat(store, store.slug, "ghp_context_repoless01");
     reproject(store, { repo: null });
 
@@ -123,7 +116,7 @@ describe("getProjectGithubContext — degraded: no repository", () => {
     // Loaders hand this the slug straight off the URL. A deleted or mistyped
     // project has to come back as a degraded value like any other missing
     // configuration; a throw here is a 500 on a page render.
-    const store = seeded();
+    const store = setupProjectedStore(ctx);
     expect(
       getProjectGithubContext(store.db, "no-such-project-ever"),
     ).toEqual({ status: "no_repo_configured" });
@@ -138,7 +131,7 @@ describe("getProjectGithubContext — degraded: no usable credential", () => {
     // perfectly good PAT bound elsewhere. The credential is per-project
     // (`project_github_credentials`); there is no store-wide fallback and no org
     // connection to fall back to.
-    const store = seeded();
+    const store = setupProjectedStore(ctx);
     secondProject(store, "other-core", "akin-ozer/other");
     bindPat(store, "other-core", "ghp_context_otherproj1");
 
@@ -154,7 +147,7 @@ describe("getProjectGithubContext — degraded: no usable credential", () => {
     // The context is resolved PER CALL, not cached at boot: revoking a
     // credential has to take effect immediately, or a deleted PAT keeps
     // authorizing writes until the process restarts.
-    const store = seeded();
+    const store = setupProjectedStore(ctx);
     const patId = bindPat(store, store.slug, "ghp_context_revoked001");
     expect(getProjectGithubContext(store.db, store.slug).status).toBe("ok");
 
@@ -174,7 +167,7 @@ describe("getProjectGithubContext — degraded: no usable credential", () => {
     // unauthenticated, which 404s a private repo as if it did not exist.
     // Degrading is the only honest answer when the credential row is there but
     // its secret will not open.
-    const store = seeded();
+    const store = setupProjectedStore(ctx);
     bindPat(store, store.slug, "ghp_context_unreadable");
     // A stored secret this reader cannot decode. `getPatToken` answers null for
     // it, exactly as it does for a box that is not a string at all.
@@ -196,7 +189,7 @@ describe("getProjectGithubContext — ok", () => {
     // project that develops on `develop` must not have its PRs based on `main`.
     // `patId` is the F28-U2b anchor: markWriteScopeProven stamps the PAT that
     // actually made the call, so it has to be the one this context authorized.
-    const store = seeded();
+    const store = setupProjectedStore(ctx);
     reproject(store, { defaultBranch: "develop" });
     const patId = bindPat(store, store.slug, "ghp_context_okarm00001");
 
@@ -216,7 +209,7 @@ describe("getProjectGithubContext — ok", () => {
     // still return status:"ok" everywhere and would still pass every
     // shape-checking test — it would just be pushing to one customer's repo with
     // another's credential.
-    const store = seeded();
+    const store = setupProjectedStore(ctx);
     secondProject(store, "other-core", "akin-ozer/other");
     bindPat(store, store.slug, "ghp_context_mine000001");
     bindPat(store, "other-core", "ghp_context_theirs0001");
@@ -236,7 +229,7 @@ describe("getProjectGithubContext — ok", () => {
     // token while `patId` reported the new one, markWriteScopeProven would stamp
     // "pull_request:write proven" onto a PAT that made no call at all — the exact
     // confusion F28-U2b exists to prevent.
-    const store = seeded();
+    const store = setupProjectedStore(ctx);
     bindPat(store, store.slug, "ghp_context_first00001");
     const second = bindPat(store, store.slug, "ghp_context_second0001");
 
@@ -252,7 +245,7 @@ describe("getProjectGithubContext — ok", () => {
     // a blank value is worse than a wrong one — it produces a ref that GitHub
     // answers about some other resource entirely. The `||` is load-bearing; a
     // `??` here would let the empty string through.
-    const store = seeded();
+    const store = setupProjectedStore(ctx);
     bindPat(store, store.slug, "ghp_context_blankbr001");
     store.db
       .prepare(`UPDATE projects SET default_branch = '' WHERE slug = ?`)

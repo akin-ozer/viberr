@@ -32,10 +32,9 @@ let fake: FakeVendorBinaries;
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  ardaId = findUserByEmail(app.db, "arda@viberr.dev")!.id;
-  muratId = findUserByEmail(app.db, "murat@viberr.dev")!.id;
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  ardaId = userIds.arda;
+  muratId = userIds.murat;
   fake = writeFakeVendorBinaries();
 });
 

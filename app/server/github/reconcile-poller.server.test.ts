@@ -12,6 +12,7 @@ import { fakeGithubFetch, type FakeResponder } from "../../../test-support/fake-
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
   noteReconcileFailure,
@@ -246,8 +247,8 @@ describe("pollGithubReconcile (P11-14)", () => {
     // rows, not wrong nudges. What this pins is the QUERY's semantics (the two
     // counts below diverge, and the poller follows the structural one), so the
     // day the redundant re-check is refactored away the blob match cannot come
-    // back with it. `decisions.server.ts:138` already reads this column with
-    // json_extract — this makes the two agree.
+    // back with it. `decisionsRequiring` (decisions.server.ts) already reads
+    // this column with json_extract — this makes the two agree.
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -316,9 +317,8 @@ describe("C7: a persistent reconcile failure alerts the people who can fix it", 
       .all(store.slug) as { userId: string; title: string }[];
 
   it("stays silent below the threshold, then notifies admins + maintainers once", () => {
-    const store = setupTestStore(ctx);
     // Project the members into `project_members` (what listProjectMembers reads).
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     noteReconcileSuccess(store.slug); // clear any global streak from a prior test
 
     for (let i = 1; i < RECONCILE_FAILURE_ALERT_THRESHOLD; i += 1) {

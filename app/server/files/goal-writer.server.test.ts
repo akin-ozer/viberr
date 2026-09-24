@@ -1,7 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   createGoalFile,
   parseGoalFileContent,
@@ -10,6 +9,10 @@ import {
   updateGoalFile,
 } from "./goal-writer.server";
 import { goalFilePath } from "./file-store-root.server";
+import { createTempDirs } from "../../../test-support/temp-dirs";
+
+const temp = createTempDirs();
+afterAll(temp.cleanup);
 
 describe("updateGoalFile stale-read repair (C01-A2, pass 32)", () => {
   it("a stale (pre-write) disk read is repaired — the earlier write survives", async () => {
@@ -17,7 +20,7 @@ describe("updateGoalFile stale-read repair (C01-A2, pass 32)", () => {
     // repair; the goal writer had none, so two back-to-back link-status
     // writes on a cached bind mount could lose the first (pass-31 gotcha 10).
     // Canary: read the raw file instead of `freshestContent` in updateGoalFile.
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-goal-stale-"));
+    const dataRoot = temp.make("viberr-goal-stale-");
     const ref = { projectSlug: "viberr-core", goalId: "goal-1", dataRoot };
     const abs = goalFilePath(ref.projectSlug, ref.goalId, dataRoot);
     mkdirSync(path.dirname(abs), { recursive: true });
@@ -61,7 +64,7 @@ describe("updateGoalFile stale-read repair (C01-A2, pass 32)", () => {
   });
 
   it("a genuine EXTERNAL edit (newer mtime) still wins over the write cache", async () => {
-    const dataRoot = mkdtempSync(path.join(tmpdir(), "viberr-goal-ext-"));
+    const dataRoot = temp.make("viberr-goal-ext-");
     const ref = { projectSlug: "viberr-core", goalId: "goal-2", dataRoot };
     const abs = goalFilePath(ref.projectSlug, ref.goalId, dataRoot);
     mkdirSync(path.dirname(abs), { recursive: true });

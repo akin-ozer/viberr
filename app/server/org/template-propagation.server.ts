@@ -6,12 +6,11 @@ import {
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { readTemplate } from "~/server/agents/deployment-view.server";
-import { projectFilePath } from "~/server/files/file-store-root.server";
 import {
   readProjectFile,
   updateProjectFile,
 } from "~/server/files/project-writer.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { deploymentFingerprint } from "~/features/agents/agent-profile-actions.server";
 import type {
   ResourceDrift,
@@ -52,7 +51,7 @@ const KINDS = ["skills", "mcps", "kb"] as const;
 type ResourceKind = (typeof KINDS)[number];
 
 /** The rendered noun for one grant, as the replies and the card spell it. */
-export function describeGrant(kind: ResourceKind, name: string): string {
+function describeGrant(kind: ResourceKind, name: string): string {
   const noun =
     kind === "skills" ? "skill" : kind === "mcps" ? "MCP server" : "knowledge base";
   return `${noun} ${name}`;
@@ -291,7 +290,7 @@ export async function propagateTemplateResources(
       written = true;
     });
     if (written) {
-      rebuildPath(db, projectFilePath(slug, ctx.dataRoot), { dataRoot: ctx.dataRoot });
+      reprojectProject(db, ctx, slug);
       recordAudit(db, {
         action: "project.agent_profile.resources_synced",
         actor,

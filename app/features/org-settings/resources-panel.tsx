@@ -4,9 +4,10 @@ import { StoreBrowser } from "~/features/kb-browser/store-browser";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
+import { countLabel } from "~/shared/text/plural";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
-import { ConfirmDelete } from "./mini-modal";
+import { ConfirmDelete } from "./confirm-delete";
 import { useOrgAction } from "./use-org-action";
 import { useBusyRow, rel, updatedLabel } from "./resource-helpers";
 import { KBModal, McpModal, SkillModal } from "./resource-modals";
@@ -36,12 +37,10 @@ import { AgentPanel, KbPanel, McpPanel, SkillPanel } from "./resource-rows";
  *  only templates, so a resource used ONLY by a project agent read as "nothing
  *  uses this" right before the delete silently dropped that project grant. */
 function grantTail(templates: number, projects: number): string {
-  const n = (count: number, noun: string) =>
-    `${count} ${noun}${count === 1 ? "" : "s"}`;
   if (templates === 0 && projects === 0) return " Nothing grants it.";
   const parts: string[] = [];
-  if (templates > 0) parts.push(n(templates, "agent template"));
-  if (projects > 0) parts.push(n(projects, "project agent"));
+  if (templates > 0) parts.push(countLabel(templates, "agent template"));
+  if (projects > 0) parts.push(countLabel(projects, "project agent"));
   return ` The grant is dropped from ${parts.join(" and ")}.`;
 }
 
@@ -231,8 +230,7 @@ export function ResourcesPanel({
             if (a.used > 0) {
               // D5: a refusal must not render the success tick.
               push(
-                "Detach " + a.name + " from its " + a.used + " project" +
-                  (a.used === 1 ? "" : "s") + " first",
+                "Detach " + a.name + " from its " + countLabel(a.used, "project") + " first",
                 "error",
               );
               return;
@@ -324,7 +322,7 @@ export function ResourcesPanel({
             confirm.kind === "kb"
               ? // A2: the server `rmSync`s the whole document folder, not "the
                 // index" — disclose the permanent data loss and the real count.
-                `Permanently deletes the folder and its ${confirm.item.fileCount} file${confirm.item.fileCount === 1 ? "" : "s"}. This cannot be undone.` +
+                `Permanently deletes the folder and its ${countLabel(confirm.item.fileCount, "file")}. This cannot be undone.` +
                 grantTail(
                   usedBy("kbs", confirm.item.dir),
                   projectGrantsFor("kbs", confirm.item.dir),

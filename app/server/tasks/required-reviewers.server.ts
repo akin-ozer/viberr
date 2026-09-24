@@ -11,6 +11,7 @@ import {
 } from "~/schemas/task-file.schema";
 import { deploymentRuntimeIdentity } from "~/server/agents/deployment-view.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { stageName } from "~/shared/workflow/stage-roles";
 
 /**
  * Ruling 178 (pass 36, G36-3): the project-level REQUIRED-reviewer rule.
@@ -44,7 +45,7 @@ export interface RequiredReviewerView {
 
 /** The display name a deployment resolves to — its own definition, else the
  *  org template it deploys, else the bare profile id. */
-export function deployedAgentName(
+function deployedAgentName(
   deployment: AgentDeployment | undefined,
   profileId: string,
   dataRoot?: string,
@@ -60,7 +61,7 @@ export function resolveRequiredReviewers(
 ): RequiredReviewerView[] {
   return fm.requiredReviewers.map((rule) => ({
     stageId: rule.stageId,
-    stageName: fm.stages.find((s) => s.id === rule.stageId)?.name ?? rule.stageId,
+    stageName: stageName(fm.stages, rule.stageId),
     profileId: rule.profileId,
     agentName: deployedAgentName(
       fm.agents.find((a) => a.profileId === rule.profileId),

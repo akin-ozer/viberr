@@ -40,6 +40,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 import type { PrCacheState } from "./pr-linker.server";
 import { POLICY_ENGINE_ACTOR } from "./scope-flag.server";
+import { errorMessage } from "~/shared/errors";
 
 /** The github cache a workspace-side collision note writes: the base cache's
  *  footprint plus the unowned PR, carrying the reconciler's foreign-head
@@ -126,7 +127,7 @@ const defaultExec: CommandExec = async (file, args, opts) => {
       stdout: rejection.stdout,
       stderr:
         rejection.stderr ??
-        (error instanceof Error ? error.message : String(error)),
+        (errorMessage(error)),
       code: rejection.code,
     };
   }
@@ -803,7 +804,7 @@ export async function reconcileWorkspaceDelivery(
     // Reconciliation must NEVER error the run. Log and move on.
     logger.info("workspace delivery reconciliation failed — skipping", {
       taskKey,
-      err: error instanceof Error ? error.message : String(error),
+      err: errorMessage(error),
     });
     return {
       status: "skipped",

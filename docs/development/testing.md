@@ -88,19 +88,30 @@ seeds synthetic ones and `compose.e2e.yml` carries its own.
 
 | Module | Gives you |
 |---|---|
-| `test-db.ts` | `createTestDbContext()` → `makeDb()` (a migrated temp SQLite), `makeTempDir()`, `cleanup()` |
-| `test-store.ts` | `setupTestStore(ctx)` → temp data root + project `viberr-core` (governed template, prefix `VIB`, next number 100, repo `akin-ozer/viberr`, no agents) with users arda (org admin, project admin), murat (maintainer), selin (contributor), elif (viewer), deniz (non-member), each with a unique `@viberr.test` email; `writeProject`, `writeTask`, `baseTaskFrontmatter` |
+| `test-db.ts` | `createTestDbContext()` → `makeDb()` (a migrated temp SQLite), `makeTempDir(prefix = "viberr-test-")`, `cleanup()` (closes the databases, then removes the dirs) |
+| `temp-dirs.ts` | `createTempDirs()` → `make(prefix)` (an `mkdtemp` dir under the OS temp dir) and `cleanup()`, which removes every dir made since the last one; for a test with no database (`createTestDbContext` keeps its dirs through it). Register `afterAll(temp.cleanup)` when a `describe` makes a dir at collection time and shares it across its cases |
+| `test-store.ts` | `setupTestStore(ctx)` → temp data root + project `viberr-core` (governed template, prefix `VIB`, next number 100, repo `akin-ozer/viberr`, no agents) with users arda (org admin, project admin), murat (maintainer), selin (contributor), elif (viewer), deniz (non-member), each with a unique `@viberr.test` email; `writeProject`, `writeTask`, `baseTaskFrontmatter`; `actorOf(user)` → the `{ userId, label }` actor a user writes as (label = email); `insertTestUser(db, id)` → a lone org-member users row (name = id, email `<id>@viberr.test`) for a test that needs a real user without the store |
+| `projected-store.ts` | `setupProjectedStore(ctx)` → `setupTestStore(ctx)` with the SQLite projection already rebuilt; kept apart so a test that never projects does not load the rebuilder |
 | `test-app.ts` | `setupAppTest()` route-level harness: `NODE_ENV=test`, fresh secrets, its own temp `VIBERR_DATA_ROOT`, `VIBERR_SEED_ADMIN_*` cleared, env cache reset, fake runtime installed; `cookieFor(userId)` signs in through better-auth with `APP_TEST_PASSWORD` (clearing that user's login rate-limit bucket first), `csrfFor(sessionId)`, `request(url, { cookie, … })` adds `Origin: http://localhost:5173`, `cleanup()` |
-| `fake-runtime.ts` | `installFakeRuntime()`, `queueFakeRun({ lines, extraFacts, backend, occurredAt, sessionId, keepRunning, outcome, gate })`, `startedRunSpecs()`, `lastRunSpec()`; completion compaction (ruling 376): `queueFakeCompaction(backend, outcome, onCompact?)`, `compactedRunSpecs()` |
-| `fake-github.ts` | `fakeGithubFetch({ "GET /user": spec \| fn })` → `{ fetchImpl, calls, callsTo }`; unmatched → 404; `unreachableFetch()` |
-| `git-origin.ts` | a local GitHub stand-in for the real git paths: `createLocalOrigin(origins, { repo, files?, empty? })` → a bare repo with `advance()` / `head()`; `withLocalGithub(root, work)` rewrites `https://github.com/` to it through a temp `GIT_CONFIG_GLOBAL`; `gitOut(cwd, args)` |
-| `demo-seed.ts`, `demo-data.ts`, `custom-board.ts` | the demo fixture: `runDemoSeed(db, { dataRoot, reset?, adminPassword? })` and `SEED_DEFAULT_PASSWORD` (arda, elif, murat, selin, deniz; `viberr-core` plus the stub projects `deploy-pipeline` and `billing-service`; twelve tasks, VIB-139…168 with full timelines plus DEP-31 and BIL-9; Arda's inbox, the VIB-142 scope violation, Arda's Home pins; the demo Developer stays Codex-backed); `CUSTOM_3_STAGE_BOARD` (`todo` / `doing` / `done`) |
+| `fake-runtime.ts` | `installFakeRuntime()`, `queueFakeRun({ lines, extraFacts, backend, occurredAt, sessionId, keepRunning, outcome, gate })`, `startedRunSpecs()`, `lastRunSpec()`; completion compaction (ruling 376): `queueFakeCompaction(backend, outcome, onCompact?)`, `compactedRunSpecs()`; `drainRunCompletions(timeoutMs = 5_000)` waits for the work a run's exit and its completion callbacks set off (a callback `void`s its effects, so nothing a test awaits covers them) — await it in `afterEach` before cleanup, or the chain meets a closed database; past the ceiling it stops waiting instead of failing. `installRunAdapters(adapters)` installs a test's own adapters with the same tracking |
+| `fake-github.ts` | `fakeGithubFetch({ "GET /user": spec \| fn })` → `{ fetchImpl, calls, callsTo }`; unmatched → 404; `unreachableFetch()`; `unreadableResponse()` → a 200 whose headers throw on read (a throw from inside a GitHub pass) |
+| `git-origin.ts` | a local GitHub stand-in for the real git paths: `createLocalOrigin(origins, { repo, files?, empty? })` → a bare repo with `advance()` (one more commit on `main`); `withLocalGithub(root, work)` rewrites `https://github.com/` to it through a temp `GIT_CONFIG_GLOBAL`; `gitOut(cwd, args)` and its sync twin `gitOutSync(cwd, args)` (runs git in `cwd`, stderr piped) → trimmed stdout |
+| `demo-seed.ts`, `demo-data.ts`, `custom-board.ts` | the demo fixture: `runDemoSeed(db, { dataRoot, reset?, adminPassword? })` (arda, elif, murat, selin, deniz, each signing in with `SEED_DEFAULT_PASSWORD` from `app/server/seed/seed-credentials.ts` unless `adminPassword` sets arda's; `viberr-core` plus the stub projects `deploy-pipeline` and `billing-service`; twelve tasks, VIB-139…168 with full timelines plus DEP-31 and BIL-9; Arda's inbox, the VIB-142 scope violation, Arda's Home pins; the demo Developer stays Codex-backed) → the counts plus `userIds`, each seeded user's id by handle, so a test signs in as one without looking it up by email; `CUSTOM_3_STAGE_BOARD` (`todo` / `doing` / `done`) |
 | `backend-credentials.ts` | `connectFakeBackend(db, userId, backend)`, `connectFakeBackends(db, userId)`, `disconnectFakeBackend(db, userId, backend)`, `fakeBackendSecret(backend)` |
 | `fake-vendor-binary.ts` | `writeFakeVendorBinaries()` → executable `claude` / `codex` stand-ins (mode 0o755) for `deps.binaries`, with `cleanup()`; `setFakeVendorMode("success" \| "fail" \| "hang")`, `setFakeVendorLoggedOut()`, `setFakeVendorLogoutExit()`, `resetFakeVendorEnv()`; the evidence readers `fakeVendorEnv/Argv/Stdin/Terminated/Logout(home)`; `FAKE_DEVICE_CODE`, `FAKE_CLAUDE_URL`, `FAKE_CODEX_URL`, `ANSI_ESCAPE` |
-| `mcp-tool-meta.ts` | reads a mounted in-process MCP server the way a model sees it: `toolLoading(server)` (tools loaded up front vs deferred to ToolSearch), `publishedSchemas(server)` (the JSON Schema through a real MCP client, ruling 296), `publishedInstructions(server)` (ruling 297) |
+| `mcp-tool-meta.ts` | reads a mounted in-process MCP server the way a model sees it: `toolLoading(server)` (tools loaded up front vs deferred to ToolSearch), `publishedSchemas(server)` (the JSON Schema through a real MCP client, ruling 296), `publishedInstructions(server)` (ruling 297); `callToolText(tools, toolName, args)` calls one controller tool (`viberr_controller` or `viberr_ops`) by name on a toolkit the test built as its asker and returns the text reply |
 | `strict-schema.ts` | `assertStrictSchema(node)` — the OpenAI strict structured-output rule (every object `additionalProperties: false`, every key `required`) walked recursively over the Codex agent envelope and operator plan |
 | `toolchain.ts` | `HERMETIC_TOOLCHAIN`, `primeToolchain(reading \| null)`, `primeHermeticToolchain()` |
 | `audit-log.ts` | `listAuditEvents(db, { limit, action })` — raw `audit_events` rows, newest first |
+| `fake-claude-query.ts` | `fakeClaudeQuery(...messages)` → a Claude SDK query (the `ClaudeQuery` the real adapter reads, one layer below `fake-runtime.ts`) that yields `messages`, then completes; `interrupt()` resolves. Type-only import, so it loads nothing at module scope |
+| `process-liveness.ts` | for tests on real processes: `alive(pid)` (signal-0 probe; any throw = not alive, unlike the product's `isProcessAlive`, where `EPERM` counts as alive) and `gone(pid, withinMs = 3000)` (polls every 25 ms) |
+| `polling.ts` | the delivery tests' fire-and-forget settling: `flush()` (5 microtask turns, then a 5 ms timer) and `waitFor(cond, what, timeoutMs = 2_000)` (polls every 5 ms, throws `timed out waiting for <what>`). Suites that poll at other cadences keep their own loops |
+| `delivery-operator.ts` | `deployDeliveryOperator(store, "full" \| "supervised")` → the store's project deploys ONLY an operator with a direct `deliver-review-pr` grant and that autonomy (repo `akin-ozer/viberr`), then re-projects |
+| `data-root-lock.ts` | `lockPath(dataRoot)` → `<dataRoot>/state/writer.lock`, the single-writer lock file (B-FD1) |
+
+A `test-support/` helper has no test of its own: the tests that use it are its coverage
+(ruling 458(m)). A helper that breaks fails the suites built on it, and the collected tree
+(`app/**`) does not reach `test-support/` anyway.
 
 Import route modules **after** `setupAppTest()` so they see the test env. A route action
 takes the React Router 8 argument shape, including `url`, `pattern` and a
@@ -109,9 +120,9 @@ takes the React Router 8 argument shape, including `url`, `pattern` and a
 ```ts
 const ctx = await setupAppTest();
 const { runDemoSeed } = await import("../../test-support/demo-seed");
-await runDemoSeed(ctx.db, { dataRoot: ctx.dataRoot });
+const { userIds } = await runDemoSeed(ctx.db, { dataRoot: ctx.dataRoot });
 const { action } = await import("~/routes/project.board");
-const { cookie, sessionId } = await ctx.cookieFor(userId);
+const { cookie, sessionId } = await ctx.cookieFor(userIds.arda);
 const request = ctx.request("/projects/viberr-core/board", {
   method: "POST",
   cookie,
@@ -184,9 +195,10 @@ Every test under `app/shared/docs/`, and the two elsewhere that read a doc:
   append contract never says "display sorts by timestamp" and keeps "it does not undo
   it".
 - `app/server/config/env.server.test.ts`: every raw `process.env.VIBERR_*` read under
-  `app/` is declared in the env schema and appears in `.env.example` (as `NAME=` or
-  `#NAME=`), except three named test-only hooks and the runbook-only
-  `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`.
+  `app/` is declared in the env schema, and every raw read and every key the schema
+  declares appears in `.env.example` (as `NAME=` or `#NAME=`; the declared keys because
+  ruling 458(c)'s knobs have no raw read left), except three named test-only hooks and
+  the runbook-only `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`.
 
 ### Source-scan gates
 

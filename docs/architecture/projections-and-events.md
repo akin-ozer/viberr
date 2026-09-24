@@ -422,9 +422,10 @@ event, not the minute it crosses (`board-query.server.ts`).
   prunes them explicitly.
 - The watcher's `ignoreInitial` means an external edit inside the sub-second initial
   scan window is picked up only on its next touch or a manual rescan.
-- Any list whose loss would persist must be parsed per row (`tolerantRowsOf` in
-  `schemas/file-diagnostics.ts`); a whole-array fallback silently empties the list and
-  the next write serializes the empty list over good rows.
+- Any list whose loss would persist must be parsed per row (`tolerantListField`, or
+  `tolerantRowsOf` for a list already extracted, in `schemas/file-diagnostics.ts`); a
+  whole-array fallback silently empties the list and the next write serializes the empty
+  list over good rows.
 - `rebuildProjections` must emit only after commit; a revalidation racing a
   half-built projection is the reason events are collected during the transaction.
 - A change to a derived column needs a `PROJECTION_DERIVATION_VERSION` bump, or

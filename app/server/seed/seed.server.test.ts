@@ -13,7 +13,8 @@ import { verifyPassword } from "~/server/auth/password.server";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
 import { agentProfileFilePath } from "~/server/files/file-store-root.server";
 import { seedDefaultAgentAssets } from "./default-assets.server";
-import { runSeed, SEED_DEFAULT_PASSWORD } from "./seed.server";
+import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
+import { runSeed } from "./seed.server";
 
 /**
  * The PRODUCT seed — a clean sheet (owner ruling 2026-07-24): built-in agent

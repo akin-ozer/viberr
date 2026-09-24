@@ -101,7 +101,7 @@ export interface ControllerConfig {
 /** Baked-in doctrine when the store has no controller definition file. Kept
  *  intentionally short — the shipped asset is the real doctrine; this exists so
  *  a hand-wiped store still refuses correctly rather than running promptless. */
-export const FALLBACK_CONTROLLER_DEFINITION =
+const FALLBACK_CONTROLLER_DEFINITION =
   "You are the Viberr Controller: the instance's conversational manager, one per instance. " +
   "You answer questions and perform actions through your tools only, strictly within the asking " +
   "person's own permission level; the server checks every call, and a [denied] result is final. " +
@@ -167,7 +167,7 @@ function readControllerProfile(dataRoot?: string): ParsedProfile | null {
 /** The seeded controller profile's `model:` placeholder for "no model
  *  chosen — the runtime default applies". C01-A9 (pass 32): named, so the
  *  no-model check below is a rule rather than a magic string. */
-export const NO_MODEL_PLACEHOLDER = "orchestration runtime";
+const NO_MODEL_PLACEHOLDER = "orchestration runtime";
 
 /** The skill the controller ALWAYS loads — its own operating guide. C03-OC3
  *  (pass 32): one rule, applied where the config is RESOLVED, so the settings
@@ -175,7 +175,7 @@ export const NO_MODEL_PLACEHOLDER = "orchestration runtime";
  *  `resources.skills` is empty (or missing) runs with exactly this guide. The
  *  runtime used to substitute it privately while the panel rendered "none
  *  granted" — under a skills lock an admin could not even see the mismatch. */
-export const CONTROLLER_DEFAULT_SKILLS: readonly string[] = ["controller-guide"];
+const CONTROLLER_DEFAULT_SKILLS: readonly string[] = ["controller-guide"];
 
 /** The controller's display name: the profile's `name`, else "Controller". */
 function controllerNameOf(fm: AgentProfileFrontmatter | undefined): string {

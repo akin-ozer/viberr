@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
 import { useFetcher, type FetcherWithComponents } from "react-router";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { useToast } from "~/ui/toast";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 
 /**
  * Fetcher wrapper for org-settings actions: injects the CSRF token, posts
@@ -40,19 +40,9 @@ export function useOrgAction(options?: {
   const fetcher = useFetcher<OrgActionData>();
   const csrf = useCsrfToken();
   const push = useToast();
-  const handled = useRef<unknown>(null);
-  const onResultRef = useRef(options?.onResult);
-  useEffect(() => {
-    onResultRef.current = options?.onResult;
-  });
-
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    const d = fetcher.data;
-    if (onResultRef.current) {
-      onResultRef.current(d);
+  useFetcherResult(fetcher, (d) => {
+    if (options?.onResult) {
+      options.onResult(d);
       return;
     }
     if (d.ok) {
@@ -62,7 +52,7 @@ export function useOrgAction(options?: {
       // the success tick (see `ToastKind`, app/ui/toast.tsx).
       push(d.error, "error");
     }
-  }, [fetcher.state, fetcher.data, push]);
+  });
 
   return {
     fetcher,

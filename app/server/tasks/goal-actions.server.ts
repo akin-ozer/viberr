@@ -47,6 +47,8 @@ import { releaseTask, setTaskDependencies, validateDependencyRefs } from "./depe
 import { formatDependencyRef, parseDependencyRef, type DependencyRender } from "~/shared/dependencies";
 import type { CreateTaskInput } from "./task-actions.server";
 import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
+import { countLabel } from "~/shared/text/plural";
+import { toError } from "~/shared/errors";
 
 /**
  * Chained goals (ruling 99): the lifecycle engine.
@@ -76,7 +78,7 @@ import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
  * There is NO delete anywhere: completed and cancelled chains stay readable.
  */
 
-export const GOAL_MAX_LINKS = 20;
+const GOAL_MAX_LINKS = 20;
 
 export interface GoalLinkInput {
   title: string;
@@ -144,7 +146,7 @@ function linkGoalText(
  *  carried the previous link, have both moved on). */
 const CHAIN_HEADER_RE = /^Part of goal [^\n]*\n\n/;
 
-export function stripChainHeader(goal: string): string {
+function stripChainHeader(goal: string): string {
   return goal.replace(CHAIN_HEADER_RE, "").trim();
 }
 
@@ -423,7 +425,7 @@ export async function createGoal(
     status: "active",
     activeTaskKey: created,
     message:
-      `Goal ${goalId} created with ${links.length} link${links.length === 1 ? "" : "s"}; ` +
+      `Goal ${goalId} created with ${countLabel(links.length, "link")}; ` +
       (startedLinks === 0
         ? "no link started yet — every one of them waits on something."
         : `${startedLinks} started now (${startedList.map((l) => `link ${l.index} is ${l.taskKey}`).join(", ")}).`),
@@ -899,7 +901,7 @@ export async function updateGoal(
           fm.links = fm.links
             .filter((l) => l.index !== op.index)
             .map((l, i) => ({ ...l, index: i + 1 }));
-          message = `Link removed; the chain now has ${fm.links.length} link${fm.links.length === 1 ? "" : "s"}.`;
+          message = `Link removed; the chain now has ${countLabel(fm.links.length, "link")}.`;
           return `Pending link ${op.index} (${link.title}) removed by ${by}.`;
         }
       }
@@ -1014,7 +1016,7 @@ export async function updateGoal(
       logger.error("goal link retry task creation failed", {
         goalId: input.goalId,
         linkIndex: retryLinkIndex,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
       await updateGoalFile(
         goalRef(ctx, input.projectSlug, input.goalId),
@@ -1083,7 +1085,7 @@ function notifyCreator(
   } catch (error) {
     logger.warn("goal creator notification failed", {
       goalId: fm.id,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -1248,7 +1250,7 @@ async function startLinkTaskLocked(
         goalId,
         linkIndex,
         taskKey: created.key,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     });
   }
@@ -1512,7 +1514,7 @@ export async function reconcileGoal(
         logger.error("goal link task creation failed", {
           goalId,
           linkIndex,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
         await updateGoalFile(ref, (goal) => {
           if (goal.frontmatter.status !== "active") return;
@@ -1554,14 +1556,14 @@ export function maybeReconcileGoalForTask(
       logger.error("goal reconcile failed", {
         projectSlug,
         goalId,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     });
   } catch (error) {
     logger.warn("goal reconcile hook failed", {
       projectSlug,
       taskKey,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -1577,7 +1579,7 @@ const activeGoalRowSchema = z.object({
  * saw) still advances its chain. Cheap: a projection query, then per-goal
  * file reads only for the few live chains.
  */
-export async function reconcileAllGoals(
+async function reconcileAllGoals(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},
 ): Promise<number> {
@@ -1596,7 +1598,7 @@ export async function reconcileAllGoals(
       logger.error("goal reconcile failed", {
         projectSlug: row.project_slug,
         goalId: row.goal_id,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -1642,7 +1644,7 @@ export function startGoalRunner(db: DatabaseSync): void {
     void goalRunnerTick(db)
       .catch((error) => {
         logger.error("goal runner tick failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       .finally(() => {
@@ -1753,7 +1755,7 @@ export function getGoalView(
   return view;
 }
 
-export function toGoalView(parsed: ParsedGoalFile): GoalView {
+function toGoalView(parsed: ParsedGoalFile): GoalView {
   const fm = parsed.frontmatter;
   return {
     id: fm.id,

@@ -134,7 +134,7 @@ export class TokenBucketLimiter {
   }
 }
 
-export const LOGIN_RATE_LIMIT = {
+const LOGIN_RATE_LIMIT = {
   capacity: 10,
   refillIntervalMs: 15 * 60 * 1000,
 } as const;

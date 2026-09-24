@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnClaudeCli, type ClaudeCli } from "./claude-spawn.server";
+import { gone } from "../../../test-support/process-liveness";
 
 /**
  * Ruling 174: Viberr spawns the Claude CLI itself, detached, through the SDK's
@@ -30,24 +31,6 @@ function start(script: string, env: NodeJS.ProcessEnv = process.env): ClaudeCli 
   });
   clis.push(cli);
   return cli;
-}
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function gone(pid: number, withinMs = 3000): Promise<boolean> {
-  const deadline = Date.now() + withinMs;
-  while (Date.now() < deadline) {
-    if (!alive(pid)) return true;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  return !alive(pid);
 }
 
 describe.skipIf(process.platform === "win32")("spawnClaudeCli (real process)", () => {

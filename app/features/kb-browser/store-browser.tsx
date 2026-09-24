@@ -7,13 +7,15 @@ import {
   type DragEvent as ReactDragEvent,
 } from "react";
 import { useFetcher } from "react-router";
+import { countLabel } from "~/shared/text/plural";
 import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useRelativeTime } from "~/ui/use-relative-time";
-import { FolderIco, FolderUpIco, UploadIco } from "./icons";
 import {
   entriesFromDataTransfer,
   entriesFromFileList,
@@ -136,11 +138,11 @@ function BrowserToolbar({
             primary; Done below is a plain exit. Five equal-weight secondaries
             gave the toolbar no ranking. */}
         <button type="button" className="btn primary sm" onClick={onUploadFiles}>
-          <UploadIco />
+          <Icon name="upload" />
           Upload files
         </button>
         <button type="button" className="btn sm" onClick={onUploadFolder}>
-          <FolderUpIco />
+          <Icon name="folderup" />
           Upload folder
         </button>
         <button
@@ -159,7 +161,7 @@ function BrowserToolbar({
           New document
         </button>
         <button type="button" className="btn ghost sm" onClick={onNewFolder}>
-          <FolderIco />
+          <Icon name="folder" />
           New folder
         </button>
         {/* P14-KM-08 (owner ruling R14-4): every toolbar action wrote to the
@@ -327,7 +329,7 @@ function StoreTree({
       style={{ paddingLeft: `${0.6 + depth * 1.3}rem` }}
     >
       <span className="twist"></span>
-      <FolderIco />
+      <Icon name="folder" />
       <input
         ref={newRef}
         className="fm-newinp mono"
@@ -389,16 +391,14 @@ function StoreTree({
               )}
             </span>
             {r.node.type === "dir" ? (
-              <FolderIco open={r.open} />
+              <Icon name={r.open ? "folderopen" : "folder"} />
             ) : (
               <Icon name="file" />
             )}
             <span className="fm-name">{r.node.name}</span>
             {r.node.type === "dir" ? (
               <span className="fm-meta">
-                {countKbFiles(r.node.children) +
-                  " file" +
-                  (countKbFiles(r.node.children) === 1 ? "" : "s")}
+                {countLabel(countKbFiles(r.node.children), "file")}
               </span>
             ) : (
               <span className="fm-meta">
@@ -459,7 +459,7 @@ function StoreTree({
                   screen to explain it. `.rsrc-acts` is the always-visible row-
                   action wrapper the org-settings resource rows already use, so
                   this is also the app's one row-action shape rather than a
-                  third. (For UI-A: `.fm-acts` at app.css:3242-3243 is now dead.) */}
+                  third. (`.fm-acts` has since been deleted from app.css, P16-UI-25.) */}
               <span className="rsrc-acts">
                 {r.node.type === "dir" && (
                   <>
@@ -470,7 +470,7 @@ function StoreTree({
                       aria-label={"Upload into " + r.node.name}
                       onClick={() => onStartUpload([...r.path, r.node.name])}
                     >
-                      <UploadIco />
+                      <Icon name="upload" />
                     </button>
                     <button
                       type="button"
@@ -510,9 +510,9 @@ function StoreTree({
   );
 }
 
-/** Nested delete confirm on its OWN native <dialog> — showModal stacking
- * makes it the topmost layer, so its Escape/backdrop land here (useDialog),
- * not on the browser card underneath. */
+/** Nested delete confirm on its OWN native <dialog> (the shared `ConfirmDialog`,
+ * ruling 458(f)) — showModal stacking makes it the topmost layer, so its
+ * Escape/backdrop land there (useDialog), not on the browser card underneath. */
 function DeleteConfirm({
   node,
   onCancel,
@@ -522,44 +522,24 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
+  const files = node.type === "dir" ? countKbFiles(node.children) : 0;
   return (
-    <dialog
-      ref={ref}
-      className="confirm-card over-modal"
-      role="alertdialog"
-      aria-labelledby="store-confirm-title"
-      aria-describedby="store-confirm-desc"
-    >
-      <div className="confirm-icon">
-        <Icon name="alert" />
-      </div>
-      <h3 id="store-confirm-title">
-        Delete “{node.name}”
-        {node.type === "dir" && countKbFiles(node.children) > 0
-          ? " and its contents"
-          : ""}
-        ?
-      </h3>
-      <p>
-        {node.type === "dir"
-          ? countKbFiles(node.children) > 0
-            ? countKbFiles(node.children) +
-              " file" +
-              (countKbFiles(node.children) === 1 ? "" : "s") +
+    <ConfirmDialog
+      screenLabel="Store deletion dialog"
+      className="over-modal"
+      title={`Delete “${node.name}”${files > 0 ? " and its contents" : ""}?`}
+      body={
+        node.type === "dir"
+          ? files > 0
+            ? countLabel(files, "file") +
               " inside will be removed from the store. Agents lose them on their next context load."
             : "The empty folder is removed from the store."
-          : "The file is removed from the store. Agents lose it on their next context load."}
-      </p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
-          {node.type === "dir" ? "Delete folder" : "Delete file"}
-        </button>
-      </div>
-    </dialog>
+          : "The file is removed from the store. Agents lose it on their next context load."
+      }
+      confirmLabel={node.type === "dir" ? "Delete folder" : "Delete file"}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -609,12 +589,7 @@ function useStoreOps(
   const uploadBusy = uploading > 0 && opsFetcher.state !== "idle";
 
   // ---- action feedback (toasts ride the server response).
-  const handledOps = useRef<unknown>(null);
-  useEffect(() => {
-    if (opsFetcher.state !== "idle" || !opsFetcher.data) return;
-    if (handledOps.current === opsFetcher.data) return;
-    handledOps.current = opsFetcher.data;
-    const d = opsFetcher.data;
+  useFetcherResult(opsFetcher, (d) => {
     setUploading(0);
     if (d.ok) {
       if (d.toast) push(d.toast);
@@ -624,7 +599,7 @@ function useStoreOps(
       // rendered under a green tick.
       push(d.error, "error");
     }
-  }, [opsFetcher.state, opsFetcher.data, push]);
+  });
 
   // ---- mutations (real fs writes via the org-settings action).
   const submitFields = (fields: Record<string, string>) => {
@@ -650,7 +625,7 @@ function useStoreOps(
       // successful upload looks like. Say which of the two nothings happened.
       if (skipped > 0) {
         push(
-          `Nothing uploaded: ${skipped} hidden item${skipped === 1 ? "" : "s"} skipped (names starting with “.” are never stored).`,
+          `Nothing uploaded: ${countLabel(skipped, "hidden item")} skipped (names starting with “.” are never stored).`,
           "error",
         );
       }
@@ -792,12 +767,7 @@ function useDocEditor(
   const loading = readFetcher.state !== "idle";
   const saving = saveFetcher.state !== "idle";
 
-  const handledRead = useRef<unknown>(null);
-  useEffect(() => {
-    if (readFetcher.state !== "idle" || !readFetcher.data) return;
-    if (handledRead.current === readFetcher.data) return;
-    handledRead.current = readFetcher.data;
-    const d = readFetcher.data;
+  useFetcherResult(readFetcher, (d) => {
     setDoc((prev) =>
       prev
         ? d.ok
@@ -805,14 +775,9 @@ function useDocEditor(
           : { ...prev, err: d.error ?? "That document could not be read." }
         : prev,
     );
-  }, [readFetcher.state, readFetcher.data]);
+  });
 
-  const handledSave = useRef<unknown>(null);
-  useEffect(() => {
-    if (saveFetcher.state !== "idle" || !saveFetcher.data) return;
-    if (handledSave.current === saveFetcher.data) return;
-    handledSave.current = saveFetcher.data;
-    const d = saveFetcher.data;
+  useFetcherResult(saveFetcher, (d) => {
     if (d.ok) {
       setConfirmReplace(false);
       setDoc(null);
@@ -824,7 +789,7 @@ function useDocEditor(
     setDoc((prev) =>
       prev ? { ...prev, err: d.error ?? "The document was not saved." } : prev,
     );
-  }, [saveFetcher.state, saveFetcher.data, onSaved]);
+  });
 
   const openNew = (dir: string[]) =>
     setDoc({ dir, name: "", body: "", existing: false, truncated: false, err: null });
@@ -875,8 +840,9 @@ function useDocEditor(
   };
 }
 
-/** Nested "this file already exists" confirm — its own native <dialog>, so it
- *  stacks over the browser card exactly like the delete confirm (UI-59). */
+/** Nested "this file already exists" confirm — its own native <dialog> (the
+ *  shared `ConfirmDialog`, ruling 458(f)), so it stacks over the browser card
+ *  exactly like the delete confirm (UI-59). */
 function ReplaceConfirm({
   path,
   onCancel,
@@ -886,33 +852,22 @@ function ReplaceConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
   return (
-    <dialog
-      ref={ref}
-      className="confirm-card over-modal"
-      role="alertdialog"
-      aria-labelledby="store-replace-title"
-      aria-describedby="store-replace-desc"
-    >
-      <div className="confirm-icon">
-        <Icon name="alert" />
-      </div>
-      <h3 id="store-replace-title">Replace “{path}”?</h3>
-      <p id="store-replace-desc">
-        A document with that name is already in the store. Saving overwrites its
-        contents: the old text is gone, and agents load the new text on their
-        next context load.
-      </p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
-          Replace document
-        </button>
-      </div>
-    </dialog>
+    <ConfirmDialog
+      screenLabel="Replace document dialog"
+      className="over-modal"
+      title={`Replace “${path}”?`}
+      body={
+        <>
+          A document with that name is already in the store. Saving overwrites its
+          contents: the old text is gone, and agents load the new text on their
+          next context load.
+        </>
+      }
+      confirmLabel="Replace document"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -985,13 +940,8 @@ export function StoreBrowser({
 
   // ---- GitHub-import feedback: lives here (not in the hook) because a
   // successful import expands the tree state this component owns.
-  const handledGh = useRef<unknown>(null);
   const { ghFetcher, dispatchGh } = ops;
-  useEffect(() => {
-    if (ghFetcher.state !== "idle" || !ghFetcher.data) return;
-    if (handledGh.current === ghFetcher.data) return;
-    handledGh.current = ghFetcher.data;
-    const d = ghFetcher.data;
+  useFetcherResult(ghFetcher, (d) => {
     if (d.ok) {
       if (d.toast) push(d.toast);
       if (d.folder) {
@@ -1010,7 +960,7 @@ export function StoreBrowser({
     } else if (d.error) {
       dispatchGh({ type: "err", err: d.error });
     }
-  }, [ghFetcher.state, ghFetcher.data, push, dispatchGh]);
+  });
 
   // ---- layered close on the native <dialog>: the nested DeleteConfirm is
   // topmost while open, so its own `cancel` handles that layer; here an
@@ -1271,7 +1221,7 @@ export function StoreBrowser({
         </div>
         <div className="modal-foot">
           <span className="foot-hint mono">
-            {nDirs + " folder" + (nDirs === 1 ? "" : "s") + " · " + nFiles + " file" + (nFiles === 1 ? "" : "s")}
+            {countLabel(nDirs, "folder") + " · " + countLabel(nFiles, "file")}
             {metaTail ? " · " + metaTail : ""}
           </span>
           <span className="foot-actions">

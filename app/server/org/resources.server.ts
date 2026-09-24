@@ -2,7 +2,6 @@ import { spawn, type SpawnOptions } from "node:child_process";
 import { publishResourceUpdated } from "./resource-events.server";
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -40,6 +39,7 @@ import {
 import { isInjectableKbDoc } from "~/server/files/kb-injection.server";
 import {
   assertSkillBodyWellFormed,
+  lstatOr,
   resolveContainedSkillFile,
 } from "~/server/files/skill-body.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -48,6 +48,8 @@ import { isReservedMcpName } from "~/shared/mcp-reserved";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE, MCP_WRITE_TOOLS_MAX } from "~/shared/mcp-tools";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
 import { updateResourceReferences } from "./resource-references.server";
+import { countLabel, pluralNoun } from "~/shared/text/plural";
+import { toError } from "~/shared/errors";
 
 /**
  * Org agent resources: knowledge bases, MCP servers, skills (org-settings
@@ -112,10 +114,11 @@ function diskNameFromId(id: string): string | null {
  *
  * C5/pass-16: this used `statSync`, which DEREFERENCES — so `kb/notes` pointing
  * at `/etc` was listed as a first-class knowledge base, browsable in the store
- * browser, counted in its doc count, and (before the matching guard in
- * `readKbBodyDetailed`) injected into runs as trusted agent context. Every
- * other store path refuses to follow a link out of the store (P14-RV-02);
- * `lstatSync` does not dereference, so a linked entry is simply not a resource.
+ * browser, counted in its doc count, and (before the matching guard in the KB
+ * reader, now `readKbIndexDetailed`) injected into runs as trusted agent
+ * context. Every other store path refuses to follow a link out of the store
+ * (P14-RV-02); `lstatSync` does not dereference, so a linked entry is simply
+ * not a resource.
  */
 export function subDirNames(root: string): string[] {
   try {
@@ -161,10 +164,10 @@ function unionDiskAndRows(rowKeys: string[], diskNames: string[]): string[] {
 // re-scans only ("manual").
 //
 // P13-KM-15 — what this mode does NOT do: it controls the DOC-COUNT/freshness
-// metadata only. Agents always read the live folder at run time (readKbBody
-// walks the real directory), so "manual" never pins the CONTENT a run sees. The
-// KB modal's copy says exactly this so the toggle can't be mistaken for a
-// content freeze.
+// metadata only. Agents always read the live folder at run time
+// (`readKbIndexDetailed` walks the real directory and `readKbDoc` reads from
+// it), so "manual" never pins the CONTENT a run sees. The KB modal's copy says
+// exactly this so the toggle can't be mistaken for a content freeze.
 export const KB_REFRESH_MODES = ["on change", "manual"] as const;
 export type KbRefreshMode = (typeof KB_REFRESH_MODES)[number];
 export const DEFAULT_KB_REFRESH: KbRefreshMode = "on change";
@@ -229,7 +232,8 @@ function buildKb(
   };
 }
 
-/** Recursive count of the files `readKbBody` would inject (P14-KM-13). */
+/** Recursive count of the documents a run can read from this KB — the same
+ *  `isInjectableKbDoc` test `readKbIndexDetailed` counts with (P14-KM-13). */
 function countInjectableDocs(nodes: StoreNode[]): number {
   return nodes.reduce(
     (sum, node) =>
@@ -531,9 +535,9 @@ export function reindexKnowledgeBase(
   return {
     docCount: kb.injectableCount,
     toast:
-      `${kb.name} re-scanned: ${kb.injectableCount} doc${kb.injectableCount === 1 ? "" : "s"} agents can read` +
+      `${kb.name} re-scanned: ${countLabel(kb.injectableCount, "doc")} agents can read` +
       (skipped > 0
-        ? ` · ${skipped} non-text file${skipped === 1 ? "" : "s"} skipped`
+        ? ` · ${countLabel(skipped, "non-text file")} skipped`
         : ""),
   };
 }
@@ -906,7 +910,7 @@ function openMcpCredential(
       } catch (error) {
         logger.warn("could not re-seal an MCP credential — read still succeeded", {
           mcp: name,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     }
@@ -916,7 +920,7 @@ function openMcpCredential(
       "mcp credential failed to decrypt under every configured key — the server will NOT be mounted",
       {
         mcp: name,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       },
     );
     return {
@@ -960,7 +964,7 @@ function openedForNewRow(sealed: string, name: string): ProbeCredential {
   } catch (error) {
     logger.error("mcp credential failed to decrypt on save — probing no-auth", {
       mcp: name,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return { token: null, unreadable: true };
   }
@@ -1004,11 +1008,6 @@ export function getMcpServer(
     | undefined;
   return row ? mapMcp(row) : null;
 }
-
-export type McpProbeOutcome =
-  | { kind: "up"; latencyMs: number }
-  | { kind: "down"; reason: string }
-  | { kind: "skipped" };
 
 /**
  * Minimal child-process surface the stdio discovery needs — real
@@ -1494,47 +1493,6 @@ function parseMcpMessage(text: string): McpMessage | null {
 }
 
 /**
- * Reachability probe for an HTTP target. Kept for the "is anything listening"
- * question; the real health signal is {@link discoverHttpMcpTools}, which
- * proves the endpoint speaks MCP. stdio targets are spawned per run → skipped.
- */
-export async function probeMcpTarget(
-  transport: "HTTP" | "stdio",
-  target: string,
-  options: McpProbeOptions = {},
-): Promise<McpProbeOutcome> {
-  if (transport !== "HTTP") return { kind: "skipped" };
-  let url: URL;
-  try {
-    url = new URL(target);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return { kind: "down", reason: "endpoint is not an http(s) URL" };
-    }
-  } catch {
-    return { kind: "down", reason: "endpoint is not a valid URL" };
-  }
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const started = Date.now();
-  try {
-    const res = await fetchImpl(url.toString(), {
-      method: "GET",
-      headers: { accept: "text/event-stream, application/json" },
-      signal: AbortSignal.timeout(options.timeoutMs ?? 2500),
-    });
-    // Headers arrived → the endpoint exists; don't hold an SSE body open.
-    res.body?.cancel().catch(() => {});
-    return { kind: "up", latencyMs: Date.now() - started };
-  } catch (error) {
-    const reason =
-      error instanceof Error && error.name === "TimeoutError"
-        ? "connection timed out"
-        : "connection refused";
-    return { kind: "down", reason };
-  }
-}
-
-
-/**
  * Real tool discovery over Streamable HTTP (P13-LV-10).
  *
  * The old HTTP health check treated ANY HTTP response as "reachable": pointing
@@ -1548,7 +1506,7 @@ export async function probeMcpTarget(
  * A credentialed server is probed WITH its credential (P13-KM-05), so a server
  * that works in a run doesn't report "unreachable" in Settings.
  */
-export async function discoverHttpMcpTools(
+async function discoverHttpMcpTools(
   target: string,
   options: McpProbeOptions & { token?: string | null } = {},
 ): Promise<StdioDiscovery> {
@@ -1797,14 +1755,14 @@ export async function saveMcpServer(
   const effectiveWriteTools = writeTools;
   const spawnNote = transport === "stdio" ? " · spawned per run" : "";
   const writeNote = effectiveWriteTools?.length
-    ? ` · ${effectiveWriteTools.length} marked as write tool${effectiveWriteTools.length === 1 ? "" : "s"}`
+    ? ` · ${effectiveWriteTools.length} marked as write ${pluralNoun(effectiveWriteTools.length, "tool")}`
     : "";
   const credNote = credOpened.unreadable
     ? " · its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
     : "";
   const toast =
     (disc.kind === "up"
-      ? `${name} saved: ${disc.tools} tool${disc.tools === 1 ? "" : "s"} discovered${spawnNote}`
+      ? `${name} saved: ${countLabel(disc.tools, "tool")} discovered${spawnNote}`
       : transport === "stdio"
         // R19-17: the wrapper used to add "command didn't respond" in front of
         // a reason that now says what actually happened, giving
@@ -1979,7 +1937,7 @@ export async function testMcpServer(
     const fresh = getMcpServer(db, id)!;
     return {
       mcp: fresh,
-      toast: `${fresh.name} healthy: ${disc.tools} tool${disc.tools === 1 ? "" : "s"} · ${disc.latencyMs}ms${credNote}`,
+      toast: `${fresh.name} healthy: ${countLabel(disc.tools, "tool")} · ${disc.latencyMs}ms${credNote}`,
     };
   }
   db.prepare(
@@ -2159,14 +2117,6 @@ function assertSkillBodyWritable(name: string, ctx: OrgSeedContext): void {
   // still a link, and the write would CREATE the target outside the store.
   if (!lstatOr(path.join(dir, "SKILL.md"))) return;
   if ("reason" in resolveContainedSkillFile(name, ctx.dataRoot)) throw uncontained();
-}
-
-function lstatOr(target: string): ReturnType<typeof lstatSync> | null {
-  try {
-    return lstatSync(target);
-  } catch {
-    return null;
-  }
 }
 
 /** True when the on-disk SKILL.md exceeds the editor read cap — the body the

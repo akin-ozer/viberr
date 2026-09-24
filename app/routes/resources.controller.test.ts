@@ -21,10 +21,9 @@ const SLUG = "viberr-core";
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  arda = findUserByEmail(app.db, "arda@viberr.dev")!.id;
-  deniz = findUserByEmail(app.db, "deniz@viberr.dev")!.id;
+  const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
+  arda = userIds.arda;
+  deniz = userIds.deniz;
 });
 afterAll(() => app.cleanup());
 

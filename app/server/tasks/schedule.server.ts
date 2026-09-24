@@ -12,25 +12,20 @@ import { holdEntriesSentence } from "~/shared/dependencies";
 import { resolveDependencies } from "~/server/projections/dependencies.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { AppError } from "~/server/errors/app-error.server";
-import {
-  readTaskFile,
-  resolveTaskFilePath,
-  updateTaskFile,
-  type TaskFileRef,
-} from "~/server/files/task-writer.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { cloneTimeoutMs } from "~/server/tasks/git-clone-auth.server";
-import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
-import type { TaskMutationContext } from "./task-actions.server";
+import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 import {
   scheduleSchema,
   type ScheduleAction,
   type TaskFileEvent,
   type TaskSchedule,
 } from "~/schemas/task-file.schema";
+import { toError } from "~/shared/errors";
 
 /**
  * Governed SCHEDULED task actions (O-3). A maintainer schedules a future
@@ -50,29 +45,6 @@ import {
  */
 
 const SCHEDULE_TICK_MS = 60_000;
-
-function taskFileRef(
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  taskKey: string,
-): TaskFileRef {
-  return {
-    projectSlug,
-    taskKey,
-    dataRoot: ctx.dataRoot,
-  };
-}
-
-function reproject(
-  db: DatabaseSync,
-  ctx: TaskMutationContext,
-  projectSlug: string,
-  taskKey: string,
-): void {
-  rebuildPath(db, resolveTaskFilePath(taskFileRef(ctx, projectSlug, taskKey)), {
-    dataRoot: ctx.dataRoot,
-  });
-}
 
 function scheduleEvent(
   actor: TaskFileEvent["actor"],
@@ -162,7 +134,7 @@ export async function scheduleTaskAction(
     agentName = view.name;
   }
 
-  const ref = taskFileRef(ctx, input.projectSlug, input.taskKey);
+  const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const existing = readTaskFile(ref);
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
   // Ruling 177 (pass 36): a closed task — archived, or at the board's terminal
@@ -209,7 +181,7 @@ export async function scheduleTaskAction(
       ),
     );
   });
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.schedule.created",
     actor,
@@ -236,7 +208,7 @@ export async function cancelScheduledAction(
   ctx: TaskMutationContext = {},
 ): Promise<{ cancelled: boolean }> {
   let cancelled = false;
-  await updateTaskFile(taskFileRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+  await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     const target = parsed.frontmatter.schedules.find((s) => s.id === input.scheduleId);
     if (!target || target.status !== "pending") return; // gone or already resolved
     target.status = "cancelled";
@@ -251,7 +223,7 @@ export async function cancelScheduledAction(
     );
   });
   if (!cancelled) return { cancelled: false };
-  reproject(db, ctx, input.projectSlug, input.taskKey);
+  reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   recordAudit(db, {
     action: "task.schedule.cancelled",
     actor,
@@ -360,7 +332,7 @@ export async function fireDueSchedules(
   const terminalNameFor = (slug: string): string => {
     const id = terminalFor(slug);
     const stages = getProject(db, slug)?.stages ?? [];
-    return id === null ? "Done" : (stages.find((s) => s.id === id)?.name ?? id);
+    return id === null ? "Done" : stageName(stages, id);
   };
   // Hunt 2026-08-29: the fire path runs under `operatorAuthorized`, which
   // skips the route-layer requireRunAgents and with it the F17/R6-3
@@ -460,7 +432,7 @@ export async function fireDueSchedules(
         let claimed = false;
         const staleClaim = isStaleClaim(s);
         const claimedFile = await updateTaskFile(
-          taskFileRef(ctx, row.project_slug, row.task_key),
+          taskRef(ctx, row.project_slug, row.task_key),
           (parsed) => {
             const target = parsed.frontmatter.schedules.find((x) => x.id === s.id);
             if (!target) return;
@@ -513,7 +485,7 @@ export async function fireDueSchedules(
         const wasMoot =
           claimedFile.frontmatter.schedules.find((x) => x.id === s.id)?.status ===
           "fired";
-        reproject(db, ctx, row.project_slug, row.task_key);
+        reprojectTask(db, ctx, row.project_slug, row.task_key);
         recordAudit(db, {
           action: "task.schedule.fired",
           actor: SYSTEM_ACTOR,
@@ -551,7 +523,7 @@ export async function fireDueSchedules(
         logger.warn("scheduled action claim failed", {
           taskKey: row.task_key,
           projectSlug: row.project_slug,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     }
@@ -610,7 +582,7 @@ export async function fireDueSchedules(
         // staleness check means: time since this occurrence started running.
         try {
           await updateTaskFile(
-            taskFileRef(ctx, t.projectSlug, t.taskKey),
+            taskRef(ctx, t.projectSlug, t.taskKey),
             (parsed) => {
               const target = parsed.frontmatter.schedules.find(
                 (x) => x.id === t.scheduleId,
@@ -625,7 +597,7 @@ export async function fireDueSchedules(
           logger.warn("schedule claim lease refresh failed", {
             taskKey: t.taskKey,
             projectSlug: t.projectSlug,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         }
         try {
@@ -706,7 +678,7 @@ export async function fireDueSchedules(
             logger.warn("scheduled run failed", {
               taskKey: t.taskKey,
               action: t.action,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
           }
         }
@@ -715,7 +687,7 @@ export async function fireDueSchedules(
         // `failed` once the retry cap is hit (F10-16).
         try {
           await updateTaskFile(
-            taskFileRef(ctx, t.projectSlug, t.taskKey),
+            taskRef(ctx, t.projectSlug, t.taskKey),
             (parsed) => {
               const target = parsed.frontmatter.schedules.find(
                 (x) => x.id === t.scheduleId,
@@ -792,7 +764,7 @@ export async function fireDueSchedules(
               }
             },
           );
-          reproject(db, ctx, t.projectSlug, t.taskKey);
+          reprojectTask(db, ctx, t.projectSlug, t.taskKey);
           if (heldQuota) {
             recordAudit(db, {
               action: "task.schedule.fired",
@@ -842,7 +814,7 @@ export async function fireDueSchedules(
         } catch (error) {
           logger.warn("schedule finalize failed", {
             taskKey: t.taskKey,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         }
       }
@@ -884,7 +856,7 @@ export function startScheduleRunner(db: DatabaseSync): void {
   // like the interval tick does.
   void fireDueSchedules(db).catch((error) => {
     logger.warn("schedule runner boot pass failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   });
   let running = false;
@@ -894,7 +866,7 @@ export function startScheduleRunner(db: DatabaseSync): void {
     void fireDueSchedules(db)
       .catch((error) => {
         logger.warn("schedule runner tick failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       // Ruling 330: the stranded sweep rides this tick rather than standing up a
@@ -905,7 +877,7 @@ export function startScheduleRunner(db: DatabaseSync): void {
       .then(() => sweepStrandedTasks(db))
       .catch((error) => {
         logger.warn("stranded sweep tick failed", {
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       })
       .finally(() => {

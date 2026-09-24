@@ -1,11 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
-  agentBackendName,
   agentRoleDisplay,
   decodeActorRef,
   slugToRole,
   systemIdToName,
 } from "~/server/files/actor-ref.server";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { countLabel } from "~/shared/text/plural";
 import { z } from "zod";
 import {
   createActorRenderOverlay,
@@ -47,7 +48,7 @@ export interface ActivityStreamRow {
   text: string;
 }
 
-export const ACTIVITY_STREAM_LIMIT = 200;
+const ACTIVITY_STREAM_LIMIT = 200;
 
 /* ------------------------------------------------------- feed filters (P21)
  * Owner request 2026-08-20: both panels get their own search + filters. The
@@ -234,7 +235,7 @@ export interface AuditLogEntry {
   resolvedBy: string | null;
 }
 
-export const AUDIT_LOG_LIMIT = 60;
+const AUDIT_LOG_LIMIT = 60;
 
 /** audit_events actions surfaced in the panel, mapped to display kinds.
  * A deliberate whitelist of the project-scoped GOVERNANCE families —
@@ -506,7 +507,7 @@ function auditText(
       }
       const resolved = d.resolvedViolations;
       return resolved > 0
-        ? `${actor} re-validated the project credential and resolved ${resolved} policy flag${resolved === 1 ? "" : "s"}.`
+        ? `${actor} re-validated the project credential and resolved ${countLabel(resolved, "policy flag")}.`
         : `${actor} re-checked the project credential scopes.`;
     }
     case "github.pr.merge_refused":
@@ -610,7 +611,7 @@ export interface AuditFilters {
 /** How many governance rows a rendered-text search will scan per leg. Audit
  *  tables hold project-scoped governance events (not the task stream), so this
  *  is a generous ceiling, stated rather than silent. */
-export const AUDIT_SCAN_CAP = 1000;
+const AUDIT_SCAN_CAP = 1000;
 
 function auditFiltersActive(f: AuditFilters): boolean {
   return Boolean(
@@ -668,7 +669,7 @@ export function displayAuditActorLabel(raw: string): string {
   const ref = decodeActorRef(raw);
   switch (ref.kind) {
     case "agent":
-      return `${slugToRole(ref.profileId)} (${agentRoleDisplay(ref)}) · ${agentBackendName(ref.backend)}`;
+      return `${slugToRole(ref.profileId)} (${agentRoleDisplay(ref)}) · ${BACKEND_LABEL[ref.backend]}`;
     case "system":
       return systemIdToName(ref.systemId);
     case "operator":

@@ -18,9 +18,11 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { AppError } from "~/server/errors/app-error.server";
+import { errnoSchema } from "~/server/files/atomic-file.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import type { RealBackend } from "./runtime-registry.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Per-person runtime homes (ruling 127).
@@ -197,7 +199,7 @@ export function listUserRuntimeRoots(
  * Everything here is synchronous and throws only from `prepare`: a run whose
  * home cannot be built must not start, while a settle must never throw.
  */
-export const CODEX_RUN_HOMES_DIR = "runs";
+const CODEX_RUN_HOMES_DIR = "runs";
 
 /** The state directories a run shares with the person's home, by link. */
 export const CODEX_HOME_SHARED_DIRS = ["sessions", "skills", "memories"] as const;
@@ -260,7 +262,7 @@ export function finishCodexRunHome(home: CodexRunHome): void {
   } catch (error) {
     logger.warn("codex run home: the refreshed sign-in could not be written back", {
       runId: home.runId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
   // Ruling 199: BEFORE the directory goes, re-point the CLI's own index at the
@@ -275,7 +277,7 @@ export function finishCodexRunHome(home: CodexRunHome): void {
   } catch (error) {
     logger.warn("codex run home could not be removed", {
       runId: home.runId,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -348,7 +350,7 @@ function repointRunRollouts(home: CodexRunHome): void {
       logger.warn("codex rollout paths could not be re-pointed", {
         runId: home.runId,
         dbFile,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }
@@ -408,7 +410,7 @@ export function repairCodexRolloutPaths(dataRoot?: string): number {
       } catch (error) {
         logger.warn("codex rollout paths could not be repaired at boot", {
           dbFile,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
       }
     }
@@ -460,10 +462,6 @@ function readIfPresent(file: string): Buffer | null {
   }
 }
 
-/** What `openSync(..., "wx")` throws when the lock is held: the one field the
- *  retry reads, decoded rather than asserted. */
-const fsErrorSchema = z.object({ code: z.string().optional() }).catch({});
-
 /** A lockfile with retry: `O_EXCL` create, poll while held, break a holder
  *  that is older than a settle could possibly be. Serializes the write-back
  *  between concurrent runs of one person; last writer wins by design. */
@@ -475,7 +473,9 @@ function withAuthLock(sharedHome: string, runId: string, action: () => void): vo
       closeSync(openSync(lock, "wx", 0o600));
       break;
     } catch (error) {
-      if (fsErrorSchema.parse(error).code !== "EEXIST") throw error;
+      // What `openSync(..., "wx")` throws when the lock is held: the one
+      // field the retry reads, decoded rather than asserted.
+      if (errnoSchema.safeParse(error).data?.code !== "EEXIST") throw error;
     }
     if (Date.now() >= deadline || lockIsStale(lock)) {
       logger.warn("codex run home: breaking a stale sign-in write-back lock", { runId });

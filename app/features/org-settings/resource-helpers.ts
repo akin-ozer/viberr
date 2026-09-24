@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { formatRelative } from "~/shared/dates/format";
-import { isMcpHealthStale } from "~/shared/freshness";
 import { useToast } from "~/ui/toast";
 import { useOrgAction, type OrgAction, type OrgActionData } from "./use-org-action";
 
@@ -23,13 +22,6 @@ export function rel(iso: string | null): string {
 export function updatedLabel(iso: string | null): string {
   return iso ? "updated " + formatRelative(iso) : "not yet edited";
 }
-
-/** P13-D-32: the "older than an hour reads as STALE" rule is interpretation,
- * which `architecture.md` forbids a UI component from owning — it now lives in
- * the shared freshness policy (server door:
- * `server/interpretation/freshness-policy.server.ts`) next to the identical
- * rule the GitHub reconcile chip applies. */
-export const isStaleCheck = isMcpHealthStale;
 
 /** Shared modal-close-with-inline-error fetcher wiring. */
 export function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void) {

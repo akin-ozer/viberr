@@ -27,7 +27,7 @@ import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { globsOverlap, type FileLease } from "~/shared/file-leases";
 
 /** Is this lease's holder finished, so the lease binds nobody? */
-export function holderIsSpent(
+function holderIsSpent(
   projectSlug: string,
   taskKey: string,
   stages: readonly { id: string }[],

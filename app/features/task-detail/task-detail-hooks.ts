@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useFetcher, useNavigate, type FetcherWithComponents } from "react-router";
 import { inFlightIntent } from "~/ui/in-flight";
 import { useToast } from "~/ui/toast";
+import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import {
   acceptanceDisclosureFields,
@@ -34,12 +35,7 @@ export type ActionResult =
 export function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) {
   const push = useToast();
   const navigate = useNavigate();
-  const handled = useRef<unknown>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (handled.current === fetcher.data) return;
-    handled.current = fetcher.data;
-    const d = fetcher.data;
+  useFetcherResult(fetcher, (d) => {
     if (d.ok) {
       if (d.toast) push(d.toast);
       if (d.navigateTo) navigate(d.navigateTo);
@@ -50,7 +46,7 @@ export function useActionFeedback(fetcher: FetcherWithComponents<ActionResult>) 
       // this page rendered under a green tick.
       push(d.error, "error");
     }
-  }, [fetcher.state, fetcher.data, push, navigate]);
+  });
 }
 
 /**

@@ -36,6 +36,7 @@ import { AgentLogsPanel, LiveRunPanel } from "~/features/runtime/runs-panels";
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 import { useStableRows } from "~/ui/use-stable-rows";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
+import { stageName } from "~/shared/workflow/stage-roles";
 import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
@@ -1039,10 +1040,7 @@ export function TaskDetailPage({
           taskKey={task.key}
           taskTitle={task.title}
           fromStageName={stage?.name ?? task.stage}
-          toStageName={
-            task.stages.find((s) => s.id === confirmMoveBack)?.name ??
-            confirmMoveBack
-          }
+          toStageName={stageName(task.stages, confirmMoveBack)}
           busy={transitionBusy}
           onCancel={() => setConfirmMoveBack(null)}
           onConfirm={(reason) => {

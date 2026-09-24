@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { z } from "zod";
 import { useNavigate, type FetcherWithComponents } from "react-router";
 import { Avatar } from "~/ui/avatar";
@@ -70,13 +70,9 @@ type ProfileFetcher = FetcherWithComponents<ProfileActionData>;
 /** Pushes server-computed toasts exactly once per completed submission. */
 function useServerToast(fetcher: ProfileFetcher) {
   const push = useToast();
-  const seen = useRef<ProfileActionData | null>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (seen.current === fetcher.data) return;
-    seen.current = fetcher.data;
-    if (fetcher.data.ok && fetcher.data.toast) push(fetcher.data.toast);
-  }, [fetcher.state, fetcher.data, push]);
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok && data.toast) push(data.toast);
+  });
 }
 
 function actionError(fetcher: ProfileFetcher): string | null {
@@ -902,13 +898,9 @@ function ProfilePassword({
 
   // Close on the server's success result: the toast says what happened, and a
   // modal that stayed open over "Password changed" would read as unfinished.
-  const doneRef = useRef<ProfileActionData | null>(null);
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    if (doneRef.current === fetcher.data) return;
-    doneRef.current = fetcher.data;
-    if (fetcher.data.ok) setOpen(false);
-  }, [fetcher.state, fetcher.data]);
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok) setOpen(false);
+  });
 
   return (
     <>

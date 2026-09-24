@@ -101,6 +101,23 @@ export function setupTestStore(ctx: TestDbContext): TestStore {
   return { db, dataRoot, slug, users };
 }
 
+/** A real users row for `id` alone (name `id`, email `<id>@viberr.test`, org
+ *  member), without the store fixture: user_prefs FKs to users, so a test can
+ *  then store a pref for it. */
+export function insertTestUser(db: DatabaseSync, id: string): void {
+  insertUser(db, {
+    id,
+    email: `${id}@viberr.test`,
+    name: id,
+    role: "member",
+  });
+}
+
+/** The actor a store user writes as: their id, with their email as the audit label. */
+export function actorOf(user: { id: string; email: string }) {
+  return { userId: user.id, label: user.email };
+}
+
 export function writeProject(
   dataRoot: string,
   frontmatter: ProjectFrontmatter,

@@ -898,11 +898,11 @@ describe("MembersPanel", () => {
 });
 
 /* F19-33: both panels below styled their head count with a private
-   `PANEL_COUNT_STYLE` (a byte copy of `.fine`, app.css:230) and their trailing
-   note with a private `POL_NOTE_STYLE` (a copy of `.pol-note.after` +
-   `.pol-note.last`, app.css:3844-3846). github-view.tsx and policy-page.tsx kept
-   their own copies of the same two objects, and the note copies had already
-   drifted three ways — .8rem here, .9rem in github-view, .85rem in the sheet.
+   `PANEL_COUNT_STYLE` (a byte copy of `.fine`) and their trailing note with a
+   private `POL_NOTE_STYLE` (a copy of `.pol-note.after` + `.pol-note.last`).
+   github-view.tsx and policy-page.tsx kept their own copies of the same two
+   objects, and the note copies had already drifted three ways — .8rem here,
+   .9rem in github-view, .85rem in the sheet.
    app.css.test.ts holds the structural gate (no style object, hoisted or inline,
    may restate a utility rule); these assert what this surface renders.
    Ruling 14: shared single implementations, never fork per surface. */
@@ -1217,7 +1217,10 @@ describe("DangerZone", () => {
       />,
     );
     fireEvent.click(container.querySelector(".dz-row .btn.danger:not(.ghost)")!);
-    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    // Ruling 458(l): the one dialog in the family that had no screen label.
+    expect(
+      container.querySelector('[role="alertdialog"]')!.getAttribute("data-screen-label"),
+    ).toBe("Delete project dialog");
 
     const confirmButton = Array.from(
       container.querySelectorAll<HTMLButtonElement>(".confirm-actions .btn.danger"),
@@ -1703,6 +1706,22 @@ describe("RepairRepoDialog refuses instead of disabling", () => {
     fireEvent.click(ack);
     fireEvent.click(primary);
     expect(onRepair).toHaveBeenCalledWith("akin-ozer/other", true);
+  });
+
+  it("the footprint note's verb agrees with its count", () => {
+    const note = () =>
+      document
+        .querySelector('dialog[aria-label="Repair repository"] input[type="checkbox"]')!
+        .closest("label")!.textContent;
+    openDialog(1);
+    expect(note()).toBe(
+      "1 task in this project carries branch/PR records against the current repository. They keep their history, but every future sync runs against the new one.",
+    );
+    cleanup();
+    openDialog(3);
+    expect(note()).toBe(
+      "3 tasks in this project carry branch/PR records against the current repository. They keep their history, but every future sync runs against the new one.",
+    );
   });
 });
 

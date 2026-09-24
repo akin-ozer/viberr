@@ -3,6 +3,8 @@ import type { PillKind } from "~/ui/pill";
 import { useClock } from "~/ui/use-clock";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
 import type { ConsoleEntry } from "./log-noise";
+// Ruling 457: count plurals are spelled inline here, not through `countLabel`
+// (why: shared/text/plural.ts).
 import {
   ARGUMENT_CLIP,
   isRunBoundary,
@@ -79,7 +81,7 @@ export function runStatePill(run: RunView): RunStateBadge {
  * person's first name, "a restart" for boot recovery, nothing when the run
  * carries neither (a stored row from before either was recorded).
  */
-export function interruptedByClause(run: RunView): string {
+function interruptedByClause(run: RunView): string {
   if (run.interruptedBy) return ` · by ${run.interruptedBy.label.split(" ")[0]}`;
   if (run.interruptedReason === "restart") return " · by a restart";
   return "";

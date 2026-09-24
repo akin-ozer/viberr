@@ -2,11 +2,12 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { watch, type FSWatcher } from "chokidar";
-import { z } from "zod";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { reindexKnowledgeBaseByDir } from "~/server/org/resources.server";
+import { errnoSchema } from "./atomic-file.server";
 import { getDataRoot, kbRootDir } from "./file-store-root.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Watches ${dataRoot}/kb and re-indexes a knowledge base when its store files
@@ -30,12 +31,6 @@ import { getDataRoot, kbRootDir } from "./file-store-root.server";
  */
 
 export const KB_WATCH_DEBOUNCE_MS = 250;
-
-/** Node hangs its errno off `code`; a watcher error without one is not a
- *  condition this module branches on. */
-const errnoSchema = z.object({
-  code: z.string().optional().catch(undefined),
-});
 
 const KB_WATCHER_KEY = Symbol.for("viberr.kbWatcher");
 
@@ -100,7 +95,7 @@ export function startKbWatcher(
     } catch (error) {
       logger.error("kb watcher re-index failed", {
         dir,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   };
@@ -135,7 +130,7 @@ export function startKbWatcher(
   } catch (error) {
     logger.error("kb watcher failed to start", {
       kbRoot,
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return null;
   }
@@ -156,7 +151,7 @@ export function startKbWatcher(
     // (mirrors the store file watcher) so a blip doesn't permanently stop KB
     // re-indexing until a restart.
     logger.error("kb watcher error — clearing watcher handle", {
-      err: err instanceof Error ? err : new Error(String(err)),
+      err: toError(err),
       code,
     });
     const current = cache[KB_WATCHER_KEY];
@@ -174,7 +169,7 @@ export function startKbWatcher(
           startKbWatcher(options);
         } catch (reErr) {
           logger.error("kb watcher re-arm failed", {
-            err: reErr instanceof Error ? reErr : new Error(String(reErr)),
+            err: toError(reErr),
           });
         }
       }, 1000).unref?.();

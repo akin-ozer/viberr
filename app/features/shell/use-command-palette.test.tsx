@@ -6,8 +6,8 @@ import { useCommandPaletteShortcut } from "./use-command-palette";
 
 /**
  * UI-C (inventory rough edge #8) — ⌘K used to be bound twice, by two
- * hand-written copies of the same effect (`topbar.tsx:67-76` and
- * `home-page.tsx:1437-1446`). A shortcut that behaves differently depending on
+ * hand-written copies of the same effect (one in `topbar.tsx`, one in
+ * `home-page.tsx`). A shortcut that behaves differently depending on
  * which surface you happen to be standing on is worse than no shortcut, so
  * there is one implementation and both surfaces call it.
  */

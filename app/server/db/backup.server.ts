@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -15,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { writeFileAtomic } from "~/server/files/atomic-file.server";
+import { sha256Hex } from "~/server/files/content-hash.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { DATA_ROOT_LOCK_FILENAME } from "./data-root-lock.server";
@@ -79,7 +79,7 @@ const STORE_DIR = "store";
  *  writes the expiring audit rows there as the DURABLE record, and `npm run
  *  backup` silently dropped it. A directory that does not exist yet (a root
  *  that never purged) is skipped, as every entry here is. */
-export const BACKED_UP_STORE_DIRS = [
+const BACKED_UP_STORE_DIRS = [
   "projects",
   "agents",
   "kb",
@@ -93,7 +93,7 @@ export const BACKED_UP_STORE_DIRS = [
  * is out, and the manifest says so rather than leaving an operator to guess
  * whether their artefact contains a credential.
  */
-export const OPTIONAL_STORE_DIRS = ["runtimes"] as const;
+const OPTIONAL_STORE_DIRS = ["runtimes"] as const;
 
 /** Row counts recorded in the manifest — the tables no rescan can rebuild. */
 const COUNTED_TABLES = [
@@ -138,10 +138,6 @@ export interface BackupResult {
   text: string;
 }
 
-function sha256File(file: string): string {
-  return createHash("sha256").update(readFileSync(file)).digest("hex");
-}
-
 /** What a copied tree contributes to the manifest's store totals. */
 interface StoreFileTotals {
   files: number;
@@ -171,7 +167,7 @@ export function projectionPathIn(dataRoot: string): string {
 }
 
 /** Default artefact name — sortable, and unambiguous about which instant. */
-export function backupDirName(at: Date = new Date()): string {
+function backupDirName(at: Date = new Date()): string {
   return `viberr-backup-${at.toISOString().replace(/[:.]/g, "-")}`;
 }
 
@@ -222,7 +218,7 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
     projection = {
       file: PROJECTION_NAME,
       bytes: statSync(target).size,
-      sha256: sha256File(target),
+      sha256: sha256Hex(readFileSync(target)),
       rows: countRows(target),
     };
   }

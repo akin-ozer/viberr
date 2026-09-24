@@ -194,7 +194,7 @@ export interface OversightSummary {
  * anything else, is not a measurement, and the schema already draws this line
  * one column over (`cache_ttl_bucket`: "NULL on Codex (no such figure)").
  */
-export const CACHE_WRITE_REPORTING_BACKENDS = ["claude"] as const;
+const CACHE_WRITE_REPORTING_BACKENDS = ["claude"] as const;
 
 /**
  * Ruling 369: what the prompt cache did for one group of runs — by run kind,

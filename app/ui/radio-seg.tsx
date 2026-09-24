@@ -13,7 +13,7 @@ import { ToggleGroup } from "radix-ui";
  * Radix's `RadioGroup` implements the WAI-ARIA radio pattern faithfully, and
  * that pattern moves selection with focus — `react-radio-group/dist/index.mjs`
  * calls `ref.current.click()` from the item's `onFocus` whenever an arrow key
- * put it there. Every group this replaces commits a SERVER MUTATION on
+ * put it there. The groups this was built for commit a SERVER MUTATION on
  * selection (a member's project role, a transition's authorization boundary),
  * so arrowing from `viewer` to `admin` would have committed `reviewer` and
  * `contributor` on the way past — three role changes and three audit entries

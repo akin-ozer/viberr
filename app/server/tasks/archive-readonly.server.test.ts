@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
@@ -18,8 +19,6 @@ import { setProjectArchived } from "~/features/project-settings/settings-actions
 
 let ctx: TestDbContext;
 let store: TestStore;
-
-const actor = (u: { id: string; email: string }) => ({ userId: u.id, label: u.email });
 
 beforeEach(() => {
   ctx = createTestDbContext();
@@ -46,7 +45,7 @@ describe("archived project is read-only (R6-3)", () => {
       createTask(
         store.db,
         { projectSlug: store.slug, title: "New", goal: "A goal long enough to pass validation." },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -58,7 +57,7 @@ describe("archived project is read-only (R6-3)", () => {
       appendComment(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", text: "hello" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -70,7 +69,7 @@ describe("archived project is read-only (R6-3)", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl", manual: true },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -110,7 +109,7 @@ describe("archived project is read-only (R6-3)", () => {
       transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: terminal, manual: true },
-        actor(store.users.selin),
+        actorOf(store.users.selin),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -137,7 +136,7 @@ describe("archived project is read-only (R6-3)", () => {
         store.db,
         // triage→ready is a declared `auto` boundary; no `manual` flag.
         { projectSlug: store.slug, taskKey: "VIB-2", toStageId: "ready" },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -149,7 +148,7 @@ describe("archived project is read-only (R6-3)", () => {
       updateTaskGoal(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", goal: "A different goal, long enough." },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 409 });
@@ -163,7 +162,7 @@ describe("archived project is read-only (R6-3)", () => {
     await setProjectArchived(
       store.db,
       { projectSlug: store.slug, archived: false },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -171,7 +170,7 @@ describe("archived project is read-only (R6-3)", () => {
     const created = await createTask(
       store.db,
       { projectSlug: store.slug, title: "Now allowed", goal: "A goal long enough to pass validation." },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(created.task.key).toMatch(/^VIB-/);

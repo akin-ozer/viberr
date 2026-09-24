@@ -22,7 +22,7 @@ interface EventMetaTable {
   [type: string]: EventMeta;
 }
 
-export const EVENT_META: EventMetaTable = {
+const EVENT_META: EventMetaTable = {
   comment: { node: "", icon: "message", label: "commented" },
   completion: { node: "completion", icon: "check", label: "Completion report" },
   github: { node: "github", icon: "github", label: "GitHub" },

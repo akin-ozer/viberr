@@ -1,5 +1,3 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
@@ -7,6 +5,7 @@ import {
   runMigrations,
 } from "~/server/db/migration-runner.server";
 import { openDatabase } from "~/server/db/sqlite.server";
+import { createTempDirs } from "./temp-dirs";
 
 /**
  * Temp-dir DB helper for tests (phase-1 pattern, centralized).
@@ -17,23 +16,21 @@ import { openDatabase } from "~/server/db/sqlite.server";
  */
 export interface TestDbContext {
   makeDb(): DatabaseSync;
-  makeTempDir(): string;
+  /** A temp dir `cleanup` removes; `prefix` names it (default `viberr-test-`). */
+  makeTempDir(prefix?: string): string;
   cleanup(): void;
 }
 
 export function createTestDbContext(): TestDbContext {
-  let tempDirs: string[] = [];
+  const tempDirs = createTempDirs();
   let openDbs: DatabaseSync[] = [];
 
   return {
-    makeTempDir(): string {
-      const dir = mkdtempSync(path.join(tmpdir(), "viberr-test-"));
-      tempDirs.push(dir);
-      return dir;
+    makeTempDir(prefix = "viberr-test-"): string {
+      return tempDirs.make(prefix);
     },
     makeDb(): DatabaseSync {
-      const dir = mkdtempSync(path.join(tmpdir(), "viberr-test-"));
-      tempDirs.push(dir);
+      const dir = tempDirs.make("viberr-test-");
       const db = openDatabase(path.join(dir, "state", "test.sqlite"));
       runMigrations(db, DEFAULT_MIGRATIONS_DIR);
       openDbs.push(db);
@@ -42,8 +39,7 @@ export function createTestDbContext(): TestDbContext {
     cleanup(): void {
       for (const db of openDbs) if (db.isOpen) db.close();
       openDbs = [];
-      for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
-      tempDirs = [];
+      tempDirs.cleanup();
     },
   };
 }

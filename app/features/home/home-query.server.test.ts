@@ -8,6 +8,7 @@ import {
 } from "../../../test-support/test-store";
 import { createPat } from "~/server/secrets/pat-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import {
   getHomeOrgSummary,
   listHomeProjectsForUser,
@@ -44,8 +45,7 @@ describe("getHomeOrgSummary — connection picker", () => {
 
 describe("listHomeProjectsForUser — membership scoping (D10/Q6)", () => {
   it("a non-member org member sees no projects they don't belong to", () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     // deniz is an org MEMBER and NOT a member of the seeded project.
     const forDeniz = listHomeProjectsForUser(store.db, {
       id: store.users.deniz.id,
@@ -61,8 +61,7 @@ describe("listHomeProjectsForUser — membership scoping (D10/Q6)", () => {
   });
 
   it("an ORG admin sees every project, member or not", () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const all = listHomeProjectsForUser(store.db, {
       id: store.users.deniz.id, // non-member...
       role: "admin", // ...but org admin

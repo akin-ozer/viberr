@@ -141,8 +141,9 @@ describe("CommandPalette", () => {
  * `aria-activedescendant` — so arrowing through the results, with focus pinned
  * in the input, announced absolutely nothing.
  *
- * The mention composer next door already had this contract right
- * (`comment-composer.tsx:259-268` + `mention-menu.tsx:60-86`); this mirrors it.
+ * The mention composer next door already had this contract right (the
+ * `ContentEditable` rendered by `CommentComposer` + the listbox `MentionMenu`
+ * renders); this mirrors it.
  */
 describe("CommandPalette: the combobox/listbox contract", () => {
   async function openWithHits() {

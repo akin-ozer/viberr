@@ -3,12 +3,14 @@ import type { DatabaseSync } from "node:sqlite";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
+  insertTestUser,
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import { insertUser } from "~/server/auth/user-store.server";
 import { rebuildAll } from "./rebuilder.server";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import {
   onProjectionEvent,
   type ProjectionEvent,
@@ -32,16 +34,6 @@ import {
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
-
-/** Real users row (user_prefs FKs to users), so a test can store a pref. */
-function mkUser(db: DatabaseSync, id: string): void {
-  insertUser(db, {
-    id,
-    email: `${id}@viberr.test`,
-    name: id,
-    role: "member",
-  });
-}
 
 describe("notifications", () => {
   it("lists per-user rows sorted by real timestamp DESC (ruling 9)", () => {
@@ -84,7 +76,7 @@ describe("notifications", () => {
 
   it("F18-1: the unread badge excludes notifications whose project was deleted", () => {
     const db = ctx.makeDb();
-    mkUser(db, "u_1");
+    insertTestUser(db, "u_1");
     db.prepare(
       `INSERT INTO projects (slug, name, task_prefix, stages_json, workflow_json, source_path, content_hash, parsed_at)
        VALUES ('live-proj', 'Live', 'LIV', '[]', '[]', 'projects/live-proj/project.md', 'h', '2026-07-04T00:00:00Z')`,
@@ -121,7 +113,7 @@ describe("notifications", () => {
 
   it("`from` actors resolve against the CURRENT users table at read time (E1)", () => {
     const db = ctx.makeDb();
-    mkUser(db, "u_sender");
+    insertTestUser(db, "u_sender");
     createNotification(db, {
       id: "n1",
       userId: "u_1",
@@ -319,7 +311,7 @@ describe("createNotification routing prefs (FIX #4)", () => {
 
   it("skips the insert (returns null) when the recipient silenced that category", () => {
     const db = ctx.makeDb();
-    mkUser(db, "u_1");
+    insertTestUser(db, "u_1");
     // u_1 silences packets; every other category stays default-ON.
     setPref(db, "u_1", NOTIFS_PREF_KEY, { packets: { app: false } });
 
@@ -333,7 +325,7 @@ describe("createNotification routing prefs (FIX #4)", () => {
 
   it("maps each singular kind to its plural pref category", () => {
     const db = ctx.makeDb();
-    mkUser(db, "u_1");
+    insertTestUser(db, "u_1");
     // Silence exactly the mentions + quality categories.
     setPref(db, "u_1", NOTIFS_PREF_KEY, {
       mentions: { app: false },
@@ -347,8 +339,8 @@ describe("createNotification routing prefs (FIX #4)", () => {
 
   it("routing is per-recipient — a silenced user doesn't mute anyone else", () => {
     const db = ctx.makeDb();
-    mkUser(db, "u_1");
-    mkUser(db, "u_2");
+    insertTestUser(db, "u_1");
+    insertTestUser(db, "u_2");
     setPref(db, "u_1", NOTIFS_PREF_KEY, { policy: { app: false } });
     expect(createNotification(db, { userId: "u_1", kind: "policy", text: "t" })).toBeNull();
     expect(createNotification(db, { userId: "u_2", kind: "policy", text: "t" })).not.toBeNull();
@@ -372,8 +364,8 @@ describe("createNotification routing prefs (FIX #4)", () => {
     // assertions still pass while `approval` for u_1 starts failing; hard-code
     // `app: false` there and the re-enable assertion fails.
     const db = ctx.makeDb();
-    mkUser(db, "u_1");
-    mkUser(db, "u_2");
+    insertTestUser(db, "u_1");
+    insertTestUser(db, "u_2");
 
     // Off, through the product's own writer — the profile page's action.
     setNotifRoutingPref(db, "u_1", "packets", false);
@@ -536,11 +528,10 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
 
 describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () => {
   it("B-FD6: rows resolve to a task, a project, or NOTHING (never a dead click)", () => {
-    const store = setupTestStore(ctx);
     // F18-1: the project must exist in the PROJECTION for its rows to stay
     // clickable (a deleted project → orphan, href null). Boot always rescans, so
     // rebuild here to reflect the real "project exists" state this test asserts.
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     const uid = store.users.murat.id;
     createNotification(store.db, { id: "n_task", userId: uid, kind: "quality", text: "t", projectSlug: store.slug, taskKey: "VIB-1", occurredAt: "2026-07-01T03:00:00.000Z" });
     createNotification(store.db, { id: "n_proj", userId: uid, kind: "policy", text: "t", projectSlug: store.slug, occurredAt: "2026-07-01T02:00:00.000Z" });

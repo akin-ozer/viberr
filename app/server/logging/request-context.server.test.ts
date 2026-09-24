@@ -1,13 +1,21 @@
+import { RouterContextProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { logger } from "./logger.server";
 import {
   bindCorrelation,
+  carryCorrelation,
   correlationFor,
+  currentCorrelation,
   currentRequestId,
+  echoRequestId,
+  forkCorrelation,
   newRequestId,
+  REQUEST_ID_HEADER,
+  requestContextMiddleware,
   runWithRequestContext,
   withRequestContext,
+  type RequestCorrelation,
 } from "./request-context.server";
 
 /**
@@ -192,5 +200,148 @@ describe("withRequestContext", () => {
     );
     expect(seen).toBe("req_from_header");
     expect(currentRequestId()).toBeNull();
+  });
+});
+
+/**
+ * Ruling 458(d): one Request names ONE id wherever it is seeded. React Router
+ * hands the same Request to the route middleware, the entry's render, its
+ * `handleError` and its data hook; a response the middleware never saw is
+ * logged by one and echoed by another, so they must agree.
+ */
+describe("correlationFor keeps one correlation per Request (ruling 458(d))", () => {
+  it("answers the same object for the same Request and a fresh id for another", () => {
+    const request = new Request("http://localhost/board");
+    const first = correlationFor(request);
+    expect(correlationFor(request)).toBe(first);
+    expect(correlationFor(new Request("http://localhost/board")).requestId).not.toBe(
+      first.requestId,
+    );
+  });
+});
+
+describe("echoRequestId (ruling 458(d))", () => {
+  it("stamps the request's id on the response it was handed", () => {
+    const request = new Request("http://localhost/x");
+    const response = new Response("ok");
+    const echoed = echoRequestId(response, request);
+    expect(echoed).toBe(response);
+    expect(echoed.headers.get(REQUEST_ID_HEADER)).toBe(correlationFor(request).requestId);
+  });
+
+  it("names the id the request's context carries, inside or outside it", () => {
+    const request = new Request("http://localhost/x", {
+      headers: { "X-Request-Id": "req_upstream" },
+    });
+    const inside = withRequestContext(request, () =>
+      echoRequestId(new Response("a"), request),
+    );
+    // Outside the context (React Router's data hook runs there).
+    const outside = echoRequestId(new Response("b"), request);
+    expect(inside.headers.get(REQUEST_ID_HEADER)).toBe("req_upstream");
+    expect(outside.headers.get(REQUEST_ID_HEADER)).toBe("req_upstream");
+  });
+
+  it("copies a response whose headers are immutable instead of throwing", () => {
+    const request = new Request("http://localhost/x");
+    const redirect = Response.redirect("http://localhost/login", 302);
+    const echoed = echoRequestId(redirect, request);
+    expect(echoed).not.toBe(redirect);
+    expect(echoed.status).toBe(302);
+    expect(echoed.headers.get("Location")).toBe("http://localhost/login");
+    expect(echoed.headers.get(REQUEST_ID_HEADER)).toBe(correlationFor(request).requestId);
+  });
+
+  it("replaces an id that is not this request's", () => {
+    const request = new Request("http://localhost/x");
+    const response = new Response("ok", { headers: { "X-Request-Id": "someone-else" } });
+    expect(echoRequestId(response, request).headers.get(REQUEST_ID_HEADER)).toBe(
+      correlationFor(request).requestId,
+    );
+  });
+});
+
+describe("requestContextMiddleware (ruling 458(d))", () => {
+  it("binds the request's id for everything below it and answers with it", async () => {
+    const request = new Request("http://localhost/projects/x", {
+      headers: { "X-Request-Id": "req_mw" },
+    });
+    let seenBelow: string | null = null;
+    const response = await requestContextMiddleware(
+      {
+        request,
+        url: new URL(request.url),
+        params: {},
+        pattern: "/",
+        context: new RouterContextProvider(),
+      },
+      async () => {
+        seenBelow = currentRequestId();
+        return new Response("page");
+      },
+    );
+    expect(seenBelow).toBe("req_mw");
+    expect(response instanceof Response ? response.headers.get(REQUEST_ID_HEADER) : null).toBe(
+      "req_mw",
+    );
+  });
+});
+
+/**
+ * Ruling 458(d): a run binds its runId and taskKey on its own work. Every
+ * continuation of a request shares one correlation object, so the run gets a
+ * copy (`forkCorrelation`); a run parked behind the concurrency cap is launched
+ * from another run's continuation, so it takes its own request's correlation
+ * with it (`carryCorrelation`).
+ */
+describe("forkCorrelation and carryCorrelation (ruling 458(d))", () => {
+  /** What a log record made now would carry, copied (the live object mutates). */
+  function copyOfCurrent(): RequestCorrelation | undefined {
+    const current = currentCorrelation();
+    return current ? { ...current } : undefined;
+  }
+
+  it("a fork's bindings stay with the fork, and its async work keeps them", async () => {
+    const seen: Array<RequestCorrelation | undefined> = [];
+    await runWithRequestContext({ requestId: "req_fork", userId: "u_1" }, async () => {
+      const later = forkCorrelation(() => {
+        bindCorrelation({ runId: "run_a" });
+        return new Promise<void>((resolve) =>
+          setTimeout(() => {
+            seen.push(copyOfCurrent());
+            resolve();
+          }, 1),
+        );
+      });
+      forkCorrelation(() => bindCorrelation({ runId: "run_b" }));
+      seen.push(copyOfCurrent());
+      await later;
+    });
+    // The request's own record carries neither run; run_a's later work is not
+    // re-stamped by run_b.
+    expect(seen).toEqual([
+      { requestId: "req_fork", userId: "u_1" },
+      { requestId: "req_fork", userId: "u_1", runId: "run_a" },
+    ]);
+  });
+
+  it("outside a request a fork just runs, and binds nothing", () => {
+    const seen = forkCorrelation(() => {
+      bindCorrelation({ runId: "run_x" });
+      return currentCorrelation();
+    });
+    expect(seen).toBeUndefined();
+  });
+
+  it("a carried thunk runs in the correlation it was made in, wherever it is called", () => {
+    const parked = runWithRequestContext({ requestId: "req_parker", userId: "u_p" }, () =>
+      carryCorrelation(copyOfCurrent),
+    );
+    const orphan = carryCorrelation(() => currentCorrelation());
+    runWithRequestContext({ requestId: "req_freer", userId: "u_f", runId: "run_f" }, () => {
+      expect(parked()).toEqual({ requestId: "req_parker", userId: "u_p" });
+      // Made outside any request: it runs outside one too.
+      expect(orphan()).toBeUndefined();
+    });
   });
 });

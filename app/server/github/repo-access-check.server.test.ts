@@ -1,9 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore } from "../../../test-support/test-store";
+import { setupProjectedStore } from "../../../test-support/projected-store";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
-import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { checkRepoAccess } from "./repo-access-check.server";
 
@@ -21,8 +20,7 @@ const ACTOR = { userId: "u_test", label: "arda@viberr.test" };
 /** A store whose `projects` projection is built and whose project carries a
  *  usable PAT, so `checkRepoAccess` reaches the GitHub `request` every time. */
 function setupWithCredential() {
-  const store = setupTestStore(ctx);
-  rebuildAll(store.db, { dataRoot: store.dataRoot });
+  const store = setupProjectedStore(ctx);
   const pat = createPat(
     store.db,
     { userId: store.users.arda.id, label: "bot", token: "ghp_repoaccess0001" },
@@ -166,8 +164,7 @@ describe("checkRepoAccess", () => {
   });
 
   it("no_pat_configured: the context failure passes straight through before any request", async () => {
-    const store = setupTestStore(ctx);
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const store = setupProjectedStore(ctx);
     // No PAT bound to the project, so the context resolver degrades first.
     const gh = fakeGithubFetch({});
     const result = await checkRepoAccess(store.db, store.slug, {

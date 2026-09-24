@@ -61,6 +61,7 @@ function toOptions(
     kind: "agent",
     handle: a.id,
     name: a.name,
+    // Spelled here, not `BACKEND_LABEL`: ruling 457 (shared/text/backend-label.ts).
     sub: `${a.role} · ${a.backend === "claude" ? "Claude" : "Codex"}`,
     backend: a.backend,
     id: a.id,

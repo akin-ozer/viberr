@@ -5,6 +5,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskClosure } from "./task-closure.server";
 import { logger } from "~/server/logging/logger.server";
 import type { TaskActionContext } from "./task-actions.server";
+import { toError } from "~/shared/errors";
 
 /**
  * Ruling 330 — nothing watched for the state itself.
@@ -185,7 +186,7 @@ export async function sweepStrandedTasks(
     found = findStrandedTasks(db, ctx, nowMs);
   } catch (error) {
     logger.warn("stranded sweep could not run its search", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return 0;
   }
@@ -208,7 +209,7 @@ export async function sweepStrandedTasks(
     } catch (error) {
       logger.warn("stranded sweep could not nudge a task", {
         taskKey: task.taskKey,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

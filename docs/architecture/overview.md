@@ -33,7 +33,7 @@ is vertical; run one instance per data root.
 | Auth | better-auth 1.6.25 behind `app/lib/auth.server.ts`; no plugins |
 | Agents | `@anthropic-ai/claude-agent-sdk` ^0.3.280, `@openai/codex-sdk` ^0.156.0, `@playwright/mcp` 0.0.79 with Debian chromium; in the image, `uv`/`uvx` 0.12.3 for Python stdio MCP servers and `git`, `make`, `curl` and `pnpm` 12.4.1 for agent shells (ruling 196) |
 | UI | one stylesheet `app/app.css` (no Tailwind), Inter / JetBrains Mono from `@fontsource` (ruling 365), lexical (comment composer), dnd-kit (board), Shiki (the attachment code reader, ruling 363), `radix-ui` for unstyled behaviour only (the user menu and `radio-seg`, ruling 166), thinking-orbs + @number-flow/react (the run console's wait row and rolling counts, rulings 366 and 451), react-markdown + remark-gfm |
-| Logging | dependency-free JSON lines on stdout with `AsyncLocalStorage` request correlation; a fatal crash writes one synchronous stderr line first |
+| Logging | dependency-free JSON lines on stdout with `AsyncLocalStorage` request correlation (`requestId`, method, path, the signed-in `userId`, and `runId`/`taskKey` on a run's own work); every response the app's handlers answer carries the id as `X-Request-Id` (ruling 458(d); the exceptions: [runbook.md §Finding a request by its id](../operations/runbook.md#finding-a-request-by-its-id)); a fatal crash writes one synchronous stderr line first |
 
 ## 3. Layers and the rules between them
 
@@ -84,7 +84,12 @@ Rules that hold in the tree (verified by grep, restated from
 finishes before the first request (§5). `root.tsx` mounts three middlewares: request
 correlation, the SSE broker's head read before any loader (a document load hands it to
 the page's first stream, ruling 457) and the rolling-session renewal, which forwards
-better-auth's refreshed cookie on whichever GET resolved the session (F10-17). The root
+better-auth's refreshed cookie on whichever GET resolved the session (F10-17). The
+correlation middleware binds one id per request (an inbound `X-Request-Id` is reused) and
+answers with it as `X-Request-Id`; `entry.server.tsx` stamps the responses React Router
+answers without route middleware (an unmatched URL, a 405, a refused `.data` mutation).
+The session guard binds the user's id once the session resolves, and a run started in the
+request logs its own work under its `runId` and `taskKey` (ruling 458(d)). The root
 loader authenticates, reads the theme cookie and mints the CSRF token; it re-runs only
 after a sign-in, a sign-out, a theme or profile change and on a document load (ruling
 457). A signed-in page also mounts the controller dock (ruling 121).
@@ -197,8 +202,8 @@ gone or replaced. Everything else is best-effort and logged.
 | Schedule runner + stranded-task sweep | boot + 60 s; the sweep (ruling 330) runs after the schedules on each interval tick | `tasks/schedule.server.ts`, `tasks/stranded-sweep.server.ts` |
 | Goal runner + dependency release | boot + 60 s; each tick reconciles goal chains, then releases held tasks whose waits are done (ruling 131) | `tasks/goal-actions.server.ts` |
 | GitHub reconcile poller | boot + 5 min; alert after 3 consecutive failures | `github/reconcile-poller.server.ts` |
-| Maintenance pass (retention, transcripts, workspaces) | boot + 6 h (`VIBERR_MAINTENANCE_INTERVAL_MS`); the workspace reclaim skips while any run is queued or running | `ops/maintenance.server.ts` |
-| Disk-pressure check | 5 min (`VIBERR_DISK_CHECK_INTERVAL_MS`); extra pass at most every 30 min | `ops/maintenance.server.ts` |
+| Maintenance pass (retention, transcripts, workspaces) | boot + 6 h (`VIBERR_MAINTENANCE_INTERVAL_SECONDS`); the workspace reclaim skips while any run is queued or running | `ops/maintenance.server.ts` |
+| Disk-pressure check | 5 min (`VIBERR_DISK_CHECK_INTERVAL_SECONDS`); extra pass at most every 30 min | `ops/maintenance.server.ts` |
 | MCP warm-up | detached, ≤ 15 min per first install | `org/mcp-warmup.server.ts` |
 | Run idle watchdogs | 15 min per backend (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`, `VIBERR_CODEX_IDLE_TIMEOUT_MS`); Claude max 2000 turns (`VIBERR_CLAUDE_MAX_TURNS`) | `runtimes/*-runtime.server.ts` |
 | Action watchdog | 30 s, around project creation | `actions/action-watchdog.server.ts` |

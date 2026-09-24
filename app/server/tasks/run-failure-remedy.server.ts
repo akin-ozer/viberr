@@ -11,6 +11,8 @@ import { formatClockUTC, utcDayKey,
   formatCalendarDateUTC,
 } from "~/shared/dates/format";
 import { formatUsd, localNetworkFailureCode } from "~/shared/run-failure";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { endSentence } from "~/shared/text/sentence";
 import type { RunFailure } from "./agent-reply.server";
 import type { OperatorPacketOptionInput } from "./operator-actions.server";
 import { SESSION_STORE_UNREADABLE_MARK } from "~/server/runtimes/session-export.server";
@@ -68,8 +70,6 @@ export interface RunFailureDescription {
   options: OperatorPacketOptionInput[];
 }
 
-const BACKEND_NAME = { claude: "Claude", codex: "Codex" } as const satisfies Record<RealBackend, string>;
-
 /** "Sep 3, 2026 · 11:50 UTC": absolute, never relative (a packet is read hours
  *  later; "today" would be a lie by then). */
 export function formatResetLabel(resetsAt: string | null | undefined): string | null {
@@ -79,11 +79,6 @@ export function formatResetLabel(resetsAt: string | null | undefined): string | 
   // wrong by up to a day on either side of midnight.
   const day = formatCalendarDateUTC(resetsAt) ?? utcDayKey(resetsAt);
   return `${day} · ${formatClockUTC(resetsAt)} UTC`;
-}
-
-/** A provider sentence ends exactly once, whatever the adapter wrote. */
-function terminated(text: string): string {
-  return /[.!?…]$/.test(text) ? text : `${text}.`;
 }
 
 function windowWord(window: string | null | undefined): string {
@@ -129,7 +124,7 @@ export function describeRunFailure(
   db: DatabaseSync,
   input: DescribeRunFailureInput,
 ): RunFailureDescription {
-  const backend = BACKEND_NAME[input.backend];
+  const backend = BACKEND_LABEL[input.backend];
   /** What an org-level restriction names: the product, not the model. */
   const product = input.backend === "claude" ? "Claude Code" : "Codex";
   const other: RealBackend = input.backend === "codex" ? "claude" : "codex";
@@ -214,10 +209,10 @@ export function describeRunFailure(
       // Ruling 127: the run's own line already names the person and their
       // remedy; that sentence is the reason and the remedy.
       reason = input.failure?.text
-        ? terminated(input.failure.text)
+        ? endSentence(input.failure.text)
         : `${backend} could not run ${runWord}: no usable credential.`;
       remedy = owner
-        ? `${owner.name} connects ${backend} on ${profile}${ownerHasOther ? `, or the run is retried on ${BACKEND_NAME[other]}` : ""}.`
+        ? `${owner.name} connects ${backend} on ${profile}${ownerHasOther ? `, or the run is retried on ${BACKEND_LABEL[other]}` : ""}.`
         : `Seat an owner who has ${backend} connected on ${profile}.`;
       break;
     case "overloaded": {
@@ -231,14 +226,14 @@ export function describeRunFailure(
       if (facts?.origin === "local") {
         const networkCode = localNetworkFailureCode(input.failure?.providerText ?? input.failure?.text ?? "");
         reason = `${backend} could not be reached from this deployment: the connection failed before the provider answered${networkCode ? ` (${networkCode})` : ""}.`;
-        remedy = `Nothing about ${whose} account or the task is wrong; the fault is on this deployment's network path (TLS, DNS or a proxy). Retry in a few minutes${ownerHasOther ? `, or run it on ${BACKEND_NAME[other]} now` : ""}.`;
+        remedy = `Nothing about ${whose} account or the task is wrong; the fault is on this deployment's network path (TLS, DNS or a proxy). Retry in a few minutes${ownerHasOther ? `, or run it on ${BACKEND_LABEL[other]} now` : ""}.`;
         break;
       }
       const status = facts?.apiErrorStatus ?? null;
       const code = facts?.apiError ?? null;
       const overloaded = status === 529 || code === "overloaded";
       reason = `${backend} could not serve ${runWord}: the provider ${overloaded ? "was overloaded" : "failed on its own side"}${status ? ` (HTTP ${status}${code && code !== "overloaded" ? `, ${code}` : ""})` : code ? ` (${code})` : ""}.`;
-      remedy = `Nothing about ${whose} account or the task is wrong. Retry in a few minutes${ownerHasOther ? `, or run it on ${BACKEND_NAME[other]} now` : ""}.`;
+      remedy = `Nothing about ${whose} account or the task is wrong. Retry in a few minutes${ownerHasOther ? `, or run it on ${BACKEND_LABEL[other]} now` : ""}.`;
       break;
     }
     case "max_turns":
@@ -279,7 +274,7 @@ export function describeRunFailure(
       break;
     default:
       reason = input.failure?.text
-        ? `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} did not complete: ${terminated(input.failure.text)}`
+        ? `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} did not complete: ${endSentence(input.failure.text)}`
         : `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} did not complete.`;
       remedy = "Re-run it; if it fails the same way, read the run's console for the cause.";
   }
@@ -429,10 +424,10 @@ function specialistOptions(
     ? (() => {
         const swap = substituteRunModel(other, profileModel);
         return swap.foreignBackend
-          ? `on \`${swap.model}\` as deployed right now (${BACKEND_NAME[other]}'s default: the profile's \`${profileModel}\` is a ${BACKEND_NAME[swap.foreignBackend]} model)`
+          ? `on \`${swap.model}\` as deployed right now (${BACKEND_LABEL[other]}'s default: the profile's \`${profileModel}\` is a ${BACKEND_LABEL[swap.foreignBackend]} model)`
           : `on its own \`${profileModel}\` as deployed right now`;
       })()
-    : `on ${BACKEND_NAME[other]}'s default model as deployed right now`;
+    : `on ${BACKEND_LABEL[other]}'s default model as deployed right now`;
   /** Ruling 254: the option carries a backend, not a model, so a deployment
    *  edit between authoring and answering moves the run and not the text. */
   const retryModelCaveat =
@@ -478,10 +473,10 @@ function specialistOptions(
     if (ownerHasOther) {
       const retry: OperatorPacketOptionInput = {
         kind: "retry_other_backend",
-        title: `Retry ${handle} on ${BACKEND_NAME[other]} now`,
+        title: `Retry ${handle} on ${BACKEND_LABEL[other]} now`,
         detail:
-          `The owner has ${BACKEND_NAME[other]} connected; re-run the same agent there ${retryModel} and continue. ` +
-          `Later runs on this task stay on ${BACKEND_NAME[other]} until another retry moves them.` +
+          `The owner has ${BACKEND_LABEL[other]} connected; re-run the same agent there ${retryModel} and continue. ` +
+          `Later runs on this task stay on ${BACKEND_LABEL[other]} until another retry moves them.` +
           retryModelCaveat +
           // Ruling 212: when the fault is THIS deployment's network path, the
           // other provider is reached over the same path, so switching is not a

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { logger } from "../logging/logger.server";
 import { runMigrations } from "./migration-runner.server";
 import { openDatabase } from "./sqlite.server";
+import { errorMessage } from "../../shared/errors";
 
 /**
  * Boot self-heal for a corrupt `projection.sqlite`.
@@ -70,7 +71,7 @@ const sqliteErrcodeSchema = z
 export function isCorruptionError(cause: unknown): boolean {
   const errcode = sqliteErrcodeSchema.parse(cause);
   if (errcode === SQLITE_CORRUPT || errcode === SQLITE_NOTADB) return true;
-  const message = cause instanceof Error ? cause.message : String(cause);
+  const message = errorMessage(cause);
   return /malformed|not a database|disk image is malformed/i.test(message);
 }
 

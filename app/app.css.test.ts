@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { escapeRegExp } from "~/shared/text/regexp";
 import { balanced, cssRules, type CssRule } from "../test-support/css-rules";
 
 /**
@@ -54,6 +55,16 @@ const CSS = readFileSync(
  *  every check below runs against the declaration text only. */
 const CODE = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
 
+/** The declarations of the first `selector { … }` block in the sheet. The
+ *  start is not anchored (`.x` also matches the tail of `.y .x {`); the
+ *  controller-layout suite's `ruleBody` is the anchored variant. */
+function decls(selector: string): string {
+  const re = new RegExp(escapeRegExp(selector) + "\\s*\\{([^}]*)\\}");
+  const m = CODE.match(re);
+  expect(m, selector).not.toBeNull();
+  return m![1];
+}
+
 /** `--x: value;` at the start of a declaration — i.e. a custom property being
  *  DEFINED, not one being read inside `var()`. */
 function declaredTokens(css: string): Set<string> {
@@ -78,14 +89,14 @@ function channel(v: number): number {
 }
 
 /** WCAG 2.x relative luminance of a `#rrggbb` string. */
-export function luminance(hex: string): number {
+function luminance(hex: string): number {
   const h = hex.replace("#", "");
   const [r, g, b] = [0, 2, 4].map((i) => channel(parseInt(h.slice(i, i + 2), 16)));
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
 /** WCAG 2.x contrast ratio between two `#rrggbb` strings. */
-export function contrastRatio(a: string, b: string): number {
+function contrastRatio(a: string, b: string): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
 }
@@ -150,7 +161,7 @@ describe("app.css custom properties (P13-D-18)", () => {
       [".sched-row", /border(-top)?:\s*1px solid var\(--(hairline|border)\)/],
     ] as const) {
       const rule = CODE.match(
-        new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
+        new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`),
       );
       expect(rule, `${selector} must have a rule`).toBeTruthy();
       expect(rule![1]).toMatch(borderRe);
@@ -435,7 +446,7 @@ describe("app.css select treatment (P16-UI-05)", () => {
     // consolidation has been undone.
     for (const selector of [".op-sel", ".fm-toolbar select"]) {
       const rule = CODE.match(
-        new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
+        new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`),
       );
       if (!rule) continue;
       expect(rule[1], `${selector} must not re-declare the border`).not.toMatch(/border:/);
@@ -1827,7 +1838,7 @@ const GLYPH_NOT_TEXT = new Map(Object.entries({
  * WCAG's own terms; an entry nobody hits fails the rot guard below.
  */
 const BELOW_AA_BY_DESIGN = {
-  ".pj-star.on": "the pinned-project star. --pin-star is a decorative accent on a glyph whose IDENTITY and STATE are carried elsewhere: `StarIco` swaps outline for filled, and the button's accessible name flips between `Pin <project>` and `Unpin <project>`. 1.4.11 exempts a graphic that is not required to understand the content, which is exactly the case when shape and name already carry it.",
+  ".pj-star.on": "the pinned-project star. --pin-star is a decorative accent on a glyph whose IDENTITY and STATE are carried elsewhere: the glyph swaps outline (`star`) for filled (`starfilled`), and the button's accessible name flips between `Pin <project>` and `Unpin <project>`. 1.4.11 exempts a graphic that is not required to understand the content, which is exactly the case when shape and name already carry it.",
   ".log-more:disabled": "`load older lines` while a fetch is in flight. WCAG 1.4.3 exempts text in an INACTIVE user-interface component by name, and the button also swaps its label to `loading older lines…`, so the state is not carried by contrast.",
 } satisfies Record<string, string>;
 
@@ -2903,15 +2914,6 @@ describe("D32-5 (pass 32): a SELECTED segment keeps its text color under hover",
  * are the rules whose removal no other test would notice.
  */
 describe("interface review 2026-09-06: the rules the fixes rest on", () => {
-  const decls = (selector: string): string => {
-    const re = new RegExp(
-      selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
-    );
-    const m = CODE.match(re);
-    expect(m, selector).not.toBeNull();
-    return m![1];
-  };
-
   it("declares the dock reserve once and every scroll container under the trigger takes it", () => {
     expect(CODE.match(/--dock-clear:/g)).toHaveLength(1);
     expect(decls(":root")).toMatch(
@@ -3151,14 +3153,6 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
 /* -------------------------- ruling 149: the fields that had no chrome ---- */
 
 describe("app.css ruling 149: every typing control wears the sheet's chrome", () => {
-  const decls = (selector: string): string => {
-    const re = new RegExp(
-      selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
-    );
-    const m = CODE.match(re);
-    expect(m, selector).not.toBeNull();
-    return m![1];
-  };
   const mobile = CODE.match(/@media \(max-width: 720px\)\s*\{([\s\S]*?)\n\}/)![1];
 
   it("the guardrail threshold field is boxed, and org settings' cap field IS that rule", () => {
@@ -3198,15 +3192,6 @@ describe("app.css ruling 149: every typing control wears the sheet's chrome", ()
 /* ------------------- ruling 149: GitHub's danger button, pinned by value --- */
 
 describe("app.css ruling 149: the destructive control is GitHub's danger button", () => {
-  const decls = (selector: string): string => {
-    const re = new RegExp(
-      selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}",
-    );
-    const m = CODE.match(re);
-    expect(m, selector).not.toBeNull();
-    return m![1];
-  };
-
   it("the pair is defined in both palettes at the owner's values", () => {
     // Nothing pinned the headline of the pass: reverting `.btn.danger` to the
     // tinted-pink face it replaced (`--coral-dark` on a `--coral-light` wash)
@@ -3435,7 +3420,7 @@ describe("app.css stage colour presets (ruling 364)", () => {
  */
 describe("app.css controller layout (ruling 419)", () => {
   const ruleBody = (css: string, selector: string): string => {
-    const m = css.match(new RegExp(`(?:^|\\n|\\})\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`));
+    const m = css.match(new RegExp(`(?:^|\\n|\\})\\s*${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`));
     expect(m, `${selector} must have a rule`).toBeTruthy();
     return m![1]!;
   };

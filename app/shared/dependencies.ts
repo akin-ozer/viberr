@@ -60,7 +60,7 @@ export const DEPENDENCY_GRAMMAR_HINT =
  * never appear in anyone's `blockedBy`. Every writer of `taskPrefix` refuses
  * it by name instead of shipping a project whose tasks cannot be waited on.
  */
-export const RESERVED_TASK_PREFIX = "GOAL";
+const RESERVED_TASK_PREFIX = "GOAL";
 
 /** Is this prefix the reserved one? Case-insensitive: the writers upper-case
  *  before storing, so `goal` and `Goal` are the same refusal. */
@@ -107,26 +107,6 @@ export function formatDependencyRef(ref: DependencyRef): string {
 export function canonicalDependencyRef(text: string): string | null {
   const ref = parseDependencyRef(text);
   return ref ? formatDependencyRef(ref) : null;
-}
-
-/** Parse a whole `blockedBy` list, dropping duplicates (after canonicalizing)
- *  and returning the first unparseable spelling so a writer can refuse it by
- *  name. */
-export interface ParsedDependencyList {
-  /** The canonical spellings, in order, deduplicated. */
-  refs: string[];
-  /** The first spelling that did not parse, or null when every one did. */
-  invalid: string | null;
-}
-
-export function parseDependencyList(entries: readonly string[]): ParsedDependencyList {
-  const refs: string[] = [];
-  for (const entry of entries) {
-    const canonical = canonicalDependencyRef(entry);
-    if (!canonical) return { refs, invalid: entry };
-    if (!refs.includes(canonical)) refs.push(canonical);
-  }
-  return { refs, invalid: null };
 }
 
 /** Split the free-text form the Details editor submits (one entry per line or

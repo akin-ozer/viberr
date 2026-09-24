@@ -703,9 +703,14 @@ describe("ProfileDetail", () => {
       />,
     );
     fireEvent.click(getByText("Delete"));
-    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    // Ruling 458(f): the shared ConfirmDialog, named by its title, with the
+    // confirm button's glyph kept.
+    const dialog = container.querySelector('[role="alertdialog"]')!;
+    expect(dialog.getAttribute("aria-label")).toBe("Delete the Developer profile?");
+    expect(dialog.getAttribute("data-screen-label")).toBe("Profile deletion dialog");
     expect(getByText("Delete the Developer profile?")).toBeTruthy();
     expect(getByText("1 active task")).toBeTruthy();
+    expect(getByText("Delete profile").closest("button")!.querySelector("svg")).not.toBeNull();
     fireEvent.click(getByText("Delete profile"));
     expect(onDelete).toHaveBeenCalledWith("developer");
   });
@@ -1650,8 +1655,9 @@ describe("CreateProfileModal", () => {
    * F19-5 — the context-resource chips (skills / MCP servers / KBs) are the one
    * chip group in this file that never reported its pressed state: the grant
    * lived in the `on` class and a check glyph, so a screen reader announced a
-   * granted KB exactly like an ungranted one. Backend (:243), autonomy (:304)
-   * and stage (:430) chips have carried `aria-pressed` since G5/UXA-4.
+   * granted KB exactly like an ungranted one. Backend (`BackendField`), autonomy
+   * (`AutonomyField`) and stage (`StagesField`) chips have carried
+   * `aria-pressed` since G5/UXA-4.
    */
   it("resource grant chips report their granted state (aria-pressed), missing grants included", () => {
     const { container, getByText } = renderModal({
@@ -1761,11 +1767,13 @@ describe("CreateProfileModal", () => {
    *
    * `agent-profile-actions.server.ts` coerces every id in
    * `ALWAYS_HUMAN_CAPABILITY_IDS` to `human` "whatever the submitted form says"
-   * (:185 edit, :239 create). The picker offered Allowed/Human-only/Off on those
-   * three rows anyway: an admin set "Merge a pull request" to Allowed, got a
-   * success toast, reopened the profile and found Human-only again. The Policy
-   * page draws the same class of invariant with the locked variant of this exact
-   * control (`.cap-seg.locked`, policy-page.tsx:471); the modal never applied it.
+   * (`grantsFor` on edit, `createModalGrants` on create). The picker offered
+   * Allowed/Human-only/Off on those three rows anyway: an admin set "Merge a
+   * pull request" to Allowed, got a success toast, reopened the profile and
+   * found Human-only again. The Policy page draws the same class of invariant
+   * with the locked variant of this exact control (`.cap-seg.locked`,
+   * `WorkflowRules`' boundary group in policy-page.tsx); the modal never
+   * applied it.
    */
   it("UX-13 — the always-human rows render locked, and the invariant is stated", () => {
     const { container, getByText } = renderModal({ initial: null });
@@ -1792,11 +1800,11 @@ describe("CreateProfileModal", () => {
 
   /**
    * F19 UX-13, second half — `report-validation-verdict` is an explicit-`direct`
-   * -or-nothing grant: `agent-profile-actions.server.ts:180` (create path :249)
-   * persists `direct` iff the form said `direct` and `off` for every other
-   * value. Offering "Human-only" therefore stored a mode in a DIFFERENT bucket
-   * than the admin picked (`capabilitiesToActionLabels` counts `human`
-   * separately from `off`), with no notice anywhere.
+   * -or-nothing grant: `grantsFor` in agent-profile-actions.server.ts (create
+   * path `createModalGrants`) persists `direct` iff the form said `direct` and
+   * `off` for every other value. Offering "Human-only" therefore stored a mode
+   * in a DIFFERENT bucket than the admin picked (`capabilitiesToActionLabels`
+   * counts `human` separately from `off`), with no notice anywhere.
    */
   it("UX-13 — the verdict row offers only the modes the save layer can store", () => {
     const { container, getByText } = renderModal({
@@ -1865,10 +1873,12 @@ describe("CreateProfileModal", () => {
 
   /**
    * F19 UX-19 — UXA-4 gave this control the radiogroup ROLE and stopped there.
-   * A radiogroup promises arrow-key traversal (`app/ui/roving-radio.ts`), which
-   * UXA-7 wired into the twin on the Policy sheet (policy-page.tsx:158/:474) and
-   * never into this one: ←/→ did nothing, and every radio was its own tab stop
-   * (15 instead of 5 for an expanded Collaboration group).
+   * A radiogroup promises arrow-key traversal (then the `rovingRadioKeyDown`
+   * helper, retired by ruling 166), which UXA-7 wired into the twins on the
+   * Policy sheet (`HumanAccess`'s role group and `WorkflowRules`' boundary group
+   * in policy-page.tsx) and never into this one: ←/→ did nothing, and every
+   * radio was its own tab stop (15 instead of 5 for an expanded Collaboration
+   * group).
    */
   it("UX-19 — the capability radiogroup traverses with arrow keys on one tab stop", async () => {
     const { container } = renderModal({ initial: null });
@@ -1942,10 +1952,10 @@ describe("CreateProfileModal", () => {
   /**
    * F19 UX-23 — the collapsed summary printed bare digits ("3 2 1") whose only
    * key was the dot colour, while the identical strip on the Policy page names
-   * every mode (policy-page.tsx:309-322). Zero counts render nothing, so
-   * position did not disambiguate either. The words now come from the SAME mode
-   * list the expanded segment uses for this profile kind, so one vocabulary
-   * covers both views.
+   * every mode (`.pcap-counts` in policy-page.tsx's `AgentCapability`). Zero
+   * counts render nothing, so position did not disambiguate either. The words
+   * now come from the SAME mode list the expanded segment uses for this profile
+   * kind, so one vocabulary covers both views.
    */
   it("UX-23 — the collapsed capability summary names each mode, not just its dot", () => {
     const { container } = renderModal({ initial: null });

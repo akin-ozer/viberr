@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
+import { lockPath } from "../../test-support/data-root-lock";
 import { createTestDbContext } from "../../test-support/test-db";
 import {
   HERMETIC_TOOLCHAIN,
@@ -153,7 +154,7 @@ describe("takeDataRootWriterLock (G1)", () => {
     // The container-vs-host shape: a lock left by a host this process cannot
     // probe for liveness, which is exactly what a recreated container found.
     writeFileSync(
-      path.join(dataRoot, "state", "writer.lock"),
+      lockPath(dataRoot),
       JSON.stringify({
         pid: 1,
         hostname: "some-dead-container",

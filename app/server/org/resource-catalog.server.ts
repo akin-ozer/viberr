@@ -23,7 +23,8 @@ import {
  * Sources, merged + de-duped:
  *  - Skills: every on-disk `data/skills/<name>/` folder (the shipped expertise
  *    skills the built-in agents actually load) ∪ org-managed `org_skills` rows.
- *  - MCP servers: the in-process `viberr` governance server ∪ org MCP registry.
+ *  - MCP servers: the org MCP registry (never the in-process `viberr` server —
+ *    see below).
  *  - Knowledge bases: every on-disk `data/kb/<dir>/` folder (what runs inject)
  *    ∪ org-managed `org_knowledge_bases` rows (E7: a KB row whose folder
  *    vanished stays grantable/visible, consistent with org-settings).
@@ -38,9 +39,6 @@ import {
  * former `profileKind` option existed only to scope that one name and went with
  * it (F7-RES3 superseded).
  */
-export const RESERVED_OPERATOR_MCP = "viberr";
-
-
 export function buildResourceCatalog(
   db: DatabaseSync,
   dataRoot?: string,

@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { sha256Hex } from "~/server/files/content-hash.server";
 /**
  * The shipped default agent assets, read from `assets/` at runtime.
  *
@@ -59,6 +59,7 @@ import {
   SEED_AGENT_PROFILES,
   type SeedAgentProfile,
 } from "./agent-catalog.server";
+import { toError } from "~/shared/errors";
 
 // F10-30: the built-in specialist PERSONA is the profile's own markdown body —
 // ONE authoring source. Previously the rich persona shipped as a SEPARATE
@@ -360,10 +361,6 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   ],
 };
 
-export function assetHash(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
-}
-
 /**
  * Whether a store's copy of a shipped asset is still EXACTLY something this app
  * wrote — the manifest's record of the last write, or a version shipped before
@@ -420,7 +417,7 @@ function writeShippedManifest(store: string, manifest: ShippedAssetManifest): vo
     // Bookkeeping only — a store that cannot record it simply falls back to the
     // historical hash list on the next boot.
     logger.warn("failed writing the shipped-asset manifest", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
   }
 }
@@ -507,9 +504,9 @@ export function seedDefaultAgentAssets(dataRoot?: string): void {
   for (const asset of assets) {
     try {
       const dest = path.join(store, asset.rel);
-      const shippedHash = assetHash(asset.content);
+      const shippedHash = sha256Hex(asset.content);
       if (existsSync(dest)) {
-        const onDiskHash = assetHash(readFileSync(dest, "utf8"));
+        const onDiskHash = sha256Hex(readFileSync(dest, "utf8"));
         if (onDiskHash === shippedHash) {
           // Already current — adopt it into the manifest so a store that
           // predates the manifest is refreshable from the NEXT rewrite on.
@@ -555,7 +552,7 @@ export function seedDefaultAgentAssets(dataRoot?: string): void {
     } catch (error) {
       logger.error("failed seeding default agent asset", {
         asset: asset.rel,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

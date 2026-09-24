@@ -8,7 +8,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 // Ruling 296: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
-import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
+import { strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
 import {
   normalizeEvidenceRows,
   type FileActorRef,
@@ -54,6 +54,7 @@ import {
   type OfferWithdrawalSlot,
   type OfferWithdrawalCause,
 } from "./task-mutation.server";
+import { toError } from "~/shared/errors";
 
 /**
  * The generic agent's in-process collaboration TOOLS (generic-agents G3) — a
@@ -120,10 +121,6 @@ interface ReportedOutcome {
   verdict?: "approve" | "request_changes";
   summary?: string;
   evidence?: { label: string; add?: string; del?: string }[];
-}
-
-function textResult(text: string) {
-  return { content: [{ type: "text" as const, text }] };
 }
 
 /** F4: cap the JSON a single `github_read` hands back, so a large tree/blob or a
@@ -379,7 +376,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           } catch (error) {
             logger.warn("agent post_comment failed", {
               taskKey,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
             return textResult("[error] The comment could not be posted.");
           }
@@ -442,7 +439,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           } catch (error) {
             logger.warn("agent ask_human failed", {
               taskKey,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
             return textResult("[error] The question could not be raised.");
           }
@@ -673,7 +670,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           } catch (error) {
             logger.warn("agent read_board failed", {
               taskKey,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
             return textResult("[error] The board could not be read.");
           }
@@ -710,7 +707,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             logger.warn("agent read_knowledge_doc failed", {
               taskKey,
               kb: args.kb,
-              err: error instanceof Error ? error : new Error(String(error)),
+              err: toError(error),
             });
             return textResult("[error] That knowledge-base document could not be read.");
           }

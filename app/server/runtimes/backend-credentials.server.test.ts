@@ -718,7 +718,7 @@ describe("no reader hands out a box", () => {
  * account had named. Driven through the real writers, so what is asserted is
  * the seam each of them shares, not the store function alone.
  *
- * Canaries: drop `retireBackendRefusalsFor` from `clearExistingCredential` and
+ * Canaries: drop `retireBackendRecordsFor` from `clearExistingCredential` and
  * the key and disconnect cases fail; drop it from `recordBackendLogin` and the
  * sign-in case fails.
  */

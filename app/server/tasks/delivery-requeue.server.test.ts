@@ -13,6 +13,8 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
+import { flush, waitFor } from "../../../test-support/polling";
 
 /**
  * R18-2 / F18-10 — a FULL-autonomy delivery re-queues the operator so an
@@ -68,30 +70,6 @@ const DEPS = {
 let ctx: TestDbContext;
 let store: TestStore;
 
-/** Deploy ONLY the operator, with a parameterized autonomy on its definition. */
-function deployOperator(autonomy: "full" | "supervised"): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
-    repo: "akin-ozer/viberr",
-    agents: [
-      {
-        profileId: "operator",
-        capabilities: [{ capabilityId: "deliver-review-pr", mode: "direct" }],
-        extras: [],
-        definition: {
-          kind: "operator",
-          name: "Operator",
-          backends: ["claude"],
-          model: "sonnet",
-          autonomy,
-        },
-      },
-    ],
-  });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-}
-
 function seedTask(
   patch: Parameters<typeof baseTaskFrontmatter>[1] = {},
   packet: Parameters<typeof writeTask>[2]["packet"] = null,
@@ -118,34 +96,6 @@ function taskFm() {
   })!.parsed.frontmatter;
 }
 
-async function flush(): Promise<void> {
-  // autoInvokeOperator is fire-and-forget (`void`) — let its microtasks settle.
-  for (let i = 0; i < 5; i++) await Promise.resolve();
-  await new Promise((r) => setTimeout(r, 5));
-}
-
-/**
- * Wait for a fire-and-forget effect to actually land.
- *
- * A fixed `flush()` cannot express this: `autoInvokeOperator` awaits a
- * dynamic import before it ever reaches `runOperator`, and on a cold module
- * graph those resolve well past a 5ms timer — so the fixed wait passed or
- * failed depending on what the rest of the suite had already imported. That is
- * a test that reports module-load timing, not behavior. Poll the condition
- * instead, with a ceiling that still fails loudly if the effect never happens.
- */
-async function waitFor(
-  cond: () => boolean,
-  what: string,
-  timeoutMs = 2_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!cond()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
-
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
@@ -168,7 +118,7 @@ afterEach(() => {
 
 describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
   it("A. full autonomy enqueues exactly one follow-up operator run with the `delivered` trigger", async () => {
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     seedTask();
     const outcome = await performDelivery(
       store.db,
@@ -190,7 +140,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
   it("C. ruling 357: a LIVE operator drive's own delivery queues no turn; it stamps the drive instead", async () => {
     // CANARY: drop the `ctx.operatorRun` arm before the re-queue (the seam
     // fires once and the stamp is missing).
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     seedTask();
     const operatorRun: NonNullable<TaskMutationContext["operatorRun"]> = {
       backend: "claude",
@@ -213,7 +163,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
   });
 
   it("B. supervised does NOT re-trigger — but LEAVES an actionable next step (R19-4)", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask();
     const outcome = await performDelivery(
       store.db,
@@ -247,7 +197,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
       created: false,
       url: "http://x/pull/7",
     });
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     seedTask();
     const outcome = await performDelivery(
       store.db,
@@ -269,7 +219,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
       created: false,
       url: "http://x/pull/7",
     });
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     seedTask();
     const outcome = await performDelivery(
       store.db,
@@ -325,7 +275,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
  */
 describe("ruling 240 — a held task refuses delivery", () => {
   it("refuses before anything is pushed, in the same words the dispatch gate uses", async () => {
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     seedTask({ blockedBy: ["VIB-2", "VIB-3"] });
     const pushesBefore = pushMock.mock.calls.length;
 
@@ -368,7 +318,7 @@ describe("ruling 240 — a held task refuses delivery", () => {
   it("delivers normally the moment nothing is held", async () => {
     // The gate keys on the list being non-empty, so an empty one must not cost
     // a delivery. CANARY: gate on the key's presence rather than its length.
-    deployOperator("full");
+    deployDeliveryOperator(store, "full");
     seedTask({ blockedBy: [] });
     const outcome = await performDelivery(
       store.db,
@@ -396,7 +346,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
   };
 
   it("block_on_policy re-queues runOperator with trigger 'packet-resolved'", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask({ stage: "impl", waiting: "human", readiness: "blocked" }, FAILURE_PACKET);
     const { resolvePacket } = await import("./task-actions.server");
     await resolvePacket(
@@ -424,7 +374,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
    * the decision re-created it, in a loop.
    */
   it("wait_for_window does NOT re-queue: the schedule is what comes back (ruling 224)", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask(
       { stage: "impl", waiting: "agent", readiness: "blocked" },
       {
@@ -482,7 +432,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
    * record "SHOP-11 is unblocked", measured live at 04:12 UTC.
    */
   it("block_on_dependencies records a REAL hold and does NOT re-queue (ruling 230)", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask(
       { stage: "impl", waiting: "agent", readiness: "blocked" },
       {
@@ -547,7 +497,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     // failed, which is why the write is best-effort and narrated.
     //
     // Canary: make the post-write effect throw instead of narrating.
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask(
       { stage: "impl", waiting: "agent", readiness: "blocked" },
       {
@@ -592,7 +542,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
   });
 
   it("hold_runtime_debug does NOT re-queue (the human asked for no run)", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask({ stage: "impl", waiting: "human", readiness: "blocked" }, FAILURE_PACKET);
     const { resolvePacket } = await import("./task-actions.server");
     await resolvePacket(
@@ -614,7 +564,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
  */
 describe("R19-4 — a supervised delivery always leaves something to act on", () => {
   it("E. the operator's OWN 'Move to Review' card dedupes with the guaranteed one", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask({
       recommendations: [
         {
@@ -641,7 +591,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
   });
 
   it("F. an OPEN packet is already the next step — no card is stacked on it", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask(
       { readiness: "input_required", waiting: "human" },
       {
@@ -675,7 +625,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
     // R15-2's human escape hatch reaches performDelivery WITHOUT
     // `operatorAuthorized`, and a human who just clicked the button needs no
     // "here is your next step" card.
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask();
     await performDelivery(
       store.db,
@@ -689,7 +639,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
   });
 
   it("H. a task already AT the review stage gets no redundant move card", async () => {
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask({ stage: "review" });
     await performDelivery(
       store.db,
@@ -709,7 +659,7 @@ describe("R19-4 — a supervised delivery always leaves something to act on", ()
       created: false,
       url: "http://x/pull/7",
     });
-    deployOperator("supervised");
+    deployDeliveryOperator(store, "supervised");
     seedTask();
     await performDelivery(
       store.db,

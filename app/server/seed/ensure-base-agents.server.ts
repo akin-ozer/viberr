@@ -4,9 +4,10 @@ import { projectFilePath } from "~/server/files/file-store-root.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { serializeProjectFile } from "~/server/files/project-file.server";
 import { listProjects } from "~/server/projections/board-query.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { logger } from "~/server/logging/logger.server";
 import { baseAgentDeployments } from "./agent-catalog.server";
+import { toError } from "~/shared/errors";
 
 /** The system operator's profile id (never removable, always ensured). */
 const OPERATOR_PROFILE_ID = "operator";
@@ -73,9 +74,7 @@ export function ensureBaseAgentsDeployed(
         projectFilePath(project.slug, dataRoot),
         serializeProjectFile(next),
       );
-      rebuildPath(db, projectFilePath(project.slug, dataRoot), {
-        dataRoot,
-      });
+      reprojectProject(db, { dataRoot }, project.slug);
       logger.info("backfilled built-in agents into project", {
         project: project.slug,
         added: missing.map((d) => d.profileId),
@@ -83,7 +82,7 @@ export function ensureBaseAgentsDeployed(
     } catch (error) {
       logger.error("failed backfilling built-in agents", {
         project: project.slug,
-        err: error instanceof Error ? error : new Error(String(error)),
+        err: toError(error),
       });
     }
   }

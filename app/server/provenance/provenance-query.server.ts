@@ -18,7 +18,7 @@ import { z } from "zod";
  */
 
 /** The reconciler's per-task observation (branch compare + PR state). */
-export const RECONCILE_ACTION = "github.reconcile";
+const RECONCILE_ACTION = "github.reconcile";
 
 /** `details_json` is a small JSON OBJECT of facts (ids, counts, paths) — see
  *  the secret-free contract on `provenance-recorder.server.ts`. Anything else

@@ -1,4 +1,5 @@
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
+import { initialsOf } from "~/ui/initials";
 import {
   backendRunMark,
   type TaskRunPrincipalView,
@@ -10,8 +11,10 @@ import {
  * splitting a label for match highlighting, and computing the text/caret after
  * an insertion. All framework-free so they unit-test directly.
  *
- * Token grammar (mirrors the server's `MENTION_RE = /@([A-Za-z][\w-]*)/g`, and
- * the composer only triggers once ≥1 char follows the `@`):
+ * Token grammar (mirrors the single-token fallback of `findMentionSpans` in
+ * ~/ui/mention-spans: `@`, then `[A-Za-z][\w-]*` — which the server routes on
+ * through `extractMentions`; the composer only triggers once ≥1 char follows
+ * the `@`):
  *   - the char before `@` is start-of-string or whitespace, then
  *   - `@`, then `[\w-]*` up to the caret.
  * The dropdown opens only when the token has at least ONE query character.
@@ -100,18 +103,6 @@ export function flattenMentionables(
     });
   }
   return out;
-}
-
-function initialsOf(name: string): string {
-  return (
-    name
-      .trim()
-      .split(/\s+/)
-      .map((w) => w[0] ?? "")
-      .slice(0, 2)
-      .join("")
-      .toUpperCase() || "?"
-  );
 }
 
 /**

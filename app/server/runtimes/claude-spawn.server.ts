@@ -6,7 +6,7 @@ import {
 } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
-import type { SignalProcess } from "./run-processes.server";
+import { realSignal, type SignalProcess } from "./run-processes.server";
 
 /**
  * Ruling 174: the Claude CLI leads its own process group.
@@ -106,10 +106,6 @@ const STDERR_DRAIN_MS = 200;
 function keepTail(text: string): string {
   return text.length > 2 * STDERR_TAIL_CHARS ? text.slice(-STDERR_TAIL_CHARS) : text;
 }
-
-const realSignal: SignalProcess = (pid, signal) => {
-  process.kill(pid, signal);
-};
 
 export function spawnClaudeCli(
   request: ClaudeSpawnRequest,

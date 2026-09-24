@@ -18,15 +18,15 @@ import { getEnv } from "../app/server/config/env.server";
 import { runWithDataRootWriterLock } from "../app/server/db/cli-lock.server";
 import { getDb } from "../app/server/db/sqlite.server";
 import { seedOrgResources } from "../app/server/org/org-seed.server";
+import { SEED_DEFAULT_PASSWORD } from "../app/server/seed/seed-credentials";
 
 // The demo fixture lives under test-support/, which the production Docker image
 // deliberately does NOT ship (it would bloat the runtime with test code). Import
 // it dynamically so a `seed:demo` attempt in that image fails with a clear
 // "dev-only" message instead of a cryptic module-not-found (seed #2).
 let runDemoSeed: typeof import("../test-support/demo-seed").runDemoSeed;
-let SEED_DEFAULT_PASSWORD: string;
 try {
-  ({ runDemoSeed, SEED_DEFAULT_PASSWORD } = await import("../test-support/demo-seed"));
+  ({ runDemoSeed } = await import("../test-support/demo-seed"));
 } catch (error) {
   // P13: the guard used to swallow the real reason, so a Vite-only `?raw`
   // import failing under tsx surfaced as a misleading "not shipped in the

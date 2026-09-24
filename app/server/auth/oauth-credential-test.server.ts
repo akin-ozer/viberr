@@ -37,7 +37,7 @@ export type OAuthCredentialTest =
   | { ok: false; reason: string };
 
 /** Bounded so a hanging provider surfaces instead of holding the request. */
-export const OAUTH_TEST_TIMEOUT_MS = 10_000;
+const OAUTH_TEST_TIMEOUT_MS = 10_000;
 
 /** Nonsense grant material — never a real token/code, and never logged. */
 const PROBE_TOKEN = "viberr_probe_invalid_token";

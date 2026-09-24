@@ -88,8 +88,8 @@ describe("parseProjectFrontmatter — one bad capability grant costs only itself
     // whole-array fallback the rule forbids (F31-C5 fixed the same shape for
     // packet options).
     // Canary: replace the `agents:` value with a plain
-    // `tolerantArray(diagnostics, data, "agents", agentsSchema)` and the
-    // deployment disappears entirely.
+    // `tolerantRows(diagnostics, data, "agents", agentsSchema.element)` (drop
+    // the `cleanAgentGrants` pre-pass) and the deployment disappears entirely.
     const { frontmatter, diagnostics } = parseProjectFrontmatter(
       {
         slug: "proj",
@@ -161,5 +161,43 @@ describe("parseProjectFrontmatter — requiredReviewers (ruling 178)", () => {
       { fallbackSlug: "proj" },
     );
     expect(Object.keys(raw.unknown)).not.toContain("requiredReviewers");
+  });
+});
+
+/**
+ * Ruling 458(h): project.md reads through the task file's tolerant helpers, so
+ * a field that falls back names the value it used ("; using <fallback>."),
+ * where it used to say "— using a default." and name nothing.
+ */
+describe("parseProjectFrontmatter — fallback wording (ruling 458(h))", () => {
+  it("names the fallback for a missing or invalid field", () => {
+    const { frontmatter, diagnostics } = parseProjectFrontmatter(
+      { slug: "proj", defaultBranch: "" },
+      { fallbackSlug: "proj" },
+    );
+    expect(frontmatter.name).toBe("proj");
+    expect(frontmatter.defaultBranch).toBe("main");
+    const byPath = new Map(
+      diagnostics.filter((d) => d.code.startsWith("frontmatter.")).map((d) => [d.path, d]),
+    );
+    // CANARY: bind project-file.schema.ts to a helper that says "— using a
+    // default." and these fail.
+    expect(byPath.get("name")).toMatchObject({
+      severity: "warning",
+      code: "frontmatter.missing_field",
+      message: 'Frontmatter field `name` is missing; using "proj".',
+    });
+    expect(byPath.get("stages")).toMatchObject({
+      severity: "warning",
+      code: "frontmatter.missing_field",
+      message: "Frontmatter field `stages` is missing; using [].",
+    });
+    expect(byPath.get("defaultBranch")).toMatchObject({
+      severity: "warning",
+      code: "frontmatter.invalid_field",
+    });
+    expect(byPath.get("defaultBranch")!.message).toMatch(
+      /^Frontmatter field `defaultBranch` is invalid \(.+\); using "main"\.$/,
+    );
   });
 });

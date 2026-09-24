@@ -65,7 +65,10 @@ General rules for the canonical files:
   would take for a boolean (`mode: "off"`, `"yes"`), so other tools read the same value.
 - **Tolerant parsing** (`app/schemas/*.schema.ts`): missing/invalid fields produce structured
   diagnostics + safe fallbacks, and list fields parse one row at a time (a bad row drops only
-  itself, with an indexed diagnostic). Parsing never throws and never drops a task or project.
+  itself, with an indexed diagnostic). `project.md` and `task.md` share one set of these readers
+  (`app/schemas/file-diagnostics.ts`), and a field that falls back names the value it used:
+  ``Frontmatter field `readiness` is missing; using "ready".`` (ruling 458(h)). Parsing never
+  throws and never drops a task or project.
   Diagnostics floor readiness (warning → `input_required`, error →
   `inconsistency_risk_detected`, hard stop → `blocked`) — see
   `app/server/interpretation/diagnostics-policy.server.ts`. Goal files and agent profiles are
@@ -793,10 +796,11 @@ Every value in `resources:` is a **store folder name, never a display name**. Fo
 `skills:` and `mcps:` the slug *is* the folder, so the two coincide. For `kb:` they do
 not: a knowledge base has a display name and a directory as separate columns, and the
 grant resolves against `${VIBERR_DATA_ROOT}/kb/<dir>`. A `kb:` entry written as the
-display name resolves to nothing — `readKbBody` returns an empty string with only a
-`logger.warn`, so the run proceeds *without* the knowledge base while every UI still shows
-it attached. Use the directory. (Renaming a KB's directory orphans existing grants for the
-same reason; re-attach them.)
+display name resolves to nothing — `readKbIndexDetailed` returns an empty index with a
+`logger.warn` and an unresolved-grant row (which the run's prompt names), so the run
+proceeds *without* the knowledge base while every UI still shows it attached. Use the
+directory. (Renaming a KB's directory orphans existing grants for the same reason;
+re-attach them.)
 
 ## 5. What is deliberately NOT in files
 

@@ -2,6 +2,7 @@ import { data } from "react-router";
 import { getDb } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { healthSnapshot } from "~/server/ops/health-snapshot.server";
+import { toError } from "~/shared/errors";
 
 /**
  * GET /resources/health — ops probe (Phase 10, docs/architecture/decisions.md route map).
@@ -97,7 +98,7 @@ export async function loader(args?: { request?: Request }) {
     );
   } catch (error) {
     logger.error("health check failed", {
-      err: error instanceof Error ? error : new Error(String(error)),
+      err: toError(error),
     });
     return data({ ok: false as const, status: "down" as const }, { status: 503 });
   }

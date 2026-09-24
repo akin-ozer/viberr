@@ -65,7 +65,17 @@ describe("collapseTelemetry", () => {
     expect(folded.count).toBe(3);
     expect(folded.tags).toEqual(["system·thinking_tokens", "rate_limit_event"]);
     expect(telemetryLabel(folded)).toContain("3 telemetry events");
-    expect(telemetryLabel(folded)).toContain("{ } raw");
+    expect(telemetryLabel(folded)).toContain("“{ } raw” shows them");
+  });
+
+  it("a lone telemetry row's label agrees with its count of one", () => {
+    const [folded] = collapseTelemetry(
+      [line({ ev: "meta", tag: "rate_limit_event", text: "{}" })],
+      false,
+    );
+    if (folded?.kind !== "telemetry") throw new Error("expected the folded entry");
+    expect(telemetryLabel(folded)).toContain("1 telemetry event ");
+    expect(telemetryLabel(folded)).toMatch(/“\{ \} raw” shows it$/);
   });
 
   it("separate runs fold separately — nothing is reordered", () => {

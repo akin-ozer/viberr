@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -24,10 +24,8 @@ export interface LocalOrigin {
   seed: string;
   /** The root commit's full sha. */
   firstCommit: string;
-  /** Land one more commit on `branch` (default `main`) and return its sha. */
-  advance(options?: { file?: string; branch?: string; message?: string }): Promise<string>;
-  /** The sha `bare` currently holds for `refs/heads/<branch>`. */
-  head(branch?: string): Promise<string>;
+  /** Land one more commit on `main` and return its sha. */
+  advance(options?: { file?: string; message?: string }): Promise<string>;
 }
 
 export interface CreateLocalOriginOptions {
@@ -78,17 +76,12 @@ export async function createLocalOrigin(
     async advance(options = {}) {
       advanceCount += 1;
       const file = options.file ?? "CHANGELOG.md";
-      const branch = options.branch ?? "main";
       const message = options.message ?? `change ${advanceCount}`;
       writeFileSync(path.join(seed, file), `${message}\n`);
       await exec("git", ["-C", seed, "add", "-A"]);
       await exec("git", ["-C", seed, "commit", "-qm", message]);
-      await exec("git", ["-C", seed, "push", "-q", bare, `HEAD:refs/heads/${branch}`]);
+      await exec("git", ["-C", seed, "push", "-q", bare, "HEAD:refs/heads/main"]);
       return (await exec("git", ["-C", seed, "rev-parse", "HEAD"])).stdout.trim();
-    },
-    async head(branch = "main") {
-      const out = await exec("git", ["-C", bare, "rev-parse", "--verify", `refs/heads/${branch}`]);
-      return out.stdout.trim();
     },
   };
 }
@@ -138,4 +131,13 @@ export async function withLocalGithub<T>(root: string, work: () => Promise<T>): 
 export async function gitOut(cwd: string, args: string[]): Promise<string> {
   const out = await exec("git", ["-C", cwd, ...args]);
   return out.stdout.trim();
+}
+
+/**
+ * `gitOut`'s synchronous twin, for building a real workspace repo inline. It
+ * spawns git IN `cwd` (no `-C`) and pipes stderr, so a failing command throws
+ * without echoing into the test output.
+ */
+export function gitOutSync(cwd: string, args: string[]): string {
+  return execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
 }

@@ -60,7 +60,7 @@ export const SLUG = "viberr-core";
 export const OTHER_SLUG = "billing";
 export const TASK = "VIB-1";
 export const OTHER_TASK = "VIB-9";
-export const USER_ID = "u_harness";
+const USER_ID = "u_harness";
 const OCCURRED_AT = "2026-09-24T10:00:00.000Z";
 
 // ------------------------------------------------------------ the stream
@@ -168,7 +168,7 @@ export class BrokerEventSource {
 }
 
 /** Publishes one wire event through the broker, routed as the server routes it. */
-export function publish(event: SseEvent, route: SseRoute): number {
+function publish(event: SseEvent, route: SseRoute): number {
   return publishSseEvent(event, route);
 }
 
@@ -228,7 +228,7 @@ export function notificationRead(): number {
 // ------------------------------------------------------------ the router
 
 /** Single fetch's revalidation choice (see the module comment). */
-export const singleFetchStrategy: DataStrategyFunction = async ({ request, matches, fetcherKey }) => {
+const singleFetchStrategy: DataStrategyFunction = async ({ request, matches, fetcherKey }) => {
   const results: Record<string, DataStrategyResult> = {};
   if (request.method !== "GET" || fetcherKey) {
     const target = matches.find((m) => m.shouldCallHandler());

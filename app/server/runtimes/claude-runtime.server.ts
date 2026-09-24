@@ -9,6 +9,8 @@ import {
   type RunFailureKind,
 } from "~/shared/run-failure";
 import { splitClaudeVariant } from "~/shared/model-ids";
+import { formatAbsoluteUTC } from "~/shared/dates/format";
+import { wholeThousands } from "~/shared/text/thousands";
 import { getEnv } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -55,6 +57,7 @@ import {
   sortedRecord,
   staticPromptText,
 } from "./prompt-prefix.server";
+import { errorMessage, toError } from "~/shared/errors";
 
 /**
  * Claude Code adapter — the OFFICIAL Claude Agent SDK
@@ -320,7 +323,8 @@ export function resolveClaudeEffort(effort?: string): string | undefined {
  * Idle (inactivity) timeout for a claude run in ms — the window a single
  * turn/tool may produce no message before the run is treated as hung.
  * Overridable via VIBERR_CLAUDE_IDLE_TIMEOUT_MS; defaults to 15 minutes, the
- * same window the Codex adapter uses (owner ruling A8).
+ * same window the Codex adapter uses (owner ruling A8; the default and the
+ * parse live in the env schema, ruling 458(j)).
  *
  * P13-RT-11: Claude had NO timer of any kind. `maxTurns` bounds turns, not
  * wall-clock or idle time, and a `for await` over a stalled SDK stream never
@@ -333,14 +337,11 @@ export function resolveClaudeEffort(effort?: string): string | undefined {
  * "another workstream" that owned the env schema — an ownership fact, not a
  * technical reason, and the schema has declared this variable since. It reads
  * the validated env now, like its Codex twin (`codexIdleTimeoutMs`) and
- * `claudeMaxTurns`. A test that sets the variable must call
+ * `resolveMaxTurns`. A test that sets the variable must call
  * `resetEnvCacheForTests()`, because `getEnv()` caches per process.
  */
-const DEFAULT_CLAUDE_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
-export function claudeIdleTimeoutMs(): number {
-  const raw = getEnv().VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
-  const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_CLAUDE_IDLE_TIMEOUT_MS;
+function claudeIdleTimeoutMs(): number {
+  return getEnv().VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
 }
 
 /**
@@ -514,9 +515,15 @@ const BASE_DENIED_BUILTINS = [
  * enable every skill — a form this adapter must never send, since "all" would
  * include the SDK's bundled set the filter exists to hide.
  */
-export function nativeSkillNames(skills?: readonly string[]): string[] {
+function nativeSkillNames(skills?: readonly string[]): string[] {
   if (!skills?.length) return [];
   return [...new Set(skills)].filter(isSdkSkillName);
+}
+
+/** What the start could enable natively, and what it had to drop. */
+export interface NativeSkillsOutcome {
+  native: string[];
+  dropped: string[];
 }
 
 /**
@@ -545,13 +552,7 @@ export function nativeSkillNames(skills?: readonly string[]): string[] {
  * (`droppedSkillsNotice`). The agent then treats them as unavailable instead
  * of invoking a name that never loads.
  */
-/** What the start could enable natively, and what it had to drop. */
-export interface NativeSkillsOutcome {
-  native: string[];
-  dropped: string[];
-}
-
-export function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
+function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
   const granted = nativeSkillNames(spec.skills);
   if (granted.length === 0) return { native: [], dropped: [] };
   if (skillPluginInPlace(spec.skillPlugin)) return { native: granted, dropped: [] };
@@ -562,13 +563,9 @@ export function nativeSkillsOutcome(spec: RunSpec): NativeSkillsOutcome {
   return { native: [], dropped: granted };
 }
 
-export function nativeSkillsForRun(spec: RunSpec): string[] {
-  return nativeSkillsOutcome(spec).native;
-}
-
 /** The system-prompt correction for skills the persona announced as attached
  *  but the adapter could not enable (see `nativeSkillsOutcome`). */
-export function droppedSkillsNotice(dropped: readonly string[]): string {
+function droppedSkillsNotice(dropped: readonly string[]): string {
   return (
     "\n\n---\n# Attached skills could NOT be enabled on this run\n\n" +
     `The skills named above as attached to this run (${dropped.join(", ")}) ` +
@@ -743,16 +740,12 @@ type ClaudeFailureKind =
   | "session_missing"
   | "unknown";
 
-/** Turn cap for a claude run — a RUNAWAY guard, not a work budget. The old
- *  hard-coded 50 cut off legitimate dev runs mid-delivery (observed live:
- *  a completed implementation died at turn 51 on `gh --version`). Default is
- *  deliberately huge (owner ruling 2026-07-17) — real runs should never hit
- *  it; deployments tune it with VIBERR_CLAUDE_MAX_TURNS in .env. */
-const DEFAULT_CLAUDE_MAX_TURNS = 2000;
+/** Turn cap for a claude run — a RUNAWAY guard, not a work budget; deployments
+ *  tune it with VIBERR_CLAUDE_MAX_TURNS in .env. Why the default of 2000 is
+ *  deliberately huge, and the parse of a set value, live in the env schema
+ *  (ruling 458(j)). */
 function resolveMaxTurns(): number {
-  const raw = getEnv().VIBERR_CLAUDE_MAX_TURNS;
-  const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CLAUDE_MAX_TURNS;
+  return getEnv().VIBERR_CLAUDE_MAX_TURNS;
 }
 
 /** The classifier's whole output: the routing class, the canonical sentence a
@@ -814,13 +807,6 @@ function failureFacts(kind: RunFailureKind, evidence: FailureEvidence): RunFailu
         : null;
   }
   return facts;
-}
-
-/** `Sep 3, 2026 11:50 UTC`, absolute, never relative. */
-function absoluteResetLabel(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /** The `code` a Node spawn failure carries (`EBADF`/`ENOENT`/…). Anything that
@@ -900,7 +886,7 @@ function classifyClaudeError(cause: unknown, evidence: FailureEvidence = NO_EVID
       // runs, so it must not say "the coordinating model" (misleads a human
       // triaging a failed delivery run toward the operator).
       message: facts.windowRejected
-        ? `The Claude account is over its usage quota: its ${window ?? "usage"} window is spent${facts.resetsAt ? ` and reopens at ${absoluteResetLabel(facts.resetsAt)}` : ""}. Wait for it, or connect a different Claude account or an API key on Profile → Agent accounts.`
+        ? `The Claude account is over its usage quota: its ${window ?? "usage"} window is spent${facts.resetsAt ? ` and reopens at ${formatAbsoluteUTC(facts.resetsAt)}` : ""}. Wait for it, or connect a different Claude account or an API key on Profile → Agent accounts.`
         : "The Claude account is over its usage quota. Retry after the limit resets, or connect a different Claude account or an API key on Profile → Agent accounts.",
       providerText,
       facts,
@@ -1302,7 +1288,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       }
       phase(RUN_PHASE.compacting, "at the end of the run");
       const clock = (iso: string) => iso.slice(11, 19);
-      const k = (n: number | null) => (n === null ? "?" : `${Math.round(n / 1000)}k`);
+      const k = (n: number | null) => (n === null ? "?" : wholeThousands(n));
       let outcome: CompactOutcome = {
         compacted: false,
         reason: "the provider reported no compaction boundary",
@@ -1372,7 +1358,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           cb.onLine({ raw: JSON.stringify(message), display: shown, facts: folded, occurredAt });
         }
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
+        const reason = errorMessage(error);
         outcome = { compacted: false, reason };
         const occurredAt = new Date().toISOString();
         cb.onLine({
@@ -1601,7 +1587,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         })().catch((error) => {
           logger.warn("claude run reap failed", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
         });
       };
@@ -1875,14 +1861,12 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               runId: spec.runId,
               runOutcome: "finished",
             });
-            emitPostTurnTransport(
-              error instanceof Error ? error.message : String(error),
-            );
+            emitPostTurnTransport(errorMessage(error));
             return settle("finished");
           }
           logger.error("claude query error", {
             runId: spec.runId,
-            err: error instanceof Error ? error : new Error(String(error)),
+            err: toError(error),
           });
           return settleError(error);
         }
@@ -1943,7 +1927,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       void run().catch((error) => {
         logger.error("claude run crashed", {
           runId: spec.runId,
-          err: error instanceof Error ? error : new Error(String(error)),
+          err: toError(error),
         });
         settleError(error);
       });

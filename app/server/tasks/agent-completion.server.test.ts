@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeProject,
@@ -57,10 +58,6 @@ import {
 
 let ctx: TestDbContext;
 let store: TestStore;
-
-function actor(user: { id: string; email: string }) {
-  return { userId: user.id, label: user.email };
-}
 
 /** A verdict-capable specialist deployment: an EXPLICIT
  *  `report-validation-verdict: direct` grant is what makes a supporting
@@ -245,14 +242,14 @@ describe("waiting-state bookkeeping (A2)", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(taskFile().parsed.frontmatter.waiting).not.toBe("agent");
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     expect(taskFile().parsed.frontmatter.waiting).toBe("agent");
@@ -296,7 +293,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       workdir: store.dataRoot,
       autonomous: true,
       dataRoot: store.dataRoot,
-      actor: actor(store.users.arda),
+      actor: actorOf(store.users.arda),
       threadId: `th-${runSeq}`,
     });
     await waitFor(() => {
@@ -2092,7 +2089,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
 
@@ -2296,7 +2293,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1, note: long },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
       const recorded = taskFile()
@@ -2326,7 +2323,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
             optionIndex: 1,
             note: "y".repeat(PACKET_NOTE_MAX + 1),
           },
-          actor(store.users.arda),
+          actorOf(store.users.arda),
           { dataRoot: store.dataRoot },
         ),
       ).rejects.toThrow(/too long/);
@@ -2369,7 +2366,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await resolvePacket(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-        actor(store.users.arda),
+        actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
 
@@ -3443,7 +3440,7 @@ describe("unavailable backend through the specialist start path", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // Ruling 127: the refusal is about the TASK OWNER's account — arda owns
@@ -3458,7 +3455,7 @@ describe("unavailable backend through the specialist start path", () => {
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // SAFETY: same single-column SELECT, and `startAgentRun` returned the id of
@@ -3538,7 +3535,7 @@ describe("unavailable backend through the specialist start path", () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     // Claude gone, Codex still connected (the beforeEach connected both).
@@ -3549,7 +3546,7 @@ describe("unavailable backend through the specialist start path", () => {
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const offered = await waitFor(() => {
@@ -3581,7 +3578,7 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
     await assignReviewer(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     queueFakeRun({
@@ -3602,7 +3599,7 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
         profileId: "dev",
         directive: "@reviewer verify the change end to end",
       },
-      actor(store.users.arda),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
     const changed = await waitFor(() => {
@@ -3644,7 +3641,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
       workdir: store.dataRoot,
       autonomous: true,
       dataRoot: store.dataRoot,
-      actor: actor(store.users.arda),
+      actor: actorOf(store.users.arda),
       // Distinct thread per helper call — two runs in one test otherwise
       // collide on the (project, task, thread) uniqueness.
       threadId: `th-${runSeq}`,

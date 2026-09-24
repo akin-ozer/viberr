@@ -24,6 +24,8 @@ import {
 import { conservativeGrantsFor } from "~/shared/capabilities";
 import { slugify } from "~/shared/ids/slugify";
 import { displayNameRefusal, normalizeDisplayName } from "~/shared/names";
+import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { countLabel } from "~/shared/text/plural";
 import {
   assertEffortForBackend,
   assertModelForBackend,
@@ -427,9 +429,6 @@ export interface SaveGagentResult {
   textBehind: TemplateTextDrift[];
 }
 
-/** The product's name for each backend, as the toasts spell it. */
-const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;
-
 /**
  * The model to store after one save (ruling 153): the caller's, checked by
  * name against the backend; omitted keeps the stored one, `""` clears it. A
@@ -475,7 +474,7 @@ function nextTemplateEffort(
 /** "1 project copy keeps its own grants" / "grants copied to 2 projects". */
 function copiesClause(diverged: TemplateCopyDrift[], propagated: PropagatedCopy[]): string | null {
   if (propagated.length > 0) {
-    return `grants copied to ${propagated.length} project${propagated.length === 1 ? "" : "s"}`;
+    return `grants copied to ${countLabel(propagated.length, "project")}`;
   }
   if (diverged.length > 0) {
     return `${diverged.length} project cop${diverged.length === 1 ? "y keeps" : "ies keep"} ${diverged.length === 1 ? "its" : "their"} own grants`;
@@ -694,7 +693,7 @@ export function deleteGlobalAgentProfile(
     return {
       status: "in_use",
       used,
-      message: `Detach ${existing.frontmatter.name} from its ${used} project${used === 1 ? "" : "s"} first`,
+      message: `Detach ${existing.frontmatter.name} from its ${countLabel(used, "project")} first`,
     };
   }
   rmSync(agentProfileFilePath(id, ctx.dataRoot), { force: true });

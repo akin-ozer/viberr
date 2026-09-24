@@ -16,7 +16,7 @@
  */
 
 /** Scopes whose absence is worth reporting and is NOT a policy violation. */
-export const ADVISORY_SCOPES: ReadonlySet<string> = new Set(["checks:read"]);
+const ADVISORY_SCOPES: ReadonlySet<string> = new Set(["checks:read"]);
 
 /** Is a refusal on `scope` an advisory rather than a violation? */
 export function scopeIsAdvisory(scope: string): boolean {

@@ -9,10 +9,7 @@ import { withActionWatchdog } from "~/server/actions/action-watchdog.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
-import {
-  getDataRoot,
-  projectFilePath,
-} from "~/server/files/file-store-root.server";
+import { getDataRoot } from "~/server/files/file-store-root.server";
 import { createProjectFile } from "~/server/files/project-writer.server";
 import {
   isReservedTaskPrefix,
@@ -20,10 +17,14 @@ import {
 } from "~/shared/dependencies";
 import { getConnection } from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
-import { rebuildPath } from "~/server/projections/rebuilder.server";
+import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { recordRepoAccess } from "~/server/github/repo-health.server";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  repoPermissionsSchema,
+  repoWritable,
+} from "~/server/secrets/pat-validator.server";
 import { proveAttachedCredential } from "~/features/github/github-actions.server";
 import {
   DEFAULT_GUARDRAILS,
@@ -33,13 +34,14 @@ import { defaultTransitionBy } from "~/shared/workflow/transitions";
 import { defaultAgentDeployments } from "~/server/seed/agent-catalog.server";
 import { findUserByEmail } from "~/server/auth/user-store.server";
 import type { ProjectRole, StageDef } from "~/schemas/project-file.schema";
-import { slugifyProjectName } from "./project-name";
+import { slugify } from "~/shared/ids/slugify";
 import {
   isStageColor,
   STAGE_COLOR_LIST,
   stageColorAt,
   TERMINAL_STAGE_COLOR,
 } from "~/shared/workflow/stage-colors";
+import { stageName } from "~/shared/workflow/stage-roles";
 
 export type PolicyPreset = "strict" | "balanced" | "auto";
 
@@ -144,40 +146,19 @@ type RepoProbe =
   | { status: "forbidden" }
   | { status: "unreachable" };
 
-/**
- * F20-15: `/repos/{owner}/{repo}` returns the `permissions` block computed for
- * THIS token — the read-only proof of write access. A project exists to push
- * branches and open PRs, so a repo the credential can only READ is not
- * deliverable. Tri-state: `null` (permissions absent) is "unknown" and passes;
- * only a PROVEN read-only repo (push === false) is called out. Mirrors the
- * (module-private) `repoWritable` in pat-validator.server.ts.
- */
-const repoPermissionsSchema = z.object({
-  admin: z.boolean().optional().catch(undefined),
-  maintain: z.boolean().optional().catch(undefined),
-  push: z.boolean().optional().catch(undefined),
-});
-type RepoPermissions = z.infer<typeof repoPermissionsSchema>;
-
 /** The `/repos/{owner}/{repo}` fields this probe reads. Every field is
  *  individually tolerant and the object itself falls back to empty: GitHub
  *  answering in an unexpected shape must read as "unknown" (the probe passes),
- *  never as a failed creation. */
+ *  never as a failed creation. The `permissions` block (F20-15, the read-only
+ *  proof of write access; only a PROVEN read-only repo is called out) is
+ *  decoded and judged by pat-validator.server.ts's `repoPermissionsSchema` /
+ *  `repoWritable`. */
 const repoResponseSchema = z
   .object({
     default_branch: z.string().optional().catch(undefined),
     permissions: repoPermissionsSchema.optional().catch(undefined),
   })
   .catch({ default_branch: undefined, permissions: undefined });
-
-function repoPushable(permissions: RepoPermissions | undefined): boolean | null {
-  if (!permissions) return null;
-  if (permissions.admin === true || permissions.maintain === true || permissions.push === true) {
-    return true;
-  }
-  if (permissions.push === false) return false;
-  return null;
-}
 
 /** The optional overrides `proveAttachedCredential` accepts, named so the call
  *  below can be built one key at a time. */
@@ -207,7 +188,7 @@ async function probeRemoteRepo(
     // F20-14/F20-15: Repair refuses a repo the credential can only read; the same
     // check belongs at create time (live: creating against a read-only-visible
     // repo was silently accepted and failed only at first delivery).
-    if (repoPushable(data.permissions) === false) {
+    if (repoWritable(data.permissions) === false) {
       return { status: "read_only", defaultBranch };
     }
     return { status: "ok", defaultBranch };
@@ -326,7 +307,7 @@ async function createProjectImpl(
       "A GitHub repository is required. Pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first.",
     );
   }
-  const slug = slugifyProjectName(name);
+  const slug = slugify(name);
   if (!slug) {
     throw AppError.validation("The project name must contain letters or digits.");
   }
@@ -474,9 +455,7 @@ async function createProjectImpl(
     { projectSlug: slug, dataRoot: ctx.dataRoot },
     { frontmatter, description: desc },
   );
-  rebuildPath(db, projectFilePath(slug, ctx.dataRoot), {
-    dataRoot: ctx.dataRoot,
-  });
+  reprojectProject(db, ctx, slug);
 
   // Bind the selected connection's PAT to the project so credential health,
   // branch creation, and PR sync work against the real repo.
@@ -576,7 +555,7 @@ function resolveProjectBlueprint(
     const seen = new Set<string>();
     stages = custom.stages.map((s, i) => {
       const name = s.name.trim();
-      let id = slugifyProjectName(name) || `stage-${i + 1}`;
+      let id = slugify(name) || `stage-${i + 1}`;
       while (seen.has(id)) id = `${id}-${i + 1}`;
       seen.add(id);
       const isTerminal = i === custom.stages!.length - 1;
@@ -667,9 +646,8 @@ function applyBoundaryOverrides(
   for (const o of overrides) {
     const edge = out.find((w) => w.from === o.fromId && w.to === o.toId);
     if (!edge) {
-      const name = (id: string) => stages.find((s) => s.id === id)?.name ?? id;
       throw AppError.validation(
-        `There is no workflow edge from "${name(o.fromId)}" to "${name(o.toId)}": boundaries exist between adjacent stages only.`,
+        `There is no workflow edge from "${stageName(stages, o.fromId)}" to "${stageName(stages, o.toId)}": boundaries exist between adjacent stages only.`,
       );
     }
     if (edge.locked) continue; // terminal edge: human, locked, non-negotiable

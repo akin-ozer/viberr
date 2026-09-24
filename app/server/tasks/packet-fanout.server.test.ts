@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  actorOf,
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
@@ -107,11 +108,6 @@ function timelineText(store: TestStore, key: string): string {
     .timeline.map((e) => e.text ?? "")
     .join("\n");
 }
-
-const actor = (store: TestStore) => ({
-  userId: store.users.arda.id,
-  label: store.users.arda.email,
-});
 
 describe("siblingPacketsSharingCause", () => {
   it("finds every OTHER open packet with the same cause, and nothing else", () => {
@@ -228,7 +224,7 @@ describe("resolvePacket fans a shared cause out (ruling 319)", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 }, // hold_runtime_debug
-      actor(store),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -274,7 +270,7 @@ describe("resolvePacket fans a shared cause out (ruling 319)", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
-      actor(store),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -300,7 +296,7 @@ describe("resolvePacket fans a shared cause out (ruling 319)", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 }, // retry_other_backend
-      actor(store),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -327,7 +323,7 @@ describe("resolvePacket fans a shared cause out (ruling 319)", () => {
         optionIndex: 0,
         custom: "Skip the catalog fixture and re-run only the gateway suite.",
       },
-      actor(store),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -351,7 +347,7 @@ describe("resolvePacket fans a shared cause out (ruling 319)", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
-      actor(store),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 
@@ -377,7 +373,7 @@ describe("resolvePacket fans a shared cause out (ruling 319)", () => {
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 2 },
-      actor(store),
+      actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
 

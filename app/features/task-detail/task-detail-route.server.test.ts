@@ -3,6 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import type { SeedUserIds } from "../../../test-support/demo-data";
 import {
   installFakeRuntime,
   queueFakeRun,
@@ -23,19 +24,11 @@ import type { loader as taskLoader, action as taskAction } from "~/routes/projec
  */
 
 let app: AppTestContext;
-let ids: SeededUserIds;
+/** The seeded humans every request in this file is issued as. */
+let ids: SeedUserIds;
 
 type LoaderData = Awaited<ReturnType<typeof taskLoader>>;
 type ActionData = Awaited<ReturnType<typeof taskAction>>;
-
-/** The seeded humans every request in this file is issued as. */
-interface SeededUserIds {
-  arda: string;
-  elif: string;
-  murat: string;
-  selin: string;
-  deniz: string;
-}
 
 /**
  * The action's refusal envelope. Every guard in routes/project.task raises an
@@ -69,16 +62,7 @@ beforeAll(async () => {
   installFakeRuntime();
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
-  await runDemoSeed(app.db, { dataRoot: app.dataRoot });
-  const { findUserByEmail } = await import("~/server/auth/user-store.server");
-  const byEmail = (email: string) => findUserByEmail(app.db, email)!.id;
-  ids = {
-    arda: byEmail("arda@viberr.dev"),
-    elif: byEmail("elif@viberr.dev"),
-    murat: byEmail("murat@viberr.dev"),
-    selin: byEmail("selin@viberr.dev"),
-    deniz: byEmail("deniz@viberr.dev"),
-  };
+  ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
   // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a
   // dispatch (and the operator drive a packet resolution re-queues) only
   // reaches an adapter when that person has the backend connected. These five

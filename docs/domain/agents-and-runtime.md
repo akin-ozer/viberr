@@ -1232,9 +1232,11 @@ write grant.
 Comments addressed to agents route by handle (`agent-reply.server.ts`): `@operator` →
 `@agent` (the deliverer) → a named specialist (name or id) → a single backend
 candidate; an ambiguous backend handle routes to nobody. Reserved handles: `operator`,
-`agent`, `claude`, `codex`. The resumed session is the latest run matching profile,
-kind and backend that is not marked session-missing; the reply preview is capped at
-1 200 chars and workspace paths are normalised.
+`agent`, `claude`, `codex`, whose one home is `RESERVED_MENTION_HANDLES`
+(`app/ui/mention-spans.ts`); the mention fan-out also skips `controller` (ruling 99). The
+resumed session is the latest run matching profile, kind and backend that is not marked
+session-missing; the reply preview is capped at 1 200 chars and workspace paths are
+normalised.
 
 ### 4.5 Scheduled runs
 
@@ -1384,9 +1386,14 @@ runtime's answer for a missing grant.
   one document whole up to `KB_DOC_READ_CHARS` 48 000 chars, flagged when clipped), or,
   on Codex, which mounts no Viberr tools, the file itself at the printed path (the
   workspace contract allows those reads, ruling 422). `KB_PRECEDENCE_NOTE` (repo
-  conventions outrank KBs) is emitted only when an index is present, by all three
-  runtimes (ruling 56). A KB that arrived only partly or not at all is named with its
-  document under "Attached resources that did NOT fully reach this run" (ruling 253).
+  conventions outrank KBs, ruling 56) is emitted only when an index is present. All three
+  runtimes assemble the block (the attached-resources banner, injected skill bodies, these
+  notes, the indexes) with one helper, `attachedResourcesBlock`, and pass only their own
+  banner wording (the specialist adds its "When a knowledge base and the repository
+  disagree" section); `kb-prompt-block.server.test.ts` pins its bytes, which the cached
+  prompt prefix depends on (ruling 370). A KB that arrived only partly or not at all is
+  named with its document under "Attached resources that did NOT fully reach this run"
+  (ruling 253).
   Supporting runs inherit the deliverer's KBs, deduplicated (rulings 47, 57). A project
   may name ONE knowledge base as its rulings (`project.md` `rulingsKb`, set by the
   controller's `set_project_rulings_kb`): `withProjectRulings` appends it, deduplicated,

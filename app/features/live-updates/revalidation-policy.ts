@@ -148,7 +148,7 @@ function ruleOf(routeId: string): RouteRule | null {
 }
 
 /** The facts a live event can change. */
-export function liveEventFacts(name: string): readonly Fact[] {
+function liveEventFacts(name: string): readonly Fact[] {
   switch (name) {
     case "run.state-changed":
       return ["run"];
@@ -181,7 +181,7 @@ function pathOf(formAction: string | undefined): string {
 }
 
 /** The facts an action can change, by the path it posts to. */
-export function actionFacts(formAction: string | undefined): readonly Fact[] {
+function actionFacts(formAction: string | undefined): readonly Fact[] {
   const path = pathOf(formAction);
   if (path.startsWith("/api/auth/")) return EVERY_FACT;
   return NARROW_ACTIONS.get(path) ?? PAGE;

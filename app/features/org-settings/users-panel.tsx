@@ -3,11 +3,12 @@ import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
 import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
-import { useDialog } from "~/ui/use-dialog";
-import { ConfirmDelete, EditIco, MiniModal } from "./mini-modal";
+import { ConfirmDelete } from "./confirm-delete";
+import { MiniModal } from "./mini-modal";
 import { useOrgAction, type OrgActionData } from "./use-org-action";
 
 /**
@@ -577,7 +578,8 @@ function EditUserModal({
 }
 
 /** Disable confirm — killing sessions + blocking sign-in is disruptive, so a
- * confirm gate mirrors the remove flow (native <dialog>, ruling 16). */
+ * confirm gate mirrors the remove flow (native <dialog>, ruling 16; the shared
+ * `ConfirmDialog` since ruling 458(f)). */
 function DisableUserDialog({
   name,
   onCancel,
@@ -587,31 +589,21 @@ function DisableUserDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
   return (
-    <dialog
-      ref={ref}
-      className="confirm-card"
-      role="alertdialog"
-      aria-label={`Disable ${name}?`}
-    >
-      <div className="confirm-icon">
-        <Icon name="hand" />
-      </div>
-      <h3>Disable {name}?</h3>
-      <p>
-        They're signed out immediately and can't sign in until re-enabled. Their
-        comments, decisions, and task assignments stay untouched.
-      </p>
-      <div className="confirm-actions">
-        <button type="button" className="btn ghost" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn danger" onClick={onConfirm}>
-          Disable
-        </button>
-      </div>
-    </dialog>
+    <ConfirmDialog
+      screenLabel="Disable user dialog"
+      icon="hand"
+      title={`Disable ${name}?`}
+      body={
+        <>
+          They're signed out immediately and can't sign in until re-enabled. Their
+          comments, decisions, and task assignments stay untouched.
+        </>
+      }
+      confirmLabel="Disable"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -776,7 +768,7 @@ export function UsersPanel({
                 aria-label={"Edit " + u.name}
                 onClick={() => setEditingId(u.id)}
               >
-                <EditIco />
+                <Icon name="edit" />
               </button>
               {u.disabled ? (
                 <button

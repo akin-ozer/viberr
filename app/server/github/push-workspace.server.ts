@@ -17,6 +17,8 @@ import {
   getProjectCredential,
 } from "~/server/secrets/pat-store.server";
 import { taskBranchName } from "./branch-sync.server";
+import { countLabel } from "~/shared/text/plural";
+import { errorMessage } from "~/shared/errors";
 
 /**
  * Server-side workspace push (F-GH3 — closing the governed-delivery gap).
@@ -522,7 +524,9 @@ async function commitsAheadOfDefault(
 }
 
 /** A local branch belonging to THIS task: the canonical `taskBranchName` form
- *  (`vib-1`) or the legacy `<key>-<slug>` one (`vib-1-normalize`). */
+ *  (`vib-1`) or any name that extends it with `-` — ruling 122's suffixed
+ *  allocation (`vib-1-3f9a`, `taskBranchCandidate` in branch-sync.server.ts)
+ *  and the legacy `<key>-<slug>` form (`vib-1-normalize`) alike. */
 function isTaskBranchName(name: string, taskKey: string): boolean {
   const canonical = taskBranchName(taskKey);
   return name === canonical || name.startsWith(`${canonical}-`);
@@ -560,8 +564,8 @@ async function readDefaultBranchEvidence(
     return {
       verified: false,
       why:
-        `its working tree holds uncommitted changes (${dirtyPaths.length} path` +
-        `${dirtyPaths.length === 1 ? "" : "s"}) that never reached a task branch`,
+        `its working tree holds uncommitted changes (${countLabel(dirtyPaths.length, "path")}) ` +
+        `that never reached a task branch`,
     };
   }
   const refsRes = await exec(
@@ -594,7 +598,7 @@ async function readDefaultBranchEvidence(
     return {
       verified: false,
       why:
-        `it carries ${ahead} local commit${ahead === 1 ? "" : "s"} ` +
+        `it carries ${countLabel(ahead, "local commit")} ` +
         `that origin/${defaultBranch} does not`,
     };
   }
@@ -1122,7 +1126,7 @@ export async function pushWorkspaceBranch(
     const detail = redactGitOutput(gitErrorText(error), { token });
     const fields: GitLogFields = {
       taskKey,
-      err: error instanceof Error ? error.message : String(error),
+      err: errorMessage(error),
     };
     if (detail) fields.detail = detail;
     logger.info("workspace branch push errored — skipping", fields);
@@ -1298,7 +1302,7 @@ export async function discardLocalTaskBranch(input: {
     logger.info("discard local task branch errored", {
       taskKey,
       branch,
-      err: error instanceof Error ? error.message : String(error),
+      err: errorMessage(error),
     });
     return { status: "failed", branch, reason: oneLine(reason) };
   }
