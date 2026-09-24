@@ -6,6 +6,7 @@ import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { rel, updatedLabel } from "./resource-helpers";
 import { isMcpHealthStale } from "~/shared/freshness";
+import { mcpSignInPhrase } from "~/shared/mcp-oauth";
 import { looksLikeWriteTool } from "~/shared/mcp-tools";
 import { countLabel } from "~/shared/text/plural";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
@@ -223,30 +224,37 @@ export function McpPanel({
               // outranks the stored `up` — that value is the verdict of the
               // probe this install was started BY.
               const warming = m.warmingSince !== null;
+              // Ruling 469: a server that needs a sign-in it does not have is
+              // not mounted on any run, whatever its last probe said.
+              const signedOut = m.oauth != null && m.oauth.status !== "signed_in";
               return (
                 <span
                   className={
                     "stat-dot" +
                     (warming
                       ? " warming"
-                      : stale
-                        ? " stale"
-                        : m.up === true
-                          ? " up"
-                          : m.up === false
-                            ? " down"
-                            : "")
+                      : signedOut
+                        ? " down"
+                        : stale
+                          ? " stale"
+                          : m.up === true
+                            ? " up"
+                            : m.up === false
+                              ? " down"
+                              : "")
                   }
                   title={
                     warming
                       ? "first run of this command, finishing in the background"
-                      : stale
-                        ? "last check passed but is stale. Retest to confirm"
-                        : m.up === true
-                          ? "connected"
-                          : m.up === false
-                            ? "unreachable"
-                            : "not health-checked"
+                      : signedOut
+                        ? (mcpSignInPhrase(m.oauth) ?? "needs sign-in")
+                        : stale
+                          ? "last check passed but is stale. Retest to confirm"
+                          : m.up === true
+                            ? "connected"
+                            : m.up === false
+                              ? "unreachable"
+                              : "not health-checked"
                   }
                 ></span>
               );
@@ -264,6 +272,10 @@ export function McpPanel({
                     on neither distinction. */}
                 {m.warmingSince !== null
                   ? "first run, installing in the background"
+                  : m.oauth != null && m.oauth.status !== "signed_in"
+                  ? // Ruling 469: "needs sign-in" / "sign-in expired: …",
+                    // said as itself rather than as "unreachable".
+                    `${mcpSignInPhrase(m.oauth)} · checked ${rel(m.lastCheckedAt)}`
                   : m.up === true
                   ? (m.tools !== null
                       ? // D32-6 (pass 32): "1 tools" — count its noun.
@@ -290,7 +302,10 @@ export function McpPanel({
                       // gateway (F-P3's "Claude runs only" caveat went with
                       // the Codex limitation it described).
                       " · auth: configured (held by Viberr; runs connect through its gateway)"
-                  : ""}
+                  : m.oauth?.status === "signed_in"
+                    ? // Ruling 469: the sign-in's tokens take the same road.
+                      ` · auth: OAuth, ${mcpSignInPhrase(m.oauth)}; held by Viberr, runs connect through its gateway`
+                    : ""}
                 {/* P14-KM-09: KB and skill rows have counted their templates
                     since P13-KM-08; MCP rows showed nothing, so an admin about
                     to rename or remove a server had no idea what depended on
@@ -324,6 +339,11 @@ export function McpPanel({
                   it is ever stored (`discoverStdioMcpTools`). */}
               {m.up === false && m.lastError && m.warmingSince === null && (
                 <span className="rsrc-err mono">{m.lastError}</span>
+              )}
+              {/* Ruling 469: why a sign-in expired, in the authorization
+                  server's words (scrubbed of every token before it was kept). */}
+              {m.oauth?.status === "expired" && m.oauth.reason && (
+                <span className="rsrc-err mono">{m.oauth.reason}</span>
               )}
             </span>
             <span className="rsrc-acts">

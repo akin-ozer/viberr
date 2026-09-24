@@ -55,8 +55,20 @@ import {
   listAllTools,
   MCP_CLIENT_CAPABILITIES,
   MCP_CLIENT_INFO,
+  OAUTH_NEEDS_SIGN_IN,
+  OAUTH_SIGN_IN_EXPIRED,
   upstreamFailureReason,
+  UpstreamSignInNeeded,
+  type UpstreamTokenSource,
 } from "~/server/mcp-proxy/upstream.server";
+import { mcpSignInPhrase, type McpOAuthView } from "~/shared/mcp-oauth";
+import {
+  clearMcpOAuthChallenge,
+  mcpOAuthCredential,
+  mcpOAuthTokenSource,
+  mcpOAuthView,
+  recordMcpOAuthChallenge,
+} from "./mcp-oauth.server";
 
 /**
  * Org agent resources: knowledge bases, MCP servers, skills (org-settings
@@ -673,6 +685,14 @@ export interface McpView {
   /** Ruling 278: paths in this server's command that lie inside Viberr's own
    *  data root. Empty for an HTTP server and for a command that names none. */
   storePaths: string[];
+  /**
+   * Ruling 469: where the connection stands on an OAuth sign-in — needs one,
+   * signed in (until when, and whether it renews) or expired — or null when it
+   * is not an OAuth connection. The public half only; the tokens never leave
+   * the server. Optional so hand-built fixtures elsewhere stay valid; every
+   * real row from `mapMcp` sets it explicitly.
+   */
+  oauth?: McpOAuthView | null;
 }
 
 type McpRow = {
@@ -690,6 +710,7 @@ type McpRow = {
   heuristic_warmups: number | null;
   tool_policy_json: string | null;
   tool_names_json: string | null;
+  oauth_json: string | null;
 };
 
 /** Ruling 176: the stored write-tool policy, `{ name, gate }` per marked tool.
@@ -838,6 +859,8 @@ function mapMcp(row: McpRow): McpView {
     discoveredTools: storedToolNames(row.tool_names_json),
     // Ruling 278: computed from the stored command, so it cannot go stale.
     storePaths: row.transport === "stdio" ? storePathsInMcpTarget(row.target) : [],
+    // Ruling 469: the public half; reading it opens no box.
+    oauth: mcpOAuthView(row.oauth_json),
   };
 }
 
@@ -848,10 +871,18 @@ function mapMcp(row: McpRow): McpView {
  * `ok`         — decrypted; use `token`.
  * `unreadable` — a credential IS configured and cannot be opened: a legacy
  *                plaintext ref, or a box no current/retired key opens.
+ * `oauth`      — ruling 469: signed in with OAuth. There is no token to hand
+ *                over here: the gateway asks `mcpOAuthTokenSource` on every
+ *                request, which renews it.
+ * `signed_out` — ruling 469: the server asks for an OAuth sign-in it does not
+ *                have (or its sign-in expired); `reason` says which, and a run
+ *                is told it instead of meeting a 401 on every call.
  */
 export type McpCredentialState =
   | { state: "none" }
   | { state: "ok"; token: string }
+  | { state: "oauth" }
+  | { state: "signed_out"; reason: string }
   | { state: "unreadable"; reason: string };
 
 /**
@@ -878,8 +909,13 @@ export function getMcpCredentialState(
   const row = db
     .prepare(`SELECT id, cred_ref FROM org_mcp_servers WHERE name = ?`)
     .get(name) as { id: string; cred_ref: string | null } | undefined;
-  if (!row?.cred_ref) return { state: "none" };
-  return openMcpCredential(db, row.id, name, row.cred_ref);
+  if (!row) return { state: "none" };
+  // Ruling 469(e): a static credential works exactly as before, and a sign-in
+  // drops it, so a row never holds both.
+  if (row.cred_ref) return openMcpCredential(db, row.id, name, row.cred_ref);
+  const oauth = mcpOAuthCredential(db, row.id);
+  if (oauth.state === "signed_in") return { state: "oauth" };
+  return oauth;
 }
 
 /** Shared open + lazy re-seal for one row's sealed credential. */
@@ -980,11 +1016,11 @@ function openedForNewRow(sealed: string, name: string): ProbeCredential {
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
                         up, last_checked_at, last_error, warming_since,
                         first_success_at, heuristic_warmups,
-                        tool_policy_json, tool_names_json
+                        tool_policy_json, tool_names_json, oauth_json
                  FROM org_mcp_servers`;
 
 export function listMcpServers(db: DatabaseSync): McpView[] {
-  // SAFETY: `MCP_SQL` selects exactly the fourteen `org_mcp_servers` columns
+  // SAFETY: `MCP_SQL` selects exactly the fifteen `org_mcp_servers` columns
   // `McpRow` declares; the baseline DDL types each one as the column this row
   // reads (0001_baseline.sql), NOT NULL on id/name/transport/target.
   const rows = db
@@ -1160,6 +1196,10 @@ interface StdioDiscoveryFailure {
    *  CALLER can decide whether this is really a first run (it holds the row),
    *  so the probe reports it and stays DB-free. */
   firstRunInstaller?: boolean;
+  /** Ruling 469: an HTTP server probed with no credential answered the MCP
+   *  authorization challenge; this is the metadata URL it named. The caller
+   *  records it, so the row reads "needs sign-in". */
+  signInChallenge?: string;
 }
 
 export type StdioDiscovery =
@@ -1470,20 +1510,32 @@ const mcpToolListSchema = z.object({
  * (P13-KM-05). A credentialed server's green dot therefore means "up with its
  * credential, over the transport the run's calls will take".
  */
+/** Ruling 469: a probe that failed on the sign-in rather than the endpoint,
+ *  which the toast states as itself instead of "unreachable". */
+function isSignInReason(reason: string): boolean {
+  return reason === OAUTH_NEEDS_SIGN_IN || reason === OAUTH_SIGN_IN_EXPIRED;
+}
+
 async function discoverHttpMcpTools(
   target: string,
-  options: McpProbeOptions & { token?: string | null } = {},
+  options: McpProbeOptions & { token?: string | null; auth?: UpstreamTokenSource } = {},
 ): Promise<StdioDiscovery> {
   const started = Date.now();
   const connectOptions: Parameters<typeof connectHttpUpstream>[1] = {
     token: options.token ?? null,
     timeoutMs: options.timeoutMs ?? 5000,
   };
+  // Ruling 469: a signed-in server is probed with its OAuth token, renewed
+  // the way the gateway renews it, so "up" is earned by the same sign-in.
+  if (options.auth) connectOptions.auth = options.auth;
   if (options.fetchImpl) connectOptions.fetchImpl = options.fetchImpl;
   let connection: Awaited<ReturnType<typeof connectHttpUpstream>>;
   try {
     connection = await connectHttpUpstream(target, connectOptions);
   } catch (error) {
+    if (error instanceof UpstreamSignInNeeded) {
+      return { kind: "down", reason: error.reason, signInChallenge: error.resourceMetadataUrl };
+    }
     return { kind: "down", reason: upstreamFailureReason(error) };
   }
   try {
@@ -1578,6 +1630,24 @@ export async function saveMcpServer(
   const writeTools =
     input.writeTools === undefined ? undefined : checkedWriteTools(input.writeTools);
 
+  // Ruling 469: a connection holds one credential. A sign-in drops a pasted
+  // token when it lands, so a pasted token over a live sign-in is refused
+  // rather than silently shadowing it (the editor hides the field meanwhile).
+  const oauthBefore = input.id ? mcpOAuthCredential(db, input.id) : null;
+  const signedIn = oauthBefore?.state === "signed_in";
+  const before = input.id ? getMcpServer(db, input.id) : null;
+  // A sign-in's tokens are for the endpoint they were issued to: re-pointing
+  // the row (or switching it to stdio) drops them rather than sending them to
+  // another server.
+  const repointed = before !== null && (before.target !== target || before.transport !== transport);
+  if (signedIn && !repointed && rawCred && !input.clearCred) {
+    throw AppError.validation(
+      `${name} is signed in with OAuth. Sign it out first to use a pasted credential instead.`,
+    );
+  }
+  const oauthAuth =
+    signedIn && !repointed && input.id ? mcpOAuthTokenSource(db, input.id) : undefined;
+
   // SAFETY: `id` is the TEXT PRIMARY KEY of `org_mcp_servers`
   // (0001_baseline.sql), so a matching row hands back a string.
   const clash = db
@@ -1605,13 +1675,23 @@ export async function saveMcpServer(
   const disc =
     transport === "stdio"
       ? await discoverStdioMcpTools(target, { ...options, token: plainCred })
-      : await discoverHttpMcpTools(target, { ...options, token: plainCred });
+      : await discoverHttpMcpTools(target, { ...options, token: plainCred, auth: oauthAuth });
+  // Ruling 469: only a probe that sent no credential of any kind can tell
+  // whether the server asks for a sign-in.
+  const probedBare = transport === "HTTP" && !cred && !oauthAuth;
   const checkedAt: string | null = now;
   const up = disc.kind === "up" ? 1 : 0;
   const tools = disc.kind === "up" ? disc.tools : null;
   // R19-17: a failure keeps its reason on the row; a success CLEARS it, so a
   // stale explanation can never sit under a green dot.
-  const lastError = disc.kind === "up" ? null : disc.reason;
+  // Ruling 469: an expired sign-in answers the challenge like one never made,
+  // and the row keeps saying which it is.
+  const lastError =
+    disc.kind === "up"
+      ? null
+      : disc.signInChallenge && !repointed && oauthBefore?.state === "signed_out"
+        ? oauthBefore.reason
+        : disc.reason;
   // R19-18: a command that was still fetching gets a background install rather
   // than a red dot. Started AFTER the row is written, below, so the warm-up's
   // own `warming_since` write cannot be overwritten by this save.
@@ -1622,7 +1702,7 @@ export async function saveMcpServer(
   // too, but capped at ONE heuristic warm-up per row (the counter is bumped by
   // `startMcpWarmup({ heuristic })`), so a command that never works still
   // settles to `unreachable` instead of re-downloading forever.
-  const priorRow = input.id ? getMcpServer(db, input.id) : null;
+  const priorRow = before;
   const firstEver = !priorRow || priorRow.firstSuccessAt == null;
   const heuristicWarmable =
     disc.kind === "down" &&
@@ -1650,8 +1730,10 @@ export async function saveMcpServer(
     : "";
   const toast =
     (disc.kind === "up"
-      ? `${name} saved: ${countLabel(disc.tools, "tool")} discovered${spawnNote}`
-      : transport === "stdio"
+      ? `${name} saved: ${countLabel(disc.tools, "tool")} discovered${spawnNote}${oauthAuth ? " · signed in with OAuth" : ""}`
+      : lastError !== null && isSignInReason(lastError)
+        ? `${name} saved: ${lastError}`
+        : transport === "stdio"
         // R19-17: the wrapper used to add "command didn't respond" in front of
         // a reason that now says what actually happened, giving
         // "didn't respond (exited before responding — …)". The reason speaks
@@ -1698,6 +1780,11 @@ export async function saveMcpServer(
       effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
       now, id,
     );
+    // Ruling 469: tokens never follow a row to another endpoint.
+    const oauthDropped = repointed && existing.oauth != null;
+    if (repointed) {
+      db.prepare(`UPDATE org_mcp_servers SET oauth_ref = NULL, oauth_json = NULL WHERE id = ?`).run(id);
+    }
     // P14-KM-01: an MCP grant is a NAME reference, and this was the one rename
     // leg that never rewrote it — KB and skill renames did, every delete dropped
     // its grants, but renaming a server left each profile pointing at a name the
@@ -1712,7 +1799,9 @@ export async function saveMcpServer(
       actor,
       subjectKind: "org_mcp",
       subjectId: id,
-      details: { name, transport, renamed: existing.name !== name },
+      details: oauthDropped
+        ? { name, transport, renamed: existing.name !== name, oauthDropped }
+        : { name, transport, renamed: existing.name !== name },
     });
     if (writeTools !== undefined && !sameNameSet(existing.writeTools, writeTools)) {
       recordAudit(db, {
@@ -1758,6 +1847,13 @@ export async function saveMcpServer(
       });
     }
     publishResourceUpdated("mcp", id);
+  }
+  // Ruling 469: what a bare probe learned about the sign-in, recorded once the
+  // row exists.
+  if (probedBare && disc.kind === "down" && disc.signInChallenge) {
+    recordMcpOAuthChallenge(db, id, disc.signInChallenge);
+  } else if (probedBare && disc.kind === "up") {
+    clearMcpOAuthChallenge(db, id);
   }
 
   if (warmable && transport === "stdio") {
@@ -1807,10 +1903,15 @@ export async function testMcpServer(
   const credNote = opened.unreadable
     ? " · WARNING: its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
     : "";
+  // Ruling 469: a signed-in server is probed with its sign-in; one that needs
+  // a sign-in it does not have says so instead of blaming the endpoint.
+  const oauth = sealed?.cred_ref ? null : mcpOAuthCredential(db, id);
+  const auth = oauth?.state === "signed_in" ? mcpOAuthTokenSource(db, id) : undefined;
   const disc =
     existing.transport === "stdio"
       ? await discoverStdioMcpTools(existing.target, { ...options, token })
-      : await discoverHttpMcpTools(existing.target, { ...options, token });
+      : await discoverHttpMcpTools(existing.target, { ...options, token, auth });
+  const probedBare = existing.transport === "HTTP" && !sealed?.cred_ref && !auth;
 
   if (disc.kind === "up") {
     db.prepare(
@@ -1822,18 +1923,29 @@ export async function testMcpServer(
       // R20-4: a passing retest is a first-ever success too — stamp it so a
       // later cold probe of a working server is never mistaken for a first run.
     ).run(disc.tools, now, now, JSON.stringify(disc.toolNames), now, id);
+    if (probedBare) clearMcpOAuthChallenge(db, id);
     const fresh = getMcpServer(db, id)!;
+    const signIn = auth ? mcpSignInPhrase(fresh.oauth) : null;
     return {
       mcp: fresh,
-      toast: `${fresh.name} healthy: ${countLabel(disc.tools, "tool")} · ${disc.latencyMs}ms${credNote}`,
+      toast: `${fresh.name} healthy: ${countLabel(disc.tools, "tool")} · ${disc.latencyMs}ms${signIn ? ` · ${signIn}` : ""}${credNote}`,
     };
   }
+  // An expired sign-in answers the challenge like one never made: the row
+  // keeps saying which it is.
+  const reason =
+    disc.signInChallenge && oauth?.state === "signed_out" ? oauth.reason : disc.reason;
   db.prepare(
     `UPDATE org_mcp_servers
      SET up = 0, tools_count = NULL, last_checked_at = ?, last_error = ?,
          updated_at = ?
      WHERE id = ?`,
-  ).run(now, disc.reason, now, id);
+  ).run(now, reason, now, id);
+  if (probedBare && disc.signInChallenge) recordMcpOAuthChallenge(db, id, disc.signInChallenge);
+  if (isSignInReason(reason)) {
+    const fresh = getMcpServer(db, id)!;
+    return { mcp: fresh, toast: `${fresh.name}: ${reason}` };
+  }
   // R19-18: retesting a command that is mid first-run install hands it to the
   // background runner instead of failing it again — retesting used to restart
   // the same download and kill it at the same point, forever.

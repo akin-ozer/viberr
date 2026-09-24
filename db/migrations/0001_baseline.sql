@@ -460,6 +460,14 @@ CREATE TABLE org_mcp_servers (
   -- offered in the editor. An observation like tools_count, but kept across a
   -- failed probe: a stale list is still the right thing to mark from.
   tool_names_json TEXT,
+  -- Ruling 469: an OAuth sign-in. `oauth_ref` is a secret-box (like cred_ref,
+  -- rotated with it) around the authorization server's endpoints, the client
+  -- Viberr registered as and the tokens; `oauth_json` is the public half every
+  -- surface reads without opening it (status needs_sign_in | signed_in |
+  -- expired, expiry, whether it renews, issuer host). NULL for a connection
+  -- that is not an OAuth one.
+  oauth_ref TEXT,
+  oauth_json TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

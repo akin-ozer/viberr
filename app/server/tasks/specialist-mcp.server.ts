@@ -281,7 +281,10 @@ export function resolveSpecialistMcpServersDetailed(
     // Refuse the mount and tell the RUN why, in the same structured shape a
     // missing server uses.
     const credential = getMcpCredentialState(db, name);
-    if (credential.state === "unreadable") {
+    // Ruling 469: a server that asks for an OAuth sign-in it does not have
+    // (or whose sign-in expired) would answer every call 401; the run is told
+    // why instead.
+    if (credential.state === "unreadable" || credential.state === "signed_out") {
       drop(name, credential.reason);
       continue;
     }
@@ -294,10 +297,11 @@ export function resolveSpecialistMcpServersDetailed(
       drop(name, "the registered stdio command is empty");
       continue;
     }
-    if (credential.state === "ok") {
+    if (credential.state === "ok" || credential.state === "oauth") {
       // Ruling 461: the credential stays in this process. The run mounts the
       // gateway's URL for the server (either transport — the gateway spawns a
-      // stdio command itself) and `startRun` adds the run's own token.
+      // stdio command itself) and `startRun` adds the run's own token. An
+      // OAuth sign-in's tokens take the same road (ruling 469).
       const url = mcpGatewayMountUrl(name);
       if (!url) {
         drop(

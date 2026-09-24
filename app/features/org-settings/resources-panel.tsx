@@ -260,7 +260,10 @@ export function ResourcesPanel({
       {modal && modal.kind === "mcp" && (
         <McpModal
           key={modal.item?.id ?? "new"}
-          initial={modal.item}
+          // Ruling 469: the row as the page holds it NOW, so a sign-in that
+          // lands in the other tab (the callback publishes, this page
+          // revalidates) reads "signed in" in the open editor.
+          initial={modal.item ? (mcps.find((m) => m.id === modal.item?.id) ?? modal.item) : null}
           usedBy={modal.item ? usedBy("mcps", modal.item.name) : 0}
           onClose={() => setModal(null)}
         />

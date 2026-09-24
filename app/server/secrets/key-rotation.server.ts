@@ -60,6 +60,17 @@ export const SEALED_STORES = [
     nameColumn: "name",
     idColumn: "id",
   },
+  // Ruling 469: an MCP connection's OAuth sign-in (client secret and tokens),
+  // a second sealed column on the same table. Its own entry, so a rotation
+  // re-seals it and the convergence count sees it.
+  {
+    id: "org_mcp_oauth",
+    label: "MCP OAuth sign-ins",
+    table: "org_mcp_servers",
+    column: "oauth_ref",
+    nameColumn: "name",
+    idColumn: "id",
+  },
   // R19-16: OAuth client secrets for GitHub/Google sign-in. The row's own
   // `provider` IS its label — there is at most one per provider, and a
   // provider name is not a secret.

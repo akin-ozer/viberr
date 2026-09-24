@@ -42,6 +42,7 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { z } from "zod";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
+import { mcpOAuthTokenSource } from "~/server/org/mcp-oauth.server";
 import { getMcpCredentialState, listMcpServers } from "~/server/org/resources.server";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { RunSpec } from "~/server/runtimes/adapter.server";
@@ -84,7 +85,8 @@ import {
  *  - The gateway speaks MCP to the run (Streamable HTTP) and MCP to the real
  *    server with the credential attached in THIS process (`upstream.server.ts`
  *    for HTTP with its SSE fallback, `upstream-stdio.server.ts` for a command
- *    the server spawns with `MCP_CREDENTIAL`), one upstream per (run, server),
+ *    the server spawns with `MCP_CREDENTIAL`; for an OAuth-signed-in server
+ *    the access token, renewed as it runs out, ruling 469), one upstream per (run, server),
  *    closed at revoke. Withheld write tools are filtered from `tools/list` and
  *    refused on `tools/call`; every forwarded call is logged (never its
  *    arguments or result) and a call to a marked write tool is audited.
@@ -635,12 +637,17 @@ async function connectUpstream(grant: RunGrant, server: string, key: string): Pr
   const row = listMcpServers(grant.db).find((entry) => entry.name === server);
   if (!row) throw new UpstreamConnectError("it is no longer in the org MCP registry");
   const credential = getMcpCredentialState(grant.db, server);
-  if (credential.state === "unreadable") throw new UpstreamConnectError(credential.reason);
+  if (credential.state === "unreadable" || credential.state === "signed_out") {
+    throw new UpstreamConnectError(credential.reason);
+  }
   const token = credential.state === "ok" ? credential.token : null;
+  // Ruling 469: an OAuth sign-in's access token is asked for on every request
+  // (renewed when it has run out, and once after a 401), never handed over.
+  const auth = credential.state === "oauth" ? mcpOAuthTokenSource(grant.db, row.id) : undefined;
   const connection =
     row.transport === "stdio"
       ? await connectStdioUpstream(row.target, { token, timeoutMs: state.timeouts.connectMs })
-      : await connectHttpUpstream(row.target, { token, timeoutMs: state.timeouts.connectMs });
+      : await connectHttpUpstream(row.target, { token, auth, timeoutMs: state.timeouts.connectMs });
   const upstream: Upstream = {
     key,
     runId: grant.runId,
