@@ -69,6 +69,7 @@ import {
 } from "~/server/tasks/required-reviewers.server";
 import type { RequiredReviewerRule } from "~/schemas/project-file.schema";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * The two `GET /repos/{owner}/{repo}` fields the repair reads, decoded by the
@@ -704,7 +705,7 @@ export async function repairProjectRepo(
   const footprint = repoFootprintTasks(db, input.projectSlug);
   if (footprint > 0 && !input.confirmFootprint) {
     throw AppError.validation(
-      `${footprint} task${footprint === 1 ? "" : "s"} in this project carry branch/PR records against ${from ?? "the current repo"}. Confirm the repair to proceed; those records keep their history but future sync runs against ${repo}.`,
+      `${countLabel(footprint, "task")} in this project ${footprint === 1 ? "carries" : "carry"} branch/PR records against ${from ?? "the current repo"}. Confirm the repair to proceed; those records keep their history but future sync runs against ${repo}.`,
     );
   }
 
@@ -1324,7 +1325,7 @@ export async function removeMember(
   return {
     toast:
       released > 0
-        ? `${displayName} removed from ${projectName}. ${released} owned task${released === 1 ? "" : "s"} released for reassignment.`
+        ? `${displayName} removed from ${projectName}. ${countLabel(released, "owned task")} released for reassignment.`
         : `${displayName} removed from ${projectName}`,
   };
 }

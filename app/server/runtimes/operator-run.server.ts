@@ -149,6 +149,7 @@ import {
 } from "~/server/tasks/run-failure-remedy.server";
 import { PLAN_NOT_CARRIED_OUT_LEAD } from "~/shared/run-failure";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { countLabel } from "~/shared/text/plural";
 import {
   noteModelAvailabilityFromFailure,
   clearModelMark,
@@ -4546,7 +4547,7 @@ function driftInstruction(snapshot: OperatorTaskSnapshot): string {
   const n = drift.authored;
   return (
     `FACT you must carry into whatever you write: the PR head (${head}) carries ` +
-    `${n === 1 ? "1 authored commit" : `${n} authored commits`} pushed AFTER the last reviewed ` +
+    `${countLabel(n, "authored commit")} pushed AFTER the last reviewed ` +
     `revision (${described.sentence}), so ${n === 1 ? "it is" : "they are"} UNREVIEWED. A review ` +
     "verdict recorded before those commits does NOT cover them: never describe this PR as " +
     "\"reviewed clean\" without saying so in the same breath. Include it as an explicit packet " +

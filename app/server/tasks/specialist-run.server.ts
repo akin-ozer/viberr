@@ -131,6 +131,7 @@ import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { newId } from "~/shared/ids/new-id.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { countLabel } from "~/shared/text/plural";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
 import {
   type DeliveryPermissions,
@@ -4049,7 +4050,7 @@ export async function pinSupportCheckout(
   // against a sha it never read, and the record would be a lie with a git
   // object id in it.
   const what = subject?.rePinned
-    ? `the reviewed revision \`${subject.rePinned.reviewedSha.slice(0, 7)}\` on its refreshed base, at \`${short}\` (${subject.rePinned.baseRefresh.merges === 1 ? "1 merge commit" : `${subject.rePinned.baseRefresh.merges} merge commits`}, ${subject.rePinned.baseRefresh.commits === 1 ? "1 base commit" : `${subject.rePinned.baseRefresh.commits} base commits`}, and no authored work since the review \u2014 ruling 238)`
+    ? `the reviewed revision \`${subject.rePinned.reviewedSha.slice(0, 7)}\` on its refreshed base, at \`${short}\` (${countLabel(subject.rePinned.baseRefresh.merges, "merge commit")}, ${countLabel(subject.rePinned.baseRefresh.commits, "base commit")}, and no authored work since the review \u2014 ruling 238)`
     : `the revision under review \`${short}\``;
   try {
     await execFileAsync("git", ["-C", dir, "cat-file", "-e", `${sha}^{commit}`], { timeout: 5_000 });

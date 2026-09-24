@@ -8,6 +8,7 @@ import {
 } from "~/features/runtime/runtime-types";
 import { formatAbsoluteUTC } from "~/shared/dates/format";
 import { wholeThousands } from "~/shared/text/thousands";
+import { countLabel } from "~/shared/text/plural";
 
 /** Normalize provider wire envelopes into console lines and persisted facts. */
 
@@ -921,9 +922,9 @@ function argumentText(value: JsonValue): string {
     case "text":
       return clippedText(v.text);
     case "list":
-      return `[${v.size} item${v.size === 1 ? "" : "s"}]`;
+      return `[${countLabel(v.size, "item")}]`;
     case "record":
-      return `{${v.size} field${v.size === 1 ? "" : "s"}}`;
+      return `{${countLabel(v.size, "field")}}`;
     default:
       return v.text;
   }
@@ -1118,5 +1119,5 @@ function cleanCommand(command: string): string {
 function summarizeChanges(changes: FileChange[]): string {
   if (!changes.length) return "no changes";
   const files = changes.length;
-  return `${files} file${files === 1 ? "" : "s"} · ${changes.map((c) => c.path).join(", ")}`;
+  return `${countLabel(files, "file")} · ${changes.map((c) => c.path).join(", ")}`;
 }

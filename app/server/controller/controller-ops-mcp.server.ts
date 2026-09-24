@@ -50,6 +50,7 @@ import {
   NotVisibleError,
   type ControllerToolUser,
 } from "./controller-tool-guards.server";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * `viberr_ops` — the controller's built-in diagnostics server (ruling 107).
@@ -377,7 +378,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     if (total <= shown) return {};
     return {
       truncated:
-        `${total - shown} more run${total - shown === 1 ? "" : "s"} matched and ` +
+        `${countLabel(total - shown, "more run")} matched and ` +
         `${shown} are shown, newest first. Pass limit up to ${MAX_RUN_ROWS} for the rest.`,
     };
   };

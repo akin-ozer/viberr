@@ -11,6 +11,7 @@ import {
   readTaskAttachmentText,
 } from "~/server/files/task-attachments.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { countLabel } from "~/shared/text/plural";
 import {
   assertEffortForBackend,
   assertModelForBackend,
@@ -1129,7 +1130,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           return (
             `[done] ${saved.toast}. ` +
             (policy.length > 0
-              ? `${policy.length} write ${policy.length === 1 ? "tool" : "tools"} withheld from every run without execute-code-or-write-repo and from every operator run (ruling 176): ${policy.join(", ")}. `
+              ? `${countLabel(policy.length, "write tool")} withheld from every run without execute-code-or-write-repo and from every operator run (ruling 176): ${policy.join(", ")}. `
               : suggestion.length > 0
                 ? `NOTHING is withheld: no tool on this server is marked, so every tool it exposes — including the ones that write — reaches every run that mounts it. From the names the probe listed, these look like write tools: ${suggestion.join(", ")}. Call save_mcp_server again with \`writeTools\` to mark them (or an explicit [] to record that none should be), then say which you chose. `
                 : "Nothing is marked as a write tool, so nothing is withheld. The probe listed no tool whose name looks like a write. ") +
@@ -1343,7 +1344,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (p.removed.length) parts.push(`dropped ${p.removed.join(", ")}`);
               return `${p.projectSlug}${parts.length ? ` (${parts.join("; ")})` : ""}`;
             });
-            return `${head} Grants copied to ${saved.propagated.length} project${saved.propagated.length === 1 ? "" : "s"}: ${per.join("; ")}.${behind}${defaults}`;
+            return `${head} Grants copied to ${countLabel(saved.propagated.length, "project")}: ${per.join("; ")}.${behind}${defaults}`;
           }
           if (saved.diverged.length > 0) {
             return `${head} ${divergedSentence(saved.diverged)} Call save_global_agent again with propagate: true to rewrite those copies, or an org admin takes the template's grants on that project's Agents page.${behind}${defaults}`;

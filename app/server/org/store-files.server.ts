@@ -31,6 +31,7 @@ import {
   STORE_TEXT_EXTENSIONS,
   STORE_TEXT_EXTENSION_LIST,
 } from "~/shared/text/store-extensions";
+import { countLabel } from "~/shared/text/plural";
 import { logger } from "~/server/logging/logger.server";
 import { assertSkillBodyWellFormed } from "~/server/files/skill-body.server";
 import { sha256Hex } from "~/server/files/content-hash.server";
@@ -1004,7 +1005,7 @@ export async function importGithubSnapshot(
   const suffix = [
     ...(truncated ? [" (truncated)"] : []),
     ...(skipped > 0
-      ? [` · ${skipped} file${skipped === 1 ? "" : "s"} skipped (fetch failed)`]
+      ? [` · ${countLabel(skipped, "file")} skipped (fetch failed)`]
       : []),
   ].join("");
   return {
@@ -1014,6 +1015,6 @@ export async function importGithubSnapshot(
     skipped,
     source,
     truncated,
-    toast: `${written} file${written === 1 ? "" : "s"} ${refreshed ? "re-imported" : "imported"} from ${source} into ${destination}/ (a snapshot, not a live sync)${suffix}`,
+    toast: `${countLabel(written, "file")} ${refreshed ? "re-imported" : "imported"} from ${source} into ${destination}/ (a snapshot, not a live sync)${suffix}`,
   };
 }

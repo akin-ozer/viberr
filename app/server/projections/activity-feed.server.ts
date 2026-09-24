@@ -6,6 +6,7 @@ import {
   systemIdToName,
 } from "~/server/files/actor-ref.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { countLabel } from "~/shared/text/plural";
 import { z } from "zod";
 import {
   createActorRenderOverlay,
@@ -506,7 +507,7 @@ function auditText(
       }
       const resolved = d.resolvedViolations;
       return resolved > 0
-        ? `${actor} re-validated the project credential and resolved ${resolved} policy flag${resolved === 1 ? "" : "s"}.`
+        ? `${actor} re-validated the project credential and resolved ${countLabel(resolved, "policy flag")}.`
         : `${actor} re-checked the project credential scopes.`;
     }
     case "github.pr.merge_refused":

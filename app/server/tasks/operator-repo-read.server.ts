@@ -8,6 +8,7 @@ import {
   redactGitOutput,
 } from "~/server/secrets/git-output-redact.server";
 import { getPatToken, getProjectCredential } from "~/server/secrets/pat-store.server";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * F21-21 — the operator's ANCHORED read of the project's default branch.
@@ -205,7 +206,7 @@ function pagedRead(stdout: string, fromLine: number | undefined, refreshed: bool
   if (!page.ok) {
     return {
       kind: "unavailable",
-      reason: `the file has ${page.totalLines} line${page.totalLines === 1 ? "" : "s"}, so fromLine ${fromLine} is past its end`,
+      reason: `the file has ${countLabel(page.totalLines, "line")}, so fromLine ${fromLine} is past its end`,
     };
   }
   return {

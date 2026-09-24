@@ -639,6 +639,7 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(repoFootprintTasks(store.db, store.slug)).toBe(1);
 
+    // The refusal's count and verb agree, as the repair dialog's note does.
     await expect(
       repairProjectRepo(
         store.db,
@@ -646,7 +647,33 @@ describe("repairProjectRepo — the explicit misconfiguration escape hatch", () 
         admin(store),
         { dataRoot: store.dataRoot },
       ),
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        "1 task in this project carries branch/PR records against akin/viberr. Confirm the repair to proceed; those records keep their history but future sync runs against akin-ozer/viberr.",
+    });
+
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-10", {
+        stage: "review",
+        branch: "vib-10",
+        pr: { number: 43, state: "review", title: "t" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    expect(repoFootprintTasks(store.db, store.slug)).toBe(2);
+    await expect(
+      repairProjectRepo(
+        store.db,
+        { projectSlug: store.slug, repo: REPO_OK },
+        admin(store),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        "2 tasks in this project carry branch/PR records against akin/viberr. Confirm the repair to proceed; those records keep their history but future sync runs against akin-ozer/viberr.",
+    });
 
     const confirmed = await repairProjectRepo(
       store.db,

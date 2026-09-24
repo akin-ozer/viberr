@@ -25,6 +25,7 @@ import {
 } from "./controller-conversations.server";
 import { notVisible } from "./controller-tool-guards.server";
 import { openRequestsContextLine } from "./controller-requests.server";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * The controller's per-turn CONTEXT READ (ruling 121).
@@ -91,8 +92,7 @@ export interface ClippedTaskFile {
 }
 
 function omissionMarker(omitted: number, clippedHead: boolean): string {
-  const entries =
-    omitted === 1 ? "1 older timeline entry" : `${omitted} older timeline entries`;
+  const entries = countLabel(omitted, "older timeline entry", "older timeline entries");
   return clippedHead
     ? `\n[... the file head was cut and ${entries} omitted to fit the context budget; get_task reads more ...]\n`
     : `\n[... ${entries} omitted to fit the context budget; get_task reads more ...]\n`;

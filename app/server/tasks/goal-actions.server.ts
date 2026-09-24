@@ -47,6 +47,7 @@ import { releaseTask, setTaskDependencies, validateDependencyRefs } from "./depe
 import { formatDependencyRef, parseDependencyRef, type DependencyRender } from "~/shared/dependencies";
 import type { CreateTaskInput } from "./task-actions.server";
 import type { TaskActor, TaskMutationContext } from "./task-mutation.server";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * Chained goals (ruling 99): the lifecycle engine.
@@ -423,7 +424,7 @@ export async function createGoal(
     status: "active",
     activeTaskKey: created,
     message:
-      `Goal ${goalId} created with ${links.length} link${links.length === 1 ? "" : "s"}; ` +
+      `Goal ${goalId} created with ${countLabel(links.length, "link")}; ` +
       (startedLinks === 0
         ? "no link started yet — every one of them waits on something."
         : `${startedLinks} started now (${startedList.map((l) => `link ${l.index} is ${l.taskKey}`).join(", ")}).`),
@@ -899,7 +900,7 @@ export async function updateGoal(
           fm.links = fm.links
             .filter((l) => l.index !== op.index)
             .map((l, i) => ({ ...l, index: i + 1 }));
-          message = `Link removed; the chain now has ${fm.links.length} link${fm.links.length === 1 ? "" : "s"}.`;
+          message = `Link removed; the chain now has ${countLabel(fm.links.length, "link")}.`;
           return `Pending link ${op.index} (${link.title}) removed by ${by}.`;
         }
       }

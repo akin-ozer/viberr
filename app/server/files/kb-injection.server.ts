@@ -9,6 +9,7 @@ import {
 import path from "node:path";
 import { logger } from "~/server/logging/logger.server";
 import { STORE_TEXT_EXTENSIONS } from "~/shared/text/store-extensions";
+import { countLabel } from "~/shared/text/plural";
 import { kbDirPath } from "./file-store-root.server";
 
 /**
@@ -292,17 +293,17 @@ export function readKbIndexDetailed(name: string, dataRoot?: string): KbInjectio
       if (kept.length === 0) return head;
       const more =
         kept.length < outline.length
-          ? `\n  … ${outline.length - kept.length} more section${outline.length - kept.length === 1 ? "" : "s"}`
+          ? `\n  … ${countLabel(outline.length - kept.length, "more section")}`
           : "";
       return `${head}${kept.join("")}${more}`;
     });
     if (docs.length > listed.length) {
       entries.push(
-        `- … ${docs.length - listed.length} more document${docs.length - listed.length === 1 ? "" : "s"} in this folder, not listed here.`,
+        `- … ${countLabel(docs.length - listed.length, "more document")} in this folder, not listed here.`,
       );
     }
     return {
-      body: `Folder \`${dir}\`. ${docs.length} document${docs.length === 1 ? "" : "s"}:\n\n${entries.join("\n")}`,
+      body: `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`,
     };
   } catch (error) {
     logger.warn("knowledge base unreadable — run proceeds WITHOUT it", {

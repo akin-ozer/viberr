@@ -111,6 +111,7 @@ import type { RunPrompt } from "./prompt-prefix.server";
 import { claudeMcpToolName, type McpToolDenial } from "~/shared/mcp-tools";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { wholeThousands } from "~/shared/text/thousands";
+import { countLabel } from "~/shared/text/plural";
 
 import { newId } from "~/shared/ids/new-id.server";
 
@@ -1355,10 +1356,10 @@ export interface StaleSessionFacts {
 function humanDuration(ms: number): string {
   if (!Number.isFinite(ms)) return "an unknown time";
   const minutes = Math.round(ms / 60_000);
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  if (minutes < 60) return countLabel(minutes, "minute");
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return `${hours} hour${hours === 1 ? "" : "s"}${rest ? ` ${rest} minute${rest === 1 ? "" : "s"}` : ""}`;
+  return `${countLabel(hours, "hour")}${rest ? ` ${countLabel(rest, "minute")}` : ""}`;
 }
 
 /** What the user is told when a session could not be resumed. Never "review your

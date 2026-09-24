@@ -17,6 +17,7 @@ import {
   getProjectCredential,
 } from "~/server/secrets/pat-store.server";
 import { taskBranchName } from "./branch-sync.server";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * Server-side workspace push (F-GH3 — closing the governed-delivery gap).
@@ -562,8 +563,8 @@ async function readDefaultBranchEvidence(
     return {
       verified: false,
       why:
-        `its working tree holds uncommitted changes (${dirtyPaths.length} path` +
-        `${dirtyPaths.length === 1 ? "" : "s"}) that never reached a task branch`,
+        `its working tree holds uncommitted changes (${countLabel(dirtyPaths.length, "path")}) ` +
+        `that never reached a task branch`,
     };
   }
   const refsRes = await exec(
@@ -596,7 +597,7 @@ async function readDefaultBranchEvidence(
     return {
       verified: false,
       why:
-        `it carries ${ahead} local commit${ahead === 1 ? "" : "s"} ` +
+        `it carries ${countLabel(ahead, "local commit")} ` +
         `that origin/${defaultBranch} does not`,
     };
   }

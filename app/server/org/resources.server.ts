@@ -48,6 +48,7 @@ import { isReservedMcpName } from "~/shared/mcp-reserved";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE, MCP_WRITE_TOOLS_MAX } from "~/shared/mcp-tools";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
 import { updateResourceReferences } from "./resource-references.server";
+import { countLabel, pluralNoun } from "~/shared/text/plural";
 
 /**
  * Org agent resources: knowledge bases, MCP servers, skills (org-settings
@@ -533,9 +534,9 @@ export function reindexKnowledgeBase(
   return {
     docCount: kb.injectableCount,
     toast:
-      `${kb.name} re-scanned: ${kb.injectableCount} doc${kb.injectableCount === 1 ? "" : "s"} agents can read` +
+      `${kb.name} re-scanned: ${countLabel(kb.injectableCount, "doc")} agents can read` +
       (skipped > 0
-        ? ` · ${skipped} non-text file${skipped === 1 ? "" : "s"} skipped`
+        ? ` · ${countLabel(skipped, "non-text file")} skipped`
         : ""),
   };
 }
@@ -1753,14 +1754,14 @@ export async function saveMcpServer(
   const effectiveWriteTools = writeTools;
   const spawnNote = transport === "stdio" ? " · spawned per run" : "";
   const writeNote = effectiveWriteTools?.length
-    ? ` · ${effectiveWriteTools.length} marked as write tool${effectiveWriteTools.length === 1 ? "" : "s"}`
+    ? ` · ${effectiveWriteTools.length} marked as write ${pluralNoun(effectiveWriteTools.length, "tool")}`
     : "";
   const credNote = credOpened.unreadable
     ? " · its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
     : "";
   const toast =
     (disc.kind === "up"
-      ? `${name} saved: ${disc.tools} tool${disc.tools === 1 ? "" : "s"} discovered${spawnNote}`
+      ? `${name} saved: ${countLabel(disc.tools, "tool")} discovered${spawnNote}`
       : transport === "stdio"
         // R19-17: the wrapper used to add "command didn't respond" in front of
         // a reason that now says what actually happened, giving
@@ -1935,7 +1936,7 @@ export async function testMcpServer(
     const fresh = getMcpServer(db, id)!;
     return {
       mcp: fresh,
-      toast: `${fresh.name} healthy: ${disc.tools} tool${disc.tools === 1 ? "" : "s"} · ${disc.latencyMs}ms${credNote}`,
+      toast: `${fresh.name} healthy: ${countLabel(disc.tools, "tool")} · ${disc.latencyMs}ms${credNote}`,
     };
   }
   db.prepare(

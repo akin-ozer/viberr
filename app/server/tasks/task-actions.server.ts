@@ -16,6 +16,7 @@ import { formatUsd, runDidNotCompleteLead } from "~/shared/run-failure";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { escapeRegExp } from "~/shared/text/regexp";
 import { endSentence } from "~/shared/text/sentence";
+import { countLabel } from "~/shared/text/plural";
 import type {
   CollisionServerOutcome,
   ResolvedPacketOption,
@@ -1386,11 +1387,10 @@ export function runOutcomeClause(input: {
   attachments: number;
 }): string {
   if (input.turns <= 0 && input.attachments <= 0) return " No changes were delivered.";
-  const turnPart =
-    input.turns > 0 ? `${input.turns} turn${input.turns === 1 ? "" : "s"}` : "";
+  const turnPart = input.turns > 0 ? countLabel(input.turns, "turn") : "";
   const filePart =
     input.attachments > 0
-      ? `${input.attachments} file${input.attachments === 1 ? "" : "s"} saved to this task`
+      ? `${countLabel(input.attachments, "file")} saved to this task`
       : "";
   const did = [turnPart, filePart].filter(Boolean).join(" and ");
   return (

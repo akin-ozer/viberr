@@ -39,6 +39,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { stageName } from "~/shared/workflow/stage-roles";
 import { acceptanceBoundaryRefusal } from "./acceptance-boundary.server";
 import { verdictStageFor } from "~/shared/workflow/verdict-stage";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * The DECISION half of "bring the task branch up to date" (N19 gap 9, owner
@@ -120,8 +121,8 @@ function remoteSentence(branch: string, remote: RemoteBranchState): string {
       return `Origin carries the workspace head \`${remote.headSha.slice(0, 7)}\`.`;
     case "behind":
       return (
-        `Origin's copy of \`${branch}\` (\`${remote.headSha.slice(0, 7)}\`) is ${remote.commits} ` +
-        `commit${remote.commits === 1 ? "" : "s"} behind the workspace head: call \`deliver_for_review\` ` +
+        `Origin's copy of \`${branch}\` (\`${remote.headSha.slice(0, 7)}\`) is ` +
+        `${countLabel(remote.commits, "commit")} behind the workspace head: call \`deliver_for_review\` ` +
         `to push it. Do not ask a person to push.`
       );
     case "diverged":
@@ -271,11 +272,11 @@ function outcomeSentence(r: UpdateBranchResult, lead = "Brought"): string {
   switch (r.status) {
     case "updated":
       return (
-        `${lead} \`${r.branch}\` up to date with \`${r.base}\` (${r.commits} commit${r.commits === 1 ? "" : "s"} ` +
+        `${lead} \`${r.branch}\` up to date with \`${r.base}\` (${countLabel(r.commits, "commit")} ` +
         `merged in, merge commit \`${r.mergeSha.slice(0, 7)}\`; the push published it, so origin now ` +
         `carries the workspace head` +
         (r.remoteBefore.kind === "behind"
-          ? `, including the ${r.remoteBefore.commits} workspace commit${r.remoteBefore.commits === 1 ? "" : "s"} origin was missing`
+          ? `, including the ${countLabel(r.remoteBefore.commits, "workspace commit")} origin was missing`
           : r.remoteBefore.kind === "absent"
             ? `; the branch did not exist on origin before`
             : "") +

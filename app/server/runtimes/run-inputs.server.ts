@@ -15,6 +15,7 @@ import {
   nextSeq,
 } from "~/server/runtimes/run-store.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * Ruling 344 — what a run was GIVEN, recorded on the run. One home, because
@@ -135,16 +136,16 @@ export function runInputsSummary(inputs: RunInputs, kind?: RunKind): string {
   bits.push(
     `persona ${inputs.personaChars} chars`,
     `prompt ${inputs.promptChars} chars`,
-    `${inputs.skills.granted.length} skill${inputs.skills.granted.length === 1 ? "" : "s"}`,
-    `${inputs.knowledge.length} knowledge base${inputs.knowledge.length === 1 ? "" : "s"}`,
-    `${inputs.mcp.mounted.length} MCP server${inputs.mcp.mounted.length === 1 ? "" : "s"}`,
+    countLabel(inputs.skills.granted.length, "skill"),
+    countLabel(inputs.knowledge.length, "knowledge base"),
+    countLabel(inputs.mcp.mounted.length, "MCP server"),
   );
   if (inputs.workspaceRefresh) bits.push(`workspace ${inputs.workspaceRefresh}`);
   const missing =
     inputs.unresolvedResources.length +
     inputs.mcp.unresolved.length +
     inputs.mcp.unhealthy.length;
-  if (missing > 0) bits.push(`${missing} grant${missing === 1 ? "" : "s"} did NOT reach this run`);
+  if (missing > 0) bits.push(`${countLabel(missing, "grant")} did NOT reach this run`);
   return `Run inputs — ${bits.join(" · ")}`;
 }
 

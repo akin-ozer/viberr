@@ -41,6 +41,7 @@ import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { newId } from "~/shared/ids/new-id.server";
 import { initialsOf } from "~/ui/initials";
 import type { UserRecord, UserRole } from "~/shared/mapping/user.server";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * Org "Users & access" server layer (org-settings spec §4.2) — thin
@@ -577,7 +578,7 @@ export async function deleteOrgUser(
   const extras = [
     ...(projectsPruned.length > 0
       ? [
-          `dropped from ${projectsPruned.length} project${projectsPruned.length === 1 ? "" : "s"}`,
+          `dropped from ${countLabel(projectsPruned.length, "project")}`,
         ]
       : []),
     // Named, not counted: which GitHub owner stopped working matters more than
@@ -589,7 +590,7 @@ export async function deleteOrgUser(
       : []),
     ...(projectsUnboundSlugs.length > 0
       ? [
-          `unbound the repo credential on ${projectsUnboundSlugs.length} project${projectsUnboundSlugs.length === 1 ? "" : "s"}`,
+          `unbound the repo credential on ${countLabel(projectsUnboundSlugs.length, "project")}`,
         ]
       : []),
   ];

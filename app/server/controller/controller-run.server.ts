@@ -92,6 +92,7 @@ import {
 } from "~/server/runtimes/prompt-prefix.server";
 import { controllerCompactAnchor } from "~/server/runtimes/context-policy.server";
 import { normalizeTimeZone } from "~/shared/dates/time-zone";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * The controller conversation engine (ruling 99).
@@ -822,7 +823,7 @@ async function settleTurn(
       text:
         dropped === 0
           ? "I could not start the queued turn. Say it again to retry."
-          : `I could not start the queued turn, and I dropped the ${dropped} message${dropped === 1 ? "" : "s"} you sent after it. Say them again to retry.`,
+          : `I could not start the queued turn, and I dropped the ${countLabel(dropped, "message")} you sent after it. Say them again to retry.`,
     });
     map.delete(conversationId);
   }
