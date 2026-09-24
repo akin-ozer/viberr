@@ -468,6 +468,58 @@ describe("a sign-in ended or landed while a request was on the wire (R-oauth-3)"
   });
 });
 
+describe("a registered client the authorization server no longer accepts (R-oauth-4)", () => {
+  it("a renewal refused with invalid_client drops the client, so the next sign-in registers again", async () => {
+    // CANARY: keep the client on a client refusal and the next sign-in
+    // reuses the dead id; the consent screen refuses it (no redirect back).
+    await startServer();
+    await signIn();
+    const [first] = server.registrations.map((client) => client.clientId);
+    server.forgetClients();
+    server.invalidateAccessTokens();
+    await expect(callWhoami()).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
+    expect(rawRow().oauth_ref).toBeNull();
+    expect(getMcpServer(db, MCP_ID)?.oauth).toMatchObject({ status: "expired", reason: expect.stringContaining("invalid_client") });
+
+    const again = await signIn();
+    expect(again.result.ok).toBe(true);
+    expect(server.registrations.map((client) => client.clientId)).not.toContain(first);
+    expect(server.registrations).toHaveLength(1);
+    expect(await callWhoami()).toContain("whoami");
+  });
+
+  it("a code exchange refused with invalid_client drops the stored client it reused", async () => {
+    // CANARY: leave the stored client alone after the refused exchange and
+    // every later sign-in reuses it and fails the same way.
+    await startServer();
+    await signIn();
+    server.rotateClientSecrets();
+    const refused = await signIn();
+    expect(refused.result).toMatchObject({ ok: false, message: expect.stringContaining("invalid_client") });
+    expect(rawRow().oauth_ref).toBeNull();
+    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
+
+    const again = await signIn();
+    expect(again.result.ok).toBe(true);
+    expect(server.registrations).toHaveLength(2);
+    expect(await callWhoami()).toContain("whoami");
+  });
+
+  it("a client whose secret has lapsed (client_secret_expires_at) is registered again rather than reused", async () => {
+    // CANARY: drop the lapse check from the reuse and the second sign-in
+    // reuses the first registration.
+    await startServer({ clientSecretExpiresAt: Math.floor(Date.now() / 1000) - 60 });
+    await signIn();
+    await signIn();
+    expect(server.registrations).toHaveLength(2);
+    // One that does not lapse is reused, as before.
+    server.options.clientSecretExpiresAt = 0;
+    await signIn();
+    await signIn();
+    expect(server.registrations).toHaveLength(3);
+  });
+});
+
 describe("a pasted credential and what is left of a sign-in (R-oauth-2)", () => {
   const base = () => ({ id: MCP_ID, name: "cloudflare-api", transport: "HTTP", target: server.url });
 

@@ -1510,8 +1510,11 @@ runtime's answer for a missing grant.
   reconnects to the new one — for the access token on every request — renewed with the refresh
   token when it is within a minute of running out and once after an upstream 401
   (single-flight per server, so two runs spend a rotating refresh token once), then
-  re-sealed. A renewal the authorization server refuses ends the sign-in: the tokens are
-  dropped, the row reads "sign-in expired: an admin must sign in again" with the
+  re-sealed. A renewal the authorization server refuses ends the sign-in — only while the
+  refused tokens are still the stored ones, so a sign-in that landed meanwhile stands —
+  the tokens are dropped (and the client registration too when the server refused the
+  client itself, `invalid_client`, so the next sign-in registers again), the row reads
+  "sign-in expired: an admin must sign in again" with the
   server's words, `org.mcp.oauth_failed` {stage: "refresh"} is audited, and the run's
   call fails with that sentence; a renewal that fails for now (unreachable, a 5xx,
   `temporarily_unavailable`) is reported and keeps the sign-in. A server that answers

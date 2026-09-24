@@ -12,8 +12,10 @@ import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
 import {
   authorizationRequest,
+  clientSecretLapsed,
   discoverMcpOAuth,
   exchangeMcpOAuthCode,
+  isClientRefusal,
   isDefinitiveRefusal,
   isSecureOAuthUrl,
   oauthClientSchema,
@@ -426,11 +428,14 @@ export async function startMcpOAuthSignIn(
   } catch (error) {
     return refuse("discovery", oauthFailureReason(error));
   }
+  // A client whose secret has lapsed is registered again, not reused
+  // (R-oauth-4); one the server refused is no longer stored at all.
   const known =
     opened.state === "ok" &&
     opened.sealed.target === row.target &&
     opened.sealed.authorizationServer === discovery.authorizationServer &&
-    opened.sealed.client.redirect_uri === input.redirectUri
+    opened.sealed.client.redirect_uri === input.redirectUri &&
+    !clientSecretLapsed(opened.sealed.client)
       ? opened.sealed.client
       : null;
   let client: McpOAuthClient;
@@ -462,6 +467,36 @@ export async function startMcpOAuthSignIn(
   });
   logger.info("mcp oauth sign-in started", { mcp: row.name, issuer: hostOf(discovery.authorizationServer) });
   return { authorizationUrl: request.authorizationUrl, issuer: hostOf(discovery.authorizationServer) };
+}
+
+/**
+ * R-oauth-4 (2026-09-25): the authorization server refused the client a
+ * row's sealed half holds (`invalid_client`, `unauthorized_client` — it forgot
+ * a dynamically registered client, or the secret lapsed). Kept, every later
+ * sign-in reused the dead id and failed the same way until someone happened
+ * to sign out. The sealed half goes, so the next sign-in registers again, and
+ * the row reads "sign-in expired" with the server's words: a sign-in riding
+ * on that client is dead with it. Nothing happens when the row holds another
+ * client by now.
+ */
+function forgetRefusedClient(db: DatabaseSync, id: string, clientId: string, reason: string): void {
+  const row = rowById(db, id);
+  const opened = row ? openOAuth(db, row) : null;
+  if (!row || opened?.state !== "ok" || opened.sealed.client.client_id !== clientId) return;
+  const scrubbed = scrubSecrets(reason, secretsOf(opened.sealed));
+  writeOAuth(db, row.id, null, {
+    status: "expired",
+    expiresAt: null,
+    renews: false,
+    issuer: hostOf(opened.sealed.authorizationServer),
+    resourceMetadataUrl: readPublic(row.oauth_json)?.resourceMetadataUrl ?? null,
+    reason: scrubbed,
+  });
+  logger.warn("mcp oauth client refused by its authorization server; the registration is dropped", {
+    mcp: row.name,
+    reason: scrubbed,
+  });
+  publishResourceUpdated("mcp", row.id);
 }
 
 export interface CompleteMcpOAuthInput {
@@ -549,6 +584,7 @@ export async function completeMcpOAuthSignIn(
     tokens = await exchangeMcpOAuthCode(entry.discovery, entry.client, input.code, entry.codeVerifier, input.fetchImpl);
   } catch (error) {
     const reason = oauthFailureReason(error);
+    if (isClientRefusal(error)) forgetRefusedClient(db, entry.mcpId, entry.client.client_id, scrub(reason));
     return failed("token", reason, `${entry.name} was not signed in: ${reason}.`);
   }
   // Read again after the exchange, and written in the same synchronous
@@ -723,23 +759,31 @@ export function mcpOAuthTokenSource(
 
   /**
    * End the sign-in whose stored tokens `refused` recognizes: the tokens are
-   * dropped (the registration is kept for the next sign-in), the row reads
-   * "sign-in expired" with the reason. The row is read again and written in
-   * one synchronous stretch, and only while it still holds the tokens that
-   * were refused: a sign-out, a new sign-in or another renewal that landed
-   * while the refusal was on the wire wins, as it does on the renewal's
-   * success path. Ending whatever was read before the await wiped a fresh
-   * sign-in and put the old registration back (R-oauth-3, 2026-09-25).
-   * Null when the stored tokens are not the refused ones.
+   * dropped, the row reads "sign-in expired" with the reason. The row is read
+   * again and written in one synchronous stretch, and only while it still
+   * holds the tokens that were refused: a sign-out, a new sign-in or another
+   * renewal that landed while the refusal was on the wire wins, as it does on
+   * the renewal's success path. Ending whatever was read before the await
+   * wiped a fresh sign-in and put the old registration back (R-oauth-3,
+   * 2026-09-25). Null when the stored tokens are not the refused ones.
+   *
+   * The registration is kept for the next sign-in — unless the server refused
+   * the client itself (`invalid_client`, `unauthorized_client`): kept, every
+   * later sign-in reused the dead id and failed the same way, so the whole
+   * sealed half goes and the next sign-in registers again (R-oauth-4).
    */
-  const expireIf = (refused: (stored: StoredTokens) => boolean, reason: string): UpstreamConnectError | null => {
+  const expireIf = (
+    refused: (stored: StoredTokens) => boolean,
+    reason: string,
+    clientRejected: boolean,
+  ): UpstreamConnectError | null => {
     const row = rowById(db, mcpId);
     const opened = row ? openOAuth(db, row) : null;
     if (!row || opened?.state !== "ok" || !opened.sealed.tokens || !refused(opened.sealed.tokens)) return null;
     const sealed = opened.sealed;
     const scrubbed = scrubSecrets(reason, secretsOf(sealed));
     const pub = readPublic(row.oauth_json);
-    writeOAuth(db, row.id, { ...sealed, tokens: null }, {
+    writeOAuth(db, row.id, clientRejected ? null : { ...sealed, tokens: null }, {
       status: "expired",
       expiresAt: null,
       renews: false,
@@ -759,23 +803,24 @@ export function mcpOAuthTokenSource(
     if (tokens.access_token !== rejected && !expiredByClock(tokens)) return tokens.access_token;
     /** The pair this renewal set out from can no longer renew: end it — or,
      *  when something else was stored meanwhile, use that. */
-    const endOrUseNewer = (reason: string): string => {
+    const endOrUseNewer = (reason: string, clientRejected: boolean): string => {
       const ended = expireIf(
         (stored) => stored.access_token === tokens.access_token && stored.refresh_token === tokens.refresh_token,
         reason,
+        clientRejected,
       );
       if (ended) throw ended;
       return current().tokens.access_token;
     };
     if (!tokens.refresh_token) {
-      return endOrUseNewer("the server issued no refresh token, so the sign-in cannot renew itself");
+      return endOrUseNewer("the server issued no refresh token, so the sign-in cannot renew itself", false);
     }
     let fresh: OAuthTokens;
     try {
       fresh = await refreshMcpOAuthTokens(discoveryOf(sealed), sealed.client, tokens.refresh_token, options.fetchImpl);
     } catch (error) {
       const reason = oauthFailureReason(error);
-      if (isDefinitiveRefusal(error)) return endOrUseNewer(reason);
+      if (isDefinitiveRefusal(error)) return endOrUseNewer(reason, isClientRefusal(error));
       const scrubbed = scrubSecrets(reason, secretsOf(sealed));
       logger.warn("mcp oauth token could not be renewed now", { mcp: row.name, reason: scrubbed });
       throw new UpstreamConnectError(`could not renew the OAuth sign-in: ${scrubbed}`);
@@ -815,6 +860,7 @@ export function mcpOAuthTokenSource(
       const ended = expireIf(
         (stored) => stored.access_token === rejected,
         "the server refused a freshly renewed token",
+        false,
       );
       if (ended) return ended;
       // The refused token is no longer the stored one: a sign-out, a new
