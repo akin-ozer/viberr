@@ -245,6 +245,15 @@ Intents behind `project.task.tsx` are explained in
   on the all-projects live scope the moment the new project is projected, still
   mid-request, and the live list would already carry the key being created. It reads
   the live list again once a refused submit has settled.
+  Under its repository field, once a connection is picked, the dialog offers
+  "Create this repository on GitHub if it does not exist" (ruling 462), unchecked by
+  default so a typo never becomes a repository; checking it shows "Create it as a
+  private repository", checked by default. The choice travels as
+  `createRepository=private|public` on the `create-project` intent to the same server
+  function the controller's `create_project` reaches. A refusal (the token cannot
+  create repositories, GitHub's own 422 message) renders in the dialog's error alert
+  with nothing written; on success the toast adds what became of the repository
+  ("Created owner/name on GitHub (private)." or that the existing one was used).
 - **Requests in flight** (rulings 147(a) and 368): the button that started a request
   carries `aria-busy` (the sheet's .7 busy step, which wins over `.btn:disabled`), the
   `loader` glyph with `spin` in place of its icon, and a label naming the work

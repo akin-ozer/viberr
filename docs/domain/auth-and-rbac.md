@@ -184,7 +184,10 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   becomes the default; the default cannot be removed; removing a connection deletes
   its PAT and cascades every project binding. A `valid` verdict older than 24 hours
   (`CONNECTION_REVALIDATE_AFTER_MS`) is re-proven before use. Audit `org.connection.*`,
-  `github.pat.*`.
+  `github.pat.*`. Creating a repository with a project (ruling 462) needs more than
+  the required pair and is never checked at save: a fine-grained token needs
+  **Administration: Read and write** for All repositories (a classic token's `repo`
+  covers it), and a token without it is refused at creation with that sentence.
 - **Users & access**: allow access by local account (temp password shown once, reset
   forced), Google account, Google domain, or GitHub handle; edit name/email; link the
   GitHub handle of a local or Google account (ruling 154: the handle whose PR approval

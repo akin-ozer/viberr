@@ -468,7 +468,7 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 
 | Tool | What it does | Gate |
 |---|---|---|
-| `create_project` | A project with any shape in one request (stages, boundaries, members, description); needs a GitHub connection for the repo owner; the asker is seeded project admin (FR5) | signed-in |
+| `create_project` | A project with any shape in one request (stages, boundaries, members, description); needs a GitHub connection for the repo owner; the asker is seeded project admin (FR5). `createRepository` (`{ private, description? }`, ruling 462) creates the repository on GitHub with the connection's token when the probe finds none, before the project is written: a refusal names what the token lacks and writes nothing, an existing repository is used as it is, and the reply says which happened. Audit `project.repository.created` | signed-in |
 
 **Board reads** (all `requireVisible`, archived projects included)
 

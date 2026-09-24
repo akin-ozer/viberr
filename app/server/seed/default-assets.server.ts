@@ -202,6 +202,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 462 (pass 40, F40-5): before "Bringing up a new project" said the
+    // repository need not exist first and named `createRepository`. The
+    // controller had no way to make one, so the owner made it by hand.
+    "f58275ca76e09a6d149e8fa3b7e8bec73cd9a7f34627e642ced603fdb1dcfd91",
     // Seeded-prompt sweep (2026-09-23): before the goal section learned
     // ruling 398 (same sentences as the definition), and before the gate line
     // stopped saying GitHub reads need maintainer (they need membership).

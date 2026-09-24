@@ -2102,7 +2102,7 @@ export function RepoPanel({
           <span className="k">After merge</span>
           <span className="v light">
             <label
-              className="branch-cleanup"
+              className="check-line"
               style={{ cursor: canRepair ? "pointer" : "default" }}
             >
               <input

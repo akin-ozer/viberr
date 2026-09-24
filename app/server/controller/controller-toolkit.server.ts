@@ -114,6 +114,7 @@ import { getGithubViewData } from "~/features/github/github-query.server";
 import {
   createProject,
   type CreateProjectInput,
+  type CreateRepositoryRequest,
   type CustomProjectBlueprint,
 } from "~/features/home/project-create.server";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
@@ -248,7 +249,9 @@ import { errorMessage } from "~/shared/errors";
 
 export interface ControllerToolkitDeps {
   db: DatabaseSync;
-  ctx: { dataRoot?: string };
+  /** `fetchImpl` is a test seam for the GitHub calls `create_project` makes
+   *  (ruling 462); production leaves it off and reaches the real `fetch`. */
+  ctx: { dataRoot?: string; fetchImpl?: typeof fetch };
   /** The asking user — the only authority anything here runs under. */
   user: { id: string; email: string; name: string };
   /** The conversation's bound project, when it has one (tool default). */
@@ -1475,12 +1478,26 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_project",
-      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Requires a GitHub connection for the repo owner. The move into the final stage stays a human decision whatever is asked. Deploy extra agents afterward with deploy_agent.",
+      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Requires a GitHub connection for the repo owner. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). The move into the final stage stays a human decision whatever is asked. Deploy extra agents afterward with deploy_agent.",
       {
         name: z.string(),
         key: z.string().describe("Task key prefix, 2 to 4 letters."),
         owner: z.string().describe("GitHub owner of the repo (a configured connection)."),
         repoName: z.string().describe("Repository name under that owner."),
+        createRepository: z
+          .strictObject({
+            private: z
+              .boolean()
+              .describe("true unless the person asked for a public repository."),
+            description: z
+              .string()
+              .optional()
+              .describe("The repository's description on GitHub."),
+          })
+          .optional()
+          .describe(
+            "Pass it when the person wants the repository created, or says it does not exist yet. The server creates owner/repoName on GitHub through the connection's token BEFORE it writes the project; a repository that already exists is used as it is and the reply says so. When the token cannot create repositories the reply names what it lacks and nothing is created: relay that sentence, the person decides what to change.",
+          ),
         policy: z.enum(["strict", "balanced", "auto"]).describe("strict = humans gate every advance · balanced = defaults · auto = full operator autonomy."),
         description: z.string().optional(),
         stages: z
@@ -1521,6 +1538,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           key: string;
           owner: string;
           repoName: string;
+          createRepository?: CreateRepositoryRequest;
           policy: "strict" | "balanced" | "auto";
           description?: string;
           stages?: { name: string; color?: StageColor }[];
@@ -1534,6 +1552,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             repoName: args.repoName,
             policy: args.policy,
           };
+          if (args.createRepository) input.createRepository = args.createRepository;
           if (args.description || args.stages || args.boundaries || args.members) {
             const custom: CustomProjectBlueprint = {};
             if (args.description) custom.description = args.description;
@@ -1542,10 +1561,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (args.members) custom.members = args.members;
             input.custom = custom;
           }
-          const created = await createProject(db, input, actor, { dataRoot });
+          const created = await createProject(db, input, actor, {
+            dataRoot,
+            fetchImpl: ctx.fetchImpl,
+          });
           return (
             `[done] Project ${created.name} created at ${created.storePath} (slug ${created.slug}, keys ${created.key}-n). ` +
             `You are its admin.` +
+            (created.repoNote ? ` ${created.repoNote}` : "") +
             (created.repoWarning ? ` Warning: ${created.repoWarning}` : "")
           );
         },

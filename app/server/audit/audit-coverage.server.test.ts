@@ -138,6 +138,8 @@ interface CoverageRow {
   taskKey?: string;
   /** Instance-wide maintenance events have no project subject. */
   instanceWide?: boolean;
+  /** A row about a project other than the fixture's (one being created). */
+  projectSlug?: string;
 }
 
 describe("governed actions record audit rows (table-driven)", () => {
@@ -785,6 +787,54 @@ describe("governed actions record audit rows (table-driven)", () => {
           }),
       },
       {
+        // Ruling 462: a repository created on GitHub for a project being
+        // created. Its row names the NEW project, not the fixture's.
+        name: "createProject (createRepository: a missing repository is created)",
+        action: "project.repository.created",
+        projectSlug: "audit-site",
+        run: async () => {
+          const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+          const { createPat } = await import("~/server/secrets/pat-store.server");
+          const { createProject } = await import("~/features/home/project-create.server");
+          const pat = createPat(
+            store.db,
+            { userId: store.users.arda.id, label: "connection · audit-org", token: "ghp_coverage000000000000000000000462" },
+            actorArda(),
+          );
+          const now = new Date().toISOString();
+          store.db
+            .prepare(
+              `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
+               VALUES (?, ?, ?, 0, 0, ?, ?)`,
+            )
+            .run("audit-org", "audit-org", pat.id, now, now);
+          let created = false;
+          const gh = fakeGithubFetch({
+            "GET /repos/audit-org/audit-site": () =>
+              created
+                ? { body: { default_branch: "main", permissions: { push: true } } }
+                : { status: 404, body: { message: "Not Found" } },
+            "POST /orgs/audit-org/repos": () => {
+              created = true;
+              return { status: 201, body: { full_name: "audit-org/audit-site" } };
+            },
+          });
+          await createProject(
+            store.db,
+            {
+              name: "Audit Site",
+              key: "AUS",
+              owner: "audit-org",
+              repoName: "audit-site",
+              policy: "balanced",
+              createRepository: { private: true },
+            },
+            actorArda(),
+            { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+          );
+        },
+      },
+      {
         // Ruling 156 (pass 35): a template's grants copied onto a project's
         // deployment, one row per project.
         name: "propagateTemplateResources",
@@ -835,7 +885,7 @@ describe("governed actions record audit rows (table-driven)", () => {
       expect(
         newest.projectSlug,
         `${row.name}: ${row.action} must carry projectSlug`,
-      ).toBe(row.instanceWide ? null : store.slug);
+      ).toBe(row.instanceWide ? null : (row.projectSlug ?? store.slug));
       const taskless = [
         "github.credential.revalidated",
         "projection.rescan",
@@ -848,6 +898,8 @@ describe("governed actions record audit rows (table-driven)", () => {
         "profile.backend.login_cancelled",
         // Ruling 156: a project-scoped row with no task.
         "project.agent_profile.resources_synced",
+        // Ruling 462: the repository a new project is created with.
+        "project.repository.created",
       ].includes(row.action);
       if (!taskless) {
         expect(

@@ -5,13 +5,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
-import { fakeGithubFetch } from "../../../test-support/fake-github";
-import { createPat, getProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  fakeGithubFetch,
+  unreachableFetch,
+  type FakeResponseSpec,
+} from "../../../test-support/fake-github";
+import { listAuditEvents } from "../../../test-support/audit-log";
+import {
+  createPat,
+  getProjectCredential,
+  recordPatValidation,
+} from "~/server/secrets/pat-store.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { AppError, isAppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { isStageColor } from "~/shared/workflow/stage-colors";
-import { createProject } from "./project-create.server";
+import { createProject, type CreateProjectInput } from "./project-create.server";
 
 // F20-1: fault-inject a stale-mount write through `createProjectFileImpl` —
 // the ctx seam standing in for the project.md write. Every other test in this
@@ -515,5 +524,261 @@ describe("ruling 364: a stage colour is one of twenty preset names, or the door 
       .parsed.frontmatter.stages;
     expect(stages.map((s) => s.color)).toEqual(["amber", "green"]);
     for (const s of stages) expect(isStageColor(s.color)).toBe(true);
+  });
+});
+
+/**
+ * Ruling 462 (F40-5): creating a project can create its GitHub repository.
+ * No product path did: the owner asked the controller to "create everything:
+ * the repo and project" and had to make `akin-ozer/website` by hand first,
+ * because creation only PROBED an existing repository and warned "create it
+ * before agents start delivering".
+ *
+ * Every case runs against a fake GitHub handed in as `fetchImpl`; nothing here
+ * reaches the network.
+ */
+describe("ruling 462: createRepository creates the repository before the project", () => {
+  const TOKEN_LOGIN = "akin-ozer";
+
+  /** A connection for `owner` whose stored validation names the token's login,
+   *  the way a real connection save records it. */
+  function seedValidatedConnection(
+    db: import("node:sqlite").DatabaseSync,
+    userId: string,
+    owner: string,
+  ) {
+    const pat = createPat(
+      db,
+      { userId, label: `connection · ${owner}`, token: "ghp_createrepo000000000000000000000000" },
+      ACTOR,
+    );
+    recordPatValidation(db, pat.id, {
+      status: "valid",
+      checkedAt: new Date().toISOString(),
+      login: TOKEN_LOGIN,
+      tokenKind: "classic",
+      expiresAt: null,
+      repo: null,
+      scopes: [],
+      missingScopes: [],
+      headerScopes: ["repo"],
+      detail: "",
+    });
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
+       VALUES (?, ?, ?, 1, 3, ?, ?)`,
+    ).run(owner, owner, pat.id, now, now);
+  }
+
+  /** The repository is missing until a create succeeds, then GitHub serves it. */
+  function missingThenCreated(owner: string, name: string, create: FakeResponseSpec) {
+    let created = false;
+    const answerCreate = (): FakeResponseSpec => {
+      if ((create.status ?? 201) < 300) created = true;
+      return create;
+    };
+    return fakeGithubFetch({
+      [`GET /repos/${owner}/${name}`]: () =>
+        created
+          ? { body: { default_branch: "main", permissions: { push: true } } }
+          : { status: 404, body: { message: "Not Found" } },
+      "POST /user/repos": answerCreate,
+      [`POST /orgs/${owner}/repos`]: answerCreate,
+    });
+  }
+
+  const website = (extra: Partial<CreateProjectInput> = {}): CreateProjectInput => ({
+    name: "Website",
+    key: "WEB",
+    owner: "akin-ozer",
+    repoName: "website",
+    policy: "balanced",
+    createRepository: { private: true },
+    ...extra,
+  });
+
+  it("creates a missing repository through the connection's token, then writes and audits the project", async () => {
+    // CANARY: drop the createRepositoryWhenMissing call and no POST is made,
+    // the project is written against a repository nobody created, and the
+    // warning is the old "create it before agents start delivering".
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = missingThenCreated("akin-ozer", "website", {
+      status: 201,
+      body: { full_name: "akin-ozer/website", default_branch: "main" },
+    });
+
+    const result = await createProject(store.db, website(), ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+    });
+
+    // The token's own login owns the repository, so it is a user repository.
+    const posts = gh.callsTo("POST /user/repos");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body).toEqual({ name: "website", private: true, auto_init: true });
+    expect(gh.callsTo("POST /orgs/akin-ozer/repos")).toHaveLength(0);
+    // Probed, created, re-probed: the create came before any project write.
+    expect(gh.calls.map((c) => `${c.method} ${c.url.pathname}`).slice(0, 3)).toEqual([
+      "GET /repos/akin-ozer/website",
+      "POST /user/repos",
+      "GET /repos/akin-ozer/website",
+    ]);
+
+    const file = readProjectFile({ projectSlug: result.slug, dataRoot: store.dataRoot });
+    expect(file?.parsed.frontmatter.repo).toBe("akin-ozer/website");
+    expect(file?.parsed.frontmatter.defaultBranch).toBe("main");
+    expect(result.repoWarning).toBeNull();
+    expect(result.repoNote).toBe("Created akin-ozer/website on GitHub (private).");
+
+    const audit = listAuditEvents(store.db, { action: "project.repository.created" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.actorLabel).toBe(ACTOR.label);
+    expect(audit[0]!.projectSlug).toBe("website");
+    expect(audit[0]!.details).toEqual({ repo: "akin-ozer/website", private: true });
+    expect(listAuditEvents(store.db, { action: "project.created" })).toHaveLength(1);
+  });
+
+  it("a token that cannot create repositories refuses by name and writes nothing", async () => {
+    // CANARY: map the 403 to anything but the ruling's sentence, or let the
+    // refusal fall through to a written project with a warning.
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = missingThenCreated("akin-ozer", "website", {
+      status: 403,
+      body: { message: "Resource not accessible by personal access token" },
+    });
+
+    await expect(
+      createProject(store.db, website(), ACTOR, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+    ).rejects.toThrow(
+      "The akin-ozer connection's token cannot create repositories. A fine-grained token needs Administration: Read and write for All repositories (a classic token needs `repo`). Create akin-ozer/website on GitHub, or widen the token, and ask again.",
+    );
+    expect(existsSync(join(store.dataRoot, "projects", "website"))).toBe(false);
+    expect(
+      store.db.prepare(`SELECT slug FROM projects WHERE slug = 'website'`).get(),
+    ).toBeUndefined();
+    expect(listAuditEvents(store.db, { action: "project.repository.created" })).toHaveLength(0);
+    expect(listAuditEvents(store.db, { action: "project.created" })).toHaveLength(0);
+  });
+
+  it("a name GitHub refuses (422) is refused in GitHub's own words, and nothing is written", async () => {
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = missingThenCreated("akin-ozer", "website", {
+      status: 422,
+      body: {
+        message: "Repository creation failed.",
+        errors: [
+          {
+            resource: "Repository",
+            code: "custom",
+            field: "name",
+            message: "name already exists on this account",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      createProject(store.db, website(), ACTOR, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl }),
+    ).rejects.toThrow(
+      "GitHub refused to create akin-ozer/website: Repository creation failed (name already exists on this account). Nothing was created.",
+    );
+    expect(existsSync(join(store.dataRoot, "projects", "website"))).toBe(false);
+  });
+
+  it("an existing repository makes the flag a no-op, and the reply says it was used", async () => {
+    // CANARY: POST whatever the probe said and this sees a create call.
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/website": {
+        body: { default_branch: "trunk", permissions: { push: true } },
+      },
+    });
+
+    const result = await createProject(store.db, website(), ACTOR, {
+      dataRoot: store.dataRoot,
+      fetchImpl: gh.fetchImpl,
+    });
+
+    expect(gh.calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    expect(result.repoNote).toBe(
+      "akin-ozer/website already exists on GitHub, so the project uses it as it is.",
+    );
+    expect(
+      readProjectFile({ projectSlug: result.slug, dataRoot: store.dataRoot })?.parsed
+        .frontmatter.defaultBranch,
+    ).toBe("trunk");
+    expect(listAuditEvents(store.db, { action: "project.repository.created" })).toHaveLength(0);
+  });
+
+  it("an owner that is not the token's own login is an organization: POST /orgs/{owner}/repos", async () => {
+    // CANARY: always POST /user/repos and the repository lands under the
+    // token's login instead of the organization the project names.
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "viberr-org");
+    const gh = missingThenCreated("viberr-org", "site", {
+      status: 201,
+      body: { full_name: "viberr-org/site", default_branch: "main" },
+    });
+
+    const result = await createProject(
+      store.db,
+      website({
+        name: "Org Site",
+        key: "ORG",
+        owner: "viberr-org",
+        repoName: "site",
+        createRepository: { private: false, description: "The org's public site" },
+      }),
+      ACTOR,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+    );
+
+    expect(gh.callsTo("POST /user/repos")).toHaveLength(0);
+    const posts = gh.callsTo("POST /orgs/viberr-org/repos");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body).toEqual({
+      name: "site",
+      private: false,
+      auto_init: true,
+      description: "The org's public site",
+    });
+    expect(result.repoNote).toBe("Created viberr-org/site on GitHub (public).");
+    expect(
+      listAuditEvents(store.db, { action: "project.repository.created" })[0]!.details,
+    ).toEqual({ repo: "viberr-org/site", private: false });
+  });
+
+  it("a probe that cannot tell whether the repository exists refuses instead of guessing", async () => {
+    // Created anyway, the project would hold a repository nobody made, and
+    // asking again would only answer "already exists".
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    await expect(
+      createProject(store.db, website(), ACTOR, {
+        dataRoot: store.dataRoot,
+        fetchImpl: unreachableFetch(),
+      }),
+    ).rejects.toThrow(
+      "Couldn't reach GitHub to check whether akin-ozer/website exists, so nothing was created.",
+    );
+    expect(existsSync(join(store.dataRoot, "projects", "website"))).toBe(false);
+  });
+
+  it("a name GitHub would rewrite is refused before any call", async () => {
+    const store = setupTestStore(ctx);
+    seedValidatedConnection(store.db, store.users.arda.id, "akin-ozer");
+    const gh = fakeGithubFetch({});
+    await expect(
+      createProject(store.db, website({ repoName: "my site" }), ACTOR, {
+        dataRoot: store.dataRoot,
+        fetchImpl: gh.fetchImpl,
+      }),
+    ).rejects.toThrow(/GitHub repository names use letters, digits/);
+    expect(gh.calls).toHaveLength(0);
   });
 });

@@ -20,7 +20,17 @@ import { getProject } from "~/server/projections/board-query.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { recordRepoAccess } from "~/server/github/repo-health.server";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
-import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  getPatMetadata,
+  getPatToken,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
+import {
+  createGithubClient,
+  githubFailureMessage,
+  type GithubClientOptions,
+  type GithubResponse,
+} from "~/server/github/github-client.server";
 import {
   repoPermissionsSchema,
   repoWritable,
@@ -137,7 +147,9 @@ function presetAgents(
  * REPORTED now so creation can disclose it; creation itself is deliberately not
  * blocked (creating the Viberr project before the GitHub repo exists is a real
  * flow), and a 10s timeout keeps the action from hanging on a blackholed
- * network.
+ * network. The one exception is a creation that asked for the repository
+ * (ruling 462, `createRepositoryWhenMissing`): there the probe decides whether
+ * to create, so an answer it cannot give refuses instead.
  */
 type RepoProbe =
   | { status: "ok"; defaultBranch: string | null }
@@ -170,9 +182,10 @@ interface ProveCredentialContext {
 async function probeRemoteRepo(
   token: string,
   repo: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<RepoProbe> {
   try {
-    const res = await fetch(`https://api.github.com/repos/${repo}`, {
+    const res = await fetchImpl(`https://api.github.com/repos/${repo}`, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
@@ -195,6 +208,136 @@ async function probeRemoteRepo(
   } catch {
     return { status: "unreachable" };
   }
+}
+
+/** The characters GitHub keeps in a repository name. Anything else it rewrites
+ *  to `-` on creation, which would bind the project to a name that does not
+ *  exist, so a creation is refused before any call instead. */
+const GITHUB_REPO_NAME = /^[A-Za-z0-9._-]+$/;
+
+/** The `POST /user/repos` and `POST /orgs/{org}/repos` fields Viberr sends. */
+interface RepositoryCreateBody {
+  name: string;
+  private: boolean;
+  /** The default branch exists from the first moment, so the project can
+   *  adopt it and a task branch has something to start from. */
+  auto_init: true;
+  description?: string;
+}
+
+/** GitHub's 422 body names each failed field in `errors[].message` beside the
+ *  top-level "Repository creation failed."; any other shape reads as none. */
+const githubFieldErrorsSchema = z
+  .object({ errors: z.array(z.object({ message: z.string() })).catch([]) })
+  .catch({ errors: [] });
+
+/**
+ * Ruling 462: why GitHub would not create the repository, in words a person
+ * can act on. Every branch is thrown before `project.md` is written, so each
+ * one can say that no project exists yet. Only the 422 also says nothing was
+ * created: a 5xx or a dropped connection may have landed on GitHub's side, so
+ * those promise only the project.
+ */
+function repositoryRefusal(
+  result: Extract<GithubResponse<unknown>, { ok: false }>,
+  owner: string,
+  repo: string,
+  personal: boolean,
+): string {
+  if (result.kind === "network") {
+    return `Couldn't reach GitHub to create ${repo}. No project was written; ask again once GitHub answers.`;
+  }
+  if (result.status === 401 || result.status === 403) {
+    return `The ${owner} connection's token cannot create repositories. A fine-grained token needs Administration: Read and write for All repositories (a classic token needs \`repo\`). Create ${repo} on GitHub, or widen the token, and ask again.`;
+  }
+  if (result.status === 422) {
+    const fields = githubFieldErrorsSchema.parse(result.data).errors.map((e) => e.message);
+    const said = githubFailureMessage(result).replace(/\.$/, "");
+    return `GitHub refused to create ${repo}: ${said}${fields.length > 0 ? ` (${fields.join("; ")})` : ""}. Nothing was created.`;
+  }
+  if (result.status === 404 && !personal) {
+    return `GitHub has no organization ${owner} that this token can create repositories in. If ${owner} is a personal account, only that account's own token can create repositories there. Create ${repo} on GitHub, or connect ${owner} with a token that can, and ask again.`;
+  }
+  return `GitHub answered ${result.status} when asked to create ${repo}: ${githubFailureMessage(result).replace(/\.$/, "")}. No project was written; ask again.`;
+}
+
+/**
+ * Ruling 462: create the repository a project is about to be bound to, when
+ * the probe found none, through the connection's own token on the server.
+ *
+ * The account decides the endpoint: `POST /user/repos` when the connection's
+ * owner is the token's own login (as its stored validation recorded it), else
+ * `POST /orgs/{owner}/repos`. `auto_init` gives the repository its default
+ * branch, so the re-probe that follows adopts it the way an existing
+ * repository's is adopted. A repository that already exists is used as it is,
+ * and a probe that could not tell (a refused token, an unreachable GitHub)
+ * refuses rather than creating a project whose repository nobody made: asked
+ * again, that project would only answer "already exists".
+ */
+async function createRepositoryWhenMissing(
+  db: DatabaseSync,
+  target: {
+    probe: RepoProbe;
+    token: string;
+    patId: string;
+    owner: string;
+    repoName: string;
+    slug: string;
+    request: CreateRepositoryRequest;
+  },
+  actor: { userId: string; label: string },
+  fetchImpl: typeof fetch | undefined,
+): Promise<{ probe: RepoProbe; note: string }> {
+  const { probe, token, owner, repoName, request } = target;
+  const repo = `${owner}/${repoName}`;
+  if (probe.status === "ok" || probe.status === "read_only") {
+    return { probe, note: `${repo} already exists on GitHub, so the project uses it as it is.` };
+  }
+  if (probe.status === "forbidden") {
+    throw AppError.validation(
+      `The ${owner} connection's token was refused for ${repo}, so Viberr cannot tell whether it exists or create it. Replace the token in Instance settings → GitHub connections and ask again.`,
+    );
+  }
+  if (probe.status === "unreachable") {
+    throw AppError.validation(
+      `Couldn't reach GitHub to check whether ${repo} exists, so nothing was created. Ask again once GitHub answers.`,
+    );
+  }
+  const login = getPatMetadata(db, target.patId)?.validation?.login ?? null;
+  const personal = login !== null && login.toLowerCase() === owner.toLowerCase();
+  const clientOptions: GithubClientOptions = { token };
+  if (fetchImpl) clientOptions.fetchImpl = fetchImpl;
+  const body: RepositoryCreateBody = {
+    name: repoName,
+    private: request.private,
+    auto_init: true,
+  };
+  const description = request.description?.trim();
+  if (description) body.description = description;
+  const created = await createGithubClient(clientOptions).request(
+    "POST",
+    personal ? "/user/repos" : `/orgs/${encodeURIComponent(owner)}/repos`,
+    z.unknown(),
+    { body },
+  );
+  if (!created.ok) {
+    throw AppError.validation(repositoryRefusal(created, owner, repo, personal));
+  }
+  // A GitHub-side write the person asked for: audited the moment it happened,
+  // so a project write that fails after it still leaves the repository on the
+  // record.
+  recordAudit(db, {
+    action: "project.repository.created",
+    actor,
+    subjectKind: "project",
+    subjectId: target.slug,
+    projectSlug: target.slug,
+    details: { repo, private: request.private },
+  });
+  return {
+    probe: await probeRemoteRepo(token, repo, fetchImpl),
+    note: `Created ${repo} on GitHub (${request.private ? "private" : "public"}).`,
+  };
 }
 
 /**
@@ -222,6 +365,18 @@ export interface CreateProjectInput {
    *  here composes BEFORE the single project.md write, so a refused shape
    *  creates nothing. */
   custom?: CustomProjectBlueprint;
+  /** Ruling 462: create `<owner>/<repoName>` on GitHub through the
+   *  connection's token when the probe finds no such repository. Both doors
+   *  (the controller's `create_project` and the New project modal) set it the
+   *  same way; an existing repository makes it a no-op. */
+  createRepository?: CreateRepositoryRequest;
+}
+
+/** Ruling 462: how a repository created with its project is made. */
+export interface CreateRepositoryRequest {
+  private: boolean;
+  /** The repository's description on GitHub. */
+  description?: string;
 }
 
 /** The optional custom blueprint a controller-driven creation carries. */
@@ -253,6 +408,12 @@ export interface CreateProjectResult {
    * that instead of reporting a plain success.
    */
   repoWarning: string | null;
+  /**
+   * Ruling 462: what a requested repository creation did, as a sentence (the
+   * repository was created, or it already existed and was used as it is);
+   * null when no creation was asked for.
+   */
+  repoNote: string | null;
 }
 
 /** Test overrides; production leaves every key off. `createProjectFileImpl`
@@ -307,6 +468,11 @@ async function createProjectImpl(
       "A GitHub repository is required. Pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first.",
     );
   }
+  if (input.createRepository && !GITHUB_REPO_NAME.test(repoName)) {
+    throw AppError.validation(
+      `GitHub repository names use letters, digits, ".", "-" and "_" only, so "${repoName}" cannot be created. Pick a name in that alphabet and ask again.`,
+    );
+  }
   const slug = slugify(name);
   if (!slug) {
     throw AppError.validation("The project name must contain letters or digits.");
@@ -347,6 +513,7 @@ async function createProjectImpl(
   }
   let defaultBranch = "main";
   let repoWarning: string | null = null;
+  let repoNote: string | null = null;
   // U33-2: the SAME probe, remembered. Creation is the other place that already
   // knows whether GitHub can serve this repository, and until pass 33 it threw
   // the answer away after one toast — so a project pointed at a repository that
@@ -356,8 +523,34 @@ async function createProjectImpl(
   let repoAccess: RepoAccessResult | null = null;
   {
     const token = getPatToken(db, connection.patId);
+    if (!token && input.createRepository) {
+      throw AppError.validation(
+        `The ${owner} connection has no token Viberr can read, so ${repo} cannot be created. Replace the token in Instance settings → GitHub connections and ask again.`,
+      );
+    }
     if (token) {
-      const probe = await probeRemoteRepo(token, repo);
+      let probe = await probeRemoteRepo(token, repo, ctx.fetchImpl);
+      // Ruling 462: BEFORE project.md, so a refusal leaves nothing behind; the
+      // probe it hands back (the re-probe of a repository it just made) is the
+      // one recorded below.
+      if (input.createRepository) {
+        const made = await createRepositoryWhenMissing(
+          db,
+          {
+            probe,
+            token,
+            patId: connection.patId,
+            owner,
+            repoName,
+            slug,
+            request: input.createRepository,
+          },
+          actor,
+          ctx.fetchImpl,
+        );
+        probe = made.probe;
+        repoNote = made.note;
+      }
       if (probe.status === "ok") {
         repoAccess = {
           status: "connected",
@@ -498,6 +691,7 @@ async function createProjectImpl(
     name,
     storePath: `${getDataRoot(ctx.dataRoot)}/projects/${slug}`,
     repoWarning,
+    repoNote,
   };
 }
 
