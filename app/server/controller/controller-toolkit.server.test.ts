@@ -1098,6 +1098,94 @@ describe("instance scope: org-role gate on every management tool", () => {
     expect(reply).not.toContain("org admin");
     expect(reply).toContain("GitHub");
   });
+
+  /**
+   * Ruling 462 (F40-5): asked to "create everything: the repo and project",
+   * the controller had no way to make the repository. `create_project` takes
+   * `createRepository`, publishes it to the model, and hands it to the one
+   * server function the New project modal also reaches.
+   */
+  it("create_project accepts createRepository and forwards it: the repository is created through the connection's token", async () => {
+    // CANARY: stop copying `args.createRepository` onto the input and no POST
+    // is made; drop the field from the schema and the published check fails.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const { createPat, recordPatValidation } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const pat = createPat(
+      app.db,
+      { userId: ids.projectAdmin, label: "connection · site-owner", token: "ghp_ctlcreaterepo00000000000000000000" },
+      { userId: ids.projectAdmin, label: "elif" },
+    );
+    recordPatValidation(app.db, pat.id, {
+      status: "valid",
+      checkedAt: new Date().toISOString(),
+      login: "site-owner",
+      tokenKind: "classic",
+      expiresAt: null,
+      repo: null,
+      scopes: [],
+      missingScopes: [],
+      headerScopes: ["repo"],
+      detail: "",
+    });
+    const now = new Date().toISOString();
+    app.db
+      .prepare(
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
+         VALUES (?, ?, ?, 0, 0, ?, ?)`,
+      )
+      .run("site-owner", "site-owner", pat.id, now, now);
+    let created = false;
+    const gh = fakeGithubFetch({
+      "GET /repos/site-owner/website": () =>
+        created
+          ? { body: { default_branch: "main", permissions: { push: true } } }
+          : { status: 404, body: { message: "Not Found" } },
+      "POST /user/repos": () => {
+        created = true;
+        return { status: 201, body: { full_name: "site-owner/website" } };
+      },
+    });
+    const user = findUserById(app.db, ids.projectAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot, fetchImpl: gh.fetchImpl },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: null,
+    });
+
+    const schema = z
+      .object({ properties: z.object({ createRepository: z.object({ description: z.string() }) }) })
+      .parse((await publishedSchemas(toolkit.mcpServers.viberr_controller)).get("create_project"));
+    expect(schema.properties.createRepository.description).toContain("does not exist yet");
+
+    const reply = await callToolText(toolkit.tools, "create_project", {
+      name: "Site Website",
+      key: "SITE",
+      owner: "site-owner",
+      repoName: "website",
+      policy: "balanced",
+      createRepository: { private: true, description: "The owner's site" },
+    });
+    expect(reply).toContain("[done] Project Site Website created");
+    expect(reply).toContain("Created site-owner/website on GitHub (private).");
+    const posts = gh.callsTo("POST /user/repos");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body).toEqual({
+      name: "website",
+      private: true,
+      auto_init: true,
+      description: "The owner's site",
+    });
+    // Audited under the person, with the controller disclosed as the instrument.
+    const row = listAuditEvents(app.db, { action: "project.repository.created" })[0]!;
+    expect(row.actorUserId).toBe(ids.projectAdmin);
+    expect(row.actorLabel).toBe(`${user.email} · via controller`);
+    expect(row.details).toEqual({ repo: "site-owner/website", private: true });
+  });
 });
 
 // --------------------------------------------------------- project scope

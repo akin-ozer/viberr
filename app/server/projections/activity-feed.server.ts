@@ -266,6 +266,8 @@ const AUDIT_ACTION_KINDS = {
   // creating one here, and was the only sibling missing.
   "project.agent_profile.deployed": "change",
   "project.created": "change",
+  // Ruling 462: the GitHub repository a project was created with.
+  "project.repository.created": "change",
   "project.archived": "change",
   "project.unarchived": "change",
   "project.deleted": "change",
@@ -376,6 +378,9 @@ const auditDetailsSchema = z.object({
   // Ruling 237: the reviewer whose objections deadlocked, and how many rounds.
   rounds: z.number().optional().catch(undefined),
   profileId: detailText,
+  // Ruling 462: the repository created with the project, and its visibility.
+  repo: detailText,
+  private: z.boolean().optional().catch(undefined),
 });
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
@@ -484,6 +489,11 @@ function auditText(
       return `${actor} deployed agent profile **${d.name ?? "?"}** to the project.`;
     case "project.created":
       return `${actor} created the project.`;
+    case "project.repository.created": {
+      const visibility =
+        d.private === undefined ? "" : d.private ? " private" : " public";
+      return `${actor} created the${visibility} GitHub repository **${d.repo ?? "?"}**.`;
+    }
     case "project.archived":
       return `${actor} archived the project.`;
     case "project.unarchived":

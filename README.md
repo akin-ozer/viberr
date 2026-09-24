@@ -180,7 +180,10 @@ Branch/PR traceability uses **user-provided GitHub tokens, encrypted at rest**
    that repository, permissions: **Contents: Read and write** (branches),
    **Pull requests: Read and write** (PR link/status/merge), **Metadata: Read-only**
    (implied). A classic token with `repo` also works and validates more precisely; the
-   required scope set is exactly `repo` + `pull_request:write`.
+   required scope set is exactly `repo` + `pull_request:write`. To let Viberr create a
+   project's repository for you (ruling 462), a fine-grained token also needs
+   **Administration: Read and write** with access to All repositories; without it,
+   create the repository on GitHub first.
 2. In Viberr: **Instance settings → GitHub connections** → add the connection (the token
    is validated before anything is saved; validation never writes to your repository),
    then attach the repo in **Project settings → Repository & credentials**.

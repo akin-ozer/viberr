@@ -369,6 +369,31 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
 });
 
 /**
+ * Ruling 462 (pass 40, F40-5): the controller's playbook says a project's
+ * repository need not exist first and names `createRepository`. The outgoing
+ * version is listed so an unedited store copy upgrades at boot.
+ *
+ * Canary: drop the bullet, or the outgoing hash, and the matching assertion
+ * fails.
+ */
+describe("the controller playbook learns createRepository (ruling 462)", () => {
+  const assetsDir = path.join(import.meta.dirname, "assets");
+  it("names the flag and lists its outgoing version", async () => {
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
+      "./default-assets.server"
+    );
+    const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
+    expect(skill).toContain("The repository does not have to exist first.");
+    expect(skill).toContain("pass `createRepository` to `create_project`");
+    expect(skill).not.toMatch(/[–—]/);
+    const rel = path.join("skills", "controller-guide", "SKILL.md");
+    const outgoing = "f58275ca76e09a6d149e8fa3b7e8bec73cd9a7f34627e642ced603fdb1dcfd91";
+    expect(shippedCopyIsUnedited(rel, outgoing, {})).toBe(true);
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+  });
+});
+
+/**
  * Ruling 134 (pass 34, F34-11): the shipped operator doctrine says that
  * rework on an open PR is delivered with `deliver_for_review`, and that
  * pushing is never a person's or an agent's job. The outgoing sha256 is

@@ -777,4 +777,60 @@ describe("create-project action (home)", () => {
     );
     expect(row?.role).toBe("admin");
   });
+
+  it("ruling 462: the modal's createRepository choice reaches createProject with its visibility", async () => {
+    // CANARY: stop reading `createRepository` off the form and no create is
+    // asked of GitHub; read "public" as private and the body says so.
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    let created = false;
+    const gh = fakeGithubFetch({
+      "GET /repos/akin-ozer/brand-site": () =>
+        created
+          ? { body: { default_branch: "main", permissions: { push: true } } }
+          : { status: 404, body: { message: "Not Found" } },
+      // The connection seeded above carries no stored login, so its owner is
+      // treated as an organization.
+      "POST /orgs/akin-ozer/repos": () => {
+        created = true;
+        return { status: 201, body: { full_name: "akin-ozer/brand-site" } };
+      },
+    });
+    const previous = globalThis.fetch;
+    vi.stubGlobal("fetch", gh.fetchImpl);
+    try {
+      const { action } = await import("~/routes/_index");
+      const { cookie, sessionId } = await app.cookieFor(seedIds.arda);
+      const csrf = await app.csrfFor(sessionId);
+      const request = app.request("/", {
+        method: "POST",
+        cookie,
+        body: new URLSearchParams({
+          _csrf: csrf,
+          intent: "create-project",
+          name: "Brand Site",
+          key: "BRS",
+          owner: "akin-ozer",
+          repoName: "brand-site",
+          policy: "balanced",
+          createRepository: "public",
+        }),
+      });
+      const result = await action({
+        request,
+        url: new URL(request.url),
+        params: {},
+        pattern: HOME_PATTERN,
+        context: new RouterContextProvider(),
+      });
+      expect(actionOutcome(result).ok).toBe(true);
+      expect("repoNote" in result ? result.repoNote : null).toBe(
+        "Created akin-ozer/brand-site on GitHub (public).",
+      );
+      const posts = gh.callsTo("POST /orgs/akin-ozer/repos");
+      expect(posts).toHaveLength(1);
+      expect(posts[0]!.body).toEqual({ name: "brand-site", private: false, auto_init: true });
+    } finally {
+      vi.stubGlobal("fetch", previous);
+    }
+  });
 });

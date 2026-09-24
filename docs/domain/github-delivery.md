@@ -79,6 +79,20 @@ characters; last 8 lines, 600 characters.
   the remote default branch, a read-only repo still creates with a warning, and
   404/401/network produce warnings with `defaultBranch` falling back to `main`. The
   connection's PAT is bound to the project and proved against the repo.
+- **Creation can create the repository** (ruling 462). With `createRepository`
+  (`{ private, description? }`: the controller's `create_project` argument, or the New
+  project modal's "Create this repository on GitHub if it does not exist") a 404 probe
+  makes the server create it with the connection's PAT before `project.md` is written:
+  `POST /user/repos` when the connection's owner is the token's own login (the stored
+  validation's `login`), else `POST /orgs/{owner}/repos`, with `auto_init: true` so the
+  default branch exists, then a re-probe whose answer is recorded as for any creation.
+  An existing repository is used as it is. Everything else refuses and writes no
+  project: a 401/403 says the token cannot create repositories and that a fine-grained
+  token needs **Administration: Read and write** for All repositories (a classic one
+  `repo`); a 422 relays GitHub's message; a probe that cannot tell whether the
+  repository exists (token refused, GitHub unreachable) and a name outside
+  `[A-Za-z0-9._-]` refuse before any create. Audit `project.repository.created
+  {repo, private}` under the acting person, recorded as soon as GitHub answers.
 - **Changing the repo later is a repair** (`repair-repo`, `edit-policy`): normalizes
   `owner/name` or a URL, demands `confirmFootprint` when tasks already carry GitHub
   records, probes with the bound credential and refuses 404/401/403 or a read-only
@@ -571,7 +585,8 @@ credential handed to a model.
 ## 9. Identifiers and knobs
 
 - Audit: `github.pat.*`, `github.credential.*`, `org.connection.*`, `secrets.resealed`,
-  `project.repo.updated`, `github.repo.bootstrapped` (ruling 128, a repository-level
+  `project.repo.updated`, `project.repository.created` (ruling 462, a repository made
+  at project creation), `github.repo.bootstrapped` (ruling 128, a repository-level
   change like `github.credential.assigned`), `github.branch.created|deleted`,
   `github.branch.prepare_failed`, `github.branch_update.operator|acceptance`,
   `github.collision.resolved`,

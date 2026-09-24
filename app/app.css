@@ -6108,7 +6108,9 @@ a.card:active, .pj-new:active { transform: scale(.99); }
    warning band is the hit target. */
 .cred-warn.ack { cursor: pointer; }
 .cred-warn.ack input { margin-top: .125rem; }
-.branch-cleanup {
+/* A checkbox and its sentence on one line: the branch-cleanup switch and the
+   New project modal's repository choice (ruling 462). */
+.check-line {
   display: flex; align-items: center; gap: .5rem;
   font-family: var(--font-body); font-size: .75rem; color: var(--muted);
 }
