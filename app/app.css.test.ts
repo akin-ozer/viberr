@@ -5645,8 +5645,9 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
         if ((m[1]!.match(/<Icon name="chevron" className="disc-chev" \/>/g) ?? []).length !== 1) bare.push(where);
       }
     }
-    // Four, and since ruling 463 a GitHub connection's reach.
-    expect(summaries).toHaveLength(5);
+    // Four, and since ruling 463 a GitHub connection's reach, and since ruling
+    // 479(a) the capability matrix's "Advisory only" list.
+    expect(summaries).toHaveLength(6);
     expect(bare).toEqual([]);
   });
 

@@ -29,7 +29,8 @@ export interface AgentDeploymentView {
   profileId: string;
   /** Display role — "Operator" or the assignment's role snapshot. */
   role: string;
-  /** null for operator engagements (rendered "orchestration"). */
+  /** null for operator engagements: the Live roster names the operator
+   *  profile's own run backend for them (ruling 479(e)). */
   backend: "codex" | "claude" | null;
   engagement: Engagement;
   taskKey: string;
@@ -60,6 +61,20 @@ export interface ResourceLists {
 export interface ResourceDrift {
   missing: ResourceLists;
   extra: ResourceLists;
+}
+
+/**
+ * Every grant in one set of lists, rendered as the replies and the card spell
+ * it (`MCP server context7`), skills first, then MCP servers, then knowledge
+ * bases. The propagation's `added`/`removed`, the controller's drift lines and
+ * (ruling 479(d)) the Agents page's confirm all read this one wording.
+ */
+export function describeDriftLists(lists: ResourceLists): string[] {
+  const out: string[] = [];
+  for (const name of lists.skills) out.push(`skill ${name}`);
+  for (const name of lists.mcps) out.push(`MCP server ${name}`);
+  for (const name of lists.kb) out.push(`knowledge base ${name}`);
+  return out;
 }
 
 /** The drift plus the template's own lists, so a card can say exactly what
@@ -132,6 +147,16 @@ export interface AgentProfileView {
   templateDrift: TemplateDrift | null;
   /** "template" = org base deployed here · "project" = created in-project. */
   source: "template" | "project";
+  /**
+   * Ruling 479(g): some field this profile renders still resolves from the org
+   * template LIVE, because the deployment's definition leaves it unset (the
+   * seeded rows carry no definition at all). A save writes a full snapshot, so
+   * only then does saving stop this project following the template, and only
+   * then does the editor say it forks. False for a project-created profile and
+   * for a copy that already carries its own snapshot (a library deploy, any
+   * earlier save), which a template edit no longer reaches.
+   */
+  tracksTemplate: boolean;
   /** B5 (pass 34, U34-3): the identity of the deployment record this view was
    *  built from. The editor submits it back, and a save composed against a
    *  different record is refused rather than reverting what it never saw.

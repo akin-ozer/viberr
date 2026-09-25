@@ -13,9 +13,10 @@ import {
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { deploymentFingerprint } from "~/features/agents/agent-profile-actions.server";
 import { describePersonaChange } from "~/server/agents/persona-change.server";
-import type {
-  ResourceDrift,
-  ResourceLists,
+import {
+  describeDriftLists,
+  type ResourceDrift,
+  type ResourceLists,
 } from "~/features/agents/agent-types";
 
 /**
@@ -50,13 +51,6 @@ import type {
 
 const KINDS = ["skills", "mcps", "kb"] as const;
 type ResourceKind = (typeof KINDS)[number];
-
-/** The rendered noun for one grant, as the replies and the card spell it. */
-function describeGrant(kind: ResourceKind, name: string): string {
-  const noun =
-    kind === "skills" ? "skill" : kind === "mcps" ? "MCP server" : "knowledge base";
-  return `${noun} ${name}`;
-}
 
 /** A deployment's stored lists may omit a kind (the schema keeps each list
  *  optional); an absent list is an empty one for the comparison. */
@@ -93,14 +87,10 @@ export function resourceDrift(
   return differs ? { missing, extra } : null;
 }
 
-/** Every grant named in a drift half, rendered (`MCP server context7`). */
-export function describeDriftLists(lists: ResourceLists): string[] {
-  const out: string[] = [];
-  for (const kind of KINDS) {
-    for (const name of lists[kind]) out.push(describeGrant(kind, name));
-  }
-  return out;
-}
+/** Every grant named in a drift half, rendered (`MCP server context7`). Its one
+ *  home is the client-safe `agent-types.ts` since ruling 479(d): the Agents
+ *  page's confirm names the same grants before the press. */
+export { describeDriftLists };
 
 export interface TemplateCopyDrift {
   projectSlug: string;
@@ -336,6 +326,14 @@ export interface PropagateInput {
  * (`project.agent_profile.resources_synced`). A deployment that carries no
  * definition is left alone (it resolves the template live) and reported with
  * nothing added or removed.
+ *
+ * Ruling 479(c): the operator's template is a source too. Its three grant
+ * lists have the same shape, an operator run mounts its copy's lists the way
+ * an agent run does (`resolveOperatorAuthority`), and the Agents page computes
+ * the operator's drift and offers this button for it. The old
+ * `kind !== "specialist"` refusal answered every press on the Operator with
+ * "No such agent profile." about the profile on screen. `readTemplate` still
+ * resolves no controller template (ruling 99), so that stays refused.
  */
 export async function propagateTemplateResources(
   db: DatabaseSync,
@@ -344,7 +342,7 @@ export async function propagateTemplateResources(
   ctx: PropagationContext = {},
 ): Promise<PropagatedCopy[]> {
   const template = readTemplate(input.profileId, ctx.dataRoot);
-  if (!template || template.kind !== "specialist") {
+  if (!template) {
     throw AppError.notFound("No such agent profile.");
   }
   const out: PropagatedCopy[] = [];

@@ -28,7 +28,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/projects/:slug/board` | `project.board.tsx` | member (the layout's `readWorkspace` gate), form | board by stage from its own loader (ruling 457: the columns, as board cards carrying the fields the board reads, `toBoardCard`; the layout carries none) (a card is one status chip, a row of problem chips and an avatar stack, ruling 365), filters in the URL (`filter`, `view`, `q`), drag-and-drop and the card's Move menu (a stage, or Move up / Move down within the lane: the keyboard and single-pointer path to a slot, ruling 455(c)), accept-from-board confirm, the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first) | `create-task`, `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
 | `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" (tasks at a stage the workflow makes acceptance legal from, whose acceptance nothing blocks, for a viewer who can accept) and "Still in review" (every other review-work row: at the review stage, an open review PR at any stage, or a required reviewer's verdict outstanding; a row before the boundary reads "Review in progress at Validation · PR #8 · awaiting verdict", or names the live PR fact instead when it carries one: unpushed revision, conflict, drifted head; U35-5). A row whose open PR shares changed paths with another open PR carries a "collides with <keys>" chip on both rows (ruling 236, read-only). A row's wait tag reads "waiting on you" for the tasks whose next move is the viewer's (`waitingOnViewer`, the same answer the board's loader gives its cards), and an agent still working keeps "agent working", as on the board card (ruling 455). Header: "N in review · M waiting on your acceptance" | |
 | `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project: New conversation in the page head, a sticky rail (conversations first, then goal chains) and a capped transcript (ruling 419); unseen replies marked (ruling 448); goal chain controls, `cancel` and skip behind a confirm; with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `goal-op` (`op`: `pause`, `resume`, `cancel`, `skip_link`, `retry_link`; `goalId`, `index`, `reason`), `interrupt` (`conversationId`, `runId`) |
-| `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail (a copy whose grants differ from its template says so on the scope line and under each list, ruling 156; the project's rulings knowledge base named when one is set, ruling 239), capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile`, `sync-profile-resources` (org admin only, carries the record's fingerprint) |
+| `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail (a copy whose grants differ from its template says so on the scope line and under each list, ruling 156; the project's rulings knowledge base named when one is set, ruling 239; a granted MCP server no run gets tools from is marked, ruling 479(b)), capability matrix modal (enforced capabilities only; advisory lines collapsed under the grid, ruling 479(a)) | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile`, `sync-profile-resources` (org admin only, carries the record's fingerprint, sent from a confirm that names what it removes and adds, ruling 479(d)) |
 | `/projects/:slug/policy` | `project.policy.tsx` | member, form | role matrix (rendered from `rbac.ts`), member roles, transition boundaries, guardrails (ruling 112), the required reviewers read-only (ruling 178; edited on Settings) | `set-role`, `set-boundary`, `set-guardrail` |
 | `/projects/:slug/github` | `project.github.tsx` | member, form | credential card (with the workflow-scope advisory, ruling 144; an advisory scope is a note, not a violation, ruling 380), repo state, branched tasks, scope violations, update status | `reconcile` (`reconcile-github`), `grant-scope`, `set-credential`, `clear-credential` (all three `grant-github-scope`) |
 | `/projects/:slug/activity` | `project.activity.tsx` | member | activity feed with day groups; audit column (compacted, ruling 61) | |
@@ -336,13 +336,14 @@ SSO`, `Settings · Agent resources`, `MCP sign-in` (the OAuth callback's page, r
 dock` (the panel, ruling 121), `Insights`, `Capability matrix modal`, `Agent profile
 modal`, `S3 export target dialog` and `Add member dialog` (both ruling 148(b)), `Delete
 project dialog` (ruling 458(l)), `Rebuild projections dialog` (Home's hand-written confirm,
-ruling 458's 2026-09-24 note), and the fourteen confirms the shared `ConfirmDialog`
+ruling 458's 2026-09-24 note), and the fifteen confirms the shared `ConfirmDialog`
 names: `Resource removal dialog`, `Stage removal dialog`, `Member removal dialog`,
 `Schedule cancel dialog`, `Interrupt run dialog`, `Dismiss recommendation dialog`,
-`Interrupt turn dialog`, `Cancel goal dialog` and `Skip link dialog` (ruling 419), and
+`Interrupt turn dialog`, `Cancel goal dialog` and `Skip link dialog` (ruling 419),
 `Disable user dialog`, `Credential removal dialog`, `Store deletion dialog`, `Replace
 document dialog` and `Profile deletion dialog` (the hand-written confirms ruling 458(f)
-moved onto it).
+moved onto it), and `Template grants dialog` (the Agents page's "Use the template's
+grants", ruling 479(d)).
 `screenLabel` is a required prop on `ConfirmDialog`, so a new call site cannot ship
 unlabelled; the typecheck refuses it.
 
@@ -501,3 +502,41 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   declaration that resolves to nothing here (R14-1 rule 3), where naming "the stages above"
   would name a scope the profile does not have. The profile editor's Eligible stages hint
   reads "stages where this profile may be newly engaged". Pinned by `agents-page.test.tsx`.
+- **The Agents page and the global profile editor say what the runtime does** (ruling 479,
+  pinned by `agents-page.test.tsx` "ruling 479", `org-settings-page.test.tsx` "ruling
+  479(h)", and the server tests the ruling names):
+  - (a) The capability matrix's grid holds only capabilities something enforces: the
+    agent editor's groups plus "Operator actions". Advisory lines sit under the grid in a
+    collapsed "Advisory only · N lines the runtime does not read", each as "Move the task
+    to Review (acts directly: Site Engineer, Site Reviewer)", with the sentence "These
+    describe how a profile is meant to work. Nothing in the runtime enforces them, so
+    they never grant or refuse anything, and the grid above leaves them out. Whether a
+    profile's review can approve or request changes is its Report a validation verdict
+    row." There is no "Other actions" group.
+  - (b) A granted MCP chip a run gets no tools from carries the missing chip's look and
+    a note: "needs sign-in", "sign-in expired", "credential unreadable" or "unreachable";
+    its title and its visually hidden text give the remedy ("Runs do not mount
+    cloudflare-api until an org admin signs it in (Instance settings → Agent
+    resources).").
+  - (c) "Use the template's grants" works on the Operator as on any profile; it never
+    answers "No such agent profile." about the profile on screen.
+  - (d) "Use the template's grants" opens "Replace <name>'s grants with the template's?"
+    ("<project>'s copy of <name> takes the template's skills, MCP servers and knowledge
+    bases, and loses any it granted on its own. Removes MCP server cloudflare-api · adds
+    nothing. Changes apply from the next run.", confirm "Replace grants", danger-toned
+    when it removes something). The toast reads `"<name>" now carries the template's
+    grants · removed … · added … · changes apply from the next run`, each clause only when
+    it has grants to name.
+  - (e) The runtime row's "Model · effort" cell reads "Claude Opus · Maximum" ("default
+    effort" when none is stored) for every kind; the operator adds its Autonomy cell. The
+    Live tab's Backend column names the operator's backend ("Claude", "Codex"), never
+    "orchestration".
+  - (f) Each Eligible stages chip carries ", eligible" or ", not eligible" as visually
+    hidden text.
+  - (g) The profile editor says "Saving forks this profile for <project>…" only for a copy
+    that still follows its template (`tracksTemplate`); every other edit reads "Update
+    this project's copy. Changes apply from the next run."
+  - (h) In Instance settings → Agent resources, a global profile's stored stage the
+    default workflow lacks reads "build (not in the default workflow)" on the row, and the
+    editor shows it as a pressed chip "build" with the note "not in the default workflow"
+    that can be pressed off (and back on) before the save.

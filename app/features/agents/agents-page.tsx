@@ -25,19 +25,23 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
   deploymentDot,
   deploymentStatusKind,
+  describeDriftLists,
   profileRoleLabel,
   type AgentDeploymentView,
   type AgentProfileView,
   type LibraryProfileView,
+  type TemplateDrift,
 } from "./agent-types";
 import {
   CAP_META,
   GOVERNED_CAP_LABELS,
   type ResCatalogGroup,
+  type ResItemWarning,
 } from "./capability-catalog";
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
 import {
   CreateProfileModal,
+  effortLabel,
   type ProfileFormPayload,
 } from "./create-profile-modal";
 
@@ -377,6 +381,7 @@ function ResGroup({
   icon,
   items,
   known,
+  warnings,
   drift,
 }: {
   label: string;
@@ -385,6 +390,9 @@ function ResGroup({
   /** P14-KM-11: the ids the store actually holds. `undefined` = unknown here, so
    *  nothing is marked (never invent a "missing" state from missing data). */
   known?: ReadonlySet<string>;
+  /** Ruling 479(b): what the registry knows against a resource the store does
+   *  hold (an MCP server that needs a sign-in, say), keyed by id. */
+  warnings?: ReadonlyMap<string, ResItemWarning>;
   /** Ruling 156: how this list differs from the template's, when it does. */
   drift?: { missing: string[]; extra: string[] };
 }) {
@@ -400,17 +408,27 @@ function ResGroup({
             // as nothing at all — live, a renamed MCP left this panel painting a
             // healthy chip while the agent found zero tools under that name.
             const missing = known ? !known.has(x) : false;
+            // Ruling 479(b): a server the store holds can still reach no run
+            // (live: `cloudflare-api` needed a sign-in and every run dropped
+            // it). Marked the way a missing one is, with the remedy.
+            const flag: ResItemWarning | undefined = missing
+              ? {
+                  note: "missing",
+                  title: `${x} is no longer in the store, so this grant reaches no run`,
+                }
+              : warnings?.get(x);
             return (
             <span
-              className={missing ? "res-chip missing" : "res-chip"}
+              className={flag ? "res-chip missing" : "res-chip"}
               key={x}
-              {...(missing
-                ? { title: `${x} is no longer in the store, so this grant reaches no run` }
-                : {})}
+              {...(flag ? { title: flag.title } : {})}
             >
-              <Icon name={missing ? "alert" : icon} />
+              <Icon name={flag ? "alert" : icon} />
               {x}
-              {missing && <span className="res-chip-note">missing</span>}
+              {flag && <span className="res-chip-note">{flag.note}</span>}
+              {/* The title is a description no screen reader is bound to
+                  read; the remedy is part of the chip's text. */}
+              {flag && <span className="vh">. {flag.title}</span>}
             </span>
             );
           })
@@ -499,6 +517,57 @@ function DeleteConfirm({
   );
 }
 
+/**
+ * Ruling 479(d): "Use the template's grants" REPLACES this project's copy of
+ * the three grant lists (ruling 156, owner Q35-7), so a grant the project
+ * added on its own is dropped. The label reads as "add what the template
+ * has", and the press went straight to the server: live, one click would have
+ * taken `cloudflare-api` off the agent that owns the open Cloudflare task, and
+ * the toast never said a grant was lost. The confirm names both halves from
+ * the drift the card already renders, in the propagation's own words.
+ */
+function SyncGrantsConfirm({
+  a: current,
+  drift: currentDrift,
+  projectName,
+  onCancel,
+  onConfirm,
+}: {
+  a: AgentProfileView;
+  drift: TemplateDrift;
+  projectName: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  // Ruling 459: the words stay the ones it opened with while the exit plays,
+  // after the write has already cleared the drift.
+  const [{ name, removed, added }] = useState(() => ({
+    name: current.name,
+    removed: describeDriftLists(currentDrift.extra),
+    added: describeDriftLists(currentDrift.missing),
+  }));
+  return (
+    <ConfirmDialog
+      screenLabel="Template grants dialog"
+      title={`Replace ${name}'s grants with the template's?`}
+      tone={removed.length > 0 ? "danger" : "primary"}
+      body={
+        <>
+          {projectName}&apos;s copy of <strong>{name}</strong> takes the
+          template&apos;s skills, MCP servers and knowledge bases, and loses any
+          it granted on its own. <strong>Removes</strong>{" "}
+          {removed.length ? removed.join(", ") : "nothing"} ·{" "}
+          <strong>adds</strong> {added.length ? added.join(", ") : "nothing"}.
+          Changes apply from the next run.
+        </>
+      }
+      confirmLabel="Replace grants"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
+  );
+}
+
 // ------------------------------------------------------- stage eligibility
 
 /**
@@ -579,6 +648,10 @@ function StageEligibility({
                 data-stage-color={elig ? s.color : undefined}
               />
               {s.name}
+              {/* Ruling 479(f): the difference was ink and a strike-through
+                  alone, so assistive technology read all five stage names
+                  the same way (WCAG 1.3.1). The state is in the text now. */}
+              <span className="vh">{elig ? ", eligible" : ", not eligible"}</span>
             </span>
           );
         })}
@@ -786,6 +859,10 @@ export function ProfileDetail({
     ...new Set(insts.filter((d) => d.running).map((d) => d.taskKey)),
   ];
   const [confirm, setConfirm] = useState(false);
+  // Ruling 479(d): "Use the template's grants" asks first, naming what goes.
+  // The drift is held from the press, so the confirm outlives the write that
+  // clears it on the card (its exit plays, ruling 459).
+  const [syncDrift, setSyncDrift] = useState<TemplateDrift | null>(null);
   // F16: "idle · available" was the page's answer no matter what — live, a
   // Codex profile whose backend nobody could run read "idle · available" here
   // while the task-level Execution panel, one click away, disagreed.
@@ -863,6 +940,14 @@ export function ProfileDetail({
     const group = resourceCatalog?.find((g) => g.key === key);
     return group ? new Set(group.items.map((i) => i.id)) : undefined;
   };
+  // Ruling 479(b): the registry's word against a resource it does hold.
+  const warningsOf = (key: string): ReadonlyMap<string, ResItemWarning> => {
+    const out = new Map<string, ResItemWarning>();
+    for (const item of resourceCatalog?.find((g) => g.key === key)?.items ?? []) {
+      if (item.warning) out.set(item.id, item.warning);
+    }
+    return out;
+  };
   const canDelete = a.kind !== "operator" && canManage;
 
   return (
@@ -874,6 +959,15 @@ export function ProfileDetail({
           activeCount={activeKeys.length}
           onCancel={() => setConfirm(false)}
           onConfirm={() => onDelete(a.id)}
+        />
+      )}
+      {syncDrift && (
+        <SyncGrantsConfirm
+          a={a}
+          drift={syncDrift}
+          projectName={projectName}
+          onCancel={() => setSyncDrift(null)}
+          onConfirm={() => onSyncResources(a)}
         />
       )}
       <div className="ag-hero">
@@ -1029,12 +1123,15 @@ export function ProfileDetail({
           {/* Ruling 156 (owner, Q35-8): only an org admin copies the template's
               grants onto this project; a project admin sees the difference and
               asks. The button carries the record the page rendered (B5), so a
-              save landing in between is refused, never reverted. */}
+              save landing in between is refused, never reverted. Ruling
+              479(d): it opens a confirm naming what the press removes and
+              adds; the submit is the confirm's. */}
           {canSyncTemplate && a.templateDrift && (
             <button
               type="button"
               className="btn ghost sm right"
-              onClick={() => onSyncResources(a)}
+              aria-haspopup="dialog"
+              onClick={() => setSyncDrift(a.templateDrift)}
             >
               <Icon name="cpu" />
               Use the template&apos;s grants
@@ -1056,6 +1153,7 @@ export function ProfileDetail({
             icon="cpu"
             items={a.resources.mcps}
             known={known("mcps")}
+            warnings={warningsOf("mcps")}
             {...(a.templateDrift
               ? { drift: { missing: a.templateDrift.missing.mcps, extra: a.templateDrift.extra.mcps } }
               : {})}
@@ -1120,41 +1218,50 @@ export function ProfileDetail({
               )}
             </div>
           </div>
-          {a.kind === "operator" ? (
+          {/* Ruling 479(e): every kind shows what a run starts on, model AND
+              effort. The operator used to get Autonomy in this cell and no
+              model at all, and no profile showed its effort, so whether an
+              agent ran at Maximum or High was readable only inside the
+              editor. The operator runs on the same two values
+              (`resolveOperatorAuthority`); an empty effort is the backend's
+              own default. */}
+          <div className="rt-cell">
+            <div className="lbl">Model · effort</div>
+            <div className="rt-val mono model-val">
+              <span>
+                {a.modelLabel} ·{" "}
+                {a.effort ? effortLabel(a.effort) : "default effort"}
+              </span>
+              {!a.modelKnown && (
+                <span
+                  className="model-sub"
+                  title={`The saved model “${a.model}” isn't a recognized model id, so runs use the default (${a.modelLabel}). Open Edit profile to pick a model.`}
+                >
+                  <Icon name="alert" />
+                  default
+                </span>
+              )}
+              {/* R20-3/F20-4: a real run proved the provider refuses this model
+                  for this account. The badge names the provider's own redacted
+                  sentence; a run on it would be refused before it starts. */}
+              {a.modelUnavailable && (
+                <span
+                  className="model-sub"
+                  title={`${a.modelUnavailable.reason} A run on this model would be refused. Open Edit profile to pick another.`}
+                >
+                  <Icon name="alert" />
+                  unavailable
+                </span>
+              )}
+            </div>
+          </div>
+          {a.kind === "operator" && (
             <div className="rt-cell">
               <div className="lbl">Autonomy</div>
               <div className="rt-val">
                 <Pill kind={a.autonomy === "full" ? "agent" : "neutral"} sm dot>
                   {a.autonomy === "full" ? "Full autonomy" : "Supervised"}
                 </Pill>
-              </div>
-            </div>
-          ) : (
-            <div className="rt-cell">
-              <div className="lbl">Model</div>
-              <div className="rt-val mono model-val">
-                <span>{a.modelLabel}</span>
-                {!a.modelKnown && (
-                  <span
-                    className="model-sub"
-                    title={`The saved model “${a.model}” isn't a recognized model id, so runs use the default (${a.modelLabel}). Open Edit profile to pick a model.`}
-                  >
-                    <Icon name="alert" />
-                    default
-                  </span>
-                )}
-                {/* R20-3/F20-4: a real run proved the provider refuses this model
-                    for this account. The badge names the provider's own redacted
-                    sentence; a run on it would be refused before it starts. */}
-                {a.modelUnavailable && (
-                  <span
-                    className="model-sub"
-                    title={`${a.modelUnavailable.reason} A run on this model would be refused. Open Edit profile to pick another.`}
-                  >
-                    <Icon name="alert" />
-                    unavailable
-                  </span>
-                )}
               </div>
             </div>
           )}
@@ -1298,6 +1405,7 @@ export function LiveRoster({
   deployments,
   onOpen,
   nameById,
+  operatorBackend,
 }: {
   deployments: AgentDeploymentView[];
   onOpen: (taskKey: string) => void;
@@ -1305,6 +1413,10 @@ export function LiveRoster({
    *  raw profileId (P11-42). The row falls back to the profileId when a name
    *  can't be resolved. */
   nameById?: Record<string, string>;
+  /** Ruling 479(e): the backend an operator run starts on. The Backend column
+   *  printed "orchestration" for every operator row, a word for no runtime,
+   *  while the operator runs on Claude or Codex like any agent. */
+  operatorBackend: "codex" | "claude";
 }) {
   const sorted = deployments.toSorted(
     (a, b) =>
@@ -1382,7 +1494,7 @@ export function LiveRoster({
               </span>
               <span className="live-be">
                 {isOp
-                  ? "orchestration"
+                  ? BACKEND_LABEL[operatorBackend]
                   : d.backend
                     ? BACKEND_LABEL[d.backend]
                     : "Codex"}
@@ -1558,6 +1670,10 @@ export function AgentsPage({
   const [formError, setFormError] = useState<string | null>(null);
 
   const operator = profiles.find((p) => p.kind === "operator") ?? null;
+  // Ruling 479(e): the backend an operator run starts on, by the rule the run
+  // resolves it with (`resolveOperatorAuthority`): the first backend the
+  // profile names, Claude when it names none or no operator is deployed.
+  const operatorBackend = (operator && primaryBackend(operator)) ?? "claude";
   const specialists = profiles.filter((p) => p.kind !== "operator");
   const libraryProfiles = library ?? [];
   const current = profiles.find((a) => a.id === sel) ?? profiles[0] ?? null;
@@ -1852,7 +1968,12 @@ export function AgentsPage({
           )}
         </div>
       ) : (
-        <LiveRoster deployments={deployments} onOpen={onOpen} nameById={nameById} />
+        <LiveRoster
+          deployments={deployments}
+          onOpen={onOpen}
+          nameById={nameById}
+          operatorBackend={operatorBackend}
+        />
       )}
 
       {creating && (

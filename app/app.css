@@ -2574,7 +2574,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 }
 .res-chip .ico { width: 12px; height: 12px; color: var(--placeholder); }
 /* P14-KM-11: a grant naming a resource the store no longer holds. It reaches the
-   run as nothing at all, so it must not read like a healthy attachment. */
+   run as nothing at all, so it must not read like a healthy attachment.
+   Ruling 479(b): a resource the store holds that a run still does not get (an
+   MCP server that needs a sign-in) wears the same class; its note says which. */
 .res-chip.missing {
   border-color: color-mix(in srgb, var(--coral-dark), transparent 55%);
   background: color-mix(in srgb, var(--coral-light), var(--surface) 60%);
@@ -2583,7 +2585,9 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .res-chip.missing .ico { color: var(--coral-dark); }
 .res-chip-note { font-size: .69rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
 
-.runtime-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--hairline); }
+/* Ruling 479(e): the operator carries a fourth cell (Autonomy beside Model ·
+   effort), so the row fits its cells instead of a fixed three. */
+.runtime-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--hairline); }
 .rt-cell .lbl { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--placeholder); }
 .rt-val { margin-top: .5rem; }
 /* Model cell: the resolved model name, plus a substitution flag when the saved

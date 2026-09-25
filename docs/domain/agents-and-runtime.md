@@ -212,6 +212,13 @@ the backend-wide list — so a tier the picker never shows is never left standin
 saved, and picking a model with fewer tiers clamps the pick to one that model offers (the
 catalog default when it is among them, else its first).
 
+The Agents page's profile panel shows both values for every kind, the operator included
+(ruling 479(e)): a "Model · effort" cell ("Claude Opus · Maximum", the effort in the
+picker's words, "default effort" when none is stored), with the operator's Autonomy as
+its own cell beside it. The Live tab's Backend column names the backend an operator run
+starts on (the operator profile's first backend, Claude when it names none), the rule
+`resolveOperatorAuthority` applies.
+
 **Availability marks** (`model_availability`): a model is marked unavailable only from a
 real run failure whose redacted text matches `MODEL_UNSUPPORTED_RE`, and cleared by a
 real success. Never a synthetic probe (ruling 19 generalised). A mark is instance-wide, not
@@ -1374,6 +1381,17 @@ grants. MCP grants are outside the
 matrix (ruling 39), except the tools an admin marks as write tools, which a withheld
 repo-write grant denies (ruling 176).
 
+**The matrix, the profile panel and the Policy counts count the same capabilities**
+(ruling 479(a)). `GOVERNED_CAP_LABELS` (every catalog row with a `group`) is the
+partition all three read. The capability matrix modal's grid is the agent editor's groups
+plus an "Operator actions" group (the operator's own capabilities); an advisory line
+(`group: null`, the three verdict outcomes among them, or a bespoke extra) is never a
+grid row. It is listed under the grid in a collapsed "Advisory only · N lines the runtime
+does not read", with the profiles that hold it and the mode it is stored at, the way the
+profile panel lists them (ruling 31); a line stored `off` holds nothing and is not listed.
+Whether a profile's review can approve or request changes is its `report-validation-verdict`
+row.
+
 Absent-grant polarity is deliberately not uniform: `dispatch-agents` and
 `use-web-search-fetch` absent ⇒ granted; `deliver-review-pr` absent ⇒ derived from
 workflow strictness and `update-task-branch` absent ⇒ whatever delivery resolves to
@@ -1477,7 +1495,16 @@ runtime's answer for a missing grant.
   live. A template edit therefore changes nothing a run mounts until the copy is
   rewritten (the template writer's `propagate`, the org modal's box, or an org admin's
   "Use the template's grants" on the Agents page), and the roster marks a copy whose
-  grants differ with the exact difference (`templateDrift`). The copy's persona is a
+  grants differ with the exact difference (`templateDrift`). The button replaces the
+  copy's three lists, so it opens a confirm ("Template grants dialog") that names what
+  the press removes and adds, and the toast repeats both (ruling 479(d)). The operator's
+  template is a source like any other (ruling 479(c)): an operator run mounts its copy's
+  lists, and `propagateTemplateResources` refuses only a profile with no template. The
+  profile editor says a save "forks" the profile only while the copy still resolves some
+  field from the template live (`tracksTemplate`: a definition-less deployment, or one
+  whose definition leaves a field a save writes unset); a copy that already holds its
+  snapshot (a library deploy, any earlier save) is told the save updates it (ruling
+  479(g)). The copy's persona is a
   snapshot too: it changes through the Agents page editor, `update_agent_deployment`'s
   `persona`, or a template save that changes the persona with `propagate` (the org
   modal's box), which rewrites every copy still running the older text (ruling 467).
@@ -1525,7 +1552,13 @@ runtime's answer for a missing grant.
   `temporarily_unavailable`) is reported and keeps the sign-in. A server that answers
   the MCP authorization challenge and holds no token (or whose sign-in expired) is not
   mounted at all: the run's prompt names it with that reason instead of a server that
-  answers every call 401. It forwards `tools/list` (withheld write tools
+  answers every call 401. The Agents page says the same before any run (ruling 479(b)):
+  `buildResourceCatalog` carries a `warning` on each MCP item a run would not get tools
+  from, read off the registry row the Settings list renders ("needs sign-in", "sign-in
+  expired", "credential unreadable", or "unreachable" for a failed last check, which is
+  mounted and flagged down), and a profile's granted chip for that server is marked the
+  way a missing one is, with the remedy (an org admin, Instance settings → Agent
+  resources) in its title and its text. It forwards `tools/list` (withheld write tools
   removed), `tools/call` (a withheld one refused with `mcpWriteToolDenyReason`),
   resources and prompts when the upstream declares them, and `list_changed`
   notifications; a timeout (5 minutes a call, reset by progress) or an upstream error

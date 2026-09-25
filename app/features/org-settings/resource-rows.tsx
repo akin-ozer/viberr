@@ -4,7 +4,7 @@ import type { StageDef } from "~/schemas/project-file.schema";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
-import { rel, updatedLabel } from "./resource-helpers";
+import { rel, storedStageLabel, updatedLabel } from "./resource-helpers";
 import { isMcpHealthStale } from "~/shared/freshness";
 import { mcpSignInPhrase } from "~/shared/mcp-oauth";
 import { looksLikeWriteTool } from "~/shared/mcp-tools";
@@ -519,8 +519,9 @@ export function AgentPanel({
       <div className="rsrc-list">
         {gagents.map((a) => {
           const res = a.skills.length + a.mcps.length + a.kbs.length;
+          // Ruling 479(h): a stored id the default workflow lacks says so.
           const stageNames = a.stages
-            .map((id) => stages.find((s) => s.id === id)?.name || id)
+            .map((id) => storedStageLabel(id, stages))
             .join(" · ");
           return (
             <div className="rsrc-row" key={a.id}>

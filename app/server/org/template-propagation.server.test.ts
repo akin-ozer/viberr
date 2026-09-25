@@ -12,6 +12,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { deployAgentProfileFromLibrary } from "~/features/agents/agent-profile-actions.server";
 import { saveGlobalAgentProfile } from "./gagents.server";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
+import { readTemplate } from "~/server/agents/deployment-view.server";
 import {
   listTemplateResourceDrift,
   propagateTemplateResources,
@@ -218,6 +219,61 @@ describe("propagateTemplateResources", () => {
     expect(
       listAuditEvents(store.db, { action: "project.agent_profile.resources_synced" }),
     ).toEqual([]);
+  });
+
+  /**
+   * Ruling 479(c) (F40-38): the Agents page offers "Use the template's grants"
+   * on the Operator too (its drift is computed like any profile's), and every
+   * press answered "No such agent profile." about the profile on screen,
+   * because this writer took specialist templates only. Canary: restore the
+   * `template.kind !== "specialist"` refusal.
+   */
+  it("rewrites the operator's copy from the operator template, removing a grant the project added", async () => {
+    const store = setupTestStore(ctx);
+    seedDefaultAgentAssets(store.dataRoot);
+    const template = readTemplate("operator", store.dataRoot)!;
+    expect(template.kind).toBe("operator");
+    const base = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter;
+    writeProject(store.dataRoot, {
+      ...base,
+      agents: [
+        {
+          profileId: "operator",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "operator",
+            resources: {
+              skills: [...template.resources.skills],
+              mcps: [...template.resources.mcps],
+              kb: [...template.resources.kb, "akin-dossier"],
+            },
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    const copies = await propagateTemplateResources(
+      store.db,
+      { profileId: "operator", projectSlugs: [store.slug] },
+      arda(store),
+      { dataRoot: store.dataRoot },
+    );
+    expect(copies).toEqual([
+      {
+        projectSlug: "viberr-core",
+        projectName: "Viberr Core",
+        name: template.name,
+        added: [],
+        removed: ["knowledge base akin-dossier"],
+      },
+    ]);
+    const after = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.agents.find((a) => a.profileId === "operator")!;
+    expect(after.definition?.resources?.kb).toEqual(template.resources.kb);
+    expect(after.definition?.kind).toBe("operator");
   });
 
   it("refuses a project that does not deploy the template", async () => {

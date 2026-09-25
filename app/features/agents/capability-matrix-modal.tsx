@@ -2,8 +2,17 @@ import { Fragment } from "react";
 import { Icon, storeIcon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 import type { MatrixProfile } from "./agent-types";
-import { CAP_MODAL_CATALOG, MODE_LABEL } from "./capability-catalog";
-import { capabilityByLabel, capabilityEnforcement } from "~/shared/capabilities";
+import {
+  CAP_MODAL_CATALOG,
+  GOVERNED_CAP_LABELS,
+  MODE_LABEL,
+} from "./capability-catalog";
+import {
+  capabilityById,
+  capabilityByLabel,
+  capabilityEnforcement,
+} from "~/shared/capabilities";
+import { countLabel } from "~/shared/text/plural";
 import {
   CODEX_REPO_WRITE_ADVISORY_NOTE,
   codexRepoWriteAdvisory,
@@ -14,10 +23,20 @@ import {
  * profiles × actions grid, rendered by both the Agents and Policy surfaces
  * (contracts §5). Presentation-only: takes `profiles` (the assembled
  * roster) + the project name for the subtitle. Rows: the curated modal
- * catalog groups, plus an "Other actions" group for any label a profile
- * declares outside the catalog (operator coordination actions, near-miss
- * extras). Matching is by display label — labels are rendered from the
+ * catalog groups, plus an "Operator actions" group for the operator's own
+ * capabilities. Matching is by display label — labels are rendered from the
  * id-based store server-side, so this stays exact.
+ *
+ * Ruling 479(a): the grid holds only capabilities something enforces
+ * (`GOVERNED_CAP_LABELS`, the set the Policy page's counts and the profile
+ * panel's columns read). Advisory persona lines (`group: null` in the catalog,
+ * the review-verdict outcomes among them, and bespoke extras) used to land in
+ * an "Other actions" group with mode colours, so both required reviewers read
+ * "Approve the review: Off", every builder "acts directly" to move a task to
+ * Review, and the grid's counts disagreed with the Policy cards one click
+ * away. They sit under the grid now, collapsed, the way the profile panel
+ * shows them (R15-12): each line with the profiles that hold it and the mode
+ * it is stored at, and no cell colour.
  *
  * Ruling 16 additions over the mock: rendered as a native <dialog> via
  * useDialog, which provides Escape close, backdrop-click close, and focus
@@ -60,20 +79,37 @@ export function CapabilityMatrixModal({
   const groups: { group: string; labels: string[] }[] = CAP_MODAL_CATALOG.map(
     (g) => ({ group: g.group, labels: g.caps.map((c) => c.label) }),
   );
-  const extras = new Set<string>();
+  // Ruling 479(a): a label outside the agent catalog is either one of the
+  // operator's own capabilities (enforced, so a grid row) or an advisory line
+  // (no runtime consumer, so never a coloured cell).
+  const operatorOnly = new Set<string>();
+  const advisory = new Map<string, Map<Mode, string[]>>();
   for (const p of profiles) {
-    for (const bucket of [
-      p.actions.direct,
-      p.actions.recommend,
-      p.actions.forbidden,
-      p.actions.off ?? [],
-    ]) {
+    const buckets: [readonly string[], Mode][] = [
+      [p.actions.direct, "direct"],
+      [p.actions.recommend, "recommend"],
+      [p.actions.forbidden, "human"],
+      [p.actions.off ?? [], "off"],
+    ];
+    for (const [bucket, mode] of buckets) {
       for (const label of bucket) {
-        if (!known.has(label)) extras.add(label);
+        if (known.has(label)) continue;
+        if (GOVERNED_CAP_LABELS.has(label)) {
+          operatorOnly.add(label);
+          continue;
+        }
+        // The profile panel lists the advisory lines a profile HOLDS; a
+        // stored `off` holds nothing, so it is no line here either.
+        if (mode === "off") continue;
+        const byMode = advisory.get(label) ?? new Map<Mode, string[]>();
+        byMode.set(mode, [...(byMode.get(mode) ?? []), p.name]);
+        advisory.set(label, byMode);
       }
     }
   }
-  if (extras.size) groups.push({ group: "Other actions", labels: [...extras] });
+  if (operatorOnly.size) {
+    groups.push({ group: "Operator actions", labels: [...operatorOnly] });
+  }
 
   return (
     <dialog
@@ -228,6 +264,47 @@ export function CapabilityMatrixModal({
               ))}
             </tbody>
           </table>
+          {advisory.size > 0 && (
+            /* Ruling 479(a): the panel's R15-12 treatment, across profiles.
+               Collapsed and outside the grid, so no cell colour and no count
+               reads an advisory line as authority; the number stays visible. */
+            <details className="cap-advisory">
+              <summary>
+                <Icon name="shield" />
+                <span>
+                  Advisory only · {countLabel(advisory.size, "line")} the runtime
+                  does not read
+                </span>
+                <Icon name="chevron" className="disc-chev" />
+              </summary>
+              <div className="cap-advisory-body">
+                <p>
+                  These describe how a profile is meant to work. Nothing in the
+                  runtime enforces them, so they never grant or refuse anything,
+                  and the grid above leaves them out. Whether a profile&apos;s
+                  review can approve or request changes is its{" "}
+                  <b>{capabilityById("report-validation-verdict")?.label}</b> row.
+                </p>
+                <ul>
+                  {[...advisory].map(([label, byMode]) => (
+                    <li key={label}>
+                      {label}{" "}
+                      <span className="fhint">
+                        (
+                        {[...byMode]
+                          .map(
+                            ([mode, names]) =>
+                              `${MODE_TITLE[mode].toLowerCase()}: ${names.join(", ")}`,
+                          )
+                          .join("; ")}
+                        )
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </details>
+          )}
           {/* P13-RT-14 / LV-15 / KM-04: the Claude↔Codex differences below are
               deliberate, but they were undisclosed — a reader could only learn
               them by running both backends and comparing. */}

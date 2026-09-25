@@ -1,10 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { ResCatalogGroup } from "~/features/agents/capability-catalog";
+import type {
+  ResCatalogGroup,
+  ResItemWarning,
+} from "~/features/agents/capability-catalog";
 import { kbRootDir, skillsRootDir } from "~/server/files/file-store-root.server";
 import { isReservedMcpName } from "~/shared/mcp-reserved";
 import {
   listMcpServers,
   listSkills,
+  type McpView,
   // The ONE store-folder lister. The private copy here used `statSync`, which
   // DEREFERENCES, so a symlinked `data/kb/<dir>` was offered in the profile
   // picker while org settings hid it and every run refused to read it — a
@@ -69,11 +73,14 @@ export function buildResourceCatalog(
   // unconditionally and `resolveSpecialistMcpServers` skips the reserved name,
   // so granting or revoking it changed nothing in either direction.
   const mcpIds = new Set<string>();
+  const mcpWarnings = new Map<string, ResItemWarning>();
   for (const m of safe(() => listMcpServers(db))) {
     if (isReservedMcpName(m.name)) {
       continue; // never let a real org row shadow Viberr's own in-process tools
     }
     mcpIds.add(m.name);
+    const warning = mcpRunWarning(m);
+    if (warning) mcpWarnings.set(m.name, warning);
   }
 
   return [
@@ -87,7 +94,11 @@ export function buildResourceCatalog(
       group: "MCP servers",
       key: "mcps",
       mono: true,
-      items: [...mcpIds].sort().map((id) => ({ id, def: false })),
+      items: [...mcpIds].sort().map((id) => {
+        const warning = mcpWarnings.get(id);
+        if (warning) return { id, def: false, warning };
+        return { id, def: false };
+      }),
     },
     {
       group: "Knowledge bases",
@@ -101,6 +112,42 @@ export function buildResourceCatalog(
       }),
     },
   ];
+}
+
+/**
+ * Ruling 479(b): why a run of any profile granting this server gets none of its
+ * tools, read from the registry row the Settings list renders (no secret box
+ * is opened here). The order is the run resolver's
+ * (`resolveSpecialistMcpServersDetailed`): an unreadable credential and a
+ * sign-in the server lacks both keep it off the run; a row whose last check
+ * failed is mounted and flagged down, so the agent is told it may get nothing.
+ * Live: the Platform Engineer's `cloudflare-api` chip read like its two healthy
+ * neighbours while every run's record said "isn't mounted on this run … needs
+ * sign-in", and the one remedy was named on another page.
+ */
+function mcpRunWarning(m: McpView): ResItemWarning | null {
+  if (m.credUnreadable) {
+    return {
+      note: "credential unreadable",
+      title: `Runs do not mount ${m.name}: its stored credential can't be opened. An org admin re-enters it in Instance settings → Agent resources.`,
+    };
+  }
+  // Ruling 469: a pasted credential wins over a sign-in, and `mapMcp` reports
+  // no sign-in status for such a row, so `oauth` here is the one that decides.
+  if (m.oauth && m.oauth.status !== "signed_in") {
+    const expired = m.oauth.status === "expired";
+    return {
+      note: expired ? "sign-in expired" : "needs sign-in",
+      title: `Runs do not mount ${m.name} until an org admin signs it in${expired ? " again" : ""} (Instance settings → Agent resources).`,
+    };
+  }
+  if (m.up === false) {
+    return {
+      note: "unreachable",
+      title: `The last check could not reach ${m.name}, so a run may get none of its tools. An org admin retests it in Instance settings → Agent resources.`,
+    };
+  }
+  return null;
 }
 
 function safe<T>(fn: () => T[]): T[] {

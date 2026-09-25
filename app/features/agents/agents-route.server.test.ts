@@ -540,8 +540,10 @@ describe("sync-profile-resources (ruling 156)", () => {
         fingerprint: drifted.fingerprint,
       }),
     );
+    // Ruling 479(d): the reply names what the press added (and, below, what
+    // it removed), as ruling 156 says it does.
     expect(synced.toast).toBe(
-      '"Sync Probe" now carries the template\'s grants · changes apply from the next run',
+      '"Sync Probe" now carries the template\'s grants · added MCP server github · changes apply from the next run',
     );
     expect(await copyMcps()).toEqual(["github"]);
     expect(
@@ -555,6 +557,23 @@ describe("sync-profile-resources (ruling 156)", () => {
       subjectId: PROFILE,
       details: { templateId: PROFILE, mcps: ["github"] },
     });
+
+    // Ruling 479(d): the template drops the grant, so the copy now holds one
+    // the template does not; the press takes it off and the toast says so.
+    // Canary: drop the `removed` clause from the route's toast.
+    await saveTemplate([]);
+    const extra = (await runLoader(ids.arda)).profiles.find((p) => p.id === PROFILE)!;
+    const dropped = saved(
+      await postAction(ids.arda, {
+        intent: "sync-profile-resources",
+        profileId: PROFILE,
+        fingerprint: extra.fingerprint,
+      }),
+    );
+    expect(dropped.toast).toBe(
+      '"Sync Probe" now carries the template\'s grants · removed MCP server github · changes apply from the next run',
+    );
+    expect(await copyMcps()).toEqual([]);
 
     // Leave the store as the seed shipped it for the cases that follow: the
     // deployment goes, then the template file.
