@@ -1082,7 +1082,7 @@ describe("ruling 370: the controller prefix", () => {
 function inProcess(
   server: RunMcpServerDeclaration | undefined,
 ): server is McpSdkServerConfigWithInstance {
-  return server !== undefined && server.type === "sdk" && "instance" in server;
+  return server !== undefined && "instance" in server && "type" in server && server.type === "sdk";
 }
 
 describe("ruling 476(h): a goal a turn creates records the conversation it was planned in", () => {
