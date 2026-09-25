@@ -279,6 +279,24 @@ describe("AttachmentsPanel producer attribution (P21)", () => {
     expect(fileBy.textContent).toContain("by Reviewer");
   });
 
+  it("ruling 478(b) (F40-32): every name carries its whole self on hover, and comes before the by-line", () => {
+    // WEB-3's rows both read "WEB-3…" at phone width, with no title to read
+    // the rest from. CANARY: drop `title={a.name}` from the file row.
+    const { container } = render(
+      <AttachmentsPanel
+        base={BASE}
+        attachments={[entry("home-page.png"), entry("WEB-3-build-node24-d0cd55e.log", 2355)]}
+        producers={{ ...producers, "WEB-3-build-node24-d0cd55e.log": producers["report.pdf"] }}
+      />,
+    );
+    const row = container.querySelector(".attach-file")!;
+    const name = row.querySelector(".attach-name")!;
+    expect(name.getAttribute("title")).toBe("WEB-3-build-node24-d0cd55e.log");
+    // The phone rule indents whatever follows the name (app.css): the by-line.
+    expect(name.nextElementSibling?.classList.contains("attach-by")).toBe(true);
+    expect(container.querySelector(".attach-thumb .attach-name")!.getAttribute("title")).toBe("home-page.png");
+  });
+
   it("omits the producer line for a name no event claims — never a guess", () => {
     const { container } = render(
       <AttachmentsPanel

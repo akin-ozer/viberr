@@ -9,7 +9,6 @@ import { Markdown } from "~/ui/markdown";
 import { AttachmentThumb } from "./attachment-image";
 import { IMAGE_RE, useAttachmentLightbox } from "./attachment-lightbox";
 import { Pill } from "~/ui/pill";
-import { RichText } from "~/ui/rich-text";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
@@ -49,6 +48,13 @@ export type TimelineFilterId = (typeof TL_FILTERS)[number]["id"];
 
 /** Comments taller than this (px) clamp by default with a "Show more" toggle. */
 const COLLAPSE_MAX = 340;
+
+/**
+ * Ruling 478(f) (F40-35): every entry sits under the Timeline's own h2, so the
+ * top heading its author wrote renders one level below it, and deeper levels
+ * follow (`~/ui/markdown.tsx`).
+ */
+const ENTRY_HEADING_BASE = 3;
 
 /**
  * A comment body that clamps when it's very tall (long agent replies) so a
@@ -110,6 +116,7 @@ function CollapsibleComment({
         <Markdown
           text={text}
           mentionNames={mentionNames}
+          headingBase={ENTRY_HEADING_BASE}
           {...(taskLinks ? { taskLinks } : {})}
           {...(attachmentNames ? { attachmentNames } : {})}
           {...(attachmentsBase ? { attachmentsBase } : {})}
@@ -195,7 +202,7 @@ const NO_NAMES: string[] = [];
  * does (the timeline shares the rows and the lookups it passes across
  * revalidations), so a send's fetcher states and a live event that brings
  * the same rows back re-render none of the items; each used to re-run its
- * Markdown or RichText, its hooks and its icons.
+ * Markdown, its hooks and its icons.
  */
 export const TimelineItem = memo(function TimelineItem({
   ev,
@@ -270,9 +277,9 @@ export const TimelineItem = memo(function TimelineItem({
         {ev.type === "comment" ? (
           <div className={"comment-card" + (ev.toAgent ? " toagent" : "")}>
             {/* Comments (agent replies AND user comments) are real multi-line
-                markdown — render with the GFM renderer, not the inline-only
-                RichText. Long replies clamp behind a Show more toggle so one
-                answer can't swallow the timeline. Typed events stay on RichText. */}
+                markdown — render with the GFM renderer. Long replies clamp
+                behind a Show more toggle so one answer can't swallow the
+                timeline. */}
             <CollapsibleComment
               text={ev.text}
               mentionNames={mentionNames}
@@ -288,11 +295,26 @@ export const TimelineItem = memo(function TimelineItem({
                 <strong>{ev.title}</strong>
               </div>
             )}
-            <div className="tl-text">
-              {/* F20: typed-event text goes through the SAME known-name filter
-                  the comment bodies use — a bare `@nobody` in a system-written
+            <div className="tl-text md-body">
+              {/* Ruling 478(a) (F40-30): typed-event text is markdown too. Its
+                  writers put the tool's own words in a fenced block ("What the
+                  checkout reported", "What the push reported") and separate
+                  paragraphs with blank lines; the inline-only RichText printed
+                  the fence as literal backticks, ran the lines together and
+                  let a long path widen the page on a phone. The GFM renderer
+                  gives the block its own scroller and breaks inline code.
+                  F20: mentions go through the SAME known-name filter the
+                  comment bodies use — a bare `@nobody` in a system-written
                   line routes nowhere, so it must not look like a live tag. */}
-              <RichText text={ev.text} names={mentionNames} {...(taskLinks ? { taskLinks } : {})} />
+              <Markdown
+                text={ev.text}
+                mentionNames={mentionNames}
+                headingBase={ENTRY_HEADING_BASE}
+                {...(taskLinks ? { taskLinks } : {})}
+                {...(attachmentNames ? { attachmentNames } : {})}
+                {...(attachmentsBase ? { attachmentsBase } : {})}
+                onAttachmentOpen={lightbox}
+              />
             </div>
             {ev.evidence && (
               <div className="tl-card evidence">

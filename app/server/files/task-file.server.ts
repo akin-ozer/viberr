@@ -460,12 +460,14 @@ function parsePacketSection(
   }
   const result = taskPacketSchema.safeParse(raw);
   if (result.success) {
+    // Ruling 478(e): NO recommendation is a legitimate packet (an agent's
+    // question it has no pick on), so only a second recommendation is news.
     const recCount = result.data.options.filter((o) => o.rec).length;
-    if (result.data.options.length > 0 && recCount !== 1) {
+    if (recCount > 1) {
       diagnostics.push(
         diagInfo(
           "packet.rec_count",
-          `Packet has ${recCount} recommended options (expected exactly 1).`,
+          `Packet has ${recCount} recommended options (expected at most 1).`,
           "packet.options",
         ),
       );

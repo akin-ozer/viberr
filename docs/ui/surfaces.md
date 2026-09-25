@@ -239,7 +239,12 @@ Intents behind `project.task.tsx` are explained in
   starter (an empty picker is refused with "Choose an agent first", the combobox
   marked and focused; a live run on that profile and the owner-credential refusal
   are availability and keep `disabled`), the project's **Add member** modal (a
-  `MiniModal` opened from a head button, ruling 148(b)) and the agent profile editor.
+  `MiniModal` opened from a head button, ruling 148(b)), the agent profile editor, and the
+  task page's decision packet (ruling 478(e): a Confirm with nothing chosen is refused with
+  "Choose an answer above first.", the radiogroup marked and its first choice focused; a
+  choice the asking agent marked `reply` with the answer box empty is refused with "Write
+  your answer to <agent> first.", the box marked and focused; the empty directive keeps
+  "Write the directive first.").
   A save with nothing changed and a typed-name destructive confirmation keep
   `disabled` on purpose (147(d)).
   While the request is in flight, the New project primary shows it: the `loader`
@@ -421,7 +426,27 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   `attach-file` (contributor and above) on a task that is not archived. `accept` comes
   from the server's own whitelist, so the picker cannot offer a file the writer would
   refuse; the writer also refuses a traversing or dot-prefixed name and anything over
-  10 MB (`MAX_UPLOAD_BYTES`).
+  10 MB (`MAX_UPLOAD_BYTES`). Every file name carries its whole self in `title`, and under
+  the 720px breakpoint a file row gives the name its own line, whole, with "by <actor> ·
+  <time>" and the size under it (ruling 478(b)).
+- **An agent's question is answered to the agent** (ruling 478(e)): on a packet the render
+  marks with `answerTo` (an `Agent question` with `askedBy`) nothing is preselected, even
+  the option the agent recommends (its "recommended" pill stays, and only a "(Recommended)"
+  mark earns it); no packet that recommends nothing preselects anything. The box under the
+  options reads "Your answer to <agent>" with the hint "optional · goes back to <agent> with
+  your choice · 4,000 characters max", or "required · …" (and the `*`) when the chosen
+  option carries `reply`; the directive's hint reads "resolves this decision · goes back
+  to <agent>". Every other packet keeps "Note for the operator".
+- **Written text sits under the page's headings and shows what it holds** (ruling 478(a),
+  (f)): typed timeline events render as markdown like comments (a fenced block scrolls on
+  its own, inline code breaks); a timeline entry's or a packet body's top heading renders
+  at h3 with deeper ones following; the GitHub panel's bar carries a visually hidden h2
+  "GitHub". The Live run strip's step cuts at the strip's edge with its ellipsis
+  (`.run-phase-text`, ruling 478(c)).
+- **The stream pickers say whose console is shown** (ruling 478(d)): the Agent logs picker
+  is named "Agent log stream: <name> · <role>" and the live strip's "Running agent: …";
+  opening one moves focus to the stream shown, the arrows move focus between streams, and
+  only Enter, Space or a click switches the console, returning focus to the trigger.
 - **The Agent-logs console carries a prompt-cache facts row** (ruling 369) under its bar:
   quiet chips for the first call's temperature and figures (green "warm start · read 47.9k",
   amber "cold start · wrote 298k"), the provider's miss reason when it sent one, the TTL

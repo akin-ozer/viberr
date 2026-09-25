@@ -151,9 +151,87 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     // CANARY: `(question.options ?? []).slice(0, 4)` in the builder.
     expect(packet.options.map((o) => o.t)).toContain("the fifth, which used to vanish");
     expect(packet.options).toHaveLength(5);
-    // The first is still the suggested one; the cut never decided that.
-    expect(packet.options.filter((o) => o.rec)).toHaveLength(1);
-    expect(packet.options[0]!.rec).toBe(true);
+    // Nothing was marked, so nothing is recommended (ruling 478(e)); the cut
+    // never decided that either.
+    expect(packet.options.filter((o) => o.rec)).toHaveLength(0);
+  });
+
+  it("ruling 478(e) (F40-57): an unmarked list carries no recommendation, and a marked one carries exactly its mark", async () => {
+    /**
+     * WEB-5: the Content Writer asked two things only Akin could answer (may a
+     * customer story be published, is an unattributed video his talk). Option
+     * 1 wore "recommended" and was preselected, and the agent had to post a
+     * comment saying the pick was not its recommendation.
+     *
+     * CANARY: `marked === -1 ? 0 : marked` in the builder.
+     */
+    const { buildAgentQuestionPacket } = await import("./agent-outcome.server");
+    const agent = { kind: "agent", backend: "claude", profileId: "content-writer", roleHint: "Content Writer" } as const;
+    const unmarked = buildAgentQuestionPacket(agent, {
+      title: "May /talks list the AWS customer panel, and is the Vault meetup video your talk?",
+      options: [{ title: "List the panel and link the video" }, { title: "Leave both out" }],
+    });
+    expect(unmarked.options.map((o) => o.rec)).toEqual([false, false]);
+    const marked = buildAgentQuestionPacket(agent, {
+      title: "Which heading?",
+      options: [{ title: "Talks" }, { title: "Speaking (Recommended)" }],
+    });
+    expect(marked.options.map((o) => [o.t, o.rec])).toEqual([
+      ["Talks", false],
+      ["Speaking", true],
+    ]);
+  });
+
+  it("ruling 478(e) (F40-31): a choice that needs a typed answer says so on the packet, and the no-choice fallback always does", async () => {
+    /**
+     * WEB-3: "Connected; the first build succeeded" asked, in its own detail,
+     * for the Worker name and the workers.dev URL, and nothing on the packet
+     * said the choice was empty without them.
+     *
+     * CANARY: drop `if (o.reply) option.reply = true;` in the builder, or the
+     * fallback's `reply: true`.
+     */
+    const { buildAgentQuestionPacket } = await import("./agent-outcome.server");
+    const agent = { kind: "agent", backend: "claude", profileId: "platform-engineer", roleHint: "Platform Engineer" } as const;
+    const packet = buildAgentQuestionPacket(agent, {
+      title: "Is Workers Builds connected?",
+      options: [
+        {
+          title: "Connected; the first build succeeded",
+          detail: "Reply with the Worker name and the workers.dev URL exactly as Cloudflare shows them.",
+          reply: true,
+        },
+        { title: "Not yet" },
+      ],
+    });
+    expect(packet.options.map((o) => o.reply)).toEqual([true, undefined]);
+    const fallback = buildAgentQuestionPacket(agent, { title: "What is the Worker called?" });
+    expect(fallback.options).toHaveLength(1);
+    expect(fallback.options[0]).toMatchObject({ kind: "custom", rec: false, reply: true });
+    // The answer goes back to the agent that asked, so the option no longer
+    // says the operator picks it up.
+    expect(fallback.options[0]!.d).not.toMatch(/operator/i);
+  });
+
+  it("ruling 478(e): the Codex envelope carries `reply`, and the schema stays strict", () => {
+    // CANARY: drop `if (opt.reply === true) choice.reply = true;` in the parser.
+    expect(assertStrictSchema(AGENT_OUTCOME_JSON_SCHEMA)).toEqual([]);
+    const o = parseAgentOutcomeJson(
+      JSON.stringify({
+        summary: "Blocked on the Cloudflare side.",
+        verdict: null,
+        evidence: null,
+        question: {
+          title: "Is Workers Builds connected?",
+          body: null,
+          options: [
+            { title: "Connected", detail: "Reply with the URL.", reply: true },
+            { title: "Not yet", detail: null, reply: null },
+          ],
+        },
+      }),
+    );
+    expect(o?.question?.options?.map((c) => c.reply)).toEqual([true, undefined]);
   });
 
   it("U39-23: an agent's '(Recommended)' mark leaves the title and decides the pill", async () => {

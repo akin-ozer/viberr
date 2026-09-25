@@ -267,7 +267,12 @@ run does not (ruling 216).
   its delivering run last saved files (`files:<deliveredAt>`), so a report or attachment
   deliverable is reviewable like a commit and a later save stales older verdicts. Never
   hand-edit it; the projection re-derives it from `workRevision`, `deliveredAt`,
-  `verdicts`, `engagements`, `noChanges` and `acceptance`.
+  `verdicts`, `engagements`, `noChanges` and `acceptance`. A verdict's `quality` event (and
+  the bell notification carrying its title) is titled from the validation it leaves:
+  "Changes requested"; "Review passed"; "Approval noted, rework still needed" only when
+  another required reviewer requested changes (`failing`, naming them); "Approval noted,
+  waiting on <names>" while required reviewers still owe a verdict (`changed`); otherwise
+  "Approval noted" (ruling 478(g)).
 
 **Nothing moving.** `sweepStrandedTasks` (`stranded-sweep.server.ts`, ruling 330) runs
 after each schedule tick and finds a task untouched for 15 minutes

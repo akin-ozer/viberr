@@ -24,11 +24,14 @@ import {
 } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
+  ASK_HUMAN_RECOMMEND_NOTE,
+  ASK_HUMAN_REPLY_NOTE,
   buildAgentQuestionPacket,
   runIdForOutcomeKey,
   stageOutcome,
   type AgentCollab,
   type AgentOutcome,
+  type AgentOutcomeChoice,
   type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
@@ -226,11 +229,9 @@ export async function postAgentComment(
   );
 }
 
-/** One answer choice offered alongside an agent question. */
-export interface AgentQuestionOption {
-  title: string;
-  detail?: string;
-}
+/** One answer choice offered alongside an agent question: the envelope's
+ *  own choice shape, so the two transports cannot drift. */
+export type AgentQuestionOption = AgentOutcomeChoice;
 
 /** The question an agent raises, addressed at a task. */
 export interface AgentQuestionRequest {
@@ -403,12 +404,13 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
               z.strictObject({
                 title: z.string().describe("A concrete answer choice."),
                 detail: z.string().optional().describe("Short clarification."),
+                reply: z.boolean().optional().describe(ASK_HUMAN_REPLY_NOTE),
               }),
             )
             .max(ASK_HUMAN_MAX_OPTIONS)
             .optional()
             .describe(
-              `2-${ASK_HUMAN_MAX_OPTIONS} answer choices (first is presented as suggested). ` +
+              `2-${ASK_HUMAN_MAX_OPTIONS} answer choices. ${ASK_HUMAN_RECOMMEND_NOTE} ` +
                 `More than ${ASK_HUMAN_MAX_OPTIONS} is refused, not trimmed: pick the ones that ` +
                 "are really different and put the rest in `body`.",
             ),
@@ -429,6 +431,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
               question.options = args.options.map((o) => {
                 const option: AgentQuestionOption = { title: prose(o.title) };
                 if (o.detail) option.detail = prose(o.detail);
+                if (o.reply) option.reply = true;
                 return option;
               });
             }

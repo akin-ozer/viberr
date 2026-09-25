@@ -587,7 +587,7 @@ describe("task detail wiring", () => {
   const live = { state: "running", lifecycle: "running", finished: null } as const;
   /** The thread the console shows, read off its own picker. */
   const shownThread = (root: ParentNode) =>
-    root.querySelector('[aria-label="Select agent log stream"]')?.textContent ?? "";
+    root.querySelector('.panel-head .rsel-btn .rsel-nm')?.textContent ?? "";
 
   it("opens the named thread's console and leaves an open console open (ruling 380)", async () => {
     const intoView = vi.spyOn(Element.prototype, "scrollIntoView");

@@ -4040,6 +4040,12 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 
 .runbar-body { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: .75rem; }
 .run-phase { display: flex; align-items: center; gap: .75rem; flex: 1 1 250px; min-width: 0; }
+/* Ruling 478(c) (F40-33): the phase's text column is a flex item too, and an
+   automatic minimum held it at the step's 44ch (317px) inside a 283px phase
+   on a phone: the step ran through the strip's border, took its ellipsis with
+   it and widened the whole page. With a zero minimum the column shrinks to
+   the phase and the step's own ellipsis shows. */
+.run-phase-text { min-width: 0; }
 .run-phase .ph { font-family: var(--font-display); font-weight: 800; font-size: 1rem; }
 .run-phase .step { margin-top: .125rem; color: var(--muted); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 44ch; }
 .run-spin { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--agent), transparent 70%); border-top-color: var(--agent); animation: runSpin .9s linear infinite; }
@@ -4613,6 +4619,15 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
     transform: none;
     transition: transform .15s var(--ease-out);
   }
+  /* Ruling 478(b) (F40-32): a file row's name takes its own line, whole, and
+     "by <actor> · <time>" and the size drop under it. On one line the fixed
+     by-line (144px) and size left the name 48px, so every file on WEB-3 read
+     "WEB-3…". `a.` outranks the base rules, which are declared later. */
+  a.attach-file { flex-wrap: wrap; row-gap: .125rem; }
+  a.attach-file .attach-name { flex: 1 1 calc(100% - 15px - .5rem); white-space: normal; overflow-wrap: anywhere; }
+  a.attach-file .attach-name + * { margin-left: calc(15px + .5rem); }
+  a.attach-file .attach-by { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  a.attach-file .attach-size { margin-left: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   /* The drawer stops sliding. Its scrim keeps the opacity fade, because a

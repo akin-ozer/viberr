@@ -398,6 +398,42 @@ function componentsFor(
 
 const DEFAULT_COMPONENTS = componentsFor(undefined, undefined);
 
+/** The mdast node kinds the heading pass reads (declared here for the same
+ *  reason the hast kinds above are: `mdast` reaches us only through
+ *  react-markdown's own dependencies). */
+interface MdastNode {
+  type: string;
+  depth?: number;
+  children?: MdastNode[];
+}
+
+/**
+ * Ruling 478(f) (F40-35): remark plugin factory for text that sits UNDER one of
+ * the page's own headings. An agent writes `#` and `##` for the sections of its
+ * report, and rendered as h1/h2 they joined the task page's outline beside
+ * Timeline, Agent logs and Details (twelve such h2s on WEB-4), and a packet
+ * body's steps became siblings of the question they belong to.
+ *
+ * The text's own top level renders at `base` and deeper levels follow, capped
+ * at h6: relative to the top level the author used, not to `#`, because agents
+ * open their sections with `##` as often as with `#`, and a fixed shift made
+ * those skip a level (an h2 title, then h4). `base` 1 leaves the text as written.
+ */
+function remarkHeadingBase(base = 1) {
+  return function transform(tree: MdastNode) {
+    if (base <= 1) return;
+    const headings: MdastNode[] = [];
+    const collect = (node: MdastNode) => {
+      if (node.type === "heading") headings.push(node);
+      for (const child of node.children ?? []) collect(child);
+    };
+    collect(tree);
+    if (headings.length === 0) return;
+    const top = Math.min(...headings.map((h) => h.depth ?? 1));
+    for (const h of headings) h.depth = Math.min(6, base + (h.depth ?? 1) - top);
+  };
+}
+
 interface MarkdownProps {
   text: string;
   /** Known mentionable names, so a multi-word "@Arda Kaya" chips as one span. */
@@ -414,6 +450,11 @@ interface MarkdownProps {
   /** Opens an embedded attachment image in the task page's lightbox — pass
    *  `useAttachmentLightbox()`'s factory. Absent ⇒ embeds are plain images. */
   onAttachmentOpen?: AttachmentOpenFactory;
+  /** Ruling 478(f): the level the text's top heading renders at, for text
+   *  that sits under one of the page's own headings (a timeline entry under
+   *  Timeline's h2, a packet body under the packet's h2); deeper headings
+   *  follow. Absent ⇒ 1, as written. */
+  headingBase?: number;
 }
 
 function sameList(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
@@ -473,6 +514,7 @@ export function sameMarkdownProps(a: MarkdownProps, b: MarkdownProps): boolean {
     a.text === b.text &&
     a.attachmentsBase === b.attachmentsBase &&
     a.onAttachmentOpen === b.onAttachmentOpen &&
+    a.headingBase === b.headingBase &&
     sameList(a.mentionNames, b.mentionNames) &&
     sameSet(a.attachmentNames, b.attachmentNames) &&
     sameLinksForText(a.text, a.taskLinks, b.taskLinks)
@@ -486,6 +528,7 @@ export const Markdown = memo(function Markdown({
   attachmentsBase,
   onAttachmentOpen,
   taskLinks,
+  headingBase = 1,
 }: MarkdownProps): ReactNode {
   // Stable component TYPES: `componentsFor` returns fresh functions, and React
   // unmounts and remounts every element rendered through a new type — every
@@ -506,7 +549,7 @@ export const Markdown = memo(function Markdown({
   );
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, [remarkHeadingBase, headingBase]]}
       rehypePlugins={[
         [rehypeMentions, mentionNames ?? []],
         [rehypeTaskLinks, taskLinks ?? {}],

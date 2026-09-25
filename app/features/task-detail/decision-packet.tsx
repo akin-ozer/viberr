@@ -34,6 +34,10 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
 const BLOCK_REASON_ID = "pkt-block-reason";
 /** Ruling 147: where a refused Confirm says the directive is still empty. */
 const CUSTOM_ERR_ID = "pkt-custom-err";
+/** Ruling 478(e): where a refused Confirm says no answer is chosen yet. */
+const CHOICE_ERR_ID = "pkt-choice-err";
+/** Ruling 478(e): where a refused Confirm says the chosen answer needs text. */
+const REPLY_ERR_ID = "pkt-reply-err";
 /**
  * UX19-4 — the exact label of the GitHub panel's delivery button
  * (`task-side-panels.tsx`). The note below points a human at a control BY NAME,
@@ -65,11 +69,14 @@ function renderInlineCode(text: string): ReactNode[] {
  * read as one paragraph with literal `**` and `##` (WEB-3, 2026-09-24). It goes
  * through the same GFM renderer as the timeline's comments; a <div>, because a
  * list cannot sit inside a <p>.
+ *
+ * Ruling 478(f) (F40-35): the body's headings are parts of the question, so
+ * they nest under the packet's own h2 title rather than standing beside it.
  */
 function PacketBody({ text }: { text: string }): ReactNode {
   return (
     <div className="packet-lede md-body">
-      <Markdown text={text} />
+      <Markdown text={text} headingBase={3} />
     </div>
   );
 }
@@ -903,13 +910,27 @@ export function DecisionPacket({
   onAsk: () => void;
 }) {
   const p = packet;
-  const [sel, setSel] = useState(() =>
-    Math.max(0, p.options.findIndex((o) => o.rec)),
-  );
+  /**
+   * Ruling 478(e) (F40-31, F40-57): the agent this card's answer goes back to,
+   * when an agent asked. Its question is one only the person can answer, so
+   * nothing is preselected on it (WEB-3's "Connected; the first build
+   * succeeded" was one Confirm from telling the agent a build had passed), and
+   * nothing is preselected on a packet that recommends nothing. -1 is "no
+   * choice yet"; Confirm then refuses in place (ruling 147).
+   */
+  const answerTo = p.answerTo;
+  const [sel, setSel] = useState(() => {
+    // With no authored option, the composed directive (index 0) is the one
+    // choice there is, and it asks for the words itself.
+    if (p.options.length === 0) return 0;
+    return answerTo ? -1 : p.options.findIndex((o) => o.rec);
+  });
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
   // P11-71: optional free-text so a human can supply the input an option asks
   // for (e.g. "specify the expected behavior") instead of resolving with an
-  // unstated reading. Recorded on the decision event.
+  // unstated reading. Recorded on the decision event. Ruling 478(e): required
+  // when the chosen option is one the asking agent marked `reply`.
   const [note, setNote] = useState("");
   // Questionnaire shape (shadcn base/questionnaire): a free-text input composed
   // WITH the fixed choices, as its own last choice. Selecting it reveals the
@@ -1026,6 +1047,15 @@ export function DecisionPacket({
   // R14-3 / F20-6 / F31-6 the three that touch a branch.
   const selectedGate = selected ? gateFor(selected.kind) : null;
   const blockReason = selectedGate?.denyNote ?? null;
+  // Ruling 478(e): the two refusals a Confirm can meet before any request.
+  // Both clear the moment the person does what they name.
+  const noChoice = sel < 0;
+  const needsReply = selected?.reply === true;
+  const choiceInvalid = refused > 0 && noChoice;
+  const replyInvalid = refused > 0 && needsReply && note.trim() === "";
+  // Roving tabindex: with nothing chosen yet, the first choice is the group's
+  // one tab stop (APG radio group).
+  const tabStop = noChoice ? 0 : sel;
   // F20-17/F20-18: is EVERY option above this viewer's tier? Only meaningful
   // when they can resolve at all (a contributor-OWNER — the owner exception let
   // them open the card, but each option re-checks a higher tier). A single
@@ -1060,7 +1090,16 @@ export function DecisionPacket({
     // more than once, which would schedule the frame twice. `sel` is current
     // here (this only runs from a keydown handler), matching the click path at
     // the option buttons below.
-    const next = (sel + delta + choiceCount) % choiceCount;
+    // Ruling 478(e): with nothing chosen, an arrow moves from the choice that
+    // has focus (the group's tab stop), or enters the list at its nearest end.
+    const from =
+      sel >= 0 ? sel : optionRefs.current.findIndex((el) => el === document.activeElement);
+    const next =
+      from < 0
+        ? delta > 0
+          ? 0
+          : choiceCount - 1
+        : (from + delta + choiceCount) % choiceCount;
     selectOption(next);
     requestAnimationFrame(() => optionRefs.current[next]?.focus());
   };
@@ -1203,6 +1242,8 @@ export function DecisionPacket({
           className="options"
           role="radiogroup"
           aria-label="Decision options"
+          aria-invalid={choiceInvalid || undefined}
+          aria-describedby={choiceInvalid ? CHOICE_ERR_ID : undefined}
           onKeyDown={(e) => {
             if (e.key === "ArrowDown" || e.key === "ArrowRight") {
               e.preventDefault();
@@ -1247,7 +1288,7 @@ export function DecisionPacket({
                 // stills its hover and press (`.opt[aria-disabled="true"]`
                 // in app.css); the inline .55 it wore is gone.
                 aria-disabled={blocked || undefined}
-                tabIndex={sel === i ? 0 : -1}
+                tabIndex={tabStop === i ? 0 : -1}
                 className={
                   "opt" + (sel === i ? " sel" : "") + (o.rec ? " recommend" : "")
                 }
@@ -1340,16 +1381,21 @@ export function DecisionPacket({
                 optionRefs.current[customIndex] = el;
               }}
               aria-checked={customSelected}
-              tabIndex={sel === customIndex ? 0 : -1}
+              tabIndex={tabStop === customIndex ? 0 : -1}
               className={"opt opt-custom" + (customSelected ? " sel" : "")}
               onClick={() => selectOption(customIndex)}
             >
               <span className="radio" />
               <span>
+                {/* Ruling 478(e) (F40-31): on an agent's question the words go
+                    back to that agent (`resolvePacket`), not to the operator.
+                    The title stays: the controller's briefing names this
+                    choice by it. */}
                 <div className="ot">Write your own directive</div>
                 <div className="od">
-                  Answer in your own words. The operator (and the asking agent,
-                  if one raised this) re-engages with exactly what you type.
+                  {answerTo
+                    ? `Answer in your own words. It goes back to ${answerTo}, which carries on from where it stopped.`
+                    : "Answer in your own words. The operator re-engages with exactly what you type."}
                 </div>
               </span>
               {customIndex < 9 && (
@@ -1359,11 +1405,29 @@ export function DecisionPacket({
           )}
         </div>
 
+        {choiceInvalid && (
+          // Ruling 478(e) under ruling 147: a Confirm with nothing chosen is
+          // refused here, a fresh alert per press, focus on the first choice.
+          <p
+            key={`choice-${refused}`}
+            id={CHOICE_ERR_ID}
+            className={"deny-note spaced" + (refusalShake.shake ? " refused" : "")}
+            onAnimationEnd={refusalShake.onAnimationEnd}
+            role="alert"
+          >
+            <Icon name="alert" />
+            Choose an answer above first.
+          </p>
+        )}
+
         {customSelected && (
           <div className="field packet-note-field">
             <label className="flabel" htmlFor="pkt-custom">
               Your directive<span className="req">*</span>
-              <span className="fhint">resolves this decision · handed to the operator</span>
+              <span className="fhint">
+                resolves this decision ·{" "}
+                {answerTo ? `goes back to ${answerTo}` : "handed to the operator"}
+              </span>
             </label>
             <textarea
               id="pkt-custom"
@@ -1421,30 +1485,59 @@ export function DecisionPacket({
           // message, and two competing textareas would ask which one counts.
           <div className="field packet-note-field">
             <label className="flabel" htmlFor="pkt-note">
-              Note for the operator
+              {/* Ruling 478(e) (F40-31): on an agent's question this box is the
+                  person's answer to THAT agent, which `resolvePacket` sends it
+                  back to. "Note for the operator · optional" told them their
+                  reply was a side note for someone else, and a note that named
+                  the operator, as the label invited, re-routed the answer away
+                  from the agent that asked (ruling 447). */}
+              {answerTo ? `Your answer to ${answerTo}` : "Note for the operator"}
+              {needsReply && <span className="req">*</span>}
               <span className="fhint">
                 {/* Ruling 315: the length is stated BEFORE it matters. The route
                     used to cut this to 2,000 characters with nothing on the box
                     saying so, and the server now refuses instead — a refusal a
                     person could not see coming is a worse trade than the cut it
                     replaced unless the box says the number. */}
-                optional · recorded on the decision · {PACKET_NOTE_MAX.toLocaleString("en-US")}{" "}
-                characters max
+                {needsReply ? "required" : "optional"} ·{" "}
+                {answerTo ? `goes back to ${answerTo} with your choice` : "recorded on the decision"} ·{" "}
+                {PACKET_NOTE_MAX.toLocaleString("en-US")} characters max
               </span>
             </label>
             <textarea
               id="pkt-note"
+              ref={noteRef}
               className="packet-note"
               value={note}
               onChange={(e) => setNote(e.target.value)}
+              aria-invalid={replyInvalid || undefined}
+              aria-describedby={replyInvalid ? REPLY_ERR_ID : undefined}
               // U39-7: this box sits under every packet, and "before
               // reopening" fitted only the closed-pull-request one.
-              placeholder="e.g. anything the operator should also know"
+              placeholder={
+                answerTo
+                  ? needsReply
+                    ? "e.g. what it asked for, exactly as you see it"
+                    : `e.g. anything ${answerTo} should also know`
+                  : "e.g. anything the operator should also know"
+              }
               rows={1}
               // The browser stops the paste at the cap rather than letting the
               // server refuse a confirm the person has already committed to.
               maxLength={PACKET_NOTE_MAX}
             />
+            {replyInvalid && (
+              <p
+                key={`reply-${refused}`}
+                id={REPLY_ERR_ID}
+                className={"deny-note spaced" + (refusalShake.shake ? " refused" : "")}
+                onAnimationEnd={refusalShake.onAnimationEnd}
+                role="alert"
+              >
+                <Icon name="alert" />
+                {answerTo ? `Write your answer to ${answerTo} first.` : "Write your answer first."}
+              </p>
+            )}
             {note.length > PACKET_NOTE_MAX - 200 && (
               <p className="fine xs dim">
                 {note.length.toLocaleString("en-US")} of{" "}
@@ -1579,6 +1672,20 @@ export function DecisionPacket({
                     setRefused((n) => n + 1);
                     customRef.current?.focus();
                   }
+                  return;
+                }
+                // Ruling 478(e) under ruling 147: nothing chosen, or a choice
+                // the asking agent marked as needing a typed answer with the
+                // box still empty, is refused in place: the alert names it and
+                // focus lands where the person must act. Never a request.
+                if (noChoice) {
+                  setRefused((n) => n + 1);
+                  optionRefs.current[tabStop]?.focus();
+                  return;
+                }
+                if (needsReply && note.trim() === "") {
+                  setRefused((n) => n + 1);
+                  noteRef.current?.focus();
                   return;
                 }
                 // The packet's one-way halves ask first (rulings 20/53), each

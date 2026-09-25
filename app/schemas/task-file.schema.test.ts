@@ -787,7 +787,7 @@ describe("packet block parse (tolerant)", () => {
     expect(diagnostics[0]?.code).toBe("packet.invalid");
   });
 
-  it("zero or multiple recommended options → info diagnostic", () => {
+  it("multiple recommended options → info diagnostic", () => {
     const { diagnostics } = parsePacket({
       type: "blocked",
       kind: "Blocked decision",
@@ -798,6 +798,24 @@ describe("packet block parse (tolerant)", () => {
       ],
     });
     expect(diagnostics.some((d) => d.code === "packet.rec_count")).toBe(true);
+  });
+
+  it("ruling 478(e): no recommended option is a legitimate packet, with no diagnostic", () => {
+    // An agent's question it has no pick on carries no `rec`; the task page
+    // printed "0 recommended options (expected exactly 1)" as a heads-up on
+    // every such packet. CANARY: restore `recCount !== 1`.
+    const { packet, diagnostics } = parsePacket({
+      type: "input",
+      kind: "Agent question",
+      title: "May /talks list the AWS customer panel?",
+      options: [
+        { kind: "custom", t: "List it", rec: false },
+        { kind: "custom", t: "Leave it out", rec: false, reply: true },
+      ],
+    });
+    expect(diagnostics.some((d) => d.code === "packet.rec_count")).toBe(false);
+    // `reply` round-trips as a typed field.
+    expect(packet!.options.map((o) => o.reply)).toEqual([undefined, true]);
   });
 
   it("null/undefined → no packet, no diagnostics", () => {

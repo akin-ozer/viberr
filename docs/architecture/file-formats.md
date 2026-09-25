@@ -595,6 +595,7 @@ Packet notes:
   | `blockedBy` | `block_on_dependencies` | what this task will wait on, in `blockedBy` spellings (ruling 230) |
   | `newTask` | `create_task` | `{ title, goal, blockedBy?, blocks?, labels? }`: the task the resolution creates; `blocks` names existing tasks that must wait on it (rulings 269, 287) |
   | `rework` | `redirect` | set by the branch-conflict packet: the resolution returns a task standing at or past the review stage to it in the same write (ruling 163) |
+  | `reply` | `custom` (an agent's question) | `true` when choosing the option needs the person's typed answer: the card requires the answer box and `resolvePacket` refuses the option without a note (ruling 478(e)). Written by `ask_human` and the Codex envelope; the options-less fallback always carries it |
 
   The schema is `.loose()`, so an unknown option key round-trips and is read by nothing. There
   is no `accept:` field: acceptance is gated **solely** on `kind === "accept_completion"`, plus
@@ -606,8 +607,9 @@ Packet notes:
   successful run may withdraw), and `askedBy` (R15-14: the profile of the agent that raised
   the question; resolving it resumes that agent's session).
 - `options` and `observations` parse per row: a malformed row drops only itself
-  (`packet.invalid_option`, `packet.invalid_observation`). A packet with options but not
-  exactly one `rec: true` gets a `packet.rec_count` info diagnostic.
+  (`packet.invalid_option`, `packet.invalid_observation`). A packet with more than one
+  `rec: true` gets a `packet.rec_count` info diagnostic. None is legitimate: an agent's
+  question carries `rec` only on the option the agent marked "(Recommended)" (ruling 478(e)).
 - The writer fences the block with more backticks than the longest run inside it, and the
   reader closes it only on a fence at least as long, so packet prose that quotes a code fence
   stays inside the block.
@@ -616,7 +618,9 @@ Packet notes:
   `app/shared/mapping/task.server.ts`): `goalDraftForOption` of the option
   `decided.optionIndex` names, present exactly while `awaiting: goal_edit` and a decision is
   recorded. It is never written to the file. Every door into the goal editor reads that one
-  field.
+  field. The render also derives `answerTo` (ruling 478(e)): the asking agent's display name,
+  set exactly when `kind` is `Agent question` and `askedBy` is set, the packets whose answer
+  `resolvePacket` sends back to that agent; the card names its answer box after it.
 
 ### Timeline entry grammar (append contract for agents)
 
@@ -645,8 +649,10 @@ Packet notes:
   reviewer's verdict report, `Compacted` on a compaction marker), `to: agent` (a comment
   routed to the operator — `comment-card toagent` tint) and `notified: <id>, <id>` (ruling
   382: the users this event's own notification reached, after routing preferences).
-- Then a blank line and the event text (RichText micro-format: `**bold**`,
-  `` `code` ``, `@mention`). Multi-line text is allowed.
+- Then a blank line and the event text: GFM markdown for every event type, comments and
+  typed events alike (ruling 478(a); `@mention` chips for known names). Multi-line text,
+  paragraphs and fenced blocks are allowed. The activity and notification feeds render it
+  through the inline `RichText` micro-format (`**bold**`, `` `code` ``, `@mention`).
 - **Body-line escaping** (structure-like text): an event-body line whose raw
   form would read as file structure — starting with `## `, `### `,
   `title:<ws>`, `to:<ws>`, `notified:<ws>`, or a line that is only (whitespace and)
