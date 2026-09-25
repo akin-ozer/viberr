@@ -2,8 +2,8 @@ import { describeRevisionDrift } from "~/shared/revision-drift";
 import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { PrOverlap } from "~/shared/pr-overlaps";
-import type { PrChecksRender, PrChecksUnread } from "~/shared/mapping/task.server";
-import { checksPill, checksUnreadPill, gatesPill, prStatePill } from "~/features/github/github-pills";
+import type { PrChecksRender } from "~/shared/mapping/task.server";
+import { checksPill, gatesPill, prStatePill } from "~/features/github/github-pills";
 import type { GatesView } from "~/shared/project-gates";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
@@ -95,9 +95,6 @@ export interface AcceptConfirmTask {
    * nothing has reported, which reads as "not reported" and never as "green".
    */
   prChecks: PrChecksRender | null;
-  /** Ruling 360: the check-runs read GitHub refused, while nothing was ever
-   *  read. The dialog says so: a refused read is not "nothing reported". */
-  prChecksUnread?: PrChecksUnread | null;
 }
 
 function headingFor(mode: AcceptCeremonyMode, terminalName: string): string {
@@ -465,24 +462,6 @@ export function AcceptConfirm({
                       </span>
                     </>
                   ) : null}
-                  {/* Ruling 360 (pass 38, F38-14): ruling 304 put the checks
-                      on this row; a read the credential cannot make left the
-                      row silent through 89 merges of red-CI heads. The refusal
-                      is a fact the person deciding is owed. */}
-                  {!task.prChecks && task.prChecksUnread ? (
-                    <>
-                      {" "}
-                      <Pill kind={checksUnreadPill().kind} sm>
-                        {checksUnreadPill().label}
-                      </Pill>{" "}
-                      <span className="pol-note" data-checks-unread>
-                        GitHub refused this credential's read of the check results
-                        {task.prChecksUnread.status ? ` (HTTP ${task.prChecksUnread.status})` : ""}:{" "}
-                        {task.prChecksUnread.message}. Whether CI passed is not known here, and merging
-                        does not wait for it.
-                      </span>
-                    </>
-                  ) : null}
                 </>
               ) : noChanges ? (
                 // F19-21 opened a SECOND no-change shape and this row asserted
@@ -643,7 +622,7 @@ export function AcceptConfirm({
             <div className={gates.state === "passed" ? "obs" : "obs warn"}>
               <span className="k">Gates</span>
               <div>
-                <Pill kind={gatesPill(gates.state).kind} sm quiet={gatesPill(gates.state).quiet}>
+                <Pill kind={gatesPill(gates.state).kind} sm>
                   {gatesPill(gates.state).label}
                 </Pill>{" "}
                 {gates.line}

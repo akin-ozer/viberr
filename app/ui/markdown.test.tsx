@@ -345,6 +345,21 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
     expect(container.querySelector("code")!.textContent).toBe("AX-33");
     expect(container.querySelector("a:not(.task-ref)")!.getAttribute("href")).toBe("https://x.test");
   });
+
+  it("links a proposal id the page resolved to its in-page entry, in the same tab", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <Markdown
+          text={"Open: kp-9f258c9ef4 and kp-0000000000."}
+          taskLinks={{ "kp-9f258c9ef4": "#proposal-kp-9f258c9ef4" }}
+        />
+      </MemoryRouter>,
+    );
+    const ref = container.querySelector("a.kp-ref")!;
+    expect(ref.getAttribute("href")).toBe("#proposal-kp-9f258c9ef4");
+    expect(ref.hasAttribute("target")).toBe(false);
+    expect(container.querySelectorAll("a")).toHaveLength(1);
+  });
 });
 
 describe("re-rendering a live page", () => {

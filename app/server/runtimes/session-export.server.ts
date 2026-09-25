@@ -545,8 +545,8 @@ export function sessionContextTokens(
  * Ruling 403: `postTokens` is NULL when nothing measured it, never 0. A zero
  * seeded as "not measured yet" survived all the way to the timeline, where it
  * told a human that a 100k-213k token conversation had been summarized "to 0k
- * tokens". Null is the value the whole chain treats as unmeasured
- * (`compactionNoteText` renders it "a summary").
+ * tokens". Null is the value the whole chain treats as unmeasured (the
+ * completion line on the run's console renders it "a summary").
  *
  * Ruling 414 corrected why it was missing. The CLI writes one compaction as
  * `compacted`, then its own size line (a `token_count` whose prompt is 0 and
@@ -577,11 +577,12 @@ export interface CodexRolloutRunStats {
   /** The last call's prompt — the size a resume replays. */
   lastPromptTokens: number;
   /** Context compactions the CLI recorded in the window: the length of
-   *  `compactionEvents`, so the run row and the notes count the same thing. */
+   *  `compactionEvents`, so the run row and the audit count the same thing. */
   compactions: number;
   /** One entry per compaction in the window, in order: the last prompt the
    *  CLI sent before it and the context it left (its own size line, else the
-   *  first call after it, else null). The sizes the timeline note prints. */
+   *  first call after it, else null). The sizes the audit row and the
+   *  console's completion line carry. */
   compactionEvents: CodexCompactionEvent[];
   /** Calls seen in the window; 0 means the rollout said nothing about it. */
   calls: number;

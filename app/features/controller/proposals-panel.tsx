@@ -68,14 +68,11 @@ export function ProposalsPanel({
         </span>
       </div>
       {proposals.length === 0 ? (
-        <p className="empty sm">
-          No open proposals. When an agent proves a line of a knowledge base wrong, its correction
-          waits here, not binding, until a person promotes or dismisses it.
-        </p>
+        <p className="empty sm">Nothing to review.</p>
       ) : (
         <ul className="ctl-proposal-list">
           {proposals.map((p) => (
-            <li key={p.id} className="ctl-proposal" data-proposal={p.id}>
+            <li key={p.id} id={`proposal-${p.id}`} className="ctl-proposal" data-proposal={p.id}>
               <div className="ctl-proposal-head">
                 <Pill kind="info" sm>
                   {p.rulings ? "Ruling" : "Knowledge base"}
@@ -152,10 +149,9 @@ export function ProposalsPanel({
           ))}
         </ul>
       )}
-      {canResolve && (
+      {canResolve && proposals.length > 0 && (
         <p className="fine xs dim ctl-proposals-note">
-          Promote and Dismiss ask the controller in this conversation; it edits the document and
-          closes the proposal.
+          Promote and Dismiss ask the controller here; it edits the document.
         </p>
       )}
       {confirmDismiss && (

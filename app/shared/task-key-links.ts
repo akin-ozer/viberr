@@ -7,8 +7,14 @@
  */
 export const TASK_KEY_IN_TEXT_RE = /\b[A-Z][A-Z0-9]{0,9}-\d{1,6}\b/g;
 
+/** Ruling 483's knowledge-base proposal ids as `kb-proposals.server.ts` mints
+ *  them: `kp-` and ten hex characters. A page that shows the open proposals
+ *  maps the ones it holds to their entries in the same {@link TaskLinks}. */
+export const PROPOSAL_ID_IN_TEXT_RE = /\bkp-[0-9a-f]{10}\b/g;
+
 /** U39-29: the tasks a text names that its reader can open, by key: the path
- *  each one opens at. Built by the page's loader; read by the renderer. */
+ *  each one opens at. Built by the page's loader; read by the renderer. A page
+ *  showing knowledge-base proposals adds each id's in-page anchor. */
 export interface TaskLinks {
   readonly [key: string]: string;
 }

@@ -1066,8 +1066,7 @@ describe("ruling 130(d): structured refusals and the principal", () => {
  * Ruling 369: the sink folds every cache fact onto the row — the run's writes,
  * the FIRST call (with its temperature and the provider's miss reason), the
  * peak and last prompt (per-call figures only), the TTL bucket and the
- * compactions — and a compaction is a governed fact with an audit row and a
- * timeline note.
+ * compactions — and a compaction is a governed fact with an audit row.
  */
 describe("ruling 369: the sink folds the prompt-cache record", () => {
   const cacheLine = (
@@ -1198,13 +1197,8 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
     expect(rowOf("run_codex_turn").first_call_prompt_tokens).toBe(14_000);
   });
 
-  it("a compaction the rollout reports and the stream never carried is audited and noted at finalize", async () => {
-    const { writeTask, baseTaskFrontmatter } = await import("../../../test-support/test-store");
-    const { readTaskFile } = await import("~/server/files/task-writer.server");
+  it("a compaction the rollout reports and the stream never carried is audited at finalize", async () => {
     const { listAuditEvents } = await import("../../../test-support/audit-log");
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl" }),
-    });
     upsertRun(store.db, {
       id: "run_rollout_compact",
       projectSlug: store.slug,
@@ -1219,11 +1213,7 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
       agentProfileId: "dev",
       state: "running",
     });
-    const sink = createRunSink(
-      store.db,
-      { ...spec("run_rollout_compact"), backend: "codex", taskKey: "VIB-3" },
-      { dataRoot: store.dataRoot },
-    );
+    const sink = createRunSink(store.db, { ...spec("run_rollout_compact"), backend: "codex", taskKey: "VIB-3" });
     const stats = {
       peakPromptTokens: 177_960,
       lastPromptTokens: 26_700,
@@ -1236,11 +1226,7 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
       (e) => e.taskKey === "VIB-3",
     );
     expect(audit).toHaveLength(1);
-    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
-    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!;
-    const note = task.parsed.timeline.find((e) => e.type === "note" && e.title === "Context compacted");
-    expect(note?.text).toContain("from 178k to 20k tokens");
-    // The same rollout folded again (a second finalize read) notes nothing new.
+    // The same rollout folded again (a second finalize read) audits nothing new.
     sink.foldRolloutStats(stats);
     expect(
       listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.taskKey === "VIB-3"),
@@ -1283,13 +1269,8 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
     expect(full.output_tokens).toBe(4_500);
   });
 
-  it("a compaction counts on the row, audits, and notes the task's timeline", async () => {
-    const { writeTask, baseTaskFrontmatter } = await import("../../../test-support/test-store");
-    const { readTaskFile } = await import("~/server/files/task-writer.server");
+  it("a compaction counts on the row and audits", async () => {
     const { listAuditEvents } = await import("../../../test-support/audit-log");
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
-    });
     upsertRun(store.db, {
       id: "run_compact",
       projectSlug: store.slug,
@@ -1304,11 +1285,7 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
       agentProfileId: "dev",
       state: "running",
     });
-    const sink = createRunSink(
-      store.db,
-      { ...spec("run_compact"), compactAnchor: "# Context compacted — re-anchor" },
-      { dataRoot: store.dataRoot },
-    );
+    const sink = createRunSink(store.db, { ...spec("run_compact"), compactAnchor: "# Context compacted — re-anchor" });
     sink.line({
       raw: JSON.stringify({ type: "system", subtype: "compact_boundary" }),
       display: { t: "00:00:00", ev: "meta", tag: "system·compact_boundary", text: "context compacted (auto)" },
@@ -1319,12 +1296,5 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
     const audit = listAuditEvents(store.db, { action: "task.agent.compaction" });
     expect(audit).toHaveLength(1);
     expect(audit[0]!.taskKey).toBe("VIB-1");
-    // The note is best-effort and lands after the line's own persist.
-    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
-    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    const note = task.parsed.timeline.find((e) => e.type === "note" && e.title === "Context compacted");
-    expect(note?.text).toContain("Dev");
-    expect(note?.text).toContain("from 251k to 12k tokens");
-    expect(note?.text).toContain("re-injected the task anchor");
   });
 });

@@ -33,7 +33,7 @@ import {
   TOKEN_PATTERN_SOURCE,
 } from "~/server/secrets/git-output-redact.server";
 import { startTemperature } from "./context-policy.server";
-import { noteRunCompaction } from "./run-context-events.server";
+import { recordRunCompaction } from "./run-context-events.server";
 import { errorMessage, toError } from "~/shared/errors";
 
 /** Terminal run states — reaching one is the run's final answer. */
@@ -227,8 +227,6 @@ export interface RunSinkOptions {
   /** Ruling 127: the plaintext credentials this run's child env carries, from
    *  `runCredentialFor`. Redacted from every persisted line and SSE payload. */
   secrets?: readonly string[];
-  /** The data root the compaction note writes under (tests). */
-  dataRoot?: string;
 }
 
 export function createRunSink(
@@ -305,9 +303,6 @@ export function createRunSink(
     const user = findUserById(db, userId);
     return { credentialUserId: userId, credentialLabel: user ? user.name || user.email : null };
   })();
-  /** Ruling 369: the name the compaction note calls the agent by. */
-  const agentName = runRow?.agent_name ?? null;
-
   // Ruling 99: a controller turn's frames route to its conversation owner (it
   // has no task scope to route on). Resolved once per run, like the principal.
   const controller =
@@ -519,9 +514,9 @@ export function createRunSink(
             if (f.cache.ttl.oneHour > 0) sawOneHour = true;
           }
         }
-        // Ruling 369: a compaction is counted on the row and noted on the task
-        // — the audit row and the timeline note are how a supervisor sees
-        // that the agent's context was replaced with a summary. Best-effort
+        // Ruling 369: a compaction is counted on the row and audited — the
+        // audit row is the governed record that the agent's context was
+        // replaced with a summary (no timeline note, ruling 490). Best-effort
         // by construction, and never on the line's own persist path.
         if (f.compaction) {
           compactions += 1;
@@ -533,7 +528,7 @@ export function createRunSink(
             lastPromptTokens = f.compaction.postTokens;
           }
           try {
-            noteRunCompaction(db, spec, agentName, f.compaction, line.occurredAt, opts.dataRoot);
+            recordRunCompaction(db, spec, f.compaction);
           } catch (error) {
             logger.error("compaction audit failed", {
               runId: spec.runId,
@@ -703,18 +698,15 @@ export function createRunSink(
       if (stats.lastPromptTokens > 0) lastPromptTokens = stats.lastPromptTokens;
       // Every compaction the rollout knows and the stream did not carry gets
       // the same governed record a streamed one gets (ruling 369(d)): the
-      // audit row and the task's timeline note, sizes from the rollout.
+      // audit row, sizes from the rollout.
       const events = stats.compactionEvents ?? [];
       for (const event of events.slice(compactions)) {
         try {
-          noteRunCompaction(
-            db,
-            spec,
-            agentName,
-            { trigger: "auto", preTokens: event.preTokens, postTokens: event.postTokens },
-            new Date().toISOString(),
-            opts.dataRoot,
-          );
+          recordRunCompaction(db, spec, {
+            trigger: "auto",
+            preTokens: event.preTokens,
+            postTokens: event.postTokens,
+          });
         } catch (error) {
           logger.error("compaction audit failed", {
             runId: spec.runId,

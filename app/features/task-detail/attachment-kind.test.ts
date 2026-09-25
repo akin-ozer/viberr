@@ -2,10 +2,24 @@ import { describe, expect, it } from "vitest";
 import {
   attachmentKind,
   BINARY_SNIFF_CHARS,
+  fileFamily,
   looksBinary,
 } from "./attachment-kind";
 
 const NUL = String.fromCharCode(0);
+
+describe("fileFamily", () => {
+  it("tints by the reader's grammar table: docs, data, log, any other grammar code, no grammar plain", () => {
+    expect(fileFamily("README.md")).toBe("docs");
+    expect(fileFamily("capture.yml")).toBe("data");
+    expect(fileFamily("results.csv")).toBe("data");
+    expect(fileFamily("console-1.log")).toBe("log");
+    expect(fileFamily("journey-script.mjs")).toBe("code");
+    expect(fileFamily("Dockerfile")).toBe("code");
+    expect(fileFamily("notes.txt")).toBe("plain");
+    expect(fileFamily("report.pdf")).toBe("plain");
+  });
+});
 
 /* Ruling 363: what the card can show, decided from the name and then the bytes. */
 describe("attachmentKind (ruling 363)", () => {

@@ -2048,6 +2048,6 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     renderPage(view({ proposals: [] }));
     const panel = await screen.findByRole("region", { name: "Proposals" });
     expect(within(panel).getByText("0 open")).toBeTruthy();
-    expect(within(panel).getByText(/No open proposals/)).toBeTruthy();
+    expect(within(panel).getByText("Nothing to review.")).toBeTruthy();
   });
 });

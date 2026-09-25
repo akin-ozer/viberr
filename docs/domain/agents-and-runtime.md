@@ -318,8 +318,8 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   wait for it, except the run's answered callback, which fires first on a finished run so
   the reply is not held behind the housekeeping (U39-30); the boundary is the run's
   compaction fact with trigger `completion`, the request's cost and tokens add to the run's
-  totals (`costAddUsd`, `usageAdd`), `last_prompt_tokens` becomes the post size, and the
-  timeline note says the next resume replays the summary. The console reads
+  totals (`costAddUsd`, `usageAdd`) and `last_prompt_tokens` becomes the post size. The
+  console reads
   `run·compacted·completion` ("context compacted at the end of the run · 111k → 9k
   tokens"), `run·compaction·request` (its cost and tokens) or `run·compaction·failed`;
   "Not enough messages to compact." is an outcome, never a failure. The phase is
@@ -744,8 +744,8 @@ inside the INSERT) → patch run facts, only when a folded value moved since the
 in the same transaction as the line → publish `run.log-appended {runId, seq}` (reference
 only). A line with no facts is therefore one statement and one commit, and
 `agent_runs.updated_at` moves with the facts, not with every line (ruling 457). The sink also
-writes the compaction audit and timeline note (ruling 369(d), `task.agent.compaction`, a
-"Context compacted" note by `system:runtime-continuity`). The `wire-format` projector maps
+writes the compaction audit row (ruling 369(d), `task.agent.compaction`); a compaction
+leaves no note on the task timeline (ruling 490). The `wire-format` projector maps
 provider envelopes to display lines with `ev ∈ init | text | tool | out | err | result |
 think | meta | diff`. The `step` column (at most 120 characters, `STEP_MAX`) names the
 tool being invoked and, once its result lands, reads `composing · <tool> · <input>
@@ -1041,8 +1041,8 @@ tooltip) and "N compactions" — each figure on a `data-` attribute (`data-start
 `data-peak`, `data-last`, `data-compactions`); a run with no first call says "no first
 call yet" (or "first call not recorded" when cache figures landed without a first call),
 never cold. A compaction also reads as a `system·compact_boundary` line ("context
-compacted (auto) · 972k → 10k tokens") and as a "Context compacted" note on the task
-timeline. Insights carries the same record as a table (ui/surfaces.md).
+compacted (auto) · 972k → 10k tokens"); it leaves no note on the task timeline (ruling
+490). Insights carries the same record as a table (ui/surfaces.md).
 
 ## 4. Specialist runs
 

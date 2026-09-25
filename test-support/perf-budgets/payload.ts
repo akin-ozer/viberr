@@ -83,9 +83,10 @@ export const PAYLOAD_BUDGETS: PerfBudgetTable = {
     journey: "board-live",
     fixture: `${BOARD_40}; /board; the 40 cards' JSON`,
   },
-  // BOARD-3: 49 before; `toBoardCard` ships the board's read set.
+  // BOARD-3: 49 before; `toBoardCard` ships the board's read set. 28 since
+  // ruling 491 dropped `prChecksUnread`, which fed only the removed pill.
   "payload:board-40.card-fields": {
-    ceiling: 29,
+    ceiling: 28,
     unit: "count",
     journey: "board-live",
     fixture: `${BOARD_40}; /board; the most fields any card ships`,
