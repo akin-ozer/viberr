@@ -8107,3 +8107,76 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 .gate-results .gate-log { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; }
 .gate-row .guard-ctl.cmd { flex: 2 1 16rem; }
 .gate-row .guard-ctl.cmd input { font-family: var(--font-mono); }
+
+/* ---------- appended: ruling 484, the task's Changes panel ---------- */
+/* The delivered revision's files and patches, read on the task page, with a
+   note on any line. The panel ships as a heading, a sentence and a button
+   (`changes-slot.tsx`); everything below `.chg-slot` is the reader chunk. A
+   file is a native <details> whose summary carries its status, path and
+   counts; its hunk is an ordered list of rows on a three-column grid (the
+   line number, which is the note button, the +/− mark, the code). Code wraps
+   rather than scrolling, so a phone reads a long line without the page
+   scrolling sideways. Added and removed rows are tinted from the success and
+   danger tokens over the surface, so both themes carry them. The note editor
+   is the goal editor's textarea and action row (`.goal-textarea`,
+   `.goal-edit-actions`). */
+.chg-lede { margin: 0 0 .75rem; max-width: 70ch; font-size: .88rem; color: var(--muted); }
+/* The toggle's chevron points the way the disclosure carets do: down while
+   the reader is folded, up while it is open. */
+.chg-panel > .btn .copy-glyph > .ico:first-child { transform: rotate(90deg); }
+.chg-panel > .btn[aria-expanded="true"] .copy-glyph > .ico:first-child { transform: rotate(-90deg); }
+.chg-slot { margin-top: .75rem; }
+.chg-body, .chg-files, .chg-edit { display: flex; flex-direction: column; gap: .75rem; }
+.chg-files, .chg-edit { gap: .5rem; }
+.chg-meta, .chg-note-off, .chg-count { margin: 0; font-size: .75rem; color: var(--muted); }
+.chg-meta .ico { width: 12px; height: 12px; vertical-align: -1px; }
+.chg-fail, .chg-stale, .chg-omitted {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem;
+  padding: .75rem; border-radius: var(--radius-box); background: var(--tint-well);
+  font-size: .88rem;
+}
+.chg-omitted { margin: 0; border-radius: 0; font-size: .75rem; color: var(--muted); }
+.chg-fail p, .chg-stale p, .chg-omitted p { margin: 0; flex: 1 1 16rem; min-width: 0; }
+.chg-file { border: 1px solid var(--hairline); border-radius: var(--radius-box); overflow: hidden; }
+.chg-file > summary {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .5rem;
+  padding: .5rem .75rem; background: var(--tint-well); font-size: .75rem; cursor: pointer;
+  list-style: none;
+}
+.chg-file > summary::-webkit-details-marker { display: none; }
+.chg-file > summary > .disc-chev { align-self: center; color: var(--muted); }
+.chg-file > summary:focus-visible, button.chg-num:focus-visible { outline-offset: -2px; }
+.chg-status { font-size: .69rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.chg-path { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+.chg-counts { white-space: nowrap; }
+.chg-file-notes { font-weight: 600; color: var(--blue-pressed); }
+.chg-lines { margin: 0; padding: 0; list-style: none; font-family: var(--font-mono); font-size: .75rem; line-height: 1.55; }
+.chg-row { display: grid; grid-template-columns: 5ch 1.5ch minmax(0, 1fr); align-items: start; }
+.chg-row[data-kind="add"] { background: color-mix(in srgb, var(--success), var(--surface) 86%); }
+.chg-row[data-kind="del"] { background: color-mix(in srgb, var(--danger), var(--surface) 88%); }
+.chg-num {
+  min-height: 1.55em; padding: 0 .5rem 0 0; border: 0; background: none;
+  font: inherit; color: var(--faint); text-align: right;
+  font-variant-numeric: tabular-nums; user-select: none;
+}
+button.chg-num { cursor: pointer; }
+button.chg-num:hover, button.chg-num[aria-expanded="true"] { color: var(--blue-pressed); background: var(--focus-wash); }
+.chg-mark { color: var(--faint); user-select: none; }
+.chg-code, .chg-hunk code, .chg-nl code { min-width: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chg-code { padding-right: .5rem; }
+.chg-hunk, .chg-nl { padding: .125rem .5rem; color: var(--faint); background: var(--tint-well); }
+.chg-note, .chg-edit { margin: .25rem .5rem .5rem calc(6.5ch + .5rem); font-family: var(--font-body); }
+.chg-note {
+  display: flex; align-items: flex-start; gap: .5rem; padding: .5rem .75rem;
+  border: 1px solid var(--hairline); border-radius: var(--radius-small);
+  background: var(--surface); font-size: .88rem;
+}
+.chg-note > .ico { width: 14px; height: 14px; flex: none; margin-top: .125rem; color: var(--blue-pressed); }
+.chg-note-text { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chg-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem;
+  padding-top: .75rem; border-top: 1px solid var(--hairline);
+}
+.chg-count { flex: 1 1 14rem; }
+.chg-foot-acts { display: flex; flex-wrap: wrap; gap: .5rem; }
+.chg-foot > .form-err { flex-basis: 100%; }

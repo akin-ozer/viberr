@@ -1606,6 +1606,11 @@ export async function appendComment(
      *  agent like `@dev` is mentioned — the reserved-handle regex alone would
      *  miss profile-name mentions). */
     forceToAgent?: boolean;
+    /** Ruling 484: a server-side writer's own record, applied in the SAME
+     *  locked write that appends the comment (the review relay stamps the
+     *  GitHub ids it relayed, so a relay is recorded exactly when its comment
+     *  is). Never set by a route. */
+    alsoWrite?: (parsed: ParsedTaskFile) => void;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -1657,6 +1662,7 @@ export async function appendComment(
   const nonDeliveryNote = mentionNonDeliveryNote(db, text, input.projectSlug);
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift(event);
+    input.alsoWrite?.(parsed);
     if (nonDeliveryNote.length > 0) {
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
@@ -2075,6 +2081,8 @@ export async function commentToAgent(
      *  skips the "Mention not started" note on a second failure, because the
      *  first attempt's note already says why. Never set by a route. */
     redelivered?: boolean;
+    /** Ruling 484: see `appendComment`. Never set by a route. */
+    alsoWrite?: (parsed: ParsedTaskFile) => void;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},

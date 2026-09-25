@@ -402,6 +402,12 @@ pr:                               # GitHub projection mirrored into the file
                                   # found and kept at (one note each). Absent = never
                                   # recorded, and a delivery treats the body as its
                                   # own. Carried for the same PR, never inherited
+  reviewRelay:                    # ruling 484 (a loose key, like humanApproval):
+    relayed: [review:2197, comment:88410]  # the GitHub reviews and line comments
+                                  # the reconciler relayed to the deliverer, stamped
+                                  # in the write that appends their comment (a
+                                  # review with nothing to relay is stamped alone);
+                                  # newest 500 kept; carried for the same PR
 github:                           # more GitHub cache: commits + change stats
   commits: [{ sha: a91f7c2, msg: "[VIB-142] …", pushed: true }]
   changed: { files: 9, add: 412, del: 87 }

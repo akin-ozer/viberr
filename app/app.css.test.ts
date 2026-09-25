@@ -5704,8 +5704,9 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       }
     }
     // Four, and since ruling 463 a GitHub connection's reach, and since ruling
-    // 479(a) the capability matrix's "Advisory only" list.
-    expect(summaries).toHaveLength(6);
+    // 479(a) the capability matrix's "Advisory only" list, and since ruling 484
+    // a changed file in the task's Changes panel.
+    expect(summaries).toHaveLength(7);
     expect(bare).toEqual([]);
   });
 
@@ -6018,6 +6019,13 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         // Ruling 482: the PR card's Run gates, an in-flight starter like the
         // ones above.
         "features/task-detail/task-side-panels.tsx: refresh → loader (spins)",
+
+        // Ruling 484: the Changes panel's toggle (while its reader loads), its
+        // Try again, a file's Load this file, and Send to the deliverer.
+        "features/task-detail/changes-slot.tsx: chevron → loader (spins)",
+        "features/task-detail/changes-panel.tsx: refresh → loader (spins)",
+        "features/task-detail/changes-panel.tsx: file → loader (spins)",
+        "features/task-detail/changes-panel.tsx: send → loader (spins)",
       ].sort(),
     );
     // The cell centres both marks, whatever their box.

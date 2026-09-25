@@ -6,7 +6,7 @@
 > `app/server/org/connections.server.ts`, `app/server/tasks/task-actions.server.ts`
 > (delivery and acceptance), `app/schemas/task-file.schema.ts` (revisions, `pr`,
 > `github`), `app/shared/revision-drift.ts`, `app/shared/credential-scopes.ts`,
-> `app/features/github/*`.
+> `app/features/github/*`, `app/features/task-detail/changes-*.tsx` (ruling 484).
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
 ## 1. Credentials
@@ -497,6 +497,19 @@ paths overlap this task's (`prPathOverlaps`, ruling 413), the same fact the revi
   admin links it under Instance settings, Users & access for a local or Google account
   (`updateOrgUser`, audit `org.user.github_handle.set` / `.cleared`); the person cannot
   set their own. The `unlinked_handle` refusal names both doors.
+- **A person reads the delivered changes, and notes lines for the deliverer, on the
+  task page** (ruling 484). The task page's Changes panel (while the review PR is open
+  and a revision is delivered) loads `GET /projects/:slug/tasks/:key/changes`
+  (`task-changes.ts` → `readTaskChanges`, member-only) when it is opened: the files and
+  patches of `readPullRequestDiff`, BOUND to the delivered revision (`headSha`: the PR's
+  live head is read first, and a PR at any other head answers why instead of its files:
+  not pushed yet, or moved past the delivery), 200,000 encoded patch characters per
+  read and a file past that loaded alone by `?path=`. A note on a line posts through
+  the task route's `review-notes` intent as ONE comment through `commentToAgent`,
+  addressed `@<deliverer>` and quoting each note's `file:line` (`review-notes.server.ts`),
+  refused with a reason when the delivered revision moved since the read or no deployed
+  agent delivers the task. GitHub reviews of the delivered head reach the deliverer the
+  same way (§6, review relay).
 - **Acceptance gate order** (`acceptanceRefusalReasons`): archived → closed PR
   (terminal, withdraws force-accept) → stage boundary → engaged required reviewers →
   project-declared required reviewers → the live no-change probe's has-work refusal →
@@ -679,6 +692,22 @@ Facts it records beside the state:
   before the compare, so finished work never reads `behind_main`; ruling 401). A pass
   whose only change is this verdict still writes a `github.reconcile` provenance row, so
   a branch that falls behind because `main` moved stops rendering a stale `synced`.
+- **Review relay** (ruling 484, `pr-review-relay.server.ts`): after its own write, on an
+  open PR whose reviews it read, the pass relays each submitted review (APPROVED,
+  CHANGES_REQUESTED or COMMENTED; never PENDING or DISMISSED) that was made on the
+  delivered revision's head by a project member (login mapped through
+  `users.github_handle`, failing closed like R19-B) and not relayed before. It lists that
+  review's line comments (`GET …/pulls/{n}/reviews/{id}/comments`, only for such a
+  review, so a quiet pass costs no call) and posts, per reviewer, ONE comment through
+  `commentToAgent` as that member (audit label `<email> · via GitHub`): `@<deliverer>`,
+  "from GitHub", a CHANGES_REQUESTED body first, then each line comment quoting its
+  `file:line` on the commit it was written on (a LEFT-side comment says "removed line"),
+  with every other `@` escaped so the deliverer is the one addressee. The ids relayed
+  (`review:<id>`, `comment:<id>`) are recorded on `pr.reviewRelay.relayed` in the SAME
+  locked write that appends the comment; a review with nothing to relay is recorded on
+  its own. The reconciler carries the record for the same PR. No deliverer (or none
+  deployed) relays and records nothing; a comments read GitHub refuses leaves the review
+  for the next pass; a relay failure is logged and never fails the pass.
 
 Out-of-band changes become typed `note` events from the policy engine ("Divergence":
 merged but not Done → accept; closed but active → rework or archive; reopened), a

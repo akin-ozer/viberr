@@ -27,6 +27,7 @@ import {
 } from "./operator-recommendations";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { AttachmentsPanel } from "./attachments-panel";
+import { ChangesPanel } from "./changes-slot";
 import { MoveBackConfirm } from "./move-back-confirm";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
@@ -121,6 +122,7 @@ export function TaskDetailPage({
   attachmentsTotal,
   attachmentProducers = {},
   attachmentsBase = null,
+  changesUrl = null,
   runtime: loadedRuntime,
   deployedSpecialists,
   operatorBackend,
@@ -173,6 +175,9 @@ export function TaskDetailPage({
    *  built by the route component (the one place that knows the params).
    *  Null hides the panel and the evidence links (e.g. bare test renders). */
   attachmentsBase?: string | null;
+  /** Ruling 484: `/projects/<slug>/tasks/<KEY>/changes`, the Changes panel's
+   *  read, built by the route component. Null hides the panel. */
+  changesUrl?: string | null;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
   /** Deployed specialists the run-agent selector offers (loader). */
@@ -1008,6 +1013,20 @@ export function TaskDetailPage({
               signed-in users.
             </p>
           </section>
+        ) : null}
+
+        {/* Ruling 484 (F40-54): the delivered revision's files and patches,
+            with a note on any line going to the deliverer as one comment.
+            Only while the review PR is open and carries a delivered revision;
+            the reader is its own chunk, loaded when the panel opens. */}
+        {changesUrl && task.pr?.state === "review" && workRevisionSha ? (
+          <ChangesPanel
+            url={changesUrl}
+            githubHost={githubHost}
+            prNumber={task.pr.number}
+            revisionSha={workRevisionSha}
+            delivererName={task.specialist?.profileName ?? null}
+          />
         ) : null}
 
         {attachmentsBase ? (

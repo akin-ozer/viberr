@@ -71,6 +71,9 @@ const prFileSchema = z.object({
 
 const prFilesSchema = z.array(prFileSchema);
 
+/** Ruling 484: the one field the head check reads off the PR detail. */
+const prHeadSchema = z.object({ head: z.object({ sha: z.string().min(1) }) });
+
 export interface PrDiffFile {
   path: string;
   status: string;
@@ -102,7 +105,13 @@ export type PrDiffResult =
       /** True when at least one patch was withheld for the byte budget. */
       truncated: boolean;
     }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      /** Ruling 484: set when the caller bound the read to a head (`headSha`)
+       *  and the pull request is somewhere else: the head it is at. */
+      liveHeadSha?: string;
+    };
 
 /**
  * Every changed file of one pull request, with its hunks.
@@ -122,6 +131,16 @@ export async function readPullRequestDiff(
      *  patch to obtain it is the call most likely to be too big — the loop the
      *  controller hit. This makes the first call always safe. */
     patches?: boolean;
+    /**
+     * Ruling 484 (pass 40, F40-54): the head the reader's view must be OF.
+     * `pulls/{n}/files` always describes the pull request's CURRENT head, and
+     * the task page's Changes panel promises the delivered revision, whose line
+     * notes go to the agent that delivered it. When the two differ (the
+     * revision is not pushed yet, or someone pushed past it) the read answers
+     * `liveHeadSha` and no files, rather than a diff of commits nobody
+     * delivered under a heading that says otherwise. One extra GET.
+     */
+    headSha?: string;
   } = {},
 ): Promise<PrDiffResult> {
   if (!Number.isInteger(prNumber) || prNumber < 1) {
@@ -136,6 +155,23 @@ export async function readPullRequestDiff(
       ok: false,
       reason: "no GitHub credential is configured for this project",
     };
+  }
+
+  if (opts.headSha) {
+    const detail = await ctx.client.request(
+      "GET",
+      `/repos/${ctx.repo}/pulls/${prNumber}`,
+      prHeadSchema,
+    );
+    if (!detail.ok) return { ok: false, reason: githubFailureMessage(detail) };
+    const live = detail.data.head.sha;
+    if (live !== opts.headSha) {
+      return {
+        ok: false,
+        reason: `pull request #${prNumber} is at ${live.slice(0, 7)}, not ${opts.headSha.slice(0, 7)}`,
+        liveHeadSha: live,
+      };
+    }
   }
 
   const wanted = opts.path?.trim() ?? "";

@@ -256,3 +256,42 @@ describe("readPullRequestDiff — the hunks, bounded, and honest about what it c
     expect(gh.calls).toHaveLength(0);
   });
 });
+
+/**
+ * Ruling 484 (pass 40, F40-54): the task page's Changes panel reads the same
+ * diff for a person, BOUND to the delivered revision. `pulls/{n}/files` always
+ * describes the PR's current head, so without the bind a person noting lines
+ * for the deliverer could be reading a push nobody delivered.
+ */
+describe("ruling 484: a diff read bound to a head", () => {
+  const DETAIL_ROUTE = "GET /repos/akin-ozer/viberr/pulls/7";
+
+  it("reads the files when the pull request is at that head", async () => {
+    const store = configuredStore();
+    const gh = fakeGithubFetch({
+      [DETAIL_ROUTE]: { body: { number: 7, head: { sha: "abc1234def" } } },
+      [FILES_ROUTE]: { body: [file("a.ts", "@@ -1 +1 @@\n-x\n+y")] },
+    });
+    const result = await readPullRequestDiff(store.db, store.slug, 7, {
+      fetchImpl: gh.fetchImpl,
+      headSha: "abc1234def",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.files.map((f) => f.path)).toEqual(["a.ts"]);
+  });
+
+  it("answers the head the PR is really at, and lists no files, when it is elsewhere", async () => {
+    const store = configuredStore();
+    const gh = fakeGithubFetch({
+      [DETAIL_ROUTE]: { body: { number: 7, head: { sha: "9999999aaa" } } },
+      [FILES_ROUTE]: { body: [file("a.ts", "@@ -1 +1 @@\n-x\n+y")] },
+    });
+    const result = await readPullRequestDiff(store.db, store.slug, 7, {
+      fetchImpl: gh.fetchImpl,
+      headSha: "abc1234def",
+    });
+    expect(result).toMatchObject({ ok: false, liveHeadSha: "9999999aaa" });
+    expect(gh.callsTo(FILES_ROUTE)).toHaveLength(0);
+  });
+});
