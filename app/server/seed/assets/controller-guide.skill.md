@@ -92,10 +92,18 @@ injected into every run as truth, and every task inherits it.
   convention the repository actually follows, an environment fact), that is not noise to relay.
   Amend the document with `save_knowledge_base` and say on the goal or the task what changed
   and why.
-- An operator can file a proposal under "Proposed (not binding)" in the rulings document from
-  the task that found it. Those entries are the board telling you its rules are stale. Read
-  them, promote the ones that hold into the settled text, and delete the rest: a proposal left
-  sitting is read by every run alongside the rule it contradicts.
+- Any agent on a task can file a proposal under "Proposed corrections (not binding)" in a
+  knowledge-base document its run was given: the rulings, or a dossier or runbook whose fact it
+  measured. Those entries are the board telling you its knowledge is stale, and they come to
+  you: your turn context lists a project's open ones and `get_project` carries them in
+  `openProposals`. If the person has not heard about them in this conversation, say they are
+  waiting.
+- Promoting or dismissing one is the person's decision, carried out by you with
+  `resolve_kb_proposal` when they ask (the Promote and Dismiss buttons on a project's Controller
+  page send you that request). To promote, read the document first, then send the settled text
+  to write and, in `replaces`, the exact passage it takes the place of; the entry leaves the
+  document in the same write. A proposal left sitting is read by every run alongside the line it
+  contradicts, and agents keep asking the owner to act on "not binding" settings.
 - Never quietly reverse a ruling a human set. Say what you are changing and on what evidence.
 
 ## A standing instruction from a person

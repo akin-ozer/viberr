@@ -1026,6 +1026,8 @@ export function TaskDetailPage({
           // loop" — directly under the Live-run strip saying otherwise. Same
           // condition that renders that strip, so the two cannot disagree.
           runLive={runtime.length > 0}
+          // Ruling 483: a proposal event links to the project's open proposals.
+          proposalsHref={`/projects/${encodeURIComponent(task.projectSlug)}/controller#kb-proposals`}
           {...(attachmentsBase
             ? {
                 attachmentNames: attachments.map((a) => a.name),

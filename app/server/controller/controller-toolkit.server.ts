@@ -209,6 +209,10 @@ import {
 } from "~/server/tasks/schedule.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
+  listProjectKbProposals,
+  resolveKbProposal,
+} from "~/server/org/kb-proposals.server";
+import {
   describeDriftLists,
   listTemplateResourceDrift,
   listTemplateTextDrift,
@@ -974,6 +978,64 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "save_knowledge_base",
   );
 
+  // Ruling 483 (F40-59): the door a person's Promote or Dismiss button asks
+  // the controller to walk. Ruling 378 left promotion to "a human or the
+  // controller" and gave neither a way to find or close a proposal; live on
+  // WEB-1 two sat unpromoted while the next packet asked the owner to type the
+  // "not binding" build command into Cloudflare. Org-admin gated like every
+  // other knowledge-base write, because a proposal lives in an org knowledge
+  // base.
+  add(
+    tool(
+      "resolve_kb_proposal",
+      "Promote or dismiss one open knowledge-base proposal (ruling 483): an entry an agent filed under \"Proposed corrections (not binding)\" in a knowledge-base document, listed in your turn context and in get_project's `openProposals` by id. Org admins only, and only when the person asked you to: a proposal binds nobody until a person decides, and their Promote and Dismiss buttons on a project's Controller page send you exactly that request. `promote` writes `text` into the document's SETTLED text, in place of `replaces` (the exact passage it corrects, which must stand once in the settled text; read the document first with read_knowledge_base_doc) or appended to the settled text when `replaces` is omitted, and removes the entry in the same write. `dismiss` removes the entry and changes nothing else. `reason` is recorded on the audit row.",
+      {
+        id: z.string().describe("The proposal's id, e.g. 'kp-3f9a1c2b7d'."),
+        action: z.enum(["promote", "dismiss"]),
+        replaces: z
+          .string()
+          .optional()
+          .describe(
+            "promote only: the settled passage the correction takes the place of, exactly as the document has it. Omit to append `text` to the settled text instead.",
+          ),
+        text: z
+          .string()
+          .optional()
+          .describe("promote only, and required there: the settled text to write."),
+        reason: z
+          .string()
+          .describe("Why, in a sentence: what the person decided and on what evidence."),
+      },
+      runWith(
+        async (args: {
+          id: string;
+          action: "promote" | "dismiss";
+          replaces?: string;
+          text?: string;
+          reason: string;
+        }) => {
+          requireOrgAdmin("promote or dismiss knowledge-base proposals");
+          const result = await resolveKbProposal(
+            db,
+            args.action === "promote"
+              ? {
+                  id: args.id,
+                  action: "promote",
+                  replaces: args.replaces ? prose(args.replaces) : null,
+                  text: prose(args.text ?? ""),
+                  reason: prose(args.reason),
+                }
+              : { id: args.id, action: "dismiss", reason: prose(args.reason) },
+            actor,
+            { dataRoot },
+          );
+          return `[${result.outcome}] ${result.message}`;
+        },
+      ),
+    ),
+    "resolve_kb_proposal",
+  );
+
   add(
     tool(
       "list_skills",
@@ -1715,7 +1777,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 483: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks) \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1742,6 +1804,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // not any profile grants it. Null means the project has named none,
           // and a settled rule has nowhere to live but each task's goal.
           rulingsKb: fm.rulingsKb ?? null,
+          // Ruling 483 (F40-59): the knowledge-base corrections agents on this
+          // project's tasks proposed and nobody has promoted or dismissed. Read
+          // from the documents themselves, where every run reads them.
+          openProposals: listProjectKbProposals(db, slug, dataRoot).map((p) => ({
+            ...p,
+            rulings: p.kb === (fm.rulingsKb ?? null),
+          })),
           // Ruling 245: who owns which shared paths until they merge. Read here
           // rather than inferred from prose, which is what every agent was doing.
           //

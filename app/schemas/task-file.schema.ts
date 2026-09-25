@@ -110,7 +110,7 @@ export function isValidDueDate(due: string): boolean {
   );
 }
 
-/** The 11 timeline event types (cross-cutting contracts §1.3). Parsers keep
+/** The 12 timeline event types (cross-cutting contracts §1.3). Parsers keep
  * unknown strings as-is (renderer falls back to comment meta).
  *
  * P13-LV-03: `policy` used to be a grab-bag — a real PAT-scope violation, a
@@ -135,6 +135,11 @@ export const TIMELINE_EVENT_TYPES = [
   // `policy`) and nothing is stuck (not `blocked`), but a supervisor scanning
   // the board/stream must get a cue that context was lost and recovered.
   "continuity",
+  // Ruling 483 (F40-59): a proposed correction to a knowledge base — the
+  // project's rulings or any base a run was given. It asks a person for a
+  // decision (promote or dismiss), so it is neither a review verdict
+  // (`quality`, where ruling 378 filed it) nor a neutral `note`.
+  "proposal",
 ] as const;
 
 /** Stable packet-option kinds (orchestrator ruling 7). Dispatch on these,

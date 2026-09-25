@@ -26,6 +26,12 @@ import {
 import { notVisible } from "./controller-tool-guards.server";
 import { openRequestsContextLine } from "./controller-requests.server";
 import { countLabel } from "~/shared/text/plural";
+import { projectRulingsKb } from "~/server/files/project-rulings.server";
+import {
+  kbProposalCountsByProject,
+  listProjectKbProposals,
+  type KbProposal,
+} from "~/server/org/kb-proposals.server";
 
 /**
  * The controller's per-turn CONTEXT READ (ruling 121).
@@ -504,6 +510,74 @@ function instanceContext(
   );
 }
 
+/** Ruling 483: proposals named per turn before the rest are left to get_project. */
+const CONTEXT_PROPOSALS = 10;
+
+/** One proposal, one line: enough to raise it and to act on it by id. */
+function proposalLine(p: KbProposal, rulingsKb: string | null): string {
+  const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+  const who = [p.filedBy, p.filedOn].filter(Boolean).join(", ");
+  return (
+    `- ${p.id} · ${p.kb === rulingsKb ? "rulings " : ""}\`${p.kb}/${p.doc}\`` +
+    ` · from ${p.taskKey ?? "a task"}${who ? ` (${who})` : ""}` +
+    (p.line ? ` · corrects "${clip(p.line, 160)}"` : " · adds to the document") +
+    ` · ${clip(p.correction, 240)}`
+  );
+}
+
+/**
+ * Ruling 483 (F40-59): the bound project's open knowledge-base proposals, in
+ * the turn context, so the next conversation knows they wait and raises them.
+ * Live on WEB-1 two proposals were never promoted: nothing brought them back
+ * after they scrolled off the timeline, and the controller only runs when a
+ * person talks to it.
+ */
+export function projectProposalsContextLine(
+  db: DatabaseSync,
+  projectSlug: string,
+  dataRoot?: string,
+): string {
+  const open = listProjectKbProposals(db, projectSlug, dataRoot);
+  if (open.length === 0) return "";
+  const rulingsKb = projectRulingsKb(projectSlug, dataRoot ? { dataRoot } : {});
+  const rows = open.slice(0, CONTEXT_PROPOSALS).map((p) => proposalLine(p, rulingsKb));
+  if (open.length > rows.length) {
+    rows.push(`- ... ${open.length - rows.length} more; get_project lists them in openProposals`);
+  }
+  return (
+    `\n## Open knowledge-base proposals on this project (${open.length})\n` +
+    `Agents filed these from this project's tasks under "Proposed corrections (not binding)" in the ` +
+    `document each corrects. Every run that reads the document reads them beside the line, and none ` +
+    `binds until a person promotes it. If the person has not heard about them in this conversation, ` +
+    `tell them they are waiting. Promote or dismiss one with resolve_kb_proposal only when the person ` +
+    `asks (their Promote and Dismiss buttons on the Controller page send that request).\n${rows.join("\n")}\n`
+  );
+}
+
+/** Ruling 483: the instance scope's count per visible project. */
+function instanceProposalsContextLine(
+  db: DatabaseSync,
+  user: ControllerContextInput["user"],
+  dataRoot?: string,
+): string {
+  const counts = kbProposalCountsByProject(db, dataRoot);
+  if (counts.size === 0) return "";
+  const admin = isOrgAdmin(db, user.id);
+  const visible = new Set(
+    listHomeProjectsForUser(db, { id: user.id, role: admin ? "admin" : "member" }).map((p) => p.slug),
+  );
+  const rows = [...counts.entries()]
+    .filter(([slug]) => visible.has(slug))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([slug, n]) => `- ${slug}: ${countLabel(n, "open proposal")}`);
+  if (rows.length === 0) return "";
+  return (
+    `\n## Open knowledge-base proposals\n` +
+    `Agents filed these under "Proposed corrections (not binding)" in knowledge-base documents; none ` +
+    `binds until a person promotes it. get_project lists a project's in openProposals.\n${rows.join("\n")}\n`
+  );
+}
+
 /**
  * U39-24: the zone the person reads times in, stated where the turn's other
  * facts about them are. The page prints every time in that zone and every tool
@@ -564,7 +638,16 @@ export function gatherControllerContext(
   // Ruling 390 (F39-17): an ask the controller raised and nobody has answered
   // comes back every turn, in every scope. The whole failure it closes is a
   // standing fact that lived only in a conversation that ended.
-  const pending = openRequestsContextLine(input.dataRoot);
+  // Ruling 483 (F40-59): the knowledge-base proposals agents filed come back
+  // the same way. The controller runs only when a person speaks to it, so this
+  // is where it learns a proposal is waiting and raises it.
+  const pending =
+    openRequestsContextLine(input.dataRoot) +
+    (scope === "instance"
+      ? instanceProposalsContextLine(db, input.user, input.dataRoot)
+      : grant
+        ? projectProposalsContextLine(db, input.projectSlug!, input.dataRoot)
+        : "");
   const surface = input.surface ? `\nThey are looking at: ${input.surface}\n` : "";
   const zone = input.timeZone ? readerZoneLine(input.timeZone, now) : "";
   let text =

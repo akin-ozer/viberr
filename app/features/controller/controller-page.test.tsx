@@ -48,6 +48,7 @@ function view(over: Partial<ControllerSurfaceView> = {}): ControllerSurfaceView 
     runtime: [],
     canInterruptTurn: false,
     goals: [],
+    proposals: [],
     viewerOwnsActive: false,
     showingAll: false,
     viewerIsOrgAdmin: true,
@@ -1011,8 +1012,11 @@ describe("ruling 419(a): the page's navigation is at its top", () => {
     );
     await screen.findByText("Chain goal-1");
     const rail = container.querySelector("aside.ctl-side")!;
+    // Ruling 483: the board's open proposals sit between the two, before the
+    // chains, because they are what the owner is asked to decide.
     expect([...rail.children].map((c) => c.className)).toEqual([
       "panel ctl-convs",
+      "panel ctl-proposals",
       "panel ctl-goals",
     ]);
   });
@@ -1643,5 +1647,86 @@ describe("ruling 465: the transcript is in reply order and names the queue", () 
     const texts = [...document.querySelectorAll(".ctl-msgs > .ctl-msg .md-body")].map((el) => el.textContent?.trim());
     expect(texts).toEqual(["Old question.", "Old answer."]);
     expect(document.querySelector("[data-msg-state]")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 483 (F40-59): the project's open knowledge-base proposals are listed
+ * where the owner looks, with a count, and Promote and Dismiss ask the
+ * controller to carry the decision out. Live on WEB-1 two operator proposals
+ * existed only as timeline events that looked like failed reviews, and nothing
+ * brought them back.
+ */
+describe("the project's open knowledge-base proposals (ruling 483)", () => {
+  const proposal = {
+    id: "kp-0123456789",
+    kb: "akin-rulings",
+    doc: "gates.md",
+    rulings: true,
+    taskKey: "WEB-1",
+    filedOn: "2026-09-24",
+    filedBy: "Operator",
+    line: "Gate commands: not yet settled",
+    correction: "The gate set is npm run lint, npm run typecheck and npm test.",
+    evidence: "All three exited 0 on WEB-1.",
+    docHref: "/org/settings?tab=resources&kb=akin-rulings&doc=gates.md",
+  };
+
+  it("lists each with its count, document, line and task, and Promote sends the request to the controller", async () => {
+    const posted: Record<string, string>[] = [];
+    renderPage(view({ proposals: [proposal] }), "", async ({ request }) => {
+      const form = await request.formData();
+      posted.push(Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)])));
+      return { ok: true, conversationId: "cnv_b" };
+    });
+    // CANARY: drop the panel from the rail and nothing on the page says a
+    // proposal waits.
+    const panel = await screen.findByRole("region", { name: "Proposals" });
+    expect(within(panel).getByText("1 open")).toBeTruthy();
+    expect(within(panel).getByText("akin-rulings/gates.md")).toBeTruthy();
+    expect(within(panel).getByText("Gate commands: not yet settled")).toBeTruthy();
+    expect(within(panel).getByRole("link", { name: "WEB-1" }).getAttribute("href")).toBe(
+      "/projects/viberr-core/tasks/WEB-1",
+    );
+    expect(within(panel).getByRole("link", { name: "Open document" }).getAttribute("href")).toBe(
+      proposal.docHref,
+    );
+    await act(async () => {
+      fireEvent.click(within(panel).getByRole("button", { name: "Promote" }));
+    });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({ intent: "send" });
+    expect(posted[0]!.text).toContain("Promote knowledge-base proposal kp-0123456789 in akin-rulings/gates.md");
+    expect(posted[0]!.text).toContain("resolve_kb_proposal");
+  });
+
+  it("Dismiss confirms first, then asks; a member who is not an org admin is told who decides", async () => {
+    const posted: string[] = [];
+    renderPage(view({ proposals: [proposal] }), "", async ({ request }) => {
+      posted.push(String((await request.formData()).get("text")));
+      return { ok: true, conversationId: "cnv_b" };
+    });
+    const panel = await screen.findByRole("region", { name: "Proposals" });
+    fireEvent.click(within(panel).getByRole("button", { name: "Dismiss" }));
+    expect(posted).toEqual([]);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Dismiss proposal" }));
+    });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toContain("Dismiss knowledge-base proposal kp-0123456789");
+    cleanup();
+
+    renderPage(view({ viewerIsOrgAdmin: false, proposals: [{ ...proposal, docHref: null }] }));
+    const memberPanel = await screen.findByRole("region", { name: "Proposals" });
+    expect(within(memberPanel).queryByRole("button", { name: "Promote" })).toBeNull();
+    expect(within(memberPanel).getByText("An org admin promotes or dismisses proposals.")).toBeTruthy();
+    expect(within(memberPanel).queryByRole("link", { name: "Open document" })).toBeNull();
+  });
+
+  it("says so when none are open", async () => {
+    renderPage(view({ proposals: [] }));
+    const panel = await screen.findByRole("region", { name: "Proposals" });
+    expect(within(panel).getByText("0 open")).toBeTruthy();
+    expect(within(panel).getByText(/No open proposals/)).toBeTruthy();
   });
 });

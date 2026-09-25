@@ -28,6 +28,11 @@ import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-a
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { taskKeyLinks } from "~/server/projections/task-key-links.server";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
+import { projectRulingsKb } from "~/server/files/project-rulings.server";
+import {
+  kbProposalDocHref,
+  listProjectKbProposals,
+} from "~/server/org/kb-proposals.server";
 
 /**
  * Loader data for the controller surfaces (ruling 99): the viewer's own
@@ -66,12 +71,33 @@ export interface ControllerSurfaceView {
   canInterruptTurn: boolean;
   /** Project surface only. */
   goals: GoalView[] | null;
+  /** Ruling 483 (F40-59): the open knowledge-base proposals agents filed from
+   *  this project's tasks. Project surface only. */
+  proposals: KbProposalView[] | null;
   viewerOwnsActive: boolean;
   /** Org admin reading every conversation (?all=1). */
   showingAll: boolean;
   viewerIsOrgAdmin: boolean;
   /** Ruling 260: who is looking, so a goal's own creator gets its controls. */
   viewerId: string;
+}
+
+/** One open knowledge-base proposal, as the project controller page lists it. */
+export interface KbProposalView {
+  id: string;
+  kb: string;
+  doc: string;
+  /** It stands in the project's rulings knowledge base. */
+  rulings: boolean;
+  taskKey: string | null;
+  filedOn: string | null;
+  filedBy: string | null;
+  line: string | null;
+  correction: string;
+  evidence: string | null;
+  /** Where an org admin opens the document (Instance settings); null for
+   *  everyone else, who cannot open that page. */
+  docHref: string | null;
 }
 
 export interface ConversationListItem {
@@ -120,6 +146,33 @@ export function selectedConversationId(
     limit: 1,
   })[0];
   return newest?.id ?? null;
+}
+
+/**
+ * Ruling 483 (F40-59): what the owner is asked to decide about the project's
+ * knowledge. Live on WEB-1 the two proposals the operator filed were visible
+ * only as timeline events that scrolled away, so nothing brought them back.
+ */
+function projectProposals(
+  db: DatabaseSync,
+  projectSlug: string,
+  viewerIsOrgAdmin: boolean,
+  dataRoot?: string,
+): KbProposalView[] {
+  const rulingsKb = projectRulingsKb(projectSlug, dataRoot ? { dataRoot } : {});
+  return listProjectKbProposals(db, projectSlug, dataRoot).map((p) => ({
+    id: p.id,
+    kb: p.kb,
+    doc: p.doc,
+    rulings: p.kb === rulingsKb,
+    taskKey: p.taskKey,
+    filedOn: p.filedOn,
+    filedBy: p.filedBy,
+    line: p.line,
+    correction: p.correction,
+    evidence: p.evidence,
+    docHref: viewerIsOrgAdmin ? kbProposalDocHref(p) : null,
+  }));
 }
 
 export function getControllerSurface(
@@ -244,6 +297,7 @@ export function getControllerSurface(
           history: readGoalHistory(scope, goal.id, { dataRoot: input.dataRoot }),
         }))
       : null,
+    proposals: scope ? projectProposals(db, scope, admin, input.dataRoot) : null,
     // Ruling 260 (pass 37, F37-91): the goal-redirect gate is a DISJUNCTION —
     // the chain's creator, or run-agents. The page knew only the role half, so
     // it hid Pause, Resume, Cancel, Retry and Skip from the person who created

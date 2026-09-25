@@ -566,6 +566,13 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   carries `outputSchema = AGENT_OUTCOME_JSON_SCHEMA` and the envelope replaces the tool
   calls a Claude specialist would make. The Codex operator returns a plan the server
   executes ([operator.md §5](operator.md#5-tools-and-the-governed-actions-behind-them)).
+- A knowledge-base correction (ruling 483): a Codex specialist with a knowledge base has
+  no `propose_kb_correction` tool, so its prompt's Collaboration section
+  (`KB_CORRECTION_NOTE_CODEX`) tells it to end its report with a `Knowledge-base
+  correction` section naming the knowledge base, document, line, correction and
+  evidence, and the operator's `agent-reply` turn relays it with its own
+  `propose_kb_correction`. A Claude specialist's note (`KB_CORRECTION_NOTE_CLAUDE`) names
+  the tool instead.
 
 ## 3. A run's life
 
@@ -1175,7 +1182,7 @@ on every attempt; the run still starts in its workspace and delivery retries the
 
 ### 4.2 The `viberr_agent` toolkit (Claude specialists)
 
-`buildAgentToolkit` (`agent-toolkit.server.ts`) builds up to six tools on independent
+`buildAgentToolkit` (`agent-toolkit.server.ts`) builds up to seven tools on independent
 gates and mounts the server only when at least one was built, with `alwaysLoad: true`
 (§2.4). It returns `toolNames`, read off the definitions it pushed, which is the tool list
 the run's `run·inputs` record discloses (ruling 339). Codex specialists mount none of it
@@ -1189,6 +1196,7 @@ and get the outcome envelope instead (§2.5).
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 48 000 chars), audit `task.agent.github_read` |
 | `read_board {taskKey?}` | none; built only when another tool already was | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
+| `propose_kb_correction {kb, doc, line?, correction, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | files one non-binding entry under `## Proposed corrections (not binding)` in that document (`proposeKbCorrection`, ruling 483): only against a knowledge base this run was given, the quoted `line` must stand in the settled text, the same open correction is a `[noop]`; a `proposal` timeline event under the agent's own name, audit `task.kb_proposal.filed`, a `quality` notification from the agent |
 
 The outcome is the first envelope a run reports. The already-staged check reads the
 in-process map and the persisted row, so an envelope staged before a restart still stands
@@ -1593,7 +1601,8 @@ runtime's answer for a missing grant.
   file one agent writes is one the delivery (the owner's uid) can commit. Nothing else the server
   writes is in the agent group (its own files are `node:node`), so the canonical
   `task.md`, `project.md`, knowledge bases and skills stay readable and unwritable to an
-  agent. Git refuses a repository another uid owns, so the image's SYSTEM git config
+  agent. A correction an agent proves goes through the server instead, as a proposal the
+  document carries and a person promotes (ruling 483, §4.2). Git refuses a repository another uid owns, so the image's SYSTEM git config
   (`/etc/gitconfig`, root-owned, which no agent can edit) carries `safe.directory=*` and
   `core.sharedRepository=group`; it binds the server's git, an agent's shell and a tool that
   clears its environment alike.

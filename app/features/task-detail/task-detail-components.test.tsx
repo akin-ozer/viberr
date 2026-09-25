@@ -427,7 +427,37 @@ describe("TimelineItem", () => {
     );
   });
 
-  it("all 11 types map to their node class + pill label (contracts §1.3)", () => {
+  /**
+   * Ruling 483 (F40-59): a proposal asks a person to decide, and the event
+   * used to carry no way to where that happens. Inside a project it links to
+   * the project's Controller page, where the proposal is listed with its
+   * document and its Promote and Dismiss.
+   */
+  it("ruling 483: a proposal event links to the project's open proposals, and no other event does", () => {
+    const href = "/projects/akinozer-com/controller#kb-proposals";
+    const proposal = ev({
+      type: "proposal",
+      actor: { kind: "agent", name: "Operator" },
+      title: "Proposed ruling change",
+      text: "**Not binding until a person promotes it:** settle the gates.",
+    });
+    const { getByRole, unmount } = render(
+      <MemoryRouter>
+        <TimelineItem ev={proposal} proposalsHref={href} />
+      </MemoryRouter>,
+    );
+    // CANARY: drop the link and the event names a decision with no way to it.
+    expect(getByRole("link", { name: "Open proposals" }).getAttribute("href")).toBe(href);
+    unmount();
+    const { queryByRole } = render(
+      <MemoryRouter>
+        <TimelineItem ev={{ ...proposal, type: "quality" }} proposalsHref={href} />
+      </MemoryRouter>,
+    );
+    expect(queryByRole("link", { name: "Open proposals" })).toBeNull();
+  });
+
+  it("all 12 types map to their node class + pill label (contracts §1.3)", () => {
     const table: [string, string, string | null][] = [
       ["comment", "", null],
       ["completion", "completion", "Completion report"],
@@ -440,6 +470,10 @@ describe("TimelineItem", () => {
       // G8: continuity reset — amber warning tone, its own label; borrows the
       // quality node styling (both are the amber/attention family).
       ["continuity", "quality", "Continuity reset"],
+      // Ruling 483 (F40-59): a proposed knowledge-base correction is its own
+      // kind, never a "Review verdict". CANARY: drop `proposal` from EVENT_META
+      // and the fallback names the raw type on an unstyled node.
+      ["proposal", "proposal", "Proposal"],
       ["transition", "transition", "Transition request"],
       ["blocked", "blocked", "Blocked decision"],
       ["agent", "agent", "Operator"],

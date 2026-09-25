@@ -1140,6 +1140,76 @@ describe("instance scope: org-role gate on every management tool", () => {
     expect(denied).toContain("org admin");
   });
 
+  /**
+   * Ruling 483 (F40-59): an agent's knowledge-base proposal reaches the
+   * controller through `get_project`, and the controller closes it with
+   * `resolve_kb_proposal` when a person asks. Live on WEB-1 the controller had
+   * no read of open proposals and no door that closed one.
+   */
+  it("ruling 483: get_project lists the open proposals and resolve_kb_proposal promotes one, org admins only", async () => {
+    const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const { fileKbProposal } = await import("~/server/org/kb-proposals.server");
+    const admin = { userId: ids.orgAdmin, label: "arda" };
+    const { kb } = await saveKnowledgeBase(
+      app.db,
+      { name: "toolkit-dossier", refresh: "on change" },
+      admin,
+      { dataRoot: app.dataRoot },
+    );
+    const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
+    writeStoreDoc(app.db, target, [], "facts.md", "# Facts\n\n- T-003: wrangler 4.138.0\n", admin);
+    const filed = await fileKbProposal(
+      app.db,
+      {
+        kb: kb.dir,
+        doc: "facts.md",
+        line: "T-003: wrangler 4.138.0",
+        correction: "The measured wrangler is 4.139.0.",
+        evidence: "npx wrangler --version printed 4.139.0",
+        taskKey: "VIB-142",
+        filedBy: "Platform Engineer",
+        actor: admin,
+      },
+      { dataRoot: app.dataRoot },
+    );
+    if (!filed.ok) throw new Error(filed.message);
+
+    // CANARY: drop `openProposals` from get_project and the controller has no
+    // read of what waits.
+    const project = z
+      .object({ openProposals: z.array(z.object({ id: z.string(), kb: z.string(), line: z.string().nullable() })) })
+      .parse(JSON.parse(await call(ids.contributor, "get_project")));
+    expect(project.openProposals).toEqual([
+      expect.objectContaining({ id: filed.proposal.id, kb: kb.dir, line: "T-003: wrangler 4.138.0" }),
+    ]);
+
+    const promote = {
+      id: filed.proposal.id,
+      action: "promote",
+      replaces: "- T-003: wrangler 4.138.0",
+      text: "- T-003: wrangler 4.139.0",
+      reason: "The owner promoted it from the Controller page.",
+    };
+    const denied = await call(ids.contributor, "resolve_kb_proposal", promote);
+    expect(denied).toContain("[denied]");
+    expect(denied).toContain("org admin");
+
+    const done = await call(ids.orgAdmin, "resolve_kb_proposal", promote);
+    expect(done).toContain("[done] Promoted");
+    const body = readFileSync(path.join(app.dataRoot, "kb", kb.dir, "facts.md"), "utf8");
+    expect(body).toBe("# Facts\n\n- T-003: wrangler 4.139.0\n");
+    const after = z
+      .object({ openProposals: z.array(z.unknown()) })
+      .parse(JSON.parse(await call(ids.orgAdmin, "get_project")));
+    expect(after.openProposals).toEqual([]);
+    expect(
+      listAuditEvents(app.db, { action: "org.kb.proposal_promoted" }).some(
+        (e) => e.actorLabel === "arda@viberr.dev · via controller",
+      ),
+    ).toBe(true);
+  });
+
   it("create_project is open to a plain org member (FR5 parity): the gate passed and only the GitHub-connection validation refused", async () => {
     const reply = await call(ids.contributor, "create_project", {
       name: "Member Made",

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFetcher, useSearchParams } from "react-router";
+import { Link, useFetcher, useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { TaskLinks } from "~/shared/task-key-links";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -203,10 +203,14 @@ export const TimelineItem = memo(function TimelineItem({
   attachmentNames,
   attachmentsBase,
   taskLinks,
+  proposalsHref,
 }: {
   ev: TimelineEventRender;
   /** U39-31: the other tasks the event names, key to path. */
   taskLinks?: TaskLinks;
+  /** Ruling 483: where a `proposal` event links (the project's open
+   *  proposals); absent in bare renders. */
+  proposalsHref?: string;
   /** Known mentionable names, for whole-name @mention chips in comment bodies
    *  AND in typed-event text. */
   mentionNames?: string[];
@@ -294,6 +298,16 @@ export const TimelineItem = memo(function TimelineItem({
                   line routes nowhere, so it must not look like a live tag. */}
               <RichText text={ev.text} names={mentionNames} {...(taskLinks ? { taskLinks } : {})} />
             </div>
+            {/* Ruling 483 (F40-59): a proposal is a decision a person owes, and
+                the project's Controller page is where it is promoted or
+                dismissed and where its document opens. A plain string prop,
+                never `useParams`: a router hook re-renders every memoised row
+                on each router change (ruling 457, CS-3). */}
+            {ev.type === "proposal" && proposalsHref && (
+              <Link className="linkish tl-proposal-link" to={proposalsHref}>
+                Open proposals
+              </Link>
+            )}
             {ev.evidence && (
               <div className="tl-card evidence">
                 {/* The add/del columns are a DIFF shape. A verdict's rows are
@@ -399,9 +413,12 @@ export function Timeline({
   attachmentNames,
   attachmentsBase,
   taskLinks,
+  proposalsHref,
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
+  /** Ruling 483: the project's open proposals, which a `proposal` event links. */
+  proposalsHref?: string;
   /** U39-31: the other tasks the slice names, key to path (loader). */
   taskLinks?: TaskLinks;
   hasMore: boolean;
@@ -654,6 +671,7 @@ export function Timeline({
               {...(attachmentSet ? { attachmentNames: attachmentSet } : {})}
               {...(attachmentsBase ? { attachmentsBase } : {})}
               {...(links ? { taskLinks: links } : {})}
+              {...(proposalsHref ? { proposalsHref } : {})}
             />
           ))
         )}

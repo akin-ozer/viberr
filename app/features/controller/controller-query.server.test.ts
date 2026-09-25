@@ -310,3 +310,60 @@ describe("getControllerSurface — a chain carries its history (ruling 419(h))",
     expect(chain?.history[0]!.text).toContain("Paused by");
   });
 });
+
+/**
+ * Ruling 483 (F40-59): the project surface carries the open knowledge-base
+ * proposals its tasks filed, so the owner sees what waits on them; the link to
+ * the document is an org admin's, the only person who can open that page.
+ */
+describe("getControllerSurface — the project's open knowledge-base proposals", () => {
+  it("lists them on the project surface only, with the document link for an org admin", async () => {
+    const [{ saveKnowledgeBase, resolveStoreTarget }, { writeStoreDoc }, { fileKbProposal }] =
+      await Promise.all([
+        import("~/server/org/resources.server"),
+        import("~/server/org/store-files.server"),
+        import("~/server/org/kb-proposals.server"),
+      ]);
+    const { baseTaskFrontmatter, writeTask } = await import("../../../test-support/test-store");
+    const { rebuildAll } = await import("~/server/projections/rebuilder.server");
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const admin = { userId: store.users.arda.id, label: "arda" };
+    const { kb } = await saveKnowledgeBase(store.db, { name: "query-dossier", refresh: "on change" }, admin, {
+      dataRoot: store.dataRoot,
+    });
+    const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
+    writeStoreDoc(store.db, target, [], "facts.md", "# Facts\n\n- A fact.\n", admin);
+    const filed = await fileKbProposal(
+      store.db,
+      {
+        kb: kb.dir,
+        doc: "facts.md",
+        line: "A fact.",
+        correction: "A truer fact.",
+        evidence: "measured",
+        taskKey: "VIB-1",
+        filedBy: "Operator",
+        actor: admin,
+      },
+      { dataRoot: store.dataRoot },
+    );
+    if (!filed.ok) throw new Error(filed.message);
+    const on = (user: { id: string; email: string }, projectSlug: string | null) =>
+      getControllerSurface(store.db, user, { projectSlug, conversationId: null, dataRoot: store.dataRoot });
+    // CANARY: return `null` for `proposals` and the page has nothing to list.
+    expect(on(store.users.arda, store.slug).proposals).toEqual([
+      expect.objectContaining({
+        id: filed.proposal.id,
+        kb: kb.dir,
+        doc: "facts.md",
+        rulings: false,
+        taskKey: "VIB-1",
+        line: "A fact.",
+        docHref: `/org/settings?tab=resources&kb=${kb.dir}&doc=facts.md`,
+      }),
+    ]);
+    expect(on(store.users.murat, store.slug).proposals?.[0]?.docHref).toBeNull();
+    expect(on(store.users.arda, null).proposals).toBeNull();
+  });
+});

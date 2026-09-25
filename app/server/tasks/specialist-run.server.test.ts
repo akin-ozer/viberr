@@ -88,6 +88,8 @@ import {
   isDispatchHeld,
   pinSupportCheckout,
   resolveResumeConfinement,
+  KB_CORRECTION_NOTE_CLAUDE,
+  KB_CORRECTION_NOTE_CODEX,
   type DispatchHeldError,
 } from "./specialist-run.server";
 import { execFile } from "node:child_process";
@@ -2221,6 +2223,54 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // Nothing it wasn't granted is offered.
     expect(spec.prompt).not.toContain('"verdict"');
     expect(spec.prompt).not.toContain('"question"');
+  });
+
+  /**
+   * Ruling 483 (F40-53): a run given a knowledge base is told how to get a
+   * line of it corrected. Claude files through the tool its KB grant mounts;
+   * Codex mounts no Viberr tools, so its report carries the correction and the
+   * operator relays it. Live on WEB-3 a Codex agent wrote "the knowledge-base
+   * runbook is read-only to me".
+   */
+  it("ruling 483: a KB-granted run is told its correction channel, per backend", async () => {
+    for (const backend of ["codex", "claude"] as const) {
+      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...file.parsed.frontmatter,
+        repo: null,
+        agents: [
+          {
+            profileId: "dev",
+            capabilities: [],
+            extras: [],
+            definition: {
+              kind: "specialist",
+              name: "dev",
+              role: "developer",
+              backends: [backend],
+              model: backend === "codex" ? "gpt-5-codex" : "sonnet",
+              resources: { skills: [], mcps: [], kb: ["akin-dossier"] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const spec = specs.at(-1)!;
+      // CANARY: drop the note and the run proves a line wrong with no channel
+      // named for the correction.
+      expect(spec.prompt, backend).toContain(
+        backend === "codex" ? KB_CORRECTION_NOTE_CODEX : KB_CORRECTION_NOTE_CLAUDE,
+      );
+      expect(spec.prompt, backend).not.toContain(
+        backend === "codex" ? KB_CORRECTION_NOTE_CLAUDE : KB_CORRECTION_NOTE_CODEX,
+      );
+    }
   });
 
   /**

@@ -181,6 +181,33 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(shippedCopyIsUnedited(path.join("skills", "controller-guide", "SKILL.md"), "69805ce6bb7bd0180014e164ae6d863268813bd4fb6a0f61bfa4e333b6674608", {})).toBe(true);
   });
 
+  it("ruling 483: the operator skill and controller guide shipped before knowledge-base proposals are recorded prior hashes", async () => {
+    // Canary: omit either outgoing hash and a live store keeps the version that
+    // names `propose_ruling` or never mentions `resolve_kb_proposal`.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    const path = await import("node:path");
+    expect(
+      shippedCopyIsUnedited(
+        path.join("skills", "viberr-app-expertise", "SKILL.md"),
+        "20acdfcb363f22622c38a48ca0f5963a5a09399aa76f87cccace59c15a2c2509",
+        {},
+      ),
+    ).toBe(true);
+    expect(
+      shippedCopyIsUnedited(
+        path.join("skills", "controller-guide", "SKILL.md"),
+        "7418f3499b14e1c8ce8a0cc46d6efdec850370712f1ec56728c1130302fcb948",
+        {},
+      ),
+    ).toBe(true);
+    const assets = path.join(import.meta.dirname, "assets");
+    const skill = readFileSync(path.join(assets, "viberr-app-expertise.skill.md"), "utf8");
+    const guide = readFileSync(path.join(assets, "controller-guide.skill.md"), "utf8");
+    expect(skill).toContain("`propose_kb_correction`");
+    expect(skill).not.toContain("propose_ruling");
+    expect(guide).toContain("`resolve_kb_proposal`");
+  });
+
   it("refreshes an UNEDITED copy of an older shipped version", async () => {
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = freshStore();

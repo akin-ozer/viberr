@@ -42,6 +42,11 @@ const EVENT_META: EventMetaTable = {
   // agent re-anchored on a fresh session). Distinct from a neutral `note` so a
   // scanning supervisor sees that context was lost and recovered.
   continuity: { node: "quality", icon: "refresh", label: "Continuity reset" },
+  // Ruling 483 (F40-59): a proposed knowledge-base correction. Ruling 378 filed
+  // these as `quality`, so the one item in the record that asks the owner to
+  // act read "Review verdict" and sat above a real verdict looking like a
+  // failed review. It is a proposal: its own label, and the edit glyph.
+  proposal: { node: "proposal", icon: "edit", label: "Proposal" },
   transition: { node: "transition", icon: "arrow", label: "Transition request" },
   blocked: { node: "blocked", icon: "alert", label: "Blocked decision" },
   // The operator's coordination actions (deploy/engage/run/release a specialist).
@@ -76,6 +81,8 @@ const TYPED_KIND: TypedKindTable = {
   note: "neutral",
   quality: "neutral",
   continuity: "risk", // G8: amber warning tone
+  // Ruling 483: a decision a person owes, not a verdict and not a warning.
+  proposal: "info",
   transition: "info",
   blocked: "blocked",
   agent: "agent",

@@ -398,6 +398,14 @@ async function mcpServersFor(
   return mounts;
 }
 
+/** Ruling 483: the collaboration note a Claude run with a knowledge base gets. */
+export const KB_CORRECTION_NOTE_CLAUDE =
+  "- `propose_kb_correction` — when your work PROVES a line in one of your knowledge bases wrong (a version you measured, a path, a command, a step), propose the correction against that document with your evidence instead of only reporting the discrepancy. It lands under \"Proposed corrections (not binding)\" in the document, beside the line, for every later run to read, and a person promotes it.";
+
+/** Ruling 483: the same channel on Codex, which mounts no Viberr tools. */
+export const KB_CORRECTION_NOTE_CODEX =
+  "- A line in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to file the correction on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the line, what is true instead and your evidence. The operator files it in the document, beside the line, for every later run to read.";
+
 /**
  * Resolve a deployed SPECIALIST agent (kind !== "operator") from the
  * project's `agents:` deployments by profile id. The effective profile merges
@@ -2062,6 +2070,17 @@ async function dispatchAgentRun(
         '- Your ask-human capability on THIS backend is that `question` field: filling it in is how you raise a question for the humans — there is no separate ask_human tool here, so never say ask-human is unavailable. Set `question` when a human decision blocks you; the answer arrives on a later resumed run, not during this one, so note it and finish.',
       );
     }
+  }
+  // Ruling 483 (F40-53): a knowledge-base line this run proves wrong has a
+  // channel now, and the run is told which. Claude files it with the tool the
+  // KB grant mounts; Codex mounts no Viberr tools, so its report carries it
+  // and the operator relays it (its agent-reply turn says so).
+  if (realBackend && kb.length > 0) {
+    collabNotes.push(
+      backend === "claude"
+        ? KB_CORRECTION_NOTE_CLAUDE
+        : KB_CORRECTION_NOTE_CODEX,
+    );
   }
   const prompt = collabNotes.length
     ? `${basePrompt}\n\n## Collaboration\n\n${collabNotes.join("\n")}`

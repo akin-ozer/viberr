@@ -2184,6 +2184,11 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .tl-node.note { background: var(--surface); color: var(--muted); border-color: var(--hairline); }
 .tl-node.github { background: var(--fg); color: var(--surface); border-color: var(--fg); }
 .tl-node.agent { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
+/* Ruling 483: a proposed knowledge-base correction asks a person to decide,
+   so it takes the info tone of a transition request, never the rose of a
+   review verdict it used to borrow. */
+.tl-node.proposal { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
+.tl-proposal-link { display: inline-block; margin-top: .25rem; font-size: .75rem; }
 
 .tl-card {
   margin-top: .5rem;
@@ -3506,6 +3511,8 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* G8: continuity reset — amber warning tone (context lost + recovered). */
 .pev-ico.act-continuity { background: var(--amber-light); color: var(--amber-dark); border-color: color-mix(in srgb, var(--amber-dark), transparent 72%); }
 .pev-ico.act-transition { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
+/* Ruling 483: the proposal tint, as on its timeline node. */
+.pev-ico.act-proposal { background: var(--blue-soft); color: var(--blue-pressed); border-color: color-mix(in srgb, var(--blue), transparent 70%); }
 .pev-ico.act-blocked { background: var(--red-light); color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral-dark), transparent 70%); }
 .pev-ico.act-agent { background: var(--agent-soft); color: var(--agent-dark); border-color: color-mix(in srgb, var(--agent), transparent 70%); }
 
@@ -7018,6 +7025,19 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 }
 .ctl-goals { display: flex; flex-direction: column; gap: .75rem; }
 .ctl-goals-count { margin-left: auto; }
+/* Ruling 483 (F40-59): the board's open knowledge-base proposals, each a card
+   in the goal chain's frame, with the document path wrapping rather than
+   widening the rail. */
+.ctl-proposals, .ctl-proposal-list, .ctl-proposal { display: flex; flex-direction: column; gap: .5rem; }
+.ctl-proposals-count, .ctl-proposal-acts .linkish { margin-left: auto; }
+.ctl-proposal-list { list-style: none; margin: 0; padding: 0; }
+.ctl-proposal { border: 1px solid var(--hairline); border-radius: var(--radius-box); padding: .5rem .75rem; min-width: 0; }
+.ctl-proposal p { margin: 0; overflow-wrap: anywhere; }
+.ctl-proposal-head, .ctl-proposal-acts { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+.ctl-proposal-doc { font-size: .75rem; color: var(--muted); overflow-wrap: anywhere; }
+.ctl-proposal-text { font-size: .88rem; line-height: 1.4; }
+.ctl-proposal-evidence { white-space: pre-wrap; }
+.ctl-proposals-note { margin: 0; }
 /* Ruling 419(d): a chain is a <details>. Spacing is margins, not a flex gap:
    a details element only became a flex container in recent engines. */
 .ctl-goal {
