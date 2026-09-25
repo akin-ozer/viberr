@@ -182,6 +182,7 @@ import {
 import { markTaskPacketApprovalRead } from "~/server/projections/notifications.server";
 import { liveMergeable } from "~/features/github/github-pills";
 import { proposeKbCorrection, type KbCorrection } from "./kb-proposal-actions.server";
+import { relayToTask } from "./task-relay.server";
 import {
   listKnowledgeBaseNames,
   listMcpServerNames,
@@ -3623,6 +3624,39 @@ export async function operatorPostComment(
     return { outcome: "noop", message: commentOutcomeMessage(result) };
   }
   return { outcome: "done", message: commentOutcomeMessage(result) };
+}
+
+/**
+ * Ruling 488 (F40-67): post on ANOTHER task of this project, as the operator.
+ * Gated like `post_comment` (`append-typed-events`): it is a comment, on the
+ * task a goal told this one to write to. The door refuses what a relay may
+ * not reach, writes the source task's line and wakes the target's operator
+ * (`relayToTask`).
+ */
+export async function operatorRelayToTask(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; toTaskKey: string; text: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "append-typed-events") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot post events in this project, so it cannot relay to another task.",
+    };
+  }
+  return relayToTask(db, ctx, {
+    projectSlug: input.projectSlug,
+    fromTaskKey: input.taskKey,
+    toTaskKey: input.toTaskKey,
+    text: input.text,
+    author: {
+      actorRef: { kind: "operator" },
+      name: "operator",
+      auditActor: OPERATOR_AUDIT_ACTOR,
+      notifyFrom: OPERATOR_NOTIFY_FROM,
+    },
+  });
 }
 
 /**

@@ -239,6 +239,27 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // Ruling 488: a relay from one task to another, audited on the target.
+        name: "relayToTask",
+        action: "task.relayed",
+        taskKey: "VIB-2",
+        run: async () => {
+          const { relayToTask } = await import("~/server/tasks/task-relay.server");
+          await relayToTask(store.db, fileCtx, {
+            projectSlug: store.slug,
+            fromTaskKey: "VIB-1",
+            toTaskKey: "VIB-2",
+            text: "The numbers VIB-2 waits on.",
+            author: {
+              actorRef: { kind: "operator" },
+              name: "operator",
+              auditActor: { userId: null, label: "operator" },
+              notifyFrom: { kind: "agent", name: "Operator" },
+            },
+          });
+        },
+      },
+      {
         name: "appendComment",
         action: "task.comment",
         taskKey: "VIB-1",

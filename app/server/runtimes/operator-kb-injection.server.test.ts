@@ -364,6 +364,21 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
     );
     expect(prompt).not.toContain("with nothing done and no packet");
   });
+
+  /**
+   * Ruling 488 (F40-67): appended whatever the persona says. Live on WEB-9 an
+   * acceptance packet asked the owner to confirm two attachments had been
+   * pasted onto WEB-8 by hand. Canary: drop the rule.
+   */
+  it("ruling 488: text for another task is relayed, never handed to a person", () => {
+    const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot).prompt;
+    expect(prompt).toContain(
+      "- Text meant for ANOTHER task of this project (a result a goal says to post there, numbers another task depends on) is posted there with `relay_to_task`",
+    );
+    expect(prompt).toContain(
+      "Never hand text to a person to copy or post between tasks, and never ask a person to confirm a relay landed.",
+    );
+  });
 });
 
 /**

@@ -25,6 +25,7 @@ import {
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
 import { postAgentComment } from "./agent-toolkit.server";
+import { relayToTask } from "./task-relay.server";
 import {
   operatorDispatchAgent,
   operatorPostComment,
@@ -806,6 +807,25 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
         );
       },
     },
+    {
+      // Ruling 488: a relay from another task lands on VIB-1 as a comment.
+      name: "relayToTask (another task's relay, the operator's or an agent's)",
+      roster: false,
+      write: async (store, tag) => {
+        writeTask(store.dataRoot, store.slug, {
+          frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store.users.arda.id }),
+        });
+        rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+        const result = await relayToTask(store.db, { dataRoot: store.dataRoot }, {
+          projectSlug: store.slug,
+          fromTaskKey: "VIB-2",
+          toTaskKey: "VIB-1",
+          text: `${tag} the deployed CPU numbers you asked for: 5 ms and 6 ms of 10.`,
+          author: { actorRef: AGENT, name: "Dev", auditActor: { userId: null, label: "agent" }, notifyFrom: OPERATOR_FROM },
+        });
+        expect(result.outcome).toBe("done");
+      },
+    },
   ];
 
   for (const writer of WRITERS) {
@@ -915,6 +935,8 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     "server/tasks/task-actions.server.ts": 4,
     "server/tasks/operator-actions.server.ts": 2,
     "server/tasks/agent-toolkit.server.ts": 1,
+    // Ruling 488: the relay's comment on the target task.
+    "server/tasks/task-relay.server.ts": 1,
     // The ONE site that must NOT fan out: the compaction marker is synthesized
     // FROM events already on the timeline (whose mentions were fanned out when
     // they were written). Re-notifying on a fold would ping people for a
