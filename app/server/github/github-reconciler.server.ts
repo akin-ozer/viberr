@@ -2074,7 +2074,8 @@ export async function mergeTaskPr(
     // credentials (bypassing viberr's PAT) leaves no violation, so without this
     // the merge — the FIRST real use of the bound PAT — never clears "unproven".
     // Prove it on the credential that made THIS merge call (F28-U2b), by id.
-    markWriteScopeProven(db, gh.patId);
+    // Ruling 480: on this repository, and `repo` too (the base branch moved).
+    markWriteScopeProven(db, gh.patId, gh.repo, "merge");
     // R15-6: post-merge branch cleanup, per project policy (default ON). The
     // merge is done and recorded above — cleanup is housekeeping that must
     // never turn a successful merge into a failed one, so every outcome

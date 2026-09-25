@@ -792,7 +792,9 @@ intent, `saveControllerConfig`):
   when, status `open | granted | declined | withdrawn`, audited
   `controller.resource_grant.requested` when a new row is raised (which also publishes
   `resource.updated`, so an open settings tab shows it without a reload). The Controller
-  tab lists the open requests with one server-computed remedy sentence per kind ("… are
+  tab lists the open requests, each saying when it was asked in the viewer's time
+  (`LocalDayDotTime`, ruling 480; it used to print the stored UTC ISO string), with one
+  server-computed remedy sentence per kind ("… are
   deployment-locked (ruling 108): set `VIBERR_UNLOCK_CONTROLLER_KB=enabled` and restart,
   then add it on the Controller tab; saving it there answers this request. There is no
   in-app grant while the section is locked."). Every open request rides in the

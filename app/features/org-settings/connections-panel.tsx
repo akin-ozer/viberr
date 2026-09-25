@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router";
 import type { ConnectionRecord } from "~/server/org/connections.server";
 import {
   REACH_CAP,
@@ -192,12 +193,16 @@ function ConnectionModal({
         </span>
         <div className="def-note">
           <Icon name="shield" />
+          {/* Ruling 480 (F40-43): the old copy promised "write dry-runs",
+              which run only when VIBERR_GITHUB_WRITE_PROBE is set, and a
+              proof on attach that a connection Re-check then erased. */}
           <span>
             Verified when you apply: a classic PAT publishes its scopes, so a
             missing one refuses the token and nothing is saved. A{" "}
-            <strong>fine-grained</strong> PAT publishes none. Its permissions
-            are proven by real probes (including write dry-runs) once the
-            connection is attached to a project with a repository.
+            <strong>fine-grained</strong> PAT publishes none, so each
+            repository proves it: GitHub reports its write access when a project
+            attaches it, and the first branch, push or pull request Viberr makes
+            there proves the rest.
           </span>
         </div>
       </div>
@@ -275,8 +280,16 @@ export function ConnectionsPanel({
 }: {
   connections: ConnectionRecord[];
 }) {
+  // Ruling 480 (F40-45): a project's credential card sends an instance admin
+  // here with `?update=<connection id>`, since Update token is the one place a
+  // token is actually replaced, and the link lands on that connection's modal.
+  const [searchParams] = useSearchParams();
   const [modal, setModal] = useState<{ item: ConnectionRecord | null } | null>(
-    null,
+    () => {
+      const asked = searchParams.get("update");
+      const item = asked ? connections.find((c) => c.id === asked) : undefined;
+      return item ? { item } : null;
+    },
   );
   const [confirm, setConfirm] = useState<ConnectionRecord | null>(null);
   const push = useToast();
@@ -386,20 +399,37 @@ export function ConnectionsPanel({
                             {a.text}
                           </span>
                         ))}
+                        {/* Ruling 480 (F40-43): a fine-grained token is
+                            proven per repository, so the line says where it
+                            stands instead of promising a verification the
+                            card then never showed. */}
                         {unproven.length > 0 && (
                           <span
                             className="sub"
                             title={unproven.map((s) => s.note ?? s.id).join(" · ")}
                           >
                             {proven.length > 0 ? " · " : ""}
-                            {unproven.map((s) => s.id).join(", ")} unproven.
-                            Verified when attached to a project
+                            {unproven.map((s) => s.id).join(", ")} unproven for
+                            the token as a whole: each repository proves them.
+                            {c.repoProofs.length === 0 &&
+                              " No repository has proven them yet: attaching the token to a project does, and so does Viberr's first write there."}
                           </span>
                         )}
                       </>
                     );
                   })()}
                 </span>
+                {c.repoProofs.map((p) => (
+                  <span className="sub" key={p.repo} data-repo-proof={p.repo}>
+                    <span className="mono">{p.repo}</span>:{" "}
+                    {[
+                      p.proven.length > 0 ? `${p.proven.join(", ")} proven` : "",
+                      p.refused.length > 0 ? `${p.refused.join(", ")} refused` : "",
+                    ]
+                      .filter(Boolean)
+                      .join("; ")}
+                  </span>
+                ))}
               </span>
               {c.validationState === "unvalidated" && (
                 <Pill kind="input" sm>

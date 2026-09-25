@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type ReactNode,
 } from "react";
 import { useFetcher } from "react-router";
 import { countLabel } from "~/shared/text/plural";
@@ -880,7 +881,9 @@ export function StoreBrowser({
 }: {
   title: string;
   subMono: string;
-  metaTail?: string;
+  /** Ruling 480: a node, so a "when" in it renders hydration-safe
+   *  (`RelativeStamp`) rather than as a clock-read string. */
+  metaTail?: ReactNode;
   tree: StoreNode[];
   resource: StoreBrowserResource;
   onClose: () => void;
@@ -1221,7 +1224,7 @@ export function StoreBrowser({
         <div className="modal-foot">
           <span className="foot-hint mono">
             {countLabel(nDirs, "folder") + " · " + countLabel(nFiles, "file")}
-            {metaTail ? " · " + metaTail : ""}
+            {metaTail ? <> · {metaTail}</> : null}
           </span>
           <span className="foot-actions">
             <button type="button" className="btn" onClick={close}>

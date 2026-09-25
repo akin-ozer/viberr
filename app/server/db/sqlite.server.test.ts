@@ -345,6 +345,39 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
   });
 
   /**
+   * Ruling 480: `repo_scopes_json` holds what each repository proved about a
+   * token. Every PAT read names it, so a root that predates it would fail the
+   * credential card and every GitHub call's context. NULL is "nothing stored
+   * yet", and a second boot adds nothing.
+   */
+  it("adds repo_scopes_json to an older root's PATs, empty, idempotently", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-patproof-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE github_pats (
+           id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT NOT NULL,
+           encrypted_token TEXT NOT NULL, token_suffix TEXT NOT NULL,
+           created_at TEXT NOT NULL, last_validated_at TEXT, validation_json TEXT);
+         INSERT INTO github_pats (id, user_id, label, encrypted_token, token_suffix, created_at)
+           VALUES ('pat_1', 'u_1', 'connection · akin-ozer', 'v1$x', 'k3ui', '2026-09-20');`,
+      );
+      ensureBaselineColumns(db);
+      ensureBaselineColumns(db);
+      // SAFETY: the SELECT names two columns; `repo_scopes_json` is nullable TEXT.
+      const rows = db
+        .prepare(`SELECT id, repo_scopes_json FROM github_pats`)
+        .all() as { id: string; repo_scopes_json: string | null }[];
+      // CANARY: drop the `github_pats` entry from BASELINE_COLUMNS and this
+      // SELECT fails with "no such column".
+      expect(rows).toEqual([{ id: "pat_1", repo_scopes_json: null }]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
    * Ruling 463: `reach_json` says which repositories a connection's token
    * reaches. Every connection reader names it, so a root that predates it
    * would fail the Instance settings card, the New project dialog and the

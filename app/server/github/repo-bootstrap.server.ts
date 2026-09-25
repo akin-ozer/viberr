@@ -9,6 +9,7 @@ import {
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { logger } from "~/server/logging/logger.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
 import {
   githubFailureMessage,
   isMissingRefAnswer,
@@ -342,6 +343,14 @@ export async function ensureDefaultBranch(
   };
   if (scope.taskKey) audit.taskKey = scope.taskKey;
   recordAudit(db, audit);
+  // Ruling 480: the commit or the ref just made is a write through this token,
+  // so it proves `repo` on this repository.
+  markWriteScopeProven(
+    db,
+    gh.patId,
+    gh.repo,
+    outcome.how === "initial_commit" ? "initial_commit" : "branch",
+  );
   if (scope.taskKey) {
     const ref = { projectSlug: scope.projectSlug, taskKey: scope.taskKey, dataRoot: ctx.dataRoot };
     if (readTaskFile(ref)) {

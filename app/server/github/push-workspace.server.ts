@@ -25,6 +25,7 @@ import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redac
 import {
   getPatToken,
   getProjectCredential,
+  markWriteScopeProven,
 } from "~/server/secrets/pat-store.server";
 import { taskBranchName } from "./branch-sync.server";
 import { countLabel } from "~/shared/text/plural";
@@ -1196,6 +1197,10 @@ export async function pushWorkspaceBranch(
     if (localAhead === null) pushed.commitsUnknown = true;
     else pushed.commits = localAhead;
     logger.info("pushed workspace branch to origin", pushed);
+    // Ruling 480 (F40-43): GitHub accepted a push authenticated by this PAT,
+    // which proves `repo` (Contents write) on this repository. The card said
+    // "repo unproven (verified on first use)" through every push until now.
+    if (credential) markWriteScopeProven(db, credential.id, repo, "push");
     // The RESULT's `commits` is a number by contract, so an unreadable history
     // reports 0 there — the push happened, the count is the only thing we don't
     // know, and the log line above is where that difference is stated.

@@ -9,6 +9,7 @@ import {
   type OpenScopeViolationInput,
 } from "~/server/projections/policy-violations.server";
 import { isSecretBox } from "./secret-box.server";
+import type { PatValidation } from "~/schemas/github-pat.schema";
 
 /** The VIB-142 pull_request:write violation these tests exercise. It used to be
  *  migration-seeded; the squashed baseline is schema-only, so tests open it
@@ -30,6 +31,7 @@ import {
   credentialAdvisories,
   markWriteScopeProven,
   recordPatValidation,
+  replacePatToken,
   setProjectCredential,
 } from "./pat-store.server";
 
@@ -42,6 +44,34 @@ afterEach(ctx.cleanup);
 
 const ACTOR = { userId: "u_test", label: "arda@viberr.test" };
 const TOKEN = "github_pat_11TESTTEST0123456789_secretsecret42af";
+
+/** A fine-grained token's validation, asked about `repo` (null = the
+ *  connection-level question: its save, Re-check or 24-hour re-proof). */
+function fineGrained(
+  repo: string | null,
+  scopes: PatValidation["scopes"],
+  status: PatValidation["status"] = "valid",
+): PatValidation {
+  return {
+    status,
+    checkedAt: "2026-09-24T21:00:00.000Z",
+    login: "akin-ozer",
+    tokenKind: "fine_grained",
+    expiresAt: null,
+    repo,
+    scopes,
+    missingScopes: [],
+    headerScopes: null,
+    detail: "Authenticated as akin-ozer.",
+  };
+}
+
+/** What the connection's own Re-check records for a fine-grained token: no
+ *  repository asked about, so nothing to probe. */
+const CONNECTION_RECHECK = fineGrained(null, [
+  { id: "repo", ok: true, source: "assumed", note: "fine-grained tokens expose no scope introspection" },
+  { id: "pull_request:write", ok: true, source: "assumed", note: "fine-grained tokens expose no scope introspection" },
+]);
 
 describe("pat-store", () => {
   it("creates a PAT encrypted at rest with a display suffix", () => {
@@ -117,7 +147,8 @@ describe("pat-store", () => {
   });
 
   it("F27-U2: a real write proves pull_request:write on the bound credential", () => {
-    const store = setupTestStore(ctx);
+    // Projected: the chip reads the project's repository off its row.
+    const store = setupProjectedStore(ctx);
     const pat = createPat(
       store.db,
       { userId: store.users.arda.id, label: "bot", token: TOKEN },
@@ -125,36 +156,25 @@ describe("pat-store", () => {
     );
     // The honest "verified on first use" state: a fine-grained token whose
     // pull_request:write was ASSUMED (never write-probed).
-    recordPatValidation(store.db, pat.id, {
-      status: "valid",
-      checkedAt: "2026-08-24T00:00:00.000Z",
-      login: "viberr-bot",
-      tokenKind: "fine_grained",
-      expiresAt: null,
-      repo: "akin-ozer/viberr",
-      scopes: [
-        { id: "repo", ok: true, source: "probe" },
-        { id: "pull_request:write", ok: true, source: "assumed" },
-      ],
-      missingScopes: [],
-      headerScopes: null,
-      detail: "Authenticated as viberr-bot.",
-    });
+    recordPatValidation(store.db, pat.id, fineGrained("akin-ozer/viberr", [
+      { id: "repo", ok: true, source: "probe" },
+      { id: "pull_request:write", ok: true, source: "assumed" },
+    ]));
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
 
-    const scopeOf = () =>
-      getProjectCredential(store.db, store.slug)!.validation!.scopes.find(
+    const chipOf = () =>
+      getProjectCredentialHealth(store.db, store.slug).scopes.find(
         (s) => s.id === "pull_request:write",
       );
-    expect(scopeOf()).toMatchObject({ source: "assumed" });
+    expect(chipOf()).toMatchObject({ source: "assumed" });
 
-    // A real PR opened → the write proves the scope; the cached chip flips.
+    // A real PR opened → the write proves the scope; the chip flips.
     // F28-U2b: proven BY the credential id that made the call, not by slug.
-    markWriteScopeProven(store.db, pat.id);
-    expect(scopeOf()).toMatchObject({ ok: true, source: "probe" });
+    markWriteScopeProven(store.db, pat.id, "akin-ozer/viberr", "pull_request");
+    expect(chipOf()).toMatchObject({ ok: true, source: "probe" });
 
     // No-op for an unknown credential (must never throw).
-    markWriteScopeProven(store.db, "no-such-pat");
+    markWriteScopeProven(store.db, "no-such-pat", "akin-ozer/viberr", "pull_request");
   });
 
   it("F28-U2b: proves the SPECIFIC credential, never whichever is bound now", () => {
@@ -165,21 +185,10 @@ describe("pat-store", () => {
         { userId: store.users.arda.id, label, token },
         ACTOR,
       );
-      recordPatValidation(store.db, pat.id, {
-        status: "valid",
-        checkedAt: "2026-08-24T00:00:00.000Z",
-        login: `viberr-${label}`,
-        tokenKind: "fine_grained",
-        expiresAt: null,
-        repo: "akin-ozer/viberr",
-        scopes: [
-          { id: "repo", ok: true, source: "probe" },
-          { id: "pull_request:write", ok: true, source: "assumed" },
-        ],
-        missingScopes: [],
-        headerScopes: null,
-        detail: "Authenticated.",
-      });
+      recordPatValidation(store.db, pat.id, fineGrained("akin-ozer/viberr", [
+        { id: "repo", ok: true, source: "probe" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ]));
       return pat;
     };
     const a = mk("a", "ghp_aaaaaaaaaaaa1111");
@@ -187,16 +196,16 @@ describe("pat-store", () => {
     // B is the project's CURRENTLY-bound credential; A is the one that actually
     // made an in-flight PR-open call before a rotation to B.
     setProjectCredential(store.db, { projectSlug: store.slug, patId: b.id }, ACTOR);
-    const scope = (patId: string) =>
-      getPatMetadata(store.db, patId)!.validation!.scopes.find(
-        (s) => s.id === "pull_request:write",
+    const proven = (patId: string) =>
+      getPatMetadata(store.db, patId)!.repoScopes.flatMap((p) =>
+        p.scopes.map((s) => `${p.repo} ${s.id} ${s.ok}`),
       );
 
     // The call that authenticated with A proves A — even though B is bound now.
-    markWriteScopeProven(store.db, a.id);
-    expect(scope(a.id)).toMatchObject({ ok: true, source: "probe" });
-    // B — which made no GitHub call — is untouched (still the honest "assumed").
-    expect(scope(b.id)).toMatchObject({ source: "assumed" });
+    markWriteScopeProven(store.db, a.id, "akin-ozer/viberr", "pull_request");
+    expect(proven(a.id)).toContain("akin-ozer/viberr pull_request:write true");
+    // B — which made no GitHub call — is untouched (its repo probe only).
+    expect(proven(b.id)).toEqual(["akin-ozer/viberr repo true"]);
   });
 
   it("binds one credential per project; delete cascades the binding", () => {
@@ -302,6 +311,155 @@ describe("pat-store", () => {
     expect(health.scopes.find((s) => s.id === "pull_request:write")).toMatchObject(
       { ok: false, source: "violation", flaggedTaskKey: "VIB-142" },
     );
+  });
+});
+
+/**
+ * Ruling 480 (F40-43): a fine-grained token's `repo` and `pull_request:write`
+ * are proven per repository. Live, the card read "repo unproven (verified on
+ * first use)" after pushes and a merge: the attach probe's proof lived only in
+ * the token's newest validation, which the connection's repo-less Re-check
+ * overwrote, and no push or merge ever proved `repo`.
+ */
+describe("ruling 480: repository-scoped proof", () => {
+  const REPO = "akin-ozer/viberr";
+  function bound() {
+    // Projected: the chips read the project's repository off its row.
+    const store = setupProjectedStore(ctx);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "connection · akin-ozer", token: TOKEN },
+      ACTOR,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
+    const chip = (id: string) =>
+      getProjectCredentialHealth(store.db, store.slug).scopes.find((s) => s.id === id);
+    return { store, pat, chip };
+  }
+
+  it("a connection Re-check (no repository) leaves the project's proven repo proven", () => {
+    // Canary: make `repoScopesAfter` drop every proof on a repo-less run, or
+    // read the chip from `validation.scopes` alone, and the second assert fails.
+    const { store, pat, chip } = bound();
+    // The attach probe: GitHub's permission block for THIS repository.
+    recordPatValidation(store.db, pat.id, fineGrained(REPO, [
+      { id: "repo", ok: true, source: "probe", note: "read + write reported by GitHub for this token" },
+      { id: "pull_request:write", ok: true, source: "assumed" },
+    ]));
+    expect(chip("repo")).toEqual({ id: "repo", ok: true, source: "probe" });
+    // Instance settings → Re-check: the same token, asked about no repository.
+    recordPatValidation(store.db, pat.id, CONNECTION_RECHECK);
+    expect(getPatMetadata(store.db, pat.id)!.validation!.repo).toBeNull();
+    expect(chip("repo")).toEqual({ id: "repo", ok: true, source: "probe" });
+    expect(chip("pull_request:write")).toMatchObject({ source: "assumed" });
+  });
+
+  it("a push, a branch and a merge prove repo on the repository they went to, and nowhere else", () => {
+    // Canary: let `repoEvidence` take any repository's proof, and the second
+    // project reads the first one's push as its own.
+    const { store, pat, chip } = bound();
+    recordPatValidation(store.db, pat.id, CONNECTION_RECHECK);
+    expect(chip("repo")).toMatchObject({ source: "assumed" });
+    markWriteScopeProven(store.db, pat.id, REPO, "push");
+    expect(chip("repo")).toEqual({ id: "repo", ok: true, source: "probe" });
+    expect(chip("pull_request:write")).toMatchObject({ source: "assumed" });
+    // A merge proves both (Contents write moves the base; the PR is merged).
+    markWriteScopeProven(store.db, pat.id, REPO, "merge");
+    expect(chip("pull_request:write")).toEqual({ id: "pull_request:write", ok: true, source: "probe" });
+    const note = getPatMetadata(store.db, pat.id)!.repoScopes[0]!.scopes.find((s) => s.id === "repo")!.note;
+    expect(note).toBe("a pull request Viberr merged here");
+
+    // Another project on ANOTHER repository, bound to the same token: nothing
+    // proven there, whatever this one proved.
+    store.db
+      .prepare(
+        `INSERT INTO projects (slug, name, repo, task_prefix, source_path, content_hash, parsed_at)
+         VALUES ('other', 'Other', 'akin-ozer/website', 'OTH', 'projects/other/project.md', 'x', '2026-09-24')`,
+      )
+      .run();
+    setProjectCredential(store.db, { projectSlug: "other", patId: pat.id }, ACTOR);
+    const other = getProjectCredentialHealth(store.db, "other").scopes;
+    expect(other.find((s) => s.id === "repo")).toMatchObject({ source: "assumed" });
+    // GitHub compares names without case; so does the proof.
+    markWriteScopeProven(store.db, pat.id, "Akin-Ozer/Website", "branch");
+    expect(getProjectCredentialHealth(store.db, "other").scopes.find((s) => s.id === "repo")).toEqual({
+      id: "repo",
+      ok: true,
+      source: "probe",
+    });
+  });
+
+  it("a repository probe that refuses is recorded too; a newer write replaces it", () => {
+    const { store, pat, chip } = bound();
+    recordPatValidation(store.db, pat.id, {
+      ...fineGrained(REPO, [
+        { id: "repo", ok: false, source: "probe", note: "repository readable but not writable" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ], "insufficient_scope"),
+      missingScopes: ["repo"],
+    });
+    recordPatValidation(store.db, pat.id, CONNECTION_RECHECK);
+    expect(chip("repo")).toEqual({ id: "repo", ok: false, source: "probe" });
+    markWriteScopeProven(store.db, pat.id, REPO, "push");
+    expect(chip("repo")).toEqual({ id: "repo", ok: true, source: "probe" });
+  });
+
+  it("proof ends with the token: replaced, revoked, or unable to see the repository", () => {
+    // Canary: drop `repo_scopes_json = NULL` from `replacePatToken`.
+    const { store, pat, chip } = bound();
+    markWriteScopeProven(store.db, pat.id, REPO, "push");
+    replacePatToken(store.db, pat.id, "github_pat_11REPLACEMENT_0000000000beef", ACTOR);
+    expect(getPatMetadata(store.db, pat.id)!.repoScopes).toEqual([]);
+    expect(chip("repo")).toMatchObject({ source: "unchecked" });
+
+    markWriteScopeProven(store.db, pat.id, REPO, "push");
+    recordPatValidation(store.db, pat.id, fineGrained(REPO, [], "repo_not_found"));
+    expect(chip("repo")).toMatchObject({ source: "unchecked" });
+
+    markWriteScopeProven(store.db, pat.id, REPO, "push");
+    recordPatValidation(store.db, pat.id, fineGrained(null, [], "revoked"));
+    expect(getPatMetadata(store.db, pat.id)!.repoScopes).toEqual([]);
+  });
+
+  it("a row cached before the proofs had a column still proves its repository, and a Re-check keeps it", () => {
+    // Canary: make `repoScopeProofsOf` return the stored proofs alone.
+    const { store, pat, chip } = bound();
+    recordPatValidation(store.db, pat.id, fineGrained(REPO, [
+      { id: "repo", ok: true, source: "probe" },
+      { id: "pull_request:write", ok: true, source: "probe" },
+    ]));
+    // What an upgraded root holds: the validation, no proof column value.
+    store.db.prepare(`UPDATE github_pats SET repo_scopes_json = NULL WHERE id = ?`).run(pat.id);
+    expect(chip("repo")).toEqual({ id: "repo", ok: true, source: "probe" });
+    recordPatValidation(store.db, pat.id, CONNECTION_RECHECK);
+    expect(chip("repo")).toEqual({ id: "repo", ok: true, source: "probe" });
+    expect(chip("pull_request:write")).toEqual({ id: "pull_request:write", ok: true, source: "probe" });
+  });
+
+  it("a classic token's header verdict answers for every repository", () => {
+    const { store, pat, chip } = bound();
+    recordPatValidation(store.db, pat.id, {
+      ...fineGrained(null, [
+        { id: "repo", ok: true, source: "header" },
+        { id: "pull_request:write", ok: true, source: "header", note: "implied by `repo`" },
+      ]),
+      tokenKind: "classic",
+      headerScopes: ["repo"],
+    });
+    expect(chip("repo")).toEqual({ id: "repo", ok: true, source: "header" });
+  });
+
+  it("names the connection holding the token, for the card's Update token link", () => {
+    const { store, pat } = bound();
+    // No connection holds it: the key is absent, not null (ruling 457's payload).
+    expect(getProjectCredentialHealth(store.db, store.slug)).not.toHaveProperty("connectionId");
+    store.db
+      .prepare(
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES ('akin-ozer', 'akin-ozer', ?, 1, '2026-09-24', '2026-09-24')`,
+      )
+      .run(pat.id);
+    expect(getProjectCredentialHealth(store.db, store.slug).connectionId).toBe("akin-ozer");
   });
 });
 

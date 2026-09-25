@@ -88,6 +88,7 @@ const CONNECTIONS: ConnectionRecord[] = [
     validationState: "unvalidated", tokenKind: null, validationDetail: null,
     missingScopes: [], reach: null, scopes: [], lastValidatedAt: null,
     createdAt: "2026-07-01T09:00:00.000Z", boundProjects: 0, advisories: [],
+    repoProofs: [],
   },
   {
     id: "hepapi", owner: "hepapi", method: "PAT", patId: "pat_2",
@@ -109,6 +110,7 @@ const CONNECTIONS: ConnectionRecord[] = [
       { id: "pull_request:write", ok: true, source: "header" },
     ], lastValidatedAt: "2026-07-01T09:00:00.000Z",
     createdAt: "2026-07-01T09:05:00.000Z", boundProjects: 2, advisories: [],
+    repoProofs: [],
   },
 ];
 
@@ -123,6 +125,48 @@ describe("ConnectionsPanel", () => {
     expect(getByText("default")).toBeTruthy();
     expect(getByText("expires in 15 days")).toBeTruthy();
     expect(queryByText("validation failed")).toBeNull();
+  });
+
+  // Ruling 480 (F40-45): a project's credential card links an instance admin
+  // to `?update=<connection id>`, the one place a token is replaced. Canary:
+  // start the modal state at null and no dialog opens.
+  it("ruling 480: ?update=<id> opens that connection's Update token, and its note promises no dry-run", async () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <ConnectionsPanel connections={CONNECTIONS} />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { findByRole } = render(
+      <Stub initialEntries={["/org/settings?tab=connections&update=hepapi"]} />,
+    );
+    const dialog = await findByRole("dialog", { name: "Update token for hepapi" });
+    // F40-43: the dry-run is an env opt-in that is off by default.
+    expect(dialog.textContent).not.toContain("dry-run");
+    expect(dialog.textContent).toContain(
+      "GitHub reports its write access when a project attaches it, and the first branch, push or pull request Viberr makes there proves the rest.",
+    );
+  });
+
+  it("ruling 480: an unknown ?update= id opens nothing", () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <ConnectionsPanel connections={CONNECTIONS} />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { queryByRole } = render(
+      <Stub initialEntries={["/org/settings?tab=connections&update=nobody"]} />,
+    );
+    expect(queryByRole("dialog")).toBeNull();
   });
 
   it("C6: a PAT expiry hydrates safely — the UTC day first, the viewer's calendar date after hydration", () => {
@@ -1185,8 +1229,37 @@ describe("ConnectionsPanel — scope evidence", () => {
       <ConnectionsPanel connections={[assumed]} />,
     );
     expect(container.querySelectorAll(".conn-row .scope-chip").length).toBe(0);
+    // Ruling 480 (F40-43): no promise the card then never kept.
     expect(container.querySelector(".conn-row .scope-chips")!.textContent).toContain(
-      "repo, pull_request:write unproven. Verified when attached to a project",
+      "repo, pull_request:write unproven for the token as a whole: each repository proves them. No repository has proven them yet: attaching the token to a project does, and so does Viberr's first write there.",
+    );
+  });
+
+  // Ruling 480 (F40-43): live, the card read "repo unproven. Verified when
+  // attached to a project" for a token attached to a project that had pushed
+  // and merged. Canary: stop rendering `repoProofs` and the line is gone.
+  it("ruling 480: lists what each repository proved, and no longer says none has", () => {
+    const proven: ConnectionRecord = {
+      ...CONNECTIONS[1]!,
+      id: "cx_proven",
+      owner: "akin-ozer",
+      scopes: [
+        { id: "repo", ok: true, source: "assumed" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ],
+      repoProofs: [
+        { repo: "akin-ozer/website", proven: ["repo", "pull_request:write"], refused: [] },
+        { repo: "akin-ozer/docs", proven: [], refused: ["repo"] },
+      ],
+    };
+    const { container } = renderPanel(<ConnectionsPanel connections={[proven]} />);
+    const lines = [...container.querySelectorAll("[data-repo-proof]")].map((l) => l.textContent);
+    expect(lines).toEqual([
+      "akin-ozer/website: repo, pull_request:write proven",
+      "akin-ozer/docs: repo refused",
+    ]);
+    expect(container.querySelector(".conn-row .scope-chips")!.textContent).not.toContain(
+      "No repository has proven them yet",
     );
   });
 

@@ -705,7 +705,7 @@ export async function openTaskPr(
     // `pull_request:write`, so its cached scope stops reading "unproven
     // (verified on first use)" after the first actual use. F28-U2b: prove it on
     // the credential that MADE the call (`gh.patId`), not whatever is bound now.
-    markWriteScopeProven(db, gh.patId);
+    markWriteScopeProven(db, gh.patId, gh.repo, "pull_request");
     return {
       status: "ok",
       prNumber: created.data.number,
@@ -755,7 +755,7 @@ export async function openTaskPr(
     );
     // F28-U2a: GitHub still CREATED the PR (2xx) — a real write proves the
     // scope here too, not only on the cleanly-decoded success path above.
-    markWriteScopeProven(db, gh.patId);
+    markWriteScopeProven(db, gh.patId, gh.repo, "pull_request");
     return { status: "ok", prNumber: pr.number, created: true, url };
   }
   if (created.kind === "network") {

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router";
 import type {
   ProjectCredentialHealth,
   ScopeChip,
@@ -42,7 +43,7 @@ export function CredentialCard({
   /** Right-aligned footer action slot (Fix in Settings / Re-check scopes).
    * The green footer carries it only while an advisory is open. */
   warnActions?: ReactNode;
-  /** Always-visible manage row (attach / rotate / remove the credential). */
+  /** Always-visible manage row (attach / re-attach / remove the credential). */
   manageActions?: ReactNode;
   /** Live token auth health from the connection probe. When the token is
    * revoked/expired, the "all scopes granted" affirmation is suppressed — the
@@ -73,6 +74,8 @@ export function CredentialCard({
   const missing = credential.scopes.find((s) => !s.ok);
   // Owner ruling 2026-07-25: a chip is a PROVEN verdict — a scope header, a
   // live probe (writes via the empty-payload dry-run), or an open violation.
+  // Ruling 480: a repository-scoped chip's probe is this project's repository's
+  // proof, a write Viberr made there included.
   // `assumed`/`unchecked` entries are not evidence, so they render as the
   // honest "unproven" line instead of a pseudo-check next to real ones.
   const proven = credential.scopes.filter(
@@ -209,10 +212,30 @@ function RemoveCredentialDialog({
 }
 
 /**
- * The attach / rotate / remove manage row shared by the GitHub view and
+ * Ruling 480 (F40-45): where an instance admin replaces the token a project's
+ * credential is bound to: its connection's Update token in Instance settings.
+ * Null when no connection holds the token.
+ */
+export function replaceTokenHref(connectionId: string | undefined): string | null {
+  return connectionId
+    ? `/org/settings?tab=connections&update=${encodeURIComponent(connectionId)}`
+    : null;
+}
+
+/**
+ * The attach / re-attach / remove manage row shared by the GitHub view and
  * project Settings (finding #13). `configured` (a real PAT is bound) shows
- * Rotate + Remove; otherwise a single Attach. admin|maintainer only — the
+ * Re-attach + Remove; otherwise a single Attach. admin|maintainer only — the
  * parent gates `canManage`. Remove goes through a confirm.
+ *
+ * Ruling 480 (F40-45): the configured button said "Rotate credential" and
+ * rotated nothing. It binds the connection that matches the repository's owner
+ * (or the default) again and re-checks it, so on a one-connection instance the
+ * token that runs afterwards is byte for byte the one before, and someone
+ * reacting to a leaked token was told it was rotated. It is named for what it
+ * does, and the row says where a token IS replaced: a link to the bound
+ * connection's Update token for an instance admin, a sentence for everyone
+ * else (Instance settings is admin-only).
  */
 export function CredentialManageActions({
   configured,
@@ -220,6 +243,7 @@ export function CredentialManageActions({
   inFlight,
   onSet,
   onClear,
+  replaceHref = null,
 }: {
   configured: boolean;
   canManage: boolean;
@@ -227,10 +251,13 @@ export function CredentialManageActions({
    *  (`inFlightIntent`), null while it is idle. The button that started it
    *  shows the work; the other one only waits at the disabled step. */
   inFlight: string | null;
-  /** Attach (unconfigured) or rotate (configured) → set-credential. */
+  /** Attach (unconfigured) or re-attach (configured) → set-credential. */
   onSet: () => void;
   /** Remove → clear-credential (after the confirm). */
   onClear: () => void;
+  /** The bound connection's Update token (`replaceTokenHref`) when the reader
+   *  is an instance admin; null (the default) otherwise. */
+  replaceHref?: string | null;
 }) {
   const [confirming, setConfirming] = useState(false);
   if (!canManage) return null;
@@ -238,6 +265,7 @@ export function CredentialManageActions({
   const setting = inFlight === "set-credential";
   const clearing = inFlight === "clear-credential";
   return (
+    <>
     <div className="cred-manage">
       <button
         type="button"
@@ -247,22 +275,28 @@ export function CredentialManageActions({
         aria-busy={setting || undefined}
         title={
           configured
-            ? "Re-bind to the default connection's PAT"
-            : "Bind the default connection's PAT to this project"
+            ? "Bind the connection for this repository's owner (or the default) again and re-check it. It does not replace a token"
+            : "Bind the GitHub connection for this repository's owner to this project"
         }
       >
-        {/* Ruling 459 over ruling 368: the lock trades for the rotate mark
+        {/* Ruling 459 over ruling 368: the lock trades for the refresh mark
             once a credential is bound, and that resting cell trades for the
             spinning loader while this button's own request is in flight. */}
         <GlyphSwap rest="lock" alt="refresh" on={configured} busy={setting} />
         {configured
           ? setting
-            ? "Rotating…"
-            : "Rotate credential"
+            ? "Re-attaching…"
+            : "Re-attach connection"
           : setting
             ? "Attaching…"
             : "Attach credential"}
       </button>
+      {configured && replaceHref && (
+        <Link className="btn ghost sm" to={replaceHref}>
+          <Icon name="sliders" />
+          Replace token
+        </Link>
+      )}
       {configured && (
         <button
           type="button"
@@ -285,5 +319,12 @@ export function CredentialManageActions({
         />
       )}
     </div>
+    {configured && !replaceHref && (
+      <div className="sub" data-replace-token-note>
+        Re-attaching never replaces a token. An instance admin replaces it in
+        Instance settings, under GitHub connections.
+      </div>
+    )}
+    </>
   );
 }

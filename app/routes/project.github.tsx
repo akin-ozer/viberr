@@ -125,7 +125,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   // as the audited D2 override. reconcile = `reconcile-github` (maintainer+,
   // R8-4); credential changes = `grant-github-scope` (maintainer+). The archived
   // read-only gate IS enforced (R8-5): a frozen project can't reconcile or
-  // rotate/clear its credential — restore it first.
+  // re-attach/clear its credential — restore it first.
   const requireGithubAction = (action: RbacAction, what: string) =>
     assertProjectAction(db, action, params.slug, actor, what);
 
@@ -138,7 +138,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       requireGithubAction("grant-github-scope", "re-check the credential");
       return await runGrantScope(db, params.slug, actor);
     }
-    // Attach/rotate + remove the project credential — same credential-change
+    // Attach/re-attach + remove the project credential — same credential-change
     // RBAC as grant-scope (`grant-github-scope`, maintainer+).
     if (intent === "set-credential" || intent === "clear-credential") {
       requireGithubAction("grant-github-scope", "change the credential");
@@ -162,6 +162,7 @@ export default function GithubView({ loaderData }: Route.ComponentProps) {
       data={loaderData.view}
       reconcileCheck={loaderData.reconcileCheck}
       myRole={layout?.myRole ?? null}
+      instanceAdmin={layout?.user.role === "admin"}
     />
   );
 }

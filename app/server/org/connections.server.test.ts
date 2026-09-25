@@ -11,7 +11,13 @@ import {
   PAT_VALIDATION_RATE_LIMIT,
 } from "~/server/auth/rate-limit.server";
 import { insertUser } from "~/server/auth/user-store.server";
-import { DEFAULT_REQUIRED_SCOPES } from "~/server/secrets/pat-store.server";
+import {
+  DEFAULT_REQUIRED_SCOPES,
+  getProjectCredentialHealth,
+  markWriteScopeProven,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
+import { validatePat } from "~/server/secrets/pat-validator.server";
 import {
   CONNECTION_REQUIRED_SCOPES,
   createConnection,
@@ -770,5 +776,94 @@ describe("ruling 463: what the token reaches", () => {
     expect(after.reach?.status).toBe("unknown");
 
     expect((await recheckConnection(db, "nobody", ACTOR)).status).toBe("not_found");
+  });
+});
+
+/**
+ * Ruling 480 (F40-43), the live sequence: a fine-grained token is attached to
+ * a project (GitHub's permission block proves `repo` on that repository), then
+ * an admin presses Re-check on Instance settings. The Re-check asks about no
+ * repository, and used to overwrite the one cached validation the project card
+ * read, so the project's proven `repo` went back to "unproven".
+ */
+describe("ruling 480: a connection Re-check never unproves a repository", () => {
+  const TOKEN = "github_pat_ruling480_token_00000000k3ui";
+  const REPO = "akin-ozer/website";
+
+  function transport() {
+    return fakeGithubFetch({
+      "GET /user": { body: { login: "akin-ozer" } },
+      "GET /users/akin-ozer": { body: {} },
+      "GET /user/repos": {
+        body: [{ full_name: REPO, private: true, permissions: { push: true } }],
+      },
+      [`GET /repos/${REPO}`]: { body: { permissions: { push: true, pull: true } } },
+      [`GET /repos/${REPO}/pulls`]: { body: [] },
+    });
+  }
+
+  // CANARY: make `repoScopesAfter` drop the proofs on a repo-less run and the
+  // project's chip reads `assumed` after the Re-check; list the repository's
+  // probe as a token-wide chip again and `scopes` carries `probe`.
+  it("the project card keeps its proof, and the connection card lists it under the repository", async () => {
+    const db = makeDbWithUser();
+    const saved = await createConnection(
+      db,
+      { owner: "akin-ozer", token: TOKEN, userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: transport().fetchImpl },
+    );
+    expect(saved.status).toBe("saved");
+    const patId = listConnections(db)[0]!.patId;
+    db.prepare(
+      `INSERT INTO projects (slug, name, repo, task_prefix, source_path, content_hash, parsed_at)
+       VALUES ('akinozer-com', 'akinozer.com', ?, 'WEB', 'projects/akinozer-com/project.md', 'x', '2026-09-24')`,
+    ).run(REPO);
+    setProjectCredential(db, { projectSlug: "akinozer-com", patId }, ACTOR);
+    // The attach probe (`proveAttachedCredential` → `validatePat` with the
+    // project's repository).
+    await validatePat(db, patId, { repo: REPO, fetchImpl: transport().fetchImpl });
+    const repoChip = () =>
+      getProjectCredentialHealth(db, "akinozer-com").scopes.find((s) => s.id === "repo");
+    expect(repoChip()).toEqual({ id: "repo", ok: true, source: "probe" });
+    // The token's newest validation is now that repository's: the connection
+    // card still keeps its chips token-wide and lists the repository instead.
+    const attached = listConnections(db)[0]!;
+    expect(attached.scopes.find((s) => s.id === "repo")).toMatchObject({ source: "assumed" });
+    expect(attached.repoProofs).toEqual([{ repo: REPO, proven: ["repo"], refused: [] }]);
+
+    getPatValidationRateLimiter().reset(ACTOR.userId);
+    const rechecked = await recheckConnection(db, "akin-ozer", ACTOR, {
+      fetchImpl: transport().fetchImpl,
+    });
+    expect(rechecked.status).toBe("rechecked");
+    expect(repoChip()).toEqual({ id: "repo", ok: true, source: "probe" });
+
+    const card = listConnections(db)[0]!;
+    // Token-wide, a fine-grained token proves neither scope…
+    expect(card.scopes.map((s) => `${s.id}:${s.source}`)).toEqual([
+      "repo:assumed",
+      "pull_request:write:assumed",
+    ]);
+    // …and the repository that proved `repo` says so.
+    expect(card.repoProofs).toEqual([{ repo: REPO, proven: ["repo"], refused: [] }]);
+  });
+
+  it("a classic token's header answers for every repository, so no repository line repeats it", async () => {
+    const db = makeDbWithUser();
+    await createConnection(
+      db,
+      { owner: "akin-ozer", token: "ghp_valid_token_42af", userId: "u_admin" },
+      ACTOR,
+      { fetchImpl: validTransport().fetchImpl },
+    );
+    const patId = listConnections(db)[0]!.patId;
+    markWriteScopeProven(db, patId, REPO, "push");
+    const card = listConnections(db)[0]!;
+    expect(card.scopes.map((s) => `${s.id}:${s.source}`)).toEqual([
+      "repo:header",
+      "pull_request:write:header",
+    ]);
+    expect(card.repoProofs).toEqual([]);
   });
 });

@@ -1,9 +1,15 @@
-import { credentialAdvisories, type CredentialAdvisory } from "~/server/secrets/pat-store.server";
+import {
+  credentialAdvisories,
+  REPO_SCOPED_SCOPES,
+  repoScopeProofsOf,
+  type CredentialAdvisory,
+} from "~/server/secrets/pat-store.server";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { withTransaction } from "~/server/db/transaction.server";
 import {
   parsePatValidation,
+  parseRepoScopeProofs,
   type PatTokenKind,
   type PatValidation,
 } from "~/schemas/github-pat.schema";
@@ -85,6 +91,17 @@ export interface ConnectionScopeEvidence {
   note?: string;
 }
 
+/**
+ * Ruling 480 (F40-43): what one repository proved about the token, for the
+ * scopes the token as a whole could not prove (a fine-grained token's `repo`
+ * and `pull_request:write`). `proven` and `refused` are scope ids.
+ */
+export interface ConnectionRepoProof {
+  repo: string;
+  proven: string[];
+  refused: string[];
+}
+
 export interface ConnectionRecord {
   id: string;
   owner: string;
@@ -124,6 +141,14 @@ export interface ConnectionRecord {
    * `source` was already persisted and ignored; it now reaches the UI.
    */
   scopes: ConnectionScopeEvidence[];
+  /**
+   * Ruling 480 (F40-43): per-repository proof of the scopes `scopes` could not
+   * prove for the token as a whole: an attached project's probe, or a branch,
+   * push, pull request or merge Viberr made there. The card said "unproven.
+   * Verified when attached to a project" while the proof it promised sat on
+   * the project, unshown here.
+   */
+  repoProofs: ConnectionRepoProof[];
   /** Ruling 144(a): the same advisories the project credential card shows. */
   advisories: CredentialAdvisory[];
   lastValidatedAt: string | null;
@@ -150,6 +175,7 @@ type ConnectionRow = {
   token_suffix: string | null;
   last_validated_at: string | null;
   validation_json: string | null;
+  repo_scopes_json: string | null;
   bound_projects: number;
 };
 
@@ -160,8 +186,64 @@ function validationState(
   return validation.status === "valid" ? "valid" : "failed";
 }
 
+/**
+ * The token-wide evidence and the per-repository proofs a connection card
+ * shows. A repository's probe is that repository's evidence (ruling 480): the
+ * token's newest validation may be a project's repository-scoped one, and
+ * painting its `repo` probe as a token-wide check claimed it for every
+ * repository the token reaches. It is listed under its repository instead, and
+ * reads "assumed" for the token as a whole. A scope the token proved as a
+ * whole (a classic token's header) needs no repository line.
+ */
+interface ConnectionEvidence {
+  scopes: ConnectionScopeEvidence[];
+  repoProofs: ConnectionRepoProof[];
+}
+
+function connectionEvidence(
+  validation: PatValidation | null,
+  repoScopesJson: string | null,
+): ConnectionEvidence {
+  const scopes = (validation?.scopes ?? []).map((sc) => {
+    if (REPO_SCOPED_SCOPES.has(sc.id) && sc.source === "probe") {
+      return {
+        id: sc.id,
+        ok: true,
+        source: "assumed",
+        note: "proven per repository, not for the token as a whole",
+      };
+    }
+    const scope: ConnectionScopeEvidence = {
+      id: sc.id,
+      ok: sc.ok,
+      source: sc.source,
+    };
+    if (sc.note) scope.note = sc.note;
+    return scope;
+  });
+  const tokenWide = new Set(
+    scopes.flatMap((sc) => (sc.source === "assumed" ? [] : [sc.id])),
+  );
+  const repoProofs = repoScopeProofsOf({
+    validation,
+    repoScopes: parseRepoScopeProofs(repoScopesJson),
+  }).flatMap((proof) => {
+    const own = proof.scopes.filter((sc) => !tokenWide.has(sc.id));
+    if (own.length === 0) return [];
+    return [
+      {
+        repo: proof.repo,
+        proven: own.flatMap((sc) => (sc.ok ? [sc.id] : [])),
+        refused: own.flatMap((sc) => (sc.ok ? [] : [sc.id])),
+      },
+    ];
+  });
+  return { scopes, repoProofs };
+}
+
 function mapRow(row: ConnectionRow, now = new Date()): ConnectionRecord {
   const validation = parsePatValidation(row.validation_json);
+  const evidence = connectionEvidence(validation, row.repo_scopes_json);
   const expiresAt = row.expires_at;
   let daysLeft: number | null = null;
   if (expiresAt) {
@@ -183,15 +265,8 @@ function mapRow(row: ConnectionRow, now = new Date()): ConnectionRecord {
       validation && validation.status !== "valid" ? validation.detail : null,
     missingScopes: validation?.missingScopes ?? [],
     reach: parseConnectionReach(row.reach_json),
-    scopes: (validation?.scopes ?? []).map((sc) => {
-      const scope: ConnectionScopeEvidence = {
-        id: sc.id,
-        ok: sc.ok,
-        source: sc.source,
-      };
-      if (sc.note) scope.note = sc.note;
-      return scope;
-    }),
+    scopes: evidence.scopes,
+    repoProofs: evidence.repoProofs,
     advisories: credentialAdvisories(validation, []),
     lastValidatedAt: row.last_validated_at,
     createdAt: row.created_at,
@@ -202,6 +277,7 @@ function mapRow(row: ConnectionRow, now = new Date()): ConnectionRecord {
 const LIST_SQL = `
   SELECT c.id, c.owner, c.pat_id, c.is_default, c.expires_at, c.reach_json,
          c.created_at, p.token_suffix, p.last_validated_at, p.validation_json,
+         p.repo_scopes_json,
          (SELECT COUNT(*) FROM project_github_credentials b
             WHERE b.pat_id = c.pat_id) AS bound_projects
   FROM github_connections c
@@ -213,7 +289,7 @@ const LIST_SQL = `
  * `github_connections.id / owner / pat_id / created_at` are TEXT NOT NULL and
  * `is_default` is INTEGER NOT NULL, while `expires_at` and `reach_json` are
  * nullable; the LEFT JOIN can additionally leave every `github_pats` column
- * null, which is why those three are typed nullable.
+ * null, which is why those four are typed nullable.
  */
 export function listConnections(db: DatabaseSync): ConnectionRecord[] {
   // SAFETY: LIST_SQL's column list is ConnectionRow's (see above).

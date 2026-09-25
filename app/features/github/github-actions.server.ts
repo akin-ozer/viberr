@@ -162,7 +162,7 @@ export async function runGrantScope(
  *
  * Best-effort by contract: the bind has already happened, and a degraded GitHub
  * must not fail it. Exported so EVERY path that binds a credential (attach,
- * rotate, project creation) proves it the same way — F15-01 was exactly one
+ * re-attach, project creation) proves it the same way — F15-01 was exactly one
  * such path skipping the probes, leaving a card with zero proven scopes.
  */
 export async function proveAttachedCredential(
@@ -240,10 +240,16 @@ async function probeRepoWithConnection(
 }
 
 /**
- * Attach / rotate the project's GitHub credential (finding #13): binds an org
- * connection to the project via the phase-7 set-PAT flow. "Rotate" is the same
- * operation on an already-bound project — the org connection is where a token
- * is actually replaced. A missing connection is a degraded VALUE, never a throw.
+ * Attach / re-attach the project's GitHub credential (finding #13): binds an
+ * org connection to the project via the phase-7 set-PAT flow. Re-attach is the
+ * same operation on an already-bound project; it never replaces a token, which
+ * only the connection's Update token in Instance settings does. Ruling 480
+ * (F40-45): the button said "Rotate credential" and the toast "Credential
+ * rotated", so on a one-connection instance someone reacting to a leaked token
+ * was told it was rotated while the same token stayed live. The toast now says
+ * which happened: the same token bound again (`reattached`, and where a token
+ * IS replaced) or another connection's token bound (`switched`). A missing
+ * connection is a degraded VALUE, never a throw.
  *
  * B-GH3: this used to bind `getDefaultConnection` unconditionally, so in a
  * multi-connection org a project whose repo lives under a non-default owner was
@@ -313,7 +319,7 @@ export async function runSetCredential(
     borrowedUnverified = probe.status === "unverified" ? probe.detail : null;
   }
 
-  const wasBound = getProjectCredential(db, projectSlug) !== null;
+  const previousPatId = getProjectCredential(db, projectSlug)?.id ?? null;
   setProjectCredential(db, { projectSlug, patId: connection.patId }, actor);
   // LV-05: the connection pill is derived from a 30 s memoized `checkRepoAccess`
   // probe. Without this the row kept saying "no credential" after a full reload.
@@ -321,16 +327,30 @@ export async function runSetCredential(
   const proveCtx: CredentialCallContext = { dataRoot: ctx.dataRoot };
   if (ctx.fetchImpl) proveCtx.fetchImpl = ctx.fetchImpl;
   await proveAttachedCredential(db, projectSlug, actor, proveCtx);
-  const head = wasBound
-    ? `Credential rotated to ${connection.owner}'s connection`
-    : `Credential attached from ${connection.owner}'s connection`;
-  let toast = wasBound ? `${head}. Sync uses it now` : head;
+  const result =
+    previousPatId === null
+      ? "attached"
+      : previousPatId === connection.patId
+        ? "reattached"
+        : "switched";
+  const head =
+    result === "attached"
+      ? `Credential attached from ${connection.owner}'s connection`
+      : result === "reattached"
+        ? `Re-attached ${connection.owner}'s connection and re-checked it`
+        : `Switched to ${connection.owner}'s connection`;
+  let toast =
+    result === "reattached"
+      ? `${head}. The token is unchanged: replace it with Update token in Instance settings, under GitHub connections`
+      : result === "switched"
+        ? `${head}. Sync uses its token now`
+        : head;
   if (!owned && repo) {
     toast = borrowedUnverified
       ? `${head}. No ${repoOwner} PAT, and ${borrowedUnverified}, so its access to ${repo} is unverified`
       : `${head}. No ${repoOwner} PAT, but this token reaches ${repo}`;
   }
-  return { ok: true, toast, result: wasBound ? "rotated" : "attached" };
+  return { ok: true, toast, result };
 }
 
 /**

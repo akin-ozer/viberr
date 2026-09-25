@@ -33,6 +33,7 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
   CredentialCard,
   CredentialManageActions,
+  replaceTokenHref,
 } from "~/features/github/credential-card";
 // Ruling 148(b): the invite form is a button that opens THIS shared modal —
 // the same chrome (and the same ruling 147 refusal) as every org-settings
@@ -2002,6 +2003,7 @@ export function RepoPanel({
   onSetCredential,
   onClearCredential,
   onOpenTask,
+  instanceAdmin = false,
 }: {
   repo: string | null;
   credential: SettingsViewData["credential"];
@@ -2009,7 +2011,7 @@ export function RepoPanel({
   /** Ruling 368: the intent the repository fetcher is carrying (repair,
    *  branch cleanup or the scope re-check), null while it is idle. */
   inFlight: string | null;
-  /** The same for the credential fetcher (attach / rotate / remove). */
+  /** The same for the credential fetcher (attach / re-attach / remove). */
   credInFlight: string | null;
   /** `edit-policy` (admin) — the repo is project identity, one tier above the
    *  credential actions. */
@@ -2025,6 +2027,10 @@ export function RepoPanel({
   onSetCredential: () => void;
   onClearCredential: () => void;
   onOpenTask: (taskKey: string) => void;
+  /** Ruling 480 (F40-45): the reader is an instance admin, so the credential
+   *  row links to the bound connection's Update token (Instance settings is
+   *  admin-only; everyone else reads where a token is replaced). */
+  instanceAdmin?: boolean;
 }) {
   const [repairing, setRepairing] = useState(false);
   const rechecking = inFlight === "grant-scope";
@@ -2135,7 +2141,7 @@ export function RepoPanel({
 
       {/* F21-5 (R19-11 / owner ruling Q-V1, PAT half): the credential card is
           the project's token fingerprint, its scope verdicts and its
-          rotate/remove controls. Every one of those actions gates on
+          re-attach/remove controls. Every one of those actions gates on
           `grant-github-scope` server-side (this route's action), so the card is
           WITHDRAWN below that tier rather than rendered read-only — ruling 37's
           precedent, and byte-for-byte what /projects/:slug/github already does
@@ -2169,6 +2175,9 @@ export function RepoPanel({
               configured={credential.source === "pat"}
               canManage={canGrant}
               inFlight={credInFlight}
+              replaceHref={
+                instanceAdmin ? replaceTokenHref(credential.connectionId) : null
+              }
               onSet={onSetCredential}
               onClear={onClearCredential}
             />
@@ -2388,11 +2397,14 @@ export function SettingsPage({
   data,
   meId,
   myRole,
+  instanceAdmin = false,
   gate = roleCan,
 }: {
   data: SettingsViewData;
   meId: string | null;
   myRole: string | null;
+  /** Ruling 480 (F40-45): the reader's instance role is `admin`. */
+  instanceAdmin?: boolean;
   /** See `ProjectActionGate`. Defaults to the shared `roleCan`. */
   gate?: ProjectActionGate;
 }) {
@@ -2635,6 +2647,7 @@ export function SettingsPage({
               )
             }
             onOpenTask={onOpenTask}
+            instanceAdmin={instanceAdmin}
           />
         </div>
         {/* Owner ruling (pass 18, Q-V1): a READ-ONLY viewer must not see the

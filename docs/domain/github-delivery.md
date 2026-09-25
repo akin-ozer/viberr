@@ -15,7 +15,7 @@ Three tables, one secret store:
 
 | Table | Role |
 |---|---|
-| `github_pats` | The only place a token lives, AES-256-GCM sealed (`v1$iv$ct$tag`, `secret-box.server.ts`), with `token_suffix` for display and a cached `validation_json`. |
+| `github_pats` | The only place a token lives, AES-256-GCM sealed (`v1$iv$ct$tag`, `secret-box.server.ts`), with `token_suffix` for display, a cached `validation_json` (the newest validator run, whatever it asked) and `repo_scopes_json` (what each repository proved, ruling 480). |
 | `github_connections` | Org-level "owner → PAT" record (`id = slugify(owner)`, `is_default`, `expires_at`, `reach_json`). Used by the Connections panel, project creation and credential attach, the store browser's GitHub import, and the controller's `list_github_connections`. |
 | `project_github_credentials` | One PAT bound per project. **Every project-scoped GitHub call** resolves through `getProjectGithubContext` (`projects.repo` + `default_branch` + this binding); it never consults connections. |
 
@@ -68,8 +68,30 @@ access read-only). Scope evidence per token kind:
   merge proves it (`markWriteScopeProven`), or `VIBERR_GITHUB_WRITE_PROBE=1` enables an
   empty-payload `POST /pulls` dry run (422 = authorized, 403 = refused).
 
+**A fine-grained token is proven per repository** (ruling 480). `repo` and
+`pull_request:write` (`REPO_SCOPED_SCOPES`) are facts about one repository, so their
+evidence is kept per repository in `github_pats.repo_scopes_json` (`RepoScopeProof`: each
+scope's last `probe` verdict there, with its time and a note), not only in the token's
+newest validation. `recordPatValidation` folds every run into it: a run that probed a
+repository records its verdicts there (a refusal too); `repo_not_found` or
+`org_approval_missing` ends that repository's proof; `revoked` or `expired` ends every
+proof; a run that asked about no repository (the connection's save, **Re-check**, the
+24-hour re-proof) or never reached GitHub changes nothing, so an Instance-settings Re-check
+can no longer turn a project's proven `repo` back into "unproven". A write Viberr made
+proves what it needed, on the repository it went to, on the PAT that made the call
+(`markWriteScopeProven(db, patId, repo, write)`): a branch created or pushed, or the
+bootstrap's initial commit, proves `repo`; a pull request opened proves
+`pull_request:write`; a merge proves both. A replaced token starts with no proof. A row
+cached before the column existed still proves the repository its validation probed
+(`repoScopeProofsOf`).
+
 Chips render only `header`, `probe` and `violation` sources as proof; `assumed` and
-`unchecked` read "unproven (verified on first use)" (ruling 19). A connection's
+`unchecked` read "unproven (verified on first use)" (ruling 19). A project's chip for a
+repository-scoped scope reads the proof of the project's own repository (a classic token's
+`header` verdict answers for every repository); a verdict earned on another repository, or
+on none, is `assumed` there. The connection card keeps its chips token-wide and lists the
+repositories that proved something beneath them ("akin-ozer/website: repo,
+pull_request:write proven", `ConnectionRecord.repoProofs`). A connection's
 `valid` verdict is re-proven before use once it is older than 24 hours
 (`ensureConnectionFresh`; a downgrade audits `org.connection.validation_downgraded`).
 Project "Re-check scopes" (`revalidateProjectCredential`, 60-second
@@ -139,10 +161,15 @@ characters; last 8 lines, 600 characters.
   `owner/name` or a URL, demands `confirmFootprint` when tasks already carry GitHub
   records, probes with the bound credential and refuses 404/401/403 or a read-only
   repo. Audit `project.repo.updated`.
-- **Attach, rotate or clear the credential** (`set-credential` / `clear-credential`,
+- **Attach, re-attach or clear the credential** (`set-credential` / `clear-credential`,
   `grant-github-scope`): prefers the connection whose owner matches the repo, else
   the default; a borrowed connection is probed against the repo first. Audit
-  `github.credential.assigned|cleared`.
+  `github.credential.assigned|cleared`. Re-attaching never replaces a token (ruling 480):
+  its result is `reattached` when the same PAT is bound again (the toast says the token is
+  unchanged and names Update token) and `switched` when another connection's PAT is bound.
+  A token is replaced only by its connection's **Update token** in Instance settings; the
+  credential card links an instance admin there (`/org/settings?tab=connections&update=<id>`,
+  the health's `connectionId`).
 - Without a credential or repo every service returns a typed degraded value
   (`no_pat_configured`, `no_repo_configured`, `auth_failed`, `network_unavailable`,
   …) that renders as a pill and an honest toast; nothing throws. The GitHub view

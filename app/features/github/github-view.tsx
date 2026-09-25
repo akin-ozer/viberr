@@ -7,7 +7,11 @@ import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useActionToast } from "~/ui/use-action-toast";
-import { CredentialCard, CredentialManageActions } from "./credential-card";
+import {
+  CredentialCard,
+  CredentialManageActions,
+  replaceTokenHref,
+} from "./credential-card";
 import { RECONCILE_START_TOAST } from "./github-copy";
 import {
   checksPill,
@@ -160,7 +164,7 @@ export function RepositoryPanel({
       </div>
 
       {/* R19-11 (owner ruling, Q-V1 PAT half): the credential card is the
-          project's token fingerprint, its scope verdicts and its rotate/remove
+          project's token fingerprint, its scope verdicts and its re-attach/remove
           controls. Server-side, every one of those actions gates on
           `grant-github-scope` (routes/project.github.tsx), so the card is
           WITHDRAWN below that tier rather than rendered read-only — ruling 37's
@@ -468,6 +472,7 @@ export function GithubViewPage({
   data,
   reconcileCheck,
   myRole,
+  instanceAdmin = false,
 }: {
   data: GithubViewData;
   /** F19-22 — see {@link ReconcileCheckView}. Required, not optional: a caller
@@ -475,6 +480,9 @@ export function GithubViewPage({
    *  though it were the last check, which is the defect. */
   reconcileCheck: ReconcileCheckView;
   myRole: string | null;
+  /** Ruling 480 (F40-45): the reader's instance role is `admin`, so the
+   *  credential row can link to the bound connection's Update token. */
+  instanceAdmin?: boolean;
 }) {
   const navigate = useNavigate();
   const push = useToast();
@@ -526,7 +534,7 @@ export function GithubViewPage({
   // enforces for grant-scope, set-credential and clear-credential alike. It
   // decides all three things that ARE that action — whether the credential card
   // is disclosed, whether Re-check scopes is offered, and whether the
-  // attach/rotate/remove row renders — so a role can never be shown a control
+  // attach/re-attach/remove row renders — so a role can never be shown a control
   // it may not use, nor hidden from one it may. The loader redacts the payload
   // on the same rule; a client-only gate would leave the token tail in the HTML.
   //
@@ -570,13 +578,16 @@ export function GithubViewPage({
     </span>
   );
 
-  // Attach / rotate / remove the project credential (finding #13) —
+  // Attach / re-attach / remove the project credential (finding #13) —
   // admin|maintainer, same gate as Re-check scopes.
   const manageActions = canGrant ? (
     <CredentialManageActions
       configured={data.credential.source === "pat"}
       canManage={canGrant}
       inFlight={inFlightIntent(credFetcher)}
+      replaceHref={
+        instanceAdmin ? replaceTokenHref(data.credential.connectionId) : null
+      }
       onSet={() =>
         credFetcher.submit(
           { intent: "set-credential", _csrf: csrf },
