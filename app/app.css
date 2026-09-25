@@ -7015,13 +7015,22 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   background: var(--surface);
   padding: .5rem .75rem .5rem;
 }
+/* The frame is the field (owner ask 2026-09-25: a square ring inside the
+   rounded frame, and a resize grip, read as an unfinished app). As for the
+   borderless inputs near the top of this sheet (acce-4), the wrapper draws the
+   ring on its own rounded edge and the textarea draws none. */
+.ctl-composer:focus-within { border-color: var(--blue); box-shadow: 0 0 0 4px var(--focus-wash); }
+/* On the frame's own edge: one 2px line, not a second ring beside the border. */
+.ctl-composer:has(textarea:focus-visible) { outline: 2px solid var(--blue); outline-offset: -1px; }
 .ctl-composer textarea {
   width: 100%;
   border: 0;
-  /* Interface review 2026-09-24 (acce-21): no `outline: none` — nothing else
-     marked keyboard focus here, so the app ring lands on the textarea itself,
-     inside the frame's padding. */
-  resize: vertical;
+  outline: none;
+  /* It grows with what is typed, up to a third of the screen, then scrolls; a
+     browser without `field-sizing` keeps its rows. */
+  resize: none;
+  field-sizing: content;
+  max-height: 33vh;
   background: transparent;
   color: var(--fg);
   font: inherit;

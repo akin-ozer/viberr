@@ -4169,7 +4169,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
       "select:focus", ".goal-textarea:focus", ".datepick-trigger:focus-visible", ".op-steer:focus",
       '.field input[type="text"]', ".field input:focus", ".field textarea:focus",
       ".meta-edit-panel .meta-field input:focus", ".fm-gh input:focus", ".feed-filters .ff-task:focus",
-      '.guard-ctl input[type="number"]:focus', ".stg-input", ".ctl-composer textarea",
+      '.guard-ctl input[type="number"]:focus', ".stg-input",
     ]) {
       expect(cascade(plain, selector).get("outline") ?? "", selector).not.toMatch(/^(0|none)$/);
     }
@@ -4181,7 +4181,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
     for (const selector of [
       "div.top-search:has(input:focus-visible)", ".board-filter-input:focus-within",
       ".label-input:focus-within", ".repo-input:focus-within", ".feed-filters .ff-search:focus-within",
-      ".attach-add > label:has(input:focus-visible)",
+      ".attach-add > label:has(input:focus-visible)", ".ctl-composer:has(textarea:focus-visible)",
     ]) {
       expect(cascade(plain, selector).get("outline"), selector).toBe("2px solid var(--blue)");
     }
