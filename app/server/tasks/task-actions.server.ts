@@ -85,6 +85,7 @@ import type {
   OperatorAutonomy,
   OperatorOpenPacketInput,
   OperatorPacketOptionInput,
+  operatorDispatchAgent,
 } from "./operator-actions.server";
 import {
   agentNamesOf,
@@ -337,6 +338,11 @@ export interface TaskActionDeps {
    *  drain's contract is WHAT it sends and in what order, and both are
    *  unobservable through a real run. */
   startAgentRun?: typeof startAgentRun;
+  /** Ruling 475: the dispatch the operator's conflict handoff starts the
+   *  delivering agent through. Injected for the same reason: the handoff's
+   *  contract is WHOM it sends and with WHAT directive, and a real run would
+   *  prepare a workspace from GitHub. */
+  dispatchAgent?: typeof operatorDispatchAgent;
 }
 
 /** The mutation ctx plus the test seams: the impls above, and the mock

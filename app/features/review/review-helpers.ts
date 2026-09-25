@@ -11,7 +11,7 @@ import type {
 import type { ValidationValue } from "~/ui/pill";
 import { plainText } from "~/features/notifications/notification-meta";
 
-import type { PrOverlap } from "~/server/projections/review-queue.server";
+import type { PrOverlap } from "~/shared/pr-overlaps";
 
 export interface ReviewRowView {
   key: string;

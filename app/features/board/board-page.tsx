@@ -59,6 +59,7 @@ import { AgentBadge, AgentGlyph } from "~/ui/identity";
 import { connectionPill } from "~/features/github/github-pills";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
 import { AcceptConfirm } from "~/features/task-detail/accept-confirm";
+import { mergeCollisions, type PrOverlap } from "~/shared/pr-overlaps";
 import { MoveBackConfirm } from "~/features/task-detail/move-back-confirm";
 import {
   acceptanceDisclosureFields,
@@ -1094,11 +1095,15 @@ function AcceptOnBoardConfirm({
   stages,
   fromStageName,
   defaultBranch,
+  mergeCollisions,
   busy,
   onCancel,
   onConfirm,
 }: {
   task: BoardTask;
+  /** Ruling 475 (F40-55 (c)): the other open PRs on this board that change a
+   *  path this task's PR changes, from the cards the board already holds. */
+  mergeCollisions: readonly PrOverlap[];
   /** Project stages in order — supplies the shared ceremony's stage list and
    *  names the terminal (merge) stage. */
   stages: BoardStage[];
@@ -1131,6 +1136,7 @@ function AcceptOnBoardConfirm({
         prChecksUnread: task.prChecksUnread ?? null,
       }}
       workRevisionSha={task.workRevisionSha ?? null}
+      mergeCollisions={mergeCollisions}
       noChanges={false}
       noPullRequest={false}
       // F32-11: the board summary carries the open packet too.
@@ -2825,6 +2831,9 @@ export function BoardPage({
             pendingAcceptTask.stage
           }
           defaultBranch={defaultBranch}
+          // Ruling 475 (F40-55 (c)): the same disclosure the task page's
+          // dialog makes, from the board's own cards (`pr.paths` rides them).
+          mergeCollisions={mergeCollisions(pendingAcceptTask, allTasks)}
           busy={transitionFetcher.state !== "idle"}
           onCancel={() => setPendingAccept(null)}
           onConfirm={(disclosure) => {

@@ -231,6 +231,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 475 (pass 40, F40-20): before a conflict went to the delivering
+    // agent. The doctrine said "A CONFLICT is not yours to settle" and a
+    // blocking packet went to a person, who could only confirm the packet's
+    // own recommendation to have the deliverer resolve it.
+    "5199e8721937aec65fe858818ec587beaf75a39985a3ab82c280993aeb8bc862",
     // Ruling 468 (pass 40, F40-12): before the doctrine said an empty
     // repository is Viberr's to initialize. Nothing told the operator so, and
     // live on WEB-1 it opened a packet asking the owner to push a README.

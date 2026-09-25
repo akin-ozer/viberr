@@ -39,7 +39,7 @@ import {
 interface OperatorWakeCall {
   projectSlug: string;
   taskKey: string;
-  trigger: "pr-diverged";
+  trigger: Parameters<OperatorWake>[4];
 }
 
 /**

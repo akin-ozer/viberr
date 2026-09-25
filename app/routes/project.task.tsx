@@ -83,6 +83,8 @@ import {
   latestTaskReconcileAt,
 } from "~/server/provenance/provenance-query.server";
 import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
+import { taskMergeCollisions } from "~/server/projections/pr-collisions.server";
+import type { PrOverlap } from "~/shared/pr-overlaps";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { withLiveRun } from "~/shared/mapping/task.server";
@@ -413,6 +415,20 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     }
   }
 
+  // Ruling 475 (F40-55 (c)): the other open PRs this task's merge would likely
+  // put in conflict, for the accept dialog. Guarded like the disclosures
+  // above: a read that fails must not 500 the task page over a sentence.
+  let mergeCollisions: PrOverlap[] = [];
+  try {
+    mergeCollisions = taskMergeCollisions(db, params.slug, detail);
+  } catch (error) {
+    logger.warn("ruling 475 merge-collision disclosure failed", {
+      projectSlug: params.slug,
+      taskKey: params.key,
+      error: toError(error),
+    });
+  }
+
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
   // the task's own owner — mirror of manualDeliverForReview's server gate.
   const myProjectRole =
@@ -512,6 +528,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // last compare, so the accept dialog can say which of its two cases this
     // click is. Null: never compared.
     baseBehindBy: createReconcileBehindByLookup(db)(detail.filePath),
+    /** Ruling 475: the open PRs sharing a changed path with this one. */
+    mergeCollisions,
     // F19-22: the line above is the last pass that CHANGED something — DG-3
     // deliberately withholds the provenance row when a poller tick finds
     // nothing new (github-reconciler.server.ts), so it drifts to "1h ago" on a
@@ -1508,6 +1526,7 @@ export default function TaskDetailRoute({
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
       baseBehindBy={loaderData.baseBehindBy}
+      mergeCollisions={loaderData.mergeCollisions}
       githubCheckedAt={loaderData.githubCheckedAt}
       workRevisionSha={loaderData.workRevisionSha}
       noChanges={loaderData.noChanges}

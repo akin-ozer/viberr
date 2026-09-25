@@ -776,3 +776,72 @@ describe("ruling 304: the accept ceremony states the checks it merges past", () 
     expect(none).not.toMatch(/checks (failing|running|unknown|passing)/);
   });
 });
+
+/**
+ * Ruling 475 (F40-55 (c)): live on akinozer-com the owner accepted WEB-4 while
+ * WEB-2's open PR #3 changed the same `package.json`. Viberr knew (both PRs'
+ * `pr.paths`), and the dialog that authorizes the merge said nothing, so
+ * WEB-2's acceptance was refused a minute later.
+ */
+describe("ruling 475: the ceremony names the open pull requests this merge will likely conflict", () => {
+  const OPEN_PR = { number: 2, state: "review" as const, title: "[WEB-4] work" };
+
+  function collidesRow(props: {
+    collisions: {
+      taskKey: string;
+      prNumber: number;
+      paths: string[];
+      partial: boolean;
+    }[];
+    pr?: AcceptConfirmTask["pr"];
+  }): HTMLElement | null {
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({ pr: props.pr === undefined ? OPEN_PR : props.pr })}
+        workRevisionSha={"a".repeat(40)}
+        defaultBranch="main"
+        ceremony={{ mode: "accept" }}
+        blockedReason={null}
+        mergeCollisions={props.collisions}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    return container.ownerDocument.querySelector<HTMLElement>("[data-merge-collisions]");
+  }
+
+  it("names the one other PR and the shared file, and what happens after the merge", () => {
+    // CANARY: stop rendering `CollidesRow` and the row is gone.
+    const row = collidesRow({
+      collisions: [{ taskKey: "WEB-2", prNumber: 3, paths: ["package.json"], partial: false }],
+    });
+    expect(row?.textContent).toBe(
+      "CollidesMerging this will likely put WEB-2's PR #3 in conflict on package.json. Viberr re-checks it right after the merge, and the operator hands a conflict to the delivering agent.",
+    );
+    expect(row?.querySelector(".mono")?.textContent).toBe("package.json");
+  });
+
+  it("lists several PRs, caps each file list, and says when a list was capped", () => {
+    const row = collidesRow({
+      collisions: [
+        { taskKey: "WEB-2", prNumber: 3, paths: ["package.json"], partial: false },
+        { taskKey: "WEB-5", prNumber: 6, paths: ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"], partial: true },
+      ],
+    });
+    expect(row?.textContent).toContain(
+      "Merging this will likely put 2 open pull requests in conflict: WEB-2's PR #3 on package.json; WEB-5's PR #6 on a.ts, b.ts, c.ts and 2 more files. Viberr re-checks them right after the merge",
+    );
+    expect(row?.textContent).toContain("A changed-file list was capped, so the overlap may be larger.");
+  });
+
+  it("stays silent with no collision, and where nothing merges", () => {
+    expect(collidesRow({ collisions: [] })).toBeNull();
+    cleanup();
+    const merged = collidesRow({
+      collisions: [{ taskKey: "WEB-2", prNumber: 3, paths: ["package.json"], partial: false }],
+      pr: { number: 2, state: "merged", title: "[WEB-4] work" },
+    });
+    expect(merged).toBeNull();
+  });
+});

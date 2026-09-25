@@ -4647,21 +4647,26 @@ function operatorTurnDoctrine(
     // for the identical condition opens the packet that resolves it. Live on
     // SHOP-12 and SHOP-3 that cost 10h45m and 7h45m, each ended by the owner
     // typing an @operator comment by hand.
+    // Ruling 475 (F40-55 (b)): the reconciler fires the same trigger when an
+    // open PR FLIPS to conflicting (another task's merge moved the base), so
+    // the instruction names both origins and the timeline says which.
     const prNo = snapshot.pr ? `#${snapshot.pr.number}` : "the review PR";
     return (
-      `A person pressed Accept on this task and Viberr refused it: the acceptance-time base ` +
-      `refresh found the branch in CONFLICT with the base, so ${prNo} cannot be merged as it ` +
-      `stands. The conflict note on the timeline names the files.\n\n` +
-      `This is YOURS to resolve, not theirs — they have no checkout, and Viberr's own rule is ` +
+      `${prNo} now CONFLICTS with the base, so it cannot be merged as it stands. Either a person ` +
+      `pressed Accept and the acceptance-time base refresh found the conflict (Viberr refused the ` +
+      `acceptance), or another task's merge moved the base and GitHub reported the conflict. The ` +
+      `conflict note on the timeline names which, and the files.\n\n` +
+      `This is YOURS to resolve, not a person's — they have no checkout, and Viberr's own rule is ` +
       `that the server does the git inside the delivering agent's workspace. Call ` +
       `\`update_branch_from_base\`: at this boundary it is permitted precisely because the PR is ` +
-      `conflicting, and it opens the conflict decision packet whose recommended option has the ` +
-      `deliverer resolve the files in the workspace it already has. If no agent can take it, open ` +
-      `a packet that says so and names what a person must choose. ` +
+      `conflicting. When the task's delivering agent can take the conflict, the tool hands it to ` +
+      `that agent itself and moves the task back to review (ruling 475); when no agent can, it ` +
+      `opens the conflict decision packet that says why. Either way do not open a packet of your ` +
+      `own for it. ` +
       `Do not tell anyone to merge the base in by hand, and never rebase: the pull request has ` +
-      `published those commits. And say in ONE comment that the acceptance was refused and what ` +
-      `is now happening — the person is waiting on a button that will keep refusing until this ` +
-      `is cleared.`
+      `published those commits. If a person's Accept was refused, say in ONE comment that it was ` +
+      `refused and what is now happening — they are waiting on a button that will keep refusing ` +
+      `until this is cleared.`
     );
   }
   if (trigger === "stranded") {

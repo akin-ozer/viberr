@@ -6037,7 +6037,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(r.outcome).toBe("noop");
     expect(r.message).toContain("VIB-1's review PR #7 conflicts with the base branch");
     expect(r.message).toContain("VIB-1 stays at In Progress");
-    expect(r.message).toContain("Open the conflict packet (update_branch_from_base)");
+    expect(r.message).toContain("Call update_branch_from_base, which routes the conflict (ruling 475)");
     expect(task().frontmatter.stage).toBe("impl");
     expect(task().frontmatter.recommendations).toEqual([]);
     // A clean PR crosses the same boundary as before (a recommendation card) —

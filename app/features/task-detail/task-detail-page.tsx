@@ -41,6 +41,7 @@ import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
+import type { PrOverlap } from "~/shared/pr-overlaps";
 import {
   useActionFeedback,
   useLogSelection,
@@ -147,6 +148,7 @@ export function TaskDetailPage({
   githubHost,
   githubReconciledAt = null,
   baseBehindBy = null,
+  mergeCollisions = [],
   githubCheckedAt = null,
   workRevisionSha = null,
   noChanges = false,
@@ -232,6 +234,9 @@ export function TaskDetailPage({
   /** U39-32: base commits the branch lacked at the reconciler's last
    *  compare; null when never compared. */
   baseBehindBy?: number | null;
+  /** Ruling 475: the other open PRs this task's merge would likely put in
+   *  conflict, for the accept dialog. */
+  mergeCollisions?: readonly PrOverlap[];
   /** F19-22: newest COMPLETED reconcile pass for this task (`github.reconcile.task`
    *  audit row). The panel needs both — one number could never say both "the
    *  poller is alive" and "nothing has moved since Tuesday". */
@@ -1051,6 +1056,7 @@ export function TaskDetailPage({
           task={task}
           workRevisionSha={workRevisionSha}
           baseBehindBy={baseBehindBy}
+          mergeCollisions={mergeCollisions}
           noChanges={noChanges}
           // F32-11: the open decision this acceptance withdraws, if any.
           // Ruling 164 + F19-7, applied to the sibling row: a PACKET resolution
