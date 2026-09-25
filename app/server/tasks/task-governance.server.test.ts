@@ -4580,6 +4580,55 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     );
     expect(goalOf(store)).toBe(before);
   });
+
+  /**
+   * Ruling 478(e) (F40-31): WEB-3's "Connected; the first build succeeded"
+   * asked for the Worker name and URL, and one Confirm sent it without them.
+   * The card refuses first; `resolvePacket` refuses for every other door.
+   *
+   * CANARY: drop the `picked.reply` check in `resolvePacket`.
+   */
+  it("ruling 478(e): a choice marked `reply` is refused without the person's typed answer, and nothing is recorded", async () => {
+    const store = setupProjectedStore(ctx);
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        options: [
+          { kind: "custom", t: "Connected; the first build succeeded", d: "", rec: false, reply: true },
+          { kind: "custom", t: "Not yet", d: "", rec: false },
+        ],
+      },
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, note: "   " },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("needs your answer") });
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.packet).not.toBeNull();
+    expect(listAuditEvents(store.db, { action: "task.packet.resolved" })).toHaveLength(0);
+
+    // With the answer, the same choice resolves and carries it.
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        note: "Worker viberr-site, https://viberr-site.example.workers.dev",
+      },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const after = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(after.parsed.packet).toBeNull();
+    expect(after.parsed.timeline.map((e) => e.text).join("\n")).toContain("viberr-site.example.workers.dev");
+  });
 });
 
 /**

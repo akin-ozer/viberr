@@ -121,7 +121,7 @@ export function AttachmentsPanel({
               onOpen={lightbox({ name: a.name, url: href(a.name) })}
             >
               <span className="attach-meta">
-                <span className="attach-name">{a.name}</span>
+                <span className="attach-name" title={a.name}>{a.name}</span>
                 <span className="attach-size">{prettySize(a.size)}</span>
               </span>
               {producers[a.name] && (
@@ -149,7 +149,10 @@ export function AttachmentsPanel({
           onClick={lightbox({ name: a.name, url: href(a.name) })}
         >
           <Icon name="file" />
-          <span className="attach-name">{a.name}</span>
+          {/* Ruling 478(b) (F40-32): the name takes its own line on a phone
+              (app.css), and the whole name rides on a hover where a long one
+              is still cut. */}
+          <span className="attach-name" title={a.name}>{a.name}</span>
           {producers[a.name] && (
             <span className="attach-by">
               by {producers[a.name].actor} ·{" "}

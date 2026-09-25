@@ -47,6 +47,7 @@ import {
   deliveringEngagement,
   type Engagement,
   deriveValidation,
+  requiredReviewers,
   normalizeEvidenceRows,
   sanitizeEventAttachmentNames,
   EVIDENCE_EMPTY_COLUMN,
@@ -3748,6 +3749,9 @@ function deadlockAgentNames(
   return file ? agentNamesOf(file.parsed.frontmatter) : new Map();
 }
 
+/** "A", "A and B", "A, B, and C": the reviewers a verdict event names. */
+const LIST_AND = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+
 /**
  * Ruling 292: the longest verdict justification stored on a task, and the
  * sentence that ships when it does not fit.
@@ -4162,10 +4166,36 @@ export async function recordAgentCompletion(
               `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. Accepting completes this task with no changes.`
             : `${roleDisplay} approved the work${onRevision}.`;
         } else {
-          // Approved, but not yet cleared: another required reviewer is
-          // outstanding or has requested changes on the current revision.
-          title = "Approval noted, rework still needed";
-          summary = `${roleDisplay} approved, but the current revision is not yet cleared by all required reviewers.`;
+          // Approved, but not yet cleared. Ruling 478(g) (F40-58): WHY decides
+          // the words. "Rework still needed" is true only when another
+          // required reviewer has requested changes (`failing`); while one has
+          // simply not reported (`changed`), the same title told the owner's
+          // bell that rework was needed on a revision nobody had objected to,
+          // minutes before "Review passed" (WEB-1, WEB-2, WEB-4).
+          const names = deadlockAgentNames(ctx, projectSlug);
+          const current = currentVerdicts(parsed.frontmatter);
+          const resultOf = (profileId: string) =>
+            current.find((v) => v.profileId === profileId)?.result;
+          const nameList = (engagements: readonly Engagement[]) =>
+            LIST_AND.format(engagements.map((e) => names.get(e.profileId) ?? e.role));
+          const required = requiredReviewers(parsed.frontmatter);
+          const objecting = required.filter((e) => resultOf(e.profileId) === "request_changes");
+          const pending = required.filter((e) => resultOf(e.profileId) !== "approve");
+          if (validation === "failing" && objecting.length > 0) {
+            title = "Approval noted, rework still needed";
+            summary =
+              `${roleDisplay} approved${onRevision}, but ${nameList(objecting)} ` +
+              `requested changes on it, so it is not cleared.`;
+          } else if (pending.length > 0) {
+            title = `Approval noted, waiting on ${nameList(pending)}`;
+            summary =
+              `${roleDisplay} approved${onRevision}. ${nameList(pending)} ` +
+              `${pending.length === 1 ? "has" : "have"} not reviewed it yet, ` +
+              "and acceptance waits for every required reviewer.";
+          } else {
+            title = "Approval noted";
+            summary = `${roleDisplay} approved${onRevision}.`;
+          }
         }
         // A not-yet-acceptable state makes a pending accept-completion
         // recommendation stale (the acceptance gate would 409), so drop it: the
@@ -9888,6 +9918,15 @@ export async function resolvePacket(
   } else {
     const picked = packet.options[input.optionIndex];
     if (!picked) throw AppError.validation("Unknown packet option.");
+    // Ruling 478(e) (F40-31): a choice the asking agent marked as needing the
+    // person's typed answer is not an answer without it. The card refuses
+    // first; this is the same refusal for any other door.
+    if (picked.reply && noteText.trim() === "") {
+      throw AppError.validation(
+        `"${picked.t}" needs your answer: write it in the box under the options and ` +
+          "confirm again. Nothing was recorded.",
+      );
+    }
     option = picked;
   }
   // R20-1 (F20-5): a packet that has already recorded a decision accepts no

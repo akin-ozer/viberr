@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -207,7 +208,16 @@ function RunGlyph({ run, decorative }: { run: RunView; decorative?: boolean }) {
 
 /**
  * Shared listbox dropdown. Adds Escape-close + arrow-key navigation over the
- * mock (which only had outside-mousedown close); keeps the exact ARIA.
+ * mock (which only had outside-mousedown close).
+ *
+ * Ruling 478(d) (F40-34): the trigger is named by its label AND the stream it
+ * shows ("Agent log stream: Platform Engineer · delivering"), so a screen
+ * reader hears which agent's console is open and a voice-control user can
+ * say the name on screen (WCAG 2.5.3); a fixed `aria-label` used to replace
+ * both. Opening moves focus into the list, onto the stream shown; the arrows
+ * move between streams there and only Enter, Space or a click switches the
+ * console. The arrows on the trigger used to swap the console underneath the
+ * reader with focus left where it was and nothing announced.
  */
 function AgentPicker({
   items,
@@ -222,6 +232,15 @@ function AgentPicker({
 }) {
   const [open, setOpen] = useState(false);
   const cur = items.find((r) => r.id === value) || items[0]!;
+  const curIndex = Math.max(0, items.findIndex((r) => r.id === cur.id));
+  const listId = useId();
+  const role = roleShort(cur);
+  /** What the trigger shows, word for word: the name it is announced by. */
+  const shown = cur.who.name + (role ? ` · ${role}` : "");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  /** The option to focus when the list mounts, set by the press that opens it. */
+  const focusOnMount = useRef<number | null>(null);
 
   // P16-UI-12: one shared dismiss hook (`app/ui/use-dismiss.ts`). This picker
   // had outside-press close but NOT document-level Escape — Escape only worked
@@ -230,53 +249,88 @@ function AgentPicker({
   // wants (the trigger is inside the returned ref, so no `also`).
   const ref = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
-  const move = (dir: 1 | -1) => {
-    const idx = items.findIndex((r) => r.id === cur.id);
-    const next = items[(idx + dir + items.length) % items.length]!;
-    onChange(next.id);
+  const openList = () => {
+    focusOnMount.current = curIndex;
+    setOpen(true);
+  };
+  /** Close, and hand focus back to the trigger it came from. */
+  const closeToTrigger = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+  const focusOption = (i: number) => {
+    const n = items.length;
+    optionRefs.current[((i % n) + n) % n]?.focus();
   };
 
   return (
     <div className="rsel" ref={ref}>
       <button
+        ref={triggerRef}
         type="button"
         className={"rsel-btn" + (open ? " open" : "")}
-        onClick={() => setOpen(!open)}
+        onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={(e) => {
           if (e.key === "Escape") setOpen(false);
-          else if (e.key === "ArrowDown") {
+          else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
-            if (open) move(1);
-            else setOpen(true);
-          } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            if (open) move(-1);
+            if (open) focusOption(curIndex);
+            else openList();
           }
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={label}
+        aria-controls={open ? listId : undefined}
+        aria-label={`${label}: ${shown}`}
       >
         <RunGlyph run={cur} />
         <span className="rsel-nm">
           {cur.who.name}
-          {roleShort(cur) && <span className="rsel-role"> · {roleShort(cur)}</span>}
+          {role && <span className="rsel-role"> · {role}</span>}
         </span>
         <span className={"rdot " + cur.state} />
         <Icon name="chevron" className="caret" />
       </button>
       {open && (
-        <div className="rsel-menu" role="listbox" aria-label={label}>
-          {items.map((r) => (
+        <div
+          className="rsel-menu"
+          role="listbox"
+          id={listId}
+          aria-label={label}
+          onKeyDown={(e) => {
+            const at = optionRefs.current.findIndex((el) => el === document.activeElement);
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              focusOption((at < 0 ? curIndex : at) + (e.key === "ArrowDown" ? 1 : -1));
+            } else if (e.key === "Home" || e.key === "End") {
+              e.preventDefault();
+              focusOption(e.key === "Home" ? 0 : items.length - 1);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              closeToTrigger();
+            } else if (e.key === "Tab") {
+              setOpen(false);
+            }
+          }}
+        >
+          {items.map((r, i) => (
             <button
               type="button"
               key={r.id}
+              ref={(el) => {
+                optionRefs.current[i] = el;
+                if (el && focusOnMount.current === i) {
+                  focusOnMount.current = null;
+                  el.focus();
+                }
+              }}
               role="option"
+              tabIndex={-1}
               aria-selected={r.id === cur.id}
               className={"rsel-item" + (r.id === cur.id ? " on" : "")}
               onClick={() => {
                 onChange(r.id);
-                setOpen(false);
+                closeToTrigger();
               }}
             >
               {/* The row prints the SDK name and "Operator" itself. */}
@@ -369,7 +423,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
         </Pill>
         <span className="right">
           {running.length > 1 ? (
-            <AgentPicker items={running} value={run.id} onChange={setSelId} label="Select running agent" />
+            <AgentPicker items={running} value={run.id} onChange={setSelId} label="Running agent" />
           ) : (
             <span className="who-chip">
               {/* The glyph is decorative exactly when the printed name already
@@ -465,7 +519,10 @@ const RunStripFacts = memo(function RunStripFacts({
     <>
       <div className="run-phase">
         <span className="run-spin" aria-hidden="true" />
-        <span>
+        {/* Ruling 478(c) (F40-33): the text column is what may shrink, so a
+            long step cuts at the strip's edge with its ellipsis showing
+            instead of widening the page on a phone (app.css). */}
+        <div className="run-phase-text">
           <div key={"ph:" + phase} className="ph" data-fresh={phaseFresh ? "true" : undefined}>
             {phase}
           </div>
@@ -481,7 +538,7 @@ const RunStripFacts = memo(function RunStripFacts({
               {readableStep(f.step)}
             </div>
           ) : null}
-        </span>
+        </div>
       </div>
       <div className="run-stats">
         <div className="run-cell">
@@ -1777,7 +1834,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
         <Icon name="term" />
         <h2>Agent logs</h2>
         <span className="right">
-          <AgentPicker items={runtime} value={cur.id} onChange={onSel} label="Select agent log stream" />
+          <AgentPicker items={runtime} value={cur.id} onChange={onSel} label="Agent log stream" />
         </span>
       </div>
 

@@ -68,6 +68,7 @@ import {
   decodeActorRef,
   systemIdToName,
 } from "~/server/files/actor-ref.server";
+import { AGENT_QUESTION_PACKET_KIND } from "~/server/tasks/agent-outcome.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 
@@ -213,6 +214,11 @@ export interface PacketRender {
   acceptAnswersWith?: string;
   /** Ruling 471: the same for a forced acceptance (the Force accept button). */
   forceAnswersWith?: string;
+  /** Ruling 478(e) (F40-31): the agent a person's answer to this packet goes
+   *  back to, by name: set on an agent's question (`askedBy`), which
+   *  `resolvePacket` routes to the asker rather than to the operator. The
+   *  card names the answer box after it. Absent on every other packet. */
+  answerTo?: string;
 }
 
 /** What a surface renders for readiness: the canonical stored enum plus the
@@ -732,6 +738,10 @@ function mapPacket(packet: TaskPacket | null): PacketRender | null {
   if (accept) render.acceptAnswersWith = accept.option.t;
   const force = acceptanceAnswerOf(packet, "force");
   if (force) render.forceAnswersWith = force.option.t;
+  // Ruling 478(e): the same predicate `resolvePacket` routes on.
+  if (packet.kind === AGENT_QUESTION_PACKET_KIND && packet.askedBy?.trim()) {
+    render.answerTo = render.from;
+  }
   return render;
 }
 

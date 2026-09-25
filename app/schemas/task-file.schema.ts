@@ -968,6 +968,11 @@ export const packetOptionSchema = z
     // admin|maintainer re-check in resolvePacket.
     /** Pre-authored timeline text written when this option is chosen. */
     ev: z.string().optional(),
+    /** Ruling 478(e): choosing this option needs the person's typed answer
+     *  (a name, a URL, a value the asking agent cannot know). The card asks
+     *  for it and `resolvePacket` refuses the choice without it. Written by
+     *  an agent question (`ask_human`, the Codex envelope). */
+    reply: z.boolean().optional(),
     /** retry_other_backend — the backend to re-run the failed agent on. */
     backend: z.enum(["codex", "claude"]).optional(),
     /** retry_other_backend — a reviewer retry names its profile (the primary

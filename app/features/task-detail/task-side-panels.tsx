@@ -268,6 +268,11 @@ export function GithubTrace({
     : null;
   return (
     <div className="panel flush">
+      {/* Ruling 478(f) (F40-35): the panel's name, for heading navigation. The
+          bar's icon and repo already say it to the eye; without this the
+          panel was the one region of the page a screen reader's heading list
+          could not reach once the task had a branch. */}
+      <h2 className="vh">GitHub</h2>
       <div className="gh-bar">
         <Icon name="github" />
         <span className="repo">{task.repo}</span>

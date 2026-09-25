@@ -3761,8 +3761,10 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
       }
     }
     expect(problems).toEqual([]);
-    // Sixteen boxes keyed on a refusal counter, and the login page's two.
-    expect(carriers).toHaveLength(18);
+    // Eighteen boxes keyed on a refusal counter, and the login page's two.
+    // Ruling 478(e) added the packet's "Choose an answer" and "Write your
+    // answer" refusals.
+    expect(carriers).toHaveLength(20);
   });
 
   it("every motion this ruling adds has a reduced-motion answer that does not move", () => {
@@ -4376,6 +4378,47 @@ describe("interface review 2026-09-24: the MEDIUM fixes", () => {
  * The move-back glyph and the markup halves of the other two are pinned by
  * the task-disposition, execution-profile and top-bell suites.
  */
+describe("app.css ruling 478: the task page at phone width", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const PHONE = "@media (max-width: 720px)";
+  /** The declarations `selector` gets from its own rules in `at` (plain when empty). */
+  const declsAt = (selector: string, at: string[]) => {
+    const hit = RULES.filter((r) => parts(r).includes(selector) && r.at.join("|") === at.join("|"));
+    expect(hit.length, `${selector} must have a rule in ${at.join(" ") || "the plain sheet"}`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+
+  it("(b) F40-32: a file row's name takes its own line on a phone and shows whole", () => {
+    // WEB-3 at 375px: both files read "WEB-3…", the name left 48px beside a
+    // fixed 144px by-line and the size. CANARY: drop the `a.attach-file` rules
+    // from the 720px block.
+    expect(declsAt("a.attach-file", [PHONE]).get("flex-wrap")).toBe("wrap");
+    const name = declsAt("a.attach-file .attach-name", [PHONE]);
+    // The whole row beside the icon (15px) and its gap (.5rem).
+    expect(name.get("flex")).toBe("1 1 calc(100% - 15px - .5rem)");
+    expect(name.get("white-space")).toBe("normal");
+    expect(name.get("overflow-wrap")).toBe("anywhere");
+    // The by-line gives way instead of holding its width.
+    const by = declsAt("a.attach-file .attach-by", [PHONE]);
+    expect(by.get("flex")).toBe("0 1 auto");
+    expect(by.get("min-width")).toBe("0");
+    // The base rules the phone rules must outrank are declared LATER in the
+    // sheet, so the phone selectors carry one type selector more.
+    expect(declsAt(".attach-file .attach-name", []).get("flex")).toBe("1");
+    expect(declsAt(".attach-file .attach-by", []).get("flex")).toBe("none");
+  });
+
+  it("(c) F40-33: the live strip's text column may shrink below the step's 44ch", () => {
+    // WEB-2 at 375px: the step ran to x=388 in a 341px strip and the page
+    // scrolled sideways. CANARY: drop `.run-phase-text { min-width: 0 }`.
+    expect(declsAt(".run-phase-text", []).get("min-width")).toBe("0");
+    expect(declsAt(".run-phase", []).get("min-width")).toBe("0");
+    expect(declsAt(".run-phase .step", []).get("text-overflow")).toBe("ellipsis");
+  });
+});
+
 describe("better-ui review 2026-09-24: the small leftovers", () => {
   const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
   const plain = RULES.filter((r) => r.at.length === 0);

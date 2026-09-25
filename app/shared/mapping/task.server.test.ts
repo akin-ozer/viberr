@@ -311,6 +311,33 @@ describe("displayReadiness derivation (F7-UI3)", () => {
     expect(decided?.acceptAnswersWith).toBeUndefined();
   });
 
+  it("ruling 478(e) (F40-31): an agent's question names the agent the answer goes back to", () => {
+    // Canary: drop the `answerTo` line in `mapPacket` and the card labels the
+    // box "Note for the operator" again.
+    const question = (extra: { askedBy?: string; kind?: string }) =>
+      JSON.stringify({
+        id: "pkt_5",
+        type: "input",
+        kind: "Agent question",
+        from: "agent:claude/platform-engineer (Platform Engineer)",
+        title: "Is Workers Builds connected?",
+        body: "",
+        options: [{ kind: "custom", t: "Connected", d: "", rec: false, reply: true }],
+        ...extra,
+      });
+    const asked = summarize(row({ packet_json: question({ askedBy: "platform-engineer" }) }), false).packet;
+    expect(asked?.answerTo).toBe(asked?.from);
+    expect(asked?.answerTo).toBeTruthy();
+    // The same predicate the server routes on: no asker, or not an agent's
+    // question, and the answer goes to the operator, so the card says that.
+    expect(summarize(row({ packet_json: question({}) }), false).packet?.answerTo).toBeUndefined();
+    expect(
+      summarize(row({ packet_json: question({ askedBy: "platform-engineer", kind: "Decision" }) }), false).packet
+        ?.answerTo,
+    ).toBeUndefined();
+    expect(summarize(row({ packet_json: inputPacket }), false).packet?.answerTo).toBeUndefined();
+  });
+
   it("an input packet on the agent's turn does not raise 'input required'", () => {
     // The packet lift is for a HUMAN who owes an answer. On the agent's turn
     // the agent-working lift below owns the slot instead — what this must never

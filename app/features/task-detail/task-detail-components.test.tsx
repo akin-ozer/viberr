@@ -267,7 +267,7 @@ describe("DecisionPacket", () => {
     );
   });
 
-  it("blocked packets tint blocked; no rec → first option preselected; Ask fires", () => {
+  it("blocked packets tint blocked; no rec → nothing preselected (ruling 478(e)); Ask fires", () => {
     const onAsk = vi.fn();
     const blocked: PacketRender = {
       ...packet142,
@@ -281,7 +281,7 @@ describe("DecisionPacket", () => {
     expect(container.querySelector(".packet")!.classList.contains("blocked")).toBe(true);
     expect(
       container.querySelector('.options [role="radio"]')!.getAttribute("aria-checked"),
-    ).toBe("true");
+    ).toBe("false");
     fireEvent.click(container.querySelector(".packet-actions .btn.ghost")!);
     expect(onAsk).toHaveBeenCalledOnce();
   });
@@ -3393,7 +3393,8 @@ describe("DecisionPacket — pass-20 governance", () => {
     expect(body.textContent).not.toContain("**");
     expect(body.textContent).not.toContain("##");
     expect(body.querySelector("strong")!.textContent).toBe("Why this is yours:");
-    expect(body.querySelector("h2")!.textContent).toBe("(a) Connect Workers Builds");
+    // Ruling 478(f): under the packet's own h2 title, one level down.
+    expect(body.querySelector("h3")!.textContent).toBe("(a) Connect Workers Builds");
     expect([...body.querySelectorAll("ol > li")].map((li) => li.textContent)).toEqual([
       "Open Workers & Pages.",
       "Set the name to akinozer-com.",
@@ -4080,6 +4081,207 @@ describe("U39-21: a packet option renders its inline code", () => {
     expect(first.querySelector(".od code")?.textContent).toBe("7920943");
     expect(first.querySelector(".ot code")?.textContent).toBe("reviewer");
     expect(first.textContent).not.toContain("`");
+  });
+});
+
+/* ---------------------------------------- ruling 478: task page fixes */
+
+describe("ruling 478: the task page's timeline, packet and GitHub panel", () => {
+  /** WEB-3's agent question, as the loader renders it. */
+  const agentQuestion: PacketRender = {
+    type: "input",
+    kind: "Agent question",
+    from: "Platform Engineer",
+    answerTo: "Platform Engineer",
+    title: "Is Workers Builds connected, and did the first build pass?",
+    body: "## (a) Connect Workers Builds\n\n1. Open the dashboard.\n\n## Please reply with\n\nThe Worker name and the workers.dev URL.",
+    observations: [],
+    options: [
+      {
+        kind: "custom",
+        t: "Connected; the first build succeeded",
+        d: "Reply with the Worker name and the workers.dev URL exactly as Cloudflare shows them.",
+        rec: true,
+        reply: true,
+      },
+      { kind: "custom", t: "Not connected yet", d: "", rec: false },
+    ],
+  };
+  const renderPacket = (packet: PacketRender, onResolve: (i: number, note: string) => void = () => {}) =>
+    render(
+      <DecisionPacket
+        packet={packet}
+        busy={false}
+        canResolve
+        canResolveCompletion
+        canEditGoal
+        canArchive
+        onResolveCustom={() => {}}
+        onResolve={onResolve}
+        onAsk={() => {}}
+      />,
+    );
+  const confirmButton = (container: HTMLElement) =>
+    [...container.querySelectorAll<HTMLButtonElement>(".packet-actions .btn.primary")].find((b) =>
+      b.textContent?.includes("Confirm decision"),
+    )!;
+
+  it("(a) F40-30: a checkout-failure note shows the tool's words as a code block, with no literal backticks", () => {
+    // WEB-1 01:47: the note's fence printed as "``" on either side of one
+    // run-on <code>, and the unbreakable path widened the page 233px on a
+    // phone. CANARY: render typed-event text through RichText again.
+    const text =
+      "**Workspace checkout failed:** the clone did not finish. Re-run once the cause above is addressed." +
+      "\n\nWhat the checkout reported:\n\n```\n" +
+      "Cloning into '/data/projects/akinozer-com/tasks/WEB-1/workspace/support/fact-checker/website'...\n" +
+      "fatal: failed to create link '/data/projects/akinozer-com/tasks/WEB-1/workspace/.git/objects/f7/ed7c45': Operation not permitted\n" +
+      "```";
+    const { container } = render(<TimelineItem ev={ev({ type: "note", text })} />);
+    const body = container.querySelector(".tl-text.md-body")!;
+    expect(body).not.toBeNull();
+    expect(body.textContent).not.toContain("`");
+    const block = body.querySelector("pre > code.mono")!;
+    expect(block).not.toBeNull();
+    // git's two lines stay two lines, in their own scrolling block.
+    expect(block.textContent!.trim().split("\n")).toHaveLength(2);
+    expect(block.textContent).toContain("fatal: failed to create link");
+    // The paragraphs stay paragraphs, and the lead-in stays bold.
+    expect(body.querySelectorAll(":scope > p").length).toBeGreaterThanOrEqual(2);
+    expect(body.querySelector("strong")!.textContent).toBe("Workspace checkout failed:");
+  });
+
+  it("(f) F40-35: a heading an author writes in a timeline entry sits under the Timeline's h2", () => {
+    // WEB-4 had twelve agent-written h2s beside Timeline, Agent logs and
+    // Details. CANARY: drop `headingBase` from the timeline's Markdown.
+    const { container } = render(
+      <>
+        <TimelineItem ev={ev({ text: "# Review of 7cf1edc\n\n## Claim by claim\n\n#### Nits" })} />
+        <TimelineItem ev={ev({ id: 2, type: "note", text: "## Summary\n\nDone." })} />
+      </>,
+    );
+    const levels = [...container.querySelectorAll("h1, h2, h3, h4, h5, h6")].map((h) => h.tagName);
+    // The entry's own top level is h3 whichever `#` count it starts at, so an
+    // entry that opens with `##` skips no level either.
+    expect(levels).toEqual(["H3", "H4", "H6", "H3"]);
+  });
+
+  it("(f) F40-35: a packet body's headings nest under the packet's own h2 title", () => {
+    // WEB-3: "(a) Connect Workers Builds" and "Please reply with" were h2s,
+    // siblings of the question. CANARY: drop `headingBase` from PacketBody.
+    const { container } = renderPacket(agentQuestion);
+    const levels = [...container.querySelectorAll(".packet-body :is(h1, h2, h3, h4, h5, h6)")].map(
+      (h) => `${h.tagName} ${h.textContent}`,
+    );
+    expect(levels).toEqual([
+      `H2 ${agentQuestion.title}`,
+      "H3 (a) Connect Workers Builds",
+      "H3 Please reply with",
+    ]);
+  });
+
+  it("(f) F40-35: the GitHub panel has a heading once the task has a branch and a PR", () => {
+    // CANARY: drop the visually hidden h2 from the gh-bar branch.
+    const { getByRole } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask({ pr: { number: 2, state: "review", title: "[WEB-4] work" } })}
+          acceptance={traceAcceptance()}
+        />
+      </MemoryRouter>,
+    );
+    expect(getByRole("heading", { level: 2, name: "GitHub" })).toBeTruthy();
+  });
+
+  it("(e) F40-31/F40-57: an agent's question preselects nothing, and Confirm refuses until an answer is chosen", () => {
+    // WEB-3: the recommended "Connected; the first build succeeded" was
+    // preselected, one Confirm from telling the agent a build had passed.
+    // CANARY: preselect the recommended option on an agent question again.
+    const onResolve = vi.fn();
+    const { container } = renderPacket(agentQuestion, onResolve);
+    const radios = [...container.querySelectorAll<HTMLButtonElement>('.options [role="radio"]')];
+    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "false"]);
+    // The group still has exactly one tab stop, the first choice.
+    expect(radios.map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+    // The agent's own pick keeps its pill: it is information, not a default.
+    expect(radios[0]!.querySelector(".rec-tag")!.textContent).toContain("recommended");
+
+    const confirm = confirmButton(container);
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(onResolve).not.toHaveBeenCalled();
+    const alert = container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("Choose an answer above first.");
+    expect(container.querySelector('[role="radiogroup"]')!.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(document.activeElement).toBe(radios[0]);
+
+    // Choosing clears the refusal.
+    fireEvent.click(radios[1]!);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    fireEvent.click(confirm);
+    expect(onResolve).toHaveBeenCalledWith(1, "");
+  });
+
+  it("(e) F40-31: the answer box is the answer to the asking agent, and a `reply` choice refuses without it", () => {
+    // WEB-3: the only box read "Note for the operator · optional", and the
+    // answer went to the Platform Engineer. CANARY: label the box "Note for
+    // the operator" again, or drop the reply refusal.
+    const onResolve = vi.fn();
+    const { container, getByLabelText } = renderPacket(agentQuestion, onResolve);
+    const radios = [...container.querySelectorAll<HTMLButtonElement>('.options [role="radio"]')];
+    fireEvent.click(radios[0]!);
+    const box = getByLabelText(/Your answer to Platform Engineer/);
+    expect(box.id).toBe("pkt-note");
+    const label = container.querySelector('label[for="pkt-note"]')!.textContent!;
+    expect(label).toContain("required");
+    expect(label).toContain("goes back to Platform Engineer");
+    expect(label).not.toMatch(/operator/i);
+
+    const confirm = confirmButton(container);
+    fireEvent.click(confirm);
+    expect(onResolve).not.toHaveBeenCalled();
+    const alert = container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("Write your answer to Platform Engineer first.");
+    expect(box.getAttribute("aria-invalid")).toBe("true");
+    expect(box.getAttribute("aria-describedby")).toBe(alert.id);
+    expect(document.activeElement).toBe(box);
+
+    fireEvent.change(box, { target: { value: "Worker viberr-site at viberr-site.workers.dev; build passed" } });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    fireEvent.click(confirm);
+    expect(onResolve).toHaveBeenCalledWith(0, "Worker viberr-site at viberr-site.workers.dev; build passed");
+
+    // A choice the agent did not mark needs no text, and the box says optional.
+    fireEvent.click(radios[1]!);
+    expect(container.querySelector('label[for="pkt-note"]')!.textContent).toContain("optional");
+    // The directive's hint names the same destination.
+    fireEvent.click(radios[2]!);
+    expect(container.querySelector('label[for="pkt-custom"]')!.textContent).toContain(
+      "goes back to Platform Engineer",
+    );
+  });
+
+  it("(e) F40-57: a packet that recommends nothing preselects nothing; an operator's pick is still preselected", () => {
+    // CANARY: `Math.max(0, …findIndex(rec))` preselects option 1 again.
+    const { container } = renderPacket({
+      ...packet142,
+      options: packet142.options.map((o) => ({ ...o, rec: false })),
+    });
+    expect(
+      [...container.querySelectorAll('.options [role="radio"]')].some(
+        (r) => r.getAttribute("aria-checked") === "true",
+      ),
+    ).toBe(false);
+    expect(container.querySelector(".rec-tag")).toBeNull();
+    cleanup();
+    const operator = renderPacket(packet142);
+    expect(
+      operator.container.querySelector('.options [role="radio"]')!.getAttribute("aria-checked"),
+    ).toBe("true");
+    // An operator packet keeps its box, named for the operator.
+    expect(operator.container.querySelector('label[for="pkt-note"]')!.textContent).toContain(
+      "Note for the operator",
+    );
   });
 });
 

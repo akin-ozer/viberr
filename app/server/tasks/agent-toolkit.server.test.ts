@@ -398,6 +398,47 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(JSON.stringify(ok)).not.toMatch(/too big|at most|maximum/i);
   });
 
+  /**
+   * Ruling 478(e) (F40-31, F40-57): `ask_human` lets the agent say a choice
+   * needs a typed answer, and tells it an unmarked list recommends nothing.
+   */
+  it("ruling 478(e): a `reply` choice reaches the packet, and an unmarked list recommends nothing", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const server = mountFor({ ...BASE, ask: true });
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+
+    const listed = await client.listTools();
+    const ask = listed.tools.find((t) => t.name === "ask_human");
+    // CANARY: put "(first is presented as suggested)" back in the description.
+    expect(JSON.stringify(ask?.inputSchema)).toContain("an unmarked list carries none");
+    expect(JSON.stringify(ask?.inputSchema)).not.toMatch(/presented as suggested/);
+
+    await client.callTool({
+      name: "ask_human",
+      arguments: {
+        title: "Is Workers Builds connected?",
+        options: [
+          { title: "Connected; the first build succeeded", reply: true },
+          { title: "Not yet" },
+        ],
+      },
+    });
+    const packet = readTaskFile({
+      projectSlug: lastStore.slug,
+      taskKey: "VIB-3",
+      dataRoot: lastStore.dataRoot,
+    })!.parsed.packet!;
+    // CANARY: drop `if (o.reply) option.reply = true;` in the tool handler.
+    expect(packet.options.map((o) => [o.reply ?? false, o.rec])).toEqual([
+      [true, false],
+      [false, false],
+    ]);
+  });
+
   let lastStore: ReturnType<typeof setupTestStore>;
 
   const BASE = { comment: false, ask: false, verdict: true };

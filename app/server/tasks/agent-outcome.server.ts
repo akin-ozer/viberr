@@ -34,7 +34,29 @@ import { newId } from "~/shared/ids/new-id.server";
 export interface AgentOutcomeChoice {
   title: string;
   detail?: string;
+  /** Ruling 478(e): choosing it needs the person's typed answer (a name, a
+   *  URL, a value only they have), so the card asks for it and refuses the
+   *  choice without it. */
+  reply?: boolean;
 }
+
+/**
+ * Ruling 478(e) (F40-57, F40-31): what an agent is told about marking its
+ * pick and asking for a typed answer, on both transports (`ask_human`'s schema
+ * and the Codex envelope's). An unmarked list carries no recommendation: the
+ * first option used to be "presented as suggested" whether the agent had a
+ * pick or not, and on WEB-5 a question only the owner could answer (may a
+ * customer story be published, is a video his talk) showed option 1 as
+ * "recommended" and one Confirm away.
+ */
+export const ASK_HUMAN_RECOMMEND_NOTE =
+  'End the title of the choice you recommend with "(Recommended)". Leave every title unmarked ' +
+  "when you have no recommendation (a question only the human can answer): an unmarked list " +
+  "carries none, and nothing is preselected.";
+export const ASK_HUMAN_REPLY_NOTE =
+  "true when choosing this option needs the human to type something back (a name, a URL, " +
+  "a value only they have); the card then asks for that text and will not send the choice " +
+  "without it.";
 
 export interface AgentOutcomeQuestion {
   title: string;
@@ -114,16 +136,20 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
         body: { type: ["string", "null"] },
         options: {
           type: ["array", "null"],
-          // U39-23: the same convention `ask_human` states to a Claude agent.
-          description:
-            "2-4 concrete answer choices. The first is presented as the suggested one, so put the one you recommend first.",
+          // U39-23 / ruling 478(e): the same convention `ask_human` states to
+          // a Claude agent.
+          description: `2-4 concrete answer choices. ${ASK_HUMAN_RECOMMEND_NOTE}`,
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["title", "detail"],
+            required: ["title", "detail", "reply"],
             properties: {
               title: { type: "string" },
               detail: { type: ["string", "null"] },
+              reply: {
+                type: ["boolean", "null"],
+                description: `${ASK_HUMAN_REPLY_NOTE} null otherwise.`,
+              },
             },
           },
         },
@@ -159,6 +185,7 @@ const codexEnvelopeSchema = z.object({
             .object({
               title: z.string().min(1),
               detail: z.string().optional().catch(undefined),
+              reply: z.boolean().optional().catch(undefined),
             })
             .nullable()
             .catch(null),
@@ -228,6 +255,7 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
       question.options = envelope.question.options.map((opt) => {
         const choice: AgentOutcomeChoice = { title: opt.title };
         if (opt.detail !== undefined) choice.detail = opt.detail;
+        if (opt.reply === true) choice.reply = true;
         return choice;
       });
     }
@@ -509,29 +537,38 @@ export function buildAgentQuestionPacket(
   const choices = (question.options ?? []).map((o) => {
     const title = o.title.trim();
     const bare = title.replace(RECOMMENDED_MARK, "").trim();
-    return { title: bare, detail: o.detail, marked: bare !== title };
+    return { title: bare, detail: o.detail, marked: bare !== title, reply: o.reply === true };
   });
   // U39-23: agents mark their pick in the title ("Coordinate core status work
   // (Recommended)"), and the card already shows a `recommended` pill, so it
   // said so twice and carried the mark into the answer, the summon note and
   // the decision record. The mark says which option the agent recommends, so
-  // it decides the pill; with none, the first is the suggested one, as
-  // `ask_human` tells the agent.
-  const marked = choices.findIndex((c) => c.marked);
-  const recommended = marked === -1 ? 0 : marked;
+  // it decides the pill. Ruling 478(e) (F40-57): with no mark there is no
+  // pick. The first option used to get the pill regardless, and on WEB-5 the
+  // agent had to post a comment disowning it.
+  const recommended = choices.findIndex((c) => c.marked);
   const options: PacketOption[] = choices.length
-    ? choices.map((o, i) => ({
-        kind: "custom" as const,
-        t: o.title || `Option ${i + 1}`,
-        d: (o.detail ?? "").trim(),
-        rec: i === recommended,
-      }))
+    ? choices.map((o, i) => {
+        const option: PacketOption = {
+          kind: "custom" as const,
+          t: o.title || `Option ${i + 1}`,
+          d: (o.detail ?? "").trim(),
+          rec: i === recommended,
+        };
+        if (o.reply) option.reply = true;
+        return option;
+      })
     : [
+        // No choices: the answer IS the typed text, so it is required, and
+        // nobody recommended anything. It goes back to the agent that asked
+        // (the card's answer box says so by name); "the operator picks it up"
+        // was not where it went (ruling 478(e), F40-31).
         {
           kind: "custom" as const,
           t: "Answer the question",
-          d: "Reply with your decision — the operator picks it up on its next turn.",
-          rec: true,
+          d: "Write your answer in the box below.",
+          rec: false,
+          reply: true,
         },
       ];
   const packet: TaskPacket = {

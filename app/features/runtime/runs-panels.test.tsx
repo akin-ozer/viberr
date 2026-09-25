@@ -149,6 +149,12 @@ describe("LiveRunPanel", () => {
     expect(container.querySelector(".run-phase .step")?.textContent).toBe(
       "Cloning acme/app",
     );
+    // Ruling 478(c) (F40-33): phase and step sit in the text column the sheet
+    // lets shrink (`.run-phase-text { min-width: 0 }`, app.css.test.ts), so a
+    // long step cuts at the strip's edge. CANARY: drop the class.
+    const column = container.querySelector(".run-phase > .run-phase-text")!;
+    expect(column.querySelector(":scope > .ph")).not.toBeNull();
+    expect(column.querySelector(":scope > .step")).not.toBeNull();
   });
 
   it("U39-26: reads a tool step as words, keeping the stored step on hover", () => {
@@ -1138,6 +1144,72 @@ describe("AgentPicker dismissal (shared useDismiss)", () => {
     const { container } = openPicker();
     fireEvent.mouseDown(container.querySelector('[role="listbox"]')!);
     expect(container.querySelector('[role="listbox"]')).not.toBeNull();
+  });
+});
+
+/**
+ * Ruling 478(d) (F40-34): the stream picker says whose console is shown, and
+ * only a deliberate choice switches it.
+ */
+describe("ruling 478(d): the agent log stream picker", () => {
+  const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });
+  const dev = mkRun({ id: "primary", who: { kind: "agent", backend: "claude", name: "Platform Engineer", role: "developer" }, state: "idle", lifecycle: "finished" });
+  const rev = mkRun({ id: "c0", kind: "reviewer", who: { kind: "agent", backend: "claude", name: "Site Reviewer", role: "reviewer" }, state: "idle", lifecycle: "finished" });
+  const renderPicker = (onSel: (id: string | null) => void) =>
+    render(
+      <Logs runtime={[op, dev, rev]} sel="primary" onSel={onSel} linesByThread={{ op: [], primary: [], c0: [] }} />,
+    );
+
+  it("names the trigger with the stream it shows, so the visible name is in the accessible name", () => {
+    // WEB-2: the button announced "Select agent log stream" and never which
+    // agent. CANARY: put `aria-label={label}` back on the trigger.
+    const { getByRole, container } = renderPicker(() => {});
+    const trigger = container.querySelector<HTMLButtonElement>(".rsel-btn")!;
+    const visible = trigger.querySelector(".rsel-nm")!.textContent!;
+    expect(visible).toContain("Platform Engineer");
+    // Label in name (WCAG 2.5.3): the name carries what a voice-control user
+    // reads on screen, word for word.
+    expect(getByRole("button", { name: `Agent log stream: ${visible}` })).toBe(trigger);
+  });
+
+  it("arrows move focus through the streams without switching the console; Enter switches it", () => {
+    // CANARY: make ArrowDown on the open list call `onChange` again (the old
+    // `move()`), and the console swaps with nothing announced.
+    const onSel = vi.fn();
+    const { container } = renderPicker(onSel);
+    const trigger = container.querySelector<HTMLButtonElement>(".rsel-btn")!;
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    const list = container.querySelector('[role="listbox"]')!;
+    expect(trigger.getAttribute("aria-controls")).toBe(list.id);
+    const options = [...list.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+    // Focus lands on the stream shown, inside the list.
+    expect(document.activeElement).toBe(options[1]);
+    fireEvent.keyDown(options[1]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(options[2]);
+    fireEvent.keyDown(options[2]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(options[0]);
+    fireEvent.keyDown(options[0]!, { key: "End" });
+    expect(document.activeElement).toBe(options[2]);
+    expect(onSel).not.toHaveBeenCalled();
+    // Enter on a native button is its click: the one way to switch.
+    fireEvent.click(options[2]!);
+    expect(onSel).toHaveBeenCalledWith("c0");
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("Escape inside the list closes it and hands focus back to the trigger, unchanged", () => {
+    const onSel = vi.fn();
+    const { container } = renderPicker(onSel);
+    const trigger = container.querySelector<HTMLButtonElement>(".rsel-btn")!;
+    fireEvent.click(trigger);
+    const options = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+    expect(document.activeElement).toBe(options[1]);
+    fireEvent.keyDown(options[1]!, { key: "Escape" });
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(onSel).not.toHaveBeenCalled();
   });
 });
 

@@ -1951,6 +1951,49 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     expect(quality?.title).toBe("Approval noted, rework still needed");
     expect(quality?.text).toContain("Validation:** failing");
     expect(quality?.text).not.toContain("approved the work");
+    // Ruling 478(g): and it names who objected.
+    expect(quality?.text).toContain("Review & validation requested changes");
+  });
+
+  it("ruling 478(g) (F40-58): an approval while another required reviewer has not reported waits on that reviewer, never 'rework'", async () => {
+    /**
+     * WEB-1 at 22:50: "Fact Checker · Review verdict · Approval noted, rework
+     * still needed" while the Site Reviewer's run was still going and nobody
+     * had objected; "Review passed" landed four minutes later. The same title
+     * reached the owner's bell each time. `changed` is a verdict still owed,
+     * not a rework.
+     *
+     * CANARY: fold the `changed` arm back into the one else and the title reads
+     * "rework still needed" again.
+     */
+    const store = setupProjectedStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.selin.id,
+        branch: "vib-1-work",
+        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT, QA_REVIEWER_ENGAGEMENT],
+        workRevision: workRev("rev_1"),
+        validation: "changed",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+
+    await recordReviewerReply(store, "Verdict: approve — looks fine to me.", QA_REVIEWER_REF);
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.frontmatter.validation).toBe("changed");
+    const quality = file.parsed.timeline.find((e) => e.type === "quality");
+    expect(quality?.title).toBe("Approval noted, waiting on Review & validation");
+    expect(quality?.text).toContain("Validation:** changed");
+    expect(quality?.text).toContain("Review & validation has not reviewed it yet");
+    expect(`${quality?.title} ${quality?.text}`).not.toMatch(/rework/i);
+    // The bell carries the same title, so it is true there too.
+    const bell = store.db
+      .prepare("SELECT title FROM notifications WHERE task_key = 'VIB-1' AND kind = 'quality'")
+      .all()
+      .map((row) => row.title);
+    expect(bell).toContain("Approval noted, waiting on Review & validation");
+    expect(bell).not.toContain("Approval noted, rework still needed");
   });
 
   it("re-entering review recomputes validation — a workRevision with no verdicts derives 'changed'", async () => {
