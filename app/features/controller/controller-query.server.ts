@@ -11,6 +11,7 @@ import {
   listMessages,
   listUnseenReplies,
   markConversationSeen,
+  type ConversationActor,
   type ControllerConversation,
   type ControllerMessage,
   type ListConversationsInput,
@@ -24,9 +25,20 @@ import {
 import { listRunsForTask } from "~/server/runtimes/run-service.server";
 import type { ConsoleShipping } from "~/server/runtimes/run-projection.server";
 import type { RunView } from "~/features/runtime/runtime-types";
-import { listGoals, readGoalHistory, type GoalView } from "~/server/tasks/goal-actions.server";
+import {
+  listGoals,
+  readGoalFileFacts,
+  type GoalView,
+  type LinkTaskStatus,
+} from "~/server/tasks/goal-actions.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { taskKeyLinks } from "~/server/projections/task-key-links.server";
+import type { TaskActivitySummary } from "~/server/projections/board-query.server";
+import { waitingOnViewer } from "~/server/projections/decisions.server";
+import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
+import { withLiveRun } from "~/shared/mapping/task.server";
+import { toBoardCard } from "~/features/board/board-card";
+import { cardStatus } from "~/features/board/card-status";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 
 /**
@@ -65,7 +77,13 @@ export interface ControllerSurfaceView {
    *  admin (`canInterruptControllerRun`, re-checked by the engine on submit). */
   canInterruptTurn: boolean;
   /** Project surface only. */
-  goals: GoalView[] | null;
+  goals: ControllerGoalView[] | null;
+  /**
+   * Ruling 476(h) (F40-61): the conversations this board's chains were planned
+   * in that its rail does not already list (an instance thread, most often),
+   * each naming the chains it planned. Only ones the viewer can open.
+   */
+  plannedElsewhere?: PlannedElsewhere[];
   viewerOwnsActive: boolean;
   /** Org admin reading every conversation (?all=1). */
   showingAll: boolean;
@@ -86,6 +104,56 @@ export interface ConversationListItem {
   /** O39-d: the viewer's own thread holds a controller reply they have not
    *  seen. Never set on someone else's thread (?all=1). */
   unread: boolean;
+}
+
+/** Ruling 476(h): a conversation a chain was planned in, as the page links it. */
+export interface PlannedConversation {
+  id: string;
+  title: string;
+  /** Its own scope's controller page, opened on it. */
+  href: string;
+  /** Where it lives: "Instance", the task it is anchored to, or its board. */
+  scopeLabel: string;
+}
+
+/** Ruling 476(h): a planning conversation the rail lists, with its chains. */
+export interface PlannedElsewhere extends PlannedConversation {
+  goalIds: string[];
+}
+
+/** A chain as the Controller page reads it. */
+export type ControllerGoalView = GoalView & {
+  /** Ruling 476(h): where the chain was planned, when the viewer can open it. */
+  plannedIn?: PlannedConversation;
+};
+
+/**
+ * Ruling 476(g) (F40-56): the board card's status word for every task of the
+ * board, keyed by task, computed exactly as the board loader computes it: the
+ * card's `waitingOnMe` from `waitingOnViewer` over the same review queue, the
+ * run row's queued state (`withLiveRun`), then `cardStatus`. The goal rail
+ * called a link whose task waited on its owner "active", in the colour of an
+ * agent at work, while the board said "waiting on you".
+ */
+export function linkTaskStatuses(
+  db: DatabaseSync,
+  viewerId: string,
+  projectSlug: string,
+  tasks: readonly TaskActivitySummary[],
+  readyKeys: Iterable<string>,
+): Map<string, LinkTaskStatus> {
+  const mine = waitingOnViewer(db, viewerId, projectSlug, readyKeys);
+  const live = liveRunStateByTask(db, projectSlug);
+  const out = new Map<string, LinkTaskStatus>();
+  for (const task of tasks) {
+    const status = cardStatus(
+      toBoardCard(withLiveRun({ ...task, waitingOnMe: mine.has(task.key) }, live.get(task.key) ?? null)),
+    );
+    if (status) {
+      out.set(task.key, { kind: status.kind, label: status.label, resumesAt: status.resumesAt ?? null });
+    }
+  }
+  return out;
 }
 
 /**
@@ -134,6 +202,9 @@ export function getControllerSurface(
      *  window to carry. The routes pass `shown` for a document load and
      *  `none` for a `.data` request; omitted, every window is carried. */
     console?: ConsoleShipping;
+    /** Ruling 476(g): the board card's status per task (`linkTaskStatuses`),
+     *  asked for only when a chain has a started link to show it on. */
+    taskStatuses?: () => ReadonlyMap<string, LinkTaskStatus>;
   },
 ): ControllerSurfaceView {
   const admin = isOrgAdmin(db, viewer.id);
@@ -197,6 +268,22 @@ export function getControllerSurface(
     conversation = { ...conversation, userLabel: nameOf(conversation.userId, conversation.userLabel) };
   }
   const messages = conversation ? listMessages(db, conversation.id) : [];
+  const goals = scope
+    ? projectGoals(db, scope, {
+        viewer: { userId: viewer.id, orgRole: admin ? "admin" : "member" },
+        dataRoot: input.dataRoot,
+        taskStatuses: input.taskStatuses,
+      })
+    : null;
+  const listed = new Set(rows.map((c) => c.id));
+  const plannedElsewhere = new Map<string, PlannedElsewhere>();
+  for (const goal of goals ?? []) {
+    const planned = goal.plannedIn;
+    if (!planned || listed.has(planned.id)) continue;
+    const entry = plannedElsewhere.get(planned.id) ?? { ...planned, goalIds: [] };
+    entry.goalIds.push(goal.id);
+    plannedElsewhere.set(planned.id, entry);
+  }
   return {
     // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
     // "is the controller available" is a question about the person looking at
@@ -236,14 +323,8 @@ export function getControllerSurface(
     canInterruptTurn: conversation
       ? conversation.userId === viewer.id || admin
       : false,
-    // Ruling 419(h): each chain carries its history from its own file, so the
-    // page can show why it paused and what a person said when they cancelled it.
-    goals: scope
-      ? listGoals(db, scope).map((goal) => ({
-          ...goal,
-          history: readGoalHistory(scope, goal.id, { dataRoot: input.dataRoot }),
-        }))
-      : null,
+    goals,
+    plannedElsewhere: [...plannedElsewhere.values()],
     // Ruling 260 (pass 37, F37-91): the goal-redirect gate is a DISJUNCTION —
     // the chain's creator, or run-agents. The page knew only the role half, so
     // it hid Pause, Resume, Cancel, Retry and Skip from the person who created
@@ -252,5 +333,76 @@ export function getControllerSurface(
     viewerOwnsActive: conversation ? conversation.userId === viewer.id : false,
     showingAll,
     viewerIsOrgAdmin: admin,
+  };
+}
+
+/**
+ * A board's chains as its Controller page reads them (ruling 99): the
+ * projection, plus from each chain's own file its history (ruling 419(h): why
+ * it paused, what a person said when they cancelled it) and the conversation
+ * it was planned in (ruling 476(h)), plus each started link's board status
+ * (ruling 476(g)).
+ */
+function projectGoals(
+  db: DatabaseSync,
+  projectSlug: string,
+  opts: {
+    viewer: ConversationActor;
+    dataRoot: string | undefined;
+    taskStatuses: (() => ReadonlyMap<string, LinkTaskStatus>) | undefined;
+  },
+): ControllerGoalView[] {
+  const goals = listGoals(db, projectSlug);
+  const started = goals.some((g) => g.links.some((l) => l.status === "active" && l.taskKey));
+  const statuses = started && opts.taskStatuses ? opts.taskStatuses() : null;
+  const planned = plannedConversationReader(db, opts.viewer, projectSlug);
+  return goals.map((goal) => {
+    const facts = readGoalFileFacts(projectSlug, goal.id, { dataRoot: opts.dataRoot });
+    const view: ControllerGoalView = {
+      ...goal,
+      history: facts.history,
+      conversationId: facts.conversationId,
+      links: goal.links.map((link) => {
+        const status = link.status === "active" && link.taskKey ? statuses?.get(link.taskKey) : undefined;
+        return status ? { ...link, taskStatus: status } : link;
+      }),
+    };
+    const plannedIn = planned(facts.conversationId);
+    if (plannedIn) view.plannedIn = plannedIn;
+    return view;
+  });
+}
+
+/**
+ * Ruling 476(h): the conversation a chain was planned in, as a link, when the
+ * viewer may open it (its owner, or an org admin: `canAccessConversation`).
+ * Conversations belong to the person who had them, so a member who did not
+ * plan the chain is shown no link and no title. Each id is read once.
+ */
+function plannedConversationReader(
+  db: DatabaseSync,
+  viewer: ConversationActor,
+  projectSlug: string,
+): (conversationId: string | null) => PlannedConversation | null {
+  const seen = new Map<string, PlannedConversation | null>();
+  return (conversationId) => {
+    if (!conversationId) return null;
+    const known = seen.get(conversationId);
+    if (known !== undefined) return known;
+    const found = getConversation(db, conversationId);
+    const planned =
+      found && canAccessConversation(db, found, viewer)
+        ? {
+            id: found.id,
+            title: found.title || "New conversation",
+            href: `${found.projectSlug ? `/projects/${found.projectSlug}` : ""}/controller?c=${encodeURIComponent(found.id)}`,
+            scopeLabel:
+              found.projectSlug === null
+                ? "Instance"
+                : (found.taskKey ?? (found.projectSlug === projectSlug ? "This board" : found.projectSlug)),
+          }
+        : null;
+    seen.set(conversationId, planned);
+    return planned;
   };
 }

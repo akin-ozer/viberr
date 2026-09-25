@@ -1,4 +1,6 @@
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
+import type { RunMcpServerDeclaration } from "~/server/runtimes/adapter.server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   setupAppTest,
@@ -1067,5 +1069,71 @@ describe("ruling 370: the controller prefix", () => {
     const tail = built.prefix.dynamic.join("");
     expect(tail).toContain("MCP servers that did NOT mount this turn");
     expect(tail.indexOf("alpha (not registered)")).toBeLessThan(tail.indexOf("zulu (probe failed)"));
+  });
+});
+
+/**
+ * Ruling 476(h) (F40-61): a chain records the conversation that planned it.
+ * Live, goal-1 was planned in a 16-message instance thread, and the project's
+ * Controller page said "No conversations yet" beside it: the goal file named
+ * its creator and nothing else, so nothing could link back.
+ */
+/** A run's mount that is an in-process SDK server, which a client can call. */
+function inProcess(
+  server: RunMcpServerDeclaration | undefined,
+): server is McpSdkServerConfigWithInstance {
+  return server !== undefined && server.type === "sdk" && "instance" in server;
+}
+
+describe("ruling 476(h): a goal a turn creates records the conversation it was planned in", () => {
+  it("the turn's own create_goal writes its conversation into the chain's file", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { lastRunSpec } = await import("../../../test-support/fake-runtime");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    await connectFakeBackend(app.db, user.id, "claude");
+    // An INSTANCE thread, planning a chain on a board: the live shape.
+    const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
+    try {
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "plan the launch on viberr-core",
+        user: { ...user, orgRole: "admin" },
+        dataRoot: app.dataRoot,
+      });
+    } finally {
+      await disconnectFakeBackend(app.db, user.id, "claude");
+    }
+    // The tool the turn was really handed, called the way the model calls it.
+    const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
+    if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "ruling-476", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+    const reply = JSON.stringify(
+      (
+        await client.callTool({
+          name: "create_goal",
+          arguments: {
+            projectSlug: "viberr-core",
+            title: "Planned from the instance",
+            links: [{ title: "Only link", goal: "Do the one thing. Done when it exists." }],
+          },
+        })
+      ).content,
+    );
+    expect(reply).toContain("[done]");
+    const goalId = /goal-\d+/.exec(reply)?.[0];
+    expect(goalId, "the reply names the goal it created").toBeTruthy();
+    const { getGoalView } = await import("~/server/tasks/goal-actions.server");
+    // CANARY: drop `conversationId: conversation.id` from the turn's mounts,
+    // or the toolkit's hand-off to `createGoal`, and the chain names no thread.
+    expect(getGoalView("viberr-core", goalId!, { dataRoot: app.dataRoot })?.conversationId).toBe(conversation.id);
+    await client.close();
   });
 });

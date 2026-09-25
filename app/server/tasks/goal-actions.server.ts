@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { CardStatusKind } from "~/features/board/card-status";
 import { actorProseName } from "./user-display-name.server";
 import {
   deadDependencies,
@@ -95,6 +96,9 @@ export interface CreateGoalInput {
   description?: string;
   onFailure?: "pause" | "continue";
   links: GoalLinkInput[];
+  /** Ruling 476(h): the controller conversation the chain is planned in,
+   *  recorded on the goal so the project's Controller page links back to it. */
+  conversationId?: string | null;
 }
 
 export interface GoalActionResult {
@@ -374,6 +378,7 @@ export async function createGoal(
         status: "active",
         createdBy: actor.userId,
         createdByLabel: actor.label,
+        conversationId: input.conversationId ?? null,
         onFailure: input.onFailure ?? "pause",
         links,
         createdAt: now,
@@ -1704,7 +1709,23 @@ export type GoalLinkView = GoalLink & {
    * text — so this is entirely about the read.
    */
   declaredGoal?: string;
+  /**
+   * Ruling 476(g) (F40-56): the word and colour the board's card gives this
+   * link's task (`cardStatus`, features/board/card-status.ts), so a chain link
+   * whose task waits on a person says "waiting on you" where the chain said
+   * "active" in the agent-working colour. Filled by the project Controller
+   * page for a link that has a task on the board; absent elsewhere.
+   */
+  taskStatus?: LinkTaskStatus;
 };
+
+/** Ruling 476(g): the board card's status for a link's task, as the rail draws it. */
+export interface LinkTaskStatus {
+  kind: CardStatusKind;
+  label: string;
+  /** `scheduled` only: when the task picks itself back up (ruling 225). */
+  resumesAt: string | null;
+}
 
 export interface GoalView {
   id: string;
@@ -1712,6 +1733,10 @@ export interface GoalView {
   status: GoalFrontmatter["status"];
   createdBy: string;
   createdByLabel: string;
+  /** Ruling 476(h): the controller conversation the chain was planned in.
+   *  Read from the goal's file (the detail read and the Controller page);
+   *  the projection does not carry it, so `listGoals` leaves it absent. */
+  conversationId?: string | null;
   onFailure: "pause" | "continue";
   description: string;
   links: GoalLinkView[];
@@ -1763,6 +1788,7 @@ function toGoalView(parsed: ParsedGoalFile): GoalView {
     status: fm.status,
     createdBy: fm.createdBy,
     createdByLabel: fm.createdByLabel,
+    conversationId: fm.conversationId,
     onFailure: fm.onFailure,
     description: parsed.description,
     links: fm.links,
@@ -1787,19 +1813,31 @@ const goalProjectionRowSchema = z.object({
   updated_at: z.string().nullable(),
 });
 
+/** What the Controller page reads from a chain's own file (below). */
+export interface GoalFileFacts {
+  history: GoalView["history"];
+  conversationId: string | null;
+}
+
 /**
  * Ruling 419(h): a chain's history, newest first, straight from its canonical
  * file. The projection carries no history (`listGoals` returns it empty), and
  * the controller page is the surface the task page sends a person to "where the
  * whole chain is read" — which showed neither why a chain paused nor the reason
- * a person gave when they cancelled it. Empty when the file is gone.
+ * a person gave when they cancelled it. Ruling 476(h): the same read carries
+ * the conversation the chain was planned in, which the projection does not
+ * hold either. Empty and null when the file is gone.
  */
-export function readGoalHistory(
+export function readGoalFileFacts(
   projectSlug: string,
   goalId: string,
   ctx: TaskMutationContext = {},
-): GoalView["history"] {
-  return readGoalFile(goalRef(ctx, projectSlug, goalId))?.parsed.timeline ?? [];
+): GoalFileFacts {
+  const parsed = readGoalFile(goalRef(ctx, projectSlug, goalId))?.parsed;
+  return {
+    history: parsed?.timeline ?? [],
+    conversationId: parsed?.frontmatter.conversationId ?? null,
+  };
 }
 
 /** List a project's goals from the projection (board panel read model). */

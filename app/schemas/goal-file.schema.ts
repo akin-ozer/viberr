@@ -92,6 +92,10 @@ export const goalFrontmatterSchema = z.object({
    *  created with nobody present. */
   createdBy: z.string().min(1),
   createdByLabel: z.string().default(""),
+  /** Ruling 476(h) (F40-61): the controller conversation the chain was
+   *  planned in, so the project's Controller page can link back to the
+   *  reasoning behind it. Null for a chain written before the key existed. */
+  conversationId: z.string().nullable().default(null),
   onFailure: z.enum(GOAL_ON_FAILURE_VALUES).default("pause"),
   links: z.array(goalLinkSchema).default([]),
   createdAt: z.string().nullable().default(null),
@@ -106,6 +110,7 @@ export const GOAL_FRONTMATTER_KEYS: readonly (keyof GoalFrontmatter)[] = [
   "status",
   "createdBy",
   "createdByLabel",
+  "conversationId",
   "onFailure",
   "links",
   "createdAt",

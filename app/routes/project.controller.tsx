@@ -23,8 +23,10 @@ import {
 import { ControllerPage } from "~/features/controller/controller-page";
 import {
   getControllerSurface,
+  linkTaskStatuses,
   selectedConversationId,
 } from "~/features/controller/controller-query.server";
+import { readWorkspace } from "./project-workspace.server";
 import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
@@ -61,6 +63,19 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       all: url.searchParams.get("all") === "1",
       // Ruling 457 (owner decision 2): console lines on a document load only.
       console: isDocumentNavigation(request) ? "shown" : "none",
+      // Ruling 476(g): a started link says what the board's card for its task
+      // says. The board's rows and review queue come from the workspace read
+      // the layout makes on the same request (`readWorkspace`, once per request).
+      taskStatuses: () => {
+        const { tasks, reviewQueue } = readWorkspace(request, db, params.slug, ctx.user);
+        return linkTaskStatuses(
+          db,
+          ctx.user.id,
+          params.slug,
+          tasks,
+          reviewQueue.ready.map((r) => r.key),
+        );
+      },
     },
   );
   // The goal redirect controls follow the goal-actions gate (creator OR

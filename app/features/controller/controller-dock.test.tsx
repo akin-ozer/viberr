@@ -898,8 +898,10 @@ describe("the controller dock (ruling 121)", () => {
     fireEvent.click(trigger);
     await screen.findByText("What is this?");
     expect(screen.getByText("task", { selector: "strong" })).toBeTruthy();
-    // Two status regions by design: the panel's working row, and the
-    // visually-hidden announcer beside the trigger that survives a close.
+    // Two status regions by design (ruling 476(d)): the visually-hidden
+    // announcer beside the trigger, which survives a close and says a turn is
+    // working, and the open panel's, which says the thread on screen replied.
+    // The working row itself is visual only.
     expect(
       screen.getAllByRole("status").map((el) => el.textContent).join(" | "),
     ).toContain("Controller is working");
@@ -1343,5 +1345,89 @@ describe("ruling 459: the dock's deferred half", () => {
       expect(trigger.getAttribute("aria-expanded")).toBe("true");
       expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
     });
+  });
+});
+
+/**
+ * Ruling 476(c) and (d) in the dock: the page's rules, in the panel a person
+ * carries onto every page. Live, the dock's transcript was 400px wide at every
+ * desktop width, so a reply opened at its tail there even on a desktop, and the
+ * announcer beside its button cleared to "" when the reply on screen landed.
+ */
+describe("ruling 476: the dock meets a reply at its first line, and says it arrived", () => {
+  const at = "2026-09-24T23:40:00.000Z";
+  const msg = (id: string, seq: number, author: "user" | "controller", text: string, replyTo: string | null = null) => ({
+    id,
+    conversationId: "cnv_a",
+    seq,
+    author,
+    userId: author === "user" ? "u1" : null,
+    text,
+    runId: author === "user" ? null : `run_${id}`,
+    surface: null,
+    replyTo,
+    createdAt: at,
+  });
+  const idle = { working: false, runId: null, phase: null, step: null, answering: null, queued: [] };
+
+  function body(messages: ReturnType<typeof msg>[], working: boolean) {
+    const turn = working ? { ...idle, working: true, runId: "run_live", answering: "p1" } : idle;
+    return (
+      <MemoryRouter>
+        <DockPanelBody
+          current={taskView({ conversation: conversationFixture(), messages, turn, viewerOwnsActive: true })}
+          turn={turn}
+          unseen={[]}
+          threadsOpen={false}
+          busy={false}
+          disabled={false}
+          text=""
+          onText={() => {}}
+          onSubmit={() => {}}
+          onPick={() => {}}
+          onLeave={() => {}}
+          composerRef={{ current: null }}
+          onMount={() => {}}
+        />
+      </MemoryRouter>
+    );
+  }
+
+  it("(c) scrolls to the first line of a reply that lands, not to the end", () => {
+    // CANARY: restore `el.scrollTop = el.scrollHeight` in the dock's effect.
+    const tops = new Map([["p1", 0], ["r1", 700]]);
+    const box = () => document.querySelector<HTMLElement>(".dock-transcript");
+    const spies = [
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("dock-transcript") ? 3000 : 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("dock-transcript") ? 388 : 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const top = tops.get(this.dataset.messageId ?? "");
+        return DOMRect.fromRect({ x: 0, y: top === undefined ? 0 : top - (box()?.scrollTop ?? 0), width: 388, height: 100 });
+      }),
+    ];
+    try {
+      const { rerender } = render(body([msg("p1", 1, "user", "Is the feed live?")], true));
+      expect(box()!.scrollTop).toBe(3000);
+      rerender(body([msg("p1", 1, "user", "Is the feed live?"), msg("r1", 2, "controller", "Yes. Both feeds answer.", "p1")], false));
+      expect(box()!.scrollTop).toBe(692);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
+  it("(d) the open panel says the thread on screen replied, and its working row is no region", () => {
+    // CANARY: drop the panel's announcer: the only status left is the
+    // button's, which leaves the thread on screen out.
+    const { rerender } = render(body([msg("p1", 1, "user", "Is the feed live?")], true));
+    const region = screen.getByRole("status");
+    expect(region.textContent).toBe("");
+    expect(document.querySelector(".ctl-working")!.hasAttribute("role")).toBe(false);
+    rerender(body([msg("p1", 1, "user", "Is the feed live?"), msg("r1", 2, "controller", "Yes. Both feeds answer.", "p1")], false));
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region.textContent).toBe("Controller replied: Yes.");
   });
 });
