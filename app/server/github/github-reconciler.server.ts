@@ -92,6 +92,7 @@ import {
   latestReconcileObservation,
   PUSH_ACTION,
 } from "~/server/provenance/provenance-query.server";
+import { recordProvenance } from "~/server/provenance/provenance-recorder.server";
 import {
   canAcceptFromStage,
   isTerminalStage,
@@ -216,12 +217,9 @@ interface GithubProvenanceDetails {
   /** Ruling 494 (pass 40, F40-70): the branch head the compare read, and the
    *  base tip it read, on a `github.reconcile` row; null when GitHub's answer
    *  did not name one (or there was no compare). A row without `headSha`
-   *  predates the ruling and reads as "head unknown". On a `github.push` row,
-   *  `headSha` is the head the push published. */
+   *  predates the ruling and reads as "head unknown". */
   headSha?: string | null;
   baseSha?: string | null;
-  /** Ruling 494: on a `github.push` row, which door pushed. */
-  via?: PushVia;
   /** A pass over a project with no branched task at all (F15-02). */
   heartbeat?: boolean;
   tasks?: number;
@@ -1706,9 +1704,11 @@ export function recompareAfterPush(
         readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot })?.parsed
           .frontmatter.repo ?? null;
       if (repo) {
-        recordGithubProvenance(db, {
-          absPath: resolveTaskFilePath(taskRef(ctx, input.projectSlug, input.taskKey)),
-          dataRoot: ctx.dataRoot,
+        recordProvenance(db, {
+          sourcePath: storeRelativePath(
+            resolveTaskFilePath(taskRef(ctx, input.projectSlug, input.taskKey)),
+            ctx.dataRoot,
+          ),
           action: PUSH_ACTION,
           details: { repo, branch: input.branch, headSha: input.headSha, via: input.via },
         });
