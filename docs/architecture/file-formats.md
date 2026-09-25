@@ -491,7 +491,7 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 18 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 7). The 19 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
@@ -500,7 +500,8 @@ options:
                                   #   move_stage | wait_for_window |
                                   #   accept_unverified_head |
                                   #   block_on_dependencies |
-                                  #   question_reviewer | create_task | custom
+                                  #   question_reviewer | create_task |
+                                  #   deliver_for_review | custom
                                   # There is NO acceptance marker field: the
                                   # acceptance path is gated on the KIND alone.
                                   # Source of truth: PACKET_OPTION_KINDS in
@@ -623,6 +624,8 @@ Packet notes:
   refuses a required payload that is missing, and refuses `goalDraft`, `toStage`, `dueAt`,
   `blockedBy` and `newTask` on any other kind. `accept_unverified_head` is never authored by
   an operator: the acceptance gate writes it itself, pinned to the shas it read (ruling 226).
+  `deliver_for_review` carries no payload: it delivers the task's committed head, and
+  authoring refuses it unless that head is committed and not delivered (ruling 489).
 
   | Field | Kind | Meaning |
   |---|---|---|

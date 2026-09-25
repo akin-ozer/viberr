@@ -247,6 +247,14 @@ export const PACKET_OPTION_KINDS = [
   // the toolkits use — under the RESOLVING person's authority, and names the
   // new key on both timelines so the two are joined on the record.
   "create_task",
+  // Ruling 489 (pass 40, F40-68): "deliver the committed head for review". The
+  // resolution performs the delivery the operator's `deliver_for_review` tool
+  // performs (`performDelivery`, through the task page's own delivery door,
+  // under the resolving person's authority), so a depth-capped chain whose
+  // last rework committed a head nobody delivered offers the one step left
+  // instead of three ways to redo finished work. Refused at authoring unless
+  // the task's head is committed and not delivered.
+  "deliver_for_review",
   "custom",
 ] as const;
 export type PacketOptionKind = (typeof PACKET_OPTION_KINDS)[number];

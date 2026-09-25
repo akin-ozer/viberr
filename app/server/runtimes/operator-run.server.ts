@@ -269,6 +269,12 @@ export interface RunOperatorInput {
   relay?: RelayPayload;
   /** Depth of the react re-invocation chain (bounds the prompt↔react loop). */
   reactDepth?: number;
+  /** Ruling 489(d): react hops since a person last acted (bounded by
+   *  OPERATOR_REACT_HOP_CEILING in task-actions). Set by the agent-reply react
+   *  and carried by the drive's own follow-ups (the `delivered` follow-up, the
+   *  stranded resume); every trigger a person causes omits it, which is what
+   *  restarts the count. */
+  reactHops?: number;
   /** Depth of the CONSECUTIVE operator-authored transition chain (bounds the
    *  transition→re-trigger loop, the same idiom as reactDepth — see
    *  OPERATOR_TRANSITION_CHAIN_CAP in task-actions). Omitted by every human /
@@ -598,6 +604,13 @@ function queueOperatorTrigger(
     if (priorDepth > (input.transitionDepth ?? 0)) {
       queue.latest = { ...queue.latest, transitionDepth: priorDepth };
     }
+    // Ruling 489(d): the same for the react hop count, but only between two
+    // triggers of the chain itself (each carries a count). A trigger a person
+    // caused carries none, and it restarts the count by overwriting.
+    const priorHops = prior?.reactHops ?? 0;
+    if (input.reactHops !== undefined && priorHops > input.reactHops) {
+      queue.latest = { ...queue.latest, reactHops: priorHops };
+    }
   }
   state.pending.set(key, queue);
   // C2 (pass 23): the caller surfaces these on the timeline — the module's own
@@ -710,6 +723,8 @@ export function deliveredFollowUpFor(entry: {
     transitionDepth: entry.transitionDepth + 1,
   };
   if (entry.dataRoot) input.dataRoot = entry.dataRoot;
+  // Ruling 489(d): the drive's own follow-up continues its chain's hop count.
+  if (own.reactHops) input.reactHops = own.reactHops;
   return input;
 }
 
@@ -1341,6 +1356,9 @@ export async function maybeResumeStrandedOperator(
   if (refreshedAndStopped && ref.ownRun?.planWhollyRefused !== true) {
     nudge.refreshNudge = true;
   }
+  // Ruling 489(d): the nudge continues the stranded drive's chain, so its hop
+  // count carries on rather than starting over.
+  if (ref.ownRun?.reactHops) nudge.reactHops = ref.ownRun.reactHops;
   if (ref.ownRun?.planWhollyRefused === true) {
     nudge.planRefusedNudge = true;
     // Ruling 400: carry the refusals into the retry's own instruction.
@@ -2010,6 +2028,9 @@ export async function runOperator(
     backend,
     autonomy: authority.autonomy,
     reactDepth: input.reactDepth ?? 0,
+    // Ruling 489(d): threaded to every agent this drive dispatches, whose
+    // completion counts one more hop toward the ceiling.
+    reactHops: input.reactHops ?? 0,
     // Threaded so a transition THIS drive makes carries the chain depth into
     // transitionStage's re-trigger (see OPERATOR_TRANSITION_CHAIN_CAP).
     transitionDepth: input.transitionDepth ?? 0,

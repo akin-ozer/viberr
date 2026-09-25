@@ -40,6 +40,23 @@ export interface CollisionServerOutcome {
   reason?: string;
 }
 
+/**
+ * Ruling 489: what the `deliver_for_review` option's delivery did. `delivered`
+ * pushed the head (or opened the PR for it); `current` found the pull request
+ * already carrying it; `failed` is every delivery that did not complete, with
+ * the delivery's own sentence as `reason`.
+ */
+export interface DeliveryServerOutcome {
+  kind: "deliver_for_review";
+  outcome: "delivered" | "current" | "failed";
+  prNumber?: number;
+  /** The full sha the delivery left on the pull request. */
+  headSha?: string;
+  reason?: string;
+}
+
+export type PacketServerOutcome = CollisionServerOutcome | DeliveryServerOutcome;
+
 /** The option a human chose on a decision packet, as handed to the operator. */
 export interface ResolvedPacketOption {
   kind: string;
@@ -47,13 +64,24 @@ export interface ResolvedPacketOption {
   /** The person's own words (a custom directive or the decision note). */
   note?: string;
   /** Viberr's own record of what the option's ceremony then did. */
-  serverOutcome?: CollisionServerOutcome;
+  serverOutcome?: PacketServerOutcome;
 }
 
 /** The one sentence the operator reads for a server outcome. */
-export function serverOutcomeSentence(o: CollisionServerOutcome): string {
+export function serverOutcomeSentence(o: PacketServerOutcome): string {
   const pr = o.prNumber !== undefined ? `PR #${o.prNumber}` : "the review PR";
   const reason = o.reason ?? "no reason recorded";
+  if (o.kind === "deliver_for_review") {
+    const sha = o.headSha ? ` \`${o.headSha.slice(0, 7)}\`` : "";
+    switch (o.outcome) {
+      case "delivered":
+        return `the delivery ran: ${pr} now carries the head${sha}, and the reviewers judge that revision.`;
+      case "current":
+        return `the delivery found ${pr} already carrying the head${sha}; nothing needed pushing.`;
+      case "failed":
+        return `the delivery did not complete (${reason}); nothing reached the review PR.`;
+    }
+  }
   switch (o.outcome) {
     case "cleared_and_delivered":
       return `the stale remote branch was cleared and the work was re-delivered to ${pr}.`;

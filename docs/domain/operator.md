@@ -165,11 +165,45 @@ oldest-first ahead of the machine slot. Consecutive comments from the same autho
 into one turn. A restart-orphaned run is finalized (`interrupted`, reason `restart`) and
 the trigger driven at once rather than chained onto a dead callback.
 
-**Loop caps.** `OPERATOR_REACT_DEPTH_CAP = 4` (agent-reply reactions),
+**Loop caps.** `OPERATOR_REACT_DEPTH_CAP = 4` (agent-reply reactions that got nowhere),
+`OPERATOR_REACT_HOP_CEILING = 12` (every agent-reply reaction since a person last acted,
+ruling 489(d)),
 `OPERATOR_TRANSITION_CHAIN_CAP = 8` (consecutive operator-authored transitions and
 stranded resumes; a human move resets the chain), and a boot recovery re-invoke cap of
 `RECOVERY_REINVOKE_CAP = 3` per task per 30 minutes. Hitting a cap opens a stuck-loop
 packet (or, for the stranded resume, leaves a note) instead of looping.
+
+The react depth counts hops that got nowhere, so a reply that reached a boundary resets it
+to 0 before the cap is checked: a reply whose recorded verdict is `approve` (ruling 362),
+and a reply whose hop moved the task's head (ruling 489). The head signal is the one the
+server writes, never the agent's prose: `headMovedSince` (`react-progress.server.ts`)
+reads the active work revision after the completion's workspace reconcile, and the hop
+moved it when a `delivered` revision was minted, or a revision's `pushedAt` was stamped by
+a delivery push, at or after the finished run's row was created. A head reached only
+through Viberr's own base refreshes mints nothing (ruling 439), and an `external` or
+`verified` revision is not the chain's progress. A reply that leaves the head where it was
+counts every hop, so a loop that gets nowhere is still capped. A task already acceptable
+when the cap is reached gets no packet (ruling 258). Otherwise the depth-capped "Work
+stalled: pick a recovery path" packet says where the work stands (`stuckLoopStandings`):
+the first paragraph of the report that hit the cap (heading marks and the `cc` line
+dropped, capped at 280 characters), the task's head and whether it is delivered (pushed by
+a delivery, or carried by the live PR), and the last gate result on record (ruling 482).
+When the head is committed and not delivered, its recommended option is `deliver_for_review`
+("Deliver <sha7> for review"), with the stock redirect and send-back options beside it,
+unrecommended, and the hold after them.
+
+Because progress resets the depth, a second bound counts every hop:
+`OPERATOR_REACT_HOP_CEILING` (3 × the depth cap = 12) react hops since a person last acted
+(ruling 489(d)). The count rides the chain as `reactHops`: the react hands the operator one
+more, the drive keeps it on `ctx.operatorRun` for every agent it dispatches, and the drive's
+own `delivered` follow-up and stranded resume carry it on. A trigger a person causes carries
+none, so a comment, a packet answer, a Run press or a person's own dispatch starts it over;
+in the lease queue two of the chain's own triggers keep the deeper count, and a person's
+trigger overwrites it. A moved head does not restart it; an approve does (ruling 362), and
+an acceptable task at the ceiling gets no packet (ruling 258). Otherwise no operator turn
+follows the twelfth hop, and the stuck-loop packet opens with the same state lines, its
+reason "The chain made progress but ran 12 hops without a person or a boundary." A restart
+loses the count, as it loses the depth.
 
 ### 3.1 The stranded-drive backstop and the stranded-task sweep
 
@@ -582,7 +616,9 @@ Who opens packets: the operator's own decision (`operatorOpenPacket`, either
 backend); an agent's `ask_human` (kind `Agent question`, `custom` option only); Viberr's
 review-deadlock escalation at the third consecutive objection (§4, ruling 237); the
 stuck-loop escalation after a no-progress react or the transition chain cap (the stock
-set: `redirect` recommended, `request_edit`, `hold_runtime_debug`); the same escalation
+set: `redirect` recommended, `request_edit`, `hold_runtime_debug`; at the react depth cap
+the body says where the work stands and, over a committed head nothing delivered,
+`deliver_for_review` is recommended ahead of the stock set, ruling 489); the same escalation
 after a failed agent run, whose reason and options come from `describeRunFailure`
 (`app/server/tasks/run-failure-remedy.server.ts`, ruling 130(b)) when the failure is
 `quota | auth | unavailable` (a spent window with a known reset offers `wait_for_window`,
@@ -633,6 +669,7 @@ Resolution effects by option kind (`resolvePacket`):
 | `block_on_dependencies` | Writes the option's `blockedBy` as the task's wait through `setTaskDependencies`, so Viberr holds the task and releases it when every entry is done (ruling 230). |
 | `question_reviewer` | Starts THAT reviewer with `REVIEW_DEADLOCK_QUESTION` (name everything it would still block on, no new verdict), `waiting: agent`, the stage unmoved (ruling 237); on a held task the question is queued on the task and put the moment the wait clears (ruling 241). |
 | `create_task` | Creates `newTask` through `createTask` under the RESOLVING person's authority and names the new key on both timelines; when `newTask.blocks` names this task, this task then waits on the new one (rulings 269, 287, 322). A created task starts from the base branch, which the authoring guidance says (`CREATE_TASK_BASE_NOTE`, ruling 441). |
+| `deliver_for_review` | After the resolution write, runs the task page's own delivery door (`manualDeliverForReview` → `performDelivery`, the core behind the operator's `deliver_for_review` tool) under the resolving person's authority: the push, the PR, the `github.delivery.manual` row and every refusal's own timeline event. A delivery that reached the PR lifts the stall's `blocked` readiness; a supervised task also gets the delivery's "Move to <review>" card. Exactly one hand-off: a full-autonomy delivery that moved the head re-queues the operator itself, otherwise `packet-resolved` carries the typed `serverOutcome` (`delivered`, `current`, `failed`). The `run-agents` tier (or the owner) and ruling 240's hold are checked before the write, so a refusal leaves the packet open. Authoring refuses it unless the task's head is committed and not delivered (ruling 489). Process-only: not appended to the goal. |
 
 An option TITLE is a promise the resolution keeps (ruling 164). `operatorOpenPacket`
 refuses a send-back option (`custom`, `redirect`, `request_edit`, whose resolution only
@@ -649,9 +686,11 @@ Who may resolve: `accept_completion` is guarded by `requireAcceptCompletion` (ad
 maintainer, or the live task owner); `force_accept` by `force-accept-completion` (admin);
 `accept_unverified_head` by `accept-completion`; `move_stage`, `archive_task`,
 `discard_branch` and `resolve_remote_collision` by `approve-transition` (admin,
-maintainer); every other kind by the owner exception or `resolve-packet` (admin,
-maintainer). A stranded contributor-owner can `request-maintainer-decision`, which
-notifies and audits `task.packet.escalated` without touching the packet.
+maintainer); `deliver_for_review` by the owner exception, or by `resolve-packet` and
+`run-agents`, the manual delivery's own tier (both admin, maintainer; ruling 489); every
+other kind by the owner exception or `resolve-packet` (admin, maintainer). A stranded
+contributor-owner can `request-maintainer-decision`, which notifies and audits
+`task.packet.escalated` without touching the packet.
 `packetIdentity` (the id, or a content fingerprint) is snapshotted before any await,
 re-compared before the irreversible GitHub write and again inside the file lock; a
 replaced packet answers "This decision was replaced by a newer one." Confirming any

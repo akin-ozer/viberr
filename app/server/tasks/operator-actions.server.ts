@@ -28,6 +28,7 @@ import {
   moveStageTarget,
 } from "~/shared/workflow/packet-options";
 import { setTaskDependencies } from "./dependencies.server";
+import { taskHeadState } from "./react-progress.server";
 import {
   recordRecommendationWithdrawal,
   reprojectTask,
@@ -1413,6 +1414,25 @@ export async function operatorOpenPacket(
           `would answer "no collision to clear" and leave the block where it is. ` +
           "For a branch whose history diverged from its own PR, a person resolves the history: " +
           "offer custom naming what they must do, or archive_task with deleteBranch to abandon it.",
+      };
+    }
+  }
+  // Ruling 489: `deliver_for_review` promises a delivery, so it is offered only
+  // over a head that has one owed — committed, and neither pushed by a
+  // delivery nor carried by the live pull request. Anywhere else the confirm
+  // would push nothing, which is ruling 244's false premise.
+  if (rawOptions.some((o) => o.kind === "deliver_for_review")) {
+    const head = taskHeadState(existing.parsed.frontmatter);
+    if (head.kind !== "undelivered") {
+      return {
+        outcome: "noop",
+        message:
+          `deliver_for_review delivers a committed head that nothing has delivered, and ` +
+          (head.kind === "none"
+            ? `${input.taskKey} has no committed head on record, so there is nothing to deliver.`
+            : `${input.taskKey}'s head \`${head.sha.slice(0, 7)}\` is already delivered` +
+              (head.prNumber !== null ? ` (PR #${head.prNumber} carries it)` : "") +
+              ", so the confirm would push nothing."),
       };
     }
   }
