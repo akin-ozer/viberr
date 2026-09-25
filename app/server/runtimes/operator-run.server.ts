@@ -3,8 +3,9 @@ import {
   serverOutcomeSentence,
   type ResolvedPacketOption,
 } from "~/shared/packet-server-outcome";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { shareDirWithAgents } from "./agent-isolation.server";
+import { existsSync, readFileSync } from "node:fs";
+import { shareDirWithAgents, shareDirWithAgentsOrWarn } from "./agent-isolation.server";
+import { removeAgentTree } from "./agent-trees.server";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -32,6 +33,8 @@ import {
   cloneFailureLogDetails,
   cloneFailureSentence,
   type CloneCredential,
+  WorkspaceFault,
+  workspaceStep,
 } from "~/server/tasks/git-clone-auth.server";
 import {
   cloneProgressStep,
@@ -40,10 +43,9 @@ import {
   mirrorIsCold,
   type WorkspaceCloneInput,
 } from "~/server/tasks/repo-mirror.server";
-import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { stripUngovernedRepoCatalog } from "./skill-mount.server";
 import { initializeUnbornCheckout } from "~/server/tasks/unborn-checkout.server";
-import { taskWorkspaceGit } from "~/server/tasks/workspace-git.server";
+import { taskWorkspaceGit, taskWorkspaceLaunch } from "~/server/tasks/workspace-git.server";
 import {
   RULING_NAMESPACE_NOTE,
   attachedResourcesBlock,
@@ -1594,12 +1596,34 @@ export async function ensureOperatorRepoCheckout(
   let token: string | null = null;
   // Ruling 249: the operator's checkout is always a network clone, and the
   // credential is resolved before it — so this arm only ever says supplied or
-  // absent, and both are true when it says them.
+  // absent, and both are true when it says them. Ruling 485: a local step's
+  // fault (the person, the directory, the heal below, the strip) says
+  // `not_involved` in the catch.
   let credential: CloneCredential = "absent";
   try {
+    // Ruling 485: a tree in the workspace is removed as the task's person,
+    // as its git runs (null: the server's own user, isolation off).
+    const workspace = { projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: input.dataRoot };
+    const person = await workspaceStep(`\`${path.dirname(dir)}\` has no person to work in it as`, () =>
+      taskWorkspaceLaunch(db, workspace),
+    );
     // Ruling 460: `workspace/` is shared with the agent group, so what the
     // clone writes below it stays editable by the agents that run there.
-    shareDirWithAgents(path.dirname(dir));
+    await workspaceStep(`\`${path.dirname(dir)}\` could not be created`, () =>
+      shareDirWithAgentsOrWarn(path.dirname(dir)),
+    );
+    // Ruling 485 (3): a checkout with no `.git/HEAD` (a clone killed mid-way,
+    // a tree an older build's server-side remove left half-removed) would
+    // block the clone into its path on every run: removed as its person.
+    if (existsSync(dir)) {
+      logger.warn("a checkout with no .git/HEAD is removed as its person and cloned again", {
+        taskKey: input.taskKey,
+        dir,
+      });
+      await workspaceStep(`\`${dir}\` has no \`.git/HEAD\` and could not be removed`, () =>
+        removeAgentTree(dir, person),
+      );
+    }
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
     credential = token ? "supplied" : "absent";
@@ -1612,6 +1636,7 @@ export async function ensureOperatorRepoCheckout(
         repo,
         destination: dir,
         token,
+        person,
       };
       if (input.dataRoot) cloneInput.dataRoot = input.dataRoot;
       if (onCloneProgress) cloneInput.onCloneProgress = onCloneProgress;
@@ -1619,18 +1644,21 @@ export async function ensureOperatorRepoCheckout(
     } finally {
       // A clone killed mid-transfer leaves a partial tree that the next run's
       // `.git` check would accept as "already cloned" — worse than nothing.
+      // As the person, and never thrown over the clone's own failure.
       if (!existsSync(path.join(dir, ".git", "HEAD"))) {
-        rmSync(dir, { recursive: true, force: true });
+        try {
+          await removeAgentTree(dir, person);
+        } catch (removal) {
+          logger.warn("an unfinished operator checkout could not be removed as its person; the next run removes it", {
+            dir,
+            err: toError(removal),
+          });
+        }
       }
     }
     // Pass 40 review (R-seams-1): the checkout's git as the task's person.
-    await stripUngovernedRepoCatalog(
-      dir,
-      taskWorkspaceGit(db, {
-        projectSlug: input.projectSlug,
-        taskKey: input.taskKey,
-        dataRoot: input.dataRoot,
-      }),
+    await workspaceStep(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
+      stripUngovernedRepoCatalog(dir, taskWorkspaceGit(db, workspace)),
     );
     logger.info("cloned the task repository for the operator (read-only view)", {
       projectSlug: input.projectSlug,
@@ -1640,10 +1668,12 @@ export async function ensureOperatorRepoCheckout(
     await initialize();
     return { kind: "checkout", repo, dir, relativeDir, defaultBranch };
   } catch (error) {
-    const details = cloneFailureLogDetails(error);
+    if (error instanceof WorkspaceFault) credential = "not_involved";
+    const details = cloneFailureLogDetails(error, { token });
     // F19-6: git's own complaint, redacted by value — "git exit 128" alone told
-    // a human with a working credential nothing they could act on.
-    const stderrExcerpt = redactGitOutput(gitErrorText(error), { token });
+    // a human with a working credential nothing they could act on. Ruling 485:
+    // for a workspace fault, the failing program's own words (rm's, git's).
+    const stderrExcerpt = details.detail ?? "";
     const failureFields = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,

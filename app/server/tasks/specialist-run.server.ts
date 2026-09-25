@@ -10,8 +10,13 @@ import {
   refreshWorkspaceFromMirror,
   type WorkspaceRefreshInput,
 } from "./workspace-refresh.server";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
+import { existsSync, mkdirSync } from "node:fs";
+import {
+  shareDirWithAgents,
+  shareDirWithAgentsOrWarn,
+  type AgentLaunch,
+} from "~/server/runtimes/agent-isolation.server";
+import { removeAgentTree } from "~/server/runtimes/agent-trees.server";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
@@ -161,6 +166,8 @@ import {
   type CloneCredential,
   githubRemoteSanitizationArgs,
   type CloneFailureLogDetails,
+  WorkspaceFault,
+  workspaceStep,
 } from "./git-clone-auth.server";
 import {
   cloneProgressStep,
@@ -1925,6 +1932,7 @@ async function dispatchAgentRun(
       sentence: cloneFailure.sentence,
       credential: cloneFailure.credential,
     };
+    if (cloneFailure.reason === "workspace_fault") promptFailure.workspaceFault = true;
     // F19-6: the agent is told to quote the reason verbatim, so this is the line
     // that carries git's real complaint into its report — and from there into
     // the operator's blocked packet.
@@ -3107,6 +3115,10 @@ export interface PromptCloneFailure {
   credential: CloneCredential;
   /** F19-6: git's own redacted output — the agent must quote it. */
   stderrExcerpt?: string;
+  /** Ruling 485: a local step failed (a tree that could not be replaced, a
+   *  directory that could not be made). The prompt then names no kind of
+   *  access at all: the agent quotes it, and the operator reads the quote. */
+  workspaceFault?: boolean;
 }
 
 /** Everything the fresh-run prompt is composed from (`buildAnalyzePrompt`). */
@@ -3263,14 +3275,21 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
             `- **The workspace has NO checkout, and this is a server-side failure, not something you can fix.** ` +
             `${input.cloneFailure.sentence}\n` +
             `- Do NOT try to clone, fetch, or authenticate to \`${input.repo}\` yourself, and do NOT ask anyone to ` +
-            `provision credentials or place a checkout` +
-            // Ruling 249: both of these are false leads a human would chase,
-            // so name whichever one applies rather than only the first.
-            (input.cloneFailure.credential === "supplied"
-              ? ` — the credential is present and working; repeating that request wastes a human's time on a false lead`
-              : input.cloneFailure.credential === "not_involved"
-                ? ` — this step never reached GitHub, so no credential is involved in it and asking for one sends a human down a false lead`
-                : ``) +
+            // Ruling 485: a fault on the server's disk. Live on WEB-5 the
+            // operator turned a replace that died on an agent's 0700
+            // directory into "attach a GitHub credential"; nothing here
+            // names access of any kind for it to repeat.
+            (input.cloneFailure.workspaceFault
+              ? `grant access or place a checkout — the fault is on the Viberr server's disk, and asking for access sends a human down a false lead`
+              : `provision credentials or place a checkout` +
+                // Ruling 249: both of these are false leads a human would
+                // chase, so name whichever one applies rather than only the
+                // first.
+                (input.cloneFailure.credential === "supplied"
+                  ? ` — the credential is present and working; repeating that request wastes a human's time on a false lead`
+                  : input.cloneFailure.credential === "not_involved"
+                    ? ` — this step never reached GitHub, so no credential is involved in it and asking for one sends a human down a false lead`
+                    : ``)) +
             `. Report that the checkout could not be provisioned, quote the reason above verbatim, and stop. ` +
             `Do not speculate about the cause beyond what that sentence says.\n` +
             // F19-6: without this the reason a human can act on ("GH006:
@@ -4122,8 +4141,9 @@ async function cloneRepo(
   },
 ): Promise<CloneOutcome> {
   // Ruling 249: `absent` until an arm proves otherwise — the local arm sets
-  // `not_involved` because it never reaches GitHub, the network arm sets
-  // `supplied` when a token was actually handed to git.
+  // `not_involved` because it never reaches GitHub (ruling 485: before its
+  // first step), the network arm sets `supplied` when a token was actually
+  // handed to git, and a workspace fault in either arm is `not_involved`.
   let credential: CloneCredential = "absent";
   // F19-6: hoisted out of the try so the catch can scrub it BY VALUE. The token
   // never reaches argv or the remote URL (askpass env only), so this literal
@@ -4152,6 +4172,28 @@ async function cloneRepo(
       // agent's own commits; this only benefits the server-side auto-commit.
     }
   };
+  // Ruling 485: every LOCAL step — removing or replacing a tree, making a
+  // directory, cloning the delivering checkout, rewriting its origin,
+  // stripping `.claude` — fails as a workspace fault that names what failed,
+  // the path and the OS error (`workspaceStep`). The catch below then says
+  // `not_involved`: live on WEB-5 a replace that died on an agent's 0700
+  // directory was logged `credential: absent`, and the operator asked the
+  // owner for a credential.
+  const local = workspaceStep;
+  // Ruling 485: a clone that did not finish leaves no tree behind. Removing
+  // one is best effort here — its failure is logged, never thrown over the
+  // clone's own — and the next run's check below removes what is left.
+  const clearUnfinished = async (dir: string, person: AgentLaunch | null) => {
+    if (existsSync(path.join(dir, ".git", "HEAD"))) return;
+    try {
+      await removeAgentTree(dir, person);
+    } catch (error) {
+      logger.warn("an unfinished checkout could not be removed as its person; the next run removes it", {
+        dir,
+        err: toError(error),
+      });
+    }
+  };
   try {
     const name = input.repo.split("/").pop() ?? input.repo;
     const workspaceRoot = taskWorkspaceRoot(
@@ -4160,6 +4202,10 @@ async function cloneRepo(
       input.dataRoot,
     );
     const dir = supportCheckoutDir(workspaceRoot, name, input.support);
+    // Ruling 485: whom a tree in this workspace is removed as — the task's
+    // person, as its git runs; null is the server's own user (isolation off).
+    // With isolation on and nobody to name, that is the first local fault.
+    const person = await local(`\`${workspaceRoot}\` has no person to work in it as`, () => personGit().launch);
 
     // P8 (pass 25): a SUPPORTING run gets its OWN checkout, but it must still
     // contain the TASK BRANCH to review the delivering agent's work — and that
@@ -4172,17 +4218,26 @@ async function cloneRepo(
     // nothing it writes can reach the delivering tree or the delivered PR.
     if (input.support) {
       const deliveringDir = supportCheckoutDir(workspaceRoot, name);
-      rmSync(dir, { recursive: true, force: true });
-      if (existsSync(path.join(deliveringDir, ".git"))) {
-        // Ruling 249: everything below this line is local. A failure here is
-        // never about a credential, and saying it was sent a human (and an
-        // operator, live on SHOP-5) to re-provision one that already worked.
-        credential = "not_involved";
+      const fromDelivering = existsSync(path.join(deliveringDir, ".git"));
+      // Ruling 249, fixed BEFORE any local step (ruling 485): a checkout cloned
+      // from the delivering one never reaches GitHub, so no credential is
+      // involved from the start. It used to be set after the removal below,
+      // so the removal's own failure went out as `credential: absent`.
+      if (fromDelivering) credential = "not_involved";
+      // Ruling 485: the previous review's tree is the agents' — a tool they ran
+      // can leave directories only its uid can enter (wrangler's 0700 temp
+      // dirs, F40-62) — so it is replaced as its person, never by the
+      // server's own recursive remove, which died half-way and left a tree
+      // with no `.git` that every later review tripped over.
+      await local(`\`${dir}\` could not be replaced`, () => removeAgentTree(dir, person));
+      if (fromDelivering) {
         // Ruling 460: the checkout is edited by agents running as their own
         // users; what is created below the shared root stays in the agent
         // group.
-        shareDirWithAgents(workspaceRoot);
-        mkdirSync(path.dirname(dir), { recursive: true });
+        await local(`\`${path.dirname(dir)}\` could not be created`, () => {
+          shareDirWithAgentsOrWarn(workspaceRoot);
+          mkdirSync(path.dirname(dir), { recursive: true });
+        });
         try {
           // Pass 40 review (R-seams-2): through git's own transport, never
           // `--local`. Under ruling 460 the delivering checkout's objects are
@@ -4194,12 +4249,16 @@ async function cloneRepo(
           // a symlinked object with `--local` for the same reason).
           // R-seams-1: and as the task's person, never the server — the
           // delivering checkout is agent-written, so reading it is theirs.
-          await personGit().run(["clone", "--no-local", deliveringDir, dir], {
-            timeoutMs: cloneTimeoutMs(),
-          });
-          await personGit().run(githubRemoteSanitizationArgs(input.repo, dir), {
-            timeoutMs: 10_000,
-          });
+          await local(`\`${dir}\` could not be cloned from the delivering checkout \`${deliveringDir}\``, () =>
+            personGit().run(["clone", "--no-local", deliveringDir, dir], {
+              timeoutMs: cloneTimeoutMs(),
+            }),
+          );
+          await local(`the origin of \`${dir}\` could not be rewritten`, () =>
+            personGit().run(githubRemoteSanitizationArgs(input.repo, dir), {
+              timeoutMs: 10_000,
+            }),
+          );
           // Ruling 129: the supporting checkout keeps its fetch-only refresh,
           // now through the SAME function the delivering one uses.
           const supportRefresh: WorkspaceRefreshInput = {
@@ -4211,33 +4270,49 @@ async function cloneRepo(
             taskKey: input.taskKey,
           };
           if (input.dataRoot) supportRefresh.dataRoot = input.dataRoot;
-          await refreshWorkspaceFromMirror(db, supportRefresh);
+          await local(`\`${dir}\` could not be refreshed`, () => refreshWorkspaceFromMirror(db, supportRefresh));
           await setIdentity(dir);
-          await stripUngovernedRepoCatalog(dir, personGit());
+          await local(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
+            stripUngovernedRepoCatalog(dir, personGit()),
+          );
           const pinned = await pinSupportCheckout(dir, input.pinSubject ?? null, personGit());
           return pinned ? { dir, refreshed: pinned } : { dir };
         } finally {
-          if (!existsSync(path.join(dir, ".git", "HEAD"))) {
-            rmSync(dir, { recursive: true, force: true });
-          }
+          await clearUnfinished(dir, person);
         }
       }
       // No delivering checkout yet — nothing has been delivered to review. Fall
       // through to a normal mirror clone (default branch) in the isolated dir.
     }
+    // Ruling 485 (3): a checkout with no `.git/HEAD` is no checkout — a clone
+    // killed mid-way, or a tree an older build's server-side remove left
+    // half-removed. Left in place it is read as "already cloned" or blocks the
+    // clone into its path on every run after, so it is removed as its person
+    // here and cloned again below.
+    if (existsSync(dir) && !existsSync(path.join(dir, ".git", "HEAD"))) {
+      logger.warn("a checkout with no .git/HEAD is removed as its person and cloned again", {
+        taskKey: input.taskKey,
+        dir,
+      });
+      await local(`\`${dir}\` has no \`.git/HEAD\` and could not be removed`, () => removeAgentTree(dir, person));
+    }
     if (existsSync(path.join(dir, ".git"))) {
       // Already cloned for this task — scrub URLs produced by older Viberr
       // versions before reuse. `--replace-all` removes every prior origin URL,
       // including a legacy `x-access-token:<PAT>@github.com` value.
-      await personGit().run(githubRemoteSanitizationArgs(input.repo, dir), {
-        timeoutMs: 10_000,
-      });
+      await local(`the origin of \`${dir}\` could not be rewritten`, () =>
+        personGit().run(githubRemoteSanitizationArgs(input.repo, dir), {
+          timeoutMs: 10_000,
+        }),
+      );
       await setIdentity(dir);
       // This is the reuse path, so a run may ALREADY be executing in this
       // workspace. Its skills live in its own plugin beside the checkout
       // (ruling 180), so stripping the repo's `.claude` here takes nothing
       // from it.
-      await stripUngovernedRepoCatalog(dir, personGit());
+      await local(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
+        stripUngovernedRepoCatalog(dir, personGit()),
+      );
       // Ruling 129 (pass 34, Q34-5): THIS is the stale-checkout window. A
       // workspace cloned once, from a repository that was still empty, was
       // reused as it stood by every later run — agents hold no credential, so
@@ -4270,8 +4345,10 @@ async function cloneRepo(
       }
       return described ? { dir, refreshed: described } : { dir };
     }
-    shareDirWithAgents(workspaceRoot);
-    mkdirSync(path.dirname(dir), { recursive: true });
+    await local(`\`${path.dirname(dir)}\` could not be created`, () => {
+      shareDirWithAgentsOrWarn(workspaceRoot);
+      mkdirSync(path.dirname(dir), { recursive: true });
+    });
 
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
@@ -4285,12 +4362,17 @@ async function cloneRepo(
         repo: input.repo,
         destination: dir,
         token,
+        // Ruling 485: a destination in the clone's way is removed as the
+        // task's person.
+        person,
       };
       if (input.dataRoot) cloneInput.dataRoot = input.dataRoot;
       if (input.onCloneProgress) cloneInput.onCloneProgress = input.onCloneProgress;
       await cloneWorkspaceRepo(cloneInput);
       await setIdentity(dir);
-      await stripUngovernedRepoCatalog(dir, personGit());
+      await local(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
+        stripUngovernedRepoCatalog(dir, personGit()),
+      );
       // Ruling 179: a supporting run that reached here (no delivering checkout
       // to clone from) still judges the revision under review when the fresh
       // clone carries it.
@@ -4303,11 +4385,13 @@ async function cloneRepo(
       // place it is worse than nothing: the next run's `.git` check treats it as
       // "already cloned for this task" and hands the agent a truncated checkout
       // it has no way to recognise as incomplete.
-      if (!existsSync(path.join(dir, ".git", "HEAD"))) {
-        rmSync(dir, { recursive: true, force: true });
-      }
+      await clearUnfinished(dir, person);
     }
   } catch (error) {
+    // Ruling 485: a local step's fault never involved a credential, whichever
+    // arm it happened in — and a network clone's failure keeps the credential
+    // state its arm set.
+    if (error instanceof WorkspaceFault) credential = "not_involved";
     // Repo private with no cred, network down, git missing, or the clone ran
     // past its ceiling. WARN, not info: the run continues without the working
     // tree it was promised, which changes what the agent can do and what its

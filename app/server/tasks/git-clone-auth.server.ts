@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { getEnv } from "~/server/config/env.server";
+import { AppError } from "~/server/errors/app-error.server";
+import { AgentTreeRemovalError } from "~/server/runtimes/agent-trees.server";
 import { filteredSpawnEnv } from "~/server/runtimes/spawn-env.server";
+import { errorMessage } from "~/shared/errors";
 import {
   gitErrorText,
   redactGitOutput,
@@ -267,9 +270,15 @@ export function cloneTimeoutMs(): number {
 }
 
 export interface CloneFailureLogDetails {
-  reason: "git_unavailable" | "clone_failed" | "clone_terminated";
+  /** `workspace_fault` (ruling 485): a LOCAL step failed — removing or
+   *  replacing a tree, making a directory, cloning the delivering checkout,
+   *  stripping `.claude`. Nothing about it involved GitHub. */
+  reason: "git_unavailable" | "clone_failed" | "clone_terminated" | "workspace_fault";
   exitCode?: number;
   signal?: string;
+  /** Ruling 485, a workspace fault only: what failed, the path and the OS
+   *  error — "`…/website` could not be replaced: EACCES on `…/dev-1wnDsF`". */
+  fault?: string;
   /**
    * Git's OWN failure text, scrubbed (`redactGitOutput`). Absent when git
    * printed nothing.
@@ -310,6 +319,17 @@ export function cloneFailureSentence(
   details: CloneFailureLogDetails,
   opts: { credential: CloneCredential; timeoutMs?: number },
 ): string {
+  // Ruling 485: a local fault says what failed on the server's disk and
+  // nothing else. Live on WEB-5 a replace that died on an agent's 0700
+  // directory was told as "No GitHub credential is attached", and the
+  // operator asked the owner to attach one; no clause about access belongs in
+  // a sentence about a directory.
+  if (details.reason === "workspace_fault") {
+    return (
+      `The workspace checkout could not be prepared on the Viberr server: ${details.fault ?? "a local step failed"}. ` +
+      "The fault is in the task's workspace on the server's disk; nothing here reached GitHub."
+    );
+  }
   const cred =
     opts.credential === "supplied"
       ? "The project's GitHub credential WAS supplied to the clone, so this is not a missing-credential problem."
@@ -361,6 +381,15 @@ export function cloneFailureLogDetails(
   cause: unknown,
   opts: { token?: string | null } = {},
 ): CloneFailureLogDetails {
+  // Ruling 485: a local step's fault is classified as what it is, never as a
+  // clone (a removal's EACCES is no `clone_failed`, and a mkdir's ENOENT is
+  // no missing git).
+  if (cause instanceof WorkspaceFault) {
+    const fault: CloneFailureLogDetails = { reason: "workspace_fault", fault: cause.fault };
+    const detail = redactGitOutput(cause.detail, opts);
+    if (detail) fault.detail = detail;
+    return fault;
+  }
   const errno = spawnErrnoSchema.safeParse(cause);
   const exitStatus = exitStatusSchema.safeParse(cause);
   const termination = terminationSchema.safeParse(cause);
@@ -379,4 +408,69 @@ export function cloneFailureLogDetails(
   const detail = redactGitOutput(gitErrorText(cause), opts);
   if (detail) details.detail = detail;
   return details;
+}
+
+/**
+ * Ruling 485: a LOCAL step in a task's workspace failed — a tree could not be
+ * removed or replaced, a directory could not be made, the delivering checkout
+ * could not be cloned, `.claude` could not be stripped. It names the path and
+ * the OS error. It is never a credential's doing: a checkout that fails on one
+ * reports `credential: not_involved` (ruling 249), and its sentence
+ * (`cloneFailureSentence`) says nothing about access at all.
+ */
+export class WorkspaceFault extends Error {
+  /** What failed and why: "`/…/website` could not be replaced: EACCES on /…/dev-1wnDsF". */
+  readonly fault: string;
+  /** The failing program's own words (rm's, git's); "" when it printed none. */
+  readonly detail: string;
+
+  constructor(fault: string, detail: string) {
+    super(fault);
+    this.name = "WorkspaceFault";
+    this.fault = fault;
+    this.detail = detail;
+  }
+}
+
+/** A node:fs error: its errno name and, when it has one, the path. */
+const fsErrorSchema = z.object({ code: z.string(), path: z.string().optional() });
+
+/**
+ * One local step's failure as a {@link WorkspaceFault}: `what` says what failed
+ * ("`/…/website` could not be replaced"), the cause supplies the OS error — a
+ * removal's "EACCES on <path>", a node:fs errno and its path, git's exit and
+ * its own words, a refusal's sentence. A fault passes through unchanged.
+ */
+export function workspaceFault(what: string, cause: unknown): WorkspaceFault {
+  if (cause instanceof WorkspaceFault) return cause;
+  if (cause instanceof AgentTreeRemovalError) {
+    return new WorkspaceFault(`${what}: ${cause.failure}`, cause.detail);
+  }
+  if (cause instanceof AppError) return new WorkspaceFault(`${what}: ${cause.userMessage}`, "");
+  const words = gitErrorText(cause);
+  const exit = exitStatusSchema.safeParse(cause);
+  if (exit.success) return new WorkspaceFault(`${what}: git exit ${exit.data.code}`, words);
+  const termination = terminationSchema.safeParse(cause);
+  if (termination.success || killedSchema.safeParse(cause).success) {
+    return new WorkspaceFault(
+      `${what}: it was stopped before it finished${termination.success ? ` (${termination.data.signal})` : ""}`,
+      words,
+    );
+  }
+  const fsError = fsErrorSchema.safeParse(cause);
+  if (fsError.success) {
+    const where = fsError.data.path ? ` on ${fsError.data.path}` : "";
+    return new WorkspaceFault(`${what}: ${fsError.data.code}${where}`, "");
+  }
+  return new WorkspaceFault(`${what}: ${errorMessage(cause)}`, "");
+}
+
+/** Run one local step of preparing a checkout; its failure is a
+ *  {@link WorkspaceFault} naming `what` (ruling 485). */
+export async function workspaceStep<T>(what: string, step: () => Promise<T> | T): Promise<T> {
+  try {
+    return await step();
+  } catch (error) {
+    throw workspaceFault(what, error);
+  }
 }

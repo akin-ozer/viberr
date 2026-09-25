@@ -61,6 +61,10 @@ cleanup() {
   for pid in $helpers; do kill -KILL "$pid" 2>/dev/null; done
   "$LAUNCH" --reap KILL "run_${TAG}_reap" >/dev/null 2>&1
   [ -d "$WS/repo" ] && as_agent "$UID_A" "rm -rf '$WS/repo'" >/dev/null 2>&1
+  # Ruling 485's tree, if its check stopped half-way: each uid removes its own.
+  for agent in "$UID_B" "$UID_A"; do
+    [ -d "$WS/support" ] && as_agent "$agent" "chmod -R u+rwX,g+rwX '$WS/support' 2>/dev/null; rm -rf '$WS/support' '$WS/deliver'" >/dev/null 2>&1
+  done
   rm -rf "$HOME_A" "$HOME_B" "$WS" ${STAGE:+"$STAGE"} 2>/dev/null
 }
 trap cleanup EXIT
@@ -261,6 +265,55 @@ fi
 rm -rf "$STAGE"
 # The checkout is its agent's alone now, so its agent removes it.
 as_agent "$UID_A" "rm -rf '$REPO'"
+
+# --- an agent-written tree is removed as its person (ruling 485) -------------
+# F40-62, live on WEB-5: wrangler left 0700 `mkdtemp` directories in a
+# supporting checkout, the server's own recursive remove deleted what the group
+# could (`.git` first) and died on the rest, and every later review ran with no
+# checkout. The server now removes such a tree as its person through the
+# launcher, then as each other uid it can see in what is left
+# (`removeAgentTree`, `app/server/runtimes/agent-trees.server.ts`). This runs
+# that function itself (tsx ships in the image) against a checkout two agent
+# uids wrote into, then clones fresh into the freed path as the person.
+DELIVER="$WS/deliver"
+SUPPORT="$WS/support/reviewer/website"
+as_agent "$UID_A" "git init -q -b main '$DELIVER' && git -C '$DELIVER' -c user.email=a@t -c user.name=a commit -q --allow-empty -m one"
+clone_support() {
+  as_agent "$UID_A" "mkdir -p '$WS/support/reviewer' && git clone -q --no-local '$DELIVER' '$SUPPORT'"
+}
+clone_support
+# What wrangler leaves (a directory only its uid can enter), and what a second
+# person's agent left in the same tree (a task whose owner changed).
+as_agent "$UID_A" "mkdir -p '$SUPPORT/.wrangler/tmp' && mkdir -m 0700 '$SUPPORT/.wrangler/tmp/dev-1wnDsF' \
+  && echo a > '$SUPPORT/.wrangler/tmp/dev-1wnDsF/bundle.js'"
+as_agent "$UID_B" "mkdir -m 0700 '$SUPPORT/by-another-owner' && echo b > '$SUPPORT/by-another-owner/f'"
+if rm -rf "$SUPPORT" 2>/dev/null; then
+  fail "the server's own rm -rf removed an agent's 0700 directory (this check proves nothing)"
+elif [ ! -e "$SUPPORT/.git" ] && [ -d "$SUPPORT/.wrangler/tmp/dev-1wnDsF" ]; then
+  pass "the server's own recursive remove dies half-way on an agent's 0700 directory, .git gone (F40-62)"
+else
+  fail "the server's own rm -rf failed without leaving the half-removed tree F40-62 found"
+fi
+APP_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+replaced=$(cd "$APP_ROOT" && node_modules/.bin/tsx -e "
+  (async () => {
+    const { removeAgentTree } = await import('./app/server/runtimes/agent-trees.server.ts');
+    await removeAgentTree('$SUPPORT', { uid: $UID_A, launcher: '$LAUNCH' });
+    console.log('removed');
+  })().catch((error) => { console.error(String(error)); process.exit(1); });
+" 2>&1)
+if [ "$replaced" = "removed" ] && [ ! -e "$SUPPORT" ]; then
+  pass "the server's replace removes the half-removed tree as its person, then as the other uid it found there"
+else
+  fail "the server's replace did not remove the tree: $replaced"
+fi
+clone_support
+if [ -f "$SUPPORT/.git/HEAD" ] && [ "$(as_agent "$UID_A" "git -C '$SUPPORT' log -1 --format=%s")" = "one" ]; then
+  pass "the fresh clone into the freed path has .git/HEAD"
+else
+  fail "the fresh clone into the freed path has no .git/HEAD"
+fi
+as_agent "$UID_A" "rm -rf '$WS/support' '$DELIVER'"
 
 # --- signals -------------------------------------------------------------------------
 VIBERR_LAUNCH_HOME="$HOME_A" VIBERR_LAUNCH_UID=$UID_A VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c \

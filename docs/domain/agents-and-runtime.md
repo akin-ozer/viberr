@@ -123,7 +123,8 @@ no other account to fall back to.
   per-person lockfile (`.auth.json.lock`, `O_EXCL` with retry; a holder older than 30 s,
   or one still held after a 3 s wait, is broken; last writer wins), only while the shared
   file still exists (a disconnect mid-run is not undone), and the run directory is
-  deleted; a run a restart orphaned is finished the same way by boot recovery before the
+  deleted — on a launched run as the person, through the launcher (ruling 485: their CLI
+  wrote it); a run a restart orphaned is finished the same way by boot recovery before the
   operator is re-invoked. **The settle also re-points the CLI's thread index** (ruling 199,
   F37-20): the CLI finds a rollout by `threads.rollout_path` in its own state database,
   and what it records there is the path it SAW through the link,
@@ -1668,6 +1669,29 @@ runtime's answer for a missing grant.
   (`serverGitEnv`); an agent's own git keeps its hooks. `gh` (the reconcile's PR lookup)
   runs as the server but in the task's directory, never the checkout. The server's own
   non-git work — the stdio MCP probes, reading transcripts — stays `node`.
+- **Who removes a tree (ruling 485).** A tool an agent runs can leave a directory only its
+  uid can enter (wrangler's `mkdtemp` dirs are 0700); the server's own recursive remove
+  then deleted what the group could, `.git` first, and died on the rest (F40-62), leaving
+  a checkout no later clone could land in. So every removal or replacement of a tree an
+  agent can write — a supporting checkout's replace, an unfinished clone, a clone
+  destination in the way, a gate checkout, a finished task's `workspace/`, the stripped
+  `.claude`, a run's skill plugin, a Codex run home, the seed's reset of a task's shared
+  directories — goes through `removeAgentTree` / `removeAgentTreeSync`
+  (`runtimes/agent-trees.server.ts`): `chmod -R u+rwX` then `rm -rf --`, absolute binaries,
+  through the launcher as the task owner (`taskWorkspaceLaunch`, the launch the
+  workspace's git uses) or, for a run home, the run's own launch. What that leaves is
+  another uid's (a task whose owner changed): the server reads the owners it can see in
+  what is left and removes as each of them, opening their entries to the group
+  (`g+rwX`) so a deeper layer shows on the next round, three rounds at most. A tree still
+  there is a fault naming the path and the errno ("EACCES on …/dev-1wnDsF"). With no
+  launcher the same commands run as the server; with isolation on and no owner to name
+  the removal refuses and nothing is removed. A checkout with no `.git/HEAD` found when a
+  run (or the operator) prepares its checkout is removed as its person and cloned again,
+  so a tree an older build half-removed heals on the next run. Every local step of
+  preparing a checkout (the removal, the directory, the clone of the delivering checkout,
+  the origin rewrite, the strip) fails as a `workspace_fault` with `credential:
+  not_involved` and a sentence that names the path and the OS error and nothing about
+  access (ruling 249's note).
 - Mirror (ruling 87): bare `projects/<slug>/.repo-mirror/<owner>__<repo>.git`, `fetch
   --prune` with a heads-to-heads refspec before each clone (timeout 120 s, rebuilt after
   2 consecutive failures), then a local hardlinked clone (in a stage, then moved into the
@@ -1680,7 +1704,8 @@ runtime's answer for a missing grant.
   Clone timeout 15 min (`VIBERR_GIT_CLONE_TIMEOUT_MS`); progress is streamed to the run
   strip ("Receiving objects" 0..90 %, "Resolving deltas" 90..100 %).
 - Retention: workspaces of tasks in the terminal stage are removed at boot (after run
-  recovery, only when no run is live) and on every maintenance pass; transcripts and
+  recovery, only when no run is live) and on every maintenance pass, each as its task's
+  owner (ruling 485; a task with no owner keeps its workspace while isolation is on); transcripts and
   session homes older than 30 days are pruned (`VIBERR_TRANSCRIPT_RETENTION_DAYS`,
   `VIBERR_SESSION_HOME_RETENTION_DAYS`, `0` = forever).
 

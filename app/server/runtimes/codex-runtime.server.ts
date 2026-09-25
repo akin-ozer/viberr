@@ -39,7 +39,9 @@ import {
   finishCodexRunHome,
   prepareCodexRunHome,
   type CodexRunHome,
+  type RunHomePerson,
 } from "./user-homes.server";
+import { removeAgentTreeSync } from "./agent-trees.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 import {
@@ -747,11 +749,15 @@ const fatalEventMessageSchema = z
 /**
  * Ruling 460: what hands a path in the principal's home to their uid (the
  * launcher's `--prepare-home`) — the run home the server just forked, the
- * sign-in it wrote back. None when the run is not launched.
+ * sign-in it wrote back — and, ruling 485, what removes the run home as them
+ * (their CLI wrote it). None when the run is not launched.
  */
-function agentOwner(agent: AgentLaunch | undefined): ((target: string) => void) | undefined {
+function agentOwner(agent: AgentLaunch | undefined): RunHomePerson | undefined {
   if (!agent) return undefined;
-  return (target) => prepareAgentPath(agent.uid, target, agent.launcher);
+  return {
+    own: (target) => prepareAgentPath(agent.uid, target, agent.launcher),
+    remove: (target) => removeAgentTreeSync(target, agent),
+  };
 }
 
 let cachedFactory: CodexFactory | null = null;

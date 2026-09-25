@@ -4,7 +4,6 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -22,6 +21,8 @@ import {
   type WorkspaceGit,
 } from "~/server/tasks/workspace-git.server";
 import { toError } from "~/shared/errors";
+import type { AgentLaunch } from "./agent-isolation.server";
+import { removeAgentTree, removeAgentTreeSync } from "./agent-trees.server";
 
 /**
  * Viberr's granted skills reach a Claude run as a LOCAL PLUGIN beside the task
@@ -86,8 +87,12 @@ const SKILL_PLUGINS_DIR = ".viberr-plugins";
  * Pass 40 review (R-seams-1): the two git reads run as the task's person
  * (`git`), never as the server — the checkout is agent-writable. A caller
  * with no person to name gets the server's own user only where no agent is
- * launched; with isolation on the git step is skipped (the catalog is still
- * removed, and at worst a tracked `.claude` deletion shows in a diff).
+ * launched; with isolation on the git step is skipped.
+ *
+ * Ruling 485: the catalog itself is removed as that same person
+ * (`removeAgentTree`), never by the server's own recursive remove — an agent
+ * writes `.claude` too. With isolation on and no person to name, the removal
+ * refuses and this throws: the catalog is left, and the caller says so.
  */
 export async function stripUngovernedRepoCatalog(
   repoDir: string,
@@ -115,7 +120,7 @@ export async function stripUngovernedRepoCatalog(
       err: toError(error),
     });
   }
-  rmSync(catalog, { recursive: true, force: true });
+  await removeAgentTree(catalog, git ? git.launch : null);
 }
 
 /**
@@ -144,6 +149,11 @@ export interface SkillPlugin {
   path: string;
   /** The manifest's `name` — the prefix of every skill's qualified name. */
   name: string;
+  /** Ruling 485: whom the plugin is removed as — the task's person. It sits in
+   *  the task's workspace, which every agent in the group can write. Absent:
+   *  the server's own user, which only a server that launches no agents
+   *  allows. */
+  person?: AgentLaunch;
 }
 
 /** What a run's mount produced. */
@@ -224,14 +234,18 @@ export async function mountGrantedSkills(input: {
   // whose hooks a project settings source would execute. No run opens that
   // source any more (ruling 180), and the working tree still must not carry
   // an ungoverned catalog for the model to read by hand.
-  await stripUngovernedRepoCatalog(dir, input.git === undefined ? workspaceGitWhenIsolationOff() : input.git);
+  const git = input.git === undefined ? workspaceGitWhenIsolationOff() : input.git;
+  await stripUngovernedRepoCatalog(dir, git);
 
+  // Ruling 485: the plugin sits in the task's workspace, which any agent in
+  // the group can write, so every removal of it is the task's person's.
+  const person = git ? git.launch : null;
   const pluginRoot = skillPluginDir(dir, input.runId);
   const skillsRoot = path.join(pluginRoot, "skills");
   try {
     // A stale directory under this name (a run id reused by a resume that
     // died mid-mount) must not leak an earlier grant set into this run.
-    rmSync(pluginRoot, { recursive: true, force: true });
+    await removeAgentTree(pluginRoot, person);
     mkdirSync(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
     writeFileSync(
       path.join(pluginRoot, ".claude-plugin", "plugin.json"),
@@ -242,7 +256,7 @@ export async function mountGrantedSkills(input: {
       pluginRoot,
       err: toError(error),
     });
-    rmSync(pluginRoot, { recursive: true, force: true });
+    removePluginQuietly(pluginRoot, person);
     return {
       mounted: [],
       skipped: names.map((name) => ({ name, reason: NO_PLUGIN_REASON })),
@@ -253,14 +267,14 @@ export async function mountGrantedSkills(input: {
   const mounted: string[] = [];
   const skipped: { name: string; reason: string }[] = [];
   for (const name of names) {
-    const reason = mountOneSkill(name, skillsRoot, input.dataRoot);
+    const reason = mountOneSkill(name, skillsRoot, person, input.dataRoot);
     if (reason) skipped.push({ name, reason });
     else mounted.push(name);
   }
   if (mounted.length === 0) {
     // A run whose grants all miss looks exactly like a run with no grants: no
     // empty plugin for the CLI to load.
-    rmSync(pluginRoot, { recursive: true, force: true });
+    removePluginQuietly(pluginRoot, person);
   }
   if (skipped.length > 0) {
     logger.warn("granted skills did not mount natively — injected as prompt text", {
@@ -268,11 +282,20 @@ export async function mountGrantedSkills(input: {
       skipped,
     });
   }
-  return {
-    mounted,
-    skipped,
-    plugin: mounted.length ? { path: pluginRoot, name: SKILL_PLUGIN_NAME } : null,
-  };
+  if (!mounted.length) return { mounted, skipped, plugin: null };
+  const plugin: SkillPlugin = { path: pluginRoot, name: SKILL_PLUGIN_NAME };
+  if (person) plugin.person = person;
+  return { mounted, skipped, plugin };
+}
+
+/** Remove a plugin tree as `person` (ruling 485), never throwing: residue of a
+ *  plugin no run names is inert, and is logged. */
+function removePluginQuietly(target: string, person: AgentLaunch | null): void {
+  try {
+    removeAgentTreeSync(target, person);
+  } catch (error) {
+    logger.warn("could not remove the run's skill plugin", { path: target, err: toError(error) });
+  }
 }
 
 /**
@@ -290,15 +313,9 @@ export function removeSkillPlugin(plugin: SkillPlugin | null | undefined): void 
     });
     return;
   }
-  try {
-    rmSync(plugin.path, { recursive: true, force: true });
-  } catch (error) {
-    // Inert residue: no session names this path once its run has settled.
-    logger.warn("could not remove the run's skill plugin", {
-      path: plugin.path,
-      err: toError(error),
-    });
-  }
+  // Inert residue when it fails: no session names this path once its run has
+  // settled. As the task's person (ruling 485).
+  removePluginQuietly(plugin.path, plugin.person ?? null);
 }
 
 /** Does the run's plugin still hold the manifest the CLI reads? The adapter
@@ -334,6 +351,7 @@ function isDirectory(dir: string): boolean {
 function mountOneSkill(
   name: string,
   skillsRoot: string,
+  person: AgentLaunch | null,
   dataRoot?: string,
 ): string | null {
   if (!isSdkSkillName(name)) {
@@ -395,7 +413,9 @@ function mountOneSkill(
   } catch (error) {
     // A half-copied folder must not be listed: this run falls back to
     // prompt-text injection for the skill, because we return a reason below.
-    rmSync(dest, { recursive: true, force: true });
+    // It is in the task's workspace, so it goes as the task's person (ruling
+    // 485).
+    removePluginQuietly(dest, person);
     logger.warn("granted skill could not be mounted into the run's plugin", {
       skill: name,
       err: toError(error),

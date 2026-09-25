@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -36,9 +36,10 @@ import {
   launchedSignal,
   launchesAgents,
   resolveExecutable,
-  shareDirWithAgents,
+  shareDirWithAgentsOrWarn,
   type AgentLaunch,
 } from "~/server/runtimes/agent-isolation.server";
+import { removeAgentTree } from "~/server/runtimes/agent-trees.server";
 import { reapRunProcesses, RUN_MARKER_ENV } from "~/server/runtimes/run-processes.server";
 import { filteredSpawnEnv } from "~/server/runtimes/spawn-env.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -53,7 +54,7 @@ import {
 } from "~/shared/project-gates";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { githubRemoteSanitizationArgs } from "./git-clone-auth.server";
-import { execOutcome, workspaceGitAs, type WorkspaceGit } from "./workspace-git.server";
+import { workspaceGitAs, type WorkspaceGit } from "./workspace-git.server";
 import { refreshWorkspaceFromMirror } from "./workspace-refresh.server";
 import type { TaskActionDeps } from "./task-actions.server";
 
@@ -597,23 +598,6 @@ function gateEnv(launch: AgentLaunch | null, marker: string): Record<string, str
   return env;
 }
 
-/**
- * `shareDirWithAgents`, best effort: a directory left unshared makes the
- * person's clone (or the log write) fail in its own words, which the record
- * keeps, rather than failing the run here before anything says why.
- */
-function shareForAgents(dir: string): void {
-  try {
-    shareDirWithAgents(dir);
-  } catch (error) {
-    mkdirSync(dir, { recursive: true });
-    logger.warn("a gate directory could not be shared with the agent group", {
-      dir,
-      err: toError(error),
-    });
-  }
-}
-
 interface GateCheckout {
   /** The checkout the gates run in. */
   dir: string;
@@ -644,14 +628,14 @@ async function prepareGateCheckout(
   const root = path.join(gatesRoot, job.runId);
   // Ruling 460: the clone below is made by the person's uid, so the
   // directories it lands in are the agents' to write.
-  shareForAgents(workspaceRoot);
-  shareForAgents(gatesRoot);
+  shareDirWithAgentsOrWarn(workspaceRoot);
+  shareDirWithAgentsOrWarn(gatesRoot);
   // One worker runs one gate run at a time, so anything else here is a run a
   // restart cut short: removed before this one starts.
   for (const stale of readdirSync(gatesRoot)) {
     if (stale !== job.runId) await removeGateCheckout(path.join(gatesRoot, stale), git.launch);
   }
-  shareForAgents(root);
+  shareDirWithAgentsOrWarn(root);
   const dir = path.join(root, name);
   // Through git's transport, never `--local` (pass 40 review R-seams-2), and
   // as the person (R-seams-1): the delivering checkout is agent-written.
@@ -688,18 +672,13 @@ async function prepareGateCheckout(
   return { dir, root };
 }
 
-/** Remove a gate checkout: as the person first (their files, whatever mode a
- *  tool left them in), then whatever the server can still reach. */
+/** Remove a gate checkout as the person its gates ran as (ruling 485: their
+ *  files, whatever mode a tool left them in, and never the server's own
+ *  recursive remove after it). A checkout left behind costs disk and is
+ *  removed before the next gate run. */
 async function removeGateCheckout(root: string, launch: AgentLaunch | null): Promise<void> {
-  if (launch) {
-    const rm = resolveExecutable("rm", process.env.PATH ?? "");
-    await execOutcome(launch.launcher, ["-rf", root], {
-      env: launchEnv(launch, rm, filteredSpawnEnv()),
-      timeout: 120_000,
-    });
-  }
   try {
-    rmSync(root, { recursive: true, force: true });
+    await removeAgentTree(root, launch);
   } catch (error) {
     logger.warn("a gate checkout could not be removed", { root, err: toError(error) });
   }
@@ -733,7 +712,7 @@ function saveGateLog(
     "",
   ].join("\n");
   try {
-    shareForAgents(dir);
+    shareDirWithAgentsOrWarn(dir);
     writeFileSync(resolveStoreSegment(dir, name), header + input.outcome.output + footer);
     return name;
   } catch (error) {

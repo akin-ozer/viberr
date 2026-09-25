@@ -240,18 +240,41 @@ export function codexRunHomeDir(sharedHome: string, runId: string): string {
  */
 export type HomeOwner = (target: string) => void;
 
-/** Build the run home (see the module note above) and return it. With `own`,
- *  the shared directories it had to create and the run home itself are handed
- *  to the person's uid before the CLI starts (it throws when that fails: a
- *  run whose home it cannot use must not start). */
+/**
+ * Ruling 485: what removes a tree in a person's home — as them, through the
+ * launcher (`removeAgentTreeSync` with their launch), never the server's own
+ * recursive remove: their CLI writes the run home, and a tool it runs can
+ * leave a directory only its uid can enter. Supplied by the caller that knows
+ * the person, like {@link HomeOwner}; absent, the server removes it itself
+ * (no agent is launched: the host dev server, the test harness).
+ */
+export type HomeRemover = (target: string) => void;
+
+/** The person a run home belongs to, when this server launches agents. */
+export interface RunHomePerson {
+  own: HomeOwner;
+  remove: HomeRemover;
+}
+
+function removeRunHomeTree(target: string, person: RunHomePerson | undefined): void {
+  if (person) person.remove(target);
+  else rmSync(target, { recursive: true, force: true });
+}
+
+/** Build the run home (see the module note above) and return it. With a
+ *  `person`, the shared directories it had to create and the run home itself
+ *  are handed to the person's uid before the CLI starts (it throws when that
+ *  fails: a run whose home it cannot use must not start), and a predecessor's
+ *  tree is removed as them. */
 export function prepareCodexRunHome(
   sharedHome: string,
   runId: string,
-  own?: HomeOwner,
+  person?: RunHomePerson,
 ): CodexRunHome {
+  const own = person?.own;
   const dir = codexRunHomeDir(sharedHome, runId);
   // Whatever a crashed predecessor of this id left: start clean, never merge.
-  rmSync(dir, { recursive: true, force: true });
+  removeRunHomeTree(dir, person);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   for (const name of CODEX_HOME_SEEDED_FILES) {
     const source = path.join(sharedHome, name);
@@ -294,13 +317,15 @@ function ownQuietly(own: HomeOwner | undefined, target: string, runId: string): 
  * its bytes changed (under the per-person lock), then remove the run home.
  * Never throws — a settle that cannot clean up is logged, not propagated.
  *
- * With `own` (ruling 460): the run home is first handed to the person's uid
- * and the server's group as a whole, so the server can read what the CLI
- * wrote there 0600 and remove it; the written-back `auth.json` is the server's
- * file, so it is handed back too, or the next compaction (which runs as the
- * person in the shared home) could not read its own sign-in.
+ * With a `person` (ruling 460): the run home is first handed to the person's
+ * uid and the server's group as a whole, so the server can read what the CLI
+ * wrote there 0600; the written-back `auth.json` is the server's file, so it
+ * is handed back too, or the next compaction (which runs as the person in the
+ * shared home) could not read its own sign-in. The run home is then removed
+ * as the person (ruling 485).
  */
-export function finishCodexRunHome(home: CodexRunHome, own?: HomeOwner): void {
+export function finishCodexRunHome(home: CodexRunHome, person?: RunHomePerson): void {
+  const own = person?.own;
   ownQuietly(own, home.dir, home.runId);
   for (const dbFile of codexStateDatabases(home.sharedHome)) ownQuietly(own, dbFile, home.runId);
   try {
@@ -319,7 +344,7 @@ export function finishCodexRunHome(home: CodexRunHome, own?: HomeOwner): void {
   repointRunRollouts(home);
   try {
     // `rm` unlinks the links; it never descends into the shared directories.
-    rmSync(home.dir, { recursive: true, force: true });
+    removeRunHomeTree(home.dir, person);
   } catch (error) {
     logger.warn("codex run home could not be removed", {
       runId: home.runId,

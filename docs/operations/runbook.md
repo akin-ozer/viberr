@@ -552,6 +552,16 @@ recovery, skipped with a log line while any run is in flight) and on every maint
 pass, for tasks in their project's terminal stage, logging `reclaimed finished task
 workspaces` with count and MB. Removing a finished task's `workspace/` by hand is safe;
 removing one for a task in progress forces a re-clone and interrupts a running agent.
+Viberr removes a workspace, a checkout and anything else an agent writes as the person it
+belongs to (ruling 485), because a tool an agent ran can leave a directory only its uid can
+enter (wrangler's 0700 `.wrangler/tmp/dev-*`), and the server's own `rm -rf` then deletes
+`.git` and stops half-way. By hand, do the same: find the owner with `docker compose exec
+-T app stat -c '%u' <dir>` and remove it as that uid, `docker compose exec -T -u
+<uid>:20000 app rm -rf <dir>`; anything left belongs to another uid, removed the same way.
+A checkout left without `.git/HEAD` also heals by itself: the next run's checkout
+preparation removes it as its person and clones again. A run whose checkout could not be
+prepared says so as a workspace fault ("… could not be replaced: EACCES on <path>"), never
+as a credential problem: attaching or re-issuing a GitHub credential does nothing for it.
 
 The mirror is built in a `<mirror>.building` sidecar and renamed into place, and a mirror
 counts as usable only once its `remote.origin.fetch` refspec is written — so a clone killed
@@ -564,7 +574,8 @@ refreshed — serving a possibly stale mirror` warnings, and agents reporting an
 repository — after which a delivering agent commits with no ancestry and the push is refused
 as non-fast-forward. That refusal is NOT a stale remote branch: check the workspace's
 `git log` before clearing anything on GitHub. The repair is to delete the mirror directory
-and the affected task's `workspace/`; both re-clone on the next run.
+(the server's, `docker compose exec -T app rm -rf …`) and the affected task's `workspace/`
+(its agents', removed as their uid as above); both re-clone on the next run.
 
 ## The single-writer lock and CLI refusals
 
