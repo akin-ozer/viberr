@@ -22,9 +22,12 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // 13073 to 13152 by ruling 471: VIB-142's packet render names the option
   // each acceptance door answers its decision with (`acceptAnswersWith` and
   // `forceAnswersWith`, "Accept completion", 79 bytes), so the accept dialog
-  // reads the loader's answer instead of guessing.
+  // reads the loader's answer instead of guessing. Raised 13152 to 13173 by
+  // ruling 475(c): the loader names the open pull requests this merge will
+  // likely put in conflict (`"mergeCollisions":[],`, 21 bytes on VIB-142, which
+  // shares no path), so the accept dialog can say so before the merge.
   "console:task-data.json-bytes": {
-    ceiling: 13152,
+    ceiling: 13173,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a .data request`,
@@ -42,8 +45,10 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // agent's window, display lines only. Raised 136574 to 136646 by CON-7:
   // the three groups' `factsAt` (24 bytes each). Raised 136646 to 136725 by
   // ruling 471: the packet render's two answer fields (79 bytes, as above).
+  // Raised 136725 to 136746 by ruling 475(c): `"mergeCollisions":[],` (21
+  // bytes, as above).
   "console:task-document.json-bytes": {
-    ceiling: 136725,
+    ceiling: 136746,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a document request`,

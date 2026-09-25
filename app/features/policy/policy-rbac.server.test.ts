@@ -31,6 +31,7 @@ import {
   requestPacketMaintainerDecision,
   manualDeliverForReview,
   refreshAndReview,
+  runProjectGatesByHand,
 } from "~/server/tasks/task-actions.server";
 import {
   assignSpecialist,
@@ -1119,6 +1120,19 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
         stage: "review",
         run: async (taskKey, actor) => {
           await refreshAndReview(store.db, { projectSlug: store.slug, taskKey }, actor, {
+            dataRoot: store.dataRoot,
+          });
+        },
+      },
+    ],
+    runProjectGatesByHand: [
+      {
+        // Ruling 482: "Run gates" on the PR card — the owner runs the gates on
+        // their OWN task's delivered revision; anyone else needs run-agents.
+        label: "runProjectGatesByHand (the PR card's Run gates)",
+        stage: "review",
+        run: async (taskKey, actor) => {
+          await runProjectGatesByHand(store.db, { projectSlug: store.slug, taskKey }, actor, {
             dataRoot: store.dataRoot,
           });
         },
