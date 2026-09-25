@@ -467,10 +467,10 @@ export function shareDirWithAgentsOrWarn(dir: string): void {
  * computes, through a descriptor opened without following a symlink: an agent
  * can replace an entry inside a workspace between a look and a chmod, and a
  * path-based chgrp would then follow its link to, say, `state/`. Entries that
- * are not the server's, and symlinks, are left alone. True when it changed
- * something.
+ * are not the server's, and symlinks, are left alone. A `gid` of null keeps
+ * the entry's own group. True when it changed something.
  */
-function shareEntry(entry: string, gid: number, want: (st: Stats) => number): boolean {
+function shareEntry(entry: string, gid: number | null, want: (st: Stats) => number): boolean {
   let fd: number;
   try {
     fd = openSync(entry, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
@@ -482,7 +482,7 @@ function shareEntry(entry: string, gid: number, want: (st: Stats) => number): bo
     if (st.uid !== process.getuid?.()) return false;
     const mode = want(st);
     let changed = false;
-    if (st.gid !== gid) {
+    if (gid !== null && st.gid !== gid) {
       fchownSync(fd, st.uid, gid);
       changed = true;
     }
@@ -550,6 +550,68 @@ function shareTreeWithAgents(dir: string, gid: number): number {
 export function shareTreeBuiltForAgents(dir: string, deps: { gid?: number } = {}): number {
   if (deps.gid === undefined && !launchesAgents()) return 0;
   return shareTreeWithAgents(dir, deps.gid ?? AGENT_GID);
+}
+
+/**
+ * Ruling 495(a): the mode a person's removal needs on what the server writes
+ * into a directory agents write. Unlinking needs write on the directory, not
+ * on the file: a directory is 2775 (in the group it was created with, the
+ * workspace's, through the setgid chain), a file only group-readable (0644,
+ * 0755 when it is executable).
+ */
+function groupRemovableMode(st: Stats): number {
+  if (st.isDirectory()) return 0o2775;
+  return (st.mode & 0o111) !== 0 ? 0o755 : 0o644;
+}
+
+/**
+ * Ruling 495(a): give entries the server wrote into a tree an agent can write
+ * the mode a person's removal needs ({@link groupRemovableMode}). Each is
+ * changed through a descriptor opened without following a link, only when the
+ * server owns it, and keeps its group: a group taken from a constant would let
+ * an entry that a swapped folder carried out of the workspace become the
+ * agents'. List a directory after what is in it. Returns how many changed.
+ */
+export function makeGroupRemovable(entries: readonly string[]): number {
+  let changed = 0;
+  for (const entry of entries) if (shareEntry(entry, null, groupRemovableMode)) changed += 1;
+  return changed;
+}
+
+/**
+ * Ruling 495(a), F40-71: {@link makeGroupRemovable} for a tree the server
+ * COPIED into a directory agents write (a run's skill folder). `cpSync` gives
+ * the copy the source's modes, so a store folder's 0755 left the person unable
+ * to unlink the copy's files, and a 0600 file would be unreadable to the run
+ * it was copied for. Walked along the SOURCE, which no agent writes, never
+ * along a listing of the copy, and children before their directory, so a
+ * folder is opened to the group only once everything under it is set. An
+ * entry the copy lacks, or one an agent swapped, is skipped. Returns how many
+ * changed.
+ */
+export function makeCopyGroupRemovable(source: string, copy: string): number {
+  let changed = 0;
+  const visit = (rel: string, depth: number) => {
+    let st: Stats;
+    try {
+      st = lstatSync(path.join(source, rel));
+    } catch {
+      return;
+    }
+    if (st.isSymbolicLink()) return;
+    if (st.isDirectory() && depth <= 64) {
+      let names: string[];
+      try {
+        names = readdirSync(path.join(source, rel));
+      } catch {
+        names = [];
+      }
+      for (const name of names) visit(path.join(rel, name), depth + 1);
+    }
+    if (shareEntry(path.join(copy, rel), null, groupRemovableMode)) changed += 1;
+  };
+  visit("", 0);
+  return changed;
 }
 
 /**

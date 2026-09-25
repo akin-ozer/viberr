@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -296,6 +298,90 @@ describe("mountGrantedSkills", () => {
     expect(readFileSync(path.join(dest, "checklists", "state-safety.md"), "utf8")).toContain(
       "# State safety",
     );
+  });
+
+  it("ruling 495(a): every folder of the plugin is the group's to write and every file the group's to read, whatever the store folder's modes", async () => {
+    // F40-71, live on deploy 10: `cpSync` gave each copy the store folder's
+    // own modes, so a settled run's plugin had its files in 0755 folders the
+    // person could not write, and its removal as the person failed on every
+    // run ("EACCES on …/skills/sourced-content/SKILL.md", 52 plugins left).
+    // Unlinking needs write on the folder, not on the file. CANARY: drop the
+    // walk after the copy (`makeCopyGroupRemovable`) and the copied folders
+    // keep the store's 0700; drop the plugin's own entries
+    // (`makeGroupRemovable`) and `skills/` keeps the umask's 0755.
+    const dataRoot = storeWithSkills([
+      {
+        name: "sourced-content",
+        skillMd: "# Sourced content\n",
+        extra: {
+          "checklists/sources.md": "# Sources\n",
+          "checklists/deep/claims.md": "# Claims\n",
+          "scripts/check.sh": "#!/bin/sh\nexit 0\n",
+        },
+      },
+    ]);
+    const src = path.join(dataRoot, "skills", "sourced-content");
+    const sourceModes = {
+      "": 0o755,
+      checklists: 0o700,
+      "checklists/deep": 0o700,
+      scripts: 0o750,
+      "SKILL.md": 0o600,
+      "checklists/sources.md": 0o640,
+      "checklists/deep/claims.md": 0o600,
+      "scripts/check.sh": 0o700,
+    };
+    for (const [rel, mode] of Object.entries(sourceModes)) chmodSync(path.join(src, rel), mode);
+    const ws = await gitCheckout();
+    // The server's own umask with isolation off: nothing below comes from it.
+    const umask = process.umask(0o022);
+    let result: Awaited<ReturnType<typeof mountGrantedSkills>>;
+    try {
+      result = await mountGrantedSkills({
+        workspaceDir: ws,
+        skills: ["sourced-content"],
+        dataRoot,
+        runId: "run_Jd1RlrxTUlUN",
+      });
+    } finally {
+      process.umask(umask);
+    }
+
+    expect(result.mounted).toEqual(["sourced-content"]);
+    const plugin = result.plugin!.path;
+    const seen: string[] = [];
+    const walk = (entry: string) => {
+      const st = lstatSync(entry);
+      const rel = path.relative(path.dirname(path.dirname(plugin)), entry);
+      const mode = st.mode & 0o7777;
+      seen.push(rel);
+      if (st.isDirectory()) {
+        // 2775; a platform that refuses the setgid bit to a folder whose group
+        // the suite is not in keeps 0775.
+        expect([0o2775, 0o775], `${rel} is ${mode.toString(8)}`).toContain(mode);
+        for (const name of readdirSync(entry)) walk(path.join(entry, name));
+      } else {
+        expect(mode & 0o040, `${rel} is ${mode.toString(8)}`).toBe(0o040);
+      }
+    };
+    walk(path.dirname(plugin));
+    expect(seen).toEqual(
+      expect.arrayContaining([
+        ".viberr-plugins",
+        ".viberr-plugins/run_Jd1RlrxTUlUN",
+        ".viberr-plugins/run_Jd1RlrxTUlUN/.claude-plugin/plugin.json",
+        ".viberr-plugins/run_Jd1RlrxTUlUN/skills/sourced-content/checklists/deep/claims.md",
+        ".viberr-plugins/run_Jd1RlrxTUlUN/skills/sourced-content/scripts/check.sh",
+      ]),
+    );
+    const copy = path.join(plugin, "skills", "sourced-content");
+    // A script stays a script.
+    expect(lstatSync(path.join(copy, "scripts", "check.sh")).mode & 0o111).toBe(0o111);
+    expect(pluginSkillMd(plugin, "sourced-content")).toContain("name: sourced-content");
+    // The store is read, never changed.
+    for (const [rel, mode] of Object.entries(sourceModes)) {
+      expect(lstatSync(path.join(src, rel)).mode & 0o7777).toBe(mode);
+    }
   });
 
   it("mounts ONLY the granted skills — the rest of the store stays out", async () => {

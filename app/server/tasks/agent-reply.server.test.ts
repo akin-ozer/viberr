@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
@@ -17,6 +17,13 @@ import {
 } from "~/schemas/task-file.schema";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { taskDir } from "~/server/files/file-store-root.server";
+import { logger } from "~/server/logging/logger.server";
+import {
+  AGENT_GID,
+  AGENT_UID_FLOOR,
+  resetAgentIsolationForTests,
+} from "~/server/runtimes/agent-isolation.server";
 import type { AgentDeployment } from "~/schemas/project-file.schema";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
@@ -1013,6 +1020,33 @@ describe("resumeWorkdir", () => {
     expect(fallback).not.toBe(ceiling);
     expect(path.relative(ceiling, fallback)).toBe("workspace");
     expect(existsSync(fallback)).toBe(true);
+  });
+
+  it("ruling 495(a): a workspace the resume makes is handed to the agents' group before anything is made in it", () => {
+    // CANARY: drop the hand-over and a resumed agent's workspace is the
+    // server's alone (0775 in the server's group, no setgid): its person
+    // writes nothing there, and cannot remove the supporting folder the
+    // server made in it when the task's workspace is reclaimed.
+    resetAgentIsolationForTests({ status: "on", uidFloor: AGENT_UID_FLOOR, reason: null });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const workspace = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace");
+      const dir = resumeWorkdir(store.slug, "VIB-1", null, store.dataRoot, { profileId: "reviewer" });
+
+      expect(dir).toBe(path.join(workspace, "support", "reviewer"));
+      expect(existsSync(dir)).toBe(true);
+      // In the image it lands (2770 in the agents' group); the suite is not
+      // in that group, so here the hand-over is refused and names its folder.
+      const st = statSync(workspace);
+      const handedOver = st.gid === AGENT_GID && (st.mode & 0o7777) === 0o2770;
+      const refusedFor = warn.mock.calls.some(
+        ([msg, fields]) => msg === "a directory could not be shared with the agent group" && fields?.dir === workspace,
+      );
+      expect(handedOver || refusedFor).toBe(true);
+    } finally {
+      warn.mockRestore();
+      resetAgentIsolationForTests();
+    }
   });
 
   it("stamps the unified delivery git identity into the resume env (F24)", async () => {

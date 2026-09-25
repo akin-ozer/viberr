@@ -315,6 +315,119 @@ else
 fi
 as_agent "$UID_A" "rm -rf '$WS/support' '$DELIVER'"
 
+# --- what the server wrote in an agent tree (ruling 495) --------------------
+# F40-71, live on deploy 10: the skill mount copied each granted skill into a
+# run's plugin as the server with `cpSync`, which keeps the store folder's
+# modes, so the plugin's files sat in 0755 folders the person could not write
+# and every run's settle failed to remove it (52 plugins left); and a finished
+# task's workspace root is the server's, in a task directory only the server
+# writes, so no agent uid could unlink it, empty or not (15 workspaces logged
+# on every boot). The mount now leaves every folder 2775 and every file
+# group-readable; the removal opens what the server wrote before that
+# (`chmod -R -P g+rwX` as the server) and removes an emptied root the server
+# owns with `rmdir` (`removeAgentTree`, run with the image's `tsx`).
+if [ "$(cat /proc/sys/fs/protected_hardlinks 2>/dev/null)" = "1" ]; then
+  pass "the kernel protects hard links (fs.protected_hardlinks = 1)"
+else
+  fail "fs.protected_hardlinks is '$(cat /proc/sys/fs/protected_hardlinks 2>&1)', not 1"
+fi
+(umask 0022 && echo server > "$WS/server-file")
+if as_agent "$UID_A" "ln '$WS/server-file' '$WS/agent-link'" >/dev/null 2>&1; then
+  fail "an agent hard-linked a server file it cannot write into its tree"
+else
+  pass "an agent cannot hard-link a server file it cannot write into its tree"
+fi
+rm -f "$WS/server-file" "$WS/agent-link" 2>/dev/null
+mkdir -p "$WS/opened-not" && chmod 0700 "$WS/opened-not" && ln -s "$WS/opened-not" "$WS/link-to-opened-not"
+chmod -R -P g+rwX -- "$WS/link-to-opened-not" 2>/dev/null
+if [ "$(stat -c '%a' "$WS/opened-not")" = "700" ]; then
+  pass "the server's chmod -R -P follows no link it is handed"
+else
+  fail "the server's chmod -R -P followed a link to $(stat -c '%a' "$WS/opened-not")"
+fi
+rm -rf "$WS/opened-not" "$WS/link-to-opened-not"
+# One server call through the image's tsx (APP_ROOT, above): prints what it
+# printed, or the error. The server's own umask (0002), as boot sets it.
+as_server_ts() {
+  (cd "$APP_ROOT" && umask 0002 && LOG_LEVEL=error node_modules/.bin/tsx -e "
+    (async () => { $1 })().catch((error) => { console.error(String(error)); process.exit(1); });
+  " 2>&1)
+}
+remove_as_person() {
+  as_server_ts "
+    const { removeAgentTree } = await import('./app/server/runtimes/agent-trees.server.ts');
+    await removeAgentTree('$1', { uid: $UID_A, launcher: '$LAUNCH' });
+    console.log('removed');"
+}
+# A task directory only the server writes, holding a workspace the agents'
+# group writes, as `enforceStoreLayout` leaves them.
+TASK="$WS/tasks/WEB-2"
+TASK_WS="$TASK/workspace"
+mkdir -p "$TASK" && chgrp "$(id -g)" "$WS/tasks" "$TASK" && chmod 0755 "$WS/tasks" "$TASK"
+mkdir "$TASK_WS" && chgrp viberr-agents "$TASK_WS" && chmod 2770 "$TASK_WS"
+as_agent "$UID_A" "mkdir -p '$TASK_WS/website' && echo hi > '$TASK_WS/website/index.html'"
+# A store skill at the modes that made F40-71: a 0755 folder (and, worse, a
+# 0700 one and a 0600 file, which cpSync kept too).
+SKILL_SRC="$WS/store/skills/sourced-content"
+mkdir -p "$SKILL_SRC/checklists/deep"
+echo "# Sourced content" > "$SKILL_SRC/SKILL.md"
+echo "# Claims" > "$SKILL_SRC/checklists/deep/claims.md"
+chmod 0755 "$WS/store" "$WS/store/skills" "$SKILL_SRC" "$SKILL_SRC/checklists"
+chmod 0700 "$SKILL_SRC/checklists/deep"
+chmod 0644 "$SKILL_SRC/SKILL.md"
+chmod 0600 "$SKILL_SRC/checklists/deep/claims.md"
+plugin=$(as_server_ts "
+    const { mountGrantedSkills } = await import('./app/server/runtimes/skill-mount.server.ts');
+    const mount = await mountGrantedSkills({ workspaceDir: '$TASK_WS/website', skills: ['sourced-content'],
+      runId: 'run_${TAG}', dataRoot: '$WS/store', git: null });
+    console.log(mount.plugin ? mount.plugin.path : 'nothing mounted: ' + JSON.stringify(mount.skipped));")
+if [ -d "$plugin/skills/sourced-content" ] && [ -z "$(find "$plugin" -type d ! -perm 2775)" ] \
+  && [ -z "$(find "$plugin" -type f ! -perm -g+r)" ]; then
+  pass "the skill mount leaves every folder of a run's plugin 2775 and every file group-readable"
+else
+  fail "the skill mount's plugin: $plugin $(find "$plugin" -printf '%m %u:%g %p\n' 2>/dev/null | tr '\n' ';')"
+fi
+if as_agent "$UID_A" "cat '$plugin/skills/sourced-content/checklists/deep/claims.md'" | grep -qx "# Claims"; then
+  pass "the run's person reads a skill file the store kept 0600"
+else
+  fail "the run's person cannot read the mounted skill's 0600 file"
+fi
+if as_agent "$UID_A" "rm -rf '$plugin'" && [ ! -e "$plugin" ]; then
+  pass "the person's own rm removes a run's plugin the server mounted (a run's settle)"
+else
+  fail "the person's own rm could not remove the mounted plugin"
+fi
+# What the mount wrote before this ruling: the folder at the store's 0755,
+# its file in the server's group.
+OLD="$TASK_WS/.viberr-plugins/run_before-495"
+(umask 0002 && mkdir -p "$OLD/skills/sourced-content" && chmod 0755 "$OLD/skills/sourced-content" \
+  && echo "# Sourced content" > "$OLD/skills/sourced-content/SKILL.md")
+as_agent "$UID_A" "rm -rf '$OLD'" 2>/dev/null
+if [ -f "$OLD/skills/sourced-content/SKILL.md" ]; then
+  pass "the person alone cannot remove a plugin the mount wrote before ruling 495 (F40-71)"
+else
+  fail "the person removed the old plugin alone (this check proves nothing)"
+fi
+removed=$(remove_as_person "$OLD")
+if [ "$removed" = "removed" ] && [ ! -e "$OLD" ]; then
+  pass "the removal opens the server's residue (chmod -R -P g+rwX as the server) and the person removes it"
+else
+  fail "the removal did not remove the server's residue: $removed"
+fi
+# The finished task's workspace: the person empties it and cannot unlink it.
+as_agent "$UID_A" "rm -rf '$TASK_WS'" 2>/dev/null
+if [ -d "$TASK_WS" ] && [ -z "$(ls -A "$TASK_WS")" ]; then
+  pass "no agent uid may unlink the server's workspace root, even emptied (F40-71)"
+else
+  fail "the workspace root is not the emptied, unremovable root F40-71 found: $(ls -la "$TASK_WS" 2>&1 | tr '\n' ';')"
+fi
+removed=$(remove_as_person "$TASK_WS")
+if [ "$removed" = "removed" ] && [ ! -e "$TASK_WS" ] && [ -d "$TASK" ]; then
+  pass "the server's rmdir removes the emptied workspace root it owns, and nothing above it"
+else
+  fail "the emptied workspace root was not removed: $removed"
+fi
+
 # --- signals -------------------------------------------------------------------------
 VIBERR_LAUNCH_HOME="$HOME_A" VIBERR_LAUNCH_UID=$UID_A VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c \
   "trap 'echo term > \"$HOME_A/term\"; umask 077; echo private > \"$HOME_A/private\"; exit 0' TERM; echo \$\$ > '$WS/relay-pid'; while :; do sleep 0.1; done" &

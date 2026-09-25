@@ -8,6 +8,7 @@ import {
 } from "~/schemas/task-file.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { shareDirWithAgentsOrWarn } from "~/server/runtimes/agent-isolation.server";
 import {
   listRunLines,
   listRunsForTaskRows,
@@ -839,14 +840,19 @@ export function resumeWorkdir(
   support?: { profileId: string },
 ): string {
   const base = taskDir(projectSlug, taskKey, dataRoot);
+  const workspaceRoot = path.join(base, "workspace");
   const scopedRoot = support
-    ? path.join(base, "workspace", "support", support.profileId)
-    : path.join(base, "workspace");
+    ? path.join(workspaceRoot, "support", support.profileId)
+    : workspaceRoot;
   if (repo) {
     const name = repo.split("/").pop() ?? repo;
     const clone = path.join(scopedRoot, name);
     if (existsSync(path.join(clone, ".git"))) return clone;
   }
+  // Ruling 460 / 495(a): the resumed agent runs as its person and writes
+  // here, and its person removes the workspace. Shared first, like a run's
+  // (`specialist-run`), so what is made below inherits the agents' group.
+  shareDirWithAgentsOrWarn(workspaceRoot);
   mkdirSync(scopedRoot, { recursive: true });
   return scopedRoot;
 }

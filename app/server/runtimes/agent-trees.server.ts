@@ -1,8 +1,9 @@
 import { execFile, spawnSync } from "node:child_process";
-import { lstatSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync, type Stats } from "node:fs";
 import path from "node:path";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
+import { logger } from "~/server/logging/logger.server";
 import {
   AGENT_UID_FLOOR,
   AGENT_UID_MAX,
@@ -43,6 +44,44 @@ import { filteredSpawnEnv } from "./spawn-env.server";
  * else: the same two commands run as the server's own user. With isolation on
  * and no person named, it refuses and removes nothing — it never falls back to
  * the server's user (460(h), the rule R-seams-1 set for git).
+ *
+ * Ruling 495 (F40-71) completes this for what the SERVER wrote in such a tree,
+ * which no agent pass could remove: a run's skill plugin as `cpSync` copied it
+ * (its files in folders the store's 0755 left the person unable to write),
+ * and the workspace root (`node`'s 2770, in a task directory only `node`
+ * writes, so no agent uid may unlink it even empty). When the agent passes
+ * leave entries, the server takes one step as itself,
+ * `chmod -R -P g+rwX -- <tree>`, which opens its own entries to their group,
+ * and the person's pass and the owner rounds run again. When they leave the
+ * target an EMPTY directory the server's uid owns, the server removes it with
+ * `rmdir -- <tree>`. A target still holding entries stays a fault naming the
+ * path and the OS error, and an empty one an agent uid owns is left to the
+ * agent passes. What the mount writes from now on needs neither step
+ * (`makeCopyGroupRemovable`, `agent-isolation.server.ts`).
+ *
+ * 485's safety argument holds:
+ *  - no recursive remove runs with the server's authority: its steps are a
+ *    `chmod`, which removes nothing, and an `rmdir`, which walks nothing and
+ *    refuses a directory with anything in it and a link (ENOTDIR);
+ *  - `chmod -R -P` follows no symbolic link, during the traversal or at the
+ *    tree itself. (`-P` because GNU chmod's `-R` defaults to `-H`, which
+ *    traverses a link named on the command line: measured in the image,
+ *    coreutils 9.7, `chmod -R g+rwX -- <link>` changed the linked tree and
+ *    `chmod -R -P g+rwX -- <link>` changed nothing.) chmod refuses every entry
+ *    the server does not own, and `g+rwX` opens an entry only to the group it
+ *    already has: `state/` and the raw run logs are in the server's own group,
+ *    which no agent uid is in;
+ *  - protected hardlinks stop an agent linking a server file into its tree,
+ *    where the chmod would reach it: `/proc/sys/fs/protected_hardlinks` is 1
+ *    in the image (measured 2026-09-26 in a container of the e2e image;
+ *    `protected_symlinks` is 1 too), so an agent uid may link only a file it
+ *    owns or can already read and write;
+ *  - neither server step runs while a directory above the tree is a link an
+ *    agent uid owns (`agentLinkAbove`), through which the steps would reach
+ *    another directory of the tree's name. The check reads before each step;
+ *    a link swapped in between the read and the step is not covered, and what
+ *    it could reach is a directory of that name the server owns, where the
+ *    steps add group permissions, or remove it if it is empty.
  */
 
 /** How many fallback rounds run as the owners found in what is left. */
@@ -58,7 +97,8 @@ export class AgentTreeRemovalError extends Error {
   readonly target: string;
   /** "<errno> on <path>" (or rm's own sentence when it named no errno). */
   readonly failure: string;
-  /** rm's stderr from the last pass, for the log. */
+  /** The last refusal's stderr (rm's, or rmdir's for an emptied root), for
+   *  the log. */
   readonly detail: string;
 
   constructor(target: string, failure: string, detail: string) {
@@ -71,15 +111,31 @@ export class AgentTreeRemovalError extends Error {
 }
 
 /** One command of a removal: as `launch`'s uid, or the server's own user. */
-interface RemovalStep {
+export interface RemovalStep {
   launch: AgentLaunch | null;
-  command: "chmod" | "rm";
+  command: "chmod" | "rm" | "rmdir";
   args: string[];
 }
 
-interface StepOutcome {
+export interface StepOutcome {
   ok: boolean;
   stderr: string;
+}
+
+/** What the rest of a removal depends on, read between its steps; never
+ *  through a link. Tests hand the plan their own. */
+export interface TreeView {
+  /** The target is still there. */
+  present(target: string): boolean;
+  /** The agent uids that own what the server can see of the target. */
+  agentOwners(target: string): number[];
+  /** What is left of a target that is still there: `entries` (a directory
+   *  with something in it, or one the server cannot list), `empty-server` (an
+   *  empty directory the server's own uid owns), or `other` (an empty
+   *  directory an agent uid owns, a file, a link). */
+  left(target: string): "entries" | "empty-server" | "other";
+  /** A directory above the target that is a link an agent uid owns, or null. */
+  agentLinkAbove(target: string): string | null;
 }
 
 function present(target: string): boolean {
@@ -89,6 +145,10 @@ function present(target: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isAgentUid(uid: number): boolean {
+  return uid >= AGENT_UID_FLOOR && uid <= AGENT_UID_MAX;
 }
 
 /**
@@ -114,7 +174,7 @@ function agentOwnersIn(target: string): number[] {
     } catch {
       return;
     }
-    if (uid >= AGENT_UID_FLOOR && uid <= AGENT_UID_MAX) owners.add(uid);
+    if (isAgentUid(uid)) owners.add(uid);
     if (!isDir || depth > 64) return;
     let names: string[];
     try {
@@ -128,14 +188,64 @@ function agentOwnersIn(target: string): number[] {
   return [...owners].sort((a, b) => a - b);
 }
 
+/** Ruling 495: what is left once the agent passes are done. */
+function leftOf(target: string): "entries" | "empty-server" | "other" {
+  let st: Stats;
+  try {
+    st = lstatSync(target);
+  } catch {
+    return "other";
+  }
+  if (!st.isDirectory()) return "other";
+  let names: string[];
+  try {
+    names = readdirSync(target);
+  } catch {
+    // A directory the server may not list may still hold its entries.
+    return "entries";
+  }
+  if (names.length > 0) return "entries";
+  return st.uid === process.getuid?.() ? "empty-server" : "other";
+}
+
+/** Ruling 495: the first directory above `target` that is a link an agent
+ *  uid owns (an agent swapped a folder it can write for it), or null. */
+function agentLinkAboveOf(target: string): string | null {
+  for (let dir = path.dirname(target); ; dir = path.dirname(dir)) {
+    try {
+      const st = lstatSync(dir);
+      if (st.isSymbolicLink() && isAgentUid(st.uid)) return dir;
+    } catch {
+      // Not there: nothing below it resolves through it either.
+    }
+    if (path.dirname(dir) === dir) return null;
+  }
+}
+
+const FS_VIEW: TreeView = {
+  present,
+  agentOwners: agentOwnersIn,
+  left: leftOf,
+  agentLinkAbove: agentLinkAboveOf,
+};
+
 /**
  * The removal as a plan of commands, so the synchronous and the asynchronous
- * drivers run one sequence. Returns null when the tree is gone, else rm's
- * stderr from the last pass that failed.
+ * drivers run one sequence. Returns null when the tree is gone, else the
+ * stderr of the last refusal (rm's from the last pass that failed, or the
+ * server's rmdir's).
+ *
+ * The order: the person's pass, then each agent uid found in what is left
+ * (at most {@link OWNER_ROUNDS} rounds). With isolation on, when that leaves
+ * entries, the server opens its own to the group (`chmod -R -P g+rwX`) and
+ * the person's pass and the rounds run again; when it leaves an empty
+ * directory the server owns, the server's `rmdir` removes it (ruling 495).
+ * Exported for the plan's own tests, which pass a {@link TreeView}.
  */
-function* removalPlan(
+export function* removalPlan(
   target: string,
   person: AgentLaunch | null,
+  view: TreeView = FS_VIEW,
 ): Generator<RemovalStep, string | null, StepOutcome> {
   let stderr = "";
   function* pass(launch: AgentLaunch | null, mode: string): Generator<RemovalStep, void, StepOutcome> {
@@ -145,17 +255,49 @@ function* removalPlan(
     const removed: StepOutcome = yield { launch, command: "rm", args: ["-rf", "--", target] };
     if (!removed.ok && removed.stderr.trim()) stderr = removed.stderr;
   }
-  yield* pass(person, "u+rwX");
-  if (!present(target)) return null;
-  // Isolation off: one user, nobody else to ask.
-  if (!person) return stderr;
-  for (let round = 0; round < OWNER_ROUNDS; round += 1) {
-    const owners = agentOwnersIn(target);
-    if (owners.length === 0) break;
-    for (const uid of owners) {
-      yield* pass({ uid, launcher: person.launcher }, "u+rwX,g+rwX");
-      if (!present(target)) return null;
+  /** The person's pass, then each owner found in what is left; true once
+   *  the tree is gone. */
+  function* agentPasses(launch: AgentLaunch): Generator<RemovalStep, boolean, StepOutcome> {
+    yield* pass(launch, "u+rwX");
+    if (!view.present(target)) return true;
+    for (let round = 0; round < OWNER_ROUNDS; round += 1) {
+      const owners = view.agentOwners(target);
+      if (owners.length === 0) break;
+      for (const uid of owners) {
+        yield* pass({ uid, launcher: launch.launcher }, "u+rwX,g+rwX");
+        if (!view.present(target)) return true;
+      }
     }
+    return false;
+  }
+  /** The server's own steps run only where no agent's link leads. */
+  function serverMayAct(): boolean {
+    const link = view.agentLinkAbove(target);
+    if (link === null) return true;
+    logger.warn("the server's own removal steps were skipped: a directory above the tree is a link an agent uid owns", {
+      target,
+      link,
+    });
+    return false;
+  }
+  if (!person) {
+    // Isolation off: one user, nobody else to ask, and none of ruling 495's
+    // steps either (495(d)).
+    yield* pass(null, "u+rwX");
+    return view.present(target) ? stderr : null;
+  }
+  if (yield* agentPasses(person)) return null;
+  // Ruling 495(b): what is left is the server's own; opened to the group,
+  // never removed, by the server.
+  if (view.left(target) === "entries" && serverMayAct()) {
+    yield { launch: null, command: "chmod", args: ["-R", "-P", "g+rwX", "--", target] };
+    if (yield* agentPasses(person)) return null;
+  }
+  // Ruling 495(c): the emptied root the server owns goes with its rmdir.
+  if (view.left(target) === "empty-server" && serverMayAct()) {
+    const removed: StepOutcome = yield { launch: null, command: "rmdir", args: ["--", target] };
+    if (!view.present(target)) return null;
+    if (!removed.ok && removed.stderr.trim()) stderr = removed.stderr;
   }
   return stderr;
 }
@@ -194,21 +336,29 @@ function runStep(step: RemovalStep): Promise<StepOutcome> {
   });
 }
 
-/** rm's strerror texts under `LC_ALL=C`, as the errno a reader searches for. */
+/** rm's and rmdir's strerror texts under `LC_ALL=C`, as the errno a reader
+ *  searches for. */
 const ERRNO_BY_MESSAGE = new Map([
   ["Permission denied", "EACCES"],
   ["Operation not permitted", "EPERM"],
   ["Directory not empty", "ENOTEMPTY"],
+  ["Not a directory", "ENOTDIR"],
   ["Read-only file system", "EROFS"],
   ["Device or resource busy", "EBUSY"],
 ]);
 
-/** "<errno> on <path>" from rm's first refusal (GNU: `rm: cannot remove
- *  '<path>': <text>`; BSD: `rm: <path>: <text>`). */
+/** "<errno> on <path>" from the first refusal of rm (GNU: `rm: cannot remove
+ *  '<path>': <text>`; BSD: `rm: <path>: <text>`) or of the server's rmdir of
+ *  an emptied root (GNU: `rmdir: failed to remove '<path>': <text>`; BSD:
+ *  `rmdir: <path>: <text>`). */
 export function removalFailure(stderr: string): string | null {
   for (const line of stderr.split("\n")) {
+    const trimmed = line.trim();
     const match =
-      /^rm: cannot remove '(.+)': (.+)$/.exec(line.trim()) ?? /^rm: (\/.+): ([^:]+)$/.exec(line.trim());
+      /^rm: cannot remove '(.+)': (.+)$/.exec(trimmed) ??
+      /^rmdir: failed to remove '(.+)': (.+)$/.exec(trimmed) ??
+      /^rmdir: (\/.+): ([^:]+)$/.exec(trimmed) ??
+      /^rm: (\/.+): ([^:]+)$/.exec(trimmed);
     if (!match) continue;
     const [, where, text] = match;
     return `${ERRNO_BY_MESSAGE.get(text ?? "") ?? text} on ${where}`;
@@ -243,9 +393,12 @@ function settle(target: string, left: string | null): void {
  * Remove `target`, a tree an agent can write, as `person` (their launch, from
  * `agentGitLaunchFor` or a run's `RunSpec.agent`). `null` is the server's own
  * user and is allowed only when this server launches no agents; with isolation
- * on it refuses (a `run_unavailable` AppError) and removes nothing. Resolves
- * when the tree is gone (or was never there); throws an
- * {@link AgentTreeRemovalError} naming the path and the OS error otherwise.
+ * on it refuses (a `run_unavailable` AppError) and removes nothing. What the
+ * agent passes leave of the server's own is opened by the server and removed
+ * by the person, and an emptied root the server owns goes with the server's
+ * `rmdir` (ruling 495). Resolves when the tree is gone (or was never there);
+ * throws an {@link AgentTreeRemovalError} naming the path and the OS error
+ * otherwise.
  */
 export async function removeAgentTree(target: string, person: AgentLaunch | null): Promise<void> {
   checkTarget(target);

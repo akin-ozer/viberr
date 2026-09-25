@@ -21,7 +21,11 @@ import {
   type WorkspaceGit,
 } from "~/server/tasks/workspace-git.server";
 import { toError } from "~/shared/errors";
-import type { AgentLaunch } from "./agent-isolation.server";
+import {
+  makeCopyGroupRemovable,
+  makeGroupRemovable,
+  type AgentLaunch,
+} from "./agent-isolation.server";
 import { removeAgentTree, removeAgentTreeSync } from "./agent-trees.server";
 
 /**
@@ -58,6 +62,13 @@ import { removeAgentTree, removeAgentTreeSync } from "./agent-trees.server";
  * when the run settles ({@link removeSkillPlugin}) — so a second run starting
  * on the same workspace can no longer unmount a live run's skills (the F19-15
  * race the old in-checkout mount needed a per-process marker to survive).
+ *
+ * Ruling 495(a), F40-71: the plugin is the server's, in a tree the task's
+ * person removes, and unlinking needs write on the directory. Its directories
+ * are 2775 and its files group-readable, set explicitly after the copy
+ * (`makeCopyGroupRemovable`, `makeGroupRemovable`): `cpSync` gives a copy the
+ * store folder's own modes, and a store folder's 0755 had left every settled
+ * run's plugin on disk, its files unlinkable by the person.
  */
 
 /** The plugin name the CLI qualifies skills with: `viberr:<skill>`. */
@@ -283,6 +294,23 @@ export async function mountGrantedSkills(input: {
     });
   }
   if (!mounted.length) return { mounted, skipped, plugin: null };
+  // Ruling 495(a): the plugin's own entries, like its skill folders, each
+  // after what is in it. Best effort: the plugin works as it is, and what the
+  // person cannot unlink at the settle the server opens then (495(b)).
+  try {
+    makeGroupRemovable([
+      skillsRoot,
+      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+      path.join(pluginRoot, ".claude-plugin"),
+      pluginRoot,
+      path.dirname(pluginRoot),
+    ]);
+  } catch (error) {
+    logger.warn("the run's skill plugin could not be given the group's modes", {
+      pluginRoot,
+      err: toError(error),
+    });
+  }
   const plugin: SkillPlugin = { path: pluginRoot, name: SKILL_PLUGIN_NAME };
   if (person) plugin.person = person;
   return { mounted, skipped, plugin };
@@ -410,6 +438,10 @@ function mountOneSkill(
         body,
       ),
     );
+    // Ruling 495(a): whatever modes the store folder carries, the copy's
+    // folders are the group's to write and its files the group's to read, so
+    // the person's removal at the settle unlinks every one.
+    makeCopyGroupRemovable(src, dest);
   } catch (error) {
     // A half-copied folder must not be listed: this run falls back to
     // prompt-text injection for the skill, because we return a reason below.
