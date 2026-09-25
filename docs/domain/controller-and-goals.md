@@ -71,7 +71,8 @@ Identity facts:
 
 Entry points: the dock (everywhere), the workspace rail item, the Home hero link (once a
 project exists), the org-settings tab's "Open the controller", and the goal chip on a
-task page (it lands on the chain's own card, `#goal-N`). There is no command-palette entry.
+task page (it lands on the task's own link row in its chain, `#goal-N-link-M`, ruling
+476(b)). There is no command-palette entry.
 The page subscribes to the user SSE scope (and the project scope on the project surface)
 and, while a turn is working, reads the turn's console tail every 5 seconds: the fallback
 for a settle the stream missed, which revalidates the page once the tail says the run
@@ -82,7 +83,19 @@ itself, and below the two-column breakpoint the head carries a native thread pic
 (`ConversationPicker`); the transcript is a capped scroller that never moves the page
 (ruling 419). A blank transcript offers three example asks per scope that send on click
 (`controller-examples.ts`, shared with the dock; ruling 314). A working turn shows the run's
-`phase` and last tool `step` on the row that says it is working (ruling 250). The transcript
+`phase` and last tool `step` on the row that says it is working (ruling 250). Below the
+two-column breakpoint the thread picker takes a row of its own in the head, with New and
+Home on the row under it (ruling 476(e)). A link in a message wraps inside the transcript
+rather than scrolling it sideways (`.md-body a`, ruling 476(a)). Where the transcript puts
+its reader is one rule for the page and the dock (`useTranscriptFollow`,
+`transcript-follow.ts`, ruling 476(c)): an opened thread shows its newest reply from the
+first line when a reply is the newest message, and its end otherwise; a controller message
+that lands is scrolled to its first line, unless the reader has scrolled up above the
+newest reply they had, and then nothing moves; the person's own message, and a turn that
+starts while they follow the thread, go to the end. One visually hidden `role="status"`
+region, mounted outside the per-thread subtree and changing only its text, says "<name> is
+working" when a turn starts and "<name> replied: <first sentence>" when the reply lands
+(`useTurnAnnouncement`, ruling 476(d)); the working row is visual only. The transcript
 is in REPLY order (ruling 465, `inReplyOrder` in `app/shared/controller-thread.ts`): each
 controller row that names the message it answers sits directly under it, and user messages
 and unlinked notes keep their `seq` order. A user message with no reply yet says where it
@@ -145,6 +158,12 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   focus trap, Tab reaches controls under the panel; ruling 455(d)). Any other Escape (the
   palette, a confirm dialog, a stage menu or its trigger, focus on nothing) leaves the dock
   alone, and an outside press never closes it. An empty thread offers the scope's three examples, which send on click.
+  The transcript meets a reply as the page's does (ruling 476(c) and (d), below in §2): it
+  opens on the newest reply's first line and scrolls a reply that lands to its first line,
+  and the panel's own visually hidden `role="status"` region says "<name> replied: <first
+  sentence>" for the thread on screen, which the button's announcer leaves out while the
+  panel is open. The "is working…" row is visual only; the button's announcer says a turn
+  is working.
 - **Phone sheet** (≤ 720 px, rulings 121(e) and 454): the panel is a bottom sheet a finger
   pulls down to dismiss. The grabber and the header are its handles, and their buttons keep
   their taps. After a 10px slop it follows 1:1, and it rubber-bands above its resting place.
@@ -813,7 +832,9 @@ thing that holds it back (ruling 398).
 Canonical at `projects/<slug>/goals/goal-<n>.md`, written only by the app (hand edits
 are tolerated by the parser; unknown frontmatter keys round-trip). Frontmatter
 (`GOAL_FRONTMATTER_KEYS` order): `id`, `title`, `status` `active | paused | attention |
-completed | cancelled`, `createdBy`, `createdByLabel`, `onFailure` `pause | continue`
+completed | cancelled`, `createdBy`, `createdByLabel`, `conversationId` (the controller
+conversation the chain was planned in, null for one written before the key; ruling 476(h)),
+`onFailure` `pause | continue`
 (default `pause`), `links[]`, `createdAt`, `updatedAt`. Each link carries `index`
 (1-based), `title`, `goal` (the link's task text), `taskKey` (null until the link
 starts), `status` `pending | active | done | failed | skipped`, `note`, `redeclared`
@@ -851,7 +872,9 @@ among the chain's own links (`refuseLinkCycles`). It writes the FILE first (ruli
 a link's inherited wait on `goal-N link M` is validated against the store, which does not
 hold the goal until the file exists), re-projects, and runs `reconcileGoal`, which starts
 every link whose wait is already satisfied under the creator's re-proven authority. A
-start that fails parks the goal in `attention` by name instead of throwing. Audit
+start that fails parks the goal in `attention` by name instead of throwing. The goal
+records the conversation whose turn called `create_goal` (`conversationId`, handed to the
+toolkit by the turn's mounts; ruling 476(h)). Audit
 `goal.created {title, links, firstTask}`; the reply names every link started ("2 started
 now (link 1 is KNC-3, link 3 is KNC-4)") or says every link waits on something.
 
@@ -950,19 +973,36 @@ controller-tool-only.
 
 ### 7.5 Reading a chain
 
-- **`get_goal`** reads the canonical file with its history. A link's `goal` is always the
+- **`get_goal`** reads the canonical file with its history and the `conversationId` the
+  chain was planned in (ruling 476(h)). A link's `goal` is always the
   contract in force: for a link whose task's current goal (chain header stripped) differs
   from what the chain declared, `goal` is the task's text and the declaration is kept as
   `declaredGoal` (ruling 335, reversing ruling 192's `liveGoal` naming).
 - **`list_goals`** and the Goals panel read the projection; each link carries `waits`, its
   declared entries with their live state (ruling 359).
-- **The Goals panel** (the project controller page's rail): each chain is a `<details>`
-  card anchored `#goal-N`, stating "N of M done"; a settled chain starts folded. "About this
-  chain" folds the description and the newest six history entries from the file
-  (`readGoalHistory`, ruling 419(h)). A link whose task exists and still waits on anything
-  unfinished shows **blocked**; its wait is a disclosure summarised as a count ("waits on 6 ·
-  4 done", plus "· N can never finish" in the danger colour) that opens to one row per
-  entry with its state, link and title (ruling 425). Controls (Retry and Skip per failed
+- **The Goals panel** (the project controller page's rail): the head counts chains by
+  status, naming only the non-zero ones ("1 active · 1 paused · 2 need attention · 3
+  settled", `goalsCountLine`, ruling 476(f)). Each chain is a `<details>` card anchored
+  `#goal-N`, stating "N of M done", plus "· N waiting on you" and "· N waiting on a human"
+  for its started links whose task waits on a person; a settled chain starts folded. Each
+  link row prints its number ("Link 3" to a screen reader) and is anchored
+  `#goal-N-link-M` (`goalLinkAnchor`, `app/shared/goal-anchor.ts`): the task page's chain
+  chip and a wait entry naming a goal link open that row, and the jump opens its chain,
+  scrolls the row to the top of the rail, focuses it and marks it (`data-targeted`; ruling
+  476(b)). "About this chain" folds "Planned in <conversation>" (a link to the thread whose
+  turn created the chain, for a viewer who may open it: its owner or an org admin), the
+  description and the newest six history entries, all read from the file in one pass
+  (`readGoalFileFacts`, rulings 419(h) and 476(h)); the Conversations panel above lists the
+  planning threads its own list does not hold under "Where this board's chains were
+  planned" (`plannedElsewhere`). A started link's pill is the board card's status for its
+  task, word and colour (`cardStatus` through `linkTaskStatuses`, fed the board's own
+  review queue and live-run state; "waiting on you" in the board's blue, "waiting on a
+  human", "input required", "agent working", "resumes <time>"; ruling 476(g)); without it,
+  a link whose task exists and still waits on anything unfinished shows **blocked**. Its
+  wait is a disclosure summarised as a count ("waits on 6 open · 4 done", plus "· N can
+  never finish" in the danger colour) that opens to one row per entry with its state, link
+  and title (ruling 425; the "open" is ruling 476(b)'s, so the count never reads as a link
+  number). Controls (Retry and Skip per failed
   link, Pause/Resume, Cancel) render for `run-agents` holders, org admins and the chain's
   own creator (ruling 260). Cancel and Skip confirm in the danger face; the cancel confirm
   names the unstarted links that will never start and the other chains' links that would

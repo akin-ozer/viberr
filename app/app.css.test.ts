@@ -3530,6 +3530,21 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".md-body code.mono")).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
+  it("ruling 476(a): a link in markdown may break a long URL rather than push the transcript sideways", () => {
+    // Measured live (F40-21): the dock's transcript scrolled 702px in 388,
+    // with 142 of 228 links past its edge; /controller at 375px 693px in 315.
+    // CANARY: drop `overflow-wrap: anywhere` from `.md-body a`.
+    expect(ruleBody(CODE, ".md-body a")).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("ruling 476(e): in one column the thread switcher takes a row of its own", () => {
+    // Measured at 375px (F40-25): 97px beside New and Home, reading "Hi. I'm s".
+    // CANARY: restore `flex: 1 1 0` on the picker, or drop the row's wrap.
+    const narrow = collapse();
+    expect(ruleBody(narrow, ".ctl-wrap .ctl-head-acts")).toMatch(/flex-wrap:\s*wrap/);
+    expect(ruleBody(narrow, ".ctl-wrap .ctl-picker")).toMatch(/flex:\s*1 1 100%/);
+  });
+
   it("ruling 419(e): a packet's code observation keeps its line breaks", () => {
     // CANARY: drop `white-space: pre-wrap` from `.obs code`.
     expect(ruleBody(CODE, ".obs code")).toMatch(/white-space:\s*pre-wrap/);

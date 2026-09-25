@@ -271,6 +271,10 @@ export interface ControllerToolkitDeps {
   /** Ruling 121: the conversation's anchored task, when it has one — every
    *  task tool's `taskKey` defaults to it. */
   taskKey?: string | null;
+  /** Ruling 476(h): the conversation this turn answers in. `create_goal`
+   *  records it on the chain, so the project's Controller page can link back
+   *  to where the chain was planned. */
+  conversationId?: string | null;
   /** Ruling 283: the knowledge bases this turn's prompt INDEXED. The pull tool
    *  is mounted over exactly these — `controllerKbNames` builds the list once
    *  so the prompt and the tool cannot name different sets. */
@@ -3868,6 +3872,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           };
           if (args.description) goalInput.description = prose(args.description);
           if (args.onFailure) goalInput.onFailure = args.onFailure;
+          // Ruling 476(h): where the chain was planned, for its card's
+          // "Planned in" link on the project's Controller page.
+          if (deps.conversationId) goalInput.conversationId = deps.conversationId;
           const result = await createGoal(db, goalInput, actor, { dataRoot });
           return `[done] ${result.message}`;
         },

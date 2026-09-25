@@ -698,6 +698,10 @@ title: Ship the billing revamp
 status: active                    # active | paused | attention | completed | cancelled
 createdBy: u_abc123               # the authority chain advancement re-proves
 createdByLabel: arda@viberr.dev
+conversationId: cnv_3fQk9x2LmP0a  # ruling 476(h): the controller conversation whose
+                                  # turn created the chain (null when none, or for a
+                                  # chain written before the key); the project's
+                                  # Controller page links back to it
 onFailure: pause                  # pause (default) | continue
 links:
   - index: 1                      # 1-based chain position
@@ -737,6 +741,8 @@ Notes:
   task move cannot leave the chain lying.
 - Goal files are app-written and never deleted by the product; terminal chains
   stay readable. `goals/*.md` is watched and projected like every canonical file.
+- `conversationId` is read from the file (`readGoalFileFacts`, the Controller page's one
+  read of each chain's file beside its history); `goal_projections` does not carry it.
 - The goal parser is **strict**, unlike the task and project parsers: any schema failure makes
   the file unreadable, and the store doctor reports every finding as a hard stop, so hand
   edits must round-trip exactly. Unknown frontmatter keys are still preserved on write.

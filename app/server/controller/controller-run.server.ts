@@ -207,6 +207,9 @@ export interface ControllerMountInput {
   projectSlug: string | null;
   /** Ruling 121: the conversation's anchored task, when it has one. */
   taskKey: string | null;
+  /** Ruling 476(h): the conversation the turn answers in, which a goal the
+   *  turn creates records. */
+  conversationId?: string | null;
   /** The ORG MCP grants that resolved and pre-flighted for this turn. */
   orgServers: RunMcpServers;
   /** Ruling 283: the knowledge bases this turn's prompt indexes, so the tool
@@ -270,6 +273,7 @@ export function buildControllerMounts(
     user: input.user,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
+    conversationId: input.conversationId ?? null,
     kb: input.kb,
   });
   const ops = buildControllerOpsMcp({ db, ctx, user: input.user });
@@ -509,6 +513,7 @@ async function startTurnRun(
     user: { id: input.user.id, email: input.user.email, name: input.user.name },
     projectSlug: conversation.projectSlug,
     taskKey: conversation.taskKey,
+    conversationId: conversation.id,
     orgServers,
     kb: controllerKbNames(config.kb, conversation.projectSlug, dataRoot),
     dataRoot,
