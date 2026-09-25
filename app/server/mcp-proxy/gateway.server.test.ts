@@ -217,6 +217,41 @@ describe("the gateway against an HTTP upstream that requires its bearer", () => 
     ]);
   });
 
+  it("ruling 486 (F40-66): a connection not signed in with OAuth offers no grant tool, and a call by that name is the server's", async () => {
+    // CANARY: offer the grant tool on every gateway connection, and both
+    // listings carry it.
+    const upstream = await startHttpUpstream(SECRET);
+    upstreams.push(upstream);
+    addMcp("cloudflare", "HTTP", upstream.url, SECRET);
+    const open = await startHttpUpstream(null);
+    upstreams.push(open);
+    addMcp("docs", "HTTP", open.url, null);
+
+    const { servers } = mountRun(["cloudflare", "docs"]);
+    const pasted = await connect(servers.cloudflare);
+    expect((await pasted.listTools()).tools.map((tool) => tool.name)).toEqual(["whoami", "delete_zone", "slow", "fail"]);
+    const called = textResult.parse(await pasted.callTool({ name: "viberr_connection_grant", arguments: {} }));
+    expect(called.content[0]?.text).toBe("viberr_connection_grant: ok");
+    expect(upstream.calls).toEqual(["viberr_connection_grant"]);
+
+    // An uncredentialed server mounts directly; reached through the gateway
+    // anyway (a credential removed mid-run leaves the run's mount there), it
+    // offers no grant tool either.
+    expect(servers.docs).toEqual({ type: "http", url: open.url });
+    const bare = bindRunToMcpGateway({
+      db,
+      runId: "run_gw_bare",
+      servers: { docs: { type: "http", url: mcpGatewayMountUrl("docs") ?? "" } },
+      toolDenials: [],
+      actor: { userId: null, label: "agent:claude/developer (Developer)" },
+      projectSlug: "acme",
+      taskKey: "VIB-1",
+      isLive: () => true,
+    });
+    const unsigned = await connect(bare.docs);
+    expect((await unsigned.listTools()).tools.map((tool) => tool.name)).toEqual(["whoami", "delete_zone", "slow", "fail"]);
+  });
+
   it("a wrong token, another server's name and a revoked token are all 401 with a JSON-RPC error", async () => {
     const upstream = await startHttpUpstream(SECRET);
     upstreams.push(upstream);

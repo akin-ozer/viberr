@@ -1572,7 +1572,15 @@ runtime's answer for a missing grant.
   action is not `read`, `metadata_read`, `monitoring` or `report`, other than
   `offline_access`) summarizes it everywhere as "read-only · 194 scopes" or "194 scopes ·
   12 writes". A run's prompt names each signed-in server's grant, and a read-only one adds
-  that the server refuses any call that writes. When a call through the gateway meets an
+  that the server refuses any call that writes. The prompt carries only that summary; the
+  scopes themselves come from `viberr_connection_grant`, one tool the gateway adds to the
+  `tools/list` of each connection signed in with OAuth and answers itself
+  (`grant-tool.server.ts`, ruling 486, F40-66): the sign-in's expiry and the granted
+  scopes, writes and reads listed apart, or that the server did not name them. It reads the
+  row's public half, so it carries no token; it is never forwarded upstream, needs the
+  run's token and is refused once the run's calls close like any call, and is never
+  withheld or audited as a write. A known grant's line in the prompt tells the agent to call
+  it before assuming a write will be refused or accepted. When a call through the gateway meets an
   upstream authorization refusal (an HTTP 401 or 403, a JSON-RPC error, or an `isError`
   tool result that says authentication or authorization, as Cloudflare's "10000:
   Authentication error" does) and the grant has no write, the run's error gains "This
@@ -1586,7 +1594,8 @@ runtime's answer for a missing grant.
   mounted and flagged down), and a profile's granted chip for that server is marked the
   way a missing one is, with the remedy (an org admin, Instance settings → Agent
   resources) in its title and its text. It forwards `tools/list` (withheld write tools
-  removed), `tools/call` (a withheld one refused with `mcpWriteToolDenyReason`),
+  removed, the grant tool added on an OAuth-signed-in connection), `tools/call` (a withheld
+  one refused with `mcpWriteToolDenyReason`),
   resources and prompts when the upstream declares them, and `list_changed`
   notifications; a timeout (5 minutes a call, reset by progress) or an upstream error
   comes back as a JSON-RPC error naming the server. A stdio server that exits mid-call

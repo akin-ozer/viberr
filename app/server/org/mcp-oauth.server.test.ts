@@ -710,6 +710,27 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
       await stopMcpGateway();
     }
   });
+
+  it("F40-66: a known grant's line sends the run to the gateway's grant tool instead of listing the scopes", () => {
+    // CANARY: drop the sentence from the line, and the run is back to reading
+    // only "195 scopes · 1 write".
+    const writes = gatewayMcpSection(
+      ["cloudflare-api"],
+      [{ name: "cloudflare-api", scope: `${CLOUDFLARE_READ_ONLY_GRANT} workers-kv-storage.write` }],
+    );
+    expect(writes).toContain(
+      "- cloudflare-api: signed in with OAuth, granted 195 scopes · 1 write. Call its `viberr_connection_grant` tool to see exactly which scopes are granted before you assume a write will be refused or accepted.",
+    );
+    expect(writes).not.toContain("workers-kv-storage.write");
+    const readOnly = gatewayMcpSection(["cloudflare-api"], [{ name: "cloudflare-api", scope: CLOUDFLARE_READ_ONLY_GRANT }]);
+    expect(readOnly).toContain(
+      "Instance settings → Agent resources. Call its `viberr_connection_grant` tool to see exactly which scopes are granted before you assume a read will be refused or accepted.",
+    );
+    // A grant the server did not name has nothing to look up.
+    const unknown = gatewayMcpSection(["cloudflare-api"], [{ name: "cloudflare-api", scope: null }]);
+    expect(unknown).toContain("- cloudflare-api: signed in with OAuth; the server did not say which scopes it granted.");
+    expect(unknown).not.toContain("viberr_connection_grant");
+  });
 });
 
 describe("no token material leaves the server (ruling 469)", () => {

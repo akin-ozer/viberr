@@ -87,13 +87,14 @@ export async function listen(
   };
 }
 
-/** A Streamable HTTP MCP server (stateless) that answers only `Bearer <token>`. */
-export async function startHttpUpstream(token: string): Promise<UpstreamHandle> {
+/** A Streamable HTTP MCP server (stateless) that answers only `Bearer <token>`,
+ *  or anyone when `token` is null (a server registered with no credential). */
+export async function startHttpUpstream(token: string | null): Promise<UpstreamHandle> {
   const calls: string[] = [];
   const authorizations: (string | null)[] = [];
   const server = await listen(async (req, res) => {
     authorizations.push(req.headers.authorization ?? null);
-    if (req.headers.authorization !== `Bearer ${token}`) {
+    if (token !== null && req.headers.authorization !== `Bearer ${token}`) {
       refuse(res);
       return;
     }
