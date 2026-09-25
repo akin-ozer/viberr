@@ -6,7 +6,11 @@ import type {
 import { createContext, memo, useContext, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link } from "react-router";
-import { TASK_KEY_IN_TEXT_RE, type TaskLinks } from "~/shared/task-key-links";
+import { PROPOSAL_ID_IN_TEXT_RE, TASK_KEY_IN_TEXT_RE, type TaskLinks } from "~/shared/task-key-links";
+
+/** What a text can link through its {@link TaskLinks}: task keys, and the
+ *  proposal ids a page showing them resolved to their entries. */
+const LINKABLE_IN_TEXT_RE = new RegExp(`${TASK_KEY_IN_TEXT_RE.source}|${PROPOSAL_ID_IN_TEXT_RE.source}`, "g");
 import { Icon } from "./icon";
 
 /**
@@ -156,7 +160,7 @@ function rehypeMentions(names: string[] = []) {
 function linkTaskKeys(value: string, links: TaskLinks): HastNode[] | null {
   const out: HastNode[] = [];
   let last = 0;
-  for (const match of value.matchAll(TASK_KEY_IN_TEXT_RE)) {
+  for (const match of value.matchAll(LINKABLE_IN_TEXT_RE)) {
     const key = match[0];
     const href = Object.hasOwn(links, key) ? links[key] : undefined;
     if (!href) continue;
@@ -164,7 +168,7 @@ function linkTaskKeys(value: string, links: TaskLinks): HastNode[] | null {
     out.push({
       type: "element",
       tagName: "a",
-      properties: { className: ["task-ref"], href },
+      properties: { className: [key.startsWith("kp-") ? "kp-ref" : "task-ref"], href },
       children: [{ type: "text", value: key }],
     });
     last = match.index + key.length;
@@ -331,6 +335,15 @@ function componentsFor(
           </Link>
         );
       }
+      // A proposal id jumps to its entry on this page (the Controller page's
+      // Proposals panel), so it is a plain in-page anchor, never a new tab.
+      if (className === "kp-ref" && href) {
+        return (
+          <a href={href} className="kp-ref">
+            {children}
+          </a>
+        );
+      }
       // Mark the subtree so a nested attachment image renders WITHOUT its
       // lightbox <button> (a <button> inside this <a> is nested-interactive).
       // The link is the interactive element.
@@ -494,7 +507,7 @@ function sameLinksForText(
   b: TaskLinks | undefined,
 ): boolean {
   if (sameLinks(a, b)) return true;
-  for (const [key] of text.matchAll(TASK_KEY_IN_TEXT_RE)) {
+  for (const [key] of text.matchAll(LINKABLE_IN_TEXT_RE)) {
     if (linkOf(a, key) !== linkOf(b, key)) return false;
   }
   return true;

@@ -72,7 +72,7 @@ export function ProposalsPanel({
       ) : (
         <ul className="ctl-proposal-list">
           {proposals.map((p) => (
-            <li key={p.id} className="ctl-proposal" data-proposal={p.id}>
+            <li key={p.id} id={`proposal-${p.id}`} className="ctl-proposal" data-proposal={p.id}>
               <div className="ctl-proposal-head">
                 <Pill kind="info" sm>
                   {p.rulings ? "Ruling" : "Knowledge base"}

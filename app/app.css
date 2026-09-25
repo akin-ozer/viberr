@@ -4692,11 +4692,11 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    app's other long-form prose, and a full-width paragraph in a wide panel is
    the same reading problem. Applied to the paragraph rather than the container
    so tables, code blocks and images keep the full width they need. */
-.md-body p { margin: .375rem 0; max-width: 70ch; }
-.md-body ul, .md-body ol { margin: .375rem 0; padding-left: 1.5rem; }
+.md-body p { margin: .75rem 0; max-width: 70ch; }
+.md-body ul, .md-body ol { margin: .75rem 0; padding-left: 1.5rem; }
 /* Item-to-item distance must beat the intra-item leading or wrapped lines and
    new bullets blur together; paragraphs inside one item stay tight. */
-.md-body li { margin: .25rem 0; }
+.md-body li { margin: .25rem 0; max-width: 70ch; }
 .md-body li > p { margin: .125rem 0; }
 .md-body h1, .md-body h2, .md-body h3,
 .md-body h4, .md-body h5, .md-body h6 {
@@ -4725,7 +4725,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .md-body h4, .md-body h5, .md-body h6 { overflow-wrap: anywhere; }
 .md-body pre, .md-table-wrap { overflow-wrap: normal; }
 /* U39-29/31: a task key a text names; a key never breaks at its dash. */
-a.task-ref { white-space: nowrap; }
+a.task-ref, a.kp-ref { white-space: nowrap; }
 .md-body code.mono {
   background: var(--tint-press);
   padding: .04rem .25rem;
@@ -6990,7 +6990,16 @@ a.card:active, .pj-new:active { transform: scale(.99); }
   gap: .375rem;
 }
 .ctl-msg-who svg { width: 14px; height: 14px; color: var(--agent-dark); }
-.ctl-msg .md-body { font-size: .88rem; }
+/* Owner, 2026-09-25 ("this wall of text"): a reply is read, so it takes the
+   timeline's 1.5 leading (`.tl-text`) instead of the browser's ~1.2. */
+.ctl-msg .md-body { font-size: .88rem; line-height: 1.5; }
+/* The Controller page's transcript is where replies are read at length, so its
+   messages are set a step up (the dock keeps .88rem in its 400px column);
+   inline code and headings step up with the text. */
+.ctl-transcript .ctl-msg .md-body { font-size: 1rem; }
+.ctl-transcript .ctl-msg .md-body code.mono { font-size: .88rem; }
+.ctl-transcript .ctl-msg .md-body :is(h1, h2) { font-size: 1.25rem; letter-spacing: var(--track-section); }
+.ctl-transcript .ctl-msg .md-body :is(h3, h4, h5, h6) { font-size: 1rem; }
 .ctl-working {
   display: flex;
   align-items: baseline;
@@ -7097,7 +7106,9 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .ctl-proposals, .ctl-proposal-list, .ctl-proposal { display: flex; flex-direction: column; gap: .5rem; }
 .ctl-proposals-count, .ctl-proposal-acts .linkish { margin-left: auto; }
 .ctl-proposal-list { list-style: none; margin: 0; padding: 0; }
-.ctl-proposal { border: 1px solid var(--hairline); border-radius: var(--radius-box); padding: .5rem .75rem; min-width: 0; }
+.ctl-proposal { border: 1px solid var(--hairline); border-radius: var(--radius-box); padding: .5rem .75rem; min-width: 0; scroll-margin-block: .75rem; }
+/* A reply's proposal id lands here: the entry it names says so. */
+.ctl-proposal:target { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .ctl-proposal p { margin: 0; overflow-wrap: anywhere; }
 .ctl-proposal-head, .ctl-proposal-acts { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
 .ctl-proposal-doc { font-size: .75rem; color: var(--muted); overflow-wrap: anywhere; }

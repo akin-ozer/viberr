@@ -200,6 +200,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // The same text after PR #321 renamed "Org settings" to "Instance
     // settings", which shipped without recording its outgoing hash.
     "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
+    // Owner, 2026-09-25 ("this wall of text"): before the reply paragraph set
+    // an order (what the person must decide first), bold line labels, links
+    // in place of restated evidence and a length of about eight lines.
+    "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
     // Rulings 482 and 483 (pass 40, F40-52, F40-59): before "Bringing up a new
