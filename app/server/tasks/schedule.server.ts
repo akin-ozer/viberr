@@ -83,6 +83,63 @@ function terminalStageId(db: DatabaseSync, projectSlug: string): string | null {
 // reached its terminal stage (the belt to this claim-time brace). B's standalone
 // `scheduledRunIsMoot` drive probe was retired with that guard (RECONCILE §1.2).
 
+// ------------------------------------------------------------------ bounds
+
+/** The ceiling every schedule door applies, in minutes (28 days). A schedule
+ *  further out than the retention story is a note, not a plan. */
+export const SCHEDULE_MAX_MINUTES = 40_320;
+
+/** The one sentence every schedule door refuses an out-of-range time with. */
+export const SCHEDULE_BOUNDS_SENTENCE = "Schedule between 1 minute and 28 days out.";
+
+/**
+ * Ruling 153, shared by ruling 487: the instant a door's `delayMinutes` or ISO
+ * `dueAt` names, under the task page's bounds and sentences. A crafted delay
+ * once overflowed Date, so both forms are clamped here rather than trusted.
+ * Throws a validation `AppError`.
+ */
+export function scheduleDueMs(
+  when: { delayMinutes?: number | undefined; dueAt?: string | undefined },
+  nowMs: number = Date.now(),
+): number {
+  if (when.delayMinutes !== undefined) {
+    const minutes = when.delayMinutes;
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > SCHEDULE_MAX_MINUTES) {
+      throw AppError.validation(SCHEDULE_BOUNDS_SENTENCE);
+    }
+    return nowMs + Math.round(minutes) * 60_000;
+  }
+  if (when.dueAt !== undefined) {
+    const dueMs = Date.parse(when.dueAt);
+    if (!Number.isFinite(dueMs)) throw AppError.validation("Invalid schedule time.");
+    const minutes = (dueMs - nowMs) / 60_000;
+    if (minutes < 1 || minutes > SCHEDULE_MAX_MINUTES) {
+      throw AppError.validation(SCHEDULE_BOUNDS_SENTENCE);
+    }
+    return dueMs;
+  }
+  throw AppError.validation(SCHEDULE_BOUNDS_SENTENCE);
+}
+
+/**
+ * Ruling 487: the `createdBy` of an entry the OPERATOR made, through its own
+ * `schedule_task_action` or a dispatch of its that was held (ruling 152(c)).
+ * The fire path reads it: an operator's run carries no human's name, so it
+ * must not be started as a person's directive or tag one when it reports.
+ */
+export const OPERATOR_SCHEDULER_ID = "operator";
+
+/** The timeline actor a schedule note is written as (ruling 487: the operator
+ *  when the write runs under its authority, the person otherwise). */
+function schedulerEventActor(
+  actor: AuditActor,
+  ctx: TaskMutationContext,
+): TaskFileEvent["actor"] {
+  return ctx.operatorAuthorized
+    ? { kind: "operator" }
+    : { kind: "human", userId: actor.userId ?? "system", nameHint: actor.label };
+}
+
 // ------------------------------------------------------------------ create
 
 export interface ScheduleInput {
@@ -103,6 +160,10 @@ export interface ScheduleInput {
  * (dynamic-dispatch rework 2026-08-29). RBAC is enforced by the caller
  * (`run-agents`, maintainer+ — scheduling triggers agent work). Rejects a
  * past `dueAt` and a task that is already in its terminal stage.
+ *
+ * Ruling 487: the operator's door (`operatorScheduleRun`) writes through here
+ * too, under `ctx.operatorAuthorized` and gated like its immediate dispatch;
+ * the entry, its note and its audit row then name the operator.
  */
 export async function scheduleTaskAction(
   db: DatabaseSync,
@@ -159,7 +220,9 @@ export async function scheduleTaskAction(
     dueAt: new Date(dueMs).toISOString(),
     profileId: action === "run-agent" ? (input.profileId ?? null) : null,
     prompt: input.prompt?.trim() ? input.prompt.trim() : "",
-    createdBy: actor.userId ?? "system",
+    // Ruling 487: an entry written under the operator's authority says so,
+    // which is what the fire path and the operator's own cancel read.
+    createdBy: ctx.operatorAuthorized ? OPERATOR_SCHEDULER_ID : (actor.userId ?? "system"),
     createdByLabel: actor.label,
     createdAt: new Date().toISOString(),
     status: "pending",
@@ -176,7 +239,7 @@ export async function scheduleTaskAction(
     parsed.frontmatter.schedules.push(schedule);
     parsed.timeline.unshift(
       scheduleEvent(
-        { kind: "human", userId: actor.userId ?? "system", nameHint: actor.label },
+        schedulerEventActor(actor, ctx),
         `**Scheduled:** ${what} for **${input.taskKey}** at ${schedule.dueAt}${schedule.prompt ? ` — ${schedule.prompt}` : ""}. It runs on the profile deployed when it fires.`,
       ),
     );
@@ -217,7 +280,7 @@ export async function cancelScheduledAction(
     cancelled = true;
     parsed.timeline.unshift(
       scheduleEvent(
-        { kind: "human", userId: actor.userId ?? "system", nameHint: actor.label },
+        schedulerEventActor(actor, ctx),
         `**Schedule cancelled:** the pending scheduled run for ${input.taskKey} was cancelled.`,
       ),
     );
@@ -618,12 +681,20 @@ export async function fireDueSchedules(
               taskKey: t.taskKey,
               profileId: t.profileId,
             };
+            // Ruling 487: the operator's own entry starts the run the way its
+            // immediate `run_agent` would. Its directive is not a person's
+            // words ("A human (operator) asked you"), and there is no person
+            // to tag: the completion re-invokes the operator as any of its
+            // dispatches does.
+            const byOperator = t.createdBy === OPERATOR_SCHEDULER_ID;
             if (t.prompt) {
               dispatch.directive = t.prompt;
-              if (t.createdByLabel) dispatch.directiveFrom = t.createdByLabel;
+              if (t.createdByLabel && !byOperator) dispatch.directiveFrom = t.createdByLabel;
             }
-            if (t.createdByLabel) dispatch.triggeredByName = t.createdByLabel;
-            if (t.createdBy) dispatch.triggeredByUserId = t.createdBy;
+            if (!byOperator) {
+              if (t.createdByLabel) dispatch.triggeredByName = t.createdByLabel;
+              if (t.createdBy) dispatch.triggeredByUserId = t.createdBy;
+            }
             await startAgentRun(
               db,
               dispatch,
@@ -649,6 +720,9 @@ export async function fireDueSchedules(
             // Only a real note rides along; an empty one would present itself to
             // the turn instruction as a stated reason.
             if (t.prompt) runInput.scheduleNote = t.prompt;
+            // Ruling 487: the turn says whose re-check this is. "A human set
+            // it" is false for the operator's own.
+            if (t.createdBy === OPERATOR_SCHEDULER_ID) runInput.scheduledByOperator = true;
             const result = await runOperator(db, runInput);
             refusedTerminal = result.refused === "closed";
             refusedHeld = result.refused === "blocked-by";

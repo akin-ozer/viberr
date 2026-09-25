@@ -8,7 +8,17 @@ import {
   type RevisionDrift,
 } from "~/shared/revision-drift";
 import { closureRefusal, taskClosure } from "./task-closure.server";
-import { resolveDependencies, tasksWaitingOn } from "~/server/projections/dependencies.server";
+import {
+  holdRefusalFor,
+  resolveDependencies,
+  tasksWaitingOn,
+} from "~/server/projections/dependencies.server";
+import {
+  cancelScheduledAction,
+  OPERATOR_SCHEDULER_ID,
+  scheduleDueMs,
+  scheduleTaskAction,
+} from "./schedule.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { prPathOverlaps } from "~/shared/pr-overlaps";
 import {
@@ -53,6 +63,7 @@ import {
   type TaskFileEvent,
   type TaskFrontmatter,
   type TaskPacket,
+  type TaskSchedule,
   unpushedRevisionOf,
   type UnpushedRevision,
 } from "~/schemas/task-file.schema";
@@ -2756,6 +2767,24 @@ export interface OperatorTaskSnapshot {
     profileId: string | null;
     state: "queued" | "running";
   }[];
+  /**
+   * Ruling 487: the runs scheduled on THIS task that have not fired yet, read
+   * from the task file: its own re-run (`run-operator`) or an agent's
+   * (`run-agent`, with the profile and directive). `by` is who scheduled it,
+   * and `yours` marks one the operator scheduled itself, the only kind
+   * `cancel_task_schedule` takes from it. A hold one of these explains needs
+   * no decision packet. Optional so hand-built fixtures need not restate it;
+   * `operatorSnapshot` always sets it.
+   */
+  schedules?: {
+    id: string;
+    action: TaskSchedule["action"];
+    dueAt: string;
+    profileId: string | null;
+    prompt: string;
+    by: string;
+    yours: boolean;
+  }[];
   autonomy: OperatorAutonomy;
   /**
    * F21-16 — the operator's OWN capability policy, LABELLED as its own.
@@ -3513,6 +3542,19 @@ export function operatorSnapshot(
         profileId: r.agent_profile_id,
         state: r.state,
       })),
+    // Ruling 487: what is already set to happen later, so a wait on a clock
+    // is read before it is asked about or scheduled twice.
+    schedules: fm.schedules
+      .filter((s) => s.status === "pending")
+      .map((s) => ({
+        id: s.id,
+        action: s.action,
+        dueAt: s.dueAt,
+        profileId: s.profileId ?? null,
+        prompt: s.prompt,
+        by: s.createdByLabel || s.createdBy,
+        yours: s.createdBy === OPERATOR_SCHEDULER_ID,
+      })),
     autonomy: authority.autonomy,
     operatorPolicy: {
       scope: "operator",
@@ -4224,6 +4266,200 @@ export async function operatorDispatchAgent(
     outcome: "done",
     message: `Started a ${BACKEND_LABEL[result.backend]} run for ${agent.name} (${as}).`,
   };
+}
+
+// ------------------------------------------------- scheduled runs (487)
+
+/** Ruling 487: the refusal both schedule verbs give an operator whose
+ *  `dispatch-agents` grant is not `direct`, or null when it is. */
+function scheduleGrantRefusal(authority: OperatorAuthority): OperatorActionResult | null {
+  const g = dispatchGate(authority);
+  if (g === "direct") return null;
+  return {
+    outcome: "denied",
+    message:
+      g === "recommend"
+        ? "Scheduling a run needs a `direct` `dispatch-agents` grant: a scheduled run starts with " +
+          "nobody present, and yours has a person start every run you propose. Recommend the run " +
+          "with `run_agent` when it is due."
+        : "Dispatching agents is not permitted for the operator here, so scheduling a run is not either.",
+  };
+}
+
+/**
+ * Ruling 487: why this agent could not be dispatched on the task NOW, or null.
+ * The same gates its immediate `run_agent` meets at the dispatcher: a
+ * dependency hold (ruling 186) and the stage the task stands at (ruling 133:
+ * the engaged deliverer runs at every stage, anyone else at the stages it
+ * declares). A schedule is that dispatch with a date on it, so it may not
+ * reach what the dispatch could not.
+ */
+function dispatchRefusalNow(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  agent: DeployedSpecialistView,
+): string | null {
+  const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  if (!file) throw AppError.notFound(`Task ${taskKey} not found.`);
+  const fm = file.parsed.frontmatter;
+  if (fm.blockedBy.length > 0) {
+    return holdRefusalFor(db, projectSlug, taskKey, fm.blockedBy, "scheduling an agent run on it");
+  }
+  const eligibility = runEligibilityFor(
+    agent,
+    fm.engagements,
+    agent.id,
+    fm.stage,
+    projectBoard(ctx, projectSlug),
+  );
+  return eligibility.ok ? null : eligibility.refusal;
+}
+
+/**
+ * Ruling 487 (F40-65): the operator schedules a future run on its OWN task:
+ * its own re-run, or a deployed agent's run with a directive, 1 minute to 28
+ * days out. It is the controller's `schedule_task_action` (ruling 153) at the
+ * operator's door: the same `schedules[]` entry, the same firing path (the
+ * profile deployed when it fires), the same `task.schedule.created` row and
+ * "Scheduled:" line, attributed to the operator.
+ *
+ * Live on WEB-9 the task had to read a deployed cron run at 12:17Z. The
+ * operator could not set that run itself, so it asked the owner to route one
+ * through the controller and then opened a packet only to record the wait.
+ * Scheduling adds no authority: it is the dispatch the operator already holds,
+ * gated the same way (`scheduleGrantRefusal`, `dispatchRefusalNow`).
+ */
+export async function operatorScheduleRun(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    /** "operator" for its own re-run, or a deployed profile id. */
+    agent: string;
+    delayMinutes?: number;
+    /** An ISO instant. Give this or `delayMinutes`. */
+    dueAt?: string;
+    /** The steer for its own re-run, or the agent's directive. */
+    prompt?: string;
+  },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const refused = scheduleGrantRefusal(authority);
+  if (refused) return refused;
+  const nowMs = Date.now();
+  let dueMs: number;
+  try {
+    dueMs = scheduleDueMs(input, nowMs);
+  } catch (error) {
+    if (!(error instanceof AppError)) throw error;
+    // The model has no clock of its own: the refusal says what "now" is.
+    return {
+      outcome: "noop",
+      message: `${error.userMessage} It is ${new Date(nowMs).toISOString()} now.`,
+    };
+  }
+  const prompt = input.prompt?.trim() ?? "";
+  if (prompt.length > 4000) {
+    return { outcome: "noop", message: "Keep the run prompt under 4000 characters." };
+  }
+  const target = input.agent.trim();
+  const schedInput: Parameters<typeof scheduleTaskAction>[1] = {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    dueAt: new Date(dueMs).toISOString(),
+    prompt,
+  };
+  let what = "your own re-run";
+  if (target.toLowerCase() !== "operator") {
+    const agent = deployedAgent(ctx, input.projectSlug, target);
+    if (!agent) {
+      return {
+        outcome: "noop",
+        message:
+          `No deployed agent "${target}" to schedule. Pick a profile from get_task's ` +
+          `deployedSpecialists, or "operator" for your own re-run.`,
+      };
+    }
+    const notNow = dispatchRefusalNow(db, ctx, input.projectSlug, input.taskKey, agent);
+    if (notNow) {
+      return {
+        outcome: "noop",
+        message: `${agent.name}'s run cannot be scheduled, because it could not be dispatched now: ${notNow}`,
+      };
+    }
+    schedInput.action = "run-agent";
+    schedInput.profileId = agent.id;
+    what = `a ${agent.name} run`;
+  }
+  let scheduled: Awaited<ReturnType<typeof scheduleTaskAction>>;
+  try {
+    scheduled = await scheduleTaskAction(db, schedInput, OPERATOR_AUDIT_ACTOR, opCtx(ctx));
+  } catch (error) {
+    // A closed task refuses with the closure sentence (ruling 177): the
+    // task's state, not the policy.
+    if (error instanceof AppError && error.status === 400) {
+      return { outcome: "noop", message: error.userMessage };
+    }
+    throw error;
+  }
+  const minutes = Math.round((Date.parse(scheduled.dueAt) - nowMs) / 60_000);
+  return {
+    outcome: "done",
+    message:
+      `Scheduled ${what} on ${input.taskKey} for ${scheduled.dueAt}, in ${minutes} minutes ` +
+      `(${scheduled.id}). It runs on the profile deployed when it fires, and get_task lists it ` +
+      "under `schedules`. A hold it explains needs no decision packet: one note naming it is the record.",
+  };
+}
+
+/**
+ * Ruling 487: cancel a pending run the operator scheduled on its OWN task. The
+ * task is the one this toolkit is bound to, so another task's entry is simply
+ * not there; a person's entry (the task page, the controller) is theirs to
+ * cancel, never the operator's.
+ */
+export async function operatorCancelSchedule(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; scheduleId: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  const refused = scheduleGrantRefusal(authority);
+  if (refused) return refused;
+  const scheduleId = input.scheduleId.trim();
+  const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!file) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  const schedules = file.parsed.frontmatter.schedules;
+  const entry = schedules.find((s) => s.id === scheduleId && s.status === "pending");
+  if (!entry) {
+    const pending = schedules.filter((s) => s.status === "pending").map((s) => s.id);
+    return {
+      outcome: "noop",
+      message:
+        `${scheduleId} is not a pending schedule on ${input.taskKey}. ` +
+        (pending.length > 0 ? `Pending here: ${pending.join(", ")}.` : "Nothing is scheduled on it."),
+    };
+  }
+  if (entry.createdBy !== OPERATOR_SCHEDULER_ID) {
+    return {
+      outcome: "denied",
+      message:
+        `${scheduleId} was scheduled by ${entry.createdByLabel || "a person"}, so it is theirs to ` +
+        "cancel, not yours. If it no longer fits the task, say so in a comment.",
+    };
+  }
+  const result = await cancelScheduledAction(
+    db,
+    { projectSlug: input.projectSlug, taskKey: input.taskKey, scheduleId },
+    OPERATOR_AUDIT_ACTOR,
+    opCtx(ctx),
+  );
+  return result.cancelled
+    ? { outcome: "done", message: `Cancelled ${scheduleId} on ${input.taskKey}.` }
+    : { outcome: "noop", message: `${scheduleId} is not pending on ${input.taskKey}.` };
 }
 
 /** The delivery audit row's details. */

@@ -13,6 +13,11 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import type { TaskFrontmatter, TaskPacket } from "~/schemas/task-file.schema";
 import type { TaskActionDeps } from "./task-actions.server";
 import {
+  operatorCancelSchedule,
+  operatorScheduleRun,
+  resolveOperatorAuthority,
+} from "./operator-actions.server";
+import {
   findStrandedTasks,
   STRANDED_AFTER_MS,
   STRANDED_NOTE_TITLE,
@@ -230,6 +235,66 @@ describe("sweepStrandedTasks", () => {
     // on top when the run throws, which is right. The point is that the record
     // of the stranded state survives an operator that could not run.
     expect(parsed.timeline.some((e) => e.title === STRANDED_NOTE_TITLE)).toBe(true);
+  });
+});
+
+describe("ruling 487: a run the operator scheduled is a reason for quiet", () => {
+  /**
+   * F40-65: live on WEB-9 the operator opened a packet only so the task "is not
+   * left idle with nothing recorded". A pending schedule already counted as a
+   * reason for quiet here (ruling 330), and the operator can now make one
+   * itself, so the schedule IS the record: the sweep must not nudge a task that
+   * holds on nothing else.
+   *
+   * CANARY: drop the pending-schedule check in `findStrandedTasks`.
+   */
+  it("a task holding only on an operator-made schedule is not nudged, and is again once the operator cancels it", async () => {
+    const store = prepared((s) => seed(s, "VIB-1"));
+    deployOperator(store);
+    const authority = resolveOperatorAuthority(dataCtx(store), store.slug);
+    const scheduled = await operatorScheduleRun(
+      store.db,
+      dataCtx(store),
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        agent: "operator",
+        delayMinutes: 120,
+        prompt: "Read the 12:17Z cron run.",
+      },
+      authority,
+    );
+    expect(scheduled.outcome).toBe("done");
+    const entry = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.frontmatter.schedules[0]!;
+    expect(entry.createdBy).toBe("operator");
+
+    // Half an hour on: quiet by every clock, the run still ninety minutes out.
+    const later = Date.now() + 30 * 60_000;
+    expect(findStrandedTasks(store.db, dataCtx(store), later)).toEqual([]);
+    const runOperator = vi.fn<NonNullable<TaskActionDeps["runOperator"]>>(async () => ({
+      runId: "run_1",
+      queued: false,
+      backend: "claude",
+      autonomy: "supervised",
+    }));
+    expect(
+      await sweepStrandedTasks(store.db, { dataRoot: store.dataRoot, deps: { runOperator } }, later),
+    ).toBe(0);
+    expect(runOperator).not.toHaveBeenCalled();
+
+    // The control: with the operator's schedule cancelled nothing is going to
+    // move the task, and the sweep sees it.
+    const cancelled = await operatorCancelSchedule(
+      store.db,
+      dataCtx(store),
+      { projectSlug: store.slug, taskKey: "VIB-1", scheduleId: entry.id },
+      authority,
+    );
+    expect(cancelled.outcome).toBe("done");
+    expect(
+      findStrandedTasks(store.db, dataCtx(store), Date.now() + 30 * 60_000).map((t) => t.taskKey),
+    ).toEqual(["VIB-1"]);
   });
 });
 

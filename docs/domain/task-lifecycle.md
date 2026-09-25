@@ -604,7 +604,14 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   created). Creating one needs `run-agents`, through the task page's run controls or
   the controller's `schedule_task_action` / `cancel_task_schedule` (ruling 153: the
   entry carries the `<email> · via controller` label); a closed task refuses it with the
-  closure sentence. Each run control carries a when-picker (now, in 5 min, 1 hour, 6
+  closure sentence. The operator schedules its own task's runs with tools of the same
+  names (ruling 487): its own re-run or a deployed agent's, 1 minute to 28 days out, only
+  on a `direct` `dispatch-agents` grant and never for an agent it could not dispatch now
+  (a dependency hold, a stage the agent does not work). Its entry reads `createdBy:
+  "operator"`, its "Scheduled:" line and audit row are the operator's, and it may cancel
+  only its own entries. A pending schedule is a reason for quiet to both the stranded
+  sweep and the settle-time backstop, and a hold it explains needs a note, never a
+  packet. Each run control carries a when-picker (now, in 5 min, 1 hour, 6
   hours, 24 hours). The runner ticks every 60 seconds, claims an occurrence before
   enqueuing (`pending → claimed → fired | failed`, `cancelled` by a human or by an
   archive), never fires on a terminal or archived task (outcomes `skipped-done`,

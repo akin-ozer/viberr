@@ -20,9 +20,9 @@ records its operator when it first leaves the entry stage (`operator: {assignedA
 and the operator is auto-invoked from task creation onward. It never writes code and
 never pushes by hand: it reads the task and the repository, scopes the goal, dispatches
 deployed agents, opens decision packets, recommends or performs stage transitions,
-decides delivery (the server pushes), leases shared files to its own task, proposes
-changes to the project's rulings, and, under full autonomy with an explicit grant,
-accepts completion.
+decides delivery (the server pushes), leases shared files to its own task, schedules
+its own task's later runs (ruling 487), proposes changes to the project's rulings, and,
+under full autonomy with an explicit grant, accepts completion.
 
 Its persona is the doctrine file `agents/definitions/operator.md` plus the
 `viberr-app-expertise` skill; both ship from `app/server/seed/assets/` and are
@@ -94,7 +94,7 @@ from the workflow graph, never a stored preset).
 | `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict (ruling 332), or the reconciler's flip of an open PR to conflicting (ruling 475(b)); the instruction names both origins |
 | `gates-failed` | rework | Viberr's own run of the project's gates on the revision under review finished with a gate that did not exit 0 (ruling 482). The turn names each failing gate, its command and its log's attachment name, tells the operator to `run_agent` the deliverer with them and deliver the fix, and forbids asking an agent to re-run the gates to report them |
 | `stranded` | decide what happens next | the stranded-task sweep (§3.1, ruling 330) |
-| `scheduled` | re-check | the schedule runner |
+| `scheduled` | re-check | the schedule runner; the turn says who set it ("a human set earlier", or "you set earlier yourself" for the operator's own entry, `scheduledByOperator`, ruling 487) |
 | `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
 
 `autoInvokeOperator` is the shared fire-and-forget seam; it is a no-op when no
@@ -175,7 +175,9 @@ packet (or, for the stranded resume, leaves a note) instead of looping.
 is live on the task, a finished drive whose task is stranded gets ONE resume nudge (a
 `transition` trigger with `strandedResume: true`) instead of a flip to "waiting on you".
 `operatorLeftTaskStranded` says a task is stranded when it is not archived, has no packet,
-no pending recommendation and no `blockedBy`, and any of: the drive's own last transition
+no pending recommendation, no `blockedBy` and no pending schedule (ruling 487: a run with its
+time on the record will move the task, so the nudge that told the operator to "record the
+hold" with a packet no longer comes), and any of: the drive's own last transition
 landed it on this stage (`ctx.operatorRun.movedToStageId`, ruling 152(a) — its move queues
 no re-trigger, whatever the new stage's boundary); the drive's whole plan was refused
 (ruling 228); the drive refreshed the branch and stopped without delivering (ruling 442);
@@ -227,7 +229,9 @@ trigger doctrine and the task snapshot stay in the user turn.
 unfinished report a failed run left standing (ruling 397), the refusal nothing has
 answered yet (ruling 408), the person's decisions on the task (ruling 415), the
 collisions with other open PRs (ruling 413), where the branch refresh is refused
-(ruling 424) and whose the open packet is (ruling 437), and it APPENDS the capability-gap
+(ruling 424), whose the open packet is (ruling 437) and the runs already scheduled on the
+task with whose each is (ruling 487: a hold one of them explains needs one note and no
+packet), and it APPENDS the capability-gap
 remedy clause (ruling 85: a packet must name the grantable capability and where a human
 grants it, not only workarounds). The backend prompt builders wrap the result; the
 Codex prompt adds `CODEX_PLAN_WHOLE_TURN` (nothing re-invokes it for a step of its own,
@@ -279,7 +283,9 @@ section for exactly this.
   `workStageId`, `nextStages` (with boundaries), `reworkStages` (the earlier stages the
   operator may move the task to directly: while validation is `failing`, and the one move
   back to the review stage a `changed` revision licenses, ruling 163), `repo`, `branch`,
-  `noChanges`, `liveRuns`.
+  `noChanges`, `liveRuns`, `schedules` (ruling 487: the pending entries on the task, each
+  with its action, due time, profile, prompt, `by` and `yours`, true for one the operator
+  scheduled itself).
 - **Agents**: `specialist` (the deliverer), `reviewers` (each with its own verdict on the
   current revision and `consecutiveRequestChanges`), `requiredReviewers` (ruling 178: the
   reviewers the PROJECT requires per review stage, each of which must hold an approve verdict
@@ -340,11 +346,13 @@ in-process MCP server `viberr` (loaded up front, `alwaysLoad`), its granted org 
 with marked write tools withheld (ruling 176), and the deny list
 `OPERATOR_READ_ONLY_DENIED_TOOLS` (`Bash`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`).
 On Codex it runs in a scratch working directory with the task store and checkout read-only
-and returns a structured plan over thirteen verbs (`post_comment`, `open_packet`,
+and returns a structured plan over fifteen verbs (`post_comment`, `open_packet`,
 `resolve_packet`, `set_goal`, `run_agent`, `transition_stage`, `deliver_for_review`,
 `update_branch_from_base`, `accept_completion`, `flag_context_conflict`,
-`set_dependencies`, `propose_kb_correction`, `lease_files`), the schema narrowed to what its
-policy allows (`operatorPlanToolsFor`) and its packet options carrying every payload the
+`set_dependencies`, `propose_kb_correction`, `lease_files`, `schedule_task_action`,
+`cancel_task_schedule`), the schema narrowed to what its policy allows
+(`operatorPlanToolsFor`; the two schedule verbs only on a `direct` dispatch grant, and never
+in the all-denied fallback) and its packet options carrying every payload the
 Claude tool does (ruling 433). The server executes the plan after the run
 (`runtime.operator.plan_executed` is the idempotency marker boot recovery reads). Once a
 step leaves the task holding a packet it did not hold when the plan began, the remaining
@@ -355,7 +363,7 @@ refusals the plan collected before it (`withEarlierRefusals`, ruling 446).
 ## 5. Tools and the governed actions behind them
 
 A withheld capability means the tool is **not built**; the model cannot reach it. The
-`viberr` server holds up to 19 tools.
+`viberr` server holds up to 21 tools.
 
 | Tool (`viberr`) | Action | Capability |
 |---|---|---|
@@ -373,6 +381,8 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `resolve_decision_packet` | `operatorResolvePacket` (withdraws only a packet the operator raised: `from: operator` and no `askedBy`, `packetIsOperators`) | `generate-packets` |
 | `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`) | `generate-packets` (the wait is the hold packet's replacement) |
 | `run_agent` | `operatorDispatchAgent` (`profileId`, `prompt`, `delivers`, `reason`, `completeness`) | `dispatch-agents` |
+| `schedule_task_action` | `operatorScheduleRun` → `scheduleTaskAction` (ruling 487: THIS task's own re-run or a deployed agent's run with a directive, `delayMinutes` 1..40320 or an ISO `dueAt`, refused as `noop` for an agent it could not dispatch now) | `dispatch-agents: direct` only |
+| `cancel_task_schedule` | `operatorCancelSchedule` → `cancelScheduledAction` (ruling 487: a pending entry the operator scheduled itself; a person's is `denied`) | `dispatch-agents: direct` only |
 | `deliver_for_review` | `operatorDeliverForReview` → `performDelivery` | `deliver-review-pr` |
 | `lease_files` | `operatorLeaseFiles` (ruling 417: lease path globs to THIS task until it merges) | `deliver-review-pr` |
 | `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → the delivering agent, or a packet when no agent can take it, ruling 475) | `update-task-branch` |
@@ -404,6 +414,30 @@ Details that matter:
   retry is already on the task's schedule and the timeline carries the "Dispatch held"
   note; the Codex plan mirror records the `noop` and executes the rest of the plan. A
   directive handed to an agent notifies no person named in it (ruling 232).
+- **Schedules** (ruling 487, F40-65). `schedule_task_action(agent, delayMinutes | dueAt,
+  prompt?)` is the controller's verb (ruling 153) at the operator's door, bound to the task
+  it runs on: `agent` is `"operator"` for its own re-run or a deployed profile id, 1 minute
+  to 28 days out (`scheduleDueMs`, the task page's bounds and sentence; the refusal says
+  what time it is now, because the model has no clock). It writes the same `schedules[]`
+  entry through `scheduleTaskAction` under `operatorAuthorized`, so the entry reads
+  `createdBy: "operator"` and `createdByLabel: "operator"`, the "Scheduled:" line is the
+  operator's, the `task.schedule.created` row's actor is the operator, and it fires on the
+  profile deployed when it fires. It is gated like the operator's immediate dispatch: the
+  tool is built, and the plan verb offered, only on a `direct` `dispatch-agents` grant (a
+  scheduled run starts with nobody present; under `recommend` a person starts every run the
+  operator proposes), and an agent it could not dispatch NOW is a `noop` naming why: not
+  deployed, held by a dependency (ruling 186's sentence), or not eligible at the task's
+  stage (ruling 133). The reply names the schedule id and says a hold it explains needs no
+  packet. At fire time the operator's own entry starts the agent the way its `run_agent`
+  would, with no person's name on the directive and no person to tag; its own re-run is
+  told "a SCHEDULED re-check you set earlier yourself". `cancel_task_schedule(scheduleId)`
+  cancels a pending entry the operator made on its own task; an entry of another task is
+  not there (`noop`), and a person's entry is `denied`, theirs to cancel. A held dispatch
+  (ruling 152(c)) made under the operator's authority writes its retry the same way, as the
+  operator's. The doctrine, the non-negotiable rules, the stage rule's tail and the
+  idle-stage nudge all say it: a wait a clock explains is scheduled, never asked, and a hold
+  a pending schedule explains needs one timeline note naming it and no decision packet; the
+  packet stays for a hold a person directed (ruling 131(f)).
 - **Transitions.** An `auto` boundary is crossed directly even when supervised; an
   `approval` boundary always files a recommendation card for a human, whatever the
   autonomy or the grant (ruling 151); a `human` boundary is refused; a backward move

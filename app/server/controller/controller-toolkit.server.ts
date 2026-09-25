@@ -207,7 +207,9 @@ import { listUsers } from "~/server/auth/user-store.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import {
   cancelScheduledAction,
+  scheduleDueMs,
   scheduleTaskAction,
+  SCHEDULE_MAX_MINUTES,
 } from "~/server/tasks/schedule.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
@@ -337,7 +339,6 @@ function divergedSentence(diverged: TemplateCopyDrift[]): string {
   return `${n} project cop${n === 1 ? "y does" : "ies do"} not carry this change: ${clauses.join("; ")}.`;
 }
 
-/** The ceiling the task page's schedule form applies (28 days). */
 /**
  * Ruling 486: an OAuth sign-in's grant as `list_mcp_servers` reports it —
  * counted, labelled and with its writes by name, never the whole list (a
@@ -356,7 +357,6 @@ function grantOf(scope: string | null) {
   };
 }
 
-const SCHEDULE_MAX_MINUTES = 40_320;
 
 /** Build the toolkit for one controller turn. */
 /**
@@ -2897,7 +2897,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         delayMinutes: z
           .number()
           .optional()
-          .describe("Minutes from now (1 to 40320). Give this or dueAt."),
+          .describe(`Minutes from now (1 to ${SCHEDULE_MAX_MINUTES}). Give this or dueAt.`),
         dueAt: z
           .string()
           .optional()
@@ -2922,26 +2922,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const denied = requireScheduleTier(slug, "schedule a run through the controller");
           if (denied) return denied;
           // The task page's bounds and sentences (project.task.tsx
-          // `schedule-action`): a crafted delay overflowed Date once, and a
-          // schedule further out than the retention story is a note, not a plan.
-          const now = Date.now();
-          let dueMs: number;
-          if (args.delayMinutes !== undefined) {
-            const minutes = args.delayMinutes;
-            if (!Number.isFinite(minutes) || minutes < 1 || minutes > SCHEDULE_MAX_MINUTES) {
-              throw AppError.validation("Schedule between 1 minute and 28 days out.");
-            }
-            dueMs = now + Math.round(minutes) * 60_000;
-          } else if (args.dueAt !== undefined) {
-            dueMs = Date.parse(args.dueAt);
-            if (!Number.isFinite(dueMs)) throw AppError.validation("Invalid schedule time.");
-            const minutes = (dueMs - now) / 60_000;
-            if (minutes < 1 || minutes > SCHEDULE_MAX_MINUTES) {
-              throw AppError.validation("Schedule between 1 minute and 28 days out.");
-            }
-          } else {
-            throw AppError.validation("Schedule between 1 minute and 28 days out.");
-          }
+          // `schedule-action`), shared with the operator's door (ruling 487).
+          const dueMs = scheduleDueMs(args);
           const steer = args.prompt ? prose(args.prompt) : "";
           if (steer.length > 4000) {
             throw AppError.validation("Keep the run prompt under 4000 characters.");
