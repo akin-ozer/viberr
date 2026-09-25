@@ -15,6 +15,9 @@ import type { NotificationKind } from "~/shared/mapping/notification.server";
 
 export const NOTIF_PREF_CATEGORIES = [
   "packets",
+  // Ruling 481(a): an agent's question, its own toggle. It used to ride
+  // "approvals", so silencing stage-approval noise silenced every question.
+  "questions",
   "approvals",
   "mentions",
   "policy",
@@ -43,6 +46,7 @@ export type NotifPrefs = Record<NotifPrefCategory, NotifChannelPrefs>;
 function defaultNotifPrefs() {
   return {
     packets: { app: true },
+    questions: { app: true },
     approvals: { app: true },
     mentions: { app: true },
     policy: { app: true },
@@ -65,6 +69,7 @@ export const DEFAULT_NOTIF_PREFS = defaultNotifPrefs();
  */
 const KIND_TO_CATEGORY = {
   packet: "packets",
+  question: "questions",
   approval: "approvals",
   mention: "mentions",
   policy: "policy",
@@ -78,9 +83,16 @@ export function notifCategoryForKind(kind: NotificationKind): NotifPrefCategory 
   return KIND_TO_CATEGORY[kind];
 }
 
-/** The routing categories — PROFILE_NTF (the first five verbatim from
- *  profile.jsx; `controller` per ruling 99, `dependencies` per ruling 131 and
- *  `ownership` per ruling 140). */
+/** The routing categories — PROFILE_NTF (the rows of profile.jsx;
+ *  `controller` per ruling 99, `dependencies` per ruling 131, `ownership` per
+ *  ruling 140 and `questions` per ruling 481).
+ *
+ *  Ruling 481(a) (F40-48): each description names what its kind's writers
+ *  actually send. "Approval requests" said "Operator transition requests at
+ *  boundaries you can approve" while it carried every agent question, so a
+ *  person who switched it off to quiet stage traffic stopped hearing from the
+ *  agents waiting on them. `notification-prefs.test.ts` pins each writer's
+ *  subject to the description of the category it routes through. */
 export const PROFILE_NTF: {
   id: NotifPrefCategory;
   n: string;
@@ -89,12 +101,17 @@ export const PROFILE_NTF: {
   {
     id: "packets",
     n: "Decision packets for you",
-    d: "Blocked decisions and completion reports waiting on your acceptance.",
+    d: "Decisions the operator opened for you: a blocked task, a question about scope, or a completion report waiting on your acceptance.",
+  },
+  {
+    id: "questions",
+    n: "Agent questions",
+    d: "A question an agent working on your task asked a person to answer. The agent waits until someone does.",
   },
   {
     id: "approvals",
     n: "Approval requests",
-    d: "Operator transition requests at boundaries you can approve.",
+    d: "The operator's recommendations and the next step recorded after a delivery, waiting for you to apply or dismiss them.",
   },
   {
     id: "mentions",
@@ -159,6 +176,9 @@ const storedChannelPrefsSchema = z
  *  `.catch` keeps one junk entry from discarding the others. */
 const storedNotifPrefsSchema = z.object({
   packets: storedChannelPrefsSchema,
+  // Ruling 481: absent on prefs stored before agent questions had their own
+  // category — the per-field catch reads it as ON.
+  questions: storedChannelPrefsSchema,
   approvals: storedChannelPrefsSchema,
   mentions: storedChannelPrefsSchema,
   policy: storedChannelPrefsSchema,

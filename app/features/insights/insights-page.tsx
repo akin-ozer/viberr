@@ -391,8 +391,13 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
         <h2>Backend quota</h2>
       </div>
       <ul className="bar-list">
-        {quota.map(({ backend, reading, exhausted, credentialRefused }) => {
-          const pct = reading ? pctOf(reading.utilization) : null;
+        {quota.map(({ backend, reading, exhausted, credentialRefused, readingWindowReset }) => {
+          // Ruling 481(d) (F40-50): a reading whose own window has reset
+          // describes a window that is over. It keeps its row, in the past
+          // tense, but no percentage and no bar: "92% of five hour · resets
+          // 03:30" at 09:00 read as a nearly spent window about to reopen.
+          const lapsed = reading != null && readingWindowReset === true;
+          const pct = reading && !lapsed ? pctOf(reading.utilization) : null;
           // V4 (pass 31): an exhaustion record is a claim about ONE moment. A
           // utilization reading this backend reported AFTER that moment is
           // fresher evidence from the same provider, so it wins — the refusal
@@ -482,9 +487,11 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                   ? "usage limit reached"
                   : reading == null
                     ? "no reading yet"
-                    : pct == null
-                      ? `${reading.rateLimitType.replaceAll("_", " ")} · utilization not reported`
-                      : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
+                    : lapsed
+                      ? `${reading.rateLimitType.replaceAll("_", " ")} · window reset, no reading since`
+                      : pct == null
+                        ? `${reading.rateLimitType.replaceAll("_", " ")} · utilization not reported`
+                        : `${pct}% of ${reading.rateLimitType.replaceAll("_", " ")}`}
                 {refusal && (
                   <span className="bar-cost" title={refused}>
                     {[
@@ -527,11 +534,12 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                     {[
                       // A provider warning outranks the reset date — the panel
                       // exists to warn BEFORE a run fails, so "allowed_warning"
-                      // must never hide behind "resets 9/18".
-                      reading.status !== "allowed"
+                      // must never hide behind "resets 9/18". Not once the
+                      // window it warned about has reset (ruling 481(d)).
+                      reading.status !== "allowed" && !lapsed
                         ? reading.status.replace(/^allowed_/, "").replaceAll("_", " ")
                         : null,
-                      reading.isUsingOverage ? "overage" : null,
+                      reading.isUsingOverage && !lapsed ? "overage" : null,
                       // Hydration-gated for the same reason the `title` above
                       // is: a local calendar date renders in the SERVER's
                       // timezone during SSR and the viewer's on the client, and
@@ -543,7 +551,8 @@ function BackendQuotaPanel({ quota }: { quota: InsightsSummary["backendQuota"] }
                       // Ruling 130(d): the reading names the HOUR when the
                       // provider sent one, not a bare calendar date.
                       reading.resetsAt != null
-                        ? `resets ${
+                        ? // Ruling 481(d): past tense once it has passed.
+                          `${lapsed ? "reset" : "resets"} ${
                             hydrated
                               ? formatDayDotTime(new Date(reading.resetsAt * 1000).toISOString())
                               : `${utcDayKey(new Date(reading.resetsAt * 1000).toISOString())} ${formatClockUTC(new Date(reading.resetsAt * 1000).toISOString())} (UTC)`

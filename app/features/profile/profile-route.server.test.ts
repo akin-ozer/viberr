@@ -495,6 +495,36 @@ describe("/profile agent accounts (ruling 127)", () => {
     }
   });
 
+  /**
+   * Ruling 481(d) (F40-50): the viewer's own reading whose window reset
+   * before this load is marked, from the one home Insights reads too, so the
+   * card says "That window reset" instead of "The window resets".
+   *
+   * Canary: return `false` from `readingWindowReset`, or drop the field in
+   * `ownReading`, and `windowReset` reads false.
+   */
+  it("ruling 481: the viewer's reading whose window already reset is marked as such", async () => {
+    const quota = await import("~/server/runtimes/backend-quota.server");
+    quota.recordBackendRateLimit(app.db, "claude", {
+      credentialUserId: ardaId,
+      credentialLabel: "Arda Test",
+      status: "allowed_warning",
+      rateLimitType: "five_hour",
+      utilization: 0.92,
+      // The window closed an hour ago; the reading was taken before it did.
+      resetsAt: Math.floor((Date.now() - 60 * 60_000) / 1000),
+      isUsingOverage: false,
+      observedAt: new Date(Date.now() - 90 * 60_000).toISOString(),
+    });
+    try {
+      const arda = await backendsOf(ardaId);
+      const claude = arda.find((b) => b.backend === "claude")!;
+      expect(claude.usage).toMatchObject({ rateLimitType: "five_hour", windowReset: true });
+    } finally {
+      quota.retireBackendRecordsFor(app.db, "claude", ardaId);
+    }
+  });
+
   it("ruling 294: a reading older than the connection describes the account it replaced", async () => {
     // The second gate, and the moment it matters: the panel revalidates the
     // loader the instant a sign-in SUCCEEDS, which is exactly when a surviving

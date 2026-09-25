@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { z } from "zod";
 import { useNavigate, type FetcherWithComponents } from "react-router";
 import { Avatar } from "~/ui/avatar";
@@ -15,7 +15,14 @@ import { RBAC_ROWS } from "~/features/policy/policy-data";
 import type { ProjectRole } from "~/shared/rbac";
 import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { PROFILE_NTF, type NotifPrefs } from "./notification-prefs";
+import {
+  desktopAlertState,
+  disableDesktopAlerts,
+  enableDesktopAlerts,
+  type DesktopAlertState,
+} from "~/features/notifications/desktop-alerts";
 import { MiniModal } from "~/features/org-settings/mini-modal";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
 import type { ProfileBackend } from "./profile-query.server";
 
@@ -309,7 +316,84 @@ function ProfileNotifications({
             </span>
           </div>
         ))}
+        <DesktopNotificationsRow />
       </div>
+    </div>
+  );
+}
+
+/** Why the switch cannot turn on here, in the person's words. */
+function desktopRefusal(state: DesktopAlertState | null): string | null {
+  if (state === "blocked") {
+    return "Notifications are blocked for Viberr in this browser's site settings. Allow them there, then switch this on.";
+  }
+  if (state === "unsupported") {
+    return "This browser can't show notifications from Viberr at this address. They need a desktop browser and an HTTPS or localhost address.";
+  }
+  return null;
+}
+
+/**
+ * Ruling 481(c) (F40-51): the opt-in for desktop notifications, per browser
+ * (`desktop-alerts.ts` says why). The browser's permission is requested here
+ * and nowhere else, and only when the person switches it on. Its state is
+ * the browser's, so it renders off until hydration reads it, and it is read
+ * again whenever the page regains focus (a person who allowed Viberr in site
+ * settings comes back to a switch that knows).
+ */
+function DesktopNotificationsRow() {
+  const push = useToast();
+  const [state, setState] = useState<DesktopAlertState | null>(null);
+  const asking = useRef(false);
+  useEffect(() => {
+    const sync = () => setState(desktopAlertState());
+    sync();
+    window.addEventListener("focus", sync);
+    return () => window.removeEventListener("focus", sync);
+  }, []);
+
+  const flip = () => {
+    if (state === null || asking.current) return;
+    if (state === "on") {
+      disableDesktopAlerts();
+      setState("off");
+      push("Desktop notifications off");
+      return;
+    }
+    asking.current = true;
+    void enableDesktopAlerts().then((next) => {
+      asking.current = false;
+      setState(next);
+      if (next === "on") {
+        push("Desktop notifications on");
+        return;
+      }
+      push(
+        desktopRefusal(next) ??
+          "Desktop notifications stay off: the browser was not allowed to show them.",
+        "error",
+      );
+    });
+  };
+
+  const refusal = desktopRefusal(state);
+  return (
+    <div className="pref-row">
+      <span className="pref-main">
+        <div className="pn">Desktop notifications</div>
+        <div className="pd">
+          In this browser: a system notification when a decision, an agent
+          question or an approval waits on you and no Viberr tab is in front
+          of you. Clicking it opens the task. Every open tab&apos;s title also
+          counts them.
+        </div>
+        {refusal ? <div className="pd">{refusal}</div> : null}
+      </span>
+      <span className="ntf-cols">
+        <span className="ntf-cell">
+          <TglP on={state === "on"} onChange={flip} label="Desktop notifications" />
+        </span>
+      </span>
     </div>
   );
 }
@@ -562,6 +646,7 @@ function ProfileGithub({
   const error = actionError(fetcher);
   const [connectBusy, setConnectBusy] = useState(false);
   const [connectErr, setConnectErr] = useState<string | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   // Start better-auth's GitHub OAuth link and follow the returned provider URL
   // — the same flow the login screen uses. (The old `/auth/github` href had no
@@ -673,10 +758,30 @@ function ProfileGithub({
               type="button"
               // Ruling 149: disconnecting an identity is destructive.
               className="btn ghost sm push danger"
-              onClick={() => submit({ intent: "github-disconnect" })}
+              // Ruling 481(b) (F40-49): asks first, like the agent account
+              // Disconnect beside it.
+              onClick={() => setConfirmDisconnect(true)}
             >
               Disconnect
             </button>
+            {confirmDisconnect && (
+              <ConfirmDialog
+                screenLabel="Disconnect GitHub dialog"
+                title="Disconnect GitHub?"
+                body={
+                  <>
+                    Your approvals, acceptances, and runtime-session opens are
+                    attributed to your workspace identity instead of{" "}
+                    {user.githubHandle ? `@${user.githubHandle}` : "your GitHub account"}{" "}
+                    in audit records until you connect again.
+                  </>
+                }
+                confirmLabel="Disconnect GitHub"
+                busy={fetcher.state !== "idle"}
+                onCancel={() => setConfirmDisconnect(false)}
+                onConfirm={() => submit({ intent: "github-disconnect" })}
+              />
+            )}
           </div>
         ) : (
           <div className="cred-warn">

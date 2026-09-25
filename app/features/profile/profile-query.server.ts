@@ -114,6 +114,11 @@ export interface ProfileBackendUsage {
   isUsingOverage: boolean;
   /** ISO instant of the run line this reading was read off. */
   observedAt: string;
+  /** Ruling 481(d): `resetsAt` has passed, so the window this reading
+   *  describes is over and no run has reported on the new one
+   *  (`readingWindowReset`). The card words it in the past tense and drops
+   *  the percentage. */
+  windowReset: boolean;
 }
 
 export interface ProfileBackend {
@@ -172,6 +177,9 @@ function ownReading(
     resetsAt: reading.resetsAt === null ? null : new Date(reading.resetsAt * 1000).toISOString(),
     isUsingOverage: reading.isUsingOverage,
     observedAt: reading.observedAt,
+    // Ruling 481(d): aged in `latestBackendRateLimits`, the one home Insights
+    // reads too.
+    windowReset: row?.readingWindowReset ?? false,
   };
 }
 

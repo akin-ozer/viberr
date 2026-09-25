@@ -512,9 +512,82 @@ describe("projectionCheckGaps (ruling 140)", () => {
         );
       `);
       expect(projectionCheckGaps(db)).toEqual([
+        "notifications.kind: question",
         "notifications.kind: dependency",
         "notifications.kind: ownership",
       ]);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+});
+
+/**
+ * Ruling 481(a): a root whose `notifications.kind` CHECK predates a kind is
+ * widened in place at boot, keeping every row and index, instead of refusing
+ * the new kind at INSERT until someone re-baselines (and loses sign-ins).
+ *
+ * Canary: return `[]` from `widenNotificationKindCheck` before the rebuild and
+ * the gap survives, the `question` insert throws, and the index check fails.
+ */
+describe("widenNotificationKindCheck (ruling 481)", () => {
+  it("rebuilds a lagging notifications table with the shipped CHECK, rows and indexes kept", async () => {
+    const { projectionCheckGaps, widenNotificationKindCheck } = await import("./boot.server");
+    const ctx = createTestDbContext();
+    try {
+      const db = ctx.makeDb();
+      // A current root: nothing to do.
+      expect(widenNotificationKindCheck(db)).toEqual([]);
+      // What a root first opened before ruling 481 carries.
+      db.exec(`
+        DROP TABLE notifications;
+        CREATE TABLE notifications (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('packet', 'approval', 'mention', 'quality', 'policy', 'controller', 'dependency', 'ownership')),
+          ptype TEXT CHECK (ptype IN ('input', 'blocked')),
+          title TEXT,
+          text TEXT NOT NULL,
+          actor_json TEXT,
+          project_slug TEXT,
+          task_key TEXT,
+          occurred_at TEXT NOT NULL,
+          read_at TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_notifications__user ON notifications (user_id, occurred_at DESC);
+        INSERT INTO notifications (id, user_id, kind, ptype, title, text, occurred_at, read_at, created_at)
+        VALUES ('ntf_old', 'u_1', 'packet', 'input', 'Decision needed', 'body',
+                '2026-09-25T03:00:00.000Z', NULL, '2026-09-25T03:00:00.000Z');
+      `);
+      const insertQuestion = () =>
+        db
+          .prepare(
+            `INSERT INTO notifications (id, user_id, kind, text, occurred_at, created_at)
+             VALUES ('ntf_q', 'u_1', 'question', 't', '2026-09-25T03:05:00.000Z', '2026-09-25T03:05:00.000Z')`,
+          )
+          .run();
+      expect(insertQuestion).toThrow(/CHECK constraint failed/);
+      expect(projectionCheckGaps(db)).toEqual(["notifications.kind: question"]);
+
+      expect(widenNotificationKindCheck(db)).toEqual(["question"]);
+
+      expect(projectionCheckGaps(db)).toEqual([]);
+      expect(db.prepare(`SELECT id, kind, ptype, title FROM notifications`).all()).toEqual([
+        { id: "ntf_old", kind: "packet", ptype: "input", title: "Decision needed" },
+      ]);
+      insertQuestion();
+      const indexes = db
+        .prepare(
+          `SELECT name FROM sqlite_master
+           WHERE type = 'index' AND tbl_name = 'notifications' AND sql IS NOT NULL
+           ORDER BY name`,
+        )
+        .all()
+        .map((row) => row.name);
+      expect(indexes).toEqual(["idx_notifications__user", "idx_notifications__user_task"]);
+      // Idempotent: the next boot finds nothing to widen.
+      expect(widenNotificationKindCheck(db)).toEqual([]);
     } finally {
       ctx.cleanup();
     }

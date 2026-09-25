@@ -1013,8 +1013,8 @@ describe("backend quota readings (pass 29)", () => {
     );
     const before = getInsightsSummary(db, NOW).backendQuota;
     expect(before).toEqual([
-      { backend: "claude", reading: null, credentialRefused: null, exhausted: null },
-      { backend: "codex", reading: null, credentialRefused: null, exhausted: null },
+      { backend: "claude", reading: null, credentialRefused: null, exhausted: null, readingWindowReset: false },
+      { backend: "codex", reading: null, credentialRefused: null, exhausted: null, readingWindowReset: false },
     ]);
 
     recordBackendRateLimit(db, "claude", {
@@ -1044,6 +1044,40 @@ describe("backend quota readings (pass 29)", () => {
     expect(claude.reading?.utilization).toBeCloseTo(0.92, 5);
     expect(claude.reading?.observedAt).toBe("2026-08-23T11:30:00.000Z");
     expect(after.find((q) => q.backend === "codex")!.reading).toBeNull();
+    // The window resets 2026-08-27T12:00Z, after NOW: still current.
+    expect(claude.readingWindowReset).toBe(false);
+  });
+
+  /**
+   * Ruling 481(d) (F40-50): a reading whose own window reset before the
+   * summary was generated is marked, so the panel stops drawing its bar and
+   * stops saying "resets <time>" in the present tense. Only an exhaustion used
+   * to age against its reset.
+   *
+   * Canary: return `false` from `readingWindowReset`.
+   */
+  it("marks a reading whose window reset before generatedAt (ruling 481)", async () => {
+    const db = ctx.makeDb();
+    const { recordBackendRateLimit } = await import("~/server/runtimes/backend-quota.server");
+    recordBackendRateLimit(db, "claude", {
+      credentialUserId: null,
+      credentialLabel: null,
+      status: "allowed",
+      rateLimitType: "five_hour",
+      utilization: 0.92,
+      // 2026-08-23T03:30:00Z, hours before NOW (12:00).
+      resetsAt: Date.parse("2026-08-23T03:30:00.000Z") / 1000,
+      isUsingOverage: false,
+      observedAt: "2026-08-23T03:01:00.000Z",
+    });
+    const summary = getInsightsSummary(db, NOW);
+    const claude = summary.backendQuota.find((q) => q.backend === "claude")!;
+    expect(claude.readingWindowReset).toBe(true);
+    // The reading itself is kept, as history.
+    expect(claude.reading?.utilization).toBeCloseTo(0.92, 5);
+    // One second before the reset it was still current.
+    const earlier = getInsightsSummary(db, "2026-08-23T03:29:59.000Z").backendQuota;
+    expect(earlier.find((q) => q.backend === "claude")!.readingWindowReset).toBe(false);
   });
 });
 

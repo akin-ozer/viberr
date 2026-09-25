@@ -510,6 +510,38 @@ describe("useLiveUpdates", () => {
     expect(seen).toEqual(["1", "2"]);
   });
 
+  /**
+   * Ruling 481(c): a DATA event reaches a frame listener too (the root's
+   * attention watcher re-reads the unread decisions on `notification.*`), once
+   * per id, and it still revalidates the routes that read it.
+   *
+   * Canary: drop the `dispatchFrame` call beside `recordLive` and `seen` stays
+   * empty.
+   */
+  it("hands a data event to a frame listener once, and still revalidates on it (ruling 481)", () => {
+    const seen: string[] = [];
+    const off = onLiveFrame("notification.created", (event) => seen.push(event.lastEventId));
+    try {
+      render(
+        <>
+          <Probe scopes={["user"]} />
+          <Probe scopes={["user"]} />
+        </>,
+        { wrapper: DataRouter },
+      );
+      const [a, b] = FakeEventSource.instances;
+      act(() => {
+        a!.emit("notification.created", "7");
+        b!.emit("notification.created", "7");
+        vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      });
+      expect(seen).toEqual(["7"]);
+      expect(loaderRuns).toBe(1);
+    } finally {
+      off();
+    }
+  });
+
   it("says when the tab's stream failed, for the console's footer, until it reopens", () => {
     let failed = false;
     function Status() {

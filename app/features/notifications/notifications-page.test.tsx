@@ -523,3 +523,33 @@ describe("ntfMeta — the pass-34 kinds", () => {
     expect(ntfMeta({ kind: "whatever" })).toEqual({ icon: "alert", cls: "act-policy" });
   });
 });
+
+/**
+ * Ruling 481(a) (F40-48): an agent's question is a decision that waits on a
+ * person, and it looks like one. Filed as an `approval` it wore the stage
+ * arrow (`act-transition`) and the "approval" pill beside operator packets
+ * pilled as decisions; the task page calls the same packet "Agent question".
+ *
+ * Canary: delete the `question` arm of `ntfPill` (it falls through to the
+ * kind name, "question", on the info tone) or of `ntfMeta` (the alert
+ * catch-all) and this fails.
+ */
+describe("the agent question row (ruling 481)", () => {
+  it("waits on you with the hand glyph and an 'agent question' input pill", () => {
+    const question: NotificationPageItem = {
+      ...ITEMS[2]!,
+      id: "n-question",
+      kind: "question",
+      ptype: null,
+      title: "Platform Engineer asks: Connect the Worker to Workers Builds",
+      text: "Only the owner can press Connect.",
+      waitingOnYou: true,
+    };
+    const { container } = renderPage([question]);
+    const row = container.querySelector(".rq-row")!;
+    expect(row.querySelector(".pill.input")!.textContent).toBe("agent question");
+    const icon = row.querySelector(".pev-ico")!;
+    expect(icon.classList.contains("act-policy")).toBe(true);
+    expect(icon.classList.contains("act-transition")).toBe(false);
+  });
+});

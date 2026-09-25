@@ -329,7 +329,10 @@ export async function openAgentQuestionPacket(
   const notice: TaskWatcherNotice = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    kind: "approval",
+    // Ruling 481(a) (F40-48): a question, not an approval. As `approval` it
+    // wore the stage-transition arrow and pill, and "Approval requests" off
+    // silenced it with nothing on the toggle saying so.
+    kind: "question",
     title: `${role} asks: ${packet.title}`,
     text: packet.body || "An engaged agent needs a human decision.",
     // Ruling 361: the agent that asked, by name; the Operator only when it did.

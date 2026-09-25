@@ -39,7 +39,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
 | `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user), same page layout as the project controller (ruling 419; a reply shown from its first line and announced by one always-mounted status region, ruling 476(c), (d)); with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `interrupt` (`conversationId`, `runId`) |
 | `/insights` | `insights.tsx` | org admin | run analytics under the standalone-page header (ruling 145): totals, coordination share, outcomes (a restart-interrupted run is stopped, not an error, and a never-started one is out of the completion rate, ruling 158), breakdowns naming what their top 8 left out, the **Prompt cache** table (ruling 369: by run kind and by credential kind; every figure on a `data-` attribute, rows keyed `data-cache-row="by run kind:primary"`), oversight cards naming their exceptions (ruling 290), backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)). Details in [../domain/auth-and-rbac.md §6](../domain/auth-and-rbac.md#6-insights-insights-org-admin-only) | |
-| `/profile` | `profile.tsx` | user | identity, password, notification routing, appearance, Your access, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's; ruling 294: the last usage reading on it), GitHub identity. The password change is a row on the Profile card whose button opens a modal (ruling 148(b)); there is no reduce-motion setting (148(c)) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
+| `/profile` | `profile.tsx` | user | identity, password, notification routing (nine in-app toggles, agent questions on their own; and the per-browser Desktop notifications switch, the one place the browser permission is asked for; ruling 481), appearance, Your access, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's; ruling 294: the last usage reading on it, in the past tense once its window has reset, ruling 481(d); Disconnect asks first, ruling 481(b)), GitHub identity (its Disconnect asks first too). The password change is a row on the Profile card whose button opens a modal (ruling 148(b)); there is no reduce-motion setting (148(c)) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user (CSRF as a result) | fetcher target; GET redirects to `/notifications` | `read` (the default; repeatable `id`), `read-all` |
 | `/prefs/theme` | `prefs.theme.tsx` | user (CSRF as a result) | writes `theme` to the user row and the `viberr_theme` cookie; GET redirects to `/` | |
@@ -50,6 +50,7 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/resources/model-catalog` | `resources.model-catalog.ts` | user | models and efforts per backend (Claude enhanced with the VIEWER's own account) | |
 | `/resources/controller` | `resources.controller.ts` | user; a project or task scope the viewer cannot reach answers an empty `unavailable` view (GET) or `{ ok:false }` (POST), never a thrown response, because it feeds a root-owned fetcher | the controller dock's view for the scope the person is standing in (ruling 121); `?seen=1` marks the shown transcript read (ruling 448) | `send` (`text`, `conversationId`, `project`, `task`, `surface`, `timeZone`) |
 | `/resources/notifications` | `resources.notifications.ts` | user | the bell popover's list: the viewer's newest `BELL_LIST_CAP` (100) notifications. Pages carry only the bell's counts (`bellCounts`); the bell loads this when the pointer or focus reaches it and on open, and again once the page has re-read the counts since (at once while open). It answers `shouldRevalidate` false; a signed-out request gets a 401, never a login redirect, and its `clientLoader` turns any failed load into the bell's failure row (ruling 457) | |
+| `/resources/attention` | `resources.attention.ts` | user; a signed-out request (or a pending password reset) gets a 401, never a login redirect | ruling 481(c): `{ waiting, items }` (`attentionSnapshot`), the viewer's unread decisions (an operator packet, an agent question, a recommendation to approve) that lead somewhere, and the newest ten worded for a desktop notification with the bell's destination. `Cache-Control: no-store`; `shouldRevalidate` false. The root's attention watcher reads it with a plain `fetch` | |
 | `/resources/controller-unseen` | `resources.controller-unseen.ts` | user | the dock's status: the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448); and the viewer's turns working right now, with scope, phase and step (ruling 457). Like `/resources/controller`, it answers `shouldRevalidate` false: the dock loads it itself | |
 | `/resources/mcp-oauth/callback` | `resources.mcp-oauth.callback.ts` | org admin (a signed-out admin goes through `/login` and back with the query) | where an MCP server's authorization server sends the browser after an OAuth sign-in started in Instance settings (ruling 469): spends the `state` once (bound to the session that started it), exchanges the code with the PKCE verifier, seals the tokens, probes the connection, and answers a plain page (`MCP sign-in`, no-store, no referrer, no token, code or state in it) that says the tab can be closed; a refused callback is a 400 page with the reason | |
 | `/resources/backend-login` | `resources.backend-login.ts` | user | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts; an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
@@ -100,6 +101,21 @@ Intents behind `project.task.tsx` are explained in
   or the focus elsewhere took it back first (ruling 457). It holds "Profile &
   preferences", "Switch project" where it applies, "Switch theme · <value>" (cycles in
   place without closing), "Instance settings" for org admins, and Sign out.
+- **The tab title and desktop notifications** (ruling 481(c)). `AttentionWatcher`,
+  mounted once by `root.tsx` for a signed-in tab (its own chunk, fetched after
+  hydration), prefixes the page's own title with the
+  count of unread decisions ("(1) WEB-3 · … · Viberr"; "99+" past 99), re-applied
+  whenever `<head>` changes and taken off at zero. It reads `/resources/attention` on
+  mount, on a `notification.created` or `notification.read` its tab's live stream hands
+  it (`onLiveFrame`), when the tab gains or loses attention, and every 60 s while it has
+  not got it (visible and focused). A hidden tab holds no stream (ruling 301), so that
+  short read is how a background tab hears. When the person switched **Desktop
+  notifications** on for this browser (Profile), a decision that is new to every tab of
+  the browser shows a system notification (title, task and project, the first 180
+  characters of the text; tagged with the row id) while the tab is not attended; a
+  tab's first reading only records what was already waiting. A click focuses the tab,
+  marks the row read and opens where the bell would. Rows an attended tab saw are never
+  announced by another tab (a shared list of handled ids in `localStorage`).
 - **The standalone-page header** (ruling 145) is the same header on the instance
   pages that render outside the workspace: brand → Home, a `Home › <page>` crumb,
   the ⌘K trigger, the bell and the account menu. `palette-shell` mounts it, and
@@ -354,14 +370,15 @@ SSO`, `Settings · Agent resources`, `MCP sign-in` (the OAuth callback's page, r
 dock` (the panel, ruling 121), `Insights`, `Capability matrix modal`, `Agent profile
 modal`, `S3 export target dialog` and `Add member dialog` (both ruling 148(b)), `Delete
 project dialog` (ruling 458(l)), `Rebuild projections dialog` (Home's hand-written confirm,
-ruling 458's 2026-09-24 note), and the fifteen confirms the shared `ConfirmDialog`
+ruling 458's 2026-09-24 note), and the seventeen confirms the shared `ConfirmDialog`
 names: `Resource removal dialog`, `Stage removal dialog`, `Member removal dialog`,
 `Schedule cancel dialog`, `Interrupt run dialog`, `Dismiss recommendation dialog`,
 `Interrupt turn dialog`, `Cancel goal dialog` and `Skip link dialog` (ruling 419),
 `Disable user dialog`, `Credential removal dialog`, `Store deletion dialog`, `Replace
 document dialog` and `Profile deletion dialog` (the hand-written confirms ruling 458(f)
-moved onto it), and `Template grants dialog` (the Agents page's "Use the template's
-grants", ruling 479(d)).
+moved onto it), `Template grants dialog` (the Agents page's "Use the template's grants",
+ruling 479(d)), and `Disconnect agent account dialog` and `Disconnect GitHub dialog`
+(Profile's two Disconnects, ruling 481(b)).
 `screenLabel` is a required prop on `ConfirmDialog`, so a new call site cannot ship
 unlabelled; the typecheck refuses it.
 

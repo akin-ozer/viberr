@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFetcher, useRevalidator } from "react-router";
 import type { FetcherWithComponents } from "react-router";
+import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { LocalCalendarDate, LocalDayDotTime } from "~/ui/local-time";
@@ -533,6 +534,9 @@ function usagePct(utilization: number | null): number | null {
  */
 function usageText(usage: NonNullable<ProfileBackend["usage"]>): string {
   const window = (usage.rateLimitType || "window").replaceAll("_", " ");
+  // Ruling 481(d): the window this figure was read in is over, so the figure
+  // describes nothing current. It used to stay "92% of five hour" for hours.
+  if (usage.windowReset) return `${window} window reset`;
   const pct = usagePct(usage.utilization);
   if (pct === null) return `${window} usage not reported`;
   return `${pct}% of ${window}`;
@@ -542,6 +546,8 @@ function usageText(usage: NonNullable<ProfileBackend["usage"]>): string {
  *  invent a threshold: a percentage it decided was alarming would be Viberr's
  *  opinion wearing the provider's authority. */
 function usagePillKind(usage: NonNullable<ProfileBackend["usage"]>): "neutral" | "risk" {
+  // A warning from a window that has since reset warns about nothing.
+  if (usage.windowReset) return "neutral";
   return usage.isUsingOverage || usage.status.includes("warning") ? "risk" : "neutral";
 }
 
@@ -566,6 +572,7 @@ function AgentAccountCard({
   const push = useToast();
   const revalidator = useRevalidator();
   const [paste, setPaste] = useState<"api_key" | "access_token" | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   // The poll fetcher is the card's OWN: `/resources/backend-login` answers for
   // the signed-in caller only, and loading it on the panel's action fetcher
@@ -762,12 +769,20 @@ function AgentAccountCard({
                 {VENDOR[backend]} how much of a window is left, so this is the
                 last figure a run reported and not a live reading: it moves only
                 when another run finishes.
-                {usage.resetsAt ? (
+                {usage.resetsAt && usage.windowReset ? (
+                  // Ruling 481(d) (F40-50): past tense once the reset has
+                  // passed. "The window resets 03:30" at 09:00 claimed a
+                  // closed window was about to reopen.
+                  <>
+                    {" "}That window reset <LocalDayDotTime iso={usage.resetsAt} />, and
+                    no {label} run has reported a reading since.
+                  </>
+                ) : usage.resetsAt ? (
                   <>
                     {" "}The window resets <LocalDayDotTime iso={usage.resetsAt} />.
                   </>
                 ) : null}
-                {usage.isUsingOverage
+                {usage.isUsingOverage && !usage.windowReset
                   ? " This account is running on overage."
                   : ""}
               </span>
@@ -838,18 +853,39 @@ function AgentAccountCard({
               className="btn ghost sm danger"
               disabled={busy}
               aria-busy={inFlight === "backend-disconnect" || undefined}
-              onClick={() => {
+              // Ruling 481(b) (F40-49): it asks first, like every other
+              // one-way control (ruling 458(f)). One tap used to sign the
+              // vendor session out, with no undo short of a fresh sign-in.
+              onClick={() => setConfirmDisconnect(true)}
+            >
+              {inFlight === "backend-disconnect" && <Icon name="loader" className="spin" />}
+              {inFlight === "backend-disconnect" ? "Disconnecting…" : "Disconnect"}
+            </button>
+          </div>
+          {confirmDisconnect && (
+            <ConfirmDialog
+              screenLabel="Disconnect agent account dialog"
+              title={`Disconnect ${label}?`}
+              body={
+                <>
+                  Viberr signs this server out of your {label} account and
+                  deletes the stored credential. Tasks you own and your
+                  controller conversations can&apos;t start a {label} run until
+                  you connect again.
+                </>
+              }
+              confirmLabel={`Disconnect ${label}`}
+              busy={busy}
+              onCancel={() => setConfirmDisconnect(false)}
+              onConfirm={() => {
                 // Close any paste form the card was showing before this
                 // connection existed, so disconnecting does not re-reveal a
                 // half-typed key field.
                 setPaste(null);
                 submit({ intent: "backend-disconnect", backend });
               }}
-            >
-              {inFlight === "backend-disconnect" && <Icon name="loader" className="spin" />}
-              {inFlight === "backend-disconnect" ? "Disconnecting…" : "Disconnect"}
-            </button>
-          </div>
+            />
+          )}
         </>
       ) : (
         <>

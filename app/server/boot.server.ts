@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { VALIDATION_VALUES, WAITING_VALUES } from "~/schemas/task-file.schema";
 import { NOTIFICATION_KINDS } from "~/shared/mapping/notification.server";
 import { runMigrations } from "./db/migration-runner.server";
+import { withTransaction } from "./db/transaction.server";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
 import {
   getEnv,
@@ -188,6 +189,72 @@ function projectionValidationGaps(db: DatabaseSync): string[] {
  */
 function notificationKindGaps(db: DatabaseSync): string[] {
   return checkListGaps(db, "notifications", "kind", NOTIFICATION_KINDS);
+}
+
+/** One `PRAGMA table_info` read → the column names, in table order. */
+function tableColumns(db: DatabaseSync, table: string): string[] {
+  // SAFETY: `PRAGMA table_info` rows always carry a non-null TEXT `name`
+  // column; only `name` is read. `table` is a literal at every call site.
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.map((row) => row.name);
+}
+
+/**
+ * Ruling 481(a): widen a lagging `notifications.kind` CHECK in place, at boot.
+ *
+ * The drift WARN above names the gap and prescribes re-baselining the
+ * projection database, which also destroys the users, sessions, sealed PATs,
+ * audit and notifications nothing can rebuild. For this one table the fix
+ * needs none of that: `notifications` is app-owned, nothing references it, and
+ * the new CHECK admits every value the old one did. So the table is rebuilt
+ * from the shipped baseline's own DDL (read from a throwaway in-memory
+ * migration, as `projectionMissingColumns` does), its rows copied across, and
+ * its indexes recreated, in one transaction (sqlite cannot ALTER a CHECK).
+ * Without it, the day ruling 481 shipped every agent question on a deployed
+ * root would have thrown at the INSERT and reached nobody, which is worse than
+ * the mis-filed row it replaced.
+ *
+ * Returns the kinds it admitted; empty when the CHECK was current (the common
+ * path, which reads one DDL row and changes nothing).
+ */
+export function widenNotificationKindCheck(db: DatabaseSync): string[] {
+  const missing = notificationKindGaps(db);
+  if (missing.length === 0) return [];
+  const expectedDb = new DatabaseSync(":memory:");
+  try {
+    runMigrations(expectedDb);
+    // SAFETY: the baseline creates `notifications`, so its CREATE TABLE row is
+    // present and `sql` is non-null for a table.
+    const table = expectedDb
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notifications'`)
+      .get() as { sql: string };
+    // SAFETY: `sql` is null only for sqlite's own automatic indexes, which the
+    // filter excludes; every remaining row is a CREATE INDEX statement.
+    const indexes = expectedDb
+      .prepare(
+        `SELECT sql FROM sqlite_master
+         WHERE type = 'index' AND tbl_name = 'notifications' AND sql IS NOT NULL`,
+      )
+      .all() as Array<{ sql: string }>;
+    const live = new Set(tableColumns(db, "notifications"));
+    const kept = tableColumns(expectedDb, "notifications")
+      .filter((column) => live.has(column))
+      .join(", ");
+    withTransaction(db, () => {
+      db.exec(
+        table.sql.replace(/^CREATE TABLE notifications\b/, "CREATE TABLE notifications__widened"),
+      );
+      db.exec(
+        `INSERT INTO notifications__widened (${kept}) SELECT ${kept} FROM notifications`,
+      );
+      db.exec(`DROP TABLE notifications`);
+      db.exec(`ALTER TABLE notifications__widened RENAME TO notifications`);
+      for (const index of indexes) db.exec(index.sql);
+    });
+  } finally {
+    expectedDb.close();
+  }
+  return missing;
 }
 
 /**
@@ -706,6 +773,19 @@ export async function bootServer(): Promise<void> {
     );
   }
   const db = getDb();
+
+  // Ruling 481(a): before anything can write a notification. A root whose
+  // `notifications.kind` CHECK predates a kind gets it widened in place, so an
+  // agent question (the kind that ruling added) is never refused at INSERT.
+  try {
+    const admitted = widenNotificationKindCheck(db);
+    if (admitted.length > 0) {
+      logger.info("widened the notifications kind CHECK in place", { admitted });
+    }
+  } catch (error) {
+    // The integrity line below still names the gap and the remedy.
+    logger.error("could not widen the notifications kind CHECK", { err: toError(error) });
+  }
 
   // Ruling 460: before anything spawns an agent or creates a workspace — the
   // server's umask, the store layout, every person's home handed to their

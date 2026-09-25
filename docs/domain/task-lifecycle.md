@@ -831,7 +831,7 @@ them.
    the recommended option of the kind wins, and a decision already decided (`awaiting`)
    takes no answer. The answer is the packet door's record: a `task.packet.resolved` row
    under the person with `optionKind`, `optionTitle`, `packetKind` and `via` (`accept` or
-   `force-accept`), the packet and approval notifications marked read, no operator
+   `force-accept`), the decision notifications (packet, agent question, approval) marked read, no operator
    hand-off, and one clause on the completion event ("This acceptance answers the open
    decision "…" with "…"."). Any other open packet is withdrawn (F32-11): a "Withdrew the
    open decision" note and a `task.packet.withdrawn` row with `by`. The operator's own

@@ -259,7 +259,7 @@ function NtfStream({
                   <button
                     type="button"
                     className="keybtn"
-                    // `title` is NULL for every kind but packet/approval, so
+                    // `title` is NULL for every kind but the decision kinds, so
                     // concatenating it announced `Mark “null” read` — the row
                     // body's own fallback is the notification's identity.
                     aria-label={"Mark “" + (n.title || plainText(n.text)) + "” read"}

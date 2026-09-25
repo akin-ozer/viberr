@@ -86,8 +86,9 @@ const recentFrames = new Set<string>();
 
 /**
  * Hands `handler` every `name` frame this tab's live stream receives (a stream
- * event: `run.log-appended`, `controller.log-appended`). Returns the
- * unsubscribe. The stream itself belongs to the surface's `useLiveUpdates`,
+ * event: `run.log-appended`, `controller.log-appended`; or, ruling 481(c), a
+ * data event such as `notification.created`, after the ledger has recorded
+ * it). Returns the unsubscribe. The stream itself belongs to the surface's `useLiveUpdates`,
  * with everything that implies: closed while the tab is hidden (ruling 301),
  * reopened on a backoff, the frames it missed replayed on every reconnect.
  */
@@ -423,7 +424,13 @@ export function useLiveUpdates(
         source.addEventListener(name, scheduleCatchUp);
         continue;
       }
-      source.addEventListener(name, (event: MessageEvent<string>) => recordLive(name, event));
+      source.addEventListener(name, (event: MessageEvent<string>) => {
+        recordLive(name, event);
+        // Ruling 481(c): a data event is handed on too, once per id, to a
+        // listener that is not a loader (the root's attention watcher reads
+        // `notification.*`). No listener, no work.
+        dispatchFrame(name, event);
+      });
     }
     source.onopen = () => {
       setPaused(false);

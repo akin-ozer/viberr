@@ -274,10 +274,12 @@ CREATE TABLE notifications (
   -- progress note addressed to the conversation owner / goal creator.
   -- 'dependency' (ruling 131): the work a task waited on landed (or can never).
   -- 'ownership' (ruling 140): the reader's task-owner seat changed hands.
+  -- 'question' (ruling 481): an agent's question only a person can answer.
   -- This list IS NOTIFICATION_KINDS in app/shared/mapping/notification.server.ts,
   -- and the boot integrity check compares the live CHECK against it, because a root
-  -- that predates a kind would otherwise reject every INSERT of it silently.
-  kind TEXT NOT NULL CHECK (kind IN ('packet', 'approval', 'mention', 'quality', 'policy', 'controller', 'dependency', 'ownership')),
+  -- that predates a kind would otherwise reject every INSERT of it silently. Boot
+  -- widens a lagging CHECK in place (`widenNotificationKindCheck`, ruling 481).
+  kind TEXT NOT NULL CHECK (kind IN ('packet', 'question', 'approval', 'mention', 'quality', 'policy', 'controller', 'dependency', 'ownership')),
   -- packet kind only: input | blocked (card tint + pill).
   ptype TEXT CHECK (ptype IN ('input', 'blocked')),
   title TEXT,
