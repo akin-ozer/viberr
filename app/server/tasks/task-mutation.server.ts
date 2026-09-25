@@ -79,6 +79,10 @@ export interface TaskMutationContext {
     backend: RealBackend;
     autonomy: "supervised" | "full";
     reactDepth: number;
+    /** Ruling 489(d): react hops since a person last acted, which a reply
+     *  that moved the head does NOT restart (see OPERATOR_REACT_HOP_CEILING).
+     *  Optional: absent reads as 0, a chain a person just started. */
+    reactHops?: number;
     /** Consecutive operator-authored transition chain depth (see
      *  OPERATOR_TRANSITION_CHAIN_CAP). Optional: only the operator drive sets
      *  it; absent reads as 0. */

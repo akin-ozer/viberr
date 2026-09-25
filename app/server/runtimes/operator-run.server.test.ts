@@ -4979,6 +4979,93 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
   });
 
+  /**
+   * Ruling 489(d): the react hop count rides the chain from drive to agent and
+   * back, through the drive's own follow-ups, and only a person restarts it.
+   * The completion side (`agent-completion.server.test.ts`) stops the chain
+   * at the ceiling; these prove the count reaches it intact.
+   */
+  describe("ruling 489(d): the react hop count rides the chain, and a person restarts it", () => {
+    const plan = (reasoning: string) => JSON.stringify({ reasoning, actions: [] });
+    const hopsNow = () => ownOperatorRunForTests(store5.slug, "VIB-1")?.reactHops;
+
+    it("a chain's drive carries its count; a person's packet answer restarts it; two chain triggers keep the deeper", async () => {
+      deployAgents([operatorAgent()]);
+      seed("impl");
+      await drive({ trigger: "agent-reply", reactDepth: 1, reactHops: 7 });
+      // CANARY: drop `reactHops` from the drive's ctx and every agent it
+      // dispatches starts the count over.
+      expect(hopsNow()).toBe(7);
+
+      // Behind the live drive: the chain's next react, then a person answers
+      // a packet. Machine triggers are newest-wins, so the answer's drive runs.
+      await drive({ trigger: "agent-reply", reactDepth: 1, reactHops: 9 });
+      await drive({
+        trigger: "packet-resolved",
+        resolvedOption: { kind: "redirect", title: "Redirect with sharper guidance" },
+      });
+      adapter5.finish(store5, plan("reacted"), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter5.pending).not.toBeNull();
+      });
+      // CANARY: keep the deeper count whatever overwrites it, and the person's
+      // answer inherits the 9 hops it was meant to end.
+      expect(hopsNow()).toBe(0);
+
+      // Two triggers of the chain itself: the deeper count survives.
+      await drive({ trigger: "agent-reply", reactDepth: 1, reactHops: 9 });
+      await drive({ trigger: "delivered", reactHops: 2 });
+      adapter5.finish(store5, plan("answered"), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(3);
+        expect(adapter5.pending).not.toBeNull();
+      });
+      // CANARY: drop the deeper-count merge and the chain loses seven hops.
+      expect(hopsNow()).toBe(9);
+      adapter5.finish(store5, plan("done"), "finished");
+      await eventually(() => {
+        expect(ownOperatorRunForTests(store5.slug, "VIB-1")).toBeNull();
+      });
+    });
+
+    it("the drive's own follow-ups carry the count: the delivered follow-up and the stranded resume", async () => {
+      deployAgents([operatorAgent()]);
+      seed("impl");
+      await drive({ trigger: "agent-reply", reactDepth: 1, reactHops: 7 });
+      ownOperatorRunForTests(store5.slug, "VIB-1")!.deliveredHeadMoved = true;
+      adapter5.finish(store5, plan("delivered"), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter5.pending).not.toBeNull();
+      });
+      // CANARY: drop the carry in `deliveredFollowUpFor` and the follow-up
+      // starts the count over.
+      expect(hopsNow()).toBe(7);
+      adapter5.finish(store5, plan("moved on"), "finished");
+      await eventually(() => {
+        expect(ownOperatorRunForTests(store5.slug, "VIB-1")).toBeNull();
+      });
+
+      // Ready's outbound boundary is `auto`: a drive that ends there having
+      // done nothing is stranded, and the settle nudges it once.
+      seed("ready");
+      await drive({ trigger: "agent-reply", reactDepth: 1, reactHops: 7 });
+      adapter5.finish(store5, plan("nothing to do"), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(4);
+        expect(adapter5.pending).not.toBeNull();
+      });
+      // CANARY: drop the carry in the stranded resume and the nudge starts
+      // the count over.
+      expect(hopsNow()).toBe(7);
+      adapter5.finish(store5, plan("still nothing"), "finished");
+      await eventually(() => {
+        expect(ownOperatorRunForTests(store5.slug, "VIB-1")).toBeNull();
+      });
+    });
+  });
+
   describe("ruling 157: a hold ends when a person starts the operator", () => {
     // Pass 35, F35-8 (KNC-25): `hold_runtime_debug` stored `readiness: blocked`
     // with no packet; a person's Run operator passed every fire-time refusal
