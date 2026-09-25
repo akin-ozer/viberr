@@ -5660,11 +5660,11 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .opt:active:where(:not(:disabled, [aria-disabled="true"])), .ag-item:active, .rq-row:active, .pcap-row:active,
 .be-opt:active:not(:disabled), .org-tile.go:active, .pj-card:has(> .pj-link:active) { transform: translateY(0) scale(.99); }
 .deploy-row:active:not(:disabled), .pj-row:has(> .pj-link:active) { transform: scale(.99); }
-.ag-newbtn:active, .live-row:active, .ctl-example:active:not(:disabled), .ctl-conv:active, .project-switch:active, .ntf-item:active:not([aria-disabled="true"]), .attach-file:active, .attach-thumb:active, .tl-attach-thumb:active, button.top-search:active { transform: scale(.99); }
+.ag-newbtn:active, .live-row:active, .ctl-example:active:not(:disabled), .ctl-conv:active, .project-switch:active, .ntf-item:active:not([aria-disabled="true"]), .attach-file:active, .attach-thumb:active, .tl-attach-thumb:active, .tl-attach-file:active, button.top-search:active { transform: scale(.99); }
 .seg button:active:not(:disabled), .fchip:active:not(:disabled), button.pick-chip:active:not(:disabled), .tl-filter button:active, .cap-seg button:active:not(:disabled), .mini-seg button:active:not(:disabled), .stage-menu-btn:active:not(:disabled), .own-btn:active, .rev-add:active:not(:disabled), .handoff-chip:active:not(:disabled), .keybtn:active, .goal-edit-btn:active, .meta-edit-btn:active { transform: scale(.96); }
 .nav-item:active { transform: scale(.96); }
 .rev-x:active:not(:disabled), .stg-x:active:not(:disabled), .own-x:active, .col-head .add:active, .session-id-copy:active { transform: scale(.96); }
-.rsel-btn:active, .cal-nav:active, .cal-day:active, button.kbd:active, .home-user:active, .tl-attach-chip:active, .board-orphan-key:active { transform: scale(.96); }
+.rsel-btn:active, .cal-nav:active, .cal-day:active, button.kbd:active, .home-user:active, .board-orphan-key:active { transform: scale(.96); }
 .datepick-clear:active { transform: translateY(-50%) scale(.96); }
 .fm-act:active { transform: scale(.96); }
 .pj-star:active { transform: scale(.96); }
@@ -6663,41 +6663,53 @@ a.card:active, .pj-new:active { transform: scale(.99); }
 .attach-by { font-size: .69rem; color: var(--muted); }
 .attach-thumb .attach-by { padding: .25rem .25rem .125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attach-file .attach-by { flex: none; }
-/* Files an event produced, as chips under the message (timeline). */
+/* Files an event produced, under the message (timeline). */
 .tl-attach { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: .5rem; }
-.tl-attach-chip {
-  display: inline-flex; align-items: center; gap: .375rem; max-width: 100%;
-  padding: .25rem .5rem; border: 1px solid var(--hairline); border-radius: var(--radius-chip);
-  background: var(--surface); text-decoration: none; color: var(--fg);
-  font-family: var(--font-mono); font-size: .75rem;
-  transition: transform .15s var(--ease-out);
-}
-.tl-attach-chip:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
-.tl-attach-chip svg { width: 13px; height: 13px; color: var(--muted); flex: none; }
-/* The file glyph leads: its side is the text side less 2px (ruling 459, the
-   .btn recipe). */
-.tl-attach-chip:has(> .ico:first-child) { padding-left: .375rem; }
-.tl-attach-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* An image the run captured renders as the picture on the producing message
    (owner ask 2026-08-20) — the panel's .attach-thumb treatment at timeline
    scale. Capped small: the timeline is a feed, the panel is the gallery.
    The same inset picture with its own edge (ruling 459), so the tile takes the
-   panel tile's 12 for the 8px picture inside it. */
-.tl-attach-thumb {
+   panel tile's 12 for the 8px picture inside it. Any other file (a log, a text
+   file) is the same tile, a page carrying its extension in the picture's place
+   (owner ask 2026-09-25: as pill chips, the row stretched them into ellipses). */
+.tl-attach-thumb, .tl-attach-file {
   display: inline-flex; flex-direction: column; width: 240px; max-width: 100%;
   padding: .25rem;
   border: 1px solid var(--hairline); border-radius: var(--radius-box);
   background: var(--surface); overflow: hidden; text-decoration: none; color: var(--fg);
   transition: transform .15s var(--ease-out);
 }
-.tl-attach-thumb:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
+.tl-attach-thumb:hover, .tl-attach-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%); }
 /* Ruling 457: the frame has its final size before the lazy picture arrives,
    as the panel's tile does, so the feed does not jump when it loads. */
 .tl-attach-thumb img {
   display: block; width: 100%; height: 150px; object-fit: cover; object-position: top; background: var(--tint-hover);
   border-radius: var(--radius-button); outline: 1px solid var(--image-outline); outline-offset: -1px;
 }
-.tl-attach-thumb .nm {
+/* The file's slot: a page with its extension on a label in the pill tones
+   (owner ask 2026-09-25: ".txt, .md, .log filetype that looks good"). */
+.tl-attach-glyph {
+  position: relative; display: flex; align-items: center; justify-content: center; height: 150px;
+  border-radius: var(--radius-button); background: var(--tint-hover);
+  --kind-line: color-mix(in srgb, var(--kind-fg), transparent 35%);
+}
+/* No kind: --kind-fg is unset, so --kind-line is too and the page is --faint.
+   The set's 1.7 stroke stays 1.7px at this size instead of scaling to 5px. */
+.tl-attach-glyph svg { width: 72px; height: 72px; fill: var(--surface); color: var(--kind-line, var(--faint)); }
+.tl-attach-glyph path { vector-effect: non-scaling-stroke; }
+/* A family (`fileFamily`, from the code reader's name → grammar table) wears
+   one pill tone on its label and, softer, on its page; plain keeps neutral. */
+.tl-attach-glyph[data-kind="docs"] { --kind-bg: var(--blue-soft); --kind-fg: var(--blue-pressed); }
+.tl-attach-glyph[data-kind="data"] { --kind-bg: var(--teal-light); --kind-fg: var(--teal-dark); }
+.tl-attach-glyph[data-kind="log"] { --kind-bg: var(--amber-light); --kind-fg: var(--amber-dark); }
+.tl-attach-glyph[data-kind="code"] { --kind-bg: var(--agent-soft); --kind-fg: var(--agent-dark); }
+.tl-attach-ext {
+  position: absolute; top: calc(50% + 4px); left: 50%; transform: translateX(-50%);
+  padding: .125rem .375rem; border-radius: var(--radius-small);
+  font-family: var(--font-mono); font-size: .69rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  background: var(--kind-bg, var(--tint-press)); color: var(--kind-fg, var(--muted));
+}
+.tl-attach-thumb .nm, .tl-attach-file .nm {
   padding: .25rem .25rem 0; font-family: var(--font-mono); font-size: .69rem; color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }

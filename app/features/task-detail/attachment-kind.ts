@@ -18,6 +18,8 @@
  * extension still reads, unhighlighted.
  */
 
+import { languageForName, PLAIN_LANGUAGE } from "~/ui/code-language";
+
 /** Image-typed attachment names — thumbnail previews + the image lightbox. */
 export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;
 
@@ -41,12 +43,36 @@ const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
 
 export type AttachmentKind = "image" | "binary" | "text";
 
+/** The lowercased extension after the last dot, "" when there is none. */
+export function fileExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
+}
+
+/** The family a timeline file tile is tinted by (a pill tone in app.css). */
+export type FileFamily = "docs" | "data" | "log" | "code" | "plain";
+
+const FAMILY_OF_LANGUAGE: ReadonlyMap<string, FileFamily> = new Map([
+  ["markdown", "docs"], ["mdx", "docs"], ["latex", "docs"],
+  ["json", "data"], ["jsonc", "data"], ["json5", "data"], ["jsonl", "data"], ["yaml", "data"],
+  ["toml", "data"], ["ini", "data"], ["properties", "data"], ["dotenv", "data"], ["xml", "data"],
+  ["csv", "data"], ["tsv", "data"],
+  ["log", "log"],
+]);
+
+/** Read off the reader's own name → grammar table, so a name it learns is
+ *  tinted with no second list: a name it does not know is plain, a grammar
+ *  this map does not name is code. */
+export function fileFamily(name: string): FileFamily {
+  const language = languageForName(name);
+  if (language === PLAIN_LANGUAGE) return "plain";
+  return FAMILY_OF_LANGUAGE.get(language) ?? "code";
+}
+
 /** By name alone: `text` means "try the reader" (the bytes get the last word). */
 export function attachmentKind(name: string): AttachmentKind {
   if (IMAGE_RE.test(name)) return "image";
-  const dot = name.lastIndexOf(".");
-  const extension = dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
-  return BINARY_EXTENSIONS.has(extension) ? "binary" : "text";
+  return BINARY_EXTENSIONS.has(fileExtension(name)) ? "binary" : "text";
 }
 
 /** How much of the head the NUL test reads — git's own window. */

@@ -4683,7 +4683,6 @@ describe("app.css ruling 459: the better-ui pass — optical alignment", () => {
     [".seg button", [".seg button:has(> .ico:first-child)"]],
     [".fchip", [".fchip:has(> .ico:first-child)"]],
     [".meta-edit-btn", [".meta-edit-btn:has(> .ico:first-child)"]],
-    [".tl-attach-chip", [".tl-attach-chip:has(> .ico:first-child)"]],
     [".rev-add", [".rev-add:has(> .ico:first-child)"]],
     [".rev-add.sm", [".rev-add.sm:has(> .ico:first-child)"]],
   ];
@@ -5267,7 +5266,7 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
       PRESSES.find((p) => p.at === rules && p.part === part)?.transform;
     for (const part of [
       ".meta-edit-btn:active", ".rsel-btn:active", ".cal-nav:active", ".cal-day:active", "button.kbd:active",
-      ".home-user:active", ".tl-attach-chip:active", ".board-orphan-key:active",
+      ".home-user:active", ".board-orphan-key:active",
     ]) {
       expect(stepOf(part), part).toBe("scale(.96)");
     }

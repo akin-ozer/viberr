@@ -7,6 +7,7 @@ import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
 import { AttachmentThumb } from "./attachment-image";
+import { fileExtension, fileFamily } from "./attachment-kind";
 import { IMAGE_RE, useAttachmentLightbox } from "./attachment-lightbox";
 import { Pill } from "~/ui/pill";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
@@ -377,8 +378,10 @@ export const TimelineItem = memo(function TimelineItem({
                 task — it renders as the picture, right on the producing
                 message (the owner's ask, 2026-08-20: chips alone made the
                 human open the side panel to see what the agent "posted").
-                Non-image files keep the chip; the route serves whitelisted
-                image types inline, sandboxed, member-only. */}
+                Any other file is the same tile, a page carrying its
+                extension in the picture's place (owner ask 2026-09-25); the
+                route serves whitelisted image types inline, sandboxed,
+                member-only. */}
             {ev.attachments.filter((name) => IMAGE_RE.test(name)).map((name) => (
               <AttachmentThumb
                 key={name}
@@ -394,13 +397,16 @@ export const TimelineItem = memo(function TimelineItem({
                 <span className="nm">{name}</span>
               </AttachmentThumb>
             ))}
-            {ev.attachments.filter((name) => !IMAGE_RE.test(name)).map((name) => (
-              // Ruling 105 (+ addendum): a text-typed chip opens the in-app
+            {ev.attachments.filter((name) => !IMAGE_RE.test(name)).map((name) => {
+              const ext = fileExtension(name);
+              const label = ext.length > 0 && ext.length <= 5;
+              return (
+              // Ruling 105 (+ addendum): a text-typed file opens the in-app
               // read-only viewer; any other kind the no-preview card with
               // its Download button.
               <a
                 key={name}
-                className="tl-attach-chip"
+                className="tl-attach-file"
                 href={`${attachmentsBase}/${encodeURIComponent(name)}`}
                 target="_blank"
                 rel="noreferrer"
@@ -409,10 +415,14 @@ export const TimelineItem = memo(function TimelineItem({
                   url: `${attachmentsBase}/${encodeURIComponent(name)}`,
                 })}
               >
-                <Icon name="file" />
+                <span className="tl-attach-glyph" data-kind={fileFamily(name)} aria-hidden="true">
+                  <Icon name={label ? "page" : "file"} />
+                  {label && <span className="tl-attach-ext">{ext}</span>}
+                </span>
                 <span className="nm">{name}</span>
               </a>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

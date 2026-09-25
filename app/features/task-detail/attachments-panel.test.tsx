@@ -309,7 +309,7 @@ describe("AttachmentsPanel producer attribution (P21)", () => {
   });
 });
 
-describe("TimelineItem attachment chips (P21 — the producing message shows its files)", () => {
+describe("TimelineItem attachments (P21 — the producing message shows its files)", () => {
   const withFiles = (attachments: string[] | null): TimelineEventRender => ({
     id: 9,
     type: "comment",
@@ -322,7 +322,7 @@ describe("TimelineItem attachment chips (P21 — the producing message shows its
     attachments,
   });
 
-  it("renders an image as a thumbnail and other files as chips, linking to the serving route", () => {
+  it("renders an image as a thumbnail and other files as file tiles, linking to the serving route", () => {
     // Owner ask (2026-08-20): a screenshot task's deliverable IS the picture —
     // chips alone sent the human to the side panel to see what was "posted".
     const { container } = render(
@@ -338,9 +338,9 @@ describe("TimelineItem attachment chips (P21 — the producing message shows its
       `${BASE}/home%20page.png`,
     );
     expect(thumbs[0]!.textContent).toContain("home page.png");
-    const chips = container.querySelectorAll<HTMLAnchorElement>(".tl-attach-chip");
-    expect(chips).toHaveLength(1);
-    expect(chips[0]!.getAttribute("href")).toBe(`${BASE}/capture.yml`);
+    const files = container.querySelectorAll<HTMLAnchorElement>(".tl-attach-file");
+    expect(files).toHaveLength(1);
+    expect(files[0]!.getAttribute("href")).toBe(`${BASE}/capture.yml`);
   });
 
   it("repairs an agent-written workspace-relative attachment link in the body", () => {
@@ -496,7 +496,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
           <TimelineItem ev={ev()} attachmentsBase={BASE} />
         </AttachmentLightboxProvider>,
       );
-      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      fireEvent.click(container.querySelector(".tl-attach-file")!);
       const dialog = baseElement.querySelector(DIALOG)!;
       expect(dialog).toBeTruthy();
       expect(dialog.querySelector("img")).toBeNull();
@@ -534,7 +534,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
           <TimelineItem ev={ev()} attachmentsBase={BASE} />
         </AttachmentLightboxProvider>,
       );
-      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      fireEvent.click(container.querySelector(".tl-attach-file")!);
       await findByText(
         "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.",
       );
@@ -554,7 +554,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
           <TimelineItem ev={ev()} attachmentsBase={BASE} />
         </AttachmentLightboxProvider>,
       );
-      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      fireEvent.click(container.querySelector(".tl-attach-file")!);
       await findByText("This file is empty.");
     } finally {
       globalThis.fetch = origFetch;
@@ -573,7 +573,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
           <TimelineItem ev={ev()} attachmentsBase={BASE} />
         </AttachmentLightboxProvider>,
       );
-      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      fireEvent.click(container.querySelector(".tl-attach-file")!);
       await findByText(
         "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.",
       );
@@ -605,7 +605,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
           />
         </AttachmentLightboxProvider>,
       );
-      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      fireEvent.click(container.querySelector(".tl-attach-file")!);
       const dialog = baseElement.querySelector(DIALOG)!;
       expect(dialog).toBeTruthy();
       expect(dialog.querySelector("img")).toBeNull();
@@ -664,7 +664,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
           />
         </AttachmentLightboxProvider>,
       );
-      fireEvent.click(container.querySelector(".tl-attach-chip")!);
+      fireEvent.click(container.querySelector(".tl-attach-file")!);
       await findByText(
         "Unable to load this file. It may have been removed, or your session may have ended. Reload the page and try again.",
       );
@@ -841,7 +841,7 @@ describe("attachment code reader (ruling 363)", () => {
         <TimelineItem ev={ev([name])} attachmentsBase={BASE} />
       </AttachmentLightboxProvider>,
     );
-    fireEvent.click(rendered.container.querySelector(".tl-attach-chip")!);
+    fireEvent.click(rendered.container.querySelector(".tl-attach-file")!);
     const dialog = rendered.baseElement.querySelector(DIALOG)!;
     expect(dialog).toBeTruthy();
     return { ...rendered, dialog };

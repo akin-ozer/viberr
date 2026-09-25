@@ -236,9 +236,9 @@ describe("timeline rows while nothing in them changes (ruling 457)", () => {
     await act(async () => {});
     view.counter.attach(view.container);
     await act(async () => view.revalidate());
-    // Still the same thirty rows, links and chips.
+    // Still the same thirty rows, links and files.
     expect(view.container.querySelectorAll(".tl-item")).toHaveLength(30);
-    expect(view.container.querySelector(".tl-attach-chip")?.textContent).toContain("notes.txt");
+    expect(view.container.querySelector(".tl-attach-file")?.textContent).toContain("notes.txt");
     expectWithinBudget(
       "render:timeline.item-renders-per-noop-revalidation",
       view.counter.renders("TimelineItem"),
