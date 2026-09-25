@@ -144,6 +144,6 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     unit: "count",
     journey: "task-open",
     fixture:
-      "fresh baseline schema: latestTaskReconcileCheckAt, latestTaskReconcileAt, the behindBy lookup, latestReconcileSync (EXPLAIN QUERY PLAN)",
+      "fresh baseline schema: latestTaskReconcileCheckAt, latestTaskReconcileAt, the behindBy lookup, latestReconcileObservation (EXPLAIN QUERY PLAN)",
   },
 };

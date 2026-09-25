@@ -245,6 +245,12 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 494 (pass 40, F40-70): before the doctrine said a behind count is
+    // true only of the head it was counted on (`baseComparedHead`), to check
+    // it against the head just pushed and never to state one in a packet for
+    // another head. Live on WEB-16 two packets told the owner the branch was 6
+    // commits behind `main` five minutes after a push that carried `main`.
+    "ee212fda34ef04e0447ed1edd1a2f50b6c1cd92cde5ac498956cea61dbcfb6d8",
     // Ruling 488 (pass 40, F40-67): before the doctrine said text meant for
     // another task is posted there with `relay_to_task` (an agent's with its
     // `relay` entries), and never handed to a person to copy over or confirm.

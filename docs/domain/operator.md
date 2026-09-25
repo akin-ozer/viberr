@@ -265,7 +265,10 @@ trigger doctrine and the task snapshot stay in the user turn.
 unfinished report a failed run left standing (ruling 397), the refusal nothing has
 answered yet (ruling 408), the person's decisions on the task (ruling 415), the
 collisions with other open PRs (ruling 413), where the branch refresh is refused
-(ruling 424), whose the open packet is (ruling 437) and the runs already scheduled on the
+(ruling 424), a behind count that describes an older head than the branch now carries
+(ruling 494: the snapshot's `baseBehindBySentence`, plus "A decision packet never states a
+behind count for a head other than the one the packet puts up."; nothing when the count
+is current), whose the open packet is (ruling 437) and the runs already scheduled on the
 task with whose each is (ruling 487: a hold one of them explains needs one note and no
 packet), and it APPENDS the capability-gap
 remedy clause (ruling 85: a packet must name the grantable capability and where a human
@@ -344,7 +347,13 @@ section for exactly this.
   `mergeable` (ruling 162); `notAcceptableReason` (the acceptance gate's own verdict,
   ruling 162), `unownedPr`, `foreignHead` (ruling 161), `baseBehindBy` (how far the base
   is ahead of the branch from the reconciler's last compare: `0` is level, `null` is "not
-  compared yet" and never a reason to skip `update_branch_from_base`), and
+  compared yet" and never a reason to skip `update_branch_from_base`),
+  `baseComparedHead` (ruling 494: `{sha, observedAt, current, pushedSince}`, the head that
+  count was counted on and when; `current` is false when Viberr recorded a push after the
+  compare that published another head, `pushedSince` naming it, and null when the compare
+  named no head, a row written before the ruling; neither is ever read as current) with
+  `baseBehindBySentence` (what to say instead of quoting the count, "" when it describes
+  the current head), and
   `notRefreshableReason` (the sentence `update_branch_from_base` refuses with from where
   the task stands, ruling 424). `gates` (ruling 482): the project's gates as Viberr ran
   them on the revision under review, `{line, state, failed[], error}` with the PR card's
@@ -566,7 +575,10 @@ Details that matter:
   revision awaits its verdict the refresh stays the operator's, and a PR GitHub already
   reports conflicting is the exception, so the conflict list and the packet can be
   produced. `notRefreshableReason` in the snapshot is that refusal, read before planning
-  (ruling 424). A conflict aborts the merge and leaves the branch as it was. Ruling 475
+  (ruling 424). A push the update makes, like a delivery's, is re-compared before the tool
+  answers (ruling 494), and its tool text and `get_task`'s say to check
+  `baseComparedHead` against the head just pushed and never to quote an older head's count,
+  in a comment or a packet. A conflict aborts the merge and leaves the branch as it was. Ruling 475
   (owner decision): when the task's delivering engagement is deployed with a repo-write
   grant, the tool hands the conflict to that agent itself: it starts the agent's run with
   ruling 438's directive (merge `origin/<base>` in its own workspace, resolve, run the

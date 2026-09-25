@@ -5328,12 +5328,16 @@ const operatorTurnInstruction = (
   // because the turn that planned it was usually a report's, which returns
   // before the stage rules.
   const unrefreshable = refreshBoundaryInstruction(args[0]);
+  // Ruling 494: a behind count that describes an older head, beside the
+  // refresh doctrine it feeds, and on every trigger: a count is quoted
+  // wherever the operator writes (on WEB-16 a comment and two packets).
+  const staleCount = baseCompareInstruction(args[0]);
   // Ruling 437: whose the open packet is, for the same reason.
   const notYours = packetAuthorInstruction(args[0]);
   // Ruling 487: what is already scheduled, for the same reason again: a hold
   // a pending run explains is decided before any trigger's doctrine runs.
   const scheduled = pendingSchedulesInstruction(args[0]);
-  return `${standing}${refused}${decided}${colliding}${unrefreshable}${notYours}${scheduled}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+  return `${standing}${refused}${decided}${colliding}${unrefreshable}${staleCount}${notYours}${scheduled}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
 };
 
 /**
@@ -5407,6 +5411,25 @@ export function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): stri
     // Ruling 429: the refusal stands only while the work is approved.
     "It lifts the moment a verdict fails or a new revision awaits its verdict: the refresh is " +
     "yours again then, here as at any stage.\n\n"
+  );
+}
+
+/**
+ * Ruling 494 (pass 40, F40-70): a behind count that describes a head the
+ * branch no longer has, said where both backends read it and only when it
+ * does. Live on WEB-16 the operator read `baseBehindBy: 6` five minutes after
+ * the delivery had pushed a head that carried `main`, planned around it, and
+ * wrote it into two packets the owner decided on; the count had been read on
+ * GitHub's copy of the branch seven seconds before that push. The snapshot now
+ * names the head each count was counted on (`baseComparedHead`) and carries
+ * the sentence; this puts it in front of the plan, whatever the trigger.
+ */
+export function baseCompareInstruction(snapshot: OperatorTaskSnapshot): string {
+  const sentence = snapshot.baseBehindBySentence ?? "";
+  if (!sentence) return "";
+  return (
+    `${sentence} A decision packet never states a behind count for a head other than the one ` +
+    "the packet puts up.\n\n"
   );
 }
 

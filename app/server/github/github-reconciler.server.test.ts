@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -4370,5 +4371,115 @@ describe("F37-9: a sync verdict that changes is recorded, even on a quiet poll",
     // One row for the first (changing) pass; the two repeats add nothing. The
     // "grow unboundedly" concern the original condition names is untouched.
     expect(syncRows(store)).toEqual(["behind_main"]);
+  });
+});
+
+/**
+ * Ruling 494 (pass 40, F40-70): the row a pass writes names the head its
+ * compare read and the base tip it read, and a pass that compared another head
+ * than the newest row names writes a row even on a quiet poll. Live on WEB-16
+ * a row counted GitHub's copy of the branch 7 s before the delivery pushed a
+ * head that carried `main`; nothing on it said which head it counted.
+ */
+describe("ruling 494: the reconcile row names the head it compared", () => {
+  const MAIN = "m".repeat(40);
+  const OLD = "a".repeat(40);
+  const OTHER = "b".repeat(40);
+
+  /** The three facts this ruling reads off a row; absent reads as undefined. */
+  const headRowSchema = z.object({
+    behindBy: z.number().nullable().optional(),
+    headSha: z.string().nullable().optional(),
+    baseSha: z.string().nullable().optional(),
+  });
+  const rows = (store: ReturnType<typeof setup>["store"]) => {
+    // SAFETY: the SELECT names the one nullable TEXT column.
+    const found = store.db
+      .prepare(
+        `SELECT details_json FROM provenance WHERE action = 'github.reconcile' ORDER BY id ASC`,
+      )
+      .all() as { details_json: string | null }[];
+    return found.map((r) => {
+      const d = headRowSchema.parse(JSON.parse(r.details_json ?? "{}"));
+      return { behindBy: d.behindBy, headSha: d.headSha, baseSha: d.baseSha };
+    });
+  };
+
+  /** The branch strictly behind `main`, its head `head`. */
+  function behindAt(head: string): FakeRoutes {
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
+      body: {
+        ahead_by: 0,
+        behind_by: 6,
+        status: "behind",
+        total_commits: 0,
+        base_commit: { sha: MAIN },
+        merge_base_commit: { sha: head },
+        commits: [],
+      },
+    };
+    return routes;
+  }
+
+  const pass = (
+    store: ReturnType<typeof setup>["store"],
+    actor: ReturnType<typeof setup>["actor"],
+    routes: FakeRoutes,
+    quiet: boolean,
+  ) =>
+    reconcileTask(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl: fakeGithubFetch(routes).fetchImpl,
+        skipUnchangedProvenance: quiet,
+      },
+    );
+
+  it("records the head and the base tip the compare read, and returns the head and the base", async () => {
+    // Canaries: drop `headSha` or `baseSha` from the row's details.
+    const { store, actor } = setup();
+    const result = await pass(store, actor, behindAt(OLD), false);
+    expect(result).toMatchObject({
+      status: "reconciled",
+      base: "main",
+      compare: { behindBy: 6, headSha: OLD },
+    });
+    expect(rows(store)).toEqual([{ behindBy: 6, headSha: OLD, baseSha: MAIN }]);
+  });
+
+  it("a quiet poll writes a row when the compared head moved, and stays quiet while it holds", async () => {
+    // Canary: drop `headChanged` from the write condition. The verdict and the
+    // task file are the same on both passes; only the head differs.
+    const { store, actor } = setup();
+    await pass(store, actor, behindAt(OLD), false);
+    await pass(store, actor, behindAt(OLD), true);
+    expect(rows(store).map((r) => r.headSha)).toEqual([OLD]);
+    await pass(store, actor, behindAt(OTHER), true);
+    expect(rows(store).map((r) => r.headSha)).toEqual([OLD, OTHER]);
+  });
+
+  it("a row that names no head (written before the ruling) is replaced by the next quiet poll", async () => {
+    // Canary: the same `headChanged` drop leaves the headless row newest, and
+    // `get_task` would read "head unknown" until something else changed.
+    const { store, actor } = setup();
+    await pass(store, actor, behindAt(OLD), false);
+    // The shape every row had before ruling 494: a count and no head.
+    store.db
+      .prepare(
+        `INSERT INTO provenance (source_path, content_hash, observed_at, action, details_json)
+         VALUES (?, NULL, ?, 'github.reconcile', ?)`,
+      )
+      .run(
+        `projects/${store.slug}/tasks/VIB-301/task.md`,
+        new Date().toISOString(),
+        JSON.stringify({ repo: "akin-ozer/viberr", sync: "behind_main", behindBy: 6 }),
+      );
+    await pass(store, actor, behindAt(OLD), true);
+    expect(rows(store)).toHaveLength(3);
+    expect(rows(store).at(-1)).toEqual({ behindBy: 6, headSha: OLD, baseSha: MAIN });
   });
 });

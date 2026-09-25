@@ -297,6 +297,22 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("get_task")).toContain("`schedules` (ruling 487) lists the runs scheduled on this task that have not fired yet");
   });
 
+  it("ruling 494: get_task and update_branch_from_base say which head a behind count describes, to check it against the pushed head, and never to quote an older head's", () => {
+    // Canaries: drop the `baseComparedHead` sentence from either description.
+    const defs = build(withPolicy(uniform("direct"))).tools;
+    const desc = (name: string) => defs.find((t) => t.name === name)!.description;
+    expect(desc("get_task")).toContain(
+      "`baseComparedHead` (ruling 494) names the head `baseBehindBy` was counted on (`sha`, `observedAt`): `current: false` means Viberr pushed the branch after that compare, so the count describes an older head",
+    );
+    expect(desc("get_task")).toContain("the count is never stated as the branch's, in a comment or a packet");
+    expect(desc("update_branch_from_base")).toContain(
+      "`get_task`'s `baseComparedHead` names the head that count was read on (ruling 494): check it against the head you just pushed.",
+    );
+    expect(desc("update_branch_from_base")).toContain(
+      "a decision packet never states a behind count for a head other than the one it puts up",
+    );
+  });
+
   it("ruling 133 (A19): get_task, run_agent and transition_stage say the engaged deliverer runs at every stage and a hand-off is never a stage workaround", () => {
     // Canary: restore any one of the three original sentences.
     const defs = build(withPolicy(uniform("direct"))).tools;

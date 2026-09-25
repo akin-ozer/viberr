@@ -9,7 +9,11 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { describeRevisionDrift, headCarriesRevision, refreshOnlyDrift } from "~/shared/revision-drift";
-import { reconcileTask, type GithubActionContext } from "./github-reconciler.server";
+import {
+  pushRecompareSentence,
+  recompareAfterPush,
+  type GithubActionContext,
+} from "./github-reconciler.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
   dispatchGate,
@@ -535,8 +539,10 @@ function outcomeSentence(r: UpdateBranchResult, lead = "Brought"): string {
  * unreviewed. (B) Reconcile, so `pr.revisionDrift` is re-measured NOW rather
  * than by the five-minute poll (the PR is open, so no divergence arm fires; the
  * reconcile may still notify watchers or wake the operator on an out-of-band
- * change, which is the same behaviour any pass has). (C) Re-read and write the
- * timeline event from the re-read, carrying the canonical drift sentence; the
+ * change, which is the same behaviour any pass has). Since ruling 494 this is
+ * the push's re-compare (`recompareAfterPush`): the push is recorded first, so
+ * a count the pass could not replace reads as the one before it. (C) Re-read
+ * and write the timeline event from the re-read, carrying the canonical drift sentence; the
  * returned sentence is built from that same re-read. The crash window between
  * the push and (A) is closed by the next classified pass, which sees the merge
  * commit without a row and counts it as authored: honest, and self-healing once
@@ -577,7 +583,21 @@ export async function recordBranchRefresh(
       rev.pushedAt = new Date().toISOString();
     }
   });
-  const reconcile = await reconcileTask(db, ref, by.reconcileActor, ctx);
+  // Ruling 494 (F40-70): the push moved the branch, so its re-compare records
+  // the push and then runs this pass in the task's lock: the count on record
+  // is counted on `mergeSha`, or reads as older when the pass could not run.
+  const reconcile = await recompareAfterPush(
+    db,
+    {
+      projectSlug: ref.projectSlug,
+      taskKey: ref.taskKey,
+      branch: result.branch,
+      headSha: result.mergeSha,
+      via: "branch-update",
+    },
+    by.reconcileActor,
+    ctx,
+  );
   // F39-64 (pass 39): GitHub shows a pushed head on the pull request some
   // seconds after the push, and the reconcile above can read the PR first.
   // It then measured no drift at the head it was shown, the reviewed one, and
@@ -613,7 +633,19 @@ export async function recordBranchRefresh(
           : drift.kind === "none"
             ? `The review PR's head now equals the reviewed revision.`
             : `Drift re-measured: ${drift.sentence}.`;
-  const sentence = `${outcomeSentence(result, by.lead)}${measured ? ` ${measured}` : ""}`;
+  // Ruling 494: a re-compare that could not run leaves the count from before
+  // the push on record, and the line says so rather than letting it stand.
+  const recount =
+    reconcile.status === "reconciled"
+      ? ""
+      : pushRecompareSentence(reconcile, {
+          branch: result.branch,
+          headSha: result.mergeSha,
+          base: result.base,
+        });
+  const sentence =
+    `${outcomeSentence(result, by.lead)}${measured ? ` ${measured}` : ""}` +
+    (recount ? ` ${recount}` : "");
   // A branch that moved must SAY it moved. The tool result is text the model
   // reads; the timeline is the record the humans read, and a base merge
   // changes what every reviewer is looking at.

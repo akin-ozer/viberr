@@ -4,8 +4,10 @@ import {
   recordProvenance,
 } from "./provenance-recorder.server";
 import {
+  createBaseCompareLookup,
   createReconcileBehindByLookup,
   latestProjectReconcileAt,
+  latestReconcileObservation,
   latestProvenance,
   latestTaskReconcileAt,
   listProvenance,
@@ -118,6 +120,84 @@ describe("reconcile reads", () => {
       "2026-07-24T09:00:00.000Z",
     );
     expect(latestTaskReconcileAt(db, SLUG, "VIB-999")).toBeNull();
+  });
+});
+
+/**
+ * Ruling 494 (pass 40, F40-70): a count is read with the head it was counted
+ * on and with any push Viberr recorded after it, from the same table, ordered
+ * by the table's own ids.
+ */
+describe("ruling 494: the compare's head and the push after it", () => {
+  const A = "a".repeat(40);
+  const B = "b".repeat(40);
+
+  it("reads the newest compare's count, its head and time, and the newest push recorded after it", () => {
+    // Canary: read the push row without the `id > ?` bound, and a push made
+    // BEFORE the compare reads as one after it.
+    const db = ctx.makeDb();
+    recordProvenance(db, {
+      sourcePath: PATH_142,
+      action: "github.push",
+      details: { headSha: A },
+      observedAt: "2026-09-25T21:20:00.000Z",
+    });
+    recordProvenance(db, {
+      sourcePath: PATH_142,
+      action: "github.reconcile",
+      details: { sync: "behind_main", behindBy: 6, headSha: A },
+      observedAt: "2026-09-25T21:25:48.527Z",
+    });
+    const read = createBaseCompareLookup(db);
+    expect(read(PATH_142)).toEqual({
+      behindBy: 6,
+      headSha: A,
+      observedAt: "2026-09-25T21:25:48.527Z",
+      pushedSince: null,
+    });
+    // Another task's push never reaches this task's reading.
+    recordProvenance(db, { sourcePath: PATH_201, action: "github.push", details: { headSha: B } });
+    expect(read(PATH_142)?.pushedSince).toBeNull();
+    recordProvenance(db, {
+      sourcePath: PATH_142,
+      action: "github.push",
+      details: { headSha: B },
+      observedAt: "2026-09-25T21:25:55.000Z",
+    });
+    expect(read(PATH_142)?.pushedSince).toEqual({ headSha: B, at: "2026-09-25T21:25:55.000Z" });
+  });
+
+  it("answers null exactly where the behindBy lookup does, and reads a missing or unreadable head as none", () => {
+    const db = ctx.makeDb();
+    const read = createBaseCompareLookup(db);
+    expect(read(PATH_142)).toBeNull();
+    recordProvenance(db, { sourcePath: PATH_142, action: "github.reconcile", details: { behindBy: null } });
+    expect(read(PATH_142)).toBeNull();
+    expect(createReconcileBehindByLookup(db)(PATH_142)).toBeNull();
+    // A row written before the ruling: a count, no head.
+    recordProvenance(db, { sourcePath: PATH_142, action: "github.reconcile", details: { behindBy: 4 } });
+    expect(read(PATH_142)).toMatchObject({ behindBy: 4, headSha: null });
+    recordProvenance(db, {
+      sourcePath: PATH_142,
+      action: "github.reconcile",
+      details: { behindBy: 4, headSha: 12 },
+    });
+    expect(read(PATH_142)).toMatchObject({ behindBy: 4, headSha: null });
+  });
+
+  it("the reconciler's own read of the newest row returns its verdict and its head", () => {
+    const db = ctx.makeDb();
+    expect(latestReconcileObservation(db, PATH_142)).toBeNull();
+    recordProvenance(db, { sourcePath: PATH_142, action: "github.reconcile", details: { sync: "synced", behindBy: 0 } });
+    expect(latestReconcileObservation(db, PATH_142)).toEqual({ sync: "synced", headSha: null });
+    recordProvenance(db, {
+      sourcePath: PATH_142,
+      action: "github.reconcile",
+      details: { sync: "behind_main", behindBy: 2, headSha: A },
+    });
+    // A push row is not an observation of the compare.
+    recordProvenance(db, { sourcePath: PATH_142, action: "github.push", details: { headSha: B } });
+    expect(latestReconcileObservation(db, PATH_142)).toEqual({ sync: "behind_main", headSha: A });
   });
 });
 

@@ -210,6 +210,16 @@ export interface BranchCompare {
    * fact the caller has to be able to see: 0 means the list is complete.
    */
   droppedCommits: number;
+  /**
+   * Ruling 494 (pass 40, F40-70): the branch head this compare read (full sha),
+   * or null when GitHub's answer does not name it (see {@link comparedHeadSha}).
+   * A count is only ever true of the head it was counted on, and a push can move
+   * the branch a second after the read.
+   */
+  headSha: string | null;
+  /** Ruling 494: the base tip this compare read (`base_commit`), or null when
+   *  the answer did not carry it. */
+  baseSha: string | null;
 }
 
 /** ONE compare commit. `sha` is the identity — an entry without one names no
@@ -228,6 +238,13 @@ const ghCompareCommitSchema = z.object({
     .optional()
     .catch(undefined),
 });
+
+/** Ruling 494: a commit the compare names by its sha alone (`base_commit`,
+ *  `merge_base_commit`); absent when the answer did not carry one. */
+const ghCommitRefSchema = z
+  .object({ sha: z.string().min(1) })
+  .optional()
+  .catch(undefined);
 
 /**
  * The compare payload's read slice, with the readers' own `??`-tolerance baked
@@ -248,8 +265,54 @@ const ghCompareSchema = z
       .array(ghCompareCommitSchema.nullable().catch(null))
       .optional()
       .catch(undefined),
+    /** Ruling 494: what names the head the compare read. Each degrades to
+     *  absent on drift, and an absent one leaves the head unknown. */
+    total_commits: z.number().optional().catch(undefined),
+    base_commit: ghCommitRefSchema,
+    merge_base_commit: ghCommitRefSchema,
   })
   .catch({});
+
+/**
+ * Ruling 494 (pass 40, F40-70): the branch head a `base...head` compare read.
+ * GitHub's answer does not name the head outright, so it is read from what the
+ * answer does carry, and never guessed:
+ *  - `identical`: the head IS the base tip (`base_commit`);
+ *  - `behind`: the head is an ancestor of the base, so it is the merge base;
+ *  - `ahead` / `diverged`: the head is the one listed commit that no other
+ *    listed commit names as a parent. Every other commit of `base..head` is a
+ *    parent of one of them, so this holds only on a COMPLETE list: a list
+ *    GitHub paged (`total_commits` above the entries sent) or one with an entry
+ *    this reader dropped answers null.
+ * Anything else, including an answer with no status, is null: an unknown head.
+ */
+export function comparedHeadSha(input: {
+  status: string | undefined;
+  baseSha: string | null;
+  mergeBaseSha: string | null;
+  commits: readonly BranchCompareCommit[];
+  /** How many commits GitHub says the list holds (`total_commits`, else `ahead_by`). */
+  expectedCommits: number | undefined;
+  droppedCommits: number;
+}): string | null {
+  switch (input.status) {
+    case "identical":
+      return input.baseSha;
+    case "behind":
+      return input.mergeBaseSha;
+    case "ahead":
+    case "diverged": {
+      if (input.droppedCommits > 0 || input.expectedCommits !== input.commits.length) {
+        return null;
+      }
+      const named = new Set(input.commits.flatMap((c) => c.parents));
+      const tips = input.commits.filter((c) => !named.has(c.fullSha));
+      return tips.length === 1 ? (tips[0]?.fullSha ?? null) : null;
+    }
+    default:
+      return null;
+  }
+}
 
 export type BranchCompareResult =
   | { status: "ok"; compare: BranchCompare }
@@ -301,6 +364,7 @@ export async function getBranchCompare(
         dropped: droppedCommits,
       });
     }
+    const baseSha = result.data.base_commit?.sha ?? null;
     return {
       status: "ok",
       compare: {
@@ -309,6 +373,17 @@ export async function getBranchCompare(
         status: result.data.status ?? "identical",
         commits,
         droppedCommits,
+        // Ruling 494: from the status GitHub SENT, never the "identical" the
+        // line above defaults a missing one to.
+        headSha: comparedHeadSha({
+          status: result.data.status,
+          baseSha,
+          mergeBaseSha: result.data.merge_base_commit?.sha ?? null,
+          commits,
+          expectedCommits: result.data.total_commits ?? result.data.ahead_by,
+          droppedCommits,
+        }),
+        baseSha,
       },
     };
   }

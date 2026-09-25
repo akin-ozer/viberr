@@ -5,7 +5,7 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { latestTaskReconcileCheckAt } from "./audit-query.server";
 import {
   createReconcileBehindByLookup,
-  latestReconcileSync,
+  latestReconcileObservation,
   latestTaskReconcileAt,
   taskProvenancePath,
 } from "~/server/provenance/provenance-query.server";
@@ -39,7 +39,7 @@ describe("task freshness reads (ruling 457)", () => {
       latestTaskReconcileCheckAt(db, "viberr-core", "VIB-142");
       latestTaskReconcileAt(db, "viberr-core", "VIB-142");
       createReconcileBehindByLookup(db)(path);
-      latestReconcileSync(db, path);
+      latestReconcileObservation(db, path);
     });
     expect(tally.statements).toHaveLength(4);
     const plans = tally.statements.map(({ sql }) => {

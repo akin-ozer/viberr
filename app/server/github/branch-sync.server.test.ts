@@ -196,6 +196,131 @@ describe("getBranchCompare commit tolerance (F21-8)", () => {
   });
 });
 
+/**
+ * Ruling 494 (pass 40, F40-70): a count is only true of the head it was
+ * counted on, so the compare names the head it read. GitHub's answer does not
+ * carry the head outright; `base_commit`, `merge_base_commit`, the commit list
+ * and `total_commits` do, and a head they cannot name is null, never a guess.
+ */
+describe("ruling 494: the compare names the head it read", () => {
+  const REPO = "akin-ozer/viberr";
+  const MAIN = "m".repeat(40);
+  const FORK = "f".repeat(40);
+  const C1 = "c1".repeat(20);
+  const C2 = "c2".repeat(20);
+  const HEAD = "d".repeat(40);
+
+  interface HeadPayload {
+    status?: string;
+    ahead_by?: number;
+    behind_by?: number;
+    total_commits?: number;
+    base_commit?: unknown;
+    merge_base_commit?: unknown;
+    commits?: unknown[];
+  }
+
+  async function compared(body: HeadPayload) {
+    const gh = fakeGithubFetch({ [`GET ${REPO_PATH}/compare/main...vib-201`]: { body } });
+    const result = await getBranchCompare(
+      createGithubClient({ token: "ghp_x", fetchImpl: gh.fetchImpl }),
+      REPO,
+      "main",
+      "vib-201",
+    );
+    if (result.status !== "ok") throw new Error(`compare answered ${result.status}`);
+    return result.compare;
+  }
+
+  const commit = (sha: string, parents: string[]) => ({
+    sha,
+    commit: { message: "[VIB-201] work" },
+    parents: parents.map((p) => ({ sha: p })),
+  });
+
+  it("level with the base: the head is the base tip, and the base tip is recorded", async () => {
+    const c = await compared({
+      status: "identical",
+      ahead_by: 0,
+      behind_by: 0,
+      total_commits: 0,
+      base_commit: { sha: MAIN },
+      merge_base_commit: { sha: MAIN },
+      commits: [],
+    });
+    expect(c.headSha).toBe(MAIN);
+    expect(c.baseSha).toBe(MAIN);
+  });
+
+  it("strictly behind: the head is the merge base", async () => {
+    // Canary: answer `base_commit` for `behind` too, and the head reads as
+    // main's tip, the very count this ruling exists to stop misreading.
+    const c = await compared({
+      status: "behind",
+      ahead_by: 0,
+      behind_by: 6,
+      total_commits: 0,
+      base_commit: { sha: MAIN },
+      merge_base_commit: { sha: FORK },
+      commits: [],
+    });
+    expect(c.headSha).toBe(FORK);
+    expect(c.baseSha).toBe(MAIN);
+  });
+
+  it("ahead or diverged: the head is the one listed commit no other names as a parent, wherever GitHub lists it", async () => {
+    // GitHub lists commits by date, which need not put the head last: here a
+    // merge of `main` (HEAD) is listed before the commit it was made on.
+    // Canary: take the last listed commit, and this reads C2.
+    const body = {
+      ahead_by: 3,
+      behind_by: 0,
+      total_commits: 3,
+      base_commit: { sha: MAIN },
+      merge_base_commit: { sha: FORK },
+      commits: [commit(C1, [FORK]), commit(HEAD, [C2, MAIN]), commit(C2, [C1])],
+    };
+    expect((await compared({ ...body, status: "ahead" })).headSha).toBe(HEAD);
+    expect((await compared({ ...body, status: "diverged", behind_by: 2 })).headSha).toBe(HEAD);
+  });
+
+  it("a list that cannot name the head answers null: paged, short of a dropped entry, or with no status", async () => {
+    // Canaries: drop the completeness check (a paged list's newest listed
+    // commit reads as the head); treat a missing status as `identical`.
+    const paged = await compared({
+      status: "ahead",
+      ahead_by: 300,
+      behind_by: 0,
+      total_commits: 300,
+      base_commit: { sha: MAIN },
+      commits: [commit(C1, [FORK]), commit(C2, [C1])],
+    });
+    expect(paged.headSha).toBeNull();
+    const dropped = await compared({
+      status: "ahead",
+      ahead_by: 2,
+      behind_by: 0,
+      total_commits: 2,
+      base_commit: { sha: MAIN },
+      commits: [commit(C1, [FORK]), { commit: { message: "no sha" } }],
+    });
+    expect(dropped.droppedCommits).toBe(1);
+    expect(dropped.headSha).toBeNull();
+    const noStatus = await compared({
+      ahead_by: 0,
+      behind_by: 0,
+      base_commit: { sha: MAIN },
+      merge_base_commit: { sha: MAIN },
+    });
+    // The reader still defaults its own `status` field; the head is not.
+    expect(noStatus.status).toBe("identical");
+    expect(noStatus.headSha).toBeNull();
+    const noCommits = await compared({ status: "identical", ahead_by: 0, behind_by: 0 });
+    expect(noCommits.headSha).toBeNull();
+    expect(noCommits.baseSha).toBeNull();
+  });
+});
+
 describe("ensureTaskBranch", () => {
   it("creates the branch from the default branch and writes it into task.md", async () => {
     const store = setupWithCredential();

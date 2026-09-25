@@ -88,7 +88,10 @@ import {
 import { relayPrReviews, REVIEW_RELAY_KEY } from "./pr-review-relay.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { latestReconcileSync } from "~/server/provenance/provenance-query.server";
+import {
+  latestReconcileObservation,
+  PUSH_ACTION,
+} from "~/server/provenance/provenance-query.server";
 import {
   canAcceptFromStage,
   isTerminalStage,
@@ -104,6 +107,7 @@ import {
 } from "./scope-flag.server";
 import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
 import { errorMessage } from "~/shared/errors";
+import { countLabel } from "~/shared/text/plural";
 
 /**
  * GitHub reconciler (Phase 7): given a task, fetches live GitHub facts
@@ -209,6 +213,15 @@ interface GithubProvenanceDetails {
    *  non-zero, so a complete list leaves no key at all. */
   commitsDropped?: number;
   sha?: string | null;
+  /** Ruling 494 (pass 40, F40-70): the branch head the compare read, and the
+   *  base tip it read, on a `github.reconcile` row; null when GitHub's answer
+   *  did not name one (or there was no compare). A row without `headSha`
+   *  predates the ruling and reads as "head unknown". On a `github.push` row,
+   *  `headSha` is the head the push published. */
+  headSha?: string | null;
+  baseSha?: string | null;
+  /** Ruling 494: on a `github.push` row, which door pushed. */
+  via?: PushVia;
   /** A pass over a project with no branched task at all (F15-02). */
   heartbeat?: boolean;
   tasks?: number;
@@ -244,10 +257,15 @@ export type TaskReconcileResult =
       taskKey: string;
       repo: string;
       branch: string;
+      /** The base branch the compare was against (the project's default). */
+      base: string;
       /** True when the task.md cache actually changed (and re-projected). */
       changed: boolean;
       sync: BranchSyncState;
-      compare: { aheadBy: number; behindBy: number } | null;
+      /** Null when GitHub could not find the branch or the base to compare.
+       *  Ruling 494: `headSha` is the branch head the compare read, null when
+       *  GitHub's answer did not name it. */
+      compare: { aheadBy: number; behindBy: number; headSha: string | null } | null;
       pr: PrFacts | null;
       /** Task-key-prefixed commits found on the branch. */
       commits: number;
@@ -1522,10 +1540,18 @@ async function reconcileTaskUnlocked(
   // audit row said `behind_main`. A verdict CHANGE is a change worth
   // recording; an unchanged verdict still writes nothing on a poller tick, so
   // the table stays bounded by real changes exactly as before.
-  const syncChanged =
-    latestReconcileSync(db, storeRelativePath(resolveTaskFilePath(ref), ctx.dataRoot)) !==
-    sync;
-  if (changed || syncChanged || !ctx.skipUnchangedProvenance) {
+  // Ruling 494 (pass 40, F40-70): so is a compare of another head. The count
+  // is only true of the head it was read on, and `get_task` reads the newest
+  // row's head to say so; a row that names none (written before the ruling)
+  // is replaced by the first pass that names one.
+  const comparedHead = compare?.headSha ?? null;
+  const newest = latestReconcileObservation(
+    db,
+    storeRelativePath(resolveTaskFilePath(ref), ctx.dataRoot),
+  );
+  const syncChanged = (newest?.sync ?? null) !== sync;
+  const headChanged = (newest?.headSha ?? null) !== comparedHead;
+  if (changed || syncChanged || headChanged || !ctx.skipUnchangedProvenance) {
     const details: GithubProvenanceDetails = {
       repo: gh.repo,
       branch,
@@ -1533,6 +1559,9 @@ async function reconcileTaskUnlocked(
       sync,
       aheadBy: compare?.aheadBy ?? null,
       behindBy: compare?.behindBy ?? null,
+      // Ruling 494: what the count was counted on.
+      headSha: comparedHead,
+      baseSha: compare?.baseSha ?? null,
       prNumber: pr?.number ?? null,
       prState: pr?.state ?? null,
       // P13-D-28: the two newly-consumed GitHub facts, on the observation row.
@@ -1567,10 +1596,11 @@ async function reconcileTaskUnlocked(
     taskKey: input.taskKey,
     repo: gh.repo,
     branch,
+    base: gh.defaultBranch,
     changed,
     sync,
     compare: compare
-      ? { aheadBy: compare.aheadBy, behindBy: compare.behindBy }
+      ? { aheadBy: compare.aheadBy, behindBy: compare.behindBy, headSha: comparedHead }
       : null,
     pr,
     commits: branchCommits?.length ?? 0,
@@ -1589,28 +1619,145 @@ export function reconcileTask(
   actor: AuditActor,
   ctx: GithubActionContext = {},
 ): Promise<TaskReconcileResult> {
-  return withTaskReconcileLock(
-    // The data root is part of the key so two test stores that happen to share
-    // a project slug do not serialize against each other.
-    `${ctx.dataRoot ?? ""}::${input.projectSlug}/${input.taskKey}`,
-    async () => {
-      try {
-        return await reconcileTaskUnlocked(db, input, actor, ctx);
-      } catch (error) {
-        // F21-9: the outermost per-task boundary. One task's unexpected failure
-        // used to abort the whole project sweep (and 500 the Reconcile button),
-        // taking every task after it with it — the poller's next tick then hit
-        // the same task first and lost the board again.
-        const message = errorMessage(error);
-        logger.error("task reconcile failed unexpectedly", {
-          projectSlug: input.projectSlug,
-          taskKey: input.taskKey,
-          err: message,
-        });
-        return { status: "task_error", taskKey: input.taskKey, message };
-      }
-    },
+  return withTaskReconcileLock(taskReconcileKey(ctx, input), () =>
+    reconcileTaskGuarded(db, input, actor, ctx),
   );
+}
+
+/** The per-task lock's key. The data root is part of it so two test stores
+ *  that happen to share a project slug do not serialize against each other. */
+function taskReconcileKey(
+  ctx: GithubActionContext,
+  input: { projectSlug: string; taskKey: string },
+): string {
+  return `${ctx.dataRoot ?? ""}::${input.projectSlug}/${input.taskKey}`;
+}
+
+/** One pass, already inside the task's lock. */
+async function reconcileTaskGuarded(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: AuditActor,
+  ctx: GithubActionContext,
+): Promise<TaskReconcileResult> {
+  try {
+    return await reconcileTaskUnlocked(db, input, actor, ctx);
+  } catch (error) {
+    // F21-9: the outermost per-task boundary. One task's unexpected failure
+    // used to abort the whole project sweep (and 500 the Reconcile button),
+    // taking every task after it with it — the poller's next tick then hit
+    // the same task first and lost the board again.
+    const message = errorMessage(error);
+    logger.error("task reconcile failed unexpectedly", {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      err: message,
+    });
+    return { status: "task_error", taskKey: input.taskKey, message };
+  }
+}
+
+/** Ruling 494: the doors that push a task branch and re-compare it. */
+export type PushVia = "delivery" | "branch-update";
+
+/**
+ * Ruling 494 (pass 40, F40-70): a push that moved a task's branch re-compares
+ * it before the push's caller returns.
+ *
+ * Live on WEB-16 (deploy 9, 2026-09-25) the poller compared GitHub's copy of
+ * `web-16` 0.2 s after `update_branch_from_base` had merged `main` in the
+ * workspace, and recorded it 6 commits behind. Seven seconds later the
+ * delivery pushed `20534f6`, which carried `main`, and nothing compared again
+ * until the next poll five minutes later. For those five minutes `get_task`
+ * said 6: the operator planned around it, and two packets told the owner the
+ * branch was 6 commits behind while the accept dialog, reading GitHub live,
+ * said it carried `main`.
+ *
+ * Inside the task's reconcile lock (F19-19), in order: a `github.push` row
+ * naming the head the push published, then an ordinary pass. The push row is
+ * written inside the lock so that a pass which read the branch before the push
+ * and is still running cannot record its older count after it: that pass
+ * finishes first, the push row stands after its row, and this pass's own row
+ * stands after the push row. When this pass fails (GitHub unreachable, the
+ * credential refused), the push still stands, no count is written in its
+ * place, and `get_task` reads the older count as describing the head before
+ * the push (`createBaseCompareLookup`'s `pushedSince`). The caller reports the
+ * outcome with {@link pushRecompareSentence}. Never throws.
+ */
+export function recompareAfterPush(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    /** The branch the push moved. */
+    branch: string;
+    /** The head the push published (full sha), null when git could not name it. */
+    headSha: string | null;
+    via: PushVia;
+  },
+  actor: AuditActor,
+  ctx: GithubActionContext = {},
+): Promise<TaskReconcileResult> {
+  const task = { projectSlug: input.projectSlug, taskKey: input.taskKey };
+  return withTaskReconcileLock(taskReconcileKey(ctx, task), async () => {
+    try {
+      // A project with no repository pushed nothing; the pass below says so.
+      const repo =
+        readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot })?.parsed
+          .frontmatter.repo ?? null;
+      if (repo) {
+        recordGithubProvenance(db, {
+          absPath: resolveTaskFilePath(taskRef(ctx, input.projectSlug, input.taskKey)),
+          dataRoot: ctx.dataRoot,
+          action: PUSH_ACTION,
+          details: { repo, branch: input.branch, headSha: input.headSha, via: input.via },
+        });
+      }
+    } catch (error) {
+      logger.warn("a push could not be recorded beside the branch compares", {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        err: errorMessage(error),
+      });
+    }
+    return reconcileTaskGuarded(db, task, actor, ctx);
+  });
+}
+
+/**
+ * Ruling 494: what a push's caller says about its re-compare. Every audience
+ * reads it (the operator's tool result, the timeline line a branch update
+ * writes), so it states the fact and leaves the instruction to the doctrine:
+ * the count as GitHub now reads it, or, when the re-compare did not happen,
+ * that the count on record is the one from before the push.
+ */
+export function pushRecompareSentence(
+  result: TaskReconcileResult,
+  pushed: { branch: string; headSha: string | null; base: string },
+): string {
+  const branch = `\`${pushed.branch}\``;
+  const base = `\`${pushed.base}\``;
+  if (result.status !== "reconciled") {
+    return (
+      `${branch} could not be compared with ${base} again after the push (${result.status}), ` +
+      `so the count of commits it is behind stays the one from before the push until the next GitHub pass.`
+    );
+  }
+  if (!result.compare) {
+    return `GitHub did not answer a compare of ${branch} with ${base} after the push, so no count was recorded for it.`;
+  }
+  const stands =
+    result.compare.behindBy === 0
+      ? `level with ${base}`
+      : `${countLabel(result.compare.behindBy, "commit")} behind ${base}`;
+  const read = result.compare.headSha;
+  if (read && pushed.headSha && read !== pushed.headSha) {
+    return (
+      `Re-compared after the push: GitHub's ${branch} stands at \`${read.slice(0, 7)}\`, ` +
+      `not the \`${pushed.headSha.slice(0, 7)}\` just pushed, and is ${stands}.`
+    );
+  }
+  return `Re-compared after the push: ${branch}${read ? ` at \`${read.slice(0, 7)}\`` : ""} is ${stands}.`;
 }
 
 /** Ruling 475: one open review PR the post-merge re-check visits. */

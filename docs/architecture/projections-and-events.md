@@ -408,8 +408,11 @@ stream, once.
 The `provenance` table records what the projector and the reconciler observed:
 `projected` (with diagnostics and event counts), `removed`, `error`, `rescan`,
 `github.reconcile` (including project heartbeats), `github.merge`,
-`github.branch_delete`. Readers derive "last synced" facts from it; it is never
-pruned. Freshness rules live in `app/shared/freshness.ts` (re-exported through
+`github.branch_delete`, `github.push` (a Viberr push of a task branch, ruling 494).
+Readers derive "last synced" facts from it; it is never pruned. A `github.reconcile`
+row names the branch head its compare read (`headSha`), and the operator's
+`baseBehindBy` is read with that head and with any `github.push` recorded after it.
+Freshness rules live in `app/shared/freshness.ts` (re-exported through
 `server/interpretation/freshness-policy.server.ts`): older than one hour is stale;
 never checked is neutral, not stale. "Gone quiet" on a task (`task-activity.server.ts`)
 derives from `task_events.occurred_at` and follows who is on the hook: one hour of

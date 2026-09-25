@@ -129,7 +129,10 @@ import {
   VIEW_WITHOUT_POLICY,
 } from "~/features/agents/agents-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { createReconcileBehindByLookup } from "~/server/provenance/provenance-query.server";
+import {
+  createBaseCompareLookup,
+  type BaseCompareReading,
+} from "~/server/provenance/provenance-query.server";
 import { storeRelativePath } from "~/server/files/file-store-root.server";
 import {
   notifyMentionedUsers,
@@ -2748,6 +2751,25 @@ export interface OperatorTaskSnapshot {
    *  compared this task yet. Informational: a stale or absent reading must
    *  never stop an update, it only stops the step being planned blind. */
   baseBehindBy?: number | null;
+  /** Ruling 494 (pass 40, F40-70): the compare `baseBehindBy` was counted in.
+   *  `sha` is the branch head it read and `observedAt` when it ran. `current`
+   *  is true when no push Viberr made since moved the branch off that head,
+   *  false when one did (`pushedSince` names the head it published, null when
+   *  git could not name it): the count then describes an older head. It is
+   *  null when the compare named no head (a compare recorded before ruling
+   *  494), which never reads as current either. Null while `baseBehindBy` is
+   *  null. Optional only so hand-built fixtures need not restate it;
+   *  `operatorSnapshot` always sets it. */
+  baseComparedHead?: {
+    sha: string | null;
+    observedAt: string;
+    current: boolean | null;
+    pushedSince: { sha: string | null; at: string } | null;
+  } | null;
+  /** Ruling 494: when `baseBehindBy` does not describe the branch's current
+   *  head, the sentence that says so and what not to write; "" when it does.
+   *  Optional for the same reason as above. */
+  baseBehindBySentence?: string;
   /** Ruling 424 (pass 39): the sentence `update_branch_from_base` refuses
    *  with from where the task stands, or null when a refresh would run. At
    *  the acceptance stage the ceremony refreshes the branch once and merges,
@@ -3167,6 +3189,71 @@ function operatorGatesOf(
   };
 }
 
+/**
+ * Ruling 494 (pass 40, F40-70): does the newest compare's count describe the
+ * branch as it stands? Not when Viberr recorded a push after that compare that
+ * published another head (or one git could not name): the count is then an
+ * older head's. Not when the compare named no head either (`null`, unknown).
+ * The known head is the one Viberr's own push published: `pr.headSha` lags a
+ * push until GitHub shows it on the pull request (F39-64), a task with no live
+ * pull request has none, and a base refresh moves the branch past
+ * `workRevision` (ruling 439).
+ */
+function comparedHeadCurrent(reading: BaseCompareReading): boolean | null {
+  const pushed = reading.pushedSince;
+  if (pushed && (pushed.headSha === null || pushed.headSha !== reading.headSha)) return false;
+  return reading.headSha === null ? null : true;
+}
+
+/** Ruling 494: the snapshot's `baseComparedHead` for a compare reading. */
+function baseComparedHeadOf(
+  reading: BaseCompareReading | null,
+): OperatorTaskSnapshot["baseComparedHead"] {
+  if (!reading) return null;
+  return {
+    sha: reading.headSha,
+    observedAt: reading.observedAt,
+    current: comparedHeadCurrent(reading),
+    pushedSince: reading.pushedSince
+      ? { sha: reading.pushedSince.headSha, at: reading.pushedSince.at }
+      : null,
+  };
+}
+
+/**
+ * Ruling 494: the sentence the operator reads instead of a count it must not
+ * repeat, or "" when the count describes the current head. It names both
+ * heads, so "the head you just pushed" is checkable against what was counted.
+ */
+function baseBehindBySentence(
+  reading: BaseCompareReading | null,
+  where: { branch: string | null; base: string },
+): string {
+  if (!reading) return "";
+  const current = comparedHeadCurrent(reading);
+  if (current === true) return "";
+  const branch = where.branch ? `\`${where.branch}\`` : "the branch";
+  const count = `\`baseBehindBy\` (${reading.behindBy})`;
+  const never =
+    `Do not quote it, in a comment or a decision packet, as how far ${branch} is behind ` +
+    `\`${where.base}\` now: a count describes only the head it was counted on.`;
+  if (current === false) {
+    const counted = reading.headSha
+      ? `on \`${reading.headSha.slice(0, 7)}\``
+      : "on a head the compare did not name";
+    const pushed = reading.pushedSince?.headSha;
+    return (
+      `${count} was counted ${counted}, and Viberr pushed ` +
+      `${pushed ? `\`${pushed.slice(0, 7)}\` to ${branch}` : `to ${branch}`} after that compare, ` +
+      `so the count describes the older head. ${never} The next GitHub pass compares the pushed head.`
+    );
+  }
+  return (
+    `The last compare did not record which head it read, so ${count} may describe an older head ` +
+    `than ${branch} carries now. ${never} The next GitHub pass records the head it compares.`
+  );
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -3193,8 +3280,11 @@ export function operatorSnapshot(
 
   const fm = file.parsed.frontmatter;
   // F37-11: the reconciler's own last compare, read the same way the GitHub
-  // page's sync pill reads it.
-  const behindByLookup = createReconcileBehindByLookup(db);
+  // page's sync pill reads it. Ruling 494: with the head it was counted on and
+  // any push Viberr made after it.
+  const baseCompare = createBaseCompareLookup(db)(
+    storeRelativePath(resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), ctx.dataRoot),
+  );
   // Ruling 302: the window, clamped the way the controller's own `events` is.
   const timelineWindow = Math.min(
     Math.max(Math.trunc(events), 1),
@@ -3536,12 +3626,15 @@ export function operatorSnapshot(
     // eight of the pass's nine "plan was not carried out in full" notes were
     // this one step. `null` means no pass has compared this task yet, which is
     // "unknown" and never an excuse to skip the call.
-    baseBehindBy: behindByLookup(
-      storeRelativePath(
-        resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)),
-        ctx.dataRoot,
-      ),
-    ),
+    baseBehindBy: baseCompare?.behindBy ?? null,
+    // Ruling 494 (F40-70): which head that count describes. Live on WEB-16 the
+    // count was read 7 s before the delivery pushed a head that carried `main`,
+    // and two packets told the owner the branch was 6 behind for five minutes.
+    baseComparedHead: baseComparedHeadOf(baseCompare),
+    baseBehindBySentence: baseBehindBySentence(baseCompare, {
+      branch: fm.branch ?? null,
+      base: project.parsed.frontmatter.defaultBranch || "main",
+    }),
     notRefreshableReason: acceptanceBoundaryRefusal(fm, taskKey, project.parsed.frontmatter),
     // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
@@ -4647,7 +4740,12 @@ export async function operatorDeliverForReview(
           : outcome.pushStatus === "up_to_date"
             ? `Nothing to push: PR #${outcome.prNumber} already carries${sha || " the workspace head"}.`
             : `Delivered: push skipped (${outcome.pushStatus}), reusing open review PR #${outcome.prNumber}.`;
-      return { outcome: "done", message };
+      // Ruling 494: where the pushed branch now stands against the base, as the
+      // compare the push ran says, or that it could not run one.
+      return {
+        outcome: "done",
+        message: outcome.recompare ? `${message} ${outcome.recompare}` : message,
+      };
     }
     case "push_conflict":
       return {
