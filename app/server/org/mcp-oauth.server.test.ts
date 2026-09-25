@@ -569,6 +569,17 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
    *  missing, which is what a canary that drops it produces. */
   const publicHalf = z.object({ status: z.string(), scope: z.string().nullable().optional() });
 
+  /** The public half as a row written before ruling 486 held it: every field
+   *  but `scope` (zod drops the key it does not name). */
+  const publicWithoutScope = z.object({
+    status: z.string(),
+    expiresAt: z.string().nullable(),
+    renews: z.boolean(),
+    issuer: z.string().nullable(),
+    resourceMetadataUrl: z.string().nullable(),
+    reason: z.string().nullable(),
+  });
+
   function oauthJson(): z.infer<typeof publicHalf> {
     return publicHalf.parse(JSON.parse(rawRow().oauth_json ?? "null"));
   }
@@ -609,7 +620,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     // scope, so every surface would name no grant until a refresh repeated it.
     await startServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
     await signIn();
-    const { scope: _dropped, ...before486 } = JSON.parse(rawRow().oauth_json ?? "{}") as Record<string, unknown>;
+    const before486 = publicWithoutScope.parse(JSON.parse(rawRow().oauth_json ?? "null"));
     db.prepare(`UPDATE org_mcp_servers SET oauth_json = ? WHERE id = ?`).run(JSON.stringify(before486), MCP_ID);
     expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBeNull();
     // CANARY: skip the write, and the row keeps naming no grant.
@@ -622,7 +633,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
   it("the grant backfill leaves a signed-out row and a token reply that named no scope as they are", async () => {
     await startServer({ grantedScope: null });
     await signIn();
-    const { scope: _none, ...noScope } = JSON.parse(rawRow().oauth_json ?? "{}") as Record<string, unknown>;
+    const noScope = publicWithoutScope.parse(JSON.parse(rawRow().oauth_json ?? "null"));
     db.prepare(`UPDATE org_mcp_servers SET oauth_json = ? WHERE id = ?`).run(JSON.stringify(noScope), MCP_ID);
     // The sealed tokens name no scope, so there is nothing true to copy.
     expect(backfillMcpGrantScopes(db)).toEqual([]);

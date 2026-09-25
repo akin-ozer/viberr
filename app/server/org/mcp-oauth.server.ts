@@ -341,13 +341,14 @@ export function mcpOAuthCredential(db: DatabaseSync, id: string): McpOAuthCreden
  * names of the connections it filled in.
  */
 export function backfillMcpGrantScopes(db: DatabaseSync): string[] {
-  // SAFETY: `ROW_SQL` selects exactly the columns `OAuthRow` declares (see
-  // `rowById`).
-  const rows = db
-    .prepare(`${ROW_SQL} WHERE oauth_ref IS NOT NULL AND oauth_json IS NOT NULL`)
-    .all() as OAuthRow[];
+  const ids = db
+    .prepare(`SELECT id FROM org_mcp_servers WHERE oauth_ref IS NOT NULL AND oauth_json IS NOT NULL`)
+    .all()
+    .map((r) => String(r.id));
   const filled: string[] = [];
-  for (const row of rows) {
+  for (const id of ids) {
+    const row = rowById(db, id);
+    if (!row) continue;
     const pub = readPublic(row.oauth_json);
     if (!pub || pub.status !== "signed_in" || pub.scope) continue;
     const opened = openOAuth(db, row);
