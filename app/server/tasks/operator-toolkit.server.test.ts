@@ -13,6 +13,7 @@ import { saveMcpServer } from "~/server/org/resources.server";
 import {
   buildOperatorToolkit,
   OPERATOR_TOOLKIT_INSTRUCTIONS,
+  SCHEDULE_TOOL_DESCRIPTION,
 } from "./operator-toolkit.server";
 import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
 import { operatorPlanSchemaFor, operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
@@ -258,6 +259,28 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(build(withheld).allowedTools).not.toContain("mcp__viberr__set_dependencies");
     expect(build(withheld).allowedTools).toContain("mcp__viberr__post_comment");
     expect(operatorPlanToolsFor(withheld)).not.toContain("set_dependencies");
+  });
+
+  it("ruling 487: the schedule tools are built on a DIRECT dispatch grant, and schedule_task_action carries the doctrine", () => {
+    // Canaries: build them on `dispatchGate !== "deny"` (the recommend
+    // operator is handed a run that starts with nobody present); drop the
+    // no-packet sentence from the description.
+    const direct = build(withPolicy(uniform("direct")));
+    expect(direct.allowedTools).toContain("mcp__viberr__schedule_task_action");
+    expect(direct.allowedTools).toContain("mcp__viberr__cancel_task_schedule");
+    for (const mode of ["recommend", "off"] as const) {
+      const withheld = build(withPolicy({ ...uniform("direct"), "dispatch-agents": mode }));
+      expect(withheld.allowedTools, mode).not.toContain("mcp__viberr__schedule_task_action");
+      expect(withheld.allowedTools, mode).not.toContain("mcp__viberr__cancel_task_schedule");
+    }
+    const desc = (name: string) => direct.tools.find((t) => t.name === name)!.description;
+    expect(desc("schedule_task_action")).toBe(SCHEDULE_TOOL_DESCRIPTION);
+    expect(SCHEDULE_TOOL_DESCRIPTION).toContain("That wait is scheduled, never asked");
+    expect(SCHEDULE_TOOL_DESCRIPTION).toContain("do not ask a person to schedule it or to route it through the controller");
+    expect(SCHEDULE_TOOL_DESCRIPTION).toContain(
+      "A hold that a pending schedule explains needs NO decision packet: write one timeline note naming the schedule and end your turn.",
+    );
+    expect(desc("get_task")).toContain("`schedules` (ruling 487) lists the runs scheduled on this task that have not fired yet");
   });
 
   it("ruling 133 (A19): get_task, run_agent and transition_stage say the engaged deliverer runs at every stage and a hand-off is never a stage workaround", () => {

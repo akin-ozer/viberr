@@ -30,6 +30,8 @@ import {
   OPERATOR_TIMELINE_MAX,
   operatorOpenPacket,
   operatorResolvePacket,
+  operatorCancelSchedule,
+  operatorScheduleRun,
   operatorPostComment,
   operatorSetDependencies,
   operatorSetGoal,
@@ -51,6 +53,7 @@ import {
   type SpecialistMcpServerConfig,
 } from "./specialist-mcp.server";
 import { listDeployedSpecialists } from "./specialist-run.server";
+import { SCHEDULE_MAX_MINUTES } from "./schedule.server";
 import {
   readDefaultBranchFile,
   defaultBranchPageNote,
@@ -83,6 +86,17 @@ export const KB_CORRECTION_TOOL_DESCRIPTION =
   "When an agent's report says a knowledge-base line is wrong and no proposal for it is on the timeline, file it for them with their evidence: an agent on Codex has no tool to file one itself. " +
   "Quote the settled `line` it corrects. The proposal is filed under a \"Proposed corrections (not binding)\" heading in that document, so every run that reads the document reads it beside the line, and the index every run is handed names the section; it never edits or removes a settled line, and it is NOT binding until a person or the controller promotes it. Bring evidence: the command and its output, or the run and verdict that showed it. This records a proposal, it does not unblock the task — if work is blocked on the decision, open a decision packet as well. " +
   "It is also how a MISSING convention gets written (ruling 418): when a reviewer blocks on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings say nothing about it, propose the convention in the rulings document it belongs to, with no `line` and with the verdict as the evidence, alongside the rework you dispatch. One convention per class, never one per finding.";
+
+/**
+ * Ruling 487 (F40-65): the operator's `schedule_task_action`. Exported so a
+ * test pins the doctrine it carries: a wait on a clock is scheduled, never
+ * asked, and a hold a pending schedule explains needs no packet.
+ */
+export const SCHEDULE_TOOL_DESCRIPTION =
+  "Schedule a future run on THIS task (ruling 487): your own re-run, or a deployed agent's run with a directive, between 1 minute and 28 days out. " +
+  "Use it whenever the task has to wait for a moment in time: a deployed cron run to read, a provider window to reopen, a deploy to land. That wait is scheduled, never asked: do not ask a person to schedule it or to route it through the controller, and do not ask anyone to confirm it. " +
+  "A hold that a pending schedule explains needs NO decision packet: write one timeline note naming the schedule and end your turn. The entry is the record, get_task lists it under `schedules`, and Viberr does not treat the task as stranded while it is pending. " +
+  "It is the run you could start now, with a date on it: an agent you could not dispatch now (not deployed, held by a dependency, not eligible at the task's stage) cannot be scheduled either. It fires on the profile deployed when it fires, and the reply names the schedule id.";
 
 /** What the run mounts, keyed by server name: the in-process `viberr`
  *  governance server, plus whichever org MCP grants resolved. */
@@ -279,7 +293,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "get_task",
-      "Read the current task snapshot: stage (plus `previousStage`, where the task CAME from — arriving back from a later stage means rework for the profile that built it), readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can run, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do; `pr.revisionDrift` names commits pushed to the PR head AFTER the last reviewed revision, which ship UNREVIEWED and must be stated wherever you reason about that PR \u2014 except a base refresh, which is named separately and is not unreviewed work; ruling 238: when the drift is base-refresh ONLY, a re-review is checked out at the REFRESHED HEAD rather than at the reviewed revision, so tell a reviewer you re-dispatch to judge the head, and never name the older sha as the commit it will be looking at; `notAcceptableReason` carries the acceptance gate's own verdict, EVERY gate included: a PR the gate would refuse cannot be recommended for acceptance, and cannot be accepted, while it is set. It also stands on a task that has simply not reached the boundary yet, and its own way out is the workflow, so it is never a reason to hold a task back. The MOVE into the acceptance stage reads the pull request instead: it is refused only while `pr.mergeable: \"conflicting\"` or `pr.unpushedRevision` stands; call `update_branch_from_base`, which routes the conflict, or deliver the revision then), and `operatorPolicy` + autonomy. TWO SCOPES, do not mix them: `operatorPolicy` is YOUR OWN capability policy (`operatorPolicy.scope: \"operator\"`, and read its `note`), while each agent's own grants are `deployedSpecialists[].capabilities` — never quote a row of yours as evidence about an agent. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions; browser = can drive a live browser; web = holds web search/fetch egress) — never by guessing from names. `deployedSpecialists[].eligibleForCurrentStage` says whether a profile may RUN at the task's current stage: its declared stages, or it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 133); declared stages alone decide where a profile may be NEWLY engaged. `notRefreshableReason` (ruling 424) is set while the task stands where `update_branch_from_base` refuses, the acceptance stage with its work approved (ruling 429), and is that refusal's sentence: a positive `baseBehindBy` there is the acceptance ceremony's to settle, so do not plan the refresh. `fileLeases` (ruling 431) is the project's lease list as it binds now; a timeline note about a lease is history, so quote only what the list holds. `collisions` (ruling 413) names the OTHER open review PRs whose diff touches a file yours does, with the shared paths: a merge on either side puts the other into conflict, so before you deliver, refresh a branch or dispatch work into a shared file, read it and say in your directive which files another task is holding. `humanDecisions` (ruling 415) is every decision a PERSON made on this task, newest first, in their own words, read from the whole timeline rather than the window: each stands until a later decision contradicts it, so read them all before you plan, never plan a move one rules out, and never ask again a question one has answered. `requiredReviewers` (ruling 178) lists the reviewers the PROJECT requires per review stage, by profile id with the stage and agent names: each must hold an `approve` verdict on the delivered revision before acceptance, engaged or not — `reviewers` lists only who you have engaged, so a required reviewer missing from it is a review you still owe. Each engaged reviewer also carries `consecutiveRequestChanges`: how many successive times it has requested changes, reset by its own first approve. A re-review that blocks the SAME revision again counts as another objection (ruling 204: in a deadlock the deliverer commits nothing, so no new revision is ever minted and counting revisions would sit at one forever); a re-DISPATCH that records no verdict counts as nothing. One is ordinary review; two or more means the objection outlived either a rework or the deliverer's answer that it had nothing in scope to change, which is when another rework stops being the move. AT TWO THE MOVE IS YOURS, AND IT IS NOT ANOTHER REWORK (ruling 410): run THAT reviewer once with no rework behind it and ask it to name everything it would still block on across its own surface, on the revision as it stands, including anything it was holding for a later round \u2014 a verdict is supposed to be the complete set, so the answer either ends the loop or shows it cannot be ended by reworking. Pass `completeness: true` on that `run_agent` (ruling 421) so the verdict it returns is recorded as the answer. Then rework ONCE against the whole answer, never one finding at a time. Viberr opens the decision packet for a human itself when the count reaches THREE (ruling 237 as amended by 410), which is the loop outliving that question \u2014 unless another decision was already open on the task at that instant, in which case it is SKIPPED and raised again when that one is answered (ruling 328). So a task you are reading with such a reviewer and no packet is one whose escalation is still owed, not one that failed: do not read the absence of a packet as evidence that the reviewer's objection was judged and dismissed.",
+      "Read the current task snapshot: stage (plus `previousStage`, where the task CAME from — arriving back from a later stage means rework for the profile that built it), readiness, waiting, owner, the engaged agents (delivering + supporting), goal, the deployed agent profiles you can run, the allowed next stage transitions, any open decision packet, the review `pr` (P13-D-4 — `state: \"closed\"` means a human CLOSED it on GitHub without merging, i.e. the work was rejected out-of-band: do NOT recommend or accept completion, report it and ask what to do; `pr.revisionDrift` names commits pushed to the PR head AFTER the last reviewed revision, which ship UNREVIEWED and must be stated wherever you reason about that PR \u2014 except a base refresh, which is named separately and is not unreviewed work; ruling 238: when the drift is base-refresh ONLY, a re-review is checked out at the REFRESHED HEAD rather than at the reviewed revision, so tell a reviewer you re-dispatch to judge the head, and never name the older sha as the commit it will be looking at; `notAcceptableReason` carries the acceptance gate's own verdict, EVERY gate included: a PR the gate would refuse cannot be recommended for acceptance, and cannot be accepted, while it is set. It also stands on a task that has simply not reached the boundary yet, and its own way out is the workflow, so it is never a reason to hold a task back. The MOVE into the acceptance stage reads the pull request instead: it is refused only while `pr.mergeable: \"conflicting\"` or `pr.unpushedRevision` stands; call `update_branch_from_base`, which routes the conflict, or deliver the revision then), and `operatorPolicy` + autonomy. TWO SCOPES, do not mix them: `operatorPolicy` is YOUR OWN capability policy (`operatorPolicy.scope: \"operator\"`, and read its `note`), while each agent's own grants are `deployedSpecialists[].capabilities` — never quote a row of yours as evidence about an agent. Call this FIRST and after each change. If the `goal` is still the unspecified triage placeholder, DRAFT it with set_goal (or open an edit_goal packet for the human) BEFORE prompting any agent. SELECT agents by each profile's `desc` (its purpose) and `capabilities` (delivery = builds and owns the branch/PR; verdict = its review verdicts gate acceptance; askHuman = can raise questions; browser = can drive a live browser; web = holds web search/fetch egress) — never by guessing from names. `deployedSpecialists[].eligibleForCurrentStage` says whether a profile may RUN at the task's current stage: its declared stages, or it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 133); declared stages alone decide where a profile may be NEWLY engaged. `notRefreshableReason` (ruling 424) is set while the task stands where `update_branch_from_base` refuses, the acceptance stage with its work approved (ruling 429), and is that refusal's sentence: a positive `baseBehindBy` there is the acceptance ceremony's to settle, so do not plan the refresh. `fileLeases` (ruling 431) is the project's lease list as it binds now; a timeline note about a lease is history, so quote only what the list holds. `schedules` (ruling 487) lists the runs scheduled on this task that have not fired yet, with who scheduled each (`yours` marks your own): a hold one of them explains needs no decision packet. `collisions` (ruling 413) names the OTHER open review PRs whose diff touches a file yours does, with the shared paths: a merge on either side puts the other into conflict, so before you deliver, refresh a branch or dispatch work into a shared file, read it and say in your directive which files another task is holding. `humanDecisions` (ruling 415) is every decision a PERSON made on this task, newest first, in their own words, read from the whole timeline rather than the window: each stands until a later decision contradicts it, so read them all before you plan, never plan a move one rules out, and never ask again a question one has answered. `requiredReviewers` (ruling 178) lists the reviewers the PROJECT requires per review stage, by profile id with the stage and agent names: each must hold an `approve` verdict on the delivered revision before acceptance, engaged or not — `reviewers` lists only who you have engaged, so a required reviewer missing from it is a review you still owe. Each engaged reviewer also carries `consecutiveRequestChanges`: how many successive times it has requested changes, reset by its own first approve. A re-review that blocks the SAME revision again counts as another objection (ruling 204: in a deadlock the deliverer commits nothing, so no new revision is ever minted and counting revisions would sit at one forever); a re-DISPATCH that records no verdict counts as nothing. One is ordinary review; two or more means the objection outlived either a rework or the deliverer's answer that it had nothing in scope to change, which is when another rework stops being the move. AT TWO THE MOVE IS YOURS, AND IT IS NOT ANOTHER REWORK (ruling 410): run THAT reviewer once with no rework behind it and ask it to name everything it would still block on across its own surface, on the revision as it stands, including anything it was holding for a later round \u2014 a verdict is supposed to be the complete set, so the answer either ends the loop or shows it cannot be ended by reworking. Pass `completeness: true` on that `run_agent` (ruling 421) so the verdict it returns is recorded as the answer. Then rework ONCE against the whole answer, never one finding at a time. Viberr opens the decision packet for a human itself when the count reaches THREE (ruling 237 as amended by 410), which is the loop outliving that question \u2014 unless another decision was already open on the task at that instant, in which case it is SKIPPED and raised again when that one is answered (ruling 328). So a task you are reading with such a reviewer and no packet is one whose escalation is still owed, not one that failed: do not read the absence of a packet as evidence that the reviewer's objection was judged and dismissed.",
       {
         events: z
           .number()
@@ -920,6 +934,63 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         },
       ),
       "run_agent",
+    );
+  }
+
+  // Ruling 487 (F40-65): the controller's schedule verbs (ruling 153) at the
+  // operator's door, for THIS task only. Built on a DIRECT dispatch grant
+  // alone: a scheduled run starts with nobody present, and a `recommend`
+  // grant means a person starts every run the operator proposes.
+  if (dispatchGate(authority) === "direct") {
+    add(
+      tool(
+        "schedule_task_action",
+        SCHEDULE_TOOL_DESCRIPTION,
+        {
+          agent: z
+            .string()
+            .describe('"operator" for your own re-run, or a deployed profile id from get_task\'s deployedSpecialists.'),
+          delayMinutes: z
+            .number()
+            .optional()
+            .describe(`Minutes from now (1 to ${SCHEDULE_MAX_MINUTES}). Give this or dueAt.`),
+          dueAt: z
+            .string()
+            .optional()
+            .describe("An ISO instant, between 1 minute and 28 days out: e.g. just after the cron run the task has to read. Give this or delayMinutes."),
+          prompt: z
+            .string()
+            .optional()
+            .describe("The steer for your own re-run, or the agent's directive (under 4000 characters): what to read or do when it fires."),
+        },
+        async (args: { agent: string; delayMinutes?: number; dueAt?: string; prompt?: string }) => {
+          const input: Parameters<typeof operatorScheduleRun>[2] = { ...base, agent: args.agent };
+          if (args.delayMinutes !== undefined) input.delayMinutes = args.delayMinutes;
+          if (args.dueAt !== undefined) input.dueAt = args.dueAt.trim();
+          if (args.prompt) input.prompt = prose(args.prompt);
+          return resultText(await operatorScheduleRun(db, ctx, input, authority));
+        },
+      ),
+      "schedule_task_action",
+    );
+    add(
+      tool(
+        "cancel_task_schedule",
+        "Cancel one PENDING run you scheduled on this task with schedule_task_action (ruling 487). The id is in get_task's `schedules` (only an entry marked `yours` is yours to cancel; a person's schedule is theirs) or in schedule_task_action's reply.",
+        {
+          scheduleId: z.string().describe("The pending entry's id (sch_...)."),
+        },
+        async (args: { scheduleId: string }) =>
+          resultText(
+            await operatorCancelSchedule(
+              db,
+              ctx,
+              { ...base, scheduleId: args.scheduleId },
+              authority,
+            ),
+          ),
+      ),
+      "cancel_task_schedule",
     );
   }
 

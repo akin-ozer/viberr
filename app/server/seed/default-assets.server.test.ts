@@ -166,6 +166,27 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(shipped()).not.toMatch(/(ask|tell) (a person|the owner|a human)[^.]*(push|make)[^.]*(initial|first) commit/i);
   });
 
+  /**
+   * Ruling 487 (F40-65): a wait on a clock is scheduled, never asked, and a
+   * hold a pending schedule explains needs no packet. Live on WEB-9 the
+   * operator asked the owner to route a 12:25Z run through the controller and
+   * opened a packet only to record the wait, obeying "never leave a pre-work
+   * or `auto` stage with nothing done and no packet".
+   */
+  it("ruling 487: the doctrine schedules a wait on a clock and records a scheduled hold with a note, and its outgoing hash is recorded", async () => {
+    // Canaries: drop the new sentences; restore "nothing done and no packet";
+    // remove the outgoing hash.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "0386467b19815de69f8a814134081b78813e2d99414c7ab45b563da84bf26786", {})).toBe(true);
+    const doctrine = shipped();
+    expect(doctrine).toContain("that wait is scheduled, not asked: `schedule_task_action` the run that picks it up then");
+    expect(doctrine).toContain("Never ask a person to schedule it or to route it through the controller");
+    expect(doctrine).toContain("A hold that a pending schedule explains needs NO decision packet");
+    expect(doctrine).toContain("write one timeline note naming the schedule and end your turn");
+    expect(doctrine).toContain("A decision packet is for a decision a person must make, never for recording that you are waiting.");
+    expect(doctrine).not.toContain("nothing done and no packet");
+  });
+
   it("pass 34 A13: the operator doctrine shipped before `set_dependencies` is a recorded prior hash, so a live store upgrades in place", async () => {
     // Canary: remove the outgoing hash from PRIOR_SHIPPED_HASHES.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");

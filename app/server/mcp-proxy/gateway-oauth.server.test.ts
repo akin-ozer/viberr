@@ -15,7 +15,9 @@ import { CLOUDFLARE_READ_ONLY_GRANT } from "../../../test-support/cloudflare-rea
 import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
 import { getMcpServer, saveMcpServer } from "~/server/org/resources.server";
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
-import { bindRunToMcpGateway, startMcpGateway, stopMcpGateway } from "./gateway.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
+import { bindRunToMcpGateway, closeRunMcpGatewayCalls, startMcpGateway, stopMcpGateway } from "./gateway.server";
+import { MCP_GRANT_TOOL_NAME } from "./grant-tool.server";
 import { errorMessage } from "~/shared/errors";
 import { OAUTH_NEEDS_SIGN_IN, OAUTH_SIGN_IN_EXPIRED } from "./upstream.server";
 
@@ -67,7 +69,7 @@ afterEach(async () => {
 });
 
 /** Mount the server as a run would and connect the run's own client. */
-async function runClient(): Promise<{ client: Client; config: string }> {
+async function runClient(): Promise<{ client: Client; config: string; runToken: string }> {
   const resolution = resolveSpecialistMcpServersDetailed(db, ["cloudflare-api"]);
   const servers = bindRunToMcpGateway({
     db,
@@ -85,7 +87,11 @@ async function runClient(): Promise<{ client: Client; config: string }> {
     new StreamableHTTPClientTransport(new URL(mount.url), { requestInit: { headers: mount.headers } }),
   );
   clients.push(client);
-  return { client, config: JSON.stringify(servers) };
+  return {
+    client,
+    config: JSON.stringify(servers),
+    runToken: mount.headers.Authorization.replace(/^Bearer /, ""),
+  };
 }
 
 describe("the gateway and an OAuth sign-in (ruling 469)", () => {
@@ -217,5 +223,94 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
     await signOutMcpOAuth(db, "mcp_cf", TEST_OAUTH_ADMIN.actor);
     await expect(client.callTool({ name: "whoami", arguments: {} })).rejects.toThrow(OAUTH_NEEDS_SIGN_IN);
     expect(server.calls).toEqual(["whoami"]);
+  });
+
+  describe("the connection's grant tool (ruling 486, F40-66)", () => {
+    const WRITES = ["workers-kv-storage.write", "workers-scripts.write"];
+
+    /** The grant tool's answer as the run's client reads it, and as it came. */
+    async function grantAnswer(client: Client): Promise<{ text: string; raw: string }> {
+      const answered = await client.callTool({ name: MCP_GRANT_TOOL_NAME, arguments: {} });
+      const parsed = toolResult.parse(answered);
+      expect(parsed.isError).not.toBe(true);
+      return { text: parsed.content.map((block) => block.text).join("\n"), raw: JSON.stringify(answered) };
+    }
+
+    it("is listed on an OAuth-signed-in connection and answers the grant's writes, reads and expiry without reaching the server", async () => {
+      // CANARIES: offer no grant tool (the listing ends at "fail"); forward
+      // the call upstream (the server hears it and answers "…: ok"); count
+      // every scope as a write (the writes list holds the reads); put the
+      // run's bearer in the answer (the token search finds it).
+      server.options.grantedScope = `${CLOUDFLARE_READ_ONLY_GRANT} ${WRITES.join(" ")}`;
+      expect((await signInWithOAuth(db, "mcp_cf")).ok).toBe(true);
+      // Marked as a write tool by hand, it still never counts as a write call.
+      db.prepare(`UPDATE org_mcp_servers SET tool_policy_json = ? WHERE id = 'mcp_cf'`).run(
+        JSON.stringify([MCP_GRANT_TOOL_NAME, "delete_zone"].map((name) => ({ name, gate: "repo-write" }))),
+      );
+      const { client, runToken } = await runClient();
+
+      const listed = (await client.listTools()).tools;
+      expect(listed.map((tool) => tool.name)).toEqual(["whoami", "delete_zone", "slow", "fail", MCP_GRANT_TOOL_NAME]);
+      expect(listed.at(-1)?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+
+      const heard = server.authorizations.length;
+      const { text, raw } = await grantAnswer(client);
+      // Answered by the gateway: the server heard nothing at all.
+      expect(server.authorizations).toHaveLength(heard);
+      expect(server.calls).toEqual([]);
+
+      const [head, writes, reads] = text.split("\n\n");
+      const expiresAt = getMcpServer(db, "mcp_cf")?.oauth?.expiresAt;
+      expect(expiresAt).toEqual(expect.any(String));
+      expect(head).toContain("cloudflare-api: signed in (expires in 60 minutes, renews itself) with OAuth");
+      expect(head).toContain(`the access token expires at ${expiresAt}.`);
+      expect(head).toContain("Granted 196 scopes: 2 writes and 194 reads.");
+      expect(writes?.split("\n")).toEqual(["Writes (2):", ...WRITES]);
+      const readLines = reads?.split("\n") ?? [];
+      expect(readLines[0]).toBe("Reads (194):");
+      expect(readLines).toHaveLength(195);
+      expect(readLines).toContain("workers-kv-storage.read");
+      expect(readLines).not.toContain("workers-kv-storage.write");
+
+      // No token material: none the server issued, and not the run's own.
+      for (const secret of [...server.issuedSecrets(), runToken]) expect(raw).not.toContain(secret);
+
+      // Not audited as a write call though its name is marked; the marked
+      // upstream tool still is.
+      expect(listAuditEvents(db, { action: "task.agent.mcp_write_call" })).toEqual([]);
+      await client.callTool({ name: "delete_zone", arguments: {} });
+      expect(listAuditEvents(db, { action: "task.agent.mcp_write_call" }).map((row) => row.details)).toEqual([
+        expect.objectContaining({ tool: "delete_zone" }),
+      ]);
+    });
+
+    it("says the server did not name the grant when its sign-in named no scope", async () => {
+      expect(getMcpServer(db, "mcp_cf")?.oauth?.scope).toBeNull();
+      const { client } = await runClient();
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain(MCP_GRANT_TOOL_NAME);
+      const { text } = await grantAnswer(client);
+      expect(text).toContain("The server did not say which scopes it granted");
+      expect(text).not.toContain("Writes");
+      expect(server.calls).toEqual([]);
+    });
+
+    it("after a sign-out it says nothing is granted, and once the run's calls close it is refused like any call", async () => {
+      // CANARY: answer it before the calls-closed check, and the ended run
+      // still reads its grant.
+      const { client } = await runClient();
+      await client.listTools();
+      await signOutMcpOAuth(db, "mcp_cf", TEST_OAUTH_ADMIN.actor);
+      const heard = server.authorizations.length;
+      const { text } = await grantAnswer(client);
+      expect(text).toBe(
+        "cloudflare-api is not signed in with OAuth now (it needs a sign-in), so its connection grants nothing until an org admin signs it in again in Instance settings → Agent resources.",
+      );
+      expect(server.authorizations).toHaveLength(heard);
+
+      closeRunMcpGatewayCalls("run_oauth_1");
+      await expect(client.callTool({ name: MCP_GRANT_TOOL_NAME, arguments: {} })).rejects.toThrow(
+        "the run has ended",
+      );
+    });
   });
 });

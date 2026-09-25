@@ -593,7 +593,8 @@ Notes:
     `delivers`, `completeness` (`run_agent`), `toStageId` (`transition`), `forHeadSha`
     (`accept_completion`);
   - `schedules[]`: `id`, `action` (`run-operator | run-agent`), `dueAt`, `profileId` (null for
-    `run-operator`), `prompt`, `createdBy`, `createdByLabel`, `createdAt`, `status`
+    `run-operator`), `prompt`, `createdBy` (the scheduler's user id, or `operator` for an entry
+    the operator made, ruling 487), `createdByLabel`, `createdAt`, `status`
     (`SCHEDULE_STATUS_VALUES`: `pending | claimed | fired | failed | cancelled`), `claimedAt`,
     `firedAt`, `retries`;
   - `queuedQuestions[]`: `id`, `profileId`, `directive`, `decidedBy`, `decidedByLabel`,

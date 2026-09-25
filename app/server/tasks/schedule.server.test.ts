@@ -1,7 +1,12 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import type { CapabilityMode } from "~/schemas/project-file.schema";
+import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
+import { buildOperatorToolkit } from "./operator-toolkit.server";
+import { operatorScheduleRun, type OperatorAuthority } from "./operator-actions.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -1208,5 +1213,293 @@ describe("tasksWithUnresolvedSchedules (B-WF5)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     expect(tasksWithUnresolvedSchedules(store.db)).toEqual([]);
+  });
+});
+
+/* ------ ruling 487 (F40-65): the operator schedules its own task's runs ------ */
+
+/**
+ * Live on WEB-9 the task had to read a deployed cron run at 11:17Z and another
+ * at 12:17Z. The operator had no scheduling tool, so it asked the owner to
+ * route a 12:25Z run through the controller, and then opened a packet only to
+ * record the wait. These are its two tools, driven through the real toolkit:
+ * the same entry, firing path, audit row and timeline line as ruling 153's,
+ * attributed to the operator and gated like its immediate dispatch.
+ */
+describe("ruling 487: the operator's schedule_task_action and cancel_task_schedule", () => {
+  /** An operator whose `dispatch-agents` grant is absent, which resolves to
+   *  the catalog default `direct` (ruling 98(b)). */
+  function operatorAuthority(policy: Record<string, CapabilityMode> = {}): OperatorAuthority {
+    return {
+      policy: new Map(Object.entries(policy)),
+      autonomy: "supervised",
+      backend: "claude",
+      model: "sonnet",
+      effort: "",
+      name: "Operator",
+      skills: [],
+      kb: [],
+      mcps: [],
+      persona: null,
+      deployed: true,
+      humanGatedBeforeWork: false,
+    };
+  }
+  const toolkitFor = (taskKey: string, authority = operatorAuthority()) =>
+    buildOperatorToolkit({ db: store.db, ctx: dctx(), projectSlug: store.slug, taskKey, authority });
+  const replyText = z
+    .object({ content: z.array(z.object({ text: z.string() })).min(1) })
+    .transform((r) => r.content[0]!.text);
+  /** Every argument the two schedule tools and `get_task` take. */
+  type ToolArgs = {
+    agent?: string;
+    delayMinutes?: number;
+    dueAt?: string;
+    prompt?: string;
+    scheduleId?: string;
+  };
+  async function call(
+    taskKey: string,
+    name: string,
+    args: ToolArgs,
+    authority = operatorAuthority(),
+  ): Promise<string> {
+    const def = toolkitFor(taskKey, authority).tools.find((t) => t.name === name);
+    if (!def) throw new Error(`${name} is not built for this operator`);
+    return replyText.parse(await def.handler(args, {}));
+  }
+  const inHours = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
+  /** `dev` works every stage on `devBackend`; `rev` is scoped to Review. */
+  function deployAgents(devBackend: "claude" | "codex"): void {
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [],
+          extras: [],
+          definition: { kind: "specialist", name: "dev", role: "developer", backends: [devBackend], model: defaultModelFor(devBackend) },
+        },
+        {
+          profileId: "rev",
+          capabilities: [],
+          extras: [],
+          definition: { kind: "specialist", name: "rev", role: "reviewer", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+      ],
+    });
+  }
+
+  beforeEach(() => {
+    deployAgents("claude");
+    for (const key of ["VIB-1", "VIB-2"]) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { ownerUserId: store.users.arda.id, stage: "impl" }),
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  });
+
+  it("writes the entry, the audit row and the Scheduled line as the operator, and get_task lists it as yours", async () => {
+    // Canaries: drop the tool from the toolkit (nothing is built to call);
+    // write `createdBy` as `actor.userId ?? "system"` again (the entry reads
+    // "system" and get_task stops calling it yours); write the note as the
+    // human-kind actor again.
+    const reply = await call("VIB-1", "schedule_task_action", {
+      agent: "dev",
+      dueAt: inHours(2),
+      prompt: "Read the 12:17Z cron run's output and report it",
+    });
+    const entry = schedules("VIB-1")[0]!;
+    expect(reply).toMatch(/^\[done\] Scheduled a dev run on VIB-1 for /);
+    // The reply names the schedule id.
+    expect(reply).toContain(`(${entry.id})`);
+    expect(entry).toMatchObject({
+      action: "run-agent",
+      profileId: "dev",
+      prompt: "Read the 12:17Z cron run's output and report it",
+      status: "pending",
+      createdBy: "operator",
+      createdByLabel: "operator",
+    });
+    // The same timeline line as ruling 153's, written by the operator.
+    const note = timeline("VIB-1")[0]!;
+    expect(note.actor).toEqual({ kind: "operator" });
+    expect(note.text).toBe(
+      `**Scheduled:** a **dev** run for **VIB-1** at ${entry.dueAt} — Read the 12:17Z cron run's output and report it. It runs on the profile deployed when it fires.`,
+    );
+    // The same audit row, with the operator as its actor.
+    const created = listAuditEvents(store.db, { action: "task.schedule.created" })[0]!;
+    expect(created).toMatchObject({ actorUserId: null, actorLabel: "operator", taskKey: "VIB-1" });
+    expect(created.details).toMatchObject({ scheduleId: entry.id, action: "run-agent", profileId: "dev" });
+    // get_task lists what is pending, and whose it is.
+    const snapshot = z
+      .object({
+        schedules: z.array(
+          z.object({
+            id: z.string(),
+            action: z.string(),
+            profileId: z.string().nullable(),
+            by: z.string(),
+            yours: z.boolean(),
+          }),
+        ),
+      })
+      .parse(JSON.parse(await call("VIB-1", "get_task", {})));
+    expect(snapshot.schedules).toEqual([
+      { id: entry.id, action: "run-agent", profileId: "dev", by: "operator", yours: true },
+    ]);
+    // Its own re-run is the other target.
+    expect(await call("VIB-1", "schedule_task_action", { agent: "operator", delayMinutes: 90 })).toMatch(
+      /^\[done\] Scheduled your own re-run on VIB-1 for .*, in 90 minutes \(sch_/,
+    );
+    expect(schedules("VIB-1")[1]).toMatchObject({ action: "run-operator", profileId: null, createdBy: "operator" });
+  });
+
+  it("refuses a time outside 1 minute to 28 days, and says what now is", async () => {
+    // Canary: drop the upper bound in `scheduleDueMs` (40321 minutes and 29
+    // days are then written).
+    for (const when of [
+      { delayMinutes: 0 },
+      { delayMinutes: 40_321 },
+      { dueAt: new Date(Date.now() + 30_000).toISOString() },
+      { dueAt: inHours(29 * 24) },
+      {},
+    ]) {
+      const reply = await call("VIB-1", "schedule_task_action", { agent: "operator", ...when });
+      expect(reply, JSON.stringify(when)).toMatch(
+        /^\[noop\] Schedule between 1 minute and 28 days out\. It is \d{4}-\d\d-\d\dT[\d:.]+Z now\.$/,
+      );
+    }
+    expect(schedules("VIB-1")).toEqual([]);
+    // The two edges themselves are inside.
+    expect(await call("VIB-1", "schedule_task_action", { agent: "operator", delayMinutes: 1 })).toMatch(/^\[done\]/);
+    expect(await call("VIB-1", "schedule_task_action", { agent: "operator", delayMinutes: 40_320 })).toMatch(/^\[done\]/);
+  });
+
+  it("refuses what it could not dispatch now: a recommend-only grant, an undeployed profile, a stage the agent does not work, a held task", async () => {
+    // Canaries: build the tools on `dispatchGate !== "deny"` (the recommend
+    // operator gets them); drop `scheduleGrantRefusal` (the action schedules
+    // for it); drop `dispatchRefusalNow`'s stage check (rev is scheduled at In
+    // Progress); drop its hold check (dev is scheduled on a held task).
+    const recommendOnly = operatorAuthority({ "dispatch-agents": "recommend" });
+    expect(toolkitFor("VIB-1", recommendOnly).allowedTools).not.toContain("mcp__viberr__schedule_task_action");
+    expect(toolkitFor("VIB-1", recommendOnly).allowedTools).not.toContain("mcp__viberr__cancel_task_schedule");
+    // The action refuses it as well, for the Codex plan's sake.
+    const denied = await operatorScheduleRun(
+      store.db,
+      dctx(),
+      { projectSlug: store.slug, taskKey: "VIB-1", agent: "dev", delayMinutes: 60 },
+      recommendOnly,
+    );
+    expect(denied.outcome).toBe("denied");
+    expect(denied.message).toContain("needs a `direct` `dispatch-agents` grant");
+
+    expect(await call("VIB-1", "schedule_task_action", { agent: "ghost", delayMinutes: 60 })).toBe(
+      `[noop] No deployed agent "ghost" to schedule. Pick a profile from get_task's deployedSpecialists, or "operator" for your own re-run.`,
+    );
+    const stage = await call("VIB-1", "schedule_task_action", { agent: "rev", delayMinutes: 60 });
+    expect(stage).toMatch(/^\[noop\] rev's run cannot be scheduled, because it could not be dispatched now: /);
+    expect(stage).toContain("Review");
+
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.blockedBy = ["VIB-2"];
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const held = await call("VIB-1", "schedule_task_action", { agent: "dev", delayMinutes: 60 });
+    expect(held).toContain("dev's run cannot be scheduled, because it could not be dispatched now: VIB-1 waits on VIB-2");
+    expect(held).toContain("so scheduling an agent run on it is refused");
+    expect(schedules("VIB-1")).toEqual([]);
+  });
+
+  it("fires on the profile deployed WHEN it fires, as the operator's dispatch rather than a person's", async () => {
+    // Canary: drop `byOperator` from the fire path's run-agent arm and the
+    // agent is told "A human (operator) asked you" and to tag "@operator" as
+    // the person who dispatched it.
+    await call("VIB-1", "schedule_task_action", {
+      agent: "dev",
+      dueAt: inHours(2),
+      prompt: "Read the 12:17Z cron run's output.",
+    });
+    const id = schedules("VIB-1")[0]!.id;
+    // The deployment changes between the schedule and the fire: dev moves to
+    // Codex. The entry pinned only the profile id (R22), so Codex runs it.
+    deployAgents("codex");
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      const entry = parsed.frontmatter.schedules.find((s) => s.id === id)!;
+      entry.dueAt = new Date(Date.now() - 60_000).toISOString();
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    expect((await fireDueSchedules(store.db, dctx())).fired).toBe(1);
+    await waitForSchedule("VIB-1", id, "fired");
+    const spec = startedRunSpecs().find((s) => s.kind !== "operator")!;
+    expect(spec.backend).toBe("codex");
+    expect(spec.prompt).toContain(`You were asked: "Read the 12:17Z cron run's output."`);
+    expect(spec.prompt).not.toContain("A human (operator)");
+    expect(spec.prompt).not.toContain("This run was dispatched by operator");
+  });
+
+  it("an operator re-run it scheduled itself is not told a human set it", async () => {
+    // Canary: drop `scheduledByOperator` from the runner's run-operator arm.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        schedules: [
+          rawSchedule({ id: "sch_own", createdBy: "operator", createdByLabel: "operator", prompt: "read the 12:17Z cron run" }),
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect((await fireDueSchedules(store.db, dctx())).fired).toBe(1);
+    await waitForSchedule("VIB-3", "sch_own", "fired");
+    const prompt = startedRunSpecs().find((s) => s.kind === "operator")?.prompt ?? "";
+    expect(prompt).toContain("SCHEDULED re-check you set earlier yourself");
+    expect(prompt).not.toContain("a human set earlier");
+    expect(prompt).toContain('"read the 12:17Z cron run"');
+  });
+
+  it("cancels only its own entries, on its own task", async () => {
+    // Canary: drop the `createdBy` check in `operatorCancelSchedule` (the
+    // person's schedule is cancelled by the operator).
+    await call("VIB-1", "schedule_task_action", { agent: "operator", delayMinutes: 120 });
+    const own = schedules("VIB-1")[0]!.id;
+    const person = await scheduleTaskAction(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dueAt: inHours(3), prompt: "re-check tomorrow" },
+      actor(),
+      dctx(),
+    );
+
+    // Another task's operator cannot reach this task's entry: its toolkit is
+    // bound to VIB-2, where the id is not.
+    expect(await call("VIB-2", "cancel_task_schedule", { scheduleId: own })).toBe(
+      `[noop] ${own} is not a pending schedule on VIB-2. Nothing is scheduled on it.`,
+    );
+    // A person's entry on its own task is theirs.
+    expect(await call("VIB-1", "cancel_task_schedule", { scheduleId: person.id })).toBe(
+      `[denied] ${person.id} was scheduled by Elif Demir, so it is theirs to cancel, not yours. If it no longer fits the task, say so in a comment.`,
+    );
+    expect(schedules("VIB-1").map((s) => s.status)).toEqual(["pending", "pending"]);
+
+    expect(await call("VIB-1", "cancel_task_schedule", { scheduleId: own })).toBe(
+      `[done] Cancelled ${own} on VIB-1.`,
+    );
+    expect(schedules("VIB-1").find((s) => s.id === own)!.status).toBe("cancelled");
+    expect(schedules("VIB-1").find((s) => s.id === person.id)!.status).toBe("pending");
+    const note = timeline("VIB-1")[0]!;
+    expect(note.actor).toEqual({ kind: "operator" });
+    expect(note.text).toContain("**Schedule cancelled:**");
+    expect(listAuditEvents(store.db, { action: "task.schedule.cancelled" })[0]).toMatchObject({
+      actorLabel: "operator",
+      details: { scheduleId: own },
+    });
+    // Nothing of its own is left to cancel twice.
+    expect(await call("VIB-1", "cancel_task_schedule", { scheduleId: own })).toBe(
+      `[noop] ${own} is not a pending schedule on VIB-1. Pending here: ${person.id}.`,
+    );
   });
 });
