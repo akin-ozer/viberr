@@ -85,8 +85,10 @@ itself, and below the two-column breakpoint the head carries a native thread pic
 (`controller-examples.ts`, shared with the dock; ruling 314). A working turn shows the run's
 `phase` and last tool `step` on the row that says it is working (ruling 250). Below the
 two-column breakpoint the thread picker takes a row of its own in the head, with New and
-Home on the row under it (ruling 476(e)). A link in a message wraps inside the transcript
-rather than scrolling it sideways (`.md-body a`, ruling 476(a)). Where the transcript puts
+Home on the row under it (ruling 476(e)). A link in a message, and any other long token in
+its prose (a word joined by slashes), wraps inside the transcript rather than scrolling it
+sideways (`.md-body a`, and `.md-body` paragraphs, list items, blockquotes and headings;
+a code block and a table keep their own scrollers; ruling 476(a), (i)). Where the transcript puts
 its reader is one rule for the page and the dock (`useTranscriptFollow`,
 `transcript-follow.ts`, ruling 476(c)): an opened thread shows its newest reply from the
 first line when a reply is the newest message, and its end otherwise; a controller message
@@ -873,7 +875,10 @@ Canonical at `projects/<slug>/goals/goal-<n>.md`, written only by the app (hand 
 are tolerated by the parser; unknown frontmatter keys round-trip). Frontmatter
 (`GOAL_FRONTMATTER_KEYS` order): `id`, `title`, `status` `active | paused | attention |
 completed | cancelled`, `createdBy`, `createdByLabel`, `conversationId` (the controller
-conversation the chain was planned in, null for one written before the key; ruling 476(h)),
+conversation the chain was planned in; ruling 476(h). A chain the controller wrote before
+the key gets it at boot, `backfillGoalConversations`, when exactly one of its creator's
+controller turns was running at its `goal.created` audit row; otherwise it stays null,
+ruling 476(j)),
 `onFailure` `pause | continue`
 (default `pause`), `links[]`, `createdAt`, `updatedAt`. Each link carries `index`
 (1-based), `title`, `goal` (the link's task text), `taskKey` (null until the link

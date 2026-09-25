@@ -4715,6 +4715,15 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
    whole transcript scrolled sideways to read one. It breaks where it must, as
    inline code does (ruling 419(i)); a table keeps its own scroller. */
 .md-body a { color: var(--blue-pressed); text-decoration: underline; overflow-wrap: anywhere; }
+/* Ruling 476(i) (live verification 2026-09-25): words joined by slashes are
+   one unbreakable run too. "Added/Changed/Deprecated/Removed/Fixed/Security."
+   in a list item still scrolled the transcript at 375px (433px in 315) and the
+   dock's (442 in 388). Prose breaks any such token where it must; a code block
+   and a table keep their own scrollers, so neither inherits it. */
+.md-body p, .md-body li, .md-body blockquote,
+.md-body h1, .md-body h2, .md-body h3,
+.md-body h4, .md-body h5, .md-body h6 { overflow-wrap: anywhere; }
+.md-body pre, .md-table-wrap { overflow-wrap: normal; }
 /* U39-29/31: a task key a text names; a key never breaks at its dash. */
 a.task-ref { white-space: nowrap; }
 .md-body code.mono {
