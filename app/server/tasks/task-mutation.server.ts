@@ -610,3 +610,73 @@ export function recordRecommendationWithdrawal(
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey, ["approval"]);
   }
 }
+
+// ------------------------------- acceptance packets (ruling 475, F40-55 (b))
+
+/**
+ * Ruling 475 (F40-55 (b)): an open decision packet that offers
+ * `accept_completion` stops holding the moment the review PR conflicts with its
+ * base, because the acceptance gate refuses the very click it invites. Live on
+ * WEB-2 the packet said "the PR is mergeable" for 26 minutes after WEB-4's
+ * merge had put it in conflict, and the owner learned so only when Accept was
+ * refused. Ruling 162(d) already withdrew the `accept_completion`
+ * RECOMMENDATIONS on that flip; the packet offering the same click survived.
+ *
+ * Runs INSIDE the task file's lock (the caller is an `updateTaskFile` mutator)
+ * and writes one person-facing note. {@link recordAcceptancePacketWithdrawal}
+ * writes the audit row and clears the bell after the lock. Returns the
+ * withdrawn packet's title, or null when no such packet stood.
+ */
+export function withdrawAcceptancePacket(
+  parsed: ParsedTaskFile,
+  /** Why the offer no longer holds, as the tail of a sentence. */
+  reason: string,
+  actor: FileActorRef,
+): { title: string } | null {
+  const packet = parsed.packet;
+  if (!packet || !packet.options.some((o) => o.kind === "accept_completion")) return null;
+  parsed.packet = null;
+  // A blocked packet held the readiness gate down with it.
+  if (parsed.frontmatter.readiness === "blocked") parsed.frontmatter.readiness = "ready";
+  parsed.timeline.unshift({
+    occurredAt: new Date().toISOString(),
+    type: "transition",
+    actor,
+    title: null,
+    text: `**Packet withdrawn:** "${packet.title}" no longer holds: ${reason}.`,
+    toAgent: false,
+    evidence: null,
+  });
+  return { title: packet.title };
+}
+
+/** A locked mutator's {@link withdrawAcceptancePacket} result, carried out of
+ *  the closure (the same reason {@link OfferWithdrawalSlot} exists). */
+export interface AcceptancePacketWithdrawalSlot {
+  /** The withdrawn packet's title; null when none stood. */
+  title: string | null;
+}
+
+/** The database half of {@link withdrawAcceptancePacket}: the audit row, and
+ *  the packet's bell marked read for everyone it reached. */
+export function recordAcceptancePacketWithdrawal(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    taskKey: string;
+    title: string;
+    reason: "pr_conflicting";
+    actor: AuditActor;
+  },
+): void {
+  recordAudit(db, {
+    action: "task.packet.withdrawn_superseded",
+    actor: input.actor,
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { reason: input.reason, title: input.title },
+  });
+  markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
+}

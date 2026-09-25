@@ -10,7 +10,7 @@ import {
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import { resolveDependencies, tasksWaitingOn } from "~/server/projections/dependencies.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
-import { prPathOverlaps } from "~/server/projections/review-queue.server";
+import { prPathOverlaps } from "~/shared/pr-overlaps";
 import {
   misdirectedOptionPromise,
   misdirectedPromiseRefusal,
@@ -2775,8 +2775,9 @@ export interface OperatorTaskSnapshot {
    *  by the SAME function every acceptance surface reads
    *  (`acceptanceRefusalFor`), or null when the task could be accepted now.
    *  A PR the gate would refuse cannot be recommended for acceptance and the
-   *  task cannot be moved into the acceptance stage; open the conflict packet
-   *  (or deliver the unpushed revision) instead. Optional only so hand-built
+   *  task cannot be moved into the acceptance stage; route the conflict with
+   *  `update_branch_from_base` (ruling 475) or deliver the unpushed revision
+   *  instead. Optional only so hand-built
    *  fixtures need not restate it; `operatorSnapshot` always sets it. */
   notAcceptableReason?: string | null;
   /** The task's delivery branch (null before any delivery). Lets recovery
@@ -4811,8 +4812,8 @@ function mergeStageEntryRefusal(
   const to = stageName(stages, reviewId);
   return (
     `${refusal} ${taskKey} stays at ${from}: ${to} is where acceptance happens, and the gate ` +
-    `would refuse it. Open the conflict packet (update_branch_from_base) or deliver the ` +
-    `revision instead of moving the task.`
+    `would refuse it. Call update_branch_from_base, which routes the conflict (ruling 475), or ` +
+    `deliver the revision instead of moving the task.`
   );
 }
 

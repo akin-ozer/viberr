@@ -1,6 +1,7 @@
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
+import type { PrOverlap } from "~/shared/pr-overlaps";
 import type { PrChecksRender, PrChecksUnread } from "~/shared/mapping/task.server";
 import { checksPill, checksUnreadPill, prStatePill } from "~/features/github/github-pills";
 import { Icon } from "~/ui/icon";
@@ -140,6 +141,52 @@ function subjectKeyFor(mode: AcceptCeremonyMode): string | undefined {
 /** The Blocked row's id, so the disabled confirm can be described by it. */
 const BLOCKED_ROW_ID = "accept-confirm-blocked";
 
+/** Paths named per colliding PR before the rest are counted. */
+const COLLIDES_PATHS_SHOWN = 3;
+
+/**
+ * Ruling 475 (F40-55 (c)): "Merging this will likely put WEB-2's PR #3 in
+ * conflict on `package.json`." Live on akinozer-com the owner accepted WEB-4
+ * while WEB-2's open PR changed the same file; Viberr knew, the dialog was
+ * silent, and WEB-2's acceptance was refused a minute later. The row names
+ * each PR and the shared paths, and what Viberr does after the merge.
+ */
+function CollidesRow({ collisions }: { collisions: readonly PrOverlap[] }) {
+  const partial = collisions.some((c) => c.partial);
+  const one = collisions.length === 1;
+  return (
+    <div className="obs warn" data-merge-collisions>
+      <span className="k">Collides</span>
+      <span>
+        {one
+          ? "Merging this will likely put "
+          : `Merging this will likely put ${collisions.length} open pull requests in conflict: `}
+        {collisions.map((c, i) => {
+          const shown = c.paths.slice(0, COLLIDES_PATHS_SHOWN);
+          const more = c.paths.length - shown.length;
+          return (
+            <span key={c.taskKey}>
+              {i > 0 ? "; " : ""}
+              {c.taskKey}'s PR #{c.prNumber}
+              {one ? " in conflict" : ""} on{" "}
+              {shown.map((path, j) => (
+                <span key={path}>
+                  {j > 0 ? ", " : ""}
+                  <span className="mono">{path}</span>
+                </span>
+              ))}
+              {more > 0 ? ` and ${more === 1 ? "1 more file" : `${more} more files`}` : ""}
+            </span>
+          );
+        })}
+        . Viberr re-checks {one ? "it" : "them"} right after the merge, and the operator hands a
+        conflict to the delivering agent.
+        {partial ? " A changed-file list was capped, so the overlap may be larger." : ""}
+      </span>
+    </div>
+  );
+}
+
 export function AcceptConfirm({
   task,
   workRevisionSha,
@@ -182,12 +229,18 @@ export function AcceptConfirm({
    *  predicate the server's write uses); this component only says which. */
   answersWith = null,
   baseBehindBy = null,
+  mergeCollisions = [],
   onRefreshFirst,
   busy,
   onCancel,
   onConfirm,
 }: {
   task: AcceptConfirmTask;
+  /** Ruling 475 (F40-55 (c)): the other open pull requests that change a
+   *  path this one changes, so merging it will likely put them in conflict.
+   *  Both doors pass it: the task page from its loader, the board from the
+   *  cards it holds (`mergeCollisions` in `~/shared/pr-overlaps`). */
+  mergeCollisions?: readonly PrOverlap[];
   /** U39-32: how many base commits the branch lacked at the reconciler's last
    *  compare, or null when that was never measured (the board door). */
   baseBehindBy?: number | null;
@@ -524,6 +577,12 @@ export function AcceptConfirm({
                 )}
               </span>
             </div>
+          )}
+          {/* Ruling 475 (F40-55 (c)): the pull requests this merge will
+              likely put in conflict, named before the click rather than found
+              by the next person's refused Accept. Only where a merge happens. */}
+          {pr && !alreadyMerged && mergeCollisions.length > 0 && (
+            <CollidesRow collisions={mergeCollisions} />
           )}
           <div className="obs">
             <span className="k">Revision</span>

@@ -2213,6 +2213,31 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(answered).not.toContain("Withdraws");
   });
 
+  it("ruling 475: names the other open PR on the board that shares a changed path, as the task page does", () => {
+    // CANARY: stop passing `mergeCollisions` to the board's AcceptOnBoardConfirm
+    // and the board's door is silent where the task page's names the collision.
+    const r = renderBoard(
+      [
+        task({
+          key: "VIB-1",
+          stage: "impl",
+          pr: { number: 2, state: "review", title: "t", paths: { headSha: "h2", changed: ["package.json", "src/a.ts"], truncated: false } },
+        }),
+        task({
+          key: "VIB-2",
+          stage: "triage",
+          atAcceptanceBoundary: false,
+          pr: { number: 3, state: "review", title: "u", paths: { headSha: "h3", changed: ["package.json"], truncated: false } },
+        }),
+      ],
+      { action: () => ({ ok: true as const, toast: "moved" }) },
+    );
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    const row = r.container.querySelector("[data-merge-collisions]");
+    expect(row?.textContent).toContain("Merging this will likely put VIB-2's PR #3 in conflict on package.json.");
+  });
+
   it("names the acceptance and the move it performs, in the shared vocabulary", () => {
     const text = openConfirm({})
       .container.querySelector("dialog")!

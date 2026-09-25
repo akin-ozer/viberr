@@ -26,6 +26,8 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeProject } from "../../../test-support/test-store";
 import { operatorSnapshot, type OperatorAuthority } from "~/server/tasks/operator-actions.server";
+import type { TaskActionDeps } from "~/server/tasks/task-actions.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
@@ -108,6 +110,8 @@ function fakeGit(
     storeLayoutFiles?: string[];
     /** Ruling 428: the files the branch changes since it forked. */
     branchFiles?: string[];
+    /** Ruling 475: the base tip `origin/<base>` resolves to. */
+    baseSha?: string;
   } = {},
 ) {
   const calls: string[][] = [];
@@ -153,7 +157,7 @@ function fakeGit(
       return { ok: true, stdout: merged ? MERGE_SHA : PRE_SHA, stderr: "" };
     }
     if (args.includes("rev-parse") && args.some((a) => a.startsWith("refs/remotes/origin/"))) {
-      return { ok: true, stdout: BASE_SHA, stderr: "" };
+      return { ok: true, stdout: opts.baseSha ?? BASE_SHA, stderr: "" };
     }
     if (args.includes("--diff-filter=U")) {
       return { ok: true, stdout: "app/main.ts\n", stderr: "" };
@@ -211,14 +215,39 @@ function deployDeliverer(repoWrite: boolean, engaged = true): void {
 /** Every call carries a canned transport: the post-update reconcile (ruling
  *  132) must never reach GitHub from a test. Unrouted answers 404, which the
  *  reconcile degrades from honestly. */
+type DispatchAgent = NonNullable<TaskActionDeps["dispatchAgent"]>;
+
+/**
+ * Ruling 475: the handoff's dispatch. A real one prepares the agent's
+ * workspace from GitHub (the branch ensure, the mirror refresh), which no test
+ * may reach, so every call carries a stub. The default refuses the way a task
+ * with no owner to bill is refused, so a test that is not about the handoff
+ * meets the fallback packet it always met.
+ */
+const refusedDispatch: DispatchAgent = async () => ({
+  outcome: "noop",
+  message: "No run started for Dev (the delivering agent): this task has no owner to bill its runs.",
+});
+
+/** A dispatch that starts the run, recording what it was handed. */
+function startingDispatch() {
+  const calls: Parameters<DispatchAgent>[2][] = [];
+  const dispatch: DispatchAgent = async (_db, _ctx, input) => {
+    calls.push(input);
+    return { outcome: "done", message: "Prompted @Dev (the delivering agent) and started its run." };
+  };
+  return { dispatch, calls };
+}
+
 const act = (
   exec: ReturnType<typeof fakeGit>["exec"],
   auth: OperatorAuthority = authority(),
   fetchImpl: typeof fetch = fakeGithubFetch({}).fetchImpl,
+  dispatchAgent: DispatchAgent = refusedDispatch,
 ) =>
   operatorUpdateBranchFromBase(
     store.db,
-    { dataRoot: store.dataRoot, fetchImpl },
+    { dataRoot: store.dataRoot, fetchImpl, deps: { dispatchAgent } },
     { projectSlug: store.slug, taskKey: "VIB-1", exec },
     auth,
   );
@@ -264,10 +293,12 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     ).toHaveLength(1);
   });
 
-  it("a CONFLICT opens a BLOCKING decision packet naming the files — and never retries", async () => {
+  it("a CONFLICT whose deliverer cannot be started opens a BLOCKING decision packet naming the files, and never retries", async () => {
     // Ruling 133(b): the redirect is recommended because the task HAS a
     // deployed, repo-write deliverer. Canary: pass `{kind: "none"}`
-    // unconditionally into `conflictOptions`.
+    // unconditionally into `conflictOptions`. Ruling 475: the operator handed
+    // the conflict to Dev first; this fixture's task has no owner to bill, so
+    // no run could start and the packet is the fallback, saying so.
     deployDeliverer(true);
     const git = fakeGit({ conflict: true });
     const res = await act(git.exec);
@@ -296,7 +327,9 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(recommended.kind).toBe("redirect");
     expect(recommended.t).toBe("Have Dev resolve the conflict");
     expect(packet.observations.find((o) => o.k === "Delivering agent")?.v).toBe("Dev");
-    expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")?.details).toMatchObject({ status: "conflict", resolver: "deliverer" });
+    expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")?.details).toMatchObject({ status: "conflict", resolver: "deliverer", route: "packet", handoffRefused: expect.any(String) });
+    expect(packet.body).toContain("The operator sent it to Dev, but no run started:");
+    expect(packet.body).toContain("A person decides how it is resolved.");
     // Every option is a human decision — none of them force the branch.
     expect(packet.options.map((o) => o.kind).sort()).toEqual([
       "archive_task",
@@ -537,8 +570,14 @@ describe("the operator persona teaches the branch update", () => {
     expect(seed).toMatch(/When it says the remote copy is behind, call `deliver_for_review` to push it; do not ask a person to push\./);
   });
 
-  it("makes a conflict a human decision the operator does not retry", () => {
-    expect(seed).toMatch(/A CONFLICT is not yours to settle/i);
+  it("ruling 475: a conflict goes to the delivering agent, a person only when no agent can take it, and nothing is retried or forced", () => {
+    // CANARY: restore "A CONFLICT is not yours to settle ... a blocking packet
+    // goes to a human" and the handoff sentences are gone.
+    expect(seed).not.toMatch(/A CONFLICT is not yours to settle/i);
+    expect(seed).toMatch(/A CONFLICT is the delivering agent's to resolve, never yours to force \(ruling 475\)/);
+    expect(seed).toMatch(/the tool hands the conflict to it itself/);
+    expect(seed).toMatch(/Only when no agent can take it \(no deliverer, no repo-write grant, or the deliverer already failed this same conflict once\) does a blocking packet go to a human/);
+    expect(seed).toMatch(/Never open a packet of your own for a conflict/);
     expect(seed).toMatch(/never propose forcing the branch/i);
   });
 
@@ -595,12 +634,44 @@ describe("ruling 134(c): the remote report", () => {
     const second = await act(fakeGit({ behind: 0, remote: "behind", ahead: 2 }).exec);
     expect(second.message).toBe(first.message);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    const lines = file.parsed.timeline.filter((e) => e.type === "github" && e.text === first.message);
+    // Ruling 475 (F40-60): the timeline carries the PERSON's sentence, once.
+    const lines = file.parsed.timeline.filter((e) => e.type === "github");
     expect(lines).toHaveLength(1);
     expect(file.parsed.packet).toBeNull();
     const audit = listAuditEvents(store.db, { action: "github.branch_update.operator" });
     expect(audit).toHaveLength(2);
     expect(audit[0]!.details).toMatchObject({ status: "already_current", remote: "behind", remoteHeadSha: REMOTE_SHA });
+  });
+
+  /**
+   * Ruling 475 (F40-60): live on WEB-1, WEB-2 and WEB-4 every delivery was
+   * preceded on the owner's timeline by "call `deliver_for_review` to push it.
+   * Do not ask a person to push." (an instruction to the operator), and the
+   * diverged variant told the person who has to act "That is a person's act,
+   * not yours". The tool result keeps the model's sentence; the timeline gets
+   * one written for a person.
+   *
+   * CANARY: append `outcomeSentence(result)` to the timeline again.
+   */
+  it("ruling 475 (F40-60): the timeline line is written for a person, and the tool result stays the operator's", async () => {
+    const line = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.timeline.find((e) => e.type === "github")!;
+    const behind = await act(fakeGit({ behind: 0, remote: "behind", ahead: 7 }).exec);
+    expect(behind.message).toContain("call `deliver_for_review` to push it. Do not ask a person to push.");
+    expect(line().text).toBe(
+      "`vib-1` is level with `main`. GitHub's copy of the branch (`remote0`) is 7 commits behind the workspace; the operator's next delivery pushes them.",
+    );
+    expect(line().text).not.toMatch(/deliver_for_review|Do not ask a person/);
+    await act(fakeGit({ behind: 0, remote: "diverged" }).exec);
+    expect(line().text).toBe(
+      `\`vib-1\` is level with \`main\`. GitHub's copy of the branch (\`remote0\`) holds commits the workspace does not, so the branch cannot be pushed as it stands. ${DIVERGED_BRANCH_REMEDY}`,
+    );
+    expect(line().text).not.toMatch(/not yours|person's act/);
+    await act(fakeGit({ behind: 0, remote: "absent" }).exec);
+    expect(line().text).toBe(
+      "`vib-1` is level with `main`. The branch is not on GitHub yet; the operator's next delivery pushes it.",
+    );
   });
 
   it("a current origin stays a quiet no-op; diverged and absent say who acts", async () => {
@@ -852,5 +923,297 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     const workRedirect = atWork.options.find((o) => o.kind === "redirect")!;
     expect(workRedirect.rework).toBeUndefined();
     expect(workRedirect.d).not.toContain("returns to Review");
+  });
+});
+
+/**
+ * Ruling 475 (F40-20, owner decision 2026-09-25): live on akinozer-com WEB-2's
+ * accept was refused over a `package.json` conflict with WEB-4's merge; the
+ * operator ran this door, wrote the exact fix in a comment, and then opened
+ * "A person decides how this is resolved." The owner's whole part was to
+ * confirm the packet's own recommendation, "Have Platform Engineer resolve the
+ * conflict". The operator now routes it: the deployed, repo-write deliverer
+ * gets it, and the packet is the fallback when no agent can.
+ */
+describe("ruling 475 (F40-20): the operator hands a conflict to the delivering agent", () => {
+  const DEV_DELIVERS = {
+    profileId: "dev",
+    backend: "claude" as const,
+    role: "developer",
+    delivers: true,
+    verdictCapable: false,
+  };
+  const file = () =>
+    readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+  const lastUpdateAudit = () =>
+    listAuditEvents(store.db, { action: "github.branch_update.operator" })[0]!.details;
+
+  /** Dev as the deployed, repo-write deliverer of VIB-1, at `stage`. */
+  function seedDeliverer(
+    stage = "impl",
+    patch: Partial<Parameters<typeof baseTaskFrontmatter>[1]> = {},
+  ): void {
+    deployDeliverer(true);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage,
+        branch: "vib-1",
+        engagements: [DEV_DELIVERS],
+        ...patch,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+
+  /** Dev's run on VIB-1, in `state`. */
+  function devRun(state: "running" | "interrupted"): void {
+    upsertRun(store.db, {
+      id: "run_dev_resolving",
+      taskKey: "VIB-1",
+      projectSlug: store.slug,
+      threadId: "t-dev",
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      agentProfileId: "dev",
+      model: "sonnet",
+      sdk: "Claude Agent SDK",
+      state,
+    });
+  }
+
+  it("sends the conflict to the deliverer with ruling 438's directive, writes a person-facing line, and opens no packet", async () => {
+    // CANARY: send every conflict to the packet (skip the handoff arm in
+    // `routeConflict`) and this reads a packet and no dispatch.
+    seedDeliverer();
+    const started = startingDispatch();
+    const res = await act(fakeGit({ conflict: true }).exec, authority(), undefined, started.dispatch);
+    expect(res.outcome).toBe("done");
+    expect(res.message).toContain("`vib-1` CONFLICTS with `main` in app/main.ts.");
+    expect(res.message).toContain("Ruling 475: handed it to Dev, the delivering agent. Prompted @Dev (the delivering agent) and started its run.");
+    expect(res.message).toContain("When it reports the merge committed, deliver the result with `deliver_for_review`");
+    expect(res.openedPacket).toBeUndefined();
+    expect(started.calls).toHaveLength(1);
+    expect(started.calls[0]).toMatchObject({ projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" });
+    expect(started.calls[0]!.prompt).toBe(
+      "`vib-1` conflicts with `main` in `app/main.ts`. Viberr's merge was aborted, so the branch is exactly as you left it. " +
+        "`origin/main` is already fetched into your workspace: merge it into `vib-1` (a merge, never a rebase), resolve " +
+        "`app/main.ts` keeping the intent of both sides, run the project's gates, and commit the merge. Do not push, and " +
+        "do not open or touch a pull request: the operator delivers the result, and the reviewers judge the resolved " +
+        "branch before anyone accepts it.",
+    );
+    const parsed = file();
+    expect(parsed.packet).toBeNull();
+    const line = parsed.timeline[0]!;
+    expect(line.actor.kind).toBe("operator");
+    expect(line.type).toBe("github");
+    expect(line.toAgent).toBe(false);
+    expect(line.text).toBe(
+      "The operator sent the `app/main.ts` conflict between `vib-1` and `main` to Dev, which merges `main` into " +
+        "the branch in its own workspace and resolves it. The reviewers judge the resolved branch before anyone accepts it.",
+    );
+    expect(lastUpdateAudit()).toMatchObject({
+      status: "conflict",
+      resolver: "deliverer",
+      route: "deliverer",
+      handedTo: "dev",
+      baseSha: BASE_SHA,
+      files: ["app/main.ts"],
+    });
+  });
+
+  it("a task past review returns to the review stage in the handoff's own write, and the acceptance card it no longer earns is withdrawn", async () => {
+    // CANARY: pass `returnsToReview: null` into `recordHandoff` and the task
+    // stays at Merge, still offering the acceptance.
+    seedDeliverer("review", {
+      recommendations: [
+        { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "" },
+      ],
+    });
+    // A Merge stage between Review and Done, with a Review-scoped reviewer, so
+    // the verdict stage is Review.
+    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...project.parsed.frontmatter,
+      stages: [
+        { id: "triage", name: "Triage", color: "slate" },
+        { id: "impl", name: "In Progress", color: "violet" },
+        { id: "review", name: "Review", color: "blue" },
+        { id: "merge", name: "Merge", color: "teal" },
+        { id: "done", name: "Done", color: "green" },
+      ],
+      workflow: [
+        { from: "triage", to: "impl", boundary: "auto", by: "Operator", locked: false },
+        { from: "impl", to: "review", boundary: "approval", by: "Operator", locked: false },
+        { from: "review", to: "merge", boundary: "approval", by: "Operator", locked: false },
+        { from: "merge", to: "done", boundary: "human", by: "Human", locked: true },
+      ],
+      agents: [
+        ...project.parsed.frontmatter.agents,
+        {
+          profileId: "reviewer",
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
+        },
+      ],
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "merge",
+        branch: "vib-1",
+        engagements: [
+          DEV_DELIVERS,
+          { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+        ],
+        pr: { number: 7, state: "review", title: "[VIB-1] t", mergeable: "conflicting" },
+        recommendations: [
+          { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-1 to Done", detail: "" },
+        ],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const started = startingDispatch();
+    const res = await act(fakeGit({ conflict: true }).exec, authority(), undefined, started.dispatch);
+    expect(res.outcome).toBe("done");
+    expect(res.message).toContain("VIB-1 returned from Merge to Review for the re-verdict.");
+    const parsed = file();
+    expect(parsed.frontmatter.stage).toBe("review");
+    expect(parsed.frontmatter.previousStageId).toBe("merge");
+    expect(parsed.frontmatter.recommendations).toEqual([]);
+    const line = parsed.timeline.find((e) => e.text.startsWith("The operator sent"))!;
+    expect(line.type).toBe("transition");
+    expect(line.text).toContain("VIB-1 returns from Merge to Review, so the reviewers judge the resolved branch before anyone accepts it.");
+    expect(listAuditEvents(store.db, { action: "task.transition" })[0]!.details).toMatchObject({
+      from: "merge",
+      to: "review",
+      boundary: "rework",
+      via: "conflict_handoff",
+    });
+  });
+
+  it("the same conflict is never sent twice: nothing new while Dev's run is live, and after it a person decides", async () => {
+    // CANARY: drop the `earlierHandoff` read and the second call dispatches
+    // again, and so does the third.
+    seedDeliverer();
+    const started = startingDispatch();
+    await act(fakeGit({ conflict: true }).exec, authority(), undefined, started.dispatch);
+    devRun("running");
+    const second = await act(fakeGit({ conflict: true }).exec, authority(), undefined, started.dispatch);
+    expect(second.outcome).toBe("noop");
+    expect(second.message).toContain("Dev was sent this same conflict at");
+    expect(second.message).toContain("its run is still going");
+    expect(started.calls).toHaveLength(1);
+    expect(file().packet).toBeNull();
+    expect(lastUpdateAudit()).toMatchObject({ route: "in_progress", handedTo: "dev" });
+
+    // Dev's run ended without resolving it: the branch conflicts the same way.
+    devRun("interrupted");
+    const third = await act(fakeGit({ conflict: true }).exec, authority(), undefined, started.dispatch);
+    expect(third.openedPacket).toBe(true);
+    expect(started.calls).toHaveLength(1);
+    const packet = file().packet!;
+    expect(packet.body).toContain("Dev was already sent this same conflict (");
+    expect(packet.body).toContain(
+      "the branch still conflicts, so a person decides how it is resolved. Resolving by hand is the recommended option.",
+    );
+    expect(packet.options.map((o) => [o.kind, o.t, o.rec])).toEqual([
+      ["custom", "Resolve `vib-1` yourself", true],
+      ["redirect", "Have Dev try the conflict again", false],
+      ["archive_task", "Archive the task: the work is superseded", false],
+    ]);
+    expect(lastUpdateAudit()).toMatchObject({ route: "packet", repeat: true });
+  });
+
+  it("a conflict against a NEW base commit is a new conflict, and goes to the deliverer again", async () => {
+    // CANARY: compare the files alone in `sameConflict` and this reads as the
+    // conflict Dev already failed.
+    seedDeliverer();
+    const started = startingDispatch();
+    await act(fakeGit({ conflict: true, baseSha: "1".repeat(40) }).exec, authority(), undefined, started.dispatch);
+    devRun("interrupted");
+    const next = await act(fakeGit({ conflict: true, baseSha: "2".repeat(40) }).exec, authority(), undefined, started.dispatch);
+    expect(next.outcome).toBe("done");
+    expect(started.calls).toHaveLength(2);
+    expect(file().packet).toBeNull();
+  });
+
+  it("a PUSH conflict is handed over the same way, with origin's copy to merge", async () => {
+    seedDeliverer();
+    const started = startingDispatch();
+    const res = await act(fakeGit({ pushRefused: true, remote: "diverged" }).exec, authority(), undefined, started.dispatch);
+    expect(res.outcome).toBe("done");
+    expect(started.calls[0]!.prompt).toContain("merge it into `vib-1` (a merge, never a rebase and never a force-push)");
+    expect(file().timeline[0]!.text).toBe(
+      "The operator sent `vib-1` to Dev: GitHub's copy of the branch holds commits the workspace does not, and Dev " +
+        "merges them in its own workspace. Nothing is forced. The reviewers judge the resolved branch before anyone accepts it.",
+    );
+    expect(lastUpdateAudit()).toMatchObject({ status: "push_conflict", route: "deliverer", remoteHeadSha: REMOTE_SHA });
+  });
+
+  it("a dispatch that throws is a run that could not start: the packet opens and quotes it", async () => {
+    // CANARY: drop the `.catch` on the dispatch and the tool throws, leaving
+    // the conflict with neither an agent nor a packet.
+    seedDeliverer();
+    const throwing: DispatchAgent = async () => {
+      throw new Error("the adapter is not configured");
+    };
+    const res = await act(fakeGit({ conflict: true }).exec, authority(), undefined, throwing);
+    expect(res.openedPacket).toBe(true);
+    expect(file().packet!.body).toContain("The operator sent it to Dev, but no run started: the adapter is not configured.");
+    expect(lastUpdateAudit()).toMatchObject({ route: "packet", handoffRefused: "the adapter is not configured" });
+  });
+
+  it("an operator whose policy asks a person before it starts an agent opens the packet, and says why", async () => {
+    // CANARY: skip the `dispatchGate` check and the handoff files a run_agent
+    // card behind a conflict nobody was told about.
+    seedDeliverer();
+    const started = startingDispatch();
+    const recommendDispatch = authority({
+      policy: new Map([
+        ["generate-packets", "direct"],
+        ["append-typed-events", "direct"],
+        ["dispatch-agents", "recommend"],
+      ]),
+    });
+    const res = await act(fakeGit({ conflict: true }).exec, recommendDispatch, undefined, started.dispatch);
+    expect(res.openedPacket).toBe(true);
+    expect(started.calls).toHaveLength(0);
+    const packet = file().packet!;
+    expect(packet.body).toContain("The operator's policy asks a person before it starts an agent, so it could not send the conflict to Dev itself.");
+    // Dev has not tried: its redirect is still the recommended option.
+    expect(packet.options.find((o) => o.rec)).toMatchObject({ kind: "redirect", t: "Have Dev resolve the conflict" });
+  });
+
+  it("F40-55 (b): an open packet offering acceptance is withdrawn first, so the conflict never waits behind it", async () => {
+    // CANARY: drop `withdrawMootAcceptancePacket` and the fallback packet is
+    // refused ("one packet stands at a time") while "Accept" still offers a
+    // click the gate refuses.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", branch: "vib-1" }),
+      packet: {
+        id: "pkt_accept",
+        type: "input",
+        kind: "Completion report",
+        from: "operator",
+        title: "Accept VIB-1",
+        body: "The PR is mergeable.",
+        observations: [],
+        options: [{ kind: "accept_completion", t: "Accept and merge", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const res = await act(fakeGit({ conflict: true }).exec);
+    expect(res.openedPacket).toBe(true);
+    const parsed = file();
+    expect(parsed.packet!.title).toBe("`vib-1` conflicts with `main`");
+    const note = parsed.timeline.find((e) => e.text.startsWith("**Packet withdrawn:**"))!;
+    expect(note.text).toBe(
+      '**Packet withdrawn:** "Accept VIB-1" no longer holds: `vib-1` conflicts with `main`, so the acceptance it offers would be refused.',
+    );
+    expect(listAuditEvents(store.db, { action: "task.packet.withdrawn_superseded" })[0]!.details).toMatchObject({
+      reason: "pr_conflicting",
+      title: "Accept VIB-1",
+    });
   });
 });

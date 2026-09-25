@@ -51,10 +51,12 @@ import {
 import {
   mergeTaskPr,
   RECONCILE_TASK_CONCURRENCY,
+  recheckOpenReviewPrs,
   reconcileProject,
   reconcileTask,
   resetReconcileCursorsForTests,
   resolveRemoteBranchCollision,
+  type OperatorWake,
 } from "./github-reconciler.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -3827,6 +3829,177 @@ describe("pass 35 S15: ruling 162 in the reconciler", () => {
     );
     expect(result).toMatchObject({ status: "not_mergeable", mergeable: "conflicting" });
     expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter.pr?.mergeable).toBe("conflicting");
+  });
+});
+
+// ------------------------------------------------- ruling 475 (F40-55)
+
+/**
+ * Ruling 475 (F40-55): live on akinozer-com the owner accepted WEB-4 at
+ * 00:26:20 and Viberr merged PR #2. WEB-2's PR #3 changed the same
+ * `package.json`. Nothing re-read PR #3 until the five-minute poll, the flip
+ * to conflicting withdrew only the recommendation cards, and nobody was woken,
+ * so the owner pressed Accept on WEB-2's still-open packet at 00:27:54 and was
+ * refused.
+ */
+describe("ruling 475 (F40-55): a merge re-checks its siblings, and a flip to conflicting is acted on", () => {
+  /** One recorded wake: which task, which trigger. */
+  function wakeRecorder() {
+    const wakes: string[] = [];
+    const wakeOperator: OperatorWake = async (_db, _ctx, _slug, taskKey, trigger) => {
+      wakes.push(`${taskKey}:${trigger}`);
+    };
+    return { wakes, wakeOperator };
+  }
+
+  const SIBLING_PR = {
+    number: 319,
+    title: "Shared config",
+    state: "open",
+    draft: false,
+    merged_at: null,
+    head: { sha: "headsha319" },
+  };
+
+  /** VIB-302, the sibling: its own open PR #319, last read as mergeable. */
+  function seedSibling(store: TestStore): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-302", {
+        title: "Shared config",
+        stage: "review",
+        branch: "vib-302-config",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 319, state: "review", title: "Shared config", mergeable: "clean" },
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  /** The routes both tasks' passes read. PR #319's detail read answers from
+   *  `sibling`, called with the attempt number. */
+  function siblingRoutes(sibling: (attempt: number) => object): FakeRoutes {
+    return {
+      ...happyRoutes(),
+      [`GET ${REPO_PATH}/compare/main...vib-302-config`]: {
+        body: { ahead_by: 1, behind_by: 1, status: "diverged", commits: [] },
+      },
+      [`GET ${REPO_PATH}/pulls`]: (call) => ({
+        body: (call.url.searchParams.get("head") ?? "").endsWith("vib-302-config")
+          ? [SIBLING_PR]
+          : [
+              { number: 318, title: "Attach execution workspace", state: "open", draft: false, merged_at: null, head: { sha: "headsha318" } },
+            ],
+      }),
+      [`GET ${REPO_PATH}/pulls/319`]: (call) => ({
+        body: { ...SIBLING_PR, merged: false, additions: 1, deletions: 0, changed_files: 1, ...sibling(call.attempt) },
+      }),
+      [`GET ${REPO_PATH}/commits/headsha319/check-runs`]: { body: { total_count: 0, check_runs: [] } },
+    };
+  }
+
+  it("(b): the flip withdraws an open packet offering acceptance, tells the owner why, and wakes the operator", async () => {
+    // CANARY: drop the `withdrawAcceptancePacket` call (the packet survives,
+    // still offering a click the gate refuses) or the `pr-conflicting` wake.
+    const { store, actor } = setup();
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-301", {
+        title: "Attach execution workspace",
+        stage: "review",
+        branch: "vib-301-workspace",
+        ownerUserId: store.users.arda.id,
+        pr: { number: 318, state: "review", title: "Attach execution workspace", mergeable: "clean" },
+      }),
+      packet: {
+        id: "pkt_accept",
+        type: "input",
+        kind: "Completion report",
+        from: "operator",
+        title: "Accept VIB-301",
+        body: "The PR is mergeable.",
+        observations: [],
+        options: [{ kind: "accept_completion", t: "Accept and merge", d: "", rec: true }],
+      },
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const routes = happyRoutes();
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, title: "Attach execution workspace", state: "open", merged: false,
+        merged_at: null, head: { sha: "headsha318" }, mergeable: false, mergeable_state: "dirty",
+        additions: 1, deletions: 0, changed_files: 1 },
+    };
+    const { wakes, wakeOperator } = wakeRecorder();
+    const pass = () =>
+      reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor,
+        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl, wakeOperator });
+    await pass();
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed;
+    expect(parsed.frontmatter.pr?.mergeable).toBe("conflicting");
+    expect(parsed.packet).toBeNull();
+    expect(parsed.timeline.find((e) => e.text.startsWith("**Packet withdrawn:**"))!.text).toBe(
+      '**Packet withdrawn:** "Accept VIB-301" no longer holds: PR #318 now conflicts with the base branch, so the acceptance it offers would be refused.',
+    );
+    expect(listAuditEvents(store.db, { action: "task.packet.withdrawn_superseded" })[0]!.details).toMatchObject({
+      reason: "pr_conflicting",
+      title: "Accept VIB-301",
+    });
+    const notice = listNotifications(store.db, store.users.arda.id).find((n) => n.kind === "policy")!;
+    expect(notice.title).toBe("PR #318 now conflicts with the base: VIB-301's acceptance is withdrawn");
+    expect(wakes).toEqual(["VIB-301:pr-conflicting"]);
+    // The same answer again flips nothing, withdraws nothing, wakes nobody.
+    await pass();
+    expect(wakes).toEqual(["VIB-301:pr-conflicting"]);
+  });
+
+  it("(a): the post-merge re-check reads every other open PR, and reads one GitHub is still computing again", async () => {
+    // CANARY: stop after the first pass (`SIBLING_RECHECK_DELAYS_MS` of one
+    // entry) and the sibling's conflict is never read.
+    const { store } = setup();
+    seedSibling(store);
+    const gh = fakeGithubFetch(
+      siblingRoutes((attempt) =>
+        attempt === 1 ? { mergeable: null } : { mergeable: false, mergeable_state: "dirty" },
+      ),
+    );
+    const { wakes, wakeOperator } = wakeRecorder();
+    const results = await recheckOpenReviewPrs(
+      store.db,
+      { projectSlug: store.slug, mergedTaskKey: "VIB-301" },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, wakeOperator, siblingRecheckDelaysMs: [0, 0, 0] },
+    );
+    // VIB-301 is the merged one: never re-read. VIB-302 twice, then settled.
+    expect(results.map((r) => ("taskKey" in r ? r.taskKey : r.status))).toEqual(["VIB-302", "VIB-302"]);
+    expect(gh.callsTo(`GET ${REPO_PATH}/pulls/319`)).toHaveLength(2);
+    expect(gh.callsTo(`GET ${REPO_PATH}/compare/main...vib-301-workspace`)).toHaveLength(0);
+    const sibling = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-302", dataRoot: store.dataRoot })!.parsed;
+    expect(sibling.frontmatter.pr?.mergeable).toBe("conflicting");
+    expect(wakes).toEqual(["VIB-302:pr-conflicting"]);
+  });
+
+  it("(a): a successful merge starts the re-check of the project's other open PRs", async () => {
+    // CANARY: drop the `recheckOpenReviewPrs` call in `mergeTaskPr`'s merged
+    // arm and PR #319 is read by nobody until the poll.
+    const { store, actor } = setup();
+    seedSibling(store);
+    const routes = siblingRoutes(() => ({ mergeable: false, mergeable_state: "dirty" }));
+    routes[`GET ${REPO_PATH}/pulls/318`] = {
+      body: { number: 318, state: "open", merged: false, head: { sha: "headsha318" }, mergeable: true, mergeable_state: "clean" },
+    };
+    routes[`PUT ${REPO_PATH}/pulls/318/merge`] = { body: { sha: "m".repeat(40), merged: true } };
+    const gh = fakeGithubFetch(routes);
+    const { wakes, wakeOperator } = wakeRecorder();
+    const merged = await mergeTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-301" },
+      actor,
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, wakeOperator, siblingRecheckDelaysMs: [0] },
+    );
+    expect(merged.status).toBe("merged");
+    // Not awaited by the merge: wait for its effect.
+    for (let i = 0; i < 100 && wakes.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(gh.callsTo(`GET ${REPO_PATH}/pulls/319`).length).toBeGreaterThan(0);
+    expect(wakes).toEqual(["VIB-302:pr-conflicting"]);
   });
 });
 

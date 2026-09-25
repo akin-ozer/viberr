@@ -6,7 +6,7 @@ import { capabilityById } from "~/shared/capabilities";
 import { prStatePill } from "~/features/github/github-pills";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
 import { reviewRowSub, type ReviewRowView } from "./review-helpers";
-import type { PrOverlap } from "~/server/projections/review-queue.server";
+import type { PrOverlap } from "~/shared/pr-overlaps";
 
 /**
  * Review queue — the human acceptance boundary as a read-only triage list.

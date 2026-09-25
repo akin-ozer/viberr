@@ -96,3 +96,48 @@ export function latestProjectReconcileCheckAt(
     ) as ReconcileCheckRow | undefined;
   return row?.latest ?? null;
 }
+
+/** One audit row's time and parsed details, as {@link taskAuditDetails} reads it. */
+export interface TaskAuditDetailsRow {
+  at: string;
+  /** `details_json` parsed; null when absent or not JSON. The caller validates
+   *  the shape it needs, because every action records its own. */
+  details: unknown;
+}
+
+/**
+ * Ruling 475: the newest rows of ONE action on ONE task, details parsed. The
+ * operator's branch-update door reads its own earlier routing decisions here
+ * (was this conflict already handed to the delivering agent once?), the way
+ * the operator snapshot reads a person's dismissals. Served by
+ * `idx_audit_events__task_action`; bounded by `limit` and by retention.
+ */
+export function taskAuditDetails(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string; action: string; limit: number },
+): TaskAuditDetailsRow[] {
+  // SAFETY: `occurred_at` is TEXT NOT NULL and `details_json` nullable TEXT
+  // (0001_baseline.sql); the two selected columns are exactly those.
+  const rows = db
+    .prepare(
+      `SELECT occurred_at, details_json FROM audit_events
+       WHERE project_slug = ? AND task_key = ? AND action = ?
+       ORDER BY occurred_at DESC, rowid DESC
+       LIMIT ?`,
+    )
+    .all(input.projectSlug, input.taskKey, input.action, input.limit) as {
+    occurred_at: string;
+    details_json: string | null;
+  }[];
+  return rows.map((row) => ({ at: row.occurred_at, details: parsedDetails(row.details_json) }));
+}
+
+/** A row's `details_json`, parsed; null when absent or not JSON. */
+function parsedDetails(json: string | null): TaskAuditDetailsRow["details"] {
+  if (!json) return null;
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}

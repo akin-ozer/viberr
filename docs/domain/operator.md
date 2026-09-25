@@ -91,7 +91,7 @@ from the workflow graph, never a stored preset).
 | `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer, or when the answer names another actor (ruling 447). The payload carries the option (kind, title), the person's own note, and, for a ceremony that performs work of its own (`resolve_remote_collision`), Viberr's record of what it did in a separate `serverOutcome` field rendered as Viberr's sentence, never inside the quoted note (ruling 136(a)) |
 | `dependencies-released` | proceed after a hold | the release engine (ruling 131(e)): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot |
 | `head-unpushed` | deliver | a person's refused acceptance whose cause is an unpushed reviewed revision, which only the operator can push (ruling 235) |
-| `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict (ruling 332) |
+| `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict (ruling 332), or the reconciler's flip of an open PR to conflicting (ruling 475(b)); the instruction names both origins |
 | `stranded` | decide what happens next | the stranded-task sweep (§3.1, ruling 330) |
 | `scheduled` | re-check | the schedule runner |
 | `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
@@ -360,7 +360,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `run_agent` | `operatorDispatchAgent` (`profileId`, `prompt`, `delivers`, `reason`, `completeness`) | `dispatch-agents` |
 | `deliver_for_review` | `operatorDeliverForReview` → `performDelivery` | `deliver-review-pr` |
 | `lease_files` | `operatorLeaseFiles` (ruling 417: lease path globs to THIS task until it merges) | `deliver-review-pr` |
-| `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → packet) | `update-task-branch` |
+| `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → the delivering agent, or a packet when no agent can take it, ruling 475) | `update-task-branch` |
 | `transition_stage` | `operatorTransitionStage` | `stage-transitions` |
 | `accept_completion` | `operatorAcceptCompletion` | `completion-for-acceptance` |
 
@@ -397,9 +397,9 @@ Details that matter:
   run (`reworkStages` lists it; ruling 163); a move INTO the acceptance-boundary stage
   is refused with the gate's own sentence while the PR conflicts (`pr.mergeable:
   "conflicting"`) or lacks the delivered revision (`pr.unpushedRevision`) ("... KNC-6
-  stays at Review: Merge is where acceptance happens, and the gate would refuse it. Open
-  the conflict packet (update_branch_from_base) or deliver the revision instead of moving
-  the task.", ruling 162); a move into the terminal stage is rerouted to
+  stays at Review: Merge is where acceptance happens, and the gate would refuse it. Call
+  update_branch_from_base, which routes the conflict (ruling 475), or deliver the revision
+  instead of moving the task.", ruling 162); a move into the terminal stage is rerouted to
   `operatorAcceptCompletion` under either gate so the acceptance capability, not
   `stage-transitions`, answers for it. The done reply names the next boundary, and a move
   onto the acceptance boundary files the acceptance recommendation in the same call
@@ -449,19 +449,32 @@ Details that matter:
   revision awaits its verdict the refresh stays the operator's, and a PR GitHub already
   reports conflicting is the exception, so the conflict list and the packet can be
   produced. `notRefreshableReason` in the snapshot is that refusal, read before planning
-  (ruling 424). A conflict aborts the merge, leaves the branch as it was and opens a
-  blocking packet; its redirect option carries `rework: true` and says "The task returns
-  to Review for the re-verdict." when the task stands past the stage where its reviewers
-  can run (ruling 163); once a person routes the conflict to the deliverer, that agent
-  merges `origin/<base>` in its own workspace and the operator delivers the result
-  (ruling 438). Ruling 134(c): it also fetches origin's copy of the TASK branch and
-  reports it beside the base answer: current, behind by N ("call `deliver_for_review` to
-  push it; do not ask a person to push"), diverged ("a person resolves the branch
-  history"), absent, or unknown with git's reason; it never becomes a second push door. A
-  lagging origin lands once on the timeline; the audit row `github.branch_update.operator`
+  (ruling 424). A conflict aborts the merge and leaves the branch as it was. Ruling 475
+  (owner decision): when the task's delivering engagement is deployed with a repo-write
+  grant, the tool hands the conflict to that agent itself: it starts the agent's run with
+  ruling 438's directive (merge `origin/<base>` in its own workspace, resolve, run the
+  gates, commit; the operator then delivers the result), returns a task past the stage
+  where its reviewers can run to that stage (ruling 163), and writes one person-facing
+  timeline line. While that run is live on the same conflict the tool sends nothing new;
+  once it has ended with the branch conflicting the same way (the same files against the
+  same base commit), the deliverer has failed it once and a person decides. The blocking
+  packet is the fallback for that, for no deliverer or grant, for a `dispatch-agents`
+  policy that only recommends, and for a run that could not start; its redirect option
+  carries `rework: true` and says "The task returns to Review for the re-verdict." when
+  the task stands past the stage where its reviewers can run (ruling 163), and a person
+  who routes the conflict to the deliverer through it gets the same directive (ruling
+  438). An open packet offering `accept_completion` is withdrawn first. Ruling 134(c): it
+  also fetches origin's copy of the TASK branch and reports it beside the base answer:
+  current, behind by N ("call `deliver_for_review` to push it; do not ask a person to
+  push"), diverged ("a person resolves the branch history"), absent, or unknown with
+  git's reason; it never becomes a second push door. A lagging origin lands once on the
+  timeline, in a sentence written for a person ("`web-2` is level with `main`. GitHub's
+  copy of the branch (`9f96fc9`) is 7 commits behind the workspace; the operator's next
+  delivery pushes them.", ruling 475(c)); the audit row `github.branch_update.operator`
   fires on every call and always carries the `status`, plus `remote` / `remoteHeadSha`,
-  `commits` / `mergeSha` or the conflicting `files` and the offered `resolver` as the
-  outcome held (ruling 133(b)). Ruling 132: a successful update records the refresh in
+  `commits` / `mergeSha` or the conflicting `files` / `baseSha`, and on a conflict the
+  `resolver` and `route` (`deliverer`, `packet`, `in_progress`) with `handedTo`, `repeat`
+  or `handoffRefused` as the outcome held (rulings 133(b), 475). Ruling 132: a successful update records the refresh in
   `baseRefreshes` under the file lock, reconciles the task at once so `pr.revisionDrift` is
   re-measured, and writes its timeline line and tool message from the re-read. Every `done`
   answer stamps the drive as having refreshed (`operatorRun.refreshed`, ruling 442).

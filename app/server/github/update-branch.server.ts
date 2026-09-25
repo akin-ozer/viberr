@@ -140,13 +140,19 @@ export type UpdateBranchResult =
       base: string;
       files: string[];
       detail?: string;
+      /** Ruling 475: the base tip the merge was attempted against (full sha),
+       *  so "the same conflict" is the same files against the same base
+       *  commit. Absent when it could not be read. */
+      baseSha?: string;
     }
   /**
    * The remote branch holds commits this workspace does not (non-fast-forward)
    * — a HISTORY divergence, never a credential problem (B-GH1/F15-15). The
    * local merge is rolled back and nothing is force-pushed (R18-4).
+   * Ruling 475: `remoteHeadSha` is origin's head that refused the push, as
+   * read before the merge; absent when it could not be read.
    */
-  | { status: "push_conflict"; branch: string; base: string; reason: string }
+  | { status: "push_conflict"; branch: string; base: string; reason: string; remoteHeadSha?: string }
   /**
    * Ruling 159(b), pass 35 review: the workspace tree carries Viberr's own
    * store layout, so this door refuses too. The delivery push is not the only
@@ -606,6 +612,16 @@ export async function updateWorkspaceBranchFromBase(
                 files,
               };
               if (detail) conflict.detail = detail;
+              // Ruling 475: the base commit this conflict is against, so a
+              // second conflict can be told apart from the one already sent to
+              // the delivering agent. Read after the abort; best-effort.
+              const conflictBaseRes = await exec(
+                "git",
+                ["-C", repoDir, "rev-parse", `refs/remotes/origin/${base}`],
+                { cwd: repoDir, timeoutMs: 5_000 },
+              );
+              const conflictBaseSha = conflictBaseRes.ok ? conflictBaseRes.stdout.trim() : "";
+              if (conflictBaseSha) conflict.baseSha = conflictBaseSha;
               return conflict;
             }
             const detail = redactGitOutput(output, { token });
@@ -693,7 +709,7 @@ export async function updateWorkspaceBranchFromBase(
                 taskKey,
                 branch,
               });
-              return {
+              const pushConflict: Extract<UpdateBranchResult, { status: "push_conflict" }> = {
                 status: "push_conflict",
                 branch,
                 base,
@@ -701,6 +717,9 @@ export async function updateWorkspaceBranchFromBase(
                   `the remote branch \`${branch}\` holds commits that are not in this ` +
                   `workspace (non-fast-forward), so the update was rolled back, not forced`,
               };
+              // Ruling 475: which of origin's heads refused it, when known.
+              if ("headSha" in remote) pushConflict.remoteHeadSha = remote.headSha;
+              return pushConflict;
             }
             const detail = redactGitOutput(pushRes.stderr, { token });
             // Ruling 144(c), the sibling this was never threaded through: GitHub's

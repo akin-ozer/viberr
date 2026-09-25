@@ -654,7 +654,11 @@ delivery ("Transition: KNC-20 returns from Merge to Review: `17e4a8c` changed af
 last verdict, so the reviewers judge it there"; audit `task.transition` with `via:
 delivery`). The redirect option of a branch-conflict packet does the same when it is
 resolved (`rework: true` on the option; `via: packet_redirect`), and the option's detail
-says so before the person decides.
+says so before the person decides. Ruling 475: the operator's `update_branch_from_base`
+hands a conflict to the deployed, repo-write delivering agent itself, and that handoff
+returns the task in its own write (`via: conflict_handoff`, "WEB-2 returns from Merge to
+Review, so the reviewers judge the resolved branch before anyone accepts it"); the
+packet is the fallback when no agent can take the conflict.
 Details in [github-delivery.md](github-delivery.md).
 
 ## 11. Acceptance and the endings
@@ -698,9 +702,16 @@ them.
    recommendation card prints the refusal as an alert and its Apply refuses the click,
    the accept dialog prints it above a disabled confirm, the GitHub card wears the
    "conflicts" pill, and the reconciler withdraws a pending `accept_completion` card the
-   moment `mergeable` flips to conflicting, with a "Conflict:" note on the timeline. The
-   accept dialog also says what CI reports when the checks are not green (failing or
-   pending); checks are not a gate (ruling 304).
+   moment `mergeable` flips to conflicting, with a "Conflict:" note on the timeline, and
+   an open decision packet offering the acceptance too, telling the watchers why and
+   waking the operator (`pr-conflicting`, ruling 475(b)). After every merge Viberr
+   re-reads the project's other open PRs (`recheckOpenReviewPrs`), so a sibling the merge
+   put in conflict flips before anyone presses its Accept. The accept dialog also says
+   what CI reports when the checks are not green (failing or pending); checks are not a
+   gate (ruling 304). Its "Collides" row names every other open PR that changes a path
+   this one changes ("Merging this will likely put WEB-2's PR #3 in conflict on
+   `package.json`. ..."), from the task page's loader and from the board's own cards
+   (ruling 475(b)).
 3a. **The base refresh, once** (ruling 162): after the gate re-check and before the
    merge, the acceptance ceremony brings the branch up to date with the base through the
    same workspace merge `update_branch_from_base` performs (`refreshBranchAsPerson`),
