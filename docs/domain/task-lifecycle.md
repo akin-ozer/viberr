@@ -430,6 +430,20 @@ writer.
   already in flight is delivered when the run completes: `deliverDeferredMention`
   gathers every human comment addressed to the agent since the busy run started into one
   directive, and a second failure writes no second note (rulings 203, 205).
+- **Review notes are comments to the deliverer** (ruling 484,
+  `review-notes.server.ts`). Two doors write the same comment through `commentToAgent`:
+  the task page's Changes panel (`review-notes`: a person's line notes on the delivered
+  revision's patches) and the reconciler's review relay (a project member's GitHub
+  review of the delivered head, posted as that member, audit label `· via GitHub`,
+  [github-delivery.md §6](github-delivery.md#6-reconciliation-and-freshness)). It opens
+  `@<deliverer handle> Review notes on \`<sha7>\` (PR #N):` (the relay adds "from
+  GitHub (a review by <login>)") and lists one note per item as `` `path:line` ``
+  (`path:start-end` for a range, "(removed line)" for a line of the old file, a bare
+  `` `path` `` for a whole file, "Requested changes" for a review's own body). Every
+  other `@` in a note is escaped, so the deliverer is the one addressee and a note
+  cannot reroute it to the operator or notify a GitHub login. The deliverer resumes on it
+  exactly as on a typed mention, under the same role gate: a contributor's notes post and
+  start nothing, and the toast says so.
 - A comment written by the operator or an agent starts no run for an agent it tags; it is
   stamped with the handles that will read nothing (rulings 214, 262). A directive the
   operator writes to an agent (`audience: "agent"`) notifies no person named inside it

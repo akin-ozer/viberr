@@ -140,6 +140,8 @@ function renderPage(props: {
   held?: { reply: Promise<unknown> };
   /** U39-32 / ruling 449: base commits the branch lacked at the last compare. */
   baseBehindBy?: number | null;
+  /** Ruling 484: the Changes panel's read. */
+  changesUrl?: string | null;
 }) {
   const submitted: Record<string, string>[] = [];
   const Stub = createRoutesStub([
@@ -174,6 +176,7 @@ function renderPage(props: {
             workRevisionSha={props.workRevisionSha ?? null}
             canDeliver={props.canDeliver ?? false}
             baseBehindBy={props.baseBehindBy ?? null}
+            changesUrl={props.changesUrl ?? null}
           />
         </ToastProvider>
       ),
@@ -190,6 +193,38 @@ function renderPage(props: {
   const utils = render(<Stub initialEntries={["/"]} />);
   return { ...utils, submitted };
 }
+
+/**
+ * Ruling 484 (pass 40, F40-54): the Changes panel stands on the page while
+ * the review PR is open and carries a delivered revision, and nowhere else: a
+ * merged PR's review is over, and without a delivery there is nothing to read.
+ */
+describe("ruling 484: the task page offers the Changes panel for an open review PR", () => {
+  const openPr: PrRef = { number: 3, state: "review", title: "Notes" };
+  const heading = (container: HTMLElement) =>
+    [...container.querySelectorAll(".panel-head h2")].some((h) => h.textContent === "Changes");
+
+  it("renders for an open review PR carrying the delivered revision", () => {
+    const { container } = renderPage({
+      task: { pr: openPr },
+      workRevisionSha: "5d1f0e2c0ffee",
+      changesUrl: "/projects/viberr-core/tasks/VIB-151/changes",
+    });
+    expect(heading(container)).toBe(true);
+  });
+
+  it("stays away from a merged PR, a task with nothing delivered, and a render with no read", () => {
+    for (const props of [
+      { task: { pr: { ...openPr, state: "merged" as const } }, workRevisionSha: "5d1f0e2", changesUrl: "/c" },
+      { task: { pr: openPr }, workRevisionSha: null, changesUrl: "/c" },
+      { task: { pr: openPr }, workRevisionSha: "5d1f0e2", changesUrl: null },
+    ]) {
+      const { container, unmount } = renderPage(props);
+      expect(heading(container)).toBe(false);
+      unmount();
+    }
+  });
+});
 
 /** An action the test answers when it decides to (ruling 368). */
 function heldAction() {

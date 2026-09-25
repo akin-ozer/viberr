@@ -78,6 +78,7 @@ import {
   PR_HUMAN_APPROVAL_KEY,
   type PrHumanApproval,
 } from "./pr-human-approval.server";
+import { relayPrReviews, REVIEW_RELAY_KEY } from "./pr-review-relay.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
 import { latestReconcileSync } from "~/server/provenance/provenance-query.server";
@@ -718,6 +719,12 @@ async function reconcileTaskUnlocked(
     // Last, as the parse orders it (the schema's keys, then this loose one),
     // so an unchanged PR compares equal to its file and writes nothing.
     if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
+    // Ruling 484: what the review relay already relayed on this PR is not a
+    // fact this pass reads, so the SAME PR carries it (dropping it would relay
+    // every review again). After `humanApproval`, the order the relay's own
+    // write leaves them in.
+    const relayRecord = cachedPr?.[REVIEW_RELAY_KEY];
+    if (relayRecord !== undefined) owned[REVIEW_RELAY_KEY] = relayRecord;
     newPr = owned;
   }
 
@@ -1381,6 +1388,33 @@ async function reconcileTaskUnlocked(
         input.taskKey,
         "pr-diverged",
       );
+    }
+  }
+
+  // Ruling 484 (pass 40, F40-54): a project member's GitHub review of the
+  // delivered revision reaches the agent that delivered it, once. After this
+  // pass's own write, because the relay records what it relayed on the same
+  // `pr` block that write replaces; inside the task's reconcile lock, so two
+  // passes never relay one review. It never fails the reconcile.
+  if (pr && ownsAPr && pr.reviewEvents && pr.reviewEvents.length > 0) {
+    try {
+      await relayPrReviews(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          prNumber: pr.number,
+          events: pr.reviewEvents,
+        },
+        { client: gh.client, repo: gh.repo },
+        { dataRoot: ctx.dataRoot },
+      );
+    } catch (error) {
+      logger.warn("GitHub review relay failed; the next reconcile retries it", {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        err: errorMessage(error),
+      });
     }
   }
 

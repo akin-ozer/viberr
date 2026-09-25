@@ -5645,8 +5645,9 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
         if ((m[1]!.match(/<Icon name="chevron" className="disc-chev" \/>/g) ?? []).length !== 1) bare.push(where);
       }
     }
-    // Four, and since ruling 463 a GitHub connection's reach.
-    expect(summaries).toHaveLength(5);
+    // Four, and since ruling 463 a GitHub connection's reach, and since ruling
+    // 484 a changed file in the task's Changes panel.
+    expect(summaries).toHaveLength(6);
     expect(bare).toEqual([]);
   });
 
@@ -5956,6 +5957,12 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/policy/policy-page.tsx: x → loader (spins)",
         // Ruling 463: a GitHub connection's Re-check.
         "features/org-settings/connections-panel.tsx: refresh → loader (spins)",
+        // Ruling 484: the Changes panel's toggle (while its reader loads), its
+        // Try again, a file's Load this file, and Send to the deliverer.
+        "features/task-detail/changes-slot.tsx: chevron → loader (spins)",
+        "features/task-detail/changes-panel.tsx: refresh → loader (spins)",
+        "features/task-detail/changes-panel.tsx: file → loader (spins)",
+        "features/task-detail/changes-panel.tsx: send → loader (spins)",
       ].sort(),
     );
     // The cell centres both marks, whatever their box.

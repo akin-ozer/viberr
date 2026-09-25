@@ -84,6 +84,9 @@ export default [
     "projects/:slug/tasks/:key/attachments/:file",
     "routes/task-attachment.ts",
   ),
+  // Ruling 484: the task page's Changes panel read (the delivered revision's
+  // files and patches), loaded by the panel itself, member-only.
+  route("projects/:slug/tasks/:key/changes", "routes/task-changes.ts"),
 
   // Bare /projects → home (the project list lives at `/`), not a 404 (N5).
   route("projects", "routes/projects.tsx"),
