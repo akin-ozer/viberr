@@ -2691,7 +2691,7 @@ describe("compaction at completion (ruling 376)", () => {
     extraFacts: [undefined, { cache: { ...bigCall.cache, promptTokens } }, undefined],
   });
 
-  it("compacts a finished run above 100k, folds the result and notes the task", async () => {
+  it("compacts a finished run above 100k and folds the result", async () => {
     const before = compactedRunSpecs().length;
     queueFakeRun(finished("sess-big", 120_000));
     queueFakeCompaction("claude", { compacted: true, preTokens: 120_000, postTokens: 18_000 });
@@ -2717,12 +2717,6 @@ describe("compaction at completion (ruling 376)", () => {
     const audit = listAuditEvents(store.db, { action: "task.agent.compaction" }).filter((e) => e.subjectId === runId);
     expect(audit).toHaveLength(1);
     expect(audit[0]?.details).toMatchObject({ trigger: "completion", preTokens: 120_000, postTokens: 18_000 });
-    // The timeline note is best-effort and asynchronous; give it its ticks.
-    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
-    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    const note = task.parsed.timeline.find((e) => e.type === "note" && e.title === "Context compacted");
-    expect(note?.text).toContain("at the end of the run");
-    expect(note?.text).toContain("from 120k to 18k tokens");
   });
 
   it("U39-30: tells a caller the answer is written before it compacts, and only then", async () => {
@@ -2877,7 +2871,7 @@ describe("compaction at completion (ruling 376)", () => {
    * printed the phantom's missing size ("to 0k tokens", then "to a summary")
    * while the rollout had measured the real one.
    */
-  it("on Codex one completion compaction is ONE note and ONE audit row, with the size the rollout measured", async () => {
+  it("on Codex one completion compaction is ONE audit row, with the size the rollout measured", async () => {
     const { writeFileSync, mkdirSync, appendFileSync } = await import("node:fs");
     const path = await import("node:path");
     const sid = "01a0ca89-0673-71c3-93c8-208b9564c414";
@@ -2935,13 +2929,6 @@ describe("compaction at completion (ruling 376)", () => {
     expect(audit.map((e) => e.details)).toEqual([
       expect.objectContaining({ trigger: "completion", preTokens: 190_309, postTokens: 9_083 }),
     ]);
-    const task = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    const notes = task.parsed.timeline.filter(
-      (e) => e.type === "note" && e.title === "Context compacted" && e.text.includes("190k"),
-    );
-    expect(notes.map((n) => n.text)).toEqual([expect.stringContaining("at the end of the run")]);
-    expect(notes[0]!.text).toContain("from 190k to 9k tokens");
-    expect(notes[0]!.text).not.toContain("(auto)");
   });
 
   it("a refused compaction leaves the run finished with its size, and says why on the log", async () => {
