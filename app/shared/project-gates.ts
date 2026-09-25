@@ -133,6 +133,96 @@ export function gateOutcomeText(result: Pick<GateResult, "exitCode" | "timedOut"
   return `exit ${result.exitCode}`;
 }
 
+/** Ruling 482(d): the system actor that writes a gate run's note. */
+export const GATES_SYSTEM_ID = "project-gates";
+
+/** The title a gate run's note carries, one per ending. The timeline reads
+ *  the ending back from it (`gateNoteView`), so writer and reader share it. */
+export const GATE_NOTE_TITLE = {
+  passed: "Project gates passed",
+  failed: "Project gates failed",
+  error: "Project gates could not run",
+} as const;
+
+/** How a gate run ended, as its note records it. */
+export type GateNoteState = keyof typeof GATE_NOTE_TITLE;
+
+/** One gate's evidence row on its run's note:
+ *  "build: exit 0 in 4 s · gate-a95c337-03-build-20260925T101500Z.log". */
+export function gateEvidenceLabel(
+  result: Pick<GateResult, "name" | "exitCode" | "timedOut" | "wallMs" | "log">,
+): string {
+  return (
+    `${result.name}: ${gateOutcomeText(result)} in ${gateWallTime(result.wallMs)}` +
+    (result.log ? ` · ${result.log}` : "")
+  );
+}
+
+/** `gateEvidenceLabel`'s shape: the name, the outcome, the time, the log. */
+const GATE_EVIDENCE_RE =
+  /^(.+): (exit \d+|timed out|did not start) in (\d+ ms|\d+ s|\d+ min \d{2} s)(?: · (\S+))?$/;
+/** The note's line names the revision: "Gates on a95c337: …". */
+const GATE_NOTE_SHA_RE = /\bGates on ([0-9a-f]{7})\b/;
+/** The note's text opens with that line in bold. */
+const GATE_NOTE_LEAD_RE = /^\*\*Gates on [^*]*\*\*\s*/;
+
+/** One gate as its run's note recorded it: the note never carried the
+ *  command. */
+export type GateNoteRow = Omit<GateRowView, "command">;
+
+/** A gate run's timeline note, read back into what it recorded. */
+export interface GateNoteView {
+  state: GateNoteState;
+  /** The revision's short sha, when the note names it. */
+  sha: string | null;
+  rows: GateNoteRow[];
+  /** Why a run could not execute, in the note's own words less the line the
+   *  view already prints; null for a run that finished. */
+  detail: string | null;
+}
+
+/**
+ * Ruling 493: a gate run's note read back into its ending, its revision and a
+ * row per gate, so the timeline draws the run as the gate table instead of a
+ * sentence, a monospaced block and the same logs again as files. The note's
+ * words stay the record (agents and task.md read them); this reads only the
+ * rows its writer printed with `gateEvidenceLabel` under a `GATE_NOTE_TITLE`.
+ * Any other title, or a row in another shape, is null, and the note renders as
+ * the note it is.
+ */
+export function gateNoteView(note: {
+  title: string | null;
+  text: string;
+  evidence: readonly { label: string }[] | null;
+  attachments: readonly string[] | null;
+}): GateNoteView | null {
+  const state: GateNoteState | null =
+    note.title === GATE_NOTE_TITLE.passed
+      ? "passed"
+      : note.title === GATE_NOTE_TITLE.failed
+        ? "failed"
+        : note.title === GATE_NOTE_TITLE.error
+          ? "error"
+          : null;
+  if (!state) return null;
+  const claimed = new Set(note.attachments ?? []);
+  const rows: GateNoteRow[] = [];
+  for (const { label } of note.evidence ?? []) {
+    const match = GATE_EVIDENCE_RE.exec(label);
+    if (!match) return null;
+    const [, name = "", outcome = "", wall = "", log] = match;
+    rows.push({ name, outcome, wall, ok: outcome === "exit 0", log: log && claimed.has(log) ? log : null });
+  }
+  // A finished run prints a row per gate; a note with none is not its note.
+  if (state !== "error" && rows.length === 0) return null;
+  return {
+    state,
+    sha: GATE_NOTE_SHA_RE.exec(note.text)?.[1] ?? null,
+    rows,
+    detail: state === "error" ? note.text.replace(GATE_NOTE_LEAD_RE, "").trim() || null : null,
+  };
+}
+
 /**
  * The view of the project's gates on this task's revision under review, or
  * null when there is nothing to show: no gates declared, or no delivered

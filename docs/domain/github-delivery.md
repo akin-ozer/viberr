@@ -636,7 +636,9 @@ killed or not started; a signal reads as 128 + n), `timedOut`, the wall time and
 saved as the task attachment `gate-<sha7>-<NN>-<name>-<stamp>.log` (the head 256 KB and
 the tail kept, the middle cut). The record binds to the revision id and sha like a
 verdict; results land as each gate finishes; the finished run writes one note from
-"Project gates" that claims its logs, and audit `task.gates.run`. A log never counts as
+"Project gates" that claims its logs, and audit `task.gates.run`. The timeline draws that
+note as its ending, its revision and the gate table, a row per gate with its log (ruling
+493, `gateNoteView`), the table the PR card and the accept dialog show. A log never counts as
 a file a concurrent run produced (`isGateLogName` in `attachmentNamesSince`). The PR card,
 the accept dialog, the operator's snapshot (`gates`) and every agent's canonical anchor
 print the same line, "Gates on `<sha7>`: N/M exit 0 (run by Viberr)". **A plain

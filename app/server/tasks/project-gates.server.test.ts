@@ -28,7 +28,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { attachmentNamesSince } from "~/server/files/task-attachments.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { getTaskSummary } from "~/server/projections/task-query.server";
+import { getTaskSummary, listTaskEvents } from "~/server/projections/task-query.server";
 import {
   AGENT_UID_FLOOR,
   resetAgentIsolationForTests,
@@ -240,6 +240,20 @@ describe("the gate run (ruling 482)", () => {
     });
     expect(note.text).toContain(`Gates on ${revisionSha.slice(0, 7)}: 1/2 exit 0 (run by Viberr)`);
     expect(note.attachments).toEqual(record.results.map((r) => r.log));
+    // Ruling 493: the timeline reads the projected note back into this run,
+    // each row with its own log. CANARY: print the evidence label another way
+    // in `gateRunEvent` and the note renders as prose again.
+    const [shown] = listTaskEvents(store.db, store.slug, "VIB-1", { limit: 1 });
+    expect(shown!.gates).toEqual({
+      state: "failed",
+      sha: revisionSha.slice(0, 7),
+      detail: null,
+      rows: [
+        { name: "head", outcome: "exit 0", wall: expect.any(String), ok: true, log: record.results[0]!.log },
+        { name: "lint", outcome: "exit 3", wall: expect.any(String), ok: false, log: record.results[1]!.log },
+      ],
+    });
+    expect(shown!.attachments).toBeNull();
     const audit = listAuditEvents(store.db, { action: "task.gates.run" });
     expect(audit).toHaveLength(1);
     expect(audit[0]!.details).toMatchObject({

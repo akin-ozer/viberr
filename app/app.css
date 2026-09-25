@@ -5596,6 +5596,16 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
   .stg-row .stg-x { grid-column: 5; }
   .stg-row .stg-input { width: 100%; grid-column: 3 / 5; }
   .stg-row:has(.stg-input) .own-wrap { grid-row: 2; }
+  /* Ruling 493: the gate table in a 243px timeline column. A table cannot
+     shrink below its content, and the time and the Log label left a gate's
+     name a word per line: the table takes the side panel's data size, the
+     cells tighten and the Log button keeps its glyph (its accessible name
+     stays "<gate> log"). */
+  table.gate-table { font-size: .75rem; }
+  .gate-table tr > :is(th, td) { padding: .375rem .5rem; }
+  .gate-table .gate-mark svg.ico { width: 16px; height: 16px; }
+  a.gate-log { min-width: 24px; justify-content: center; padding: .25rem; }
+  .gate-log-word { display: none; }
 }
 
 /* Neutralize anchor defaults on link-shaped controls. */
@@ -8131,27 +8141,57 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 
 /* ---------- appended: ruling 482, project gates ---------- */
 /* The PR card's gate record: the one-line verdict as a `.kv-row` like the
-   rows above it (the line wraps: it names a sha and a count), then one line
-   per gate — a pass/fail glyph in the diff pair's colours, the gate's name,
-   its outcome, its time and its log. The accept dialog's Gates row reuses the
-   same list. A gate row on Settings is a lease row whose command field takes
-   the room, set in the code face because it is a command. */
+   rows above it (the line wraps: it names a sha and a count), then the gate
+   table (ruling 493, below). A gate row on Settings is a lease row whose
+   command field takes the room, set in the code face because it is a
+   command. */
 .gate-block .kv-row .v { flex-wrap: wrap; justify-content: flex-end; text-align: right; font-weight: 600; }
-.gate-results {
-  list-style: none; margin: .25rem 0 .5rem; padding: 0;
-  display: grid; gap: .25rem; font-size: .75rem;
+/* Ruling 493: one table wherever the gates are shown, on the note a run
+   writes to the timeline, the PR card and the accept dialog. The mark, the
+   time and the log take what they need and the name takes the rest. A pass is
+   the success green, a failure the blocked red with its outcome in words, and
+   a failing row is tinted so it is found without reading. The table holds a
+   short list, so on a wide timeline it stops at a readable measure. */
+.gate-table {
+  width: 100%; max-width: 36rem; margin-top: .5rem;
+  border-collapse: separate; border-spacing: 0;
+  border: 1px solid var(--hairline); border-radius: var(--radius-box);
+  overflow: hidden;
+  font-size: .88rem; font-variant-numeric: tabular-nums;
 }
-.gate-results li {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-  align-items: center; gap: .5rem;
+.gate-table th, .gate-table td {
+  padding: .375rem .75rem; border-top: 1px solid var(--hairline);
+  text-align: left; vertical-align: middle;
 }
-.gate-results li .ico { width: 12px; height: 12px; }
-.gate-results li.ok .ico { color: var(--teal-dark); }
-.gate-results li.bad .ico, .gate-results li.bad .gate-outcome { color: var(--coral-dark); }
-.gate-results .gate-name { overflow-wrap: anywhere; }
-.gate-results .gate-outcome { font-weight: 600; }
-.gate-results .gate-wall { color: var(--faint); font-variant-numeric: tabular-nums; }
-.gate-results .gate-log { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; }
+.gate-table tr:first-child > * { border-top: 0; }
+.gate-table .gate-mark { width: 1px; padding-right: 0; line-height: 0; }
+.gate-table .gate-mark .ico { width: 18px; height: 18px; }
+.gate-table tr.ok .gate-mark { color: var(--success-dark); }
+.gate-table tr.ok .gate-mark circle { fill: var(--success-soft); }
+.gate-table tr.bad > * { background: color-mix(in srgb, var(--red-light), transparent 55%); }
+.gate-table tr.bad .gate-mark, .gate-table .gate-why { color: var(--coral-dark); }
+.gate-table tr.bad .gate-mark circle { fill: var(--red-light); }
+.gate-table .gate-name { font-weight: 500; color: var(--fg); overflow-wrap: anywhere; }
+/* A failure's outcome follows its name, and wraps under it with no indent. */
+.gate-name-in { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: .5rem; }
+.gate-table .gate-why { font-size: .75rem; font-weight: 600; }
+.gate-table .gate-wall { width: 1px; white-space: nowrap; text-align: right; color: var(--muted); }
+.gate-table .gate-log-cell { width: 1px; padding: .25rem .5rem .25rem 0; }
+.gate-log {
+  display: inline-flex; align-items: center; gap: .25rem; min-height: 24px;
+  padding: .25rem .5rem; border-radius: var(--radius-button);
+  font-size: .75rem; font-weight: 600; color: var(--muted); white-space: nowrap;
+  text-decoration: none;
+}
+.gate-log .ico { width: 14px; height: 14px; }
+.gate-log:hover { background: var(--tint-hover); color: var(--fg); }
+/* The side panel and the dialog set it at their own size. */
+.gate-table.compact { max-width: none; font-size: .75rem; }
+.gate-table.compact th, .gate-table.compact td { padding: .25rem .5rem; }
+.gate-table.compact .gate-mark .ico { width: 14px; height: 14px; }
+/* The run's revision beside its pill in the timeline header. */
+.tl-gate-rev { font-size: .75rem; color: var(--muted); }
+.tl-gate-rev code { font-family: var(--font-mono); color: var(--fg); }
 .gate-row .guard-ctl.cmd { flex: 2 1 16rem; }
 .gate-row .guard-ctl.cmd input { font-family: var(--font-mono); }
 

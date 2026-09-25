@@ -25,6 +25,7 @@ import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
 import { checksPill, gatesPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { GatesView } from "~/shared/project-gates";
 import { useAttachmentLightbox } from "./attachment-lightbox";
+import { GateResults } from "./gate-results";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
@@ -583,31 +584,7 @@ function GatesRow({
         </span>
       </div>
       {gates.rows.length > 0 && (
-        <ul className="gate-results" aria-label="Gate results">
-          {gates.rows.map((row) => (
-            <li key={row.name} className={row.ok ? "ok" : "bad"}>
-              <Icon name={row.ok ? "check" : "x"} />
-              <span className="gate-name mono">{row.name}</span>
-              <span className="gate-outcome">{row.outcome}</span>
-              <span className="gate-wall">{row.wall}</span>
-              {row.log && attachmentsBase ? (
-                <a
-                  className="gate-log"
-                  href={`${attachmentsBase}/${encodeURIComponent(row.log)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`${row.name} log`}
-                  onClick={lightbox({
-                    name: row.log,
-                    url: `${attachmentsBase}/${encodeURIComponent(row.log)}`,
-                  })}
-                >
-                  log
-                </a>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <GateResults rows={gates.rows} attachmentsBase={attachmentsBase} openLog={lightbox} compact />
       )}
       {gates.error && (
         <p className="deny-note spaced">

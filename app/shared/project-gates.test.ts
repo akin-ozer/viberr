@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { GateRun, WorkRevision } from "~/schemas/task-file.schema";
 import {
+  EVIDENCE_EMPTY_COLUMN,
+  normalizeEvidenceRows,
+  type GateRun,
+  type WorkRevision,
+} from "~/schemas/task-file.schema";
+import {
+  GATE_NOTE_TITLE,
+  gateEvidenceLabel,
   gateLogName,
+  gateNoteView,
   isGateLogName,
   gateWallTime,
   projectGatesRefusal,
@@ -146,5 +154,79 @@ describe("gate log names", () => {
     expect(gateWallTime(850)).toBe("850 ms");
     expect(gateWallTime(12_400)).toBe("12 s");
     expect(gateWallTime(64_000)).toBe("1 min 04 s");
+  });
+});
+
+/**
+ * Ruling 493: the timeline draws a gate run's note as the gate table, from the
+ * rows its writer printed. The rows go through the same normalizer the writer
+ * uses, so what is read here is what task.md holds.
+ */
+describe("gateNoteView (ruling 493)", () => {
+  const noteOf = (run: GateRun, title: string | null, text: string) => ({
+    title,
+    text,
+    evidence: normalizeEvidenceRows(
+      run.results.map((r) => ({
+        label: gateEvidenceLabel(r),
+        add: EVIDENCE_EMPTY_COLUMN,
+        del: EVIDENCE_EMPTY_COLUMN,
+      })),
+    ),
+    attachments: run.results.flatMap((r) => (r.log ? [r.log] : [])),
+  });
+  const log = (i: number, name: string) => `gate-a95c337-0${i}-${name}-20260925T100001Z.log`;
+
+  it("reads a finished run's note back into its ending, its revision and a row per gate", () => {
+    // CANARY: drop the log group from GATE_EVIDENCE_RE and every row loses its log.
+    const run = finished([0, 0, 1, null]);
+    run.results[0]!.wallMs = 850;
+    run.results[1]!.wallMs = 64_000;
+    const view = gateNoteView(
+      noteOf(run, GATE_NOTE_TITLE.failed, "**Gates on a95c337: 2/4 exit 0 (run by Viberr).** `build` exit 1."),
+    );
+    expect(view).toEqual({
+      state: "failed",
+      sha: "a95c337",
+      detail: null,
+      rows: [
+        { name: "install", outcome: "exit 0", wall: "850 ms", ok: true, log: log(1, "install") },
+        { name: "check", outcome: "exit 0", wall: "1 min 04 s", ok: true, log: log(2, "check") },
+        { name: "build", outcome: "exit 1", wall: "12 s", ok: false, log: log(3, "build") },
+        { name: "deploy-dry-run", outcome: "timed out", wall: "12 s", ok: false, log: log(4, "deploy-dry-run") },
+      ],
+    });
+  });
+
+  it("links only a log the note claims, and keeps the reason a run could not execute", () => {
+    const run = finished([0, 0, 0, 0]);
+    run.results = run.results.slice(0, 2);
+    const note = { ...noteOf(run, GATE_NOTE_TITLE.passed, "**Gates on a95c337: 4/4 exit 0 (run by Viberr).**"), attachments: [log(1, "install")] };
+    // CANARY: link every row's log whatever the note claims.
+    expect(gateNoteView(note)?.rows.map((r) => r.log)).toEqual([log(1, "install"), null]);
+    const error = gateNoteView({
+      title: GATE_NOTE_TITLE.error,
+      text: "**Gates on a95c337: could not run (run by Viberr).** Viberr could not run the project's gates on `a95c337`: the delivering checkout is missing.",
+      evidence: null,
+      attachments: null,
+    });
+    expect(error).toEqual({
+      state: "error",
+      sha: "a95c337",
+      rows: [],
+      detail: "Viberr could not run the project's gates on `a95c337`: the delivering checkout is missing.",
+    });
+  });
+
+  it("is null for any other note, which then renders as the note it is", () => {
+    const run = finished([0, 0, 0, 0]);
+    const text = "**Gates on a95c337: 4/4 exit 0 (run by Viberr).**";
+    expect(gateNoteView(noteOf(run, GATE_NOTE_TITLE.passed, text))?.state).toBe("passed");
+    // CANARY: stop comparing the title and any note with such rows is a gate run.
+    expect(gateNoteView(noteOf(run, "Left waiting on an absent agent", text))).toBeNull();
+    const reworded = noteOf(run, GATE_NOTE_TITLE.passed, text);
+    reworded.evidence = [{ label: "install passed quickly", add: EVIDENCE_EMPTY_COLUMN, del: EVIDENCE_EMPTY_COLUMN }];
+    expect(gateNoteView(reworded)).toBeNull();
+    expect(gateNoteView({ title: GATE_NOTE_TITLE.passed, text, evidence: null, attachments: null })).toBeNull();
   });
 });

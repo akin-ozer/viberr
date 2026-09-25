@@ -8,6 +8,7 @@ import type { GatesView } from "~/shared/project-gates";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
+import { GateResults } from "./gate-results";
 
 /**
  * R15-1/F15-10 — the ONE acceptance ceremony.
@@ -627,18 +628,7 @@ export function AcceptConfirm({
                 </Pill>{" "}
                 {gates.line}
                 {gates.rows.some((r) => !r.ok) && (
-                  <ul className="gate-results">
-                    {gates.rows
-                      .filter((r) => !r.ok)
-                      .map((r) => (
-                        <li key={r.name} className="bad">
-                          <Icon name="x" />
-                          <span className="gate-name mono">{r.name}</span>
-                          <span className="gate-outcome">{r.outcome}</span>
-                          <span className="gate-wall">{r.wall}</span>
-                        </li>
-                      ))}
-                  </ul>
+                  <GateResults rows={gates.rows.filter((r) => !r.ok)} compact />
                 )}
               </div>
             </div>

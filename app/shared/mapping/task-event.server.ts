@@ -1,3 +1,4 @@
+import { GATES_SYSTEM_ID, gateNoteView, type GateNoteView } from "~/shared/project-gates";
 import type { ActorRender } from "./actor.server";
 
 /**
@@ -52,9 +53,27 @@ export interface TimelineEventRender {
   /** Files the event's run saved into the task's attachments/ dir — names
    *  only, rendered as chips linking to the serving route. */
   attachments: string[] | null;
+  /** Ruling 493: a gate run's note read back into its rows (`gateNoteView`),
+   *  absent on every other event. The rows carry the logs, so such an event's
+   *  `evidence` is null and `attachments` keeps only a file no row links. */
+  gates?: GateNoteView;
 }
 
 export function mapTaskEventRow(row: TaskEventRow): TimelineEventRender {
+  const event = mapEventRow(row);
+  // Written by the gates' system actor (ruling 482(d)); the projection keys a
+  // system actor by its bare id (`rebuilder.server.ts`).
+  if (row.type !== "note" || row.actor_kind !== "system" || row.actor_ref !== GATES_SYSTEM_ID) {
+    return event;
+  }
+  const gates = gateNoteView(event);
+  if (!gates) return event;
+  const linked = new Set(gates.rows.map((r) => r.log));
+  const rest = event.attachments?.filter((name) => !linked.has(name)) ?? [];
+  return { ...event, gates, evidence: null, attachments: rest.length > 0 ? rest : null };
+}
+
+function mapEventRow(row: TaskEventRow): TimelineEventRender {
   // SAFETY: both JSON columns have ONE writer — `rebuilder.server.ts` inserts
   // `JSON.stringify(resolveActor(event.actor))` and
   // `JSON.stringify(event.evidence)`, whose sources are an `ActorRender` and a
