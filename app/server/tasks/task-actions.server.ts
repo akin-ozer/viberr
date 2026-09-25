@@ -291,6 +291,19 @@ export type {
 const OPERATOR_REACT_DEPTH_CAP = 4;
 
 /**
+ * Ruling 489(d): the ceiling on react hops since a person last acted, which
+ * nothing but a person (or an approve, ruling 362) restarts.
+ *
+ * The depth cap above counts hops that got nowhere, so a reply that moved the
+ * task's head resets it (ruling 489(a)). That leaves a chain whose every hop
+ * commits a new head with no bound at all: the operator re-dispatching a
+ * developer that commits each time, with no reviewer to object, would run and
+ * bill forever. This one counts EVERY hop, progress or not, and stops the
+ * chain with the stuck-loop packet at three times the depth cap.
+ */
+export const OPERATOR_REACT_HOP_CEILING = 3 * OPERATOR_REACT_DEPTH_CAP;
+
+/**
  * Hard cap on CONSECUTIVE operator-authored stage transitions (runaway
  * backstop for the P11-70 every-transition re-trigger). Each link is a full
  * LLM operator run, and the chain's normal termination — the operator reaches
@@ -4788,7 +4801,7 @@ export async function registerAgentCompletion(
      *  against (the mention ladder resolves people, not substrings). */
     dispatchedByUserId?: string;
     /** Present when started inside an operator react loop (continue the chain). */
-    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number; reactHops?: number };
     /** Ruling 248 (F37-77): the workspace checkout could not be provisioned, so
      *  this run executed with NO working tree. PERSISTED on the run row for the
      *  same reason as `outcomeKey` — the closure that would otherwise carry it
@@ -4909,7 +4922,9 @@ async function warnStrayAttachmentsFolder(
  */
 export async function applyAgentCompletionEffects(
   db: DatabaseSync,
-  ctx: TaskMutationContext,
+  /** `deps.runOperator` (tests) replaces the react's operator run, as it does
+   *  every other operator hand-off. */
+  ctx: TaskActionContext,
   input: {
     projectSlug: string;
     taskKey: string;
@@ -4936,7 +4951,7 @@ export async function applyAgentCompletionEffects(
     /** Dispatch-completion contract (2026-08-29) — see registerAgentCompletion. */
     dispatchedByName?: string;
     dispatchedByUserId?: string;
-    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number };
+    operatorRun?: { backend: RealBackend; autonomy: OperatorAutonomy; reactDepth: number; reactHops?: number };
     /** Ruling 211(c): set by boot recovery, which replays a run's lost effects
      *  possibly days later. The deferred-@mention redelivery is a promise made
      *  by the LIVE refusal and belongs to the live completion; replaying it from
@@ -5744,6 +5759,10 @@ export async function applyAgentCompletionEffects(
     reactAutonomy = resolveOperatorAuthority(ctx, input.projectSlug, {}).autonomy;
     currentDepth = 0;
   }
+  /** Ruling 489(d): react hops since a person last acted. A run a person
+   *  dispatched, or a drive a person's comment or packet answer started,
+   *  carries none, so the count starts over there. */
+  let chainHops = input.operatorRun?.reactHops ?? 0;
   // Ruling 231 (F37-51): the react chain carries its DEPTH and its autonomy,
   // and no longer carries a BACKEND.
   //
@@ -5887,6 +5906,9 @@ export async function applyAgentCompletionEffects(
     });
     currentDepth = 0;
   }
+  // Ruling 489(d): an approve restarts the hop count as well, on 362's own
+  // argument: a stage cannot be approved twice, so the restart cannot loop.
+  if (approvedThisReply) chainHops = 0;
   // Ruling 489 (pass 40, F40-68): a reply that MOVED the task's head is a
   // boundary too, so the count starts over at it as it does at an approve.
   //
@@ -5922,12 +5944,21 @@ export async function applyAgentCompletionEffects(
       currentDepth = 0;
     }
   }
-  const shouldReact = operatorShouldReactToReply(
-    finished.state,
-    stripCcLine(replyForCompare),
-    stripCcLine(prevReply),
-    currentDepth,
-  );
+  // Ruling 489(d): the ceiling progress does not reset. The depth reset above
+  // unbounded the one loop that commits on every hop — the operator
+  // re-dispatching a developer that commits each time, with no reviewer to
+  // object — so every hop since a person last acted is counted here, and at
+  // OPERATOR_REACT_HOP_CEILING the chain stops with the same packet.
+  const hopCeilingReached =
+    finished.state === "finished" && chainHops >= OPERATOR_REACT_HOP_CEILING;
+  const shouldReact =
+    !hopCeilingReached &&
+    operatorShouldReactToReply(
+      finished.state,
+      stripCcLine(replyForCompare),
+      stripCcLine(prevReply),
+      currentDepth,
+    );
   // Ruling 203 (F37-23): a person's @mention that landed while this agent was
   // running was refused by the single-flight guard, and viberr told them the
   // agent would see it. This is where that promise is kept — ahead of the
@@ -5948,7 +5979,8 @@ export async function applyAgentCompletionEffects(
   const mustReact =
     !!input.dispatchedByName &&
     finished.state === "finished" &&
-    currentDepth < OPERATOR_REACT_DEPTH_CAP;
+    currentDepth < OPERATOR_REACT_DEPTH_CAP &&
+    !hopCeilingReached;
   if (!shouldReact && !mustReact) {
     const strippedReply = stripCcLine(replyForCompare);
     const strippedPrev = stripCcLine(prevReply);
@@ -5959,6 +5991,8 @@ export async function applyAgentCompletionEffects(
       !noProgress &&
       finished.state === "finished" &&
       currentDepth >= OPERATOR_REACT_DEPTH_CAP;
+    /** Ruling 489(d): the chain kept making progress and ran out of hops. */
+    const hopCapped = !!replyText && !noProgress && !depthCapped && hopCeilingReached;
     if (noProgress) {
       logger.info("operator react skipped — agent made no progress (repeated its reply)", {
         taskKey: input.taskKey,
@@ -5986,7 +6020,7 @@ export async function applyAgentCompletionEffects(
     // about the work rather than about the packet this branch is deciding not to
     // open.
     const acceptableNow =
-      (noProgress || depthCapped) &&
+      (noProgress || depthCapped || hopCapped) &&
       acceptanceRefusalFor(
         { projectSlug: input.projectSlug, taskKey: input.taskKey },
         ctx,
@@ -5995,24 +6029,34 @@ export async function applyAgentCompletionEffects(
       logger.info("stuck-loop packet skipped — the task is acceptable, so the chain reached a boundary", {
         taskKey: input.taskKey,
         runId: finished.id,
-        why: noProgress ? "no_progress" : "depth_capped",
+        why: noProgress ? "no_progress" : depthCapped ? "depth_capped" : "hop_ceiling",
       });
     }
-    if ((noProgress || depthCapped) && !acceptableNow) {
+    if (hopCapped) {
+      logger.info("operator react stopped — the chain reached its hop ceiling since a person last acted", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        hops: chainHops,
+      });
+    }
+    if ((noProgress || depthCapped || hopCapped) && !acceptableNow) {
       const stuck: Parameters<typeof openStuckLoopPacket>[2] = {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         agentHandle: input.agentHandle,
         reason: noProgress
           ? "The agent repeated its previous report verbatim, with no forward progress."
-          : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
+          : depthCapped
+            ? `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`
+            : `The chain made progress but ran ${OPERATOR_REACT_HOP_CEILING} hops without a person or a boundary.`,
       };
       // Ruling 489: the capped packet says where the work stands — the report
       // that hit the cap, the head and whether it is delivered, the last gate
       // result — and, over a committed head nobody delivered, recommends the
       // one step left. On WEB-8 its body carried nothing of the report, and
-      // delivering 178dc22 for review appeared nowhere on it.
-      if (depthCapped) {
+      // delivering 178dc22 for review appeared nowhere on it. The hop ceiling
+      // (489(d)) opens the same packet with the same lines.
+      if (depthCapped || hopCapped) {
         const standingFile = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
         if (standingFile) {
           const standings = stuckLoopStandings({
@@ -6050,12 +6094,16 @@ export async function applyAgentCompletionEffects(
     await clearWaitingToHuman(db, ctx, input.projectSlug, input.taskKey);
     return;
   }
-  const { runOperator } = await import("~/server/runtimes/operator-run.server");
+  const runOperator =
+    ctx.deps?.runOperator ??
+    (await import("~/server/runtimes/operator-run.server")).runOperator;
   const reactInput: RunOperatorInput = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     trigger: "agent-reply",
     reactDepth: currentDepth + 1,
+    // Ruling 489(d): every hop counts toward the ceiling, progress or not.
+    reactHops: chainHops + 1,
     backend: reactBackend,
     autonomy: reactAutonomy,
     dataRoot: ctx.dataRoot,

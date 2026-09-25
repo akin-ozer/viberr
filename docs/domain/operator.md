@@ -165,7 +165,9 @@ oldest-first ahead of the machine slot. Consecutive comments from the same autho
 into one turn. A restart-orphaned run is finalized (`interrupted`, reason `restart`) and
 the trigger driven at once rather than chained onto a dead callback.
 
-**Loop caps.** `OPERATOR_REACT_DEPTH_CAP = 4` (agent-reply reactions),
+**Loop caps.** `OPERATOR_REACT_DEPTH_CAP = 4` (agent-reply reactions that got nowhere),
+`OPERATOR_REACT_HOP_CEILING = 12` (every agent-reply reaction since a person last acted,
+ruling 489(d)),
 `OPERATOR_TRANSITION_CHAIN_CAP = 8` (consecutive operator-authored transitions and
 stranded resumes; a human move resets the chain), and a boot recovery re-invoke cap of
 `RECOVERY_REINVOKE_CAP = 3` per task per 30 minutes. Hitting a cap opens a stuck-loop
@@ -189,6 +191,19 @@ a delivery, or carried by the live PR), and the last gate result on record (ruli
 When the head is committed and not delivered, its recommended option is `deliver_for_review`
 ("Deliver <sha7> for review"), with the stock redirect and send-back options beside it,
 unrecommended, and the hold after them.
+
+Because progress resets the depth, a second bound counts every hop:
+`OPERATOR_REACT_HOP_CEILING` (3 × the depth cap = 12) react hops since a person last acted
+(ruling 489(d)). The count rides the chain as `reactHops`: the react hands the operator one
+more, the drive keeps it on `ctx.operatorRun` for every agent it dispatches, and the drive's
+own `delivered` follow-up and stranded resume carry it on. A trigger a person causes carries
+none, so a comment, a packet answer, a Run press or a person's own dispatch starts it over;
+in the lease queue two of the chain's own triggers keep the deeper count, and a person's
+trigger overwrites it. A moved head does not restart it; an approve does (ruling 362), and
+an acceptable task at the ceiling gets no packet (ruling 258). Otherwise no operator turn
+follows the twelfth hop, and the stuck-loop packet opens with the same state lines, its
+reason "The chain made progress but ran 12 hops without a person or a boundary." A restart
+loses the count, as it loses the depth.
 
 ### 3.1 The stranded-drive backstop and the stranded-task sweep
 

@@ -1331,7 +1331,9 @@ write grant.
    depth is still under 4. A reply whose recorded verdict is `approve` resets the depth
    (ruling 362), and so does a reply that moved the task's head during its hop: a work
    revision minted, or a revision's `pushedAt` stamped, after the run's row was created
-   (ruling 489). A completion that raised the review-deadlock packet does not react
+   (ruling 489). A moved head does not restart the ceiling of 12 react hops since a person
+   last acted (`OPERATOR_REACT_HOP_CEILING`, 489(d)); an approve does. At the ceiling no
+   react follows and the stuck-loop packet opens. A completion that raised the review-deadlock packet does not react
    (ruling 237). With no react, a repeated reply (no progress) or the depth cap opens the
    stuck-loop packet unless the task is already acceptable (ruling 258); either way
    waiting → human. The depth-capped packet quotes the report's first paragraph, names the
@@ -1836,7 +1838,8 @@ async hang).
   event quoting the matched phrase (§4.1); supporting runs get the read-only paragraph and
   the delivery denies.
 - Bounds: operator react depth 4 (an `approve` resets it, ruling 362, and so does a reply
-  that moved the task's head, ruling 489), transition chain
+  that moved the task's head, ruling 489), react hops 12 since a person last acted (only
+  an `approve` or a person restarts it, 489(d)), transition chain
   8 (counted across re-triggered turns; a live operator run's own moves queue no turn,
   ruling 152(a), so consecutive `auto` boundaries are walked inside one turn and the
   stranded-stage backstop covers an abandoned chain), carried triggers 8, recovery

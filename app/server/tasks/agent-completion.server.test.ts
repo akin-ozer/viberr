@@ -45,6 +45,7 @@ import {
   applyAgentCompletionEffects,
   classifyReviewerVerdict,
   markWaitingAgent,
+  OPERATOR_REACT_HOP_CEILING,
   resolvePacket,
 } from "./task-actions.server";
 import {
@@ -1621,6 +1622,199 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           },
         },
       });
+    });
+
+    /**
+     * Ruling 489(d): the ceiling progress does not reset. With the depth reset
+     * above, a chain whose every hop commits a new head (the operator
+     * re-dispatching a developer, no reviewer to object) had no bound at all.
+     */
+    it("a chain that commits a new head on every hop stops at the hop ceiling with the packet", async () => {
+      deployOperator();
+      writeReviewTask({ stage: "impl", validation: "changed", pr: PR_7 });
+      const runOp = vi.fn<typeof runOperator>(async () => ({
+        runId: null,
+        queued: true,
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+      }));
+      // The drive a person started: no hops yet. Every later hop's chain state
+      // is exactly what the previous react handed the operator.
+      let chain = { reactDepth: 0, reactHops: 0 };
+      for (let hop = 0; hop <= OPERATOR_REACT_HOP_CEILING; hop += 1) {
+        const runId = await finishedRunWith(`Pass ${hop}: committed the next slice.`);
+        // Each hop leaves a new tree behind, so the reconcile mints a revision.
+        await updateTaskFile(
+          { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+          (f) => {
+            f.frontmatter.workRevision = {
+              id: `rev_hop_${hop}`,
+              headSha: hop.toString(16).padStart(40, "c"),
+              treeSha: hop.toString(16).padStart(40, "d"),
+              branch: "vib-1-work",
+              createdAt: new Date().toISOString(),
+              sourceProfileId: "dev",
+              kind: "delivered",
+            };
+          },
+        );
+        rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+        const reactsBefore = runOp.mock.calls.length;
+        await applyAgentCompletionEffects(
+          store.db,
+          { dataRoot: store.dataRoot, deps: { runOperator: runOp } },
+          {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            backend: "claude",
+            profileId: "dev",
+            role: "Implementation",
+            delivers: true,
+            workdir: null,
+            agentHandle: "dev",
+            operatorRun: { backend: "claude", autonomy: "supervised", ...chain },
+          },
+          { id: runId, state: "finished" },
+        );
+        if (hop < OPERATOR_REACT_HOP_CEILING) {
+          // Progress keeps the depth at 1, far under its cap: only the ceiling
+          // can stop this chain. CANARY: let progress reset the hop count too
+          // (or stop adding one per hop) and it never reaches the ceiling.
+          expect(runOp.mock.calls.length, `hop ${hop} reacted`).toBe(reactsBefore + 1);
+          const next = runOp.mock.calls.at(-1)![1];
+          expect(next.reactDepth).toBe(1);
+          expect(next.reactHops).toBe(hop + 1);
+          chain = { reactDepth: next.reactDepth ?? 0, reactHops: next.reactHops ?? 0 };
+          expect(taskFile().parsed.packet).toBeNull();
+        }
+      }
+
+      // CANARY: drop the ceiling check and hop 12 reacts like the eleven before
+      // it, with no packet and no bound.
+      expect(runOp).toHaveBeenCalledTimes(OPERATOR_REACT_HOP_CEILING);
+      const packet = taskFile().parsed.packet;
+      expect(packet?.title).toBe("Work stalled: pick a recovery path");
+      expect(packet!.body).toContain(
+        "The chain made progress but ran 12 hops without a person or a boundary.",
+      );
+      // The same state lines as the depth-capped packet.
+      expect(packet!.body).toContain("The last report, from @dev: “Pass 12: committed the next slice.”");
+      expect(packet!.body).toContain("committed and NOT delivered: PR #7 still carries `aaaaaaa`.");
+      expect(packet!.options[0]).toMatchObject({ kind: "deliver_for_review", rec: true });
+    });
+
+    it("at the ceiling an approve still continues the chain, from zero", async () => {
+      deployOperator();
+      const runOp = vi.fn<typeof runOperator>(async () => ({
+        runId: null,
+        queued: true,
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+      }));
+      const atCeiling = {
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+        reactDepth: 1,
+        reactHops: OPERATOR_REACT_HOP_CEILING,
+      };
+      // Ruling 362's shape: an approve with a second verdict still owed.
+      writeReviewTask({
+        validation: "changed",
+        engagements: [
+          DEV_DELIVERS_ENGAGEMENT,
+          REVIEWER_ENGAGEMENT,
+          { ...REVIEWER_ENGAGEMENT, profileId: "verifier", role: "Integration verifier" },
+        ],
+      });
+      const summary = "Approved at the pinned head.";
+      const approveRun = await finishedRunWith(summary);
+      stageOutcome(store.db, `oc-${approveRun}`, { summary, verdict: "approve" });
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot, deps: { runOperator: runOp } },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          backend: "claude",
+          profileId: "reviewer",
+          role: "Reviewer",
+          delivers: false,
+          workdir: null,
+          agentHandle: "reviewer",
+          outcomeKey: `oc-${approveRun}`,
+          operatorRun: atCeiling,
+        },
+        { id: approveRun, state: "finished" },
+      );
+      // CANARY: stop an approve restarting the hop count and the ceiling opens
+      // "Work stalled" over an approve — BNB-16 again.
+      expect(taskFile().parsed.packet).toBeNull();
+      expect(runOp).toHaveBeenCalledTimes(1);
+      expect(runOp.mock.calls[0]![1]).toMatchObject({ reactDepth: 1, reactHops: 1 });
+    });
+
+    it("at the ceiling an acceptable task still gets no packet", async () => {
+      deployOperator();
+      const runOp = vi.fn<typeof runOperator>(async () => ({
+        runId: null,
+        queued: true,
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+      }));
+      const atCeiling = {
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+        reactDepth: 1,
+        reactHops: OPERATOR_REACT_HOP_CEILING,
+      };
+      // Ruling 258's shape: the task is acceptable, and the reply at the
+      // ceiling is not an approve.
+      writeReviewTask({
+        validation: "healthy",
+        pr: { number: 7, state: "review", title: "[VIB-1] Task VIB-1" },
+      });
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          f.frontmatter.verdicts = [
+            {
+              profileId: "reviewer",
+              revisionId: f.frontmatter.workRevision!.id,
+              headSha: f.frontmatter.workRevision!.headSha,
+              result: "approve",
+              reason: "Approved.",
+              at: new Date().toISOString(),
+              rounds: 1,
+            },
+          ];
+        },
+      );
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      expect(
+        acceptanceRefusalFor({ projectSlug: store.slug, taskKey: "VIB-1" }, { dataRoot: store.dataRoot }),
+      ).toBeNull();
+      const notesRun = await finishedRunWith("Release notes tidied; nothing else to do.");
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot, deps: { runOperator: runOp } },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          backend: "claude",
+          profileId: "dev",
+          role: "Implementation",
+          delivers: true,
+          workdir: null,
+          agentHandle: "dev",
+          operatorRun: atCeiling,
+        },
+        { id: notesRun, state: "finished" },
+      );
+      // CANARY: leave the ceiling out of ruling 258's check and the packet
+      // opens and blocks the acceptance it should wait for.
+      expect(taskFile().parsed.packet).toBeNull();
+      // The chain still ends at the ceiling: no operator turn follows.
+      expect(runOp).not.toHaveBeenCalled();
     });
   });
 
