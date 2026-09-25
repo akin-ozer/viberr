@@ -349,9 +349,11 @@ section for exactly this.
   is ahead of the branch from the reconciler's last compare: `0` is level, `null` is "not
   compared yet" and never a reason to skip `update_branch_from_base`),
   `baseComparedHead` (ruling 494: `{sha, observedAt, current, pushedSince}`, the head that
-  count was counted on and when; `current` is false when Viberr recorded a push after the
-  compare that published another head, `pushedSince` naming it, and null when the compare
-  named no head, a row written before the ruling; neither is ever read as current) with
+  count was counted on and when; `current` is false when the count was not read on the head
+  Viberr's newest push published, `pushedSince` naming it: the push came after the
+  compare, or the compare right after the push read another head because GitHub had not
+  shown the push yet. It is null when the compare named no head, a row written before the
+  ruling; neither is ever read as current) with
   `baseBehindBySentence` (what to say instead of quoting the count, "" when it describes
   the current head), and
   `notRefreshableReason` (the sentence `update_branch_from_base` refuses with from where

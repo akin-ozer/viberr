@@ -411,7 +411,9 @@ The `provenance` table records what the projector and the reconciler observed:
 `github.branch_delete`, `github.push` (a Viberr push of a task branch, ruling 494).
 Readers derive "last synced" facts from it; it is never pruned. A `github.reconcile`
 row names the branch head its compare read (`headSha`), and the operator's
-`baseBehindBy` is read with that head and with any `github.push` recorded after it.
+`baseBehindBy` is read with that head and against Viberr's newest `github.push`: a push
+recorded after it, or one whose first compare after it read another head, makes the count
+not the pushed head's.
 Freshness rules live in `app/shared/freshness.ts` (re-exported through
 `server/interpretation/freshness-policy.server.ts`): older than one hour is stale;
 never checked is neutral, not stale. "Gone quiet" on a task (`task-activity.server.ts`)

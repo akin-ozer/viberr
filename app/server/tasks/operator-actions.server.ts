@@ -2753,13 +2753,15 @@ export interface OperatorTaskSnapshot {
   baseBehindBy?: number | null;
   /** Ruling 494 (pass 40, F40-70): the compare `baseBehindBy` was counted in.
    *  `sha` is the branch head it read and `observedAt` when it ran. `current`
-   *  is true when no push Viberr made since moved the branch off that head,
-   *  false when one did (`pushedSince` names the head it published, null when
-   *  git could not name it): the count then describes an older head. It is
-   *  null when the compare named no head (a compare recorded before ruling
-   *  494), which never reads as current either. Null while `baseBehindBy` is
-   *  null. Optional only so hand-built fixtures need not restate it;
-   *  `operatorSnapshot` always sets it. */
+   *  is false when the count was not read on the head Viberr's newest push
+   *  published (`pushedSince` names that head, null when git could not name
+   *  it): the push came after the compare, or the compare right after the
+   *  push read another head because GitHub had not shown the push yet. The
+   *  count then describes another head than the pushed one. It is null when
+   *  the compare named no head (a compare recorded before ruling 494), which
+   *  never reads as current either, and true otherwise. Null while
+   *  `baseBehindBy` is null. Optional only so hand-built fixtures need not
+   *  restate it; `operatorSnapshot` always sets it. */
   baseComparedHead?: {
     sha: string | null;
     observedAt: string;
@@ -3191,17 +3193,17 @@ function operatorGatesOf(
 
 /**
  * Ruling 494 (pass 40, F40-70): does the newest compare's count describe the
- * branch as it stands? Not when Viberr recorded a push after that compare that
- * published another head (or one git could not name): the count is then an
- * older head's. Not when the compare named no head either (`null`, unknown).
- * The known head is the one Viberr's own push published: `pr.headSha` lags a
- * push until GitHub shows it on the pull request (F39-64), a task with no live
- * pull request has none, and a base refresh moves the branch past
- * `workRevision` (ruling 439).
+ * branch as it stands? Not when it was not read on the head Viberr's newest
+ * push published (`pushedSince`, set by `createBaseCompareLookup`): a push
+ * recorded after that compare, or one the compare right after it read another
+ * head for, GitHub answering before it showed the push. Not when the compare
+ * named no head either (`null`, unknown). The known head is the one Viberr's
+ * own push published: `pr.headSha` lags a push until GitHub shows it on the
+ * pull request (F39-64), a task with no live pull request has none, and a base
+ * refresh moves the branch past `workRevision` (ruling 439).
  */
 function comparedHeadCurrent(reading: BaseCompareReading): boolean | null {
-  const pushed = reading.pushedSince;
-  if (pushed && (pushed.headSha === null || pushed.headSha !== reading.headSha)) return false;
+  if (reading.pushedSince) return false;
   return reading.headSha === null ? null : true;
 }
 
@@ -3242,6 +3244,15 @@ function baseBehindBySentence(
       ? `on \`${reading.headSha.slice(0, 7)}\``
       : "on a head the compare did not name";
     const pushed = reading.pushedSince?.headSha;
+    if (reading.pushedSince?.afterCompare === false && pushed) {
+      // The first compare after the push read another head than it published
+      // (`pushNotCounted` sets this only with both heads named).
+      return (
+        `${count} was counted ${counted}, not on \`${pushed.slice(0, 7)}\`, which Viberr pushed to ` +
+        `${branch} before that compare, so the count does not describe the pushed head. ${never} ` +
+        `The next GitHub pass compares the branch again.`
+      );
+    }
     return (
       `${count} was counted ${counted}, and Viberr pushed ` +
       `${pushed ? `\`${pushed.slice(0, 7)}\` to ${branch}` : `to ${branch}`} after that compare, ` +

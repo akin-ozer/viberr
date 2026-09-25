@@ -245,6 +245,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 494's review: the doctrine as ruling 494 first shipped it, with
+    // its `baseBehindBy` sentences between `update_branch_from_base`'s own
+    // sentences and the "Never call it" that pointed back to the tool, so
+    // "it" read as the packet or the count. The sentence now names the tool.
+    "43a9a0b59ee0c6d6e58cbc5c6807467005b5b343f7e5f7909d622a944d23d5e4",
     // Ruling 494 (pass 40, F40-70): before the doctrine said a behind count is
     // true only of the head it was counted on (`baseComparedHead`), to check
     // it against the head just pushed and never to state one in a packet for

@@ -302,7 +302,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     const defs = build(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
     expect(desc("get_task")).toContain(
-      "`baseComparedHead` (ruling 494) names the head `baseBehindBy` was counted on (`sha`, `observedAt`): `current: false` means Viberr pushed the branch after that compare, so the count describes an older head",
+      "`baseComparedHead` (ruling 494) names the head `baseBehindBy` was counted on (`sha`, `observedAt`): `current: false` means the count was not read on the head Viberr last pushed (`pushedSince` names it), because that push came after the compare or GitHub had not shown it yet when it compared",
     );
     expect(desc("get_task")).toContain("the count is never stated as the branch's, in a comment or a packet");
     expect(desc("update_branch_from_base")).toContain(

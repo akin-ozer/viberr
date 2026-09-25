@@ -1676,7 +1676,10 @@ export type PushVia = "delivery" | "branch-update";
  * written inside the lock so that a pass which read the branch before the push
  * and is still running cannot record its older count after it: that pass
  * finishes first, the push row stands after its row, and this pass's own row
- * stands after the push row. When this pass fails (GitHub unreachable, the
+ * stands after the push row, the first compare after it. When GitHub answers
+ * that compare before it shows the push (it reads another head than
+ * `headSha`), `get_task` reads its count as not the pushed head's, until a
+ * later pass compares again. When this pass fails (GitHub unreachable, the
  * credential refused), the push still stands, no count is written in its
  * place, and `get_task` reads the older count as describing the head before
  * the push (`createBaseCompareLookup`'s `pushedSince`). The caller reports the

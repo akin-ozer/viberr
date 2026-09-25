@@ -278,6 +278,47 @@ describe("ruling 494: a push re-compares the branch it moved", () => {
     expect(snap.baseBehindBySentence).toContain("Do not quote it, in a comment or a decision packet");
   });
 
+  it("a re-compare GitHub answers before it shows the push: the reply names both heads, and get_task reads the count as not the pushed head's until the next pass", async () => {
+    // CANARY: read only a push recorded AFTER the newest compare
+    // (`createBaseCompareLookup`'s old `id > ?` bound), and the count the
+    // re-compare read on the replaced head reads as current, with no sentence.
+    seedReviewTask();
+    await pollAtOldHead();
+    // GitHub still shows `vib-1` at the head the push replaced, on the pull
+    // request and on the compare.
+    const res = await deliverWith(githubAt(OLD).fetchImpl);
+    expect(res.outcome).toBe("done");
+    expect(res.message).toContain(
+      "Re-compared after the push: GitHub's `vib-1` stands at `aafee66`, not the `20534f6` just pushed, and is 6 commits behind `main`.",
+    );
+    expect(rows().slice(-2)).toEqual([
+      { action: "github.push", behindBy: undefined, headSha: NEW },
+      { action: "github.reconcile", behindBy: 6, headSha: OLD },
+    ]);
+    const snap = snapshot();
+    expect(snap.baseBehindBy).toBe(6);
+    expect(snap.baseComparedHead).toMatchObject({
+      sha: OLD,
+      current: false,
+      pushedSince: { sha: NEW },
+    });
+    expect(snap.baseBehindBySentence).toContain(
+      "`baseBehindBy` (6) was counted on `aafee66`, not on `20534f6`, which Viberr pushed to `vib-1` before that compare, so the count does not describe the pushed head.",
+    );
+    expect(snap.baseBehindBySentence).toContain("Do not quote it, in a comment or a decision packet");
+
+    // The next pass reads the pushed head, and its count is the branch's.
+    await reconcileTask(store.db, task(), SYS, {
+      dataRoot: store.dataRoot,
+      fetchImpl: githubAt(NEW).fetchImpl,
+      skipUnchangedProvenance: true,
+    });
+    const after = snapshot();
+    expect(after.baseBehindBy).toBe(0);
+    expect(after.baseComparedHead).toMatchObject({ sha: NEW, current: true, pushedSince: null });
+    expect(after.baseBehindBySentence).toBe("");
+  });
+
   it("a delivery that throws after its push still re-compares before it returns", async () => {
     // CANARY: drop the re-compare from `performDelivery`'s catch.
     seedReviewTask();
@@ -388,6 +429,48 @@ describe("ruling 494: get_task names the head its count was counted on", () => {
         "`vib-1` is behind `main` now: a count describes only the head it was counted on. " +
         "The next GitHub pass compares the pushed head.",
     );
+  });
+
+  it("compared head: the compare right after a push of B that read A says the count is not B's, and a later compare is the branch's", () => {
+    // CANARIES: read only a push recorded after the compare (the lookup's old
+    // `id > ?` bound), and the count reads as current with no sentence; check
+    // every compare against the newest push, and the head a person moved on
+    // GitHub reads as not current.
+    seedTask();
+    compareRow({ sync: "behind_main", behindBy: 6, headSha: A }, "2026-09-25T21:25:48.527Z");
+    pushRow(B, "2026-09-25T21:25:55.000Z");
+    // The push's own re-compare, which GitHub answered with the older head.
+    compareRow({ sync: "behind_main", behindBy: 6, headSha: A }, "2026-09-25T21:25:56.000Z");
+    const snap = snapshot();
+    expect(snap.baseBehindBy).toBe(6);
+    expect(snap.baseComparedHead).toEqual({
+      sha: A,
+      observedAt: "2026-09-25T21:25:56.000Z",
+      current: false,
+      pushedSince: { sha: B, at: "2026-09-25T21:25:55.000Z" },
+    });
+    expect(snap.baseBehindBySentence).toBe(
+      "`baseBehindBy` (6) was counted on `a1a1a1a`, not on `b2b2b2b`, which Viberr pushed to `vib-1` before that compare, " +
+        "so the count does not describe the pushed head. Do not quote it, in a comment or a decision packet, as how far " +
+        "`vib-1` is behind `main` now: a count describes only the head it was counted on. " +
+        "The next GitHub pass compares the branch again.",
+    );
+    // The next pass read the pushed head.
+    compareRow({ sync: "synced", behindBy: 0, headSha: B }, "2026-09-25T21:30:48.000Z");
+    expect(snapshot()).toMatchObject({
+      baseBehindBy: 0,
+      baseComparedHead: { sha: B, current: true, pushedSince: null },
+      baseBehindBySentence: "",
+    });
+    // A head that moved on GitHub after that (a person's commit there) is
+    // the branch's head: its count is current, not an older head's.
+    const C = "c3c3c3c".padEnd(40, "3");
+    compareRow({ sync: "behind_main", behindBy: 1, headSha: C }, "2026-09-25T21:35:48.000Z");
+    expect(snapshot()).toMatchObject({
+      baseBehindBy: 1,
+      baseComparedHead: { sha: C, current: true, pushedSince: null },
+      baseBehindBySentence: "",
+    });
   });
 
   it("a compare made after the push describes the head it read", () => {

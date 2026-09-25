@@ -206,7 +206,8 @@ export const PUSH_ACTION = "github.push";
 
 /**
  * Ruling 494 (pass 40, F40-70): the newest compare's count for a task branch,
- * with the head it was counted on and any push Viberr made after it.
+ * with the head it was counted on and the push Viberr made that it does not
+ * describe, if there is one.
  *
  * `baseBehindBy` used to be the count alone. Live on WEB-16 a compare read
  * GitHub's copy of the branch 0.2 s before the delivery pushed a head that
@@ -222,9 +223,60 @@ export interface BaseCompareReading {
   headSha: string | null;
   /** When that compare ran (UTC ISO). */
   observedAt: string;
-  /** Viberr's newest push of the branch recorded AFTER that compare (the head
-   *  it published, null when git could not name it), or null when none was. */
-  pushedSince: { headSha: string | null; at: string } | null;
+  /** Viberr's newest push of the branch when the count was not read on the
+   *  head it published (that head, null when git could not name it), or null
+   *  when there is no push or the count was read on it
+   *  ({@link pushNotCounted}). `afterCompare` is true for a push recorded
+   *  after the compare, and false for a push the first compare after it read
+   *  another head for. */
+  pushedSince: { headSha: string | null; at: string; afterCompare: boolean } | null;
+}
+
+/** The three columns the compare lookup reads from a provenance row (a type
+ *  alias, like {@link RawRow}, so a statement's row is comparable to it). */
+type CompareLookupRow = {
+  id: number;
+  observed_at: string;
+  details_json: string | null;
+};
+
+/**
+ * Ruling 494: the newest push, when the count was not read on the head it
+ * published.
+ *
+ * - A push recorded AFTER the compare moved the branch past what was counted,
+ *   unless it published the very head the compare read. A push whose head git
+ *   could not name is never that head.
+ * - A push recorded BEFORE the compare is answered by the FIRST compare after
+ *   it. `recompareAfterPush` writes that one inside the same hold of the
+ *   task's reconcile lock, right after the push row, so it is the push's own
+ *   re-compare (or, when that one wrote nothing, the next pass). When it read
+ *   another head than the push published, GitHub answered before it showed
+ *   the push, and its count is not the pushed head's either (the delivery
+ *   reply's "stands at `A`, not the `B` just pushed"). Only a named head on
+ *   both sides can show that: a compare that named none reads as head
+ *   unknown, and a push git could not name leaves nothing to check.
+ * - A compare after that first one is GitHub's word on the branch, whatever
+ *   head it names: a head that moved on GitHub since (a person's commit there)
+ *   is the branch's head too.
+ */
+function pushNotCounted(
+  compare: { id: number; headSha: string | null },
+  previousCompareId: number | null,
+  push: CompareLookupRow,
+): BaseCompareReading["pushedSince"] {
+  const pushed = rowHeadOf(parseDetails(push.details_json));
+  if (push.id > compare.id) {
+    return pushed !== null && pushed === compare.headSha
+      ? null
+      : { headSha: pushed, at: push.observed_at, afterCompare: true };
+  }
+  const firstSincePush = previousCompareId === null || previousCompareId < push.id;
+  const readAnother =
+    pushed !== null && compare.headSha !== null && pushed !== compare.headSha;
+  return firstSincePush && readAnother
+    ? { headSha: pushed, at: push.observed_at, afterCompare: false }
+    : null;
 }
 
 /** Factory, like {@link createReconcileBehindByLookup}: the statements are
@@ -233,39 +285,36 @@ export interface BaseCompareReading {
 export function createBaseCompareLookup(
   db: DatabaseSync,
 ): (sourcePath: string) => BaseCompareReading | null {
+  // The newest two compares: the newest holds the count, and the one before it
+  // says whether the newest is the first since the newest push.
   const compareStmt = db.prepare(
     `SELECT id, observed_at, details_json FROM provenance
      WHERE source_path = ? AND action = ?
-     ORDER BY id DESC LIMIT 1`,
+     ORDER BY id DESC LIMIT 2`,
   );
   const pushStmt = db.prepare(
-    `SELECT observed_at, details_json FROM provenance
-     WHERE source_path = ? AND action = ? AND id > ?
+    `SELECT id, observed_at, details_json FROM provenance
+     WHERE source_path = ? AND action = ?
      ORDER BY id DESC LIMIT 1`,
   );
   return (sourcePath: string): BaseCompareReading | null => {
     // SAFETY: `id` is the INTEGER PRIMARY KEY, `observed_at` TEXT NOT NULL and
     // `details_json` nullable TEXT (0001_baseline.sql): the three columns
-    // selected.
-    const row = compareStmt.get(sourcePath, RECONCILE_ACTION) as
-      | { id: number; observed_at: string; details_json: string | null }
-      | undefined;
+    // selected, by both statements.
+    const [row, previous] = compareStmt.all(sourcePath, RECONCILE_ACTION) as CompareLookupRow[];
     if (!row) return null;
     const details = parseDetails(row.details_json);
     if (details === null) return null;
     const reconciled = reconcileDetailsSchema.safeParse(details);
     if (!reconciled.success) return null;
-    // SAFETY: as above, `observed_at` and `details_json`.
-    const push = pushStmt.get(sourcePath, PUSH_ACTION, row.id) as
-      | { observed_at: string; details_json: string | null }
-      | undefined;
+    const headSha = rowHeadOf(details);
+    // SAFETY: as above.
+    const push = pushStmt.get(sourcePath, PUSH_ACTION) as CompareLookupRow | undefined;
     return {
       behindBy: reconciled.data.behindBy,
-      headSha: rowHeadOf(details),
+      headSha,
       observedAt: row.observed_at,
-      pushedSince: push
-        ? { headSha: rowHeadOf(parseDetails(push.details_json)), at: push.observed_at }
-        : null,
+      pushedSince: push ? pushNotCounted({ id: row.id, headSha }, previous?.id ?? null, push) : null,
     };
   };
 }

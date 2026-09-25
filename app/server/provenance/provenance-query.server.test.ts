@@ -125,30 +125,30 @@ describe("reconcile reads", () => {
 
 /**
  * Ruling 494 (pass 40, F40-70): a count is read with the head it was counted
- * on and with any push Viberr recorded after it, from the same table, ordered
- * by the table's own ids.
+ * on and with Viberr's newest push, from the same table, ordered by the
+ * table's own ids: a push recorded after the count, or one whose first compare
+ * read another head, is a push the count does not describe.
  */
-describe("ruling 494: the compare's head and the push after it", () => {
+describe("ruling 494: the compare's head and the push it does not describe", () => {
   const A = "a".repeat(40);
   const B = "b".repeat(40);
-
-  it("reads the newest compare's count, its head and time, and the newest push recorded after it", () => {
-    // Canary: read the push row without the `id > ?` bound, and a push made
-    // BEFORE the compare reads as one after it.
-    const db = ctx.makeDb();
-    recordProvenance(db, {
-      sourcePath: PATH_142,
-      action: "github.push",
-      details: { headSha: A },
-      observedAt: "2026-09-25T21:20:00.000Z",
-    });
+  const C = "c".repeat(40);
+  const compare = (db: ReturnType<typeof ctx.makeDb>, headSha: string | null, observedAt: string) =>
     recordProvenance(db, {
       sourcePath: PATH_142,
       action: "github.reconcile",
-      details: { sync: "behind_main", behindBy: 6, headSha: A },
-      observedAt: "2026-09-25T21:25:48.527Z",
+      details: { sync: "behind_main", behindBy: 6, headSha },
+      observedAt,
     });
+  const push = (db: ReturnType<typeof ctx.makeDb>, headSha: string | null, observedAt: string) =>
+    recordProvenance(db, { sourcePath: PATH_142, action: "github.push", details: { headSha }, observedAt });
+
+  it("reads the newest compare's count, its head and time, and a push recorded after it", () => {
+    const db = ctx.makeDb();
+    push(db, A, "2026-09-25T21:20:00.000Z");
+    compare(db, A, "2026-09-25T21:25:48.527Z");
     const read = createBaseCompareLookup(db);
+    // The compare read the head the push before it published.
     expect(read(PATH_142)).toEqual({
       behindBy: 6,
       headSha: A,
@@ -158,13 +158,72 @@ describe("ruling 494: the compare's head and the push after it", () => {
     // Another task's push never reaches this task's reading.
     recordProvenance(db, { sourcePath: PATH_201, action: "github.push", details: { headSha: B } });
     expect(read(PATH_142)?.pushedSince).toBeNull();
-    recordProvenance(db, {
-      sourcePath: PATH_142,
-      action: "github.push",
-      details: { headSha: B },
-      observedAt: "2026-09-25T21:25:55.000Z",
+    push(db, B, "2026-09-25T21:25:55.000Z");
+    expect(read(PATH_142)?.pushedSince).toEqual({
+      headSha: B,
+      at: "2026-09-25T21:25:55.000Z",
+      afterCompare: true,
     });
-    expect(read(PATH_142)?.pushedSince).toEqual({ headSha: B, at: "2026-09-25T21:25:55.000Z" });
+  });
+
+  it("reads a push the first compare after it did not read as one the count does not describe, and a later compare at its word", () => {
+    // CANARY: read only a push recorded after the compare (the `id > ?`
+    // bound this lookup had), and the compare that read `A` right after the
+    // push of `B` reads as describing the branch.
+    const db = ctx.makeDb();
+    compare(db, A, "2026-09-25T21:25:48.527Z");
+    push(db, B, "2026-09-25T21:25:55.000Z");
+    // The push's own re-compare, answered before GitHub showed the push.
+    compare(db, A, "2026-09-25T21:25:56.000Z");
+    const read = createBaseCompareLookup(db);
+    expect(read(PATH_142)).toEqual({
+      behindBy: 6,
+      headSha: A,
+      observedAt: "2026-09-25T21:25:56.000Z",
+      pushedSince: { headSha: B, at: "2026-09-25T21:25:55.000Z", afterCompare: false },
+    });
+    // The next pass reads the pushed head.
+    compare(db, B, "2026-09-25T21:30:48.000Z");
+    expect(read(PATH_142)?.pushedSince).toBeNull();
+    // A head that moved on GitHub since (a person's commit there) is the
+    // branch's head too: a compare after the first one is GitHub's word.
+    compare(db, C, "2026-09-25T21:35:48.000Z");
+    expect(read(PATH_142)).toMatchObject({ headSha: C, pushedSince: null });
+  });
+
+  it("checks the first compare after a push only when both heads are named", () => {
+    const db = ctx.makeDb();
+    const read = createBaseCompareLookup(db);
+    // No compare before the push: the first after it read another head.
+    push(db, B, "2026-09-25T21:25:55.000Z");
+    compare(db, A, "2026-09-25T21:25:56.000Z");
+    expect(read(PATH_142)?.pushedSince).toEqual({
+      headSha: B,
+      at: "2026-09-25T21:25:55.000Z",
+      afterCompare: false,
+    });
+    // A compare that named no head is head unknown, not another head.
+    const other = ctx.makeDb();
+    push(other, B, "2026-09-25T21:25:55.000Z");
+    compare(other, null, "2026-09-25T21:25:56.000Z");
+    expect(createBaseCompareLookup(other)(PATH_142)).toMatchObject({ headSha: null, pushedSince: null });
+    // A push git could not name leaves nothing to check the compare after it
+    // against; one recorded after the compare still moved the branch.
+    const unnamed = ctx.makeDb();
+    push(unnamed, null, "2026-09-25T21:25:55.000Z");
+    compare(unnamed, A, "2026-09-25T21:25:56.000Z");
+    expect(createBaseCompareLookup(unnamed)(PATH_142)?.pushedSince).toBeNull();
+    push(unnamed, null, "2026-09-25T21:26:30.000Z");
+    expect(createBaseCompareLookup(unnamed)(PATH_142)?.pushedSince).toEqual({
+      headSha: null,
+      at: "2026-09-25T21:26:30.000Z",
+      afterCompare: true,
+    });
+    // A push after the compare that published the very head it read.
+    const same = ctx.makeDb();
+    compare(same, B, "2026-09-25T21:25:56.000Z");
+    push(same, B, "2026-09-25T21:25:57.000Z");
+    expect(createBaseCompareLookup(same)(PATH_142)?.pushedSince).toBeNull();
   });
 
   it("answers null exactly where the behindBy lookup does, and reads a missing or unreadable head as none", () => {

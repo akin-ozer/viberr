@@ -234,16 +234,24 @@ describe("shipped-asset refresh (B-OP1)", () => {
    * counted on. Live on WEB-16 two packets told the owner the branch was 6
    * commits behind `main`, five minutes after a push that carried `main`.
    */
-  it("ruling 494: the doctrine checks a behind count's head against the head just pushed and keeps another head's count out of packets, and its outgoing hash is recorded", async () => {
-    // Canaries: drop the sentences; remove the outgoing hash.
+  it("ruling 494: the doctrine checks a behind count's head against the head just pushed and keeps another head's count out of packets, and its outgoing hashes are recorded", async () => {
+    // Canaries: drop the sentences; remove either outgoing hash; say "Never
+    // call it" again after the packet sentence.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
     expect(shippedCopyIsUnedited(OPERATOR_REL, "ee212fda34ef04e0447ed1edd1a2f50b6c1cd92cde5ac498956cea61dbcfb6d8", {})).toBe(true);
+    // The text as ruling 494 first shipped it, before its review named the tool.
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "43a9a0b59ee0c6d6e58cbc5c6807467005b5b343f7e5f7909d622a944d23d5e4", {})).toBe(true);
     const doctrine = shipped();
     expect(doctrine).toContain(
       "`get_task`'s `baseBehindBy` is the count the last compare read, and `baseComparedHead` names the head it read: check that head against the head you just pushed before you rely on the count or repeat it.",
     );
     expect(doctrine).toContain(
       "a decision packet never states a behind count for a head other than the one the packet puts up",
+    );
+    // The sentence after the packet rule names the tool it forbids: an "it"
+    // there reads as the packet or the count.
+    expect(doctrine).toContain(
+      "the one the packet puts up. Never call `update_branch_from_base` once the task stands at the acceptance stage",
     );
   });
 

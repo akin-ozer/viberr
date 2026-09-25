@@ -383,13 +383,19 @@ steps below, with the hold sentence on the timeline (ruling 240).
    pass, whose `github.reconcile` row then names that head (§6). It runs before the
    "Pushed" record below, so a pull request GitHub has not caught up on cannot leave its
    older head on the file (F39-64), and before the `delivered` re-queue, so the
-   operator's next read has the new count. The operator's `deliver_for_review` reply
-   adds what it found ("Re-compared after the push: `web-16` at `20534f6` is level with
-   `main`.") or that it could not run ("`web-16` could not be compared with `main` again
-   after the push (network_unavailable), so the count of commits it is behind stays the
-   one from before the push until the next GitHub pass."). A re-compare that fails never
-   fails the delivery and writes no count in its place. Then `noChanges` is cleared, a
-   stale push-conflict packet is withdrawn,
+   operator's next read has the new count. On a `delivered` outcome the operator's
+   `deliver_for_review` reply adds what it found ("Re-compared after the push: `web-16`
+   at `20534f6` is level with `main`.", or, when GitHub answered with another head than
+   the one pushed, "Re-compared after the push: GitHub's `web-16` stands at `aafee66`,
+   not the `20534f6` just pushed, and is 6 commits behind `main`.") or that it could not
+   run ("`web-16` could not be compared with `main` again after the push
+   (network_unavailable), so the count of commits it is behind stays the one from before
+   the push until the next GitHub pass."). A delivery whose push landed but that ended
+   otherwise (the PR door answered `closed_by_human`, `branch_collision`,
+   `nothing_to_review` or another refusal, or something threw after the push)
+   re-compares the same way, and its reply leaves the count to `get_task`. A re-compare
+   that fails never fails the delivery and writes no count in its place. Then
+   `noChanges` is cleared, a stale push-conflict packet is withdrawn,
    `workRevision.pushedAt` is stamped on the revision whose head the push published
    (ruling 161; also a head that reaches the revision only through Viberr's own base
    refreshes, ruling 439), and what MOVED decides the follow-up (ruling 134): a newly
@@ -721,10 +727,16 @@ Facts it records beside the state:
   row written before the ruling (which names no head) is replaced by the first pass that
   does. A Viberr push that moves the branch writes a `github.push` row inside the task's
   lock before its own pass (§3 step 5), so a pass that read the branch before the push
-  cannot record its count after it. The operator's `get_task` reads the newest count
-  with that head and time (`baseComparedHead`, [operator.md](operator.md)): a
-  `github.push` row newer than the count that published another head makes it an older
-  head's count, and a row with no head is unknown; neither reads as current.
+  cannot record its count after it, and the pass's own row is the first compare after
+  the push row. The operator's `get_task` reads the newest count with that head and time
+  (`baseComparedHead`, [operator.md](operator.md)) against Viberr's newest push
+  (`createBaseCompareLookup`, `provenance-query.server.ts`): a `github.push` row newer
+  than the count that published another head makes it an older head's count, and so
+  does a push whose first compare after it read another head than the push published
+  (GitHub answered before it showed the push), until a later pass compares again; a
+  compare after that first one is GitHub's word on the branch, a head a person moved on
+  GitHub included. A row with no head is unknown. Neither a stale count nor an unknown
+  one reads as current.
 - **Review relay** (ruling 484, `pr-review-relay.server.ts`): after its own write, on an
   open PR whose reviews it read, the pass relays each submitted review (APPROVED,
   CHANGES_REQUESTED or COMMENTED; never PENDING or DISMISSED) that was made on the
