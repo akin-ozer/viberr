@@ -7600,6 +7600,12 @@ export type DeliveryOutcome =
        *  (full autonomy, moved head). Ruling 357: false for a delivery made by
        *  a live operator drive — its own lease release decides the follow-up. */
       operatorRequeued: boolean;
+      /** Ruling 494: where the pushed branch stands against the base, from the
+       *  compare the push ran before this returned (or that it could not run
+       *  it, so the count on record is the one from before the push). Null
+       *  when the delivery pushed nothing. Optional only so hand-built
+       *  fixtures need not restate it; `performDelivery` always sets it. */
+      recompare?: string | null;
     }
   /** F15-15/B-GH1: the remote branch diverged (non-fast-forward). No PR was
    *  opened — it would review the stale remote content, not the delivery. */
@@ -7746,6 +7752,9 @@ export async function performDelivery(
   actor: TaskActor,
 ): Promise<DeliveryOutcome> {
   const dataCtx = { dataRoot: ctx.dataRoot };
+  // Ruling 494: the branch this delivery's push moved, until it is re-compared.
+  // Every path out after a push goes through the re-compare, the thrown one too.
+  let pushedBranch: { branch: string; headSha: string | null } | null = null;
   try {
     // Ruling 240 (F37-61): a HELD task refuses delivery, for ruling 186's own
     // reason and against its own live case. Ruling 186 gated every DISPATCH
@@ -7800,6 +7809,7 @@ export async function performDelivery(
       canCommitPush,
       ...dataCtx,
     });
+    if (push.status === "pushed") pushedBranch = { branch: push.branch, headSha: push.headSha };
     // Ruling 202, corrected by ruling 211(d): the drive DELIVERED — stamped
     // once the push has actually been attempted, not on entry. Stamping on
     // entry counted the arms that do nothing at all as progress
@@ -8231,6 +8241,16 @@ export async function performDelivery(
       },
       prCtx,
     );
+    // Ruling 494 (F40-70): the push moved the branch, so it is compared with
+    // the base again now, whatever the PR door answered, and before anything
+    // below re-queues the operator or reads the count. After the PR door so the
+    // pass sees the PR this delivery opened, and before `recordPushedHead`, so
+    // a pull request GitHub has not caught up on cannot leave its older head
+    // on the file (F39-64): that write is the last word on `pr.headSha`.
+    const recompare = pushedBranch
+      ? await recompareDeliveredBranch(db, ctx, projectSlug, taskKey, pushedBranch, actor)
+      : null;
+    pushedBranch = null;
     if (result.status === "ok") {
       // R17-2: a real PR now stands for review — clear any stale no-change flag
       // from an earlier empty-branch attempt (a later delivery produced commits).
@@ -8380,6 +8400,7 @@ export async function performDelivery(
         headSha,
         moved,
         operatorRequeued,
+        recompare,
       };
     }
     logger.info("review PR not opened", { taskKey, reason: result.status });
@@ -8544,10 +8565,59 @@ export async function performDelivery(
       taskKey,
       err: toError(error),
     });
+    // Ruling 494: the push stands whatever threw after it, so the branch it
+    // moved is compared again before this returns, as on every other path.
+    if (pushedBranch) {
+      await recompareDeliveredBranch(db, ctx, projectSlug, taskKey, pushedBranch, actor);
+    }
     return {
       status: "failed",
       message: errorMessage(error),
     };
+  }
+}
+
+/**
+ * Ruling 494 (pass 40, F40-70): compare the branch a delivery push moved with
+ * the base again, through the reconciler's per-task lock
+ * (`recompareAfterPush`), as the delivering actor, and say what that found.
+ * Never throws: a delivery is never failed by its own re-compare.
+ */
+async function recompareDeliveredBranch(
+  db: DatabaseSync,
+  ctx: TaskActionContext,
+  projectSlug: string,
+  taskKey: string,
+  pushed: { branch: string; headSha: string | null },
+  actor: TaskActor,
+): Promise<string | null> {
+  try {
+    const { recompareAfterPush, pushRecompareSentence } = await import(
+      "~/server/github/github-reconciler.server"
+    );
+    const githubCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
+    if (ctx.fetchImpl) githubCtx.fetchImpl = ctx.fetchImpl;
+    // The pass's audit rows name who delivered: the operator's own actor for
+    // an operator delivery (its task actor's id is a sentinel, never a user).
+    const auditActor: AuditActor = ctx.operatorAuthorized
+      ? OPERATOR_AUDIT_ACTOR
+      : { userId: actor.userId, label: actor.label };
+    const result = await recompareAfterPush(
+      db,
+      { projectSlug, taskKey, branch: pushed.branch, headSha: pushed.headSha, via: "delivery" },
+      auditActor,
+      githubCtx,
+    );
+    const base =
+      readProjectFile({ projectSlug, dataRoot: ctx.dataRoot })?.parsed.frontmatter.defaultBranch ||
+      "main";
+    return pushRecompareSentence(result, { ...pushed, base });
+  } catch (error) {
+    logger.warn("the branch a delivery pushed could not be re-compared", {
+      taskKey,
+      err: toError(error),
+    });
+    return null;
   }
 }
 

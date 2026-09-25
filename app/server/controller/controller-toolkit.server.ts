@@ -196,6 +196,7 @@ import {
   type CreateTaskInput,
 } from "~/server/tasks/task-actions.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
+import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import {
   PRIORITY_VALUES,
   revisionLeftWorkspace,
@@ -2269,7 +2270,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       {
         projectSlug: z.string().optional(),
         title: z.string(),
-        goal: z.string().optional().describe("The task text: deliverable plus the done signal."),
+        // Ruling 492: every door that writes a goal says what a done signal can be.
+        goal: z
+          .string()
+          .optional()
+          .describe("The task text: deliverable plus the done signal. " + DONE_SIGNAL_RULE),
         priority: z.enum(["low", "normal", "high", "urgent"]).optional().describe("urgent IS the urgent flag."),
         labels: z.array(z.string()).optional(),
         owner: z
@@ -2497,7 +2502,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .describe(
             "A corrected title. This is the line every person scanning the board reads, so correct it when the goal's own evidence has outrun it rather than leaving the correction in a body nobody opens.",
           ),
-        goal: z.string().optional().describe("The new goal text (deliverable plus the done signal)."),
+        goal: z
+          .string()
+          .optional()
+          .describe("The new goal text (deliverable plus the done signal). " + DONE_SIGNAL_RULE),
         priority: z.enum(PRIORITY_VALUES).optional(),
         labels: z.array(z.string()).optional().describe("The full label set; [] clears it."),
         dueDate: z.string().optional().describe("ISO date (YYYY-MM-DD), or \"\" to clear."),
@@ -2999,7 +3007,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_github_state",
-      "The project's GitHub view: connection and credential health, task branches with sync state, pull requests with checks/review/mergeability, and how fresh the cache is. A PR's `checks` is null in three different cases: `checksRead` true with a null `checks` means GitHub reported NO check runs (no CI configured, or none has reported); `checksRead` false with a `checksUnread` object means GitHub REFUSED the read (its status and message are there — a 403 is the credential lacking Checks: read, and the PR card and accept dialog then say 'checks not readable'); `checksRead` false with `checksUnread` null means nobody has looked yet. `review` is GitHub's own review verdict, which is null on a repository where humans do not review there - viberr's own reviewer verdicts live on the task, not here. Membership gated. Read-only; Update status lives on the GitHub page.",
+      "The project's GitHub view: connection and credential health, task branches with sync state, pull requests with checks/review/mergeability, and how fresh the cache is. A PR's `checks` is null in three different cases: `checksRead` true with a null `checks` means GitHub reported NO check runs (no CI configured, or none has reported); `checksRead` false with a `checksUnread` object means GitHub REFUSED the read (its status and message are there — a 403 is the credential lacking Checks: read); `checksRead` false with `checksUnread` null means nobody has looked yet. `review` is GitHub's own review verdict, which is null on a repository where humans do not review there - viberr's own reviewer verdicts live on the task, not here. Membership gated. Read-only; Update status lives on the GitHub page.",
       { projectSlug: z.string().optional() },
       runWith(async (args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -3983,7 +3991,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .array(
             z.strictObject({
               title: z.string(),
-              goal: z.string().describe("Self-standing task text: deliverable plus the done signal."),
+              goal: z
+                .string()
+                .describe("Self-standing task text: deliverable plus the done signal. " + DONE_SIGNAL_RULE),
               blockedBy: z
                 .array(z.string())
                 .optional()
@@ -4099,7 +4109,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             "adopt_task: an EXISTING task in this project for the pending link to carry. Ruling 243 — use this instead of creating a task and deleting the link, which destroys the link's authored text. The task must not already belong to another chain, and the LINK must still have none: a link starts the moment nothing makes it wait (ruling 398, in the unblocking call itself since ruling 411), so a link you just unblocked already has its own task and this is refused. Adopt a task that existed BEFORE the link could start, never one you made for it.",
           ),
         title: z.string().optional(),
-        goal: z.string().optional(),
+        // Ruling 492: `add_link` and `edit_link` write a link's task text
+        // here, and the field used to carry no description at all.
+        goal: z
+          .string()
+          .optional()
+          .describe(
+            "edit_link / add_link: the link's self-standing task text, deliverable plus the done signal. " +
+              DONE_SIGNAL_RULE,
+          ),
         description: z
           .string()
           .optional()

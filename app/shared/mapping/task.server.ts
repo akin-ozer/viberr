@@ -332,10 +332,6 @@ export interface TaskSummary {
   /** P13-D-28: CI health for the PR head commit — feeds the checks pill next to
    *  the PR pill. Null = no PR / never read / no CI on the commit. */
   prChecks: PrChecksRender | null;
-  /** Ruling 360: the check-runs read GitHub refused, while no summary has ever
-   *  been read for this PR. Null when checks were read (see `prChecks`), when
-   *  nothing was ever attempted, or when there is no PR. */
-  prChecksUnread?: PrChecksUnread | null;
   /** P13-D-28: GitHub review verdict on an OPEN PR — feeds the review pill.
    *  Null = no PR / settled PR / never read / nothing outstanding. */
   prReview: PrReviewState | null;
@@ -870,7 +866,6 @@ export function mapTaskProjectionRow(
     repo: row.repo,
     pr,
     prChecks: mapPrChecks(pr),
-    prChecksUnread: mapPrChecksUnread(pr),
     prReview: mapPrReview(pr),
     commits: github?.commits ?? [],
     otherCommits: github?.otherCommits ?? [],

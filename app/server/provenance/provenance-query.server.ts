@@ -137,9 +137,29 @@ const reconcileDetailsSchema = z.object({ behindBy: z.number() });
 /** The sync verdict a row recorded, when it recorded one. */
 const reconcileSyncSchema = z.object({ sync: z.string() });
 
+/** Ruling 494: the head a row names (the compare's on a `github.reconcile`
+ *  row, the pushed one on a `github.push` row). Absent, null or unreadable is
+ *  "not named", which a reader treats as unknown, never as a match. */
+const rowHeadSchema = z.object({ headSha: z.string().min(1).nullish().catch(null) });
+
+function rowHeadOf(details: ProvenanceDetails | null): string | null {
+  if (details === null) return null;
+  const parsed = rowHeadSchema.safeParse(details);
+  return parsed.success ? (parsed.data.headSha ?? null) : null;
+}
+
+/** What the NEWEST `github.reconcile` row for a task file recorded. */
+export interface ReconcileObservation {
+  /** Its sync verdict, or null when it recorded none. */
+  sync: string | null;
+  /** Ruling 494: the branch head its compare read, or null when it named none
+   *  (a row written before the ruling, or an answer that did not name it). */
+  headSha: string | null;
+}
+
 /**
- * The sync verdict the NEWEST observation row for this task file recorded, or
- * null when no row has ever recorded one.
+ * The sync verdict and the compared head the NEWEST observation row for this
+ * task file recorded, or null when there is no row.
  *
  * Ruling 187's sibling (pass 37, F37-9): the sync pill reads the newest
  * `github.reconcile` row, and the reconciler withheld that row on any pass
@@ -149,14 +169,19 @@ const reconcileSyncSchema = z.object({ sync: z.string() });
  * agreed with the audit. "Behind main" is only interesting BECAUSE main
  * moved, which was the one transition the pill could not see.
  *
- * The reconciler compares against this and writes a row when the verdict
- * differs, so growth stays bounded by real changes exactly as `changed` bounds
- * it for the file.
+ * Ruling 494 (pass 40, F40-70): the same holds for the head the compare read.
+ * The count is true only of that head, so a pass that compared a DIFFERENT
+ * head than the newest row names is a change worth a row too (and a row that
+ * names none is replaced by the first pass that does).
+ *
+ * The reconciler compares against this and writes a row when either differs,
+ * so growth stays bounded by real changes exactly as `changed` bounds it for
+ * the file.
  */
-export function latestReconcileSync(
+export function latestReconcileObservation(
   db: DatabaseSync,
   sourcePath: string,
-): string | null {
+): ReconcileObservation | null {
   // SAFETY: `provenance.details_json` is a nullable TEXT column
   // (0001_baseline.sql), and it is the only column selected here.
   const row = db
@@ -166,10 +191,132 @@ export function latestReconcileSync(
        ORDER BY id DESC LIMIT 1`,
     )
     .get(sourcePath, RECONCILE_ACTION) as { details_json: string | null } | undefined;
-  const details = parseDetails(row?.details_json ?? null);
-  if (details === null) return null;
-  const parsed = reconcileSyncSchema.safeParse(details);
-  return parsed.success ? parsed.data.sync : null;
+  if (!row) return null;
+  const details = parseDetails(row.details_json);
+  const sync = details === null ? null : reconcileSyncSchema.safeParse(details);
+  return {
+    sync: sync?.success ? sync.data.sync : null,
+    headSha: rowHeadOf(details),
+  };
+}
+
+/** Ruling 494: the row a Viberr push of a task branch leaves beside the
+ *  compares (`recompareAfterPush`, github-reconciler.server.ts). */
+export const PUSH_ACTION = "github.push";
+
+/**
+ * Ruling 494 (pass 40, F40-70): the newest compare's count for a task branch,
+ * with the head it was counted on and the push Viberr made that it does not
+ * describe, if there is one.
+ *
+ * `baseBehindBy` used to be the count alone. Live on WEB-16 a compare read
+ * GitHub's copy of the branch 0.2 s before the delivery pushed a head that
+ * carried `main`, nothing compared again for five minutes, and for those five
+ * minutes the operator told the owner, twice in packets, that the branch was 6
+ * commits behind. The row named no head, so nothing could tell the count was
+ * about a head the branch no longer had.
+ */
+export interface BaseCompareReading {
+  /** The count the newest compare recorded. */
+  behindBy: number;
+  /** The branch head that compare read, or null when the row names none. */
+  headSha: string | null;
+  /** When that compare ran (UTC ISO). */
+  observedAt: string;
+  /** Viberr's newest push of the branch when the count was not read on the
+   *  head it published (that head, null when git could not name it), or null
+   *  when there is no push or the count was read on it
+   *  ({@link pushNotCounted}). `afterCompare` is true for a push recorded
+   *  after the compare, and false for a push the first compare after it read
+   *  another head for. */
+  pushedSince: { headSha: string | null; at: string; afterCompare: boolean } | null;
+}
+
+/** The three columns the compare lookup reads from a provenance row (a type
+ *  alias, like {@link RawRow}, so a statement's row is comparable to it). */
+type CompareLookupRow = {
+  id: number;
+  observed_at: string;
+  details_json: string | null;
+};
+
+/**
+ * Ruling 494: the newest push, when the count was not read on the head it
+ * published.
+ *
+ * - A push recorded AFTER the compare moved the branch past what was counted,
+ *   unless it published the very head the compare read. A push whose head git
+ *   could not name is never that head.
+ * - A push recorded BEFORE the compare is answered by the FIRST compare after
+ *   it. `recompareAfterPush` writes that one inside the same hold of the
+ *   task's reconcile lock, right after the push row, so it is the push's own
+ *   re-compare (or, when that one wrote nothing, the next pass). When it read
+ *   another head than the push published, GitHub answered before it showed
+ *   the push, and its count is not the pushed head's either (the delivery
+ *   reply's "stands at `A`, not the `B` just pushed"). Only a named head on
+ *   both sides can show that: a compare that named none reads as head
+ *   unknown, and a push git could not name leaves nothing to check.
+ * - A compare after that first one is GitHub's word on the branch, whatever
+ *   head it names: a head that moved on GitHub since (a person's commit there)
+ *   is the branch's head too.
+ */
+function pushNotCounted(
+  compare: { id: number; headSha: string | null },
+  previousCompareId: number | null,
+  push: CompareLookupRow,
+): BaseCompareReading["pushedSince"] {
+  const pushed = rowHeadOf(parseDetails(push.details_json));
+  if (push.id > compare.id) {
+    return pushed !== null && pushed === compare.headSha
+      ? null
+      : { headSha: pushed, at: push.observed_at, afterCompare: true };
+  }
+  const firstSincePush = previousCompareId === null || previousCompareId < push.id;
+  const readAnother =
+    pushed !== null && compare.headSha !== null && pushed !== compare.headSha;
+  return firstSincePush && readAnother
+    ? { headSha: pushed, at: push.observed_at, afterCompare: false }
+    : null;
+}
+
+/** Factory, like {@link createReconcileBehindByLookup}: the statements are
+ *  prepared once. Null exactly when that lookup answers null (no row, or a
+ *  newest row with no count: never compared). */
+export function createBaseCompareLookup(
+  db: DatabaseSync,
+): (sourcePath: string) => BaseCompareReading | null {
+  // The newest two compares: the newest holds the count, and the one before it
+  // says whether the newest is the first since the newest push.
+  const compareStmt = db.prepare(
+    `SELECT id, observed_at, details_json FROM provenance
+     WHERE source_path = ? AND action = ?
+     ORDER BY id DESC LIMIT 2`,
+  );
+  const pushStmt = db.prepare(
+    `SELECT id, observed_at, details_json FROM provenance
+     WHERE source_path = ? AND action = ?
+     ORDER BY id DESC LIMIT 1`,
+  );
+  return (sourcePath: string): BaseCompareReading | null => {
+    // SAFETY: `id` is the INTEGER PRIMARY KEY, `observed_at` TEXT NOT NULL and
+    // `details_json` nullable TEXT (0001_baseline.sql): the three columns
+    // selected, by both statements.
+    const [row, previous] = compareStmt.all(sourcePath, RECONCILE_ACTION) as CompareLookupRow[];
+    if (!row) return null;
+    const details = parseDetails(row.details_json);
+    if (details === null) return null;
+    const reconciled = reconcileDetailsSchema.safeParse(details);
+    if (!reconciled.success) return null;
+    const headSha = rowHeadOf(details);
+    // SAFETY: as above.
+    const push = pushStmt.get(sourcePath, PUSH_ACTION) as CompareLookupRow | undefined;
+    return {
+      behindBy: reconciled.data.behindBy,
+      headSha,
+      observedAt: row.observed_at,
+      pushedSince: push ? pushNotCounted({ id: row.id, headSha }, previous?.id ?? null, push) : null,
+    };
+  };
 }
 
 export function createReconcileBehindByLookup(

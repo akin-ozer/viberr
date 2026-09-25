@@ -375,7 +375,27 @@ steps below, with the hold sentence on the timeline (ruling 240).
    `reason`, and the next delivery tries again. The reconciler never reads the body; it
    carries `bodyWritten` for the same PR, including one a delivery wrote during its
    pass.
-5. **Afterwards**: `noChanges` is cleared, a stale push-conflict packet is withdrawn,
+5. **Afterwards**: a push that moved the branch (`pushed`, never `up_to_date`) is first
+   compared with the base again, whatever the PR door answered and on a thrown path too
+   (ruling 494). `recompareAfterPush` (`github-reconciler.server.ts`) takes the task's
+   reconcile lock, records a `github.push` provenance row naming the head the push
+   published (`{branch, headSha, via: delivery}`), and runs an ordinary `reconcileTask`
+   pass, whose `github.reconcile` row then names that head (§6). It runs before the
+   "Pushed" record below, so a pull request GitHub has not caught up on cannot leave its
+   older head on the file (F39-64), and before the `delivered` re-queue, so the
+   operator's next read has the new count. On a `delivered` outcome the operator's
+   `deliver_for_review` reply adds what it found ("Re-compared after the push: `web-16`
+   at `20534f6` is level with `main`.", or, when GitHub answered with another head than
+   the one pushed, "Re-compared after the push: GitHub's `web-16` stands at `aafee66`,
+   not the `20534f6` just pushed, and is 6 commits behind `main`.") or that it could not
+   run ("`web-16` could not be compared with `main` again after the push
+   (network_unavailable), so the count of commits it is behind stays the one from before
+   the push until the next GitHub pass."). A delivery whose push landed but that ended
+   otherwise (the PR door answered `closed_by_human`, `branch_collision`,
+   `nothing_to_review` or another refusal, or something threw after the push)
+   re-compares the same way, and its reply leaves the count to `get_task`. A re-compare
+   that fails never fails the delivery and writes no count in its place. Then
+   `noChanges` is cleared, a stale push-conflict packet is withdrawn,
    `workRevision.pushedAt` is stamped on the revision whose head the push published
    (ruling 161; also a head that reaches the revision only through Viberr's own base
    refreshes, ruling 439), and what MOVED decides the follow-up (ruling 134): a newly
@@ -446,7 +466,7 @@ paths overlap this task's (`prPathOverlaps`, ruling 413), the same fact the revi
 |---|---|---|
 | `resolve_remote_collision` packet option | Refused before anything is written while the task waits on other work (ruling 354; the packet stays open). Deletes the stale remote branch first, closes the recorded unowned PR (audit `github.pr.closed_unowned` when Viberr's close went through), re-delivers this task's local work, lifts `readiness` from `blocked`. The ceremony writes ONE `github` event naming the PR's fate in every arm (U36-7): "Branch collision cleared: closed PR #N and deleted branch `b`" when the close answered 200; after a refused close it re-reads the PR and says what GitHub shows — "is closed on GitHub with its head", "still shows open on GitHub — close it there", or "could not be re-read" — with the refusal quoted. Ruling 136: the ceremony ends with exactly ONE hand-off (the `delivered` re-queue when the re-delivery fired it, else a `packet-resolved` re-queue carrying the outcome in its own `serverOutcome` field); a refusal because the PR on the ref is this task's OWN open PR is no collision: a behind or absent remote gets the delivery that pushes the work and the block lifts, a diverged remote keeps the block and prints `DIVERGED_BRANCH_REMEDY`; every other refusal keeps the block and hands the operator its typed reason. One audit row per ceremony: `github.collision.resolved {outcome, reason, prNumber, delivered, blockLifted}`. | `approve-transition` |
 | `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Ruling 161: the operator may author it until the revision has LEFT the workspace (`revisionLeftWorkspace`: a PR tracks the branch, an unowned PR stands on the name, or a push stamped `workRevision.pushedAt`); a revision the agent merely reported does not block it, and the refusal names the real reason. A confirmed discard retires the reported revision (`workRevision.kind: discarded`, verdicts kept as history, `validation: none`), says so in the outcome note ("Revision `rev_…` is retired with it") and records `retiredRevisionId` on `task.branch.discarded` (`localSha`, `remoteSha: null`, `basis: local_only`). | `approve-transition` |
-| `update_branch_from_base` (operator, capability `update-task-branch`) | `updateWorkspaceBranchFromBase` (`update-branch.server.ts`) merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force; the merge and its abort run as the task owner's agent uid, GitHub's base and origin's copy of the branch are fetched with the PAT into the server's stage and fetched from there by the workspace, and the push goes out from the stage — §1, R-seams-1), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, and `recordBranchRefresh` records the refresh in `baseRefreshes` (with `onto`, the head it merged onto, ruling 439), stamps `pushedAt`, and reconciles at once (ruling 132). Before fetching it refuses a branch that carries the store layout (`store_layout`, ruling 159(b)) or changes a path another task leases (`lease_held`, ruling 428); nothing is merged or pushed. It reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)); the timeline line says the same fact for a person ("... the operator's next delivery pushes them", ruling 475(c)); `already_current` is reported as done, not a refusal (ruling 229). A conflict or push conflict goes to the task's delivering agent when its engagement is deployed with a repo-write grant (ruling 475(a), owner decision, narrowing 133(b) and 438): the tool starts that agent's run through `operatorDispatchAgent` with ruling 438's directive (merge `origin/<base>`, or origin's copy of the branch, into the task branch in its own workspace, never a rebase or force-push, resolve the files, run the gates, commit; the operator delivers the result), returns a task past review to the review stage in the same write (`task.transition {via: conflict_handoff}`), and writes one person-facing timeline line ("The operator sent the `package.json` conflict between `web-2` and `main` to Platform Engineer, ..."); while that agent's run on the same conflict is live nothing new is sent. The human `blocked` packet whose options can all execute (ruling 133(b)) is the fallback, and its body says which case it is: no deliverer, undeployed or grant withdrawn ("Resolve the branch yourself" recommended); the deliverer was already sent this same conflict (the same files against the same base commit, or the same origin head refusing the push) and the branch still conflicts (by hand recommended, "Have <deliverer> try the conflict again" second); a `dispatch-agents` policy that only recommends; or a run that could not start. A "Delivering agent" observation names it or "none". An open packet offering `accept_completion` is withdrawn first (ruling 475(b)). The `github.branch_update.operator` audit row records `resolver`, `route` (`deliverer`, `packet`, `in_progress`), `handedTo`, `repeat`, `handoffRefused` and the conflict's `baseSha` or `remoteHeadSha`; the earlier-handoff check reads those rows. Refused at the acceptance-boundary stage and past it (`acceptanceBoundaryRefusal`, ruling 162: the acceptance ceremony refreshes once) unless the PR is `conflicting` at its current head or the work is still in its review loop (`validation` `failing` or `changed`, ruling 429); the operator snapshot carries the same refusal as `notRefreshableReason` (ruling 424). The redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 163). A drive that refreshed the branch and then left the task idle is resumed once (ruling 442). | operator gate; `recommend` is refused outright |
+| `update_branch_from_base` (operator, capability `update-task-branch`) | `updateWorkspaceBranchFromBase` (`update-branch.server.ts`) merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force; the merge and its abort run as the task owner's agent uid, GitHub's base and origin's copy of the branch are fetched with the PAT into the server's stage and fetched from there by the workspace, and the push goes out from the stage — §1, R-seams-1), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, and `recordBranchRefresh` records the refresh in `baseRefreshes` (with `onto`, the head it merged onto, ruling 439), stamps `pushedAt`, and re-compares at once through `recompareAfterPush` (rulings 132 and 494: the `github.push` row naming the merge commit, then the pass; a pass that could not run is said on the line: "… could not be compared with `main` again after the push (…), so the count of commits it is behind stays the one from before the push until the next GitHub pass"). Before fetching it refuses a branch that carries the store layout (`store_layout`, ruling 159(b)) or changes a path another task leases (`lease_held`, ruling 428); nothing is merged or pushed. It reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)); the timeline line says the same fact for a person ("... the operator's next delivery pushes them", ruling 475(c)); `already_current` is reported as done, not a refusal (ruling 229). A conflict or push conflict goes to the task's delivering agent when its engagement is deployed with a repo-write grant (ruling 475(a), owner decision, narrowing 133(b) and 438): the tool starts that agent's run through `operatorDispatchAgent` with ruling 438's directive (merge `origin/<base>`, or origin's copy of the branch, into the task branch in its own workspace, never a rebase or force-push, resolve the files, run the gates, commit; the operator delivers the result), returns a task past review to the review stage in the same write (`task.transition {via: conflict_handoff}`), and writes one person-facing timeline line ("The operator sent the `package.json` conflict between `web-2` and `main` to Platform Engineer, ..."); while that agent's run on the same conflict is live nothing new is sent. The human `blocked` packet whose options can all execute (ruling 133(b)) is the fallback, and its body says which case it is: no deliverer, undeployed or grant withdrawn ("Resolve the branch yourself" recommended); the deliverer was already sent this same conflict (the same files against the same base commit, or the same origin head refusing the push) and the branch still conflicts (by hand recommended, "Have <deliverer> try the conflict again" second); a `dispatch-agents` policy that only recommends; or a run that could not start. A "Delivering agent" observation names it or "none". An open packet offering `accept_completion` is withdrawn first (ruling 475(b)). The `github.branch_update.operator` audit row records `resolver`, `route` (`deliverer`, `packet`, `in_progress`), `handedTo`, `repeat`, `handoffRefused` and the conflict's `baseSha` or `remoteHeadSha`; the earlier-handoff check reads those rows. Refused at the acceptance-boundary stage and past it (`acceptanceBoundaryRefusal`, ruling 162: the acceptance ceremony refreshes once) unless the PR is `conflicting` at its current head or the work is still in its review loop (`validation` `failing` or `changed`, ruling 429); the operator snapshot carries the same refusal as `notRefreshableReason` (ruling 424). The redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 163). A drive that refreshed the branch and then left the task idle is resumed once (ruling 442). | operator gate; `recommend` is refused outright |
 | Branch cleanup | `deleteTaskRemoteBranch`, after a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Ruling 136(c): a CACHED open PR is re-confirmed against GitHub before it can refuse (a pass with the divergence notification and the operator wake suppressed); a PR GitHub reports closed or merged lets the delete proceed on the refreshed file, a PR still open refuses (`own_pr_open`), and every degraded or unexpected reconcile status refuses as `unconfirmed` ("GitHub could not confirm"), never deleting on an unconfirmed state. The archive and empty-branch doors inherit the same check and sentence. Ruling 161: the ref's head is read before the DELETE and recorded (`github.branch.deleted {sha}`, "Deleted branch … Its head was `sha`"); the archive's local cleanup records both heads on `task.branch.discarded {localSha, remoteSha, basis: archive_cleanup}`, and the archive dialog says what origin holds when the reconciler recorded `github.foreignHead` ("origin's `branch` carries commits this task did not author; deleting it removes them too"). Only GitHub's explicit "does not exist" answer counts as `already_gone`; any other refusal of the DELETE (a protected branch, a ruleset) is `github_refused` (ruling 207(d)). | human `userId` required |
 
 ## 5. Revisions, verdicts and acceptance
@@ -636,7 +656,9 @@ killed or not started; a signal reads as 128 + n), `timedOut`, the wall time and
 saved as the task attachment `gate-<sha7>-<NN>-<name>-<stamp>.log` (the head 256 KB and
 the tail kept, the middle cut). The record binds to the revision id and sha like a
 verdict; results land as each gate finishes; the finished run writes one note from
-"Project gates" that claims its logs, and audit `task.gates.run`. A log never counts as
+"Project gates" that claims its logs, and audit `task.gates.run`. The timeline draws that
+note as its ending, its revision and the gate table, a row per gate with its log (ruling
+493, `gateNoteView`), the table the PR card and the accept dialog show. A log never counts as
 a file a concurrent run produced (`isGateLogName` in `attachmentNamesSince`). The PR card,
 the accept dialog, the operator's snapshot (`gates`) and every agent's canonical anchor
 print the same line, "Gates on `<sha7>`: N/M exit 0 (run by Viberr)". **A plain
@@ -667,7 +689,8 @@ pass that RECORD appears, not the pass the state changes, because `pr.state: clo
 reaches the file from the workspace reconcile. The closure is carried while the PR stays
 closed and dropped when it is live or merged again. The operator's branch update runs one
 such pass right after its push (ruling 132), so the drift it caused is measured before
-the tool answers. The reconciler never mints a PR link and never downgrades `merged` or
+the tool answers, and since ruling 494 every Viberr push that moves a task branch does
+the same before its caller returns (§3 step 5). The reconciler never mints a PR link and never downgrades `merged` or
 `accepted`.
 
 Facts it records beside the state:
@@ -692,6 +715,28 @@ Facts it records beside the state:
   before the compare, so finished work never reads `behind_main`; ruling 401). A pass
   whose only change is this verdict still writes a `github.reconcile` provenance row, so
   a branch that falls behind because `main` moved stops rendering a stale `synced`.
+- **The compared head** (ruling 494): the `github.reconcile` row records `headSha`, the
+  branch head the compare read, and `baseSha`, the base tip it read (`base_commit`), so a
+  count says which head it was counted on. GitHub's compare answer does not name the head
+  outright: `identical` reads the base tip, `behind` the merge base, and `ahead` or
+  `diverged` the one listed commit no other listed commit names as a parent, which holds
+  only on a complete list; a paged list, one with an entry the reader dropped, or an
+  answer with no status is null, "head unknown", never a guess
+  (`comparedHeadSha`, `branch-sync.server.ts`). A pass that compared another head than
+  the newest row names writes a row even on a quiet poll, as a verdict change does, so a
+  row written before the ruling (which names no head) is replaced by the first pass that
+  does. A Viberr push that moves the branch writes a `github.push` row inside the task's
+  lock before its own pass (§3 step 5), so a pass that read the branch before the push
+  cannot record its count after it, and the pass's own row is the first compare after
+  the push row. The operator's `get_task` reads the newest count with that head and time
+  (`baseComparedHead`, [operator.md](operator.md)) against Viberr's newest push
+  (`createBaseCompareLookup`, `provenance-query.server.ts`): a `github.push` row newer
+  than the count that published another head makes it an older head's count, and so
+  does a push whose first compare after it read another head than the push published
+  (GitHub answered before it showed the push), until a later pass compares again; a
+  compare after that first one is GitHub's word on the branch, a head a person moved on
+  GitHub included. A row with no head is unknown. Neither a stale count nor an unknown
+  one reads as current.
 - **Review relay** (ruling 484, `pr-review-relay.server.ts`): after its own write, on an
   open PR whose reviews it read, the pass relays each submitted review (APPROVED,
   CHANGES_REQUESTED or COMMENTED; never PENDING or DISMISSED) that was made on the
@@ -791,7 +836,8 @@ credential handed to a model.
   `github.delivery.manual|operator|next_step`, `task.acceptance.head_unpushed`,
   `task.agent.github_read`, `task.branch.discarded|discard_refused`,
   `project.file_leases.updated`.
-- Provenance: `github.reconcile`, `github.merge`, `github.branch_delete`.
+- Provenance: `github.reconcile`, `github.merge`, `github.branch_delete`, `github.push`
+  (ruling 494: a Viberr push of a task branch, `{repo, branch, headSha, via}`).
 - Timeline: `github` (branch and PR facts, delivery signals by `system:delivery`),
   `policy` (scope violation and update), `note` (divergence, collision, cleanup, a
   credential advisory), `completion`, `transition`.

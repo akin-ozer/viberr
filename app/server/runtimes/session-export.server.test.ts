@@ -13,7 +13,6 @@ import {
   sessionContextTokens,
 } from "./session-export.server";
 import { userBackendHome } from "./user-homes.server";
-import { compactionNoteText } from "./run-context-events.server";
 
 /**
  * Session export: locate a provider transcript by session id (robust to the
@@ -602,7 +601,7 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
    * two spellings (see the test above), and the figure was measurable all
    * along. This is the genuinely unmeasured case, which the null still serves.
    */
-  it("a compaction with nothing after it has an unmeasured post size, and the note says so", () => {
+  it("a compaction with nothing after it has an unmeasured post size", () => {
     const dir = codexDir("22");
     const sid = "01a0ca03-b8cf-77c0-0000-000000000403";
     writeFileSync(
@@ -623,14 +622,5 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
     expect(event.preTokens).toBe(111_733);
     // The assertion that goes red if the placeholder is a number again.
     expect(event.postTokens).toBeNull();
-
-    // ...and the sentence the human reads never invents the figure.
-    const note = compactionNoteText(
-      "Surface Developer",
-      { trigger: "completion", preTokens: event.preTokens, postTokens: event.postTokens },
-      true,
-    );
-    expect(note).toContain("from 112k to a summary");
-    expect(note).not.toContain("0k");
   });
 });

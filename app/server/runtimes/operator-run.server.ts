@@ -99,6 +99,7 @@ import {
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-actions.server";
 import { PACKET_OPTION_KINDS, type PacketOptionKind } from "~/schemas/task-file.schema";
+import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import type { RelayPayload } from "~/server/tasks/task-relay.server";
 import {
   buildOperatorToolkit,
@@ -2371,7 +2372,9 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           delivers: { type: ["boolean", "null"], description: "run_agent: true = hand delivery to this profile (owns branch/PR, one per task); false = run as supporting (review). Null derives it from the profile's grants and the task's current deliverer." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_kb_correction: the correction, or the missing convention (ruling 418), in one or two sentences; for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; else null." },
+          // Ruling 492: `set_goal` drafts the task's goal in `text`, so this
+          // field is one of the doors that write a goal.
+          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_kb_correction: the correction, or the missing convention (ruling 418), in one or two sentences; for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; else null. " + DONE_SIGNAL_RULE },
           reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet. For propose_kb_correction: the settled LINE the correction replaces, quoted as the document has it (a distinctive phrase is enough); null only when it adds something the document does not say, such as a missing convention." },
           kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For propose_kb_correction: the knowledge base and the document to correct as `<knowledge base>/<document>`, each named as the index names it (any knowledge base a run on this task was given, yours or an engaged agent's), or the document alone for the project's rulings knowledge base. Else null." },
           repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For propose_kb_correction: the EVIDENCE that proves the line wrong or the convention missing \u2014 the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
@@ -2463,7 +2466,8 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                 goalDraft: {
                   type: ["string", "null"],
                   description:
-                    "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Null on every other kind.",
+                    "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Null on every other kind. " +
+                    DONE_SIGNAL_RULE,
                 },
                 // Ruling 433 (F39-55): ruling 270 gave the Claude tool the
                 // payloads of rulings 224, 230 and 269, and this schema never
@@ -2493,7 +2497,8 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                     goal: {
                       type: "string",
                       description:
-                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria). It is the contract whoever works it is held to.",
+                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria). It is the contract whoever works it is held to. " +
+                        DONE_SIGNAL_RULE,
                     },
                     blockedBy: {
                       type: ["array", "null"],
@@ -5328,12 +5333,16 @@ const operatorTurnInstruction = (
   // because the turn that planned it was usually a report's, which returns
   // before the stage rules.
   const unrefreshable = refreshBoundaryInstruction(args[0]);
+  // Ruling 494: a behind count that describes an older head, beside the
+  // refresh doctrine it feeds, and on every trigger: a count is quoted
+  // wherever the operator writes (on WEB-16 a comment and two packets).
+  const staleCount = baseCompareInstruction(args[0]);
   // Ruling 437: whose the open packet is, for the same reason.
   const notYours = packetAuthorInstruction(args[0]);
   // Ruling 487: what is already scheduled, for the same reason again: a hold
   // a pending run explains is decided before any trigger's doctrine runs.
   const scheduled = pendingSchedulesInstruction(args[0]);
-  return `${standing}${refused}${decided}${colliding}${unrefreshable}${notYours}${scheduled}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
+  return `${standing}${refused}${decided}${colliding}${unrefreshable}${staleCount}${notYours}${scheduled}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}`;
 };
 
 /**
@@ -5407,6 +5416,25 @@ export function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): stri
     // Ruling 429: the refusal stands only while the work is approved.
     "It lifts the moment a verdict fails or a new revision awaits its verdict: the refresh is " +
     "yours again then, here as at any stage.\n\n"
+  );
+}
+
+/**
+ * Ruling 494 (pass 40, F40-70): a behind count that describes a head the
+ * branch no longer has, said where both backends read it and only when it
+ * does. Live on WEB-16 the operator read `baseBehindBy: 6` five minutes after
+ * the delivery had pushed a head that carried `main`, planned around it, and
+ * wrote it into two packets the owner decided on; the count had been read on
+ * GitHub's copy of the branch seven seconds before that push. The snapshot now
+ * names the head each count was counted on (`baseComparedHead`) and carries
+ * the sentence; this puts it in front of the plan, whatever the trigger.
+ */
+export function baseCompareInstruction(snapshot: OperatorTaskSnapshot): string {
+  const sentence = snapshot.baseBehindBySentence ?? "";
+  if (!sentence) return "";
+  return (
+    `${sentence} A decision packet never states a behind count for a head other than the one ` +
+    "the packet puts up.\n\n"
   );
 }
 

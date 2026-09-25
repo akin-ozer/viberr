@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { sha256Hex } from "~/server/files/content-hash.server";
 import { logger } from "~/server/logging/logger.server";
+import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
 
 /**
@@ -226,6 +227,109 @@ describe("shipped-asset refresh (B-OP1)", () => {
     );
     expect(asset("developer-expertise.skill.md")).toContain(
       "Never write it to an attachment or into your report for a person to copy over.",
+    );
+  });
+
+  /**
+   * Ruling 492 (F40-69): a done signal is something the task can show before
+   * acceptance, which closes the task. Goals kept asking for a proof only the
+   * merged or deployed code could show (the operator's option on WEB-16,
+   * WEB-13, goal-1 links 9 and 11), and nothing their authors read said
+   * otherwise. The controller guide and the operator doctrine quote
+   * `DONE_SIGNAL_RULE` word for word, and the doctrine says the operator
+   * raises the follow-up read as a `create_task` option.
+   *
+   * Review (2026-09-26): the read's goal confirms the merge and the deploy,
+   * because the read is released at Done and the operator's own acceptance
+   * leaves the merge pending; and the doctrine waits for a person's answer
+   * to that option before the task goes up for acceptance, because an
+   * acceptance withdraws an open decision unanswered. The first doctrine
+   * said "Never hold this task back for that proof" instead.
+   */
+  it("ruling 492: the controller guide and the operator doctrine carry the done-signal rule, and their outgoing hashes are recorded", async () => {
+    // Canaries: drop the rule from the guide's "Creating a task" section or
+    // its bullet from "Chained goals"; drop the rule or the create_task
+    // sentence from the doctrine; remove either outgoing hash. Review
+    // canaries: drop the merge check from the guide's read task or its
+    // chained example; drop the doctrine's wait for the answer; restore
+    // "Never hold this task back for that proof".
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const guideRel = path.join("skills", "controller-guide", "SKILL.md");
+    expect(
+      shippedCopyIsUnedited(guideRel, "ce538f0db704167a768cdab3848110ad5c46ff7843919330927bf59efda22a57", {}),
+      "the guide's outgoing hash is not recorded",
+    ).toBe(true);
+    expect(
+      shippedCopyIsUnedited(OPERATOR_REL, "ee212fda34ef04e0447ed1edd1a2f50b6c1cd92cde5ac498956cea61dbcfb6d8", {}),
+      "the doctrine's outgoing hash is not recorded",
+    ).toBe(true);
+    const guide = readFileSync(
+      path.join(REPO_ROOT, "app/server/seed/assets/controller-guide.skill.md"),
+      "utf8",
+    );
+    const doctrine = shipped();
+    expect(PRIOR_SHIPPED_HASHES[guideRel]).not.toContain(sha256Hex(guide));
+    expect(PRIOR_SHIPPED_HASHES[OPERATOR_REL]).not.toContain(sha256Hex(doctrine));
+    // One section of the guide, from its heading to the next one.
+    const section = (heading: string): string => {
+      const start = guide.indexOf(`\n## ${heading}\n`);
+      if (start < 0) return "";
+      const end = guide.indexOf("\n## ", start + 1);
+      return end < 0 ? guide.slice(start) : guide.slice(start, end);
+    };
+    const creating = section("Creating a task");
+    expect(creating, "the guide's Creating a task section").toContain(DONE_SIGNAL_RULE);
+    expect(creating, "the guide's Creating a task section").toContain("create both tasks in the same turn");
+    expect(creating, "the guide's Creating a task section").toContain(
+      "a goal that confirms the delivery task's change is merged and deployed before it reads",
+    );
+    const chained = section("Chained goals");
+    expect(chained, "the guide's Chained goals section").toContain(
+      "it is something the link's task can show BEFORE acceptance",
+    );
+    expect(chained, "the guide's Chained goals section").toContain(
+      "split in two: the delivery link, and a read link whose `blockedBy` names it",
+    );
+    expect(chained, "the guide's Chained goals section").toContain(
+      "confirms the job is merged and deployed, then reads its first run on the deployed build",
+    );
+    expect(doctrine, "the operator doctrine").toContain(DONE_SIGNAL_RULE);
+    expect(doctrine, "the operator doctrine").toContain(
+      "raise a `create_task` option for the read: its `newTask.blockedBy` names this task, its `newTask.goal` has the read confirm this task's change is merged and deployed before it reads",
+    );
+    expect(doctrine, "the operator doctrine").toContain(
+      "Then stop, and put this task up for acceptance only once a person has answered that option",
+    );
+    expect(doctrine, "the operator doctrine").not.toContain("Never hold this task back");
+    expect(doctrine, "the operator doctrine").toContain(
+      "no task owns that read (`read_board` lists none, and no link in `goalChain` plans one)",
+    );
+    for (const text of [guide, doctrine]) expect(text).not.toMatch(/[–—]/);
+  });
+
+  /**
+   * Ruling 494 (F40-70): a behind count is true only of the head it was
+   * counted on. Live on WEB-16 two packets told the owner the branch was 6
+   * commits behind `main`, five minutes after a push that carried `main`.
+   */
+  it("ruling 494: the doctrine checks a behind count's head against the head just pushed and keeps another head's count out of packets, and its outgoing hashes are recorded", async () => {
+    // Canaries: drop the sentences; remove either outgoing hash; say "Never
+    // call it" again after the packet sentence.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "ee212fda34ef04e0447ed1edd1a2f50b6c1cd92cde5ac498956cea61dbcfb6d8", {})).toBe(true);
+    // The text as ruling 494 first shipped it, before its review named the tool.
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "43a9a0b59ee0c6d6e58cbc5c6807467005b5b343f7e5f7909d622a944d23d5e4", {})).toBe(true);
+    const doctrine = shipped();
+    expect(doctrine).toContain(
+      "`get_task`'s `baseBehindBy` is the count the last compare read, and `baseComparedHead` names the head it read: check that head against the head you just pushed before you rely on the count or repeat it.",
+    );
+    expect(doctrine).toContain(
+      "a decision packet never states a behind count for a head other than the one the packet puts up",
+    );
+    // The sentence after the packet rule names the tool it forbids: an "it"
+    // there reads as the packet or the count.
+    expect(doctrine).toContain(
+      "the one the packet puts up. Never call `update_branch_from_base` once the task stands at the acceptance stage",
     );
   });
 

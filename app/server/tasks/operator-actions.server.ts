@@ -39,7 +39,11 @@ import {
   type OfferWithdrawalSlot,
   type OfferWithdrawalCause,
 } from "./task-mutation.server";
-import { joinDependencyEntries, type DependencyRender } from "~/shared/dependencies";
+import {
+  canonicalDependencyRef,
+  joinDependencyEntries,
+  type DependencyRender,
+} from "~/shared/dependencies";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
@@ -129,7 +133,10 @@ import {
   VIEW_WITHOUT_POLICY,
 } from "~/features/agents/agents-query.server";
 import { logger } from "~/server/logging/logger.server";
-import { createReconcileBehindByLookup } from "~/server/provenance/provenance-query.server";
+import {
+  createBaseCompareLookup,
+  type BaseCompareReading,
+} from "~/server/provenance/provenance-query.server";
 import { storeRelativePath } from "~/server/files/file-store-root.server";
 import {
   notifyMentionedUsers,
@@ -2748,6 +2755,27 @@ export interface OperatorTaskSnapshot {
    *  compared this task yet. Informational: a stale or absent reading must
    *  never stop an update, it only stops the step being planned blind. */
   baseBehindBy?: number | null;
+  /** Ruling 494 (pass 40, F40-70): the compare `baseBehindBy` was counted in.
+   *  `sha` is the branch head it read and `observedAt` when it ran. `current`
+   *  is false when the count was not read on the head Viberr's newest push
+   *  published (`pushedSince` names that head, null when git could not name
+   *  it): the push came after the compare, or the compare right after the
+   *  push read another head because GitHub had not shown the push yet. The
+   *  count then describes another head than the pushed one. It is null when
+   *  the compare named no head (a compare recorded before ruling 494), which
+   *  never reads as current either, and true otherwise. Null while
+   *  `baseBehindBy` is null. Optional only so hand-built fixtures need not
+   *  restate it; `operatorSnapshot` always sets it. */
+  baseComparedHead?: {
+    sha: string | null;
+    observedAt: string;
+    current: boolean | null;
+    pushedSince: { sha: string | null; at: string } | null;
+  } | null;
+  /** Ruling 494: when `baseBehindBy` does not describe the branch's current
+   *  head, the sentence that says so and what not to write; "" when it does.
+   *  Optional for the same reason as above. */
+  baseBehindBySentence?: string;
   /** Ruling 424 (pass 39): the sentence `update_branch_from_base` refuses
    *  with from where the task stands, or null when a refresh would run. At
    *  the acceptance stage the ceremony refreshes the branch once and merges,
@@ -3167,6 +3195,80 @@ function operatorGatesOf(
   };
 }
 
+/**
+ * Ruling 494 (pass 40, F40-70): does the newest compare's count describe the
+ * branch as it stands? Not when it was not read on the head Viberr's newest
+ * push published (`pushedSince`, set by `createBaseCompareLookup`): a push
+ * recorded after that compare, or one the compare right after it read another
+ * head for, GitHub answering before it showed the push. Not when the compare
+ * named no head either (`null`, unknown). The known head is the one Viberr's
+ * own push published: `pr.headSha` lags a push until GitHub shows it on the
+ * pull request (F39-64), a task with no live pull request has none, and a base
+ * refresh moves the branch past `workRevision` (ruling 439).
+ */
+function comparedHeadCurrent(reading: BaseCompareReading): boolean | null {
+  if (reading.pushedSince) return false;
+  return reading.headSha === null ? null : true;
+}
+
+/** Ruling 494: the snapshot's `baseComparedHead` for a compare reading. */
+function baseComparedHeadOf(
+  reading: BaseCompareReading | null,
+): OperatorTaskSnapshot["baseComparedHead"] {
+  if (!reading) return null;
+  return {
+    sha: reading.headSha,
+    observedAt: reading.observedAt,
+    current: comparedHeadCurrent(reading),
+    pushedSince: reading.pushedSince
+      ? { sha: reading.pushedSince.headSha, at: reading.pushedSince.at }
+      : null,
+  };
+}
+
+/**
+ * Ruling 494: the sentence the operator reads instead of a count it must not
+ * repeat, or "" when the count describes the current head. It names both
+ * heads, so "the head you just pushed" is checkable against what was counted.
+ */
+function baseBehindBySentence(
+  reading: BaseCompareReading | null,
+  where: { branch: string | null; base: string },
+): string {
+  if (!reading) return "";
+  const current = comparedHeadCurrent(reading);
+  if (current === true) return "";
+  const branch = where.branch ? `\`${where.branch}\`` : "the branch";
+  const count = `\`baseBehindBy\` (${reading.behindBy})`;
+  const never =
+    `Do not quote it, in a comment or a decision packet, as how far ${branch} is behind ` +
+    `\`${where.base}\` now: a count describes only the head it was counted on.`;
+  if (current === false) {
+    const counted = reading.headSha
+      ? `on \`${reading.headSha.slice(0, 7)}\``
+      : "on a head the compare did not name";
+    const pushed = reading.pushedSince?.headSha;
+    if (reading.pushedSince?.afterCompare === false && pushed) {
+      // The first compare after the push read another head than it published
+      // (`pushNotCounted` sets this only with both heads named).
+      return (
+        `${count} was counted ${counted}, not on \`${pushed.slice(0, 7)}\`, which Viberr pushed to ` +
+        `${branch} before that compare, so the count does not describe the pushed head. ${never} ` +
+        `The next GitHub pass compares the branch again.`
+      );
+    }
+    return (
+      `${count} was counted ${counted}, and Viberr pushed ` +
+      `${pushed ? `\`${pushed.slice(0, 7)}\` to ${branch}` : `to ${branch}`} after that compare, ` +
+      `so the count describes the older head. ${never} The next GitHub pass compares the pushed head.`
+    );
+  }
+  return (
+    `The last compare did not record which head it read, so ${count} may describe an older head ` +
+    `than ${branch} carries now. ${never} The next GitHub pass records the head it compares.`
+  );
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -3193,8 +3295,11 @@ export function operatorSnapshot(
 
   const fm = file.parsed.frontmatter;
   // F37-11: the reconciler's own last compare, read the same way the GitHub
-  // page's sync pill reads it.
-  const behindByLookup = createReconcileBehindByLookup(db);
+  // page's sync pill reads it. Ruling 494: with the head it was counted on and
+  // any push Viberr made after it.
+  const baseCompare = createBaseCompareLookup(db)(
+    storeRelativePath(resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), ctx.dataRoot),
+  );
   // Ruling 302: the window, clamped the way the controller's own `events` is.
   const timelineWindow = Math.min(
     Math.max(Math.trunc(events), 1),
@@ -3536,12 +3641,15 @@ export function operatorSnapshot(
     // eight of the pass's nine "plan was not carried out in full" notes were
     // this one step. `null` means no pass has compared this task yet, which is
     // "unknown" and never an excuse to skip the call.
-    baseBehindBy: behindByLookup(
-      storeRelativePath(
-        resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)),
-        ctx.dataRoot,
-      ),
-    ),
+    baseBehindBy: baseCompare?.behindBy ?? null,
+    // Ruling 494 (F40-70): which head that count describes. Live on WEB-16 the
+    // count was read 7 s before the delivery pushed a head that carried `main`,
+    // and two packets told the owner the branch was 6 behind for five minutes.
+    baseComparedHead: baseComparedHeadOf(baseCompare),
+    baseBehindBySentence: baseBehindBySentence(baseCompare, {
+      branch: fm.branch ?? null,
+      base: project.parsed.frontmatter.defaultBranch || "main",
+    }),
     notRefreshableReason: acceptanceBoundaryRefusal(fm, taskKey, project.parsed.frontmatter),
     // R19-1: name the repository the read-only view reads.
     repo: project.parsed.frontmatter.repo ?? null,
@@ -4647,7 +4755,12 @@ export async function operatorDeliverForReview(
           : outcome.pushStatus === "up_to_date"
             ? `Nothing to push: PR #${outcome.prNumber} already carries${sha || " the workspace head"}.`
             : `Delivered: push skipped (${outcome.pushStatus}), reusing open review PR #${outcome.prNumber}.`;
-      return { outcome: "done", message };
+      // Ruling 494: where the pushed branch now stands against the base, as the
+      // compare the push ran says, or that it could not run one.
+      return {
+        outcome: "done",
+        message: outcome.recompare ? `${message} ${outcome.recompare}` : message,
+      };
     }
     case "push_conflict":
       return {
@@ -5099,6 +5212,41 @@ function completionCapabilityRefusal(
 }
 
 /**
+ * Ruling 492 (review, 2026-09-26): the refusal for an operator acceptance that
+ * would bury the follow-up it just offered, or null.
+ *
+ * The doctrine has the operator raise a post-merge proof's read as a
+ * `create_task` option before it puts the task up for acceptance, and an
+ * acceptance withdraws the open decision it does not answer (F32-11; the
+ * operator's own answers none, ruling 471(b)). The first wording ended "Never
+ * hold this task back for that proof", so an operator that opened the option
+ * and called `accept_completion` in the same turn withdrew it unanswered and
+ * the read task was never created. Under supervised autonomy its acceptance
+ * card stood beside the option, and a person who applied the card first lost
+ * the read the same way. Only prompt text stood in the way.
+ *
+ * Refused while the open decision, not yet decided, offers a `create_task`
+ * whose new task waits on this one (`newTask.blockedBy` names it, in the
+ * canonical spelling the packet schema stores). Every other open decision is
+ * withdrawn by the acceptance as before, and a person's own acceptance is
+ * never refused here: its dialog names the decision it withdraws.
+ */
+function followUpOptionRefusal(packet: TaskPacket | null, taskKey: string): string | null {
+  if (!packet || packet.awaiting) return null;
+  const key = canonicalDependencyRef(taskKey) ?? taskKey;
+  const followUp = packet.options.find(
+    (o) => o.kind === "create_task" && (o.newTask?.blockedBy ?? []).includes(key),
+  )?.newTask;
+  if (!followUp) return null;
+  return (
+    `The open decision "${packet.title}" offers to create "${followUp.title}", which waits ` +
+    `on ${taskKey}. Accepting now would withdraw that decision unanswered, so the follow-up ` +
+    `would never be created (ruling 492). Wait for a person to answer it; you are re-invoked ` +
+    `when they do. Withdraw it with resolve_decision_packet first only if it is moot.`
+  );
+}
+
+/**
  * Accept completion and move the task to Done. This is the ONE deliberate
  * exception to the human-only-Done invariant: it performs the move ONLY under
  * FULL autonomy (governed additionally by completion-for-acceptance). Under
@@ -5178,6 +5326,17 @@ export async function operatorAcceptCompletion(
       const remedy = reworkRemedySentence(ctx, input.projectSlug, file.parsed.frontmatter, stages);
       return { outcome: "noop", message: remedy ? `${refusal} ${remedy}` : refusal };
     }
+  }
+  // Ruling 492 (review): checked before BOTH branches, so neither a
+  // full-autonomy acceptance nor a card a person could apply first withdraws
+  // the follow-up read the operator offered. Read fresh: the no-change probe
+  // above may have waited on GitHub.
+  {
+    const refusal = followUpOptionRefusal(
+      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.packet ?? null,
+      input.taskKey,
+    );
+    if (refusal) return { outcome: "noop", message: refusal };
   }
 
   // Supervised, or `completion-for-acceptance: recommend` → recommend only: post

@@ -45,6 +45,9 @@ import { filteredSpawnEnv } from "~/server/runtimes/spawn-env.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { errorMessage, toError } from "~/shared/errors";
 import {
+  GATE_NOTE_TITLE,
+  GATES_SYSTEM_ID,
+  gateEvidenceLabel,
   gateLogName,
   gateOutcomeText,
   gateRunMatchesDeclared,
@@ -721,7 +724,7 @@ function saveGateLog(
   }
 }
 
-const GATES_ACTOR = { kind: "system", systemId: "project-gates" } as const;
+const GATES_ACTOR = { kind: "system", systemId: GATES_SYSTEM_ID } as const;
 
 /** The timeline note a finished (or failed-to-run) gate run writes. */
 function gateRunEvent(run: GateRun, gates: readonly ProjectGate[], taskKey: string): TaskFileEvent {
@@ -741,22 +744,23 @@ function gateRunEvent(run: GateRun, gates: readonly ProjectGate[], taskKey: stri
   let title: string;
   let text: string;
   if (run.status === "error") {
-    title = "Project gates could not run";
+    title = GATE_NOTE_TITLE.error;
     text =
       `**${line}.** Viberr could not run the project's gates on \`${run.headSha.slice(0, 7)}\`: ${run.error}. ` +
       `${taskKey} cannot be accepted on this revision until they run; a maintainer or the task owner can run them again from the GitHub card.`;
   } else if (failed.length > 0) {
-    title = "Project gates failed";
+    title = GATE_NOTE_TITLE.failed;
     text =
       `**${line}.** ${failed.map((r) => `\`${r.name}\` ${gateOutcomeText(r)}`).join(", ")}. ` +
       `${taskKey} cannot be accepted on this revision; the next delivered revision is gated again, and an admin can force-accept on the record. Each gate's log is attached.`;
   } else {
-    title = "Project gates passed";
+    title = GATE_NOTE_TITLE.passed;
     text = `**${line}.** Each gate's log is attached.`;
   }
   const evidence = normalizeEvidenceRows(
+    // Ruling 493: the timeline reads these rows back (`gateNoteView`).
     run.results.map((r) => ({
-      label: `${r.name}: ${gateOutcomeText(r)} in ${gateWallTime(r.wallMs)}${r.log ? ` · ${r.log}` : ""}`,
+      label: gateEvidenceLabel(r),
       add: EVIDENCE_EMPTY_COLUMN,
       del: EVIDENCE_EMPTY_COLUMN,
     })),

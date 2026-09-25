@@ -618,6 +618,18 @@ function Transcript({
   // capped scroller at every width now, so only its own box moves. Ruling
   // 476(c): and a reply that lands shows its first line, not its last.
   useTranscriptFollow(scrollRef, view.messages, fresh, view.turn.working, view.conversation?.id ?? "");
+  // A reply that names an open knowledge-base proposal links it to its entry
+  // in the Proposals panel beside the transcript (owner, 2026-09-25).
+  const messageLinks = useMemo(
+    () =>
+      view.proposals?.length
+        ? {
+            ...view.taskLinks,
+            ...Object.fromEntries(view.proposals.map((p) => [p.id, `#proposal-${p.id}`])),
+          }
+        : view.taskLinks,
+    [view.taskLinks, view.proposals],
+  );
 
   if (!view.conversation) {
     return (
@@ -716,7 +728,7 @@ function Transcript({
                 )}
               </header>
               <div className="md-body">
-                <Markdown text={m.text} taskLinks={view.taskLinks} />
+                <Markdown text={m.text} taskLinks={messageLinks} />
               </div>
             </article>
             {m.id === workingAfter && working}

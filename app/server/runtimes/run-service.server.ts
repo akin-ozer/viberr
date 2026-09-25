@@ -2179,14 +2179,14 @@ function launch(
     startedAt?: string;
     /** F21-13: a disclosure line to open the run log with. */
     notice?: string;
-    /** The data root the run's task lives under: what the sink's timeline
-     *  notes (a compaction, ruling 369/376) are written against. Absent means
-     *  the instance's own root. */
+    /** The data root the run's task lives under: where the finalize reads a
+     *  Codex run's rollout (ruling 369(c)). Absent means the instance's own
+     *  root. */
     dataRoot?: string;
   } = {},
 ): void {
   const state = getState();
-  const sink = createRunSink(db, spec, opts.dataRoot ? { secrets, dataRoot: opts.dataRoot } : { secrets });
+  const sink = createRunSink(db, spec, { secrets });
 
   // Set when onExit fires DURING adapter.start() (synchronous exit / spawn
   // crash) so we skip tracking a handle for an already-terminal run.

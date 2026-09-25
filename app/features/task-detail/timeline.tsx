@@ -3,10 +3,14 @@ import { Link, useFetcher, useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { TaskLinks } from "~/shared/task-key-links";
 import { useCsrfToken } from "~/ui/csrf-input";
-import { Icon } from "~/ui/icon";
+import { gatesPill } from "~/features/github/github-pills";
+import type { GateNoteState } from "~/shared/project-gates";
+import { Icon, type IconName } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
 import { AttachmentThumb } from "./attachment-image";
+import { GateResults } from "./gate-results";
+import { fileExtension, fileFamily } from "./attachment-kind";
 import { IMAGE_RE, useAttachmentLightbox } from "./attachment-lightbox";
 import { Pill } from "~/ui/pill";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
@@ -190,6 +194,17 @@ function EvidenceLabel({
   );
 }
 
+/**
+ * Ruling 493: a gate run's note takes its ending's mark on the rail and its
+ * word in the pill, in the PR card's colours (`gatesPill`). Beside the actor
+ * the pill finishes the sentence: "Project gates passed".
+ */
+const GATE_NOTE_META = {
+  passed: { node: "completion", icon: "check", label: "passed" },
+  failed: { node: "blocked", icon: "x", label: "failed" },
+  error: { node: "blocked", icon: "alert", label: "could not run" },
+} as const satisfies Record<GateNoteState, { node: string; icon: IconName; label: string }>;
+
 /** Row keys for `useStableRows` (stable, module-level). */
 const eventKeyOf = (ev: TimelineEventRender) => String(ev.id);
 
@@ -226,7 +241,8 @@ export const TimelineItem = memo(function TimelineItem({
   /** The attachment route base — absent (e.g. bare renders) ⇒ plain labels. */
   attachmentsBase?: string;
 }) {
-  const meta = eventMeta(ev.type);
+  const gates = ev.gates;
+  const meta = gates ? GATE_NOTE_META[gates.state] : eventMeta(ev.type);
   const actor = ev.actor;
   const isTyped = ev.type !== "comment";
   const guest = actor.kind === "human" && "guest" in actor && actor.guest;
@@ -248,9 +264,14 @@ export const TimelineItem = memo(function TimelineItem({
               trailing role. */}
           <span className="tl-actor">{actor.name}</span>
           {isTyped && (
-            <Pill kind={typedKind(ev.type)} sm>
+            <Pill kind={gates ? gatesPill(gates.state).kind : typedKind(ev.type)} sm>
               {meta.label}
             </Pill>
+          )}
+          {gates?.sha && (
+            <span className="tl-gate-rev">
+              on <code>{gates.sha}</code>
+            </span>
           )}
           {/* The "agent" badge marks a COMMENT written by an agent — the one
               place it adds signal (agent- vs human-authored message). A typed
@@ -292,6 +313,25 @@ export const TimelineItem = memo(function TimelineItem({
               {...(attachmentsBase ? { attachmentsBase } : {})}
             />
           </div>
+        ) : gates ? (
+          <>
+            {/* Ruling 493: the header already says how the run ended and on
+                which revision, and the table holds each gate with its log, so
+                the note's own sentence is not said again. A run that could not
+                execute keeps its reason. */}
+            {gates.detail && (
+              <div className="tl-text md-body">
+                <Markdown
+                  text={gates.detail}
+                  headingBase={ENTRY_HEADING_BASE}
+                  {...(taskLinks ? { taskLinks } : {})}
+                />
+              </div>
+            )}
+            {gates.rows.length > 0 && (
+              <GateResults rows={gates.rows} attachmentsBase={attachmentsBase ?? null} openLog={lightbox} />
+            )}
+          </>
         ) : (
           <>
             {ev.title && (
@@ -377,8 +417,10 @@ export const TimelineItem = memo(function TimelineItem({
                 task — it renders as the picture, right on the producing
                 message (the owner's ask, 2026-08-20: chips alone made the
                 human open the side panel to see what the agent "posted").
-                Non-image files keep the chip; the route serves whitelisted
-                image types inline, sandboxed, member-only. */}
+                Any other file is the same tile, a page carrying its
+                extension in the picture's place (owner ask 2026-09-25); the
+                route serves whitelisted image types inline, sandboxed,
+                member-only. */}
             {ev.attachments.filter((name) => IMAGE_RE.test(name)).map((name) => (
               <AttachmentThumb
                 key={name}
@@ -394,13 +436,16 @@ export const TimelineItem = memo(function TimelineItem({
                 <span className="nm">{name}</span>
               </AttachmentThumb>
             ))}
-            {ev.attachments.filter((name) => !IMAGE_RE.test(name)).map((name) => (
-              // Ruling 105 (+ addendum): a text-typed chip opens the in-app
+            {ev.attachments.filter((name) => !IMAGE_RE.test(name)).map((name) => {
+              const ext = fileExtension(name);
+              const label = ext.length > 0 && ext.length <= 5;
+              return (
+              // Ruling 105 (+ addendum): a text-typed file opens the in-app
               // read-only viewer; any other kind the no-preview card with
               // its Download button.
               <a
                 key={name}
-                className="tl-attach-chip"
+                className="tl-attach-file"
                 href={`${attachmentsBase}/${encodeURIComponent(name)}`}
                 target="_blank"
                 rel="noreferrer"
@@ -409,10 +454,14 @@ export const TimelineItem = memo(function TimelineItem({
                   url: `${attachmentsBase}/${encodeURIComponent(name)}`,
                 })}
               >
-                <Icon name="file" />
+                <span className="tl-attach-glyph" data-kind={fileFamily(name)} aria-hidden="true">
+                  <Icon name={label ? "page" : "file"} />
+                  {label && <span className="tl-attach-ext">{ext}</span>}
+                </span>
                 <span className="nm">{name}</span>
               </a>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -22,9 +22,10 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageLabel } from "~/shared/workflow/stage-label";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import { checksPill, checksUnreadPill, gatesPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
+import { checksPill, gatesPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { GatesView } from "~/shared/project-gates";
 import { useAttachmentLightbox } from "./attachment-lightbox";
+import { GateResults } from "./gate-results";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
@@ -315,20 +316,6 @@ export function GithubTrace({
             {checksPill(task.prChecks).label}
           </Pill>
         )}
-        {/* Ruling 360 (pass 38, F38-14): the read GitHub refused, said rather
-            than blanked. This card read "PR #10 · in review" beside a head
-            whose every check had failed, because the credential could not
-            read them and a failed read rendered as nothing. */}
-        {!task.prChecks && task.prChecksUnread && (
-          <span
-            data-checks-unread
-            title={`GitHub refused the check-runs read${task.prChecksUnread.status ? ` (HTTP ${task.prChecksUnread.status})` : ""}: ${task.prChecksUnread.message}`}
-          >
-            <Pill kind={checksUnreadPill().kind} sm>
-              {checksUnreadPill().label}
-            </Pill>
-          </span>
-        )}
         {task.prReview && (
           <Pill kind={reviewPill(task.prReview).kind} sm>
             {reviewPill(task.prReview).label}
@@ -337,11 +324,7 @@ export function GithubTrace({
         {/* Ruling 482: what Viberr's own run of the project's gates says about
             the revision under review, beside what GitHub's checks say. */}
         {acceptance.gates && (
-          <Pill
-            kind={gatesPill(acceptance.gates.state).kind}
-            sm
-            quiet={gatesPill(acceptance.gates.state).quiet}
-          >
+          <Pill kind={gatesPill(acceptance.gates.state).kind} sm>
             {gatesPill(acceptance.gates.state).label}
           </Pill>
         )}
@@ -601,31 +584,7 @@ function GatesRow({
         </span>
       </div>
       {gates.rows.length > 0 && (
-        <ul className="gate-results" aria-label="Gate results">
-          {gates.rows.map((row) => (
-            <li key={row.name} className={row.ok ? "ok" : "bad"}>
-              <Icon name={row.ok ? "check" : "x"} />
-              <span className="gate-name mono">{row.name}</span>
-              <span className="gate-outcome">{row.outcome}</span>
-              <span className="gate-wall">{row.wall}</span>
-              {row.log && attachmentsBase ? (
-                <a
-                  className="gate-log"
-                  href={`${attachmentsBase}/${encodeURIComponent(row.log)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`${row.name} log`}
-                  onClick={lightbox({
-                    name: row.log,
-                    url: `${attachmentsBase}/${encodeURIComponent(row.log)}`,
-                  })}
-                >
-                  log
-                </a>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <GateResults rows={gates.rows} attachmentsBase={attachmentsBase} openLog={lightbox} compact />
       )}
       {gates.error && (
         <p className="deny-note spaced">

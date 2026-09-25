@@ -200,8 +200,18 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // The same text after PR #321 renamed "Org settings" to "Instance
     // settings", which shipped without recording its outgoing hash.
     "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
+    // Owner, 2026-09-25 ("this wall of text"): before the reply paragraph set
+    // an order (what the person must decide first), bold line labels, links
+    // in place of restated evidence and a length of about eight lines.
+    "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 492 (pass 40, F40-69): before "Creating a task" and "Chained
+    // goals" said a done signal is something the task can show before
+    // acceptance, and that a proof only the merged or deployed code can show
+    // is a follow-up read task. The controller wrote goal-1 links 9 and 11 on
+    // akinozer-com with such a proof as their done signal.
+    "ce538f0db704167a768cdab3848110ad5c46ff7843919330927bf59efda22a57",
     // Rulings 482 and 483 (pass 40, F40-52, F40-59): before "Bringing up a new
     // project" named `set_project_gates` and the rulings paragraph stopped
     // listing "the gate commands" as prose to write there (every directive
@@ -241,6 +251,22 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 494's review: the doctrine as ruling 494 first shipped it, with
+    // its `baseBehindBy` sentences between `update_branch_from_base`'s own
+    // sentences and the "Never call it" that pointed back to the tool, so
+    // "it" read as the packet or the count. The sentence now names the tool.
+    "43a9a0b59ee0c6d6e58cbc5c6807467005b5b343f7e5f7909d622a944d23d5e4",
+    // Ruling 494 (pass 40, F40-70): before the doctrine said a behind count is
+    // true only of the head it was counted on (`baseComparedHead`), to check
+    // it against the head just pushed and never to state one in a packet for
+    // another head. Live on WEB-16 two packets told the owner the branch was 6
+    // commits behind `main` five minutes after a push that carried `main`.
+    // Ruling 492 (pass 40, F40-69): before the doctrine said a done signal is
+    // something the task can show before acceptance, and that a proof only
+    // the merged or deployed code can show is raised as a `create_task`
+    // option for a read task that waits on this one. Live on WEB-16 the
+    // operator's own option drafted a goal done only "after the merge".
+    "ee212fda34ef04e0447ed1edd1a2f50b6c1cd92cde5ac498956cea61dbcfb6d8",
     // Ruling 488 (pass 40, F40-67): before the doctrine said text meant for
     // another task is posted there with `relay_to_task` (an agent's with its
     // `relay` entries), and never handed to a person to copy over or confirm.

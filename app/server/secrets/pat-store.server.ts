@@ -553,7 +553,8 @@ export function credentialAdvisories(
   }
   // Ruling 360 (pass 38, F38-14): the check-runs read GitHub refused with this
   // token. Not a missing REQUIRED scope — merging never needed it — but the
-  // reason every task page and accept dialog says "checks not readable".
+  // reason the checks are not shown (ruling 491 dropped the "checks not
+  // readable" pill; the project's own gates carry the verification).
   // F39-5: the same list the timeline writer reads, so "advisory" cannot mean
   // one thing on the card and another on the record.
   const checks = openViolations.find(

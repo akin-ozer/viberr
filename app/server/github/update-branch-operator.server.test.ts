@@ -15,7 +15,10 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
+import { z } from "zod";
+import { taskProvenancePath } from "~/server/provenance/provenance-query.server";
+import { reconcileTask } from "./github-reconciler.server";
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import {
   createPat,
@@ -26,7 +29,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeProject } from "../../../test-support/test-store";
 import { operatorSnapshot, type OperatorAuthority } from "~/server/tasks/operator-actions.server";
-import type { TaskActionDeps } from "~/server/tasks/task-actions.server";
+import { performDelivery, type TaskActionDeps } from "~/server/tasks/task-actions.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
 import {
   operatorUpdateBranchFromBase,
@@ -1214,6 +1217,163 @@ describe("ruling 475 (F40-20): the operator hands a conflict to the delivering a
     expect(listAuditEvents(store.db, { action: "task.packet.withdrawn_superseded" })[0]!.details).toMatchObject({
       reason: "pr_conflicting",
       title: "Accept VIB-1",
+    });
+  });
+});
+
+/**
+ * Ruling 494 (pass 40, F40-70): every push that moves the task branch is
+ * followed by a compare of the head it pushed, before its caller returns. Live
+ * on WEB-16 `update_branch_from_base` found the workspace level with `main`
+ * and GitHub's copy behind it; a poll 0.2 s later counted that unpushed copy 6
+ * behind; the delivery pushed seven seconds later, and `get_task` said 6 for
+ * the five minutes until the next poll.
+ */
+describe("ruling 494: a branch update and the push after it leave the pushed head's count", () => {
+  const NEW = "c0ffee1".padEnd(40, "0");
+  const SLOW = { userId: null, label: "poller" };
+
+  const rowSchema = z.object({
+    behindBy: z.number().nullable().optional(),
+    headSha: z.string().nullable().optional(),
+  });
+  function rows(): { action: string; behindBy: number | null | undefined; headSha: string | null | undefined }[] {
+    // SAFETY: `action` is TEXT NOT NULL and `details_json` nullable TEXT
+    // (0001_baseline.sql), the two columns selected.
+    const found = store.db
+      .prepare(
+        `SELECT action, details_json FROM provenance
+         WHERE source_path = ? AND action IN ('github.reconcile', 'github.push')
+         ORDER BY id ASC`,
+      )
+      .all(taskProvenancePath(store.slug, "VIB-1")) as { action: string; details_json: string | null }[];
+    return found.map((r) => {
+      const d = rowSchema.parse(JSON.parse(r.details_json ?? "{}"));
+      return { action: r.action, behindBy: d.behindBy, headSha: d.headSha };
+    });
+  }
+
+  /** GitHub's compare of `vib-1` with `main` while `vib-1` stands at `head`. */
+  function githubAt(head: string, behindBy: number) {
+    return fakeGithubFetch({
+      [`GET /repos/akin-ozer/viberr/git/ref/heads/main`]: { body: { object: { sha: BASE_SHA } } },
+      [`GET /repos/akin-ozer/viberr/compare/main...vib-1`]: {
+        body:
+          behindBy > 0
+            ? {
+                status: "behind",
+                ahead_by: 0,
+                behind_by: behindBy,
+                total_commits: 0,
+                base_commit: { sha: BASE_SHA },
+                merge_base_commit: { sha: head },
+                commits: [],
+              }
+            : {
+                status: "ahead",
+                ahead_by: 1,
+                behind_by: 0,
+                total_commits: 1,
+                base_commit: { sha: BASE_SHA },
+                merge_base_commit: { sha: BASE_SHA },
+                commits: [
+                  { sha: head, commit: { message: "[VIB-1] merge main" }, parents: [{ sha: REMOTE_SHA }, { sha: BASE_SHA }] },
+                ],
+              },
+      },
+      [`GET /repos/akin-ozer/viberr/pulls`]: { body: [] },
+    });
+  }
+
+  const snap = () =>
+    operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority());
+
+  it("branch update then push: the count after the delivery push is the pushed head's", async () => {
+    // CANARY: drop the delivery's post-push re-compare, and `get_task` reads
+    // the poll's 6 for GitHub's older copy.
+    const update = await act(fakeGit({ behind: 0, remote: "behind" }).exec);
+    expect(update.message).toContain("behind the workspace head: call `deliver_for_review` to push it");
+    // The update pushed nothing, so it recorded no push.
+    expect(rows()).toEqual([]);
+    // The poll reads GitHub's copy, which the delivery has not pushed yet.
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, SLOW, {
+      dataRoot: store.dataRoot,
+      fetchImpl: githubAt(REMOTE_SHA, 6).fetchImpl,
+      skipUnchangedProvenance: true,
+    });
+    expect(snap().baseBehindBy).toBe(6);
+
+    const delivered = await performDelivery(
+      store.db,
+      {
+        dataRoot: store.dataRoot,
+        fetchImpl: githubAt(NEW, 0).fetchImpl,
+        deps: {
+          pushWorkspaceBranch: async () => ({
+            status: "pushed",
+            branch: "vib-1",
+            commits: 1,
+            headSha: NEW,
+            remoteHeadBefore: REMOTE_SHA,
+            workflowFiles: [],
+          }),
+          openTaskPr: async () => ({
+            status: "ok",
+            prNumber: 9,
+            created: true,
+            url: "https://github.com/akin-ozer/viberr/pull/9",
+          }),
+        },
+      },
+      store.slug,
+      "VIB-1",
+      { userId: store.users.arda.id, label: "arda" },
+    );
+    expect(delivered).toMatchObject({
+      status: "delivered",
+      recompare: "Re-compared after the push: `vib-1` at `c0ffee1` is level with `main`.",
+    });
+    expect(rows().slice(-2)).toEqual([
+      { action: "github.push", behindBy: undefined, headSha: NEW },
+      { action: "github.reconcile", behindBy: 0, headSha: NEW },
+    ]);
+    expect(snap().baseBehindBy).toBe(0);
+    expect(snap().baseComparedHead).toMatchObject({ sha: NEW, current: true });
+  });
+
+  it("an update that pushes records the push and counts the merge it pushed", async () => {
+    // CANARY: `recordBranchRefresh` back on a plain `reconcileTask`: no push
+    // row is written.
+    const res = await act(fakeGit({ behind: 2 }).exec, authority(), githubAt(MERGE_SHA, 0).fetchImpl);
+    expect(res.outcome).toBe("done");
+    expect(rows()).toEqual([
+      { action: "github.push", behindBy: undefined, headSha: MERGE_SHA },
+      { action: "github.reconcile", behindBy: 0, headSha: MERGE_SHA },
+    ]);
+    expect(snap().baseComparedHead).toMatchObject({ sha: MERGE_SHA, current: true });
+  });
+
+  it("an update whose re-compare fails says the count is the one from before the push, and get_task reads it as the older head's", async () => {
+    // CANARIES: `recordBranchRefresh` back on a plain `reconcileTask` (the
+    // older count reads as current); drop the sentence's failure clause.
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, SLOW, {
+      dataRoot: store.dataRoot,
+      fetchImpl: githubAt(REMOTE_SHA, 6).fetchImpl,
+    });
+    const res = await act(fakeGit({ behind: 2 }).exec, authority(), unreachableFetch());
+    expect(res.outcome).toBe("done");
+    expect(res.message).toContain(
+      "`vib-1` could not be compared with `main` again after the push (network_unavailable), so the count of commits it is behind stays the one from before the push until the next GitHub pass.",
+    );
+    const timeline = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+      .parsed.timeline;
+    expect(timeline[0]!.text).toContain("could not be compared with `main` again after the push");
+    const s = snap();
+    expect(s.baseBehindBy).toBe(6);
+    expect(s.baseComparedHead).toMatchObject({
+      sha: REMOTE_SHA,
+      current: false,
+      pushedSince: { sha: MERGE_SHA },
     });
   });
 });

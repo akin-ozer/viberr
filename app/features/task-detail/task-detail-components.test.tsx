@@ -1780,44 +1780,6 @@ describe("GithubTrace — branch collision framing (F31-1)", () => {
     expect(row.textContent).toContain("not this task");
   });
 
-  it("ruling 360: the PR card names a read GitHub refused, and a summary outranks it", () => {
-    // CANARY: drop the `prChecksUnread` pill from the card.
-    const refused = {
-      status: 403,
-      message: "Resource not accessible by personal access token",
-      at: "2026-09-18T08:00:00.000Z",
-    };
-    const pr = { number: 10, state: "review" as const, title: "[VIB-151] work" };
-    const { container } = render(
-      <MemoryRouter>
-        <GithubTrace
-          githubHost={GH_HOST}
-          task={traceTask({ pr, prChecks: null, prChecksUnread: refused })}
-          acceptance={traceAcceptance()}
-        />
-      </MemoryRouter>,
-    );
-    const pill = container.querySelector("[data-checks-unread]");
-    expect(pill).not.toBeNull();
-    expect(pill!.textContent).toContain("checks not readable");
-    expect(pill!.getAttribute("title")).toContain("(HTTP 403)");
-
-    const { container: read } = render(
-      <MemoryRouter>
-        <GithubTrace
-          githubHost={GH_HOST}
-          task={traceTask({
-            pr,
-            prChecks: { total: 2, passing: 2, failing: 0, pending: 0, state: "passing" },
-            prChecksUnread: refused,
-          })}
-          acceptance={traceAcceptance()}
-        />
-      </MemoryRouter>,
-    );
-    expect(read.querySelector("[data-checks-unread]")).toBeNull();
-  });
-
   it("renders no collision row when nothing squats on the branch", () => {
     const { container } = render(
       <MemoryRouter>
@@ -1873,10 +1835,10 @@ describe("GithubTrace — project gates (ruling 482)", () => {
     );
     expect(getByText("Gates on a95c337: 3/4 exit 0 (run by Viberr)")).toBeTruthy();
     expect(container.querySelector(".gh-bar")?.textContent).toContain("gates failed");
-    const results = getByRole("list", { name: "Gate results" });
+    const results = getByRole("table", { name: "Gate results" });
     expect(results.textContent).toContain("build");
     expect(results.textContent).toContain("exit 1");
-    expect(results.querySelector("li.bad")?.textContent).toContain("build");
+    expect(results.querySelector("tr.bad")?.textContent).toContain("build");
     const log = getByRole("link", { name: "build log" });
     expect(log.getAttribute("href")).toBe(
       "/projects/viberr-core/tasks/VIB-151/attachments/gate-a95c337-02-build-20260925T101512Z.log",
@@ -4190,6 +4152,67 @@ describe("U39-21: a packet option renders its inline code", () => {
 });
 
 /* ---------------------------------------- ruling 478: task page fixes */
+
+/**
+ * Ruling 493: a gate run's note is drawn as what it records, its ending, its
+ * revision and the gate table, instead of a sentence, a monospaced block and
+ * the same logs again as files.
+ */
+describe("TimelineItem — a gate run's note (ruling 493)", () => {
+  const BASE = "/projects/viberr-core/tasks/VIB-151/attachments";
+  const LOG = "gate-a95c337-02-build-20260925T101512Z.log";
+  const gateNote = (gates: NonNullable<TimelineEventRender["gates"]>) =>
+    ev({
+      type: "note",
+      actor: { kind: "system", name: "Project gates" },
+      title: "Project gates failed",
+      text: "**Gates on a95c337: 1/2 exit 0 (run by Viberr).** `build` exit 1. Each gate's log is attached.",
+      gates,
+    });
+  const FAILED = {
+    state: "failed" as const,
+    sha: "a95c337",
+    detail: null,
+    rows: [
+      { name: "install", outcome: "exit 0", wall: "12 s", ok: true, log: "gate-a95c337-01-install-20260925T101500Z.log" },
+      { name: "build", outcome: "exit 1", wall: "41 s", ok: false, log: LOG },
+    ],
+  };
+
+  it("puts the ending in the pill and the revision beside it, and each gate in the table with its log", () => {
+    // CANARY: drop the `gates ?` branch from TimelineItem and the note is prose again.
+    const { container, getByRole } = render(<TimelineItem ev={gateNote(FAILED)} attachmentsBase={BASE} />);
+    expect(container.querySelector(".tl-node.blocked")).not.toBeNull();
+    const pill = container.querySelector(".tl-meta .pill");
+    expect(pill?.textContent).toBe("failed");
+    expect(pill?.classList.contains("blocked")).toBe(true);
+    expect(container.querySelector(".tl-gate-rev")?.textContent).toBe("on a95c337");
+    const table = getByRole("table", { name: "Gate results" });
+    expect(table.querySelector("tr.bad")?.textContent).toContain("exit 1");
+    expect(getByRole("link", { name: "build log" }).getAttribute("href")).toBe(`${BASE}/${LOG}`);
+    // The header and the table say it all: not the sentence, not the title.
+    expect(container.textContent).not.toContain("run by Viberr");
+    expect(container.textContent).not.toContain("Project gates failed");
+  });
+
+  it("shows a pass green and keeps the reason a run could not execute", () => {
+    const passed = render(
+      <TimelineItem ev={gateNote({ ...FAILED, state: "passed", rows: [FAILED.rows[0]!] })} attachmentsBase={BASE} />,
+    );
+    expect(passed.container.querySelector(".tl-node.completion")).not.toBeNull();
+    expect(passed.container.querySelector(".tl-meta .pill.done")?.textContent).toBe("passed");
+    passed.unmount();
+    const error = render(
+      <TimelineItem
+        ev={gateNote({ state: "error", sha: "a95c337", rows: [], detail: "The delivering checkout is missing." })}
+        attachmentsBase={BASE}
+      />,
+    );
+    expect(error.container.querySelector(".tl-meta .pill")?.textContent).toBe("could not run");
+    expect(error.container.querySelector(".tl-text")?.textContent).toBe("The delivering checkout is missing.");
+    expect(error.container.querySelector(".gate-table")).toBeNull();
+  });
+});
 
 describe("ruling 478: the task page's timeline, packet and GitHub panel", () => {
   /** WEB-3's agent question, as the loader renders it. */

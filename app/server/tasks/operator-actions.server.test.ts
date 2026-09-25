@@ -29,8 +29,11 @@ import {
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
+import type { runOperator } from "~/server/runtimes/operator-run.server";
+import { listProjectTasks } from "~/server/projections/board-query.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { waitFor } from "../../../test-support/polling";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import {
@@ -2583,6 +2586,212 @@ describe("operatorAcceptCompletion", () => {
     expect(r.outcome).toBe("noop");
     expect(task().frontmatter.stage).toBe("review"); // NOT moved to Done
     expect(task().packet?.type).toBe("blocked"); // decision still open
+  });
+
+  /**
+   * Ruling 492 (review, 2026-09-26): the doctrine has the operator offer a
+   * post-merge proof's read as a `create_task` option before the task goes up
+   * for acceptance, and an acceptance withdraws the open decision it does not
+   * answer (F32-11; the operator's own answers none). The first doctrine said
+   * "Never hold this task back for that proof", so an operator that opened the
+   * option and accepted in the same turn buried the read, and a supervised
+   * operator's card stood beside it for a person to apply first.
+   */
+  describe("ruling 492: an open create_task whose new task waits on this one holds the operator's acceptance", () => {
+    const DECISION = "VIB-1's cron result can only be read after the merge";
+    const READ_TITLE = "Read VIB-1's first cron run on the deployed build";
+
+    function acceptanceRoster(completion: CapabilityMode): void {
+      deployRoster([
+        ...DEFAULT_POLICY.filter(
+          (c) =>
+            c.capabilityId !== "completion-for-acceptance" &&
+            c.capabilityId !== "generate-packets",
+        ),
+        { capabilityId: "completion-for-acceptance", mode: completion },
+        { capabilityId: "generate-packets", mode: "direct" },
+      ]);
+    }
+
+    /** The option the doctrine has the operator raise, through its own door. */
+    async function offerRead(
+      blockedBy: string[] | null,
+      autonomy: OperatorAutonomy,
+      other: OperatorPacketOptionInput = { kind: "custom", title: "No read is needed" },
+    ): Promise<void> {
+      const newTask: NonNullable<OperatorPacketOptionInput["newTask"]> = {
+        title: READ_TITLE,
+        goal:
+          "Confirm VIB-1's change is merged and deployed, then read its first cron run. " +
+          "Done when the run's log line is quoted here.",
+      };
+      if (blockedBy) newTask.blockedBy = blockedBy;
+      const opened = await operatorOpenPacket(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          packetType: "input",
+          title: DECISION,
+          options: [
+            { kind: "create_task", title: "Create the read task", recommended: true, newTask },
+            other,
+          ],
+        },
+        authority(autonomy),
+      );
+      expect(opened.outcome).toBe("done");
+    }
+
+    const accept = (
+      autonomy: OperatorAutonomy,
+      callCtx: TaskActionContext = { dataRoot: store.dataRoot },
+    ) =>
+      operatorAcceptCompletion(
+        store.db,
+        callCtx,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        authority(autonomy),
+      );
+
+    it("full autonomy refuses, and the decision stays open with nothing withdrawn", async () => {
+      // CANARY: drop the `followUpOptionRefusal` check from
+      // operatorAcceptCompletion and VIB-1 moves to Done with the option
+      // withdrawn unanswered.
+      acceptanceRoster("direct");
+      seedTask("review");
+      await offerRead(["VIB-1"], "full");
+      const r = await accept("full");
+      expect(r.outcome).toBe("noop");
+      expect(r.message).toContain(
+        `The open decision "${DECISION}" offers to create "${READ_TITLE}", which waits on VIB-1. ` +
+          "Accepting now would withdraw that decision unanswered",
+      );
+      expect(task().frontmatter.stage).toBe("review");
+      expect(task().packet?.title).toBe(DECISION);
+      expect(listAuditEvents(store.db, { action: "task.packet.withdrawn" })).toHaveLength(0);
+      expect(listAuditEvents(store.db, { action: "task.operator.accepted_completion" })).toHaveLength(0);
+    });
+
+    it("supervised files no acceptance card beside it", async () => {
+      // CANARY: the same check dropped, and the card a person could apply
+      // first is filed.
+      acceptanceRoster("recommend");
+      seedTask("review");
+      await offerRead(["VIB-1"], "supervised");
+      const r = await accept("supervised");
+      expect(r.outcome).toBe("noop");
+      expect(r.message).toContain(`offers to create "${READ_TITLE}"`);
+      expect(task().frontmatter.recommendations).toHaveLength(0);
+      expect(listAuditEvents(store.db, { action: "task.operator.recommended_completion" })).toHaveLength(0);
+    });
+
+    it("a create_task whose new task does not wait on this one is withdrawn by the acceptance as before (F32-11)", async () => {
+      // CANARY: refuse on every create_task option and this one holds too.
+      acceptanceRoster("direct");
+      seedTask("review");
+      await offerRead(null, "full");
+      const r = await accept("full");
+      expect(r.outcome).toBe("done");
+      expect(task().frontmatter.stage).toBe("done");
+      expect(task().packet).toBeNull();
+      expect(listAuditEvents(store.db, { action: "task.packet.withdrawn" })).toHaveLength(1);
+    });
+
+    it("a decision already answered another way holds nothing: its create_task can no longer be chosen", async () => {
+      // The person chose the goal edit, so the packet only waits for the
+      // edited goal and the read will not come from it (ruling 471 lets a
+      // decided packet take no second answer). CANARY: drop the `awaiting`
+      // check and this acceptance is refused for an option nobody can pick.
+      acceptanceRoster("direct");
+      seedTask("review");
+      await offerRead(["VIB-1"], "full", {
+        kind: "edit_goal",
+        title: "Rewrite the goal instead",
+        goalDraft: "Ship the cron job. Done when its gates pass on the branch.",
+      });
+      const { resolvePacket } = await import("./task-actions.server");
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        { userId: store.users.arda.id, label: store.users.arda.email },
+        { dataRoot: store.dataRoot },
+      );
+      expect(task().packet?.awaiting).toBe("goal_edit");
+      expect((await accept("full")).outcome).toBe("done");
+    });
+
+    it("once a person answers it, the acceptance proceeds and the read is released at Done, before any merge", async () => {
+      // The whole sequence the doctrine prescribes. The acceptance is the
+      // operator's own, so the PR stays accepted with the merge pending, and
+      // the read task is released anyway: which is why its goal confirms the
+      // merge and the deploy before it reads (DONE_SIGNAL_RULE).
+      acceptanceRoster("direct");
+      seedTask("review");
+      const head = "a".repeat(40);
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (parsed) => {
+          parsed.frontmatter.pr = { number: 7, state: "review", title: "[VIB-1] cron", headSha: head };
+          parsed.frontmatter.workRevision = {
+            id: "rev_1",
+            headSha: head,
+            treeSha: "t".repeat(40),
+            branch: "vib-1-work",
+            createdAt: "2026-07-25T09:00:00.000Z",
+            sourceProfileId: "developer",
+          };
+          parsed.frontmatter.engagements = [
+            { profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true },
+          ];
+          parsed.frontmatter.verdicts = [
+            { profileId: "reviewer", revisionId: "rev_1", headSha: head, result: "approve", reason: "looks right", at: "2026-07-25T09:30:00.000Z", rounds: 1 },
+          ];
+        },
+      );
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      // Every operator hand-off below (the answer's, the release's) lands on
+      // this stub instead of starting a run.
+      const runOp = vi.fn<typeof runOperator>(async () => ({
+        runId: null,
+        queued: true,
+        backend: "claude" as const,
+        autonomy: "full" as const,
+      }));
+      const callCtx: TaskActionContext = { dataRoot: store.dataRoot, deps: { runOperator: runOp } };
+      await offerRead(["VIB-1"], "full");
+      expect((await accept("full", callCtx)).outcome).toBe("noop");
+
+      const { resolvePacket } = await import("./task-actions.server");
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        { userId: store.users.arda.id, label: store.users.arda.email },
+        callCtx,
+      );
+      const readKey = listProjectTasks(store.db, store.slug, { dataRoot: store.dataRoot }).find(
+        (t) => t.title === READ_TITLE,
+      )?.key;
+      expect(readKey, "the person's answer created the read task").toBeDefined();
+      const readTask = () =>
+        readTaskFile({ projectSlug: store.slug, taskKey: readKey ?? "", dataRoot: store.dataRoot })?.parsed;
+      expect(readTask()?.frontmatter.blockedBy).toEqual(["VIB-1"]);
+
+      expect((await accept("full", callCtx)).outcome).toBe("done");
+      expect(task().frontmatter.stage).toBe("done");
+      expect(task().frontmatter.pr?.state).toBe("accepted");
+      // The acceptance's own sweep (ruling 131(e)) releases the read, and the
+      // release hands the read task to its operator last.
+      await waitFor(
+        () =>
+          runOp.mock.calls.some(
+            ([, run]) => run.taskKey === readKey && run.trigger === "dependencies-released",
+          ),
+        "the read task's release",
+      );
+      expect(readTask()?.frontmatter.blockedBy).toEqual([]);
+    });
   });
 
   it("full autonomy + RECOMMEND only recommends — it does NOT auto-close (Q1)", async () => {

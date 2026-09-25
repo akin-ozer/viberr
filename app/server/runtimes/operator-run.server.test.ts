@@ -1818,6 +1818,38 @@ describe("pr-diverged turn instruction (both backends)", () => {
     );
   });
 
+  it("ruling 494: a behind count that describes an older head is named before the plan on both backends, and a current one adds nothing", () => {
+    // CANARY: drop `baseCompareInstruction` from `operatorTurnInstruction`.
+    // Live on WEB-16 the stale count reached a comment and two packets, so
+    // it is said on every trigger, the report's and the delivery's included.
+    const sentence =
+      "`baseBehindBy` (6) was counted on `aafee66`, and Viberr pushed `20534f6` to `web-16` after that compare, so the count describes the older head.";
+    const stale = snapshot({
+      baseBehindBy: 6,
+      baseComparedHead: {
+        sha: "aafee66".padEnd(40, "0"),
+        observedAt: "2026-09-25T21:25:48.527Z",
+        current: false,
+        pushedSince: { sha: "20534f6".padEnd(40, "0"), at: "2026-09-25T21:25:55.000Z" },
+      },
+      baseBehindBySentence: sentence,
+    });
+    const rule =
+      "A decision packet never states a behind count for a head other than the one the packet puts up.";
+    for (const trigger of ["agent-reply", "delivered", "manual"] as const) {
+      const reply = trigger === "agent-reply" ? "Rework committed." : undefined;
+      for (const prompt of [
+        buildCodexOperatorPrompt(stale, trigger, undefined, reply),
+        buildOperatorTurnPrompt(stale, trigger, undefined, reply),
+      ]) {
+        expect(prompt, trigger).toContain(`${sentence} ${rule}`);
+      }
+    }
+    const current = snapshot({ baseBehindBy: 0, baseBehindBySentence: "" });
+    expect(buildCodexOperatorPrompt(current, "manual")).not.toContain(rule);
+    expect(buildOperatorTurnPrompt(current, "manual")).not.toContain(rule);
+  });
+
   it("ruling 437: a packet the operator did not raise is named as not its own, on every trigger", () => {
     // Live on AX-28 (02:12) and AX-31 (02:39): `resolve_packet` planned on an
     // agent's question and refused. CANARY: drop `packetAuthorInstruction`.

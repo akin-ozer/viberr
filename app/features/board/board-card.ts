@@ -12,9 +12,9 @@ import type { TaskSummary } from "~/shared/mapping/task.server";
  * here, where the typecheck sends it.
  *
  * Kept on purpose: the acceptance ceremony re-reads the summary from the live
- * payload (F19-27, ruling 42), so `pr`, `prChecks`, `prChecksUnread`,
- * `workRevisionSha`, the packet's type and title (and the option the
- * acceptance answers it with, ruling 471), `blockReason`,
+ * payload (F19-27, ruling 42), so `pr`, `prChecks`, `workRevisionSha`, the
+ * packet's type and title (and the option the acceptance answers it with,
+ * ruling 471), `blockReason`,
  * `atAcceptanceBoundary` and `archived` stay; `waitingOnMe` (R8-3) and `quiet`
  * (Gap-10) are the loader's viewer and activity annotations.
  */
@@ -43,7 +43,6 @@ export interface BoardCard
     | "branch"
     | "pr"
     | "prChecks"
-    | "prChecksUnread"
     | "prReview"
     | "continuity"
     | "workRevisionSha"
@@ -84,7 +83,6 @@ export function toBoardCard(task: TaskSummary & { quiet: boolean }): BoardCard {
     branch: task.branch,
     pr: task.pr,
     prChecks: task.prChecks,
-    prChecksUnread: task.prChecksUnread,
     prReview: task.prReview,
     continuity: task.continuity,
     workRevisionSha: task.workRevisionSha,
