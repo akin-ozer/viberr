@@ -1,7 +1,7 @@
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import { execFile } from "node:child_process";
 import { describeRevisionDrift } from "~/shared/revision-drift";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -5691,6 +5691,41 @@ describe("R19-1 — the operator's read-only repository view", () => {
     // nothing they could act on.
     expect(prompt).toContain("The workspace checkout failed");
     expect(prompt).toContain("The checkout reported:");
+  });
+
+  it("ruling 485: a checkout left with no `.git/HEAD` is removed as its person before the clone, which then lands from the mirror", async () => {
+    // F40-62 left a tree like this behind: files, a `.git` whose HEAD is gone,
+    // and a directory the server's own recursive remove could not empty.
+    // CANARY: skip the heal in `ensureOperatorRepoCheckout` and the mirror's
+    // clone is refused the occupied path, so it falls back to a full clone
+    // from GitHub (the warning below).
+    deploy("acme/widgets");
+    await makeOrigin();
+    const dir = checkoutDir();
+    mkdirSync(path.join(dir, ".git", "objects"), { recursive: true });
+    writeFileSync(path.join(dir, "stale.txt"), "left behind\n");
+    const tool = path.join(dir, ".wrangler", "tmp", "dev-1wnDsF");
+    mkdirSync(tool, { recursive: true });
+    writeFileSync(path.join(tool, "bundle.js"), "export {};\n");
+    chmodSync(tool, 0o500);
+    const warn = vi.spyOn(logger, "warn");
+    let warned: string[] = [];
+    try {
+      await withLocalGithub(origins, () => drive());
+      warned = warn.mock.calls.map((call) => call[0]);
+    } finally {
+      if (existsSync(tool)) chmodSync(tool, 0o700);
+      warn.mockRestore();
+    }
+
+    expect(existsSync(path.join(dir, ".git", "HEAD"))).toBe(true);
+    expect(existsSync(path.join(dir, "README.md"))).toBe(true);
+    expect(existsSync(path.join(dir, "stale.txt"))).toBe(false);
+    expect(warned).toContain("a checkout with no .git/HEAD is removed as its person and cloned again");
+    expect(warned).not.toContain(
+      "cloning from the project's repository mirror failed — cloning from GitHub",
+    );
+    expect(systemPrompt()).toContain("read-only checkout of **acme/widgets**");
   });
 
   it("a repo-less project gets the no-checkout arm and no clone is attempted", async () => {

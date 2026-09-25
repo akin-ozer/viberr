@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { taskDir } from "~/server/files/file-store-root.server";
@@ -8,7 +8,9 @@ import {
   listProjects,
   listProjectTasks,
 } from "~/server/projections/board-query.server";
+import { removeAgentTreeSync } from "~/server/runtimes/agent-trees.server";
 import { toError } from "~/shared/errors";
+import { taskWorkspaceLaunch } from "./workspace-git.server";
 
 /**
  * Task-workspace reclamation (P13, from the ARCH-6 intent audit).
@@ -107,7 +109,14 @@ export function reclaimTerminalTaskWorkspaces(
       if (!existsSync(workspace)) continue;
       const size = dirSize(workspace);
       try {
-        rmSync(workspace, { recursive: true, force: true });
+        // Ruling 485: the workspace is the agents' — a tool they ran can leave
+        // directories only its uid can enter — so it goes as the task's person
+        // (synchronously: nothing may start in it while it is going). With
+        // isolation on and no owner this refuses and the workspace stays.
+        removeAgentTreeSync(
+          workspace,
+          taskWorkspaceLaunch(db, { projectSlug: project.slug, taskKey: task.key, dataRoot: options.dataRoot }),
+        );
         removed += 1;
         bytes += size;
       } catch (error) {

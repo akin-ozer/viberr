@@ -16,7 +16,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { projectDir } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
-import { shareTreeBuiltForAgents } from "~/server/runtimes/agent-isolation.server";
+import { shareTreeBuiltForAgents, type AgentLaunch } from "~/server/runtimes/agent-isolation.server";
+import { removeAgentTree } from "~/server/runtimes/agent-trees.server";
 import {
   gitErrorText,
   redactGitOutput,
@@ -28,6 +29,7 @@ import {
   githubRepositoryUrl,
   serverGitEnv,
   setOriginUrlArgs,
+  workspaceFault,
   type GitHubAskpassEnv,
 } from "./git-clone-auth.server";
 import {
@@ -675,6 +677,11 @@ export interface WorkspaceCloneInput {
    *  direct-from-GitHub fallback). Silent on the warm hardlink clone from the
    *  mirror, which finishes in seconds. */
   onCloneProgress?: CloneProgress;
+  /** Ruling 485: whom a destination that stands in the clone's way is
+   *  removed as — the task's person (`taskWorkspaceLaunch`). Absent or null is
+   *  the server's own user, which only a server that launches no agents
+   *  allows; with isolation on the removal refuses instead. */
+  person?: AgentLaunch | null;
 }
 
 export interface WorkspaceCloneResult {
@@ -758,8 +765,15 @@ export async function cloneWorkspaceRepo(
         redactGitOutput(gitErrorText(error), { token }),
       );
       // Whatever stood in the way (a half-moved tree, a directory already
-      // there) would make the move below refuse the destination too.
-      rmSync(input.destination, { recursive: true, force: true });
+      // there) would make the move below refuse the destination too. The
+      // destination is in a workspace an agent writes, so it goes as the
+      // task's person (ruling 485), and a failure to clear it is a fault on
+      // the server's disk, never a clone's.
+      try {
+        await removeAgentTree(input.destination, input.person ?? null);
+      } catch (removal) {
+        throw workspaceFault(`\`${input.destination}\` stands in the clone's way and could not be removed`, removal);
+      }
     }
   }
 

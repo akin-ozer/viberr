@@ -1,6 +1,10 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  AGENT_UID_FLOOR,
+  resetAgentIsolationForTests,
+} from "~/server/runtimes/agent-isolation.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -128,5 +132,66 @@ describe("reclaimTerminalTaskWorkspaces", () => {
     ).toBe(1);
     expect(existsSync(terminal)).toBe(false);
     expect(existsSync(middle)).toBe(true);
+  });
+
+  describe("ruling 485: as the task's person, never as the server", () => {
+    /** Directories a test made unwritable, handed back before cleanup. */
+    const locked: string[] = [];
+    afterEach(() => {
+      for (const dir of locked.splice(0)) if (existsSync(dir)) chmodSync(dir, 0o700);
+      resetAgentIsolationForTests();
+    });
+
+    /** A stand-in `viberr-launch` (isolation `on`) that logs and execs. */
+    function standInLauncher(): () => string[] {
+      const dir = ctx.makeTempDir("viberr-launcher-");
+      const log = path.join(dir, "launch.log");
+      const launcher = path.join(dir, "viberr-launch");
+      writeFileSync(
+        launcher,
+        [
+          "#!/bin/sh",
+          'if [ "$1" = "--prepare-home" ]; then mkdir -p "$3"; exit 0; fi',
+          `printf 'uid=%s exec=%s args=%s\\n' "$VIBERR_LAUNCH_UID" "$(basename "$VIBERR_LAUNCH_EXEC")" "$*" >> '${log}'`,
+          'target=$VIBERR_LAUNCH_EXEC',
+          "unset VIBERR_LAUNCH_UID VIBERR_LAUNCH_EXEC VIBERR_LAUNCH_HOME",
+          'exec "$target" "$@"',
+          "",
+        ].join("\n"),
+      );
+      chmodSync(launcher, 0o755);
+      resetAgentIsolationForTests({ status: "on", uidFloor: AGENT_UID_FLOOR, reason: null }, { launcher });
+      return () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []);
+    }
+
+    it("a finished task's workspace goes through the launch as its owner, a tool's unwritable directory included; an unowned one is left, not removed as the server", () => {
+      // CANARY: reclaim with `rmSync` again and the owned workspace throws on
+      // the tool's directory (nothing reclaimed), while the unowned one is
+      // removed by the server's own user.
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", { stage: "done", ownerUserId: store.users.arda.id }),
+      });
+      task(store, "VIB-2", "done");
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const owned = seedWorkspace(store, "VIB-1");
+      const tool = path.join(owned, "viberr", ".wrangler", "tmp", "dev-1wnDsF");
+      mkdirSync(tool, { recursive: true });
+      writeFileSync(path.join(tool, "bundle.js"), "export {};\n");
+      chmodSync(tool, 0o500);
+      locked.push(tool);
+      const unowned = seedWorkspace(store, "VIB-2");
+      const launched = standInLauncher();
+
+      const result = reclaimTerminalTaskWorkspaces(store.db, { dataRoot: store.dataRoot });
+
+      expect(result.removed).toBe(1);
+      expect(existsSync(owned)).toBe(false);
+      expect(launched()).toEqual([
+        `uid=${AGENT_UID_FLOOR} exec=chmod args=-R u+rwX -- ${owned}`,
+        `uid=${AGENT_UID_FLOOR} exec=rm args=-rf -- ${owned}`,
+      ]);
+      expect(existsSync(path.join(unowned, "viberr", "chunk.bin"))).toBe(true);
+    });
   });
 });

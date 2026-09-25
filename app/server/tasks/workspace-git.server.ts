@@ -233,27 +233,40 @@ function noPerson(what: string): AppError {
     code: ERROR_CODES.RUN_UNAVAILABLE,
     status: 409,
     userMessage:
-      `The workspace's git could not run as its person's own user (ruling 460, pass 40 review): ${what}. ` +
-      "Nothing ran; a workspace's git never falls back to the server's own user.",
+      `The task's workspace could not be worked in as its person's own user (ruling 460, pass 40 review): ${what}. ` +
+      "Nothing ran; a workspace's git, and the removal of a tree in it (ruling 485), never falls back to the server's own user.",
   });
 }
 
 /**
- * The git for a task's workspace: as the task's owner (ruling 127: the person
- * the task's runs bill) when this server launches agents, else as the server's
- * own user. Throws a `run_unavailable` AppError when isolation is on and there
- * is nobody to run as (no task, no owner) or the person's home cannot be
- * prepared — a caller degrades on it the way it degrades on a git failure.
+ * Who works in a task's workspace: the task's owner (ruling 127: the person the
+ * task's runs bill) through the launcher when this server launches agents, and
+ * null — the server's own user — when it does not. Its git runs as them
+ * ({@link taskWorkspaceGit}), and so does the removal of a tree in it (ruling
+ * 485, `removeAgentTree`). Throws a `run_unavailable` AppError when isolation
+ * is on and there is nobody to run as (no task, no owner) or the person's home
+ * cannot be prepared.
  */
-export function taskWorkspaceGit(db: DatabaseSync, ref: TaskWorkspaceRef): WorkspaceGit {
-  if (!launchesAgents()) return workspaceGitAs(null);
+export function taskWorkspaceLaunch(db: DatabaseSync, ref: TaskWorkspaceRef): AgentLaunch | null {
+  if (!launchesAgents()) return null;
   if (!ref.taskKey) throw noPerson("no task names the person");
   const taskFile: TaskFileRef = { projectSlug: ref.projectSlug, taskKey: ref.taskKey };
   if (ref.dataRoot) taskFile.dataRoot = ref.dataRoot;
   const file = readTaskFile(taskFile);
   const owner = file?.parsed.frontmatter.ownerUserId ?? null;
   if (!owner) throw noPerson(`${ref.taskKey} has no owner`);
-  return workspaceGitAs(agentGitLaunchFor(db, owner, ref.dataRoot));
+  return agentGitLaunchFor(db, owner, ref.dataRoot);
+}
+
+/**
+ * The git for a task's workspace: as the task's owner when this server
+ * launches agents, else as the server's own user ({@link taskWorkspaceLaunch}).
+ * Throws a `run_unavailable` AppError when isolation is on and there is nobody
+ * to run as or the person's home cannot be prepared — a caller degrades on it
+ * the way it degrades on a git failure.
+ */
+export function taskWorkspaceGit(db: DatabaseSync, ref: TaskWorkspaceRef): WorkspaceGit {
+  return workspaceGitAs(taskWorkspaceLaunch(db, ref));
 }
 
 /** `git-upload-pack`'s absolute path: on `PATH`, else in git's exec path. */

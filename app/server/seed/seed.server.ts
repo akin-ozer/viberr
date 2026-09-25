@@ -1,6 +1,9 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { TASK_SHARED_DIRS } from "~/server/runtimes/agent-isolation.server";
+import { removeAgentTreeSync } from "~/server/runtimes/agent-trees.server";
+import { taskWorkspaceLaunch } from "~/server/tasks/workspace-git.server";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import {
   credentialPasswordHash,
@@ -88,6 +91,34 @@ const DERIVED_TABLES = [
   "projects",
 ];
 
+function entriesOf(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Ruling 485: the directories a run writes — each task's `workspace/`,
+ * `attachments/` and `.operator-scratch/` — are the agents' trees (a tool they
+ * ran can leave a directory only its uid can enter), so a reset removes them
+ * as each task's owner before the rest of `projects/`, the server's own, goes.
+ * Where the seed runs beside a launcher and a task has no owner, it throws
+ * rather than remove that task's trees as the server.
+ */
+function removeTaskAgentTrees(db: DatabaseSync, dataRoot: string, projRoot: string): void {
+  for (const slug of entriesOf(projRoot)) {
+    for (const key of entriesOf(path.join(projRoot, slug, "tasks"))) {
+      for (const name of TASK_SHARED_DIRS) {
+        const target = path.join(projRoot, slug, "tasks", key, name);
+        if (!existsSync(target)) continue;
+        removeAgentTreeSync(target, taskWorkspaceLaunch(db, { projectSlug: slug, taskKey: key, dataRoot }));
+      }
+    }
+  }
+}
+
 /**
  * Wipe the store back to a clean sheet: projects/, agents/profiles, the raw
  * runtime .jsonl transcript truth, and every derived table. Scoped to the
@@ -101,6 +132,7 @@ const DERIVED_TABLES = [
 export function resetStore(db: DatabaseSync, dataRoot: string): void {
   const projRoot = projectsDir(dataRoot);
   if (existsSync(projRoot)) {
+    removeTaskAgentTrees(db, dataRoot, projRoot);
     rmSync(projRoot, { recursive: true, force: true });
   }
   const profilesRoot = path.join(dataRoot, "agents", "profiles");

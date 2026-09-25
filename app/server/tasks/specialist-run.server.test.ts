@@ -1,6 +1,7 @@
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -13,7 +14,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "~/server/logging/logger.server";
+import {
+  AGENT_UID_FLOOR,
+  resetAgentIsolationForTests,
+} from "~/server/runtimes/agent-isolation.server";
+import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
@@ -4626,7 +4633,12 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // which is what sent the operator to re-provision a working one.
       expect(prompt).not.toContain("No GitHub credential is attached");
       expect(prompt).not.toContain("ran anonymously");
-      expect(prompt).toContain("never reached GitHub");
+      // Ruling 485: the local clone is a local step, so its failure is a
+      // workspace fault naming the path and git's exit.
+      expect(prompt).toContain(
+        `could not be cloned from the delivering checkout \`${ws}\`: git exit 128. ` +
+          "The fault is in the task's workspace on the server's disk; nothing here reached GitHub.",
+      );
 
       // Ruling 248 CANARY: drop `noCheckout: !!cloneFailure` from the
       // completion contract and this is 0 — the verdict path stays open for a
@@ -4728,6 +4740,226 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
           { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
           actorOf(store.users.arda), { dataRoot: store.dataRoot }),
       ).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  /**
+   * Ruling 485 (F40-62, live on WEB-5 2026-09-25). The Site Reviewer ran
+   * wrangler in its supporting checkout, which left two `mkdtemp` directories
+   * at 0700 as the agent's uid. The next review's replace was the server's
+   * `rmSync`: it deleted what the group could (`.git` first), threw EACCES on
+   * the rest, and every review after that ran with no checkout and no
+   * verdict. The throw landed before `credential = "not_involved"`, so the log
+   * said `credential: absent` and the operator asked the owner to attach a
+   * GitHub credential.
+   *
+   * The suite runs as one uid: a directory with no write bit stands in for
+   * the agent's 0700 one (the server's own recursive remove cannot empty
+   * either; its owner can once it made it removable).
+   */
+  describe("ruling 485: an agent-written checkout is replaced as its person, and a local fault blames no credential", () => {
+    /** Directories a test made unwritable, handed back before cleanup. */
+    const locked: string[] = [];
+    afterEach(() => {
+      for (const dir of locked.splice(0)) {
+        try {
+          chmodSync(dir, 0o700);
+        } catch {
+          // Gone with its tree.
+        }
+      }
+      resetAgentIsolationForTests();
+      vi.restoreAllMocks();
+    });
+
+    function deployCritic(): void {
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "critic", capabilities: [], extras: [],
+            definition: {
+              kind: "specialist", name: "critic", role: "reviewer",
+              backends: ["claude"], model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }
+
+    async function runAndStop(profileId: string): Promise<string> {
+      const run = await startAgentRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId },
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      await interruptRun(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+        actorOf(store.users.arda));
+      return run.runId;
+    }
+
+    /** A delivering checkout and one finished review, whose supporting
+     *  checkout is returned. */
+    async function reviewedOnce(): Promise<{ ws: string; dir: string }> {
+      const ws = await workspaceCheckout();
+      deployCritic();
+      await assignReviewer(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
+      await runAndStop("critic");
+      const dir = path.join(path.dirname(ws), "support", "critic", path.basename(ws));
+      expect(existsSync(path.join(dir, ".git", "HEAD"))).toBe(true);
+      return { ws, dir };
+    }
+
+    /** What wrangler left in the live checkout (`.wrangler/tmp/dev-*`). */
+    function leaveToolDir(dir: string): string {
+      const tool = path.join(dir, ".wrangler", "tmp", "dev-1wnDsF");
+      mkdirSync(tool, { recursive: true });
+      writeFileSync(path.join(tool, "bundle.js"), "export {};\n");
+      chmodSync(tool, 0o500);
+      locked.push(tool);
+      return tool;
+    }
+
+    /** A stand-in `viberr-launch` (isolation `on`), as
+     *  `workspace-git.server.test.ts` uses: it logs the uid, the binary's
+     *  name and the argv, scrubs the `VIBERR_LAUNCH_*` names and execs. */
+    function standInLauncher(): () => { uid: string; exec: string; args: string }[] {
+      const dir = ctx.makeTempDir("viberr-launcher-");
+      const log = path.join(dir, "launch.log");
+      const launcher = path.join(dir, "viberr-launch");
+      writeFileSync(
+        launcher,
+        [
+          "#!/bin/sh",
+          'if [ "$1" = "--prepare-home" ]; then mkdir -p "$3"; exit 0; fi',
+          'if [ "$1" = "--reap" ]; then exit 0; fi',
+          `printf 'uid=%s exec=%s args=%s\\n' "$VIBERR_LAUNCH_UID" "$(basename "$VIBERR_LAUNCH_EXEC")" "$*" >> '${log}'`,
+          'target=$VIBERR_LAUNCH_EXEC',
+          "unset VIBERR_LAUNCH_UID VIBERR_LAUNCH_EXEC VIBERR_LAUNCH_HOME",
+          'exec "$target" "$@"',
+          "",
+        ].join("\n"),
+      );
+      chmodSync(launcher, 0o755);
+      resetAgentIsolationForTests({ status: "on", uidFloor: AGENT_UID_FLOOR, reason: null }, { launcher });
+      return () =>
+        (existsSync(log) ? readFileSync(log, "utf8") : "")
+          .split("\n")
+          .map((line) => /^uid=(\S*) exec=(\S*) args=(.*)$/.exec(line))
+          .filter((match) => match !== null)
+          .map((match) => ({ uid: match[1] ?? "", exec: match[2] ?? "", args: match[3] ?? "" }));
+    }
+
+    it("with the launcher, a supporting checkout a tool left an unenterable directory in is replaced through the launch as the task owner's uid", async () => {
+      // CANARY: put the server's `rmSync(dir, {recursive: true, force: true})`
+      // back in cloneRepo's supporting arm: it dies on the tool's directory,
+      // and the review runs with no checkout.
+      const { dir } = await reviewedOnce();
+      leaveToolDir(dir);
+      const launched = standInLauncher();
+
+      const runId = await runAndStop("critic");
+
+      expect(existsSync(path.join(dir, ".git", "HEAD"))).toBe(true);
+      expect(existsSync(path.join(dir, "README.md"))).toBe(true);
+      expect(existsSync(path.join(dir, ".wrangler"))).toBe(false);
+      expect(getRun(store.db, runId)!.no_checkout).toBe(0);
+      const uid = String(AGENT_UID_FLOOR);
+      const lines = launched();
+      expect(lines).toContainEqual({ uid, exec: "chmod", args: `-R u+rwX -- ${dir}` });
+      expect(lines).toContainEqual({ uid, exec: "rm", args: `-rf -- ${dir}` });
+      // …and the clone into the freed path is the same person's.
+      expect(lines.some((l) => l.uid === uid && l.exec === "git" && l.args.startsWith("clone --no-local "))).toBe(true);
+    });
+
+    it("with isolation off, the server replaces it itself", async () => {
+      // CANARY: the isolation-off removal as `rmSync` (no `chmod -R u+rwX`)
+      // and the replace throws on the tool's directory.
+      const { dir } = await reviewedOnce();
+      leaveToolDir(dir);
+
+      const runId = await runAndStop("critic");
+
+      expect(existsSync(path.join(dir, ".git", "HEAD"))).toBe(true);
+      expect(existsSync(path.join(dir, ".wrangler"))).toBe(false);
+      expect(getRun(store.db, runId)!.no_checkout).toBe(0);
+    });
+
+    it("a supporting checkout that cannot be replaced is a workspace fault: `not_involved`, the path and the OS error, and no word of a credential for the operator to repeat", async () => {
+      // CANARY: move `credential = "not_involved"` back below the removal and
+      // the log says `absent` and the sentence "No GitHub credential is
+      // attached to this project" (the WEB-5 packet); drop the
+      // `workspace_fault` arm of `cloneFailureSentence` and the sentence
+      // carries a credential clause again.
+      const { dir } = await reviewedOnce();
+      // Its parent refuses the unlink: the replace cannot finish.
+      chmodSync(path.dirname(dir), 0o500);
+      locked.push(path.dirname(dir));
+      const warn = vi.spyOn(logger, "warn");
+
+      const runId = await runAndStop("critic");
+
+      expect(getRun(store.db, runId)!.no_checkout).toBe(1);
+      expect(warn).toHaveBeenCalledWith(
+        "specialist run clone failed — running WITHOUT a checkout",
+        expect.objectContaining({
+          credential: "not_involved",
+          reason: "workspace_fault",
+          fault: `\`${dir}\` could not be replaced: EACCES on ${dir}`,
+        }),
+      );
+      // What the operator and a person read: the task's timeline note, and
+      // the failure section of the reviewer's prompt it quotes verbatim.
+      const timeline = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
+        .parsed.timeline;
+      const note = timeline.find(
+        (event) => event.type === "note" && (event.text ?? "").startsWith("**Workspace checkout failed:**"),
+      );
+      expect(note?.text).toContain(`could not be replaced: EACCES on ${dir}`);
+      expect(note?.text).not.toMatch(/credential/i);
+      const prompt = lastRunSpec()?.prompt ?? "";
+      const failure = prompt
+        .split("\n")
+        .filter((line) => line.startsWith("- **The workspace has NO checkout") || line.startsWith("- Do NOT try to clone"));
+      expect(failure).toHaveLength(2);
+      expect(failure.join("\n")).toContain(`could not be replaced: EACCES on ${dir}`);
+      expect(failure.join("\n")).not.toMatch(/credential/i);
+    });
+
+    it("a delivering checkout left with no `.git/HEAD` is removed as its person and cloned again", async () => {
+      // CANARY: drop the `.git/HEAD` check before the reuse arm and the
+      // checkout is reused as it stands: its git fails and the run has no
+      // checkout.
+      const origins = ctx.makeTempDir("viberr-origins-");
+      await createLocalOrigin(origins, { repo: "acme/widgets" });
+      const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+        .parsed.frontmatter;
+      writeProject(store.dataRoot, { ...fm, repo: "acme/widgets" });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      // What an older build's half-finished remove left: files, a `.git`
+      // whose HEAD is gone, and a directory it could not empty.
+      const ws = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "widgets");
+      mkdirSync(path.join(ws, ".git", "objects"), { recursive: true });
+      writeFileSync(path.join(ws, "stale.txt"), "left behind\n");
+      leaveToolDir(ws);
+      await assignSpecialist(store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+        actorOf(store.users.arda), { dataRoot: store.dataRoot });
+
+      const runId = await withLocalGithub(origins, () => runAndStop("dev"));
+
+      expect(existsSync(path.join(ws, ".git", "HEAD"))).toBe(true);
+      expect(existsSync(path.join(ws, "README.md"))).toBe(true);
+      expect(existsSync(path.join(ws, "stale.txt"))).toBe(false);
+      expect(getRun(store.db, runId)!.no_checkout).toBe(0);
+      expect(lastRunSpec()?.prompt).toContain("is already checked out in the current directory");
     });
   });
 });

@@ -448,6 +448,21 @@ export function shareDirWithAgents(dir: string, deps: { gid?: number } = {}): vo
 }
 
 /**
+ * {@link shareDirWithAgents}, best effort: a directory left unshared makes the
+ * person's own step in it (a clone, a log write) fail in its own words, which
+ * the caller reports, rather than failing here before anything says why. Only
+ * the directory's creation still throws.
+ */
+export function shareDirWithAgentsOrWarn(dir: string): void {
+  try {
+    shareDirWithAgents(dir);
+  } catch (error) {
+    mkdirSync(dir, { recursive: true });
+    logger.warn("a directory could not be shared with the agent group", { dir, err: toError(error) });
+  }
+}
+
+/**
  * Put one of the server's own entries in the agent group with the mode `want`
  * computes, through a descriptor opened without following a symlink: an agent
  * can replace an entry inside a workspace between a look and a chmod, and a
@@ -612,8 +627,9 @@ export interface LayoutReport {
   failures: string[];
 }
 
-/** The per-task directories a run writes. */
-const TASK_SHARED_DIRS = ["workspace", "attachments", ".operator-scratch"] as const;
+/** The per-task directories a run writes: shared with the agent group here,
+ *  and removed as the task's person wherever they are removed (ruling 485). */
+export const TASK_SHARED_DIRS = ["workspace", "attachments", ".operator-scratch"] as const;
 
 /**
  * Ruling 460's store layout, asserted at every boot. The server owns the tree,
