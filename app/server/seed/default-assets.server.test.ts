@@ -232,17 +232,27 @@ describe("shipped-asset refresh (B-OP1)", () => {
 
   /**
    * Ruling 492 (F40-69): a done signal is something the task can show before
-   * acceptance, which merges and closes the task in one write. Goals kept
-   * asking for a proof only the merged or deployed code could show (the
-   * operator's option on WEB-16, WEB-13, goal-1 links 9 and 11), and nothing
-   * their authors read said otherwise. The controller guide and the operator
-   * doctrine quote `DONE_SIGNAL_RULE` word for word, and the doctrine says the
-   * operator raises the follow-up read as a `create_task` option.
+   * acceptance, which closes the task. Goals kept asking for a proof only the
+   * merged or deployed code could show (the operator's option on WEB-16,
+   * WEB-13, goal-1 links 9 and 11), and nothing their authors read said
+   * otherwise. The controller guide and the operator doctrine quote
+   * `DONE_SIGNAL_RULE` word for word, and the doctrine says the operator
+   * raises the follow-up read as a `create_task` option.
+   *
+   * Review (2026-09-26): the read's goal confirms the merge and the deploy,
+   * because the read is released at Done and the operator's own acceptance
+   * leaves the merge pending; and the doctrine waits for a person's answer
+   * to that option before the task goes up for acceptance, because an
+   * acceptance withdraws an open decision unanswered. The first doctrine
+   * said "Never hold this task back for that proof" instead.
    */
   it("ruling 492: the controller guide and the operator doctrine carry the done-signal rule, and their outgoing hashes are recorded", async () => {
     // Canaries: drop the rule from the guide's "Creating a task" section or
     // its bullet from "Chained goals"; drop the rule or the create_task
-    // sentence from the doctrine; remove either outgoing hash.
+    // sentence from the doctrine; remove either outgoing hash. Review
+    // canaries: drop the merge check from the guide's read task or its
+    // chained example; drop the doctrine's wait for the answer; restore
+    // "Never hold this task back for that proof".
     const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
     const guideRel = path.join("skills", "controller-guide", "SKILL.md");
     expect(
@@ -270,6 +280,9 @@ describe("shipped-asset refresh (B-OP1)", () => {
     const creating = section("Creating a task");
     expect(creating, "the guide's Creating a task section").toContain(DONE_SIGNAL_RULE);
     expect(creating, "the guide's Creating a task section").toContain("create both tasks in the same turn");
+    expect(creating, "the guide's Creating a task section").toContain(
+      "a goal that confirms the delivery task's change is merged and deployed before it reads",
+    );
     const chained = section("Chained goals");
     expect(chained, "the guide's Chained goals section").toContain(
       "it is something the link's task can show BEFORE acceptance",
@@ -277,10 +290,17 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(chained, "the guide's Chained goals section").toContain(
       "split in two: the delivery link, and a read link whose `blockedBy` names it",
     );
+    expect(chained, "the guide's Chained goals section").toContain(
+      "confirms the job is merged and deployed, then reads its first run on the deployed build",
+    );
     expect(doctrine, "the operator doctrine").toContain(DONE_SIGNAL_RULE);
     expect(doctrine, "the operator doctrine").toContain(
-      "raise a `create_task` option for the read first: its `newTask.blockedBy` names this task",
+      "raise a `create_task` option for the read: its `newTask.blockedBy` names this task, its `newTask.goal` has the read confirm this task's change is merged and deployed before it reads",
     );
+    expect(doctrine, "the operator doctrine").toContain(
+      "Then stop, and put this task up for acceptance only once a person has answered that option",
+    );
+    expect(doctrine, "the operator doctrine").not.toContain("Never hold this task back");
     expect(doctrine, "the operator doctrine").toContain(
       "no task owns that read (`read_board` lists none, and no link in `goalChain` plans one)",
     );

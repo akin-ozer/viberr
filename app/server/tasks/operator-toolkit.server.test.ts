@@ -1047,9 +1047,10 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * acceptance. Live on WEB-16 the operator's own `create_task` option
    * drafted "Done when, after the merge and the Workers Builds deploy, a
    * read-only post-merge read … shows the new field's value". Acceptance
-   * merges and closes a task in one write, so nothing after the merge happens
-   * inside it, and the owner rewrote the goal by hand. Every goal field the
-   * operator writes through said only "deliverable plus acceptance criteria".
+   * closes a task (a person's also merges its PR; the operator's own leaves
+   * the merge pending), so nothing after the merge happens inside it, and the
+   * owner rewrote the goal by hand. Every goal field the operator writes
+   * through said only "deliverable plus acceptance criteria".
    */
   it("ruling 492: every door the operator writes a goal through carries DONE_SIGNAL_RULE, on both backends", async () => {
     // CANARY: drop `DONE_SIGNAL_RULE` from any one door and its assertion

@@ -217,8 +217,8 @@ describe("the tool surface itself encodes the invariants", () => {
  * Ruling 492 (F40-69): a done signal is something the task can show before
  * acceptance, and every door that writes a goal says so.
  *
- * Acceptance merges the task's PR and moves it to Done in one write, so a goal
- * whose done signal only the merged or deployed code can show can never be met
+ * Acceptance moves the task to Done and nothing sits after it, so a goal whose
+ * done signal only the merged or deployed code can show can never be met
  * inside its task. On akinozer-com the controller wrote two such goals (goal-1
  * links 9 and 11, carried by WEB-12 and WEB-7), and each needed a person or an
  * extra packet before it could finish. Its four goal doors said only
@@ -252,6 +252,23 @@ describe("ruling 492: every controller door that writes a goal carries the done-
     expect(DONE_SIGNAL_RULE).toContain("a done signal is something the task can show BEFORE acceptance");
     expect(DONE_SIGNAL_RULE).toContain("that proof goes in a follow-up read task that waits on this one");
     expect(DONE_SIGNAL_RULE).toContain("split in two: the delivery link, and a read link");
+    // Review (2026-09-26): the rule is true on every acceptance path. A
+    // full-autonomy operator's acceptance leaves the PR "accepted, merge
+    // pending", and a `blockedBy` wait is done when its task reaches Done,
+    // merged or not (operator-actions "ruling 492" walks that path). So the
+    // read exists before the acceptance and confirms the merge itself.
+    // CANARY: restore the first wording ("Acceptance merges the task's PR and
+    // moves the task to Done in the same write", "raised before or at this
+    // task's acceptance").
+    expect(DONE_SIGNAL_RULE).toContain(
+      "a full-autonomy operator's acceptance never merges and leaves the merge to a person",
+    );
+    expect(DONE_SIGNAL_RULE).toContain("created before this task is accepted");
+    expect(DONE_SIGNAL_RULE).toContain(
+      "which can be before the merge and before the deploy, so the read's goal has it confirm this task's change is merged and deployed before it reads",
+    );
+    expect(DONE_SIGNAL_RULE).not.toContain("in the same write");
+    expect(DONE_SIGNAL_RULE).not.toContain("at this task's acceptance");
     const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const toolkit = buildControllerToolkit({
       db: app.db,
