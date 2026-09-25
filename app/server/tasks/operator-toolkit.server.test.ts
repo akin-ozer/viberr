@@ -331,6 +331,17 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("update_branch_from_base")).toContain("the acceptance ceremony brings the branch up to date once and merges in the same step");
   });
 
+  it("ruling 492 (review): accept_completion says it waits for the answer to the operator's own follow-up option", () => {
+    // The tool refuses while the open decision offers a create_task whose new
+    // task waits on this one, because accepting would withdraw it unanswered.
+    // Canary: drop the sentence from the accept_completion description.
+    const defs = build(withPolicy(uniform("direct"))).tools;
+    const desc = (name: string) => defs.find((t) => t.name === name)!.description;
+    expect(desc("accept_completion")).toContain(
+      "It also refuses while your open decision offers a `create_task` whose new task waits on this one (ruling 492)",
+    );
+  });
+
   it("nothing granted: Claude builds no governed tool; the Codex plan enum falls back and never advertises delivery", () => {
     const auth = withPolicy(uniform("off"));
     expect([...claudeGovernedTools(build(auth).allowedTools)]).toEqual([]);
