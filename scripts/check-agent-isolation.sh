@@ -427,6 +427,22 @@ if [ "$removed" = "removed" ] && [ ! -e "$TASK_WS" ] && [ -d "$TASK" ]; then
 else
   fail "the emptied workspace root was not removed: $removed"
 fi
+# A folder above the tree that an agent swapped for a link to a server
+# directory (the store root is 0750 in the agents' group, like this one):
+# the server's chmod and rmdir are not run through it.
+LINKED="$WS/server-owned"
+mkdir -p "$LINKED/data/kept" "$LINKED/empty" && chmod 0750 "$LINKED" "$LINKED/data" "$LINKED/empty"
+as_agent "$UID_A" "mkdir -p '$WS/sup' && ln -s '$LINKED' '$WS/sup/rev'"
+through_data=$(remove_as_person "$WS/sup/rev/data")
+through_empty=$(remove_as_person "$WS/sup/rev/empty")
+if [ "$through_data" != "removed" ] && [ "$through_empty" != "removed" ] \
+  && [ "$(stat -c '%a' "$LINKED/data")" = "750" ] && [ -d "$LINKED/data/kept" ] && [ -d "$LINKED/empty" ]; then
+  pass "the server opens and removes nothing through a folder an agent swapped for a link"
+else
+  fail "the server acted through an agent's link: data is $(stat -c '%a' "$LINKED/data" 2>&1), empty/ $([ -d "$LINKED/empty" ] && echo kept || echo removed)"
+fi
+as_agent "$UID_A" "rm -rf '$WS/sup'"
+rm -rf "$LINKED"
 
 # --- signals -------------------------------------------------------------------------
 VIBERR_LAUNCH_HOME="$HOME_A" VIBERR_LAUNCH_UID=$UID_A VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c \
