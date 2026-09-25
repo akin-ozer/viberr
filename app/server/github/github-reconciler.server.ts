@@ -1279,6 +1279,16 @@ async function reconcileTaskUnlocked(
         { userId: actor.userId ?? "", label: actor.label ?? "system" },
         { via: "authored-drift" },
       );
+      // Ruling 482 (F40-52): the external head is what merges now, so the
+      // project's gates run on it like on any delivered revision.
+      const { requestProjectGatesQuietly } = await import(
+        "~/server/tasks/project-gates.server"
+      );
+      await requestProjectGatesQuietly(
+        db,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: ctx.dataRoot },
+        "revision",
+      );
       if (!ctx.suppressDivergenceNotice && driftVoidText) {
         notifyTaskWatchers(
           db,

@@ -65,6 +65,7 @@ import { startScheduleRunner } from "./tasks/schedule.server";
 import { startGoalRunner } from "./tasks/goal-actions.server";
 import { recoverControllerConversations } from "./controller/controller-run.server";
 import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.server";
+import { recoverProjectGates } from "./tasks/project-gates.server";
 import { toError } from "~/shared/errors";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
@@ -829,6 +830,19 @@ export async function bootServer(): Promise<void> {
   // disk — all awaited internally, and it must never hold up the server coming
   // online.
   void reconcileRestartedWork(db);
+
+  // Ruling 482: a project gate run the previous process left queued or running
+  // has no worker behind it, and the acceptance gate would wait on it forever.
+  // Each is queued again; the runs themselves happen off this path.
+  void (async () => {
+    try {
+      await recoverProjectGates(db);
+    } catch (error) {
+      logger.warn("interrupted project gate runs could not be recovered", {
+        err: toError(error),
+      });
+    }
+  })();
 
   // Start the server-side schedule runner (O-3): fire due scheduled operator
   // re-runs once at boot (catching any that came due while down), then on an

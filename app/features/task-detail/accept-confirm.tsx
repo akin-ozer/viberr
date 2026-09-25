@@ -2,7 +2,8 @@ import { describeRevisionDrift } from "~/shared/revision-drift";
 import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { PrChecksRender, PrChecksUnread } from "~/shared/mapping/task.server";
-import { checksPill, checksUnreadPill, prStatePill } from "~/features/github/github-pills";
+import { checksPill, checksUnreadPill, gatesPill, prStatePill } from "~/features/github/github-pills";
+import type { GatesView } from "~/shared/project-gates";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -182,6 +183,7 @@ export function AcceptConfirm({
    *  predicate the server's write uses); this component only says which. */
   answersWith = null,
   baseBehindBy = null,
+  gates = null,
   onRefreshFirst,
   busy,
   onCancel,
@@ -191,6 +193,10 @@ export function AcceptConfirm({
   /** U39-32: how many base commits the branch lacked at the reconciler's last
    *  compare, or null when that was never measured (the board door). */
   baseBehindBy?: number | null;
+  /** Ruling 482 (F40-52): the project's gates as Viberr ran them on the
+   *  revision this click accepts, or null (no gates declared, or the board
+   *  door, whose refusal row already carries the gate's sentence). */
+  gates?: GatesView | null;
   /** Ruling 449 (O39-c): bring the branch up to date and re-review it before
    *  accepting. Offered only where the caller passes it (the task page's
    *  direct Accept) and only while the branch is behind its base. */
@@ -569,6 +575,36 @@ export function AcceptConfirm({
               )}
             </span>
           </div>
+          {/* Ruling 482 (F40-52): the owner accepted two production deploys on
+              agents' reports of the gate exit codes. This row is the server's
+              own run, bound to the sha on the Revision row above. A failure
+              also stands in the Blocked row below, because it refuses a plain
+              acceptance; force accept records it as bypassed. */}
+          {gates && (
+            <div className={gates.state === "passed" ? "obs" : "obs warn"}>
+              <span className="k">Gates</span>
+              <div>
+                <Pill kind={gatesPill(gates.state).kind} sm quiet={gatesPill(gates.state).quiet}>
+                  {gatesPill(gates.state).label}
+                </Pill>{" "}
+                {gates.line}
+                {gates.rows.some((r) => !r.ok) && (
+                  <ul className="gate-results">
+                    {gates.rows
+                      .filter((r) => !r.ok)
+                      .map((r) => (
+                        <li key={r.name} className="bad">
+                          <Icon name="x" />
+                          <span className="gate-name mono">{r.name}</span>
+                          <span className="gate-outcome">{r.outcome}</span>
+                          <span className="gate-wall">{r.wall}</span>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
           {/* R19-5: the skip is allowed — being quiet about it is not. Name the
               stages this jump goes past, in order, plus the review gate; the
               Force accept button that opened this dialog says the same thing in

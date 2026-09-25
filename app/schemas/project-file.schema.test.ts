@@ -169,6 +169,33 @@ describe("parseProjectFrontmatter — requiredReviewers (ruling 178)", () => {
  * a field that falls back names the value it used ("; using <fallback>."),
  * where it used to say "— using a default." and name nothing.
  */
+describe("parseProjectFrontmatter — gates (ruling 482)", () => {
+  it("keeps valid gates in order, drops only a malformed row, and stays absent when undeclared", () => {
+    // CANARY: parse `gates` with the whole-array `tolerant` and one bad row
+    // silently stops every gate from running or blocking.
+    const { frontmatter, diagnostics } = parseProjectFrontmatter(
+      {
+        slug: "proj",
+        gates: [
+          { name: "install", command: "pnpm install --frozen-lockfile" },
+          { name: "build" }, // malformed: no command
+          { name: "check", command: "pnpm astro check", timeoutSeconds: 900 },
+        ],
+      },
+      { fallbackSlug: "proj" },
+    );
+    expect(frontmatter.gates).toEqual([
+      { name: "install", command: "pnpm install --frozen-lockfile" },
+      { name: "check", command: "pnpm astro check", timeoutSeconds: 900 },
+    ]);
+    expect(diagnostics.some((d) => d.path === "gates[1]")).toBe(true);
+    // A project.md without the key gains none on the next write.
+    expect(
+      parseProjectFrontmatter({ slug: "proj" }, { fallbackSlug: "proj" }).frontmatter.gates,
+    ).toBeUndefined();
+  });
+});
+
 describe("parseProjectFrontmatter — fallback wording (ruling 458(h))", () => {
   it("names the fallback for a missing or invalid field", () => {
     const { frontmatter, diagnostics } = parseProjectFrontmatter(

@@ -523,6 +523,14 @@ const BASELINE_COLUMNS: readonly {
         name: "required_reviewers_json",
         ddl: "required_reviewers_json TEXT NOT NULL DEFAULT '[]'",
       },
+      // Ruling 482: the project's declared gates. Named by the rebuilder on
+      // every project write and read by every task walk, like the column
+      // above; its DEFAULT is the truth for every project that predates it
+      // (none declared gates before the key existed).
+      {
+        name: "gates_json",
+        ddl: "gates_json TEXT NOT NULL DEFAULT '[]'",
+      },
     ],
   },
   {

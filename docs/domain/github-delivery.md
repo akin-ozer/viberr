@@ -563,6 +563,43 @@ stage where the reviewer works (`task.transition {boundary: "rework", via:
 The commits without the task's `[KEY]` prefix are kept as `github.otherCommits` and the
 Commits card lists them apart as "Also on the branch · not this task's".
 
+**Project gates: Viberr runs them itself** (ruling 482,
+`app/server/tasks/project-gates.server.ts`, `app/shared/project-gates.ts`). `project.md`
+declares `gates: [{name, command, timeoutSeconds?}]` (Settings → Gates, or the
+controller's `set_project_gates`; `edit-policy`). A run is asked for by a delivery
+(`performDelivery`'s delivered outcome), by a workspace reconcile that mints a new
+revision while the task's pull request stands, by the reconciler's external revision
+(ruling 179), by a changed gate list (every open task with a delivered revision), by a
+person's "Run gates" on the GitHub card (maintainer+ or the owner, audited
+`task.gates.requested`), and at boot for a record a restart left `queued` or `running`.
+The request only writes `gateRun: queued` onto the task and enqueues; one worker runs one
+task's gates at a time, instance-wide, off every request path. The run clones the
+delivering checkout (`clone --no-local`, as the task owner through the ruling-460
+launcher, pass 40 review R-seams-1/2) into `workspace/.gates/<runId>/`, fetches origin's
+heads from the mirror when the revision is not there (an external head), detaches at the
+revision's sha and runs each command with `sh -c` in order, as the owner's agent uid with
+`filteredSpawnEnv()` and the agent's own `$HOME` (with no launcher, as the server's own
+user, like workspace git; with isolation on and no owner, the run records an error and
+never runs as the server). Each gate is its own process group, stopped at its timeout
+(600 s by default; SIGTERM, then the group killed after 5 s) and swept by its
+`VIBERR_RUN_ID` marker afterwards. Per gate the task records the exit code (`null` when
+killed or not started; a signal reads as 128 + n), `timedOut`, the wall time and the log,
+saved as the task attachment `gate-<sha7>-<NN>-<name>-<stamp>.log` (the head 256 KB and
+the tail kept, the middle cut). The record binds to the revision id and sha like a
+verdict; results land as each gate finishes; the finished run writes one note from
+"Project gates" that claims its logs, and audit `task.gates.run`. A log never counts as
+a file a concurrent run produced (`isGateLogName` in `attachmentNamesSince`). The PR card,
+the accept dialog, the operator's snapshot (`gates`) and every agent's canonical anchor
+print the same line, "Gates on `<sha7>`: N/M exit 0 (run by Viberr)". **A plain
+acceptance waits until every declared gate exited 0 on the revision under review**:
+missing, stale (an edited list), queued, running, failed and could-not-run evidence all
+refuse (`projectGatesRefusal`, in `acceptanceRefusalReasons` and the projection's
+`acceptanceBlockReason`, after the verdict gate). Force accept bypasses it and names it in
+its record. A failing gate re-invokes the operator with the `gates-failed` trigger. A
+`verified` (no-change) revision and a files-only delivery have no checkout to gate and
+owe nothing; a base refresh that keeps the revision (ruling 439) keeps its gate record, as
+it keeps its verdicts.
+
 ## 6. Reconciliation and freshness
 
 `reconcileTask` (`github-reconciler.server.ts`, serialized per task) fetches the branch

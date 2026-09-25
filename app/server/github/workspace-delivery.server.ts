@@ -621,6 +621,16 @@ export async function reconcileWorkspaceDelivery(
           actor: { userId: null, label: "system:workspace-reconcile" },
         });
       }
+      // Ruling 482 (F40-52): a new head on a task whose pull request stands is
+      // the delivered head moving before verdicts count, so the project's
+      // gates are queued on it now. Before the first delivery the delivery
+      // itself asks.
+      if (workRevisionPatch && fm.pr && fm.pr.state !== "closed" && fm.pr.state !== "merged") {
+        const { requestProjectGatesQuietly } = await import(
+          "~/server/tasks/project-gates.server"
+        );
+        await requestProjectGatesQuietly(db, { projectSlug, taskKey, dataRoot }, "revision");
+      }
     }
     // The branch-reconciled audit fires only for a real BRANCH or COMMIT change,
     // not for a workRevision-only stamp (F10-15): re-reconciling an unchanged

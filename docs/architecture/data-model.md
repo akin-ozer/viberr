@@ -65,6 +65,13 @@ Created by the code that needs them:
                                                     one Claude run's skill plugin (ruling 180), beside the
                                                     checkout it serves (a supporting run's sits under
                                                     support/<profileId>/); removed when the run settles
+  projects/<slug>/tasks/<KEY>/workspace/.gates/<runId>/<repo-name>/
+                                                    one project-gate run's clone of the delivering
+                                                    checkout, detached at the revision's sha and made
+                                                    by the task owner's agent uid (ruling 482);
+                                                    removed when the run finishes. Each gate's log
+                                                    lands in attachments/ as
+                                                    `gate-<sha7>-<NN>-<name>-<stamp>.log`
   projects/<slug>/tasks/<KEY>/.operator-scratch/    the Codex operator's working directory
   projects/<slug>/goals/<goal-id>.md                chained goals (ruling 99)
   projects/<slug>/.repo-mirror/<owner>__<repo>.git  the project's bare repository mirror (ruling 87);
@@ -152,7 +159,7 @@ files) · **C** cache/operational (safe to lose).
 
 | Table | Kind | What it holds |
 |---|---|---|
-| `projects` | D | One row per `project.md`: `slug`, `name`, `archived`, `repo`, `default_branch`, `task_prefix`, `description`, JSON copies `stages_json`, `workflow_json`, `agent_policy_json`, `credential_policy_json`, `guardrails_json`, `required_reviewers_json` (ruling 178: the required-reviewer rules RESOLVED to stage and agent names at project-rebuild time, so the task walk prints the acceptance gate's sentence from the row), `source_path`, `content_hash`, `parsed_at`. |
+| `projects` | D | One row per `project.md`: `slug`, `name`, `archived`, `repo`, `default_branch`, `task_prefix`, `description`, JSON copies `stages_json`, `workflow_json`, `agent_policy_json`, `credential_policy_json`, `guardrails_json`, `required_reviewers_json` (ruling 178: the required-reviewer rules RESOLVED to stage and agent names at project-rebuild time, so the task walk prints the acceptance gate's sentence from the row), `gates_json` (ruling 482: the declared gates, `[]` when none, so the task walk's acceptance block says when the gates have not passed on the revision under review; a change cascades into every task like the reviewer rules), `source_path`, `content_hash`, `parsed_at`. |
 | `project_members` | D | `members[]` from `project.md`: (`project_slug`, `user_id`) → `role` (`admin \| maintainer \| contributor \| viewer`). |
 | `task_projections` | D | One row per `task.md`, keyed (`project_slug`, `task_key`): `title`, `stage`, **derived** `readiness` plus `stored_readiness`, `waiting` (CHECK mirrors `WAITING_VALUES`, including the projection-only `schedule`, ruling 225), `urgent`, `priority`, `labels_json`, `due_date`, `blocked_by_json` (ruling 131: the task's `blockedBy` list verbatim; entry states are resolved at read time, never stored), `archived`, derived `validation` (CHECK mirrors `VALIDATION_VALUES`), `validation_block_reason`, `acceptance` (`forced`), `continuity` (`degraded`), `owner_user_id`, the engagement snapshots `specialist_json` (the delivering engagement) / `reviewers_json` (the supporting engagements) / `operator_json` (the operator assignment), `branch`, `repo` (always the project's), `pr_json`, `github_json`, `work_revision_sha`, `goal`, `packet_json`, `recommendation_count` and `recommendation_kinds` (the distinct kinds of the pending recommendations, sorted and comma-joined), `schedules_json`, `event_count`, `comment_count`, `diagnostic_count`, `goal_id` / `goal_link_index`, `created_at`, `updated_at`, `source_path`, `content_hash`, `parsed_at`, `board_rank`. |
 | `task_events` | D | The task timeline, one row per entry: `id`, `project_slug`, `task_key`, `position` (0 = newest), `occurred_at`, `type`, `actor_kind` (`human \| agent \| operator \| controller \| system`; an unrecognized author projects as `system`), `actor_ref` (a user id, `agent/<profileId>`, `operator`, `controller`, or a system id), a denormalized `actor_json` snapshot, `title`, `text`, `to_agent`, `evidence_json`, `attachments_json`. A re-project keeps the rows of events that did not change (aligned from the oldest end; their `id` survives, their `position` shifts, changed content is updated in place) and deletes and inserts the rest (ruling 457), so an appended comment re-issues no existing id. |
@@ -326,7 +333,8 @@ second adds each missing `BASELINE_COLUMNS` entry with `ALTER TABLE … ADD COLU
   before it; at a restart or a failed start it stops, and what was still waiting is marked
   earlier history that boot recovery does not note; a root the first `reply_to` backfill
   already linked is walked again when it gains `unlinked_history`, ruling 465's dated note);
-- `projects`: `required_reviewers_json`;
+- `projects`: `required_reviewers_json`, `gates_json` (ruling 482; `'[]'` is the truth for
+  every project that predates it);
 - `task_projections`: `recommendation_kinds`.
 
 It also creates the `BASELINE_TABLES` (`project_github_health`, `user_backend_credentials`,

@@ -120,6 +120,49 @@ describe("task.md round-trip", () => {
     expect(serializeTaskFile(parsed)).toBe(first);
   });
 
+  it("ruling 482: the gate run record round-trips whole, and a malformed one reads as absent", () => {
+    // CANARY: read `gateRun` under another name in parseTaskFrontmatter and
+    // the record is never read back, so the next write loses it.
+    const gateRun = {
+      id: "gate_1",
+      revisionId: "rev_9f2c",
+      headSha: "a91f7c2e".padEnd(40, "0"),
+      status: "finished" as const,
+      reason: "delivery",
+      requestedAt: "2026-09-25T10:14:58.000Z",
+      startedAt: "2026-09-25T10:15:00.000Z",
+      finishedAt: "2026-09-25T10:16:12.000Z",
+      error: null,
+      results: [
+        {
+          name: "build",
+          command: "pnpm build",
+          exitCode: 0,
+          timedOut: false,
+          wallMs: 41230,
+          log: "gate-a91f7c2-01-build-20260925T101500Z.log",
+        },
+        { name: "hang", command: "sleep 99", exitCode: null, timedOut: true, wallMs: 600000, log: null },
+      ],
+    };
+    const withRun = { ...FULL, frontmatter: { ...FULL.frontmatter, gateRun } };
+    const text = serializeTaskFile(withRun);
+    const { parsed, diagnostics } = parseTaskFileContent(text, { fallbackKey: "VIB-142" });
+    expect(diagnostics).toEqual([]);
+    expect(parsed.frontmatter.gateRun).toEqual(gateRun);
+    // Stable from the first rewrite on (the parse puts the key in its
+    // canonical place, before `github`).
+    const rewritten = serializeTaskFile(parsed);
+    expect(serializeTaskFile(parseTaskFileContent(rewritten, { fallbackKey: "VIB-142" }).parsed)).toBe(
+      rewritten,
+    );
+    const broken = parseTaskFileContent(text.replace("status: finished", "status: sideways"), {
+      fallbackKey: "VIB-142",
+    });
+    expect(broken.parsed.frontmatter.gateRun).toBeUndefined();
+    expect(broken.diagnostics.some((d) => d.path === "gateRun")).toBe(true);
+  });
+
   it("clearing the packet removes the section; round-trip still holds", () => {
     const noPacket = { ...FULL, packet: null };
     const text = serializeTaskFile(noPacket);

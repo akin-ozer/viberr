@@ -16,6 +16,7 @@ import {
   UPLOADABLE_EXTENSIONS,
 } from "~/shared/attachment-kinds";
 import path from "node:path";
+import { isGateLogName } from "~/shared/project-gates";
 import {
   resolveStoreSegment,
   taskAttachmentsDir,
@@ -145,6 +146,10 @@ export function attachmentNamesSince(
   const inWindow: { name: string; at: string }[] = [];
   for (const name of names) {
     if (name.startsWith(".")) continue;
+    // Ruling 482: a gate log is Viberr's own evidence, written by the gate
+    // runner while any run may be in flight. Claiming it for that run would
+    // name the run as its author and, for a deliverer, move `deliveredAt`.
+    if (isGateLogName(name)) continue;
     try {
       const st = statSync(path.join(dir, name));
       if (!st.isFile()) continue;

@@ -177,6 +177,21 @@ fileLeases:                       # ruling 245: which TASK owns which shared pat
   - paths: ["pnpm-lock.yaml"]
     taskKey: SHOP-11
     reason: regenerating it for the cart importer
+gates:                            # ruling 482: the commands VIBERR runs on every
+                                  # delivered revision, in order, each with `sh -c`
+                                  # in a fresh checkout of the revision's sha, as the
+                                  # task owner's agent uid (ruling 460), with no
+                                  # credential. A plain acceptance waits until every
+                                  # one exited 0 on the revision under review. Absent
+                                  # (not `[]`) when the project declares none; at most
+                                  # 10; `timeoutSeconds` 1..3600, 600 when absent. Set
+                                  # on Settings → Gates or by set_project_gates
+                                  # (edit-policy).
+  - name: install
+    command: pnpm install --frozen-lockfile
+  - name: build
+    command: pnpm build
+    timeoutSeconds: 900
 ---
 
 Project description prose (markdown body).
@@ -189,7 +204,7 @@ Notes:
   `tasks/<PREFIX>-<n>` directories rescues a stale/missing counter. Concurrent
   creates can never mint the same key.
 - Every list (`stages`, `workflow`, `members`, `agents`, `guardrails`,
-  `requiredReviewers`, `fileLeases`) parses per row, and each deployment's `capabilities`
+  `requiredReviewers`, `fileLeases`, `gates`) parses per row, and each deployment's `capabilities`
   per grant: one malformed grant costs only itself, with a diagnostic. A missing `stages`
   list is an error diagnostic (`project.no_stages`).
 - Membership is authoritative here (files are truth); `project_members` in
@@ -415,6 +430,24 @@ blockedBy:                        # ruling 131: what this task WAITS ON, in exac
                                   # reserved taskPrefix: `GOAL-1` would read as
                                   # a goal reference missing its link
 acceptance: forced                # optional; N20-14 — set when an admin force-accepted
+gateRun:                          # optional; ruling 482 — the project's gates as VIBERR
+  id: gate_Xk2…                   # last ran them, bound to a revision like a verdict.
+  revisionId: rev_9f2c            # The workRevision.id and the full sha checked out.
+  headSha: a91f7c2e…              # status: queued | running | finished | error (the
+  status: finished                # run could not execute; `error` says why). Written
+  reason: delivery                # by the server alone: a delivery, a new head while a
+  requestedAt: 2026-09-25T10:14:58Z  # PR stands, the reconciler's external revision, a
+  startedAt: 2026-09-25T10:15:00Z    # changed gate list or a person's "Run gates" asks;
+  finishedAt: 2026-09-25T10:16:12Z   # each result lands as it finishes. A malformed
+  error: null                     # record reads as absent (gates not run: fail closed)
+  results:
+    - name: build
+      command: pnpm build
+      exitCode: 0                 # null when killed at its timeout or never started
+      timedOut: false
+      wallMs: 41230
+      log: gate-a91f7c2-02-build-20260925T101512Z.log  # the task attachment holding
+                                  # the combined output (null when it could not be saved)
 headCheckWaiver:                  # optional; ruling 226 — a maintainer took a merge whose
   prNumber: 114                   # containment check GitHub refused to run. Pinned to all
   revisionHeadSha: a1b2c3d…       # three: the gate re-reads the LIVE head and honours it only

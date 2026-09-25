@@ -1230,6 +1230,61 @@ const reviewVerdictSchema = z
   .loose();
 export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;
 
+// ------------------------------------------- project gate runs (ruling 482)
+
+/** One project gate's outcome on one revision. */
+const gateResultSchema = z
+  .object({
+    /** The gate's name and command AS RUN, so a gate list edited afterwards
+     *  can be told from the one this evidence is about. */
+    name: z.string().min(1),
+    command: z.string().min(1),
+    /** The process's exit code; null when it never returned one (killed at
+     *  its timeout, or it could not start). */
+    exitCode: z.number().int().nullable(),
+    /** Killed at its timeout. */
+    timedOut: z.boolean().default(false),
+    /** Wall-clock milliseconds from spawn to exit. */
+    wallMs: z.number().int().min(0),
+    /** The combined stdout/stderr, saved as a task attachment (its name),
+     *  or null when it could not be saved. */
+    log: z.string().nullable().default(null),
+  })
+  .loose();
+export type GateResult = z.infer<typeof gateResultSchema>;
+
+/**
+ * Ruling 482 (pass 40, F40-52): the project's gates as Viberr RAN them on one
+ * revision — typed evidence, bound to the revision like a verdict.
+ *
+ * Written by the server alone (`project-gates.server.ts`): queued when a
+ * delivery or a new head asks for it, running while the gates execute (each
+ * result lands as it finishes), `finished` with every result, or `error` when
+ * the run could not execute at all (no checkout, the revision missing from
+ * it, the launch refused) — and then `error` says why. The latest run only;
+ * the timeline keeps one event per finished run.
+ */
+const gateRunSchema = z
+  .object({
+    id: z.string().min(1),
+    /** The `workRevision.id` the gates ran on. A newer revision makes this
+     *  run history for the gate, exactly as it makes a verdict stale. */
+    revisionId: z.string().min(1),
+    /** The full sha checked out for the run. */
+    headSha: z.string().min(1),
+    status: z.enum(["queued", "running", "finished", "error"]),
+    /** What asked: `delivery`, `revision`, `person`, `gates-changed`,
+     *  `restart`. Display only. */
+    reason: z.string().default(""),
+    requestedAt: z.string().min(1),
+    startedAt: z.string().nullable().default(null),
+    finishedAt: z.string().nullable().default(null),
+    error: z.string().nullable().default(null),
+    results: z.array(gateResultSchema).default([]),
+  })
+  .loose();
+export type GateRun = z.infer<typeof gateRunSchema>;
+
 // -------------------------------------------------------- frontmatter
 
 /** Ruling 132: one recorded base refresh (see `baseRefreshes` below). */
@@ -1407,6 +1462,9 @@ const taskFrontmatterFields = {
     })
     .nullable()
     .optional(),
+  /** Ruling 482: the project's gates as Viberr last ran them on this task
+   *  (absent until a run is first asked for). */
+  gateRun: gateRunSchema.optional(),
   github: githubCacheSchema.nullable(),
   /** Chained-goal back-reference (ruling 99): this task is one LINK of a goal
    *  chain. The chain itself is canonical in
@@ -1796,6 +1854,8 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   // gate that re-reads it would refuse forever and the override would be a
   // button that does nothing. The canary found exactly that.
   "headCheckWaiver",
+  // Ruling 482: the server's own gate evidence.
+  "gateRun",
   "github",
   "goalRef",
   "createdAt",
@@ -2215,6 +2275,17 @@ export function parseTaskFrontmatter(
       data,
       "headCheckWaiver",
       taskFrontmatterFields.headCheckWaiver,
+      undefined,
+    ),
+    // Ruling 482: absent means no gate run was ever asked for. A malformed
+    // record falls back to absent with a diagnostic, which reads as "the gates
+    // have not run on this revision" and blocks acceptance until they do: the
+    // fail-closed direction, and the next run rewrites the whole record.
+    gateRun: tolerant(
+      diagnostics,
+      data,
+      "gateRun",
+      taskFrontmatterFields.gateRun,
       undefined,
     ),
     github: tolerant(

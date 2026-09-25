@@ -497,7 +497,9 @@ bound to the review subject (§6). A run whose workspace could not be provisione
 records no verdict (ruling 248). The reason is capped at 2,000 characters
 (`VERDICT_REASON_MAX_CHARS`), and the full report stays on the timeline as a "Review
 verdict" comment that compaction never folds (rulings 292, 317). The standing verdicts
-ride whole in every agent's canonical anchor (ruling 392). A project member's GitHub
+ride whole in every agent's canonical anchor (ruling 392), and so does the project's gate
+record on the revision under review, each gate's outcome, time and log, with the rule
+that an agent never re-runs the gates to report them (ruling 482). A project member's GitHub
 approval on the PR, whose `commit_id` equals the delivered head and whose login maps
 to a member through `users.github_handle`, counts as an approving verdict (ruling 68);
 anything ambiguous fails closed with the reason recorded.
@@ -776,6 +778,18 @@ them.
    rule: `validation` is derived from the ENGAGED required reviewers alone, so a task
    whose declared reviewer never ran can read `healthy` (another reviewer approved) or
    `changed` while the acceptance box beside it prints the rule's sentence.
+4b. **Project gates** (ruling 482): when `project.md` declares `gates`, every one must
+   have exited 0 in Viberr's own run on the revision under review (`gateRun`, bound to the
+   revision id and sha). A run that is missing, queued or running, made under an earlier
+   gate list, failed, or could not execute refuses with its own sentence ("The project's
+   gates failed on WEB-4's revision `a95c337`: 3/4 exit 0 (`build` exit 1). Rework the
+   branch; …"). ONE pure gate, `projectGatesRefusal` (`app/shared/project-gates.ts`),
+   read by the refusal stack after the verdict gate, by the projection's
+   `validation_block_reason` (the `projects` row carries the list as `gates_json`, and an
+   edit cascades into every task row), by the operator's `notAcceptableReason` and by the
+   force disclosure, which names it among the bypassed gates. Force accept bypasses it.
+   A `verified` revision and a files-only delivery owe no gates. How the run happens is
+   [github-delivery.md §5](github-delivery.md#5-revisions-verdicts-and-acceptance).
 5. **PR head containment** (`acceptancePrHeadCheck`): the PR head must contain the
    delivered commit. A head ahead of the reviewed revision is accepted with a disclosed
    divergence (ruling 42; since ruling 132 the disclosure is the classified drift

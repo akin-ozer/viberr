@@ -3702,6 +3702,26 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
     expect(wakes).toEqual(["pr-diverged"]);
   });
 
+  it("ruling 482: the external head is gated like a delivered one", async () => {
+    // CANARY: drop the gate request after `returnChangedRevisionToReview` in
+    // reconcileTask and the moved head carries no gate record at all.
+    const { store, run } = seedApproved();
+    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...pf.parsed.frontmatter,
+      gates: [{ name: "build", command: "true" }],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const parsed = await run();
+    const { whenProjectGatesIdle } = await import("~/server/tasks/project-gates.server");
+    await whenProjectGatesIdle();
+    expect(parsed.frontmatter.gateRun).toMatchObject({
+      revisionId: parsed.frontmatter.workRevision!.id,
+      headSha: HEAD,
+      reason: "revision",
+    });
+  });
+
   it("returns a task that sits past its verdict stage to the stage where the reviewer works", async () => {
     // The reviewer is eligible at `impl`; the task sits at `review` (the
     // acceptance boundary on the GOVERNED template). The moved head sends it

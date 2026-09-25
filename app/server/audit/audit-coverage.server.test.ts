@@ -1064,6 +1064,38 @@ describe("governed actions record audit rows (table-driven)", () => {
           );
         },
       },
+      {
+        // Ruling 482: the project's gates (Settings → Gates, the controller's
+        // set_project_gates).
+        name: "setProjectGates",
+        action: "project.gates.updated",
+        run: async () => {
+          const { setProjectGates } = await import(
+            "~/features/project-settings/settings-actions.server"
+          );
+          await setProjectGates(
+            store.db,
+            { projectSlug: store.slug, gates: [{ name: "build", command: "true" }] },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
+      {
+        // Ruling 482: a person asks Viberr to run the gates again.
+        name: "runProjectGatesByHand",
+        action: "task.gates.requested",
+        taskKey: "VIB-2",
+        run: async () => {
+          const { runProjectGatesByHand } = await import("~/server/tasks/task-actions.server");
+          await runProjectGatesByHand(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-2" },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
       // Ruling 469: an MCP connection's OAuth sign-in, against the in-test
       // authorization server. Instance-wide: the registry is org-level.
       ...(["org.mcp.oauth_connected", "org.mcp.oauth_failed", "org.mcp.oauth_signed_out"] as const).map(
@@ -1133,6 +1165,8 @@ describe("governed actions record audit rows (table-driven)", () => {
         "org.mcp.oauth_connected",
         "org.mcp.oauth_failed",
         "org.mcp.oauth_signed_out",
+        // Ruling 482: the project's gate list, a project-scoped row.
+        "project.gates.updated",
       ].includes(row.action);
       if (!taskless) {
         expect(

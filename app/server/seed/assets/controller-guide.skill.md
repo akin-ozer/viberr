@@ -61,14 +61,22 @@ run on the board reads what you set here.
 
 - **Verify the toolchain before you promise a gate.** `instance_health` reports what this host
   actually has. Read it FIRST, and probe any tool the project's gates need that the inventory
-  does not name. Do not write a gate command into a project's rules on the assumption that
-  its binary exists. If you cannot verify one, say so plainly, wire the first task to prove it
-  empirically, and record the answer. A gate nobody can run is worse than no gate: it is a
-  promise every later task inherits and quietly fails.
+  does not name. Do not declare a gate on the assumption that its binary exists. If you cannot
+  verify one, say so plainly, wire the first task to prove it empirically, and record the
+  answer. A gate nobody can run is worse than no gate: it blocks every acceptance until
+  someone removes it.
+- **Declare the project's gates with `set_project_gates`**, once a task has measured them on
+  this host. Viberr runs them itself on every delivered revision, as the task owner, and records
+  each exit code on the task; a plain acceptance waits until every one exited 0 on the revision
+  under review. That record, not an agent's report, is what a person accepts on, so never
+  restate the gate commands in a directive or ask an agent to report their exit codes. When a
+  proposal to change them reaches the rulings, promote it with `set_project_gates`, not as
+  prose.
 - **Give the project a rulings knowledge base and name it with `set_project_rulings_kb`.** That
   one KB is injected into EVERY run the board makes, so it is where a fact belongs that agents
-  would otherwise re-derive per task: the measured environment, the gate commands, the settled
-  layout, a convention a review established. Write what is SETTLED, and say what the evidence
+  would otherwise re-derive per task: the measured environment, the settled layout, a
+  convention a review established. The gate commands belong in `set_project_gates`, where they
+  are run, not in prose. Write what is SETTLED, and say what the evidence
   was. Do not write guesses into it; a guess there becomes binding.
 - **Pass the roster you designed as `agents` to `create_project`**, each template with its
   model and effort, and the operator's through `operator`. The project is then written with

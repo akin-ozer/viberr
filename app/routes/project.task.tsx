@@ -46,6 +46,7 @@ import {
   dismissRecommendation,
   forceAcceptCompletion,
   manualDeliverForReview,
+  runProjectGatesByHand,
   refreshAndReview,
   releaseOwner,
   requestPacketMaintainerDecision,
@@ -920,6 +921,16 @@ export async function action({ request, params }: Route.ActionArgs) {
               },
               { status: 409 },
             );
+      }
+      case "run-gates": {
+        // Ruling 482: run the project's gates on the revision under review
+        // again. Same tier as a manual delivery (maintainer+ or the owner),
+        // enforced and audited inside runProjectGatesByHand; queued, never run
+        // on this request.
+        const outcome = await runProjectGatesByHand(db, { projectSlug, taskKey }, actor);
+        return outcome.status === "not_owed"
+          ? data({ ok: false as const, error: outcome.message }, { status: 409 })
+          : { ok: true as const, intent, toast: outcome.message };
       }
       case "attach-file": {
         // F39-6: the human writer the attachments panel never had. Multipart,

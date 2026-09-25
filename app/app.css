@@ -8013,3 +8013,29 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 .conn-reach-list .mono { color: var(--muted); overflow-wrap: anywhere; }
 .conn-reach-ro, .conn-reach-note { font-size: .75rem; color: var(--faint); }
 .conn-reach-note { margin: .375rem 0 0; }
+
+/* ---------- appended: ruling 482, project gates ---------- */
+/* The PR card's gate record: the one-line verdict as a `.kv-row` like the
+   rows above it (the line wraps: it names a sha and a count), then one line
+   per gate — a pass/fail glyph in the diff pair's colours, the gate's name,
+   its outcome, its time and its log. The accept dialog's Gates row reuses the
+   same list. A gate row on Settings is a lease row whose command field takes
+   the room, set in the code face because it is a command. */
+.gate-block .kv-row .v { flex-wrap: wrap; justify-content: flex-end; text-align: right; font-weight: 600; }
+.gate-results {
+  list-style: none; margin: .25rem 0 .5rem; padding: 0;
+  display: grid; gap: .25rem; font-size: .75rem;
+}
+.gate-results li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center; gap: .5rem;
+}
+.gate-results li .ico { width: 12px; height: 12px; }
+.gate-results li.ok .ico { color: var(--teal-dark); }
+.gate-results li.bad .ico, .gate-results li.bad .gate-outcome { color: var(--coral-dark); }
+.gate-results .gate-name { overflow-wrap: anywhere; }
+.gate-results .gate-outcome { font-weight: 600; }
+.gate-results .gate-wall { color: var(--faint); font-variant-numeric: tabular-nums; }
+.gate-results .gate-log { color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; }
+.gate-row .guard-ctl.cmd { flex: 2 1 16rem; }
+.gate-row .guard-ctl.cmd input { font-family: var(--font-mono); }

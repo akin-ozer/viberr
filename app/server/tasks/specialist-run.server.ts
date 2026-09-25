@@ -550,6 +550,12 @@ async function freshRunAnchor(
       // Ruling 245(b): resolved, so a run is never warned off a file whose
       // holder has already landed.
       fileLeases: activeFileLeases(projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+      // Ruling 482: the project's gates as Viberr ran them, so a reviewer
+      // reads the record instead of re-running the gates to report them.
+      gates:
+        readProjectFile(
+          ctx.dataRoot ? { projectSlug, dataRoot: ctx.dataRoot } : { projectSlug },
+        )?.parsed.frontmatter.gates ?? [],
     });
   } catch (error) {
     logger.warn("canonical anchor could not be built for a fresh run", {

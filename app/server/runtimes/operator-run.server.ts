@@ -227,6 +227,9 @@ export interface RunOperatorInput {
     /** Ruling 332: a person pressed Accept and the acceptance-time refresh
      *  found the branch in conflict with the base. */
     | "pr-conflicting"
+    /** Ruling 482: the project's gates, run by Viberr on the revision under
+     *  review, did not all exit 0. */
+    | "gates-failed"
     | "scheduled"
     | "manual";
   /** Ruling 141: the schedule occurrence this trigger fires for, so a refusal
@@ -4641,6 +4644,33 @@ function operatorTurnDoctrine(
       "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
     );
   }
+  if (trigger === "gates-failed") {
+    // Ruling 482 (F40-52): Viberr ran the project's gates on the revision under
+    // review and one did not exit 0. The acceptance gate now refuses on it, and
+    // the rework is this operator's to dispatch.
+    const gates = snapshot.gates;
+    const failed = (gates?.failed ?? [])
+      .map(
+        (f) =>
+          `\`${f.name}\` (\`${f.command}\`) ${f.outcome}` +
+          (f.log ? `; its full log is the task attachment \`${f.log}\`` : ""),
+      )
+      .join("; ");
+    return (
+      `Viberr ran the project's gates itself on the revision under review: ${gates?.line ?? "a gate failed"}. ` +
+      (failed ? `Failed: ${failed}. ` : "") +
+      `This is the server's own record, bound to the sha, and ${snapshot.key} cannot be accepted ` +
+      `on this revision until a revision passes every gate. Dispatch the rework: \`run_agent\` the ` +
+      `delivering profile (the engaged deliverer runs at any stage, ruling 133) with the failing ` +
+      `gate, its command and the log's attachment name in the prompt, so it reproduces and fixes ` +
+      `the failure in its workspace. Then deliver the fix with \`deliver_for_review\`; Viberr ` +
+      `gates the new revision on its own. Do NOT ask an agent to re-run the gates to report them, ` +
+      `do not recommend acceptance, and do not treat an agent's claim that the gate passes as the ` +
+      `answer: only Viberr's next run is. If the failure is not the branch's fault (a gate the host ` +
+      `cannot run, a flaky command), say so in ONE comment and open a decision packet naming what a ` +
+      `person must choose (fix the gate list in project Settings, or run the gates again).`
+    );
+  }
   if (trigger === "pr-conflicting") {
     // Ruling 332: a person pressed Accept, the acceptance-time refresh found the
     // branch in conflict, and the refusal used to wake nobody — while YOUR door
@@ -4793,7 +4823,8 @@ function operatorTurnDoctrine(
       // Ruling 178: this arm returns before the stage rule, so the project's
       // required reviewers are named here too — the review this turn should
       // dispatch is theirs.
-      requiredReviewersRule(snapshot)
+      requiredReviewersRule(snapshot) +
+      projectGatesRule(snapshot)
     );
   }
 
@@ -4866,10 +4897,30 @@ function requiredReviewersRule(snapshot: OperatorTaskSnapshot): string {
   );
 }
 
+/**
+ * Ruling 482 (F40-52): the project's gates are the server's to run, and their
+ * record is in the snapshot. Before this, every directive re-typed the gate
+ * commands from the rulings KB and asked an agent to report their exit codes,
+ * which is exactly the claim a person cannot check. Empty when the project
+ * declares no gates or nothing is delivered.
+ */
+function projectGatesRule(snapshot: OperatorTaskSnapshot): string {
+  const gates = snapshot.gates;
+  if (!gates) return "";
+  return (
+    `Project gates (ruling 482): ${gates.line}. Viberr runs the project's gate commands itself on ` +
+    "every delivered revision, as the task owner, and records each exit code on the task (`gates` in " +
+    "the snapshot). Acceptance is refused until every gate exited 0 on the revision under review. " +
+    "Never ask an agent to run the gates to report them, never quote an agent's report of them as " +
+    "the result, and never offer or perform `accept_completion` while `gates.state` is not `passed`. "
+  );
+}
+
 /** The ordinary stage rule: what THIS stage calls for, from the live snapshot. */
 function stageRule(snapshot: OperatorTaskSnapshot): string {
   return (
     requiredReviewersRule(snapshot) +
+    projectGatesRule(snapshot) +
     `You are at stage "${snapshot.stageName}"` +
     (snapshot.previousStage
       ? `, arrived from "${snapshot.previousStage.name}"`

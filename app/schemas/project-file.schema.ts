@@ -282,6 +282,36 @@ const fileLeasesSchema = z.array(
  *  later version's keys survive a read/write cycle. */
 export type FileLeaseRow = z.infer<typeof fileLeasesSchema>[number];
 
+/**
+ * Ruling 482 (pass 40, F40-52): the project's GATES — commands Viberr itself
+ * runs in a checkout of every delivered revision, as the task owner's agent
+ * uid, recording each exit code, wall time and log on the task
+ * (`app/server/tasks/project-gates.server.ts`). Before this the gate list was
+ * prose in a knowledge base, restated in every directive, and the person who
+ * accepted a production merge read an agent's claim that the gates passed.
+ *
+ * The limits are the writer's (Settings, the controller's
+ * `set_project_gates`): a parse keeps whatever the file says, row by row.
+ */
+export const PROJECT_GATES_MAX = 10;
+export const GATE_NAME_MAX_CHARS = 40;
+export const GATE_COMMAND_MAX_CHARS = 2000;
+/** A gate with no `timeoutSeconds` is killed after this many seconds. */
+export const GATE_DEFAULT_TIMEOUT_SECONDS = 600;
+export const GATE_MAX_TIMEOUT_SECONDS = 3600;
+
+const projectGateSchema = z
+  .object({
+    /** Short and unique within the project ("install", "build"). */
+    name: z.string().min(1),
+    /** Run with `sh -c` in the checkout's root. */
+    command: z.string().min(1),
+    timeoutSeconds: z.number().int().min(1).max(GATE_MAX_TIMEOUT_SECONDS).optional(),
+  })
+  .loose();
+export type ProjectGate = z.infer<typeof projectGateSchema>;
+const projectGatesSchema = z.array(projectGateSchema);
+
 const projectFrontmatterSchema = z.object({
   name: projectNameSchema,
   slug: projectSlugSchema,
@@ -326,6 +356,12 @@ const projectFrontmatterSchema = z.object({
    * existed parses unchanged.
    */
   fileLeases: fileLeasesSchema.default([]).catch([]),
+  /**
+   * Ruling 482: the commands Viberr runs on every delivered revision. Absent
+   * (not `[]`) on a project that declares none, so a project.md written
+   * before this existed is not rewritten with an empty key.
+   */
+  gates: projectGatesSchema.optional(),
 });
 export type ProjectFrontmatter = z.infer<typeof projectFrontmatterSchema>;
 
@@ -346,6 +382,7 @@ const PROJECT_FRONTMATTER_KEYS: readonly (keyof ProjectFrontmatter)[] = [
   "requiredReviewers",
   "rulingsKb",
   "fileLeases",
+  "gates",
 ];
 
 /** Widened to `string` so the raw-key scan below can test membership without
@@ -504,6 +541,12 @@ export function parseProjectFrontmatter(
     // this same pass and wrote fine while reading back undefined.
     fileLeases: tolerantRows(diagnostics, data, "fileLeases", fileLeasesSchema.element),
   };
+  // Ruling 482: per ROW, because a dropped gate silently stops being run and
+  // stops blocking. Absent stays absent: only a project that declared gates
+  // carries the key.
+  if (data.gates !== undefined) {
+    frontmatter.gates = tolerantRows(diagnostics, data, "gates", projectGatesSchema.element);
+  }
 
   if (frontmatter.stages.length === 0) {
     diagnostics.push(

@@ -147,10 +147,12 @@ import {
   renameStage,
   reorderStages,
   setProjectFileLeases,
+  setProjectGates,
   setProjectRulingsKb,
   setRequiredReviewers,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
+import { projectGatesView } from "~/shared/project-gates";
 import { resolveRequiredReviewers } from "~/server/tasks/required-reviewers.server";
 import {
   setMemberRole,
@@ -1715,7 +1717,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247) \u2014 and `gates`, the commands Viberr itself runs on every delivered revision (ruling 482; set with set_project_gates). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1756,6 +1758,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // Named, not dropped: the declaration was made and is now spent, and
           // somebody may want to clear the row.
           spentFileLeases: staleFileLeases(db, slug, dataRoot ? { dataRoot } : {}),
+          // Ruling 482: the commands Viberr itself runs on every delivered
+          // revision; set with set_project_gates.
+          gates: fm.gates ?? [],
           stages: project.stages.map((s) => ({
             id: s.id,
             name: s.name,
@@ -1960,6 +1965,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             `newest first. Pass events up to ${CONTROLLER_EVENTS_MAX} to widen this ` +
             "window, and read_timeline_entry with an `at` for one in full.";
         }
+        // Ruling 482: the project's gates as Viberr ran them on the revision
+        // under review, in the PR card's own line.
+        const gates = projectGatesView(
+          readProjectFile({ projectSlug: slug, dataRoot })?.parsed.frontmatter.gates,
+          readTaskFile({ projectSlug: slug, taskKey: key, dataRoot })?.parsed.frontmatter ?? {
+            workRevision: null,
+          },
+        );
         return json({
           task: {
             ...task,
@@ -1967,6 +1980,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               { projectSlug: slug, taskKey: key },
               { dataRoot },
             ),
+            gates: gates
+              ? {
+                  line: gates.line,
+                  state: gates.state,
+                  results: gates.rows,
+                  error: gates.error,
+                }
+              : null,
           },
           schedules,
           // Ruling 302, extended to the sibling it was first written without.
@@ -3163,6 +3184,46 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       ),
     ),
     "set_file_leases",
+  );
+
+  add(
+    tool(
+      "set_project_gates",
+      "Ruling 482: declare the project's GATES, the commands VIBERR ITSELF runs on every delivered revision, or pass [] to clear them. Project admin (edit-policy). The WHOLE list, in run order, replacing what project.md holds; read `gates` from get_project first. Each gate is `{name, command, timeoutSeconds?}` (a short unique name, a command run with `sh -c` in the checkout's root, and a timeout of 1 to 3600 seconds, 600 when omitted); at most 10. Viberr runs them itself, in a fresh checkout of the exact delivered revision, as the task owner's own agent user with no credentials, and records each exit code, wall time and log on the task: the PR card and the accept dialog print \"Gates on <sha>: N/M exit 0 (run by Viberr)\". A plain acceptance is refused until every gate exited 0 on the revision under review (force accept stays, on the record), and a failing gate hands the rework to the operator. This is where a MEASURED gate set belongs once a task has proven it on this host (`instance_health` and a task's run show what the host has): promote it here rather than writing the commands into the rulings knowledge base as prose, which every directive then re-types and no one can check. A changed list queues the gates on every open task that already has a delivered revision; an unchanged one answers `[noop]`. A duplicate or empty name, an empty command, or a timeout out of range is refused by name with nothing written.",
+      {
+        projectSlug: z.string().optional(),
+        gates: z
+          .array(
+            z.strictObject({
+              name: z.string().describe("Short and unique, e.g. \"build\"."),
+              command: z.string().describe("Run with `sh -c` in the checkout's root, e.g. \"pnpm build\"."),
+              timeoutSeconds: z
+                .number()
+                .int()
+                .optional()
+                .describe("1 to 3600; 600 when omitted."),
+            }),
+          )
+          .describe("The COMPLETE gate list, in run order; [] clears it."),
+      },
+      runWith(
+        async (args: {
+          projectSlug?: string;
+          gates: { name: string; command: string; timeoutSeconds?: number }[];
+        }) => {
+          const slug = slugOf(args.projectSlug);
+          requireVisible(slug, "change this project's policy");
+          const result = await setProjectGates(
+            db,
+            { projectSlug: slug, gates: args.gates },
+            actor,
+            { dataRoot },
+          );
+          return result.changed ? `[done] ${result.toast}.` : `[noop] ${result.toast}; nothing was written.`;
+        },
+      ),
+    ),
+    "set_project_gates",
   );
 
   add(

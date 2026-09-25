@@ -470,7 +470,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 - Every tool refuses an argument it does not declare (`strictTool`, ruling 296).
 
-**54 tools**: 53 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
+**55 tools**: 54 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
 counts them) plus `read_knowledge_doc`, registered (indented, inside a condition) only when
 the turn holds at least one knowledge base, which is every turn while the controller keeps
 its `controller-handbook` grant. `projectSlug` defaults to the bound project and, on a
@@ -520,9 +520,9 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 
 | Tool | What it does |
 |---|---|
-| `get_project` | Stages with task counts, workflow, members, deployed agents with their RESOLVED grants, board-resolved eligible `stages` beside `declaredStages` (ruling 188), model, effort, operator autonomy, `resources` and `templateDrift`; `advisory` marks a matrix-only grant (ruling 377(a)); `requiredReviewers` (ruling 178), goals summary, `rulingsKb` (ruling 239), resolved `fileLeases` and `spentFileLeases` (rulings 245, 247) |
+| `get_project` | Stages with task counts, workflow, members, deployed agents with their RESOLVED grants, board-resolved eligible `stages` beside `declaredStages` (ruling 188), model, effort, operator autonomy, `resources` and `templateDrift`; `advisory` marks a matrix-only grant (ruling 377(a)); `requiredReviewers` (ruling 178), goals summary, `rulingsKb` (ruling 239), resolved `fileLeases` and `spentFileLeases` (rulings 245, 247), `gates` (ruling 482) |
 | `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, goal-chain chip and `waitsOn`; Done included, archived only with `includeArchived` |
-| `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), pending `schedules` (ruling 153), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
+| `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
 | `read_timeline_entry` | One timeline entry in full, by the `at` stamp `get_task` prints (ruling 285) |
 | `read_task_attachment` | One text attachment of a task (`.txt .log .md .json .yml .yaml .csv .diff .patch`; ruling 293) |
 | `read_default_branch_file` | One file as the project's default branch has it, from the project's git mirror (built on first use), in pages of whole lines via `fromLine` (rulings 299, 436); an absent path is reported absent; audited `controller.repo.read` |
@@ -549,6 +549,7 @@ matrix the human surfaces use; the tier in brackets is the floor)
 | `set_required_reviewers` | The WHOLE required-reviewer list per non-terminal stage, `[]` clearing it; every profile must be deployed and hold `report-validation-verdict`; an unchanged list answers `[noop]`; audited `project.required_reviewers.updated` [`edit-policy`; ruling 178] |
 | `set_project_rulings_kb` | Name the project's rulings KB by store directory, or `null` to clear; that KB is injected into every run the project makes [`edit-policy`; ruling 239] |
 | `set_file_leases` | Replace the project's file-lease list (path globs a task owns until it merges); overlapping leases held by different unfinished tasks are refused [`edit-policy`; rulings 245, 353, 417] |
+| `set_project_gates` | Replace the project's gates, the commands Viberr itself runs on every delivered revision (`{name, command, timeoutSeconds?}`, at most 10, run with `sh -c` in order, 600 s by default), `[]` clearing them; a duplicate or empty name, an empty command or a timeout outside 1..3600 is refused by name with nothing written; an unchanged list answers `[noop]`; a changed one queues the gates on every open task with a delivered revision; audited `project.gates.updated`. Its description sends a MEASURED gate set here instead of into the rulings KB as prose [`edit-policy`; ruling 482] |
 | `update_stages` | Add (before the final stage), rename, recolor (one of the twenty presets), remove or reorder; removing a stage never loosens a boundary [`edit-policy`] |
 | `set_transition_boundary` | `auto`, `approval` or `human` for one move; the move into the final stage stays human [`edit-policy`] |
 | `invite_member` | Add a member by email (an unknown email gets an account and a relayed one-time password), seated in the given `role` in one write (default viewer; an unknown role refused by name) [`manage-members`] |

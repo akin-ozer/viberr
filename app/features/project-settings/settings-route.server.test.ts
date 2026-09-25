@@ -818,3 +818,82 @@ describe("set-file-leases (ruling 396)", () => {
     expect(cleared.ok).toBe(true);
   });
 });
+
+/**
+ * Ruling 482 (F40-52): the project's gates are declared on Settings, through
+ * the writer the controller's `set_project_gates` calls. Before this the list
+ * was prose in a knowledge base that every directive re-typed.
+ */
+describe("set-project-gates (ruling 482)", () => {
+  it("round-trips the gate list into project.md and the loader, audited, with the writer's refusals", async () => {
+    const saved = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "set-project-gates",
+        gates: JSON.stringify([
+          { name: "install", command: "npm ci", timeoutSeconds: null },
+          { name: "build", command: "npm run build", timeoutSeconds: 900 },
+        ]),
+      }),
+    );
+    expect(saved.ok).toBe(true);
+    expect(saved.toast).toContain("Gates saved: install, build");
+    // CANARY: drop the `gates` write in setProjectGates and project.md never
+    // carries the list the runner reads.
+    expect(projectMd()).toContain("gates:");
+    expect(projectMd()).toContain("npm run build");
+    const { view } = await runLoader(ids.arda);
+    expect(view.gates).toEqual([
+      { name: "install", command: "npm ci" },
+      { name: "build", command: "npm run build", timeoutSeconds: 900 },
+    ]);
+    const audit = listAuditEvents(app.db, { action: "project.gates.updated" });
+    expect(audit.at(-1)?.details).toMatchObject({ count: 2 });
+
+    // The same list again writes nothing and audits nothing.
+    const unchanged = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "set-project-gates",
+        gates: JSON.stringify([
+          { name: "install", command: "npm ci" },
+          { name: "build", command: "npm run build", timeoutSeconds: 900 },
+        ]),
+      }),
+    );
+    expect(unchanged.toast).toBe("Gates unchanged: install, build");
+    expect(listAuditEvents(app.db, { action: "project.gates.updated" })).toHaveLength(audit.length);
+
+    // Project policy: a maintainer is refused.
+    const denied = actionOutcome(
+      await postAction(ids.murat, { intent: "set-project-gates", gates: "[]" }),
+    );
+    expect(denied.status).toBe(403);
+
+    const duplicate = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "set-project-gates",
+        gates: JSON.stringify([
+          { name: "build", command: "a" },
+          { name: "Build", command: "b" },
+        ]),
+      }),
+    );
+    expect(duplicate.status).toBe(400);
+    expect(duplicate.error).toContain('Two gates are named "Build"');
+
+    const timeout = actionOutcome(
+      await postAction(ids.arda, {
+        intent: "set-project-gates",
+        gates: JSON.stringify([{ name: "build", command: "a", timeoutSeconds: 99999 }]),
+      }),
+    );
+    expect(timeout.status).toBe(400);
+    expect(timeout.error).toContain("1 to 3600");
+
+    const cleared = actionOutcome(
+      await postAction(ids.arda, { intent: "set-project-gates", gates: "[]" }),
+    );
+    expect(cleared.toast).toBe("Gates cleared: acceptance no longer waits on them");
+    // A project that declares none carries no key at all.
+    expect(projectMd()).not.toContain("gates:");
+  });
+});

@@ -92,6 +92,7 @@ from the workflow graph, never a stored preset).
 | `dependencies-released` | proceed after a hold | the release engine (ruling 131(e)): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot |
 | `head-unpushed` | deliver | a person's refused acceptance whose cause is an unpushed reviewed revision, which only the operator can push (ruling 235) |
 | `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict (ruling 332) |
+| `gates-failed` | rework | Viberr's own run of the project's gates on the revision under review finished with a gate that did not exit 0 (ruling 482). The turn names each failing gate, its command and its log's attachment name, tells the operator to `run_agent` the deliverer with them and deliver the fix, and forbids asking an agent to re-run the gates to report them |
 | `stranded` | decide what happens next | the stranded-task sweep (§3.1, ruling 330) |
 | `scheduled` | re-check | the schedule runner |
 | `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
@@ -287,7 +288,12 @@ answered (ruling 328).
   is ahead of the branch from the reconciler's last compare: `0` is level, `null` is "not
   compared yet" and never a reason to skip `update_branch_from_base`), and
   `notRefreshableReason` (the sentence `update_branch_from_base` refuses with from where
-  the task stands, ruling 424).
+  the task stands, ruling 424). `gates` (ruling 482): the project's gates as Viberr ran
+  them on the revision under review, `{line, state, failed[], error}` with the PR card's
+  own line ("Gates on `<sha7>`: N/M exit 0 (run by Viberr)"), or null when the project
+  declares none or nothing is delivered. While gates are declared, the stage rule and the
+  `delivered` turn carry a gate rule: Viberr runs them, the record is the result, and
+  `accept_completion` is never offered or performed while `gates.state` is not `passed`.
 - **Decisions and history**: `openPacket` and `packet` (type, title, body, options,
   `awaiting`, `raisedBy`, `yours`, ruling 437), `recommendations` (pending and recently
   declined, at most 5 each, so a supervised operator does not re-propose a just-dismissed

@@ -51,6 +51,7 @@ import {
   type Recommendation,
   type RecommendationKind,
   type TaskFileEvent,
+  type TaskFrontmatter,
   type TaskPacket,
   unpushedRevisionOf,
   type UnpushedRevision,
@@ -175,6 +176,13 @@ import {
   listMcpServerNames,
   listSkillNames,
 } from "~/server/org/resources.server";
+import type { ProjectGate } from "~/schemas/project-file.schema";
+import {
+  failedGateResults,
+  gateOutcomeText,
+  projectGatesView,
+  type GatesState,
+} from "~/shared/project-gates";
 
 /** Capability-gated task mutations used only by the in-process operator toolkit. */
 
@@ -2489,6 +2497,21 @@ export interface OperatorTaskSnapshot {
    *  Optional so hand-built fixtures need not restate it; `operatorSnapshot`
    *  always sets it. */
   requiredReviewers?: RequiredReviewerView[];
+  /**
+   * Ruling 482 (F40-52): the project's gates on the revision under review, as
+   * VIBERR ran them (never an agent's report of them): the line the PR card
+   * prints, the state, and each gate that did not exit 0 with its log's
+   * attachment name. A `failed` state blocks acceptance; dispatch the rework
+   * with the failing gate and its log in the directive. Null when the project
+   * declares no gates or nothing is delivered. Optional so hand-built
+   * fixtures need not restate it; `operatorSnapshot` always sets it.
+   */
+  gates?: {
+    line: string;
+    state: GatesState;
+    failed: { name: string; command: string; outcome: string; log: string | null }[];
+    error: string | null;
+  } | null;
   /** Stages the task may move to next (declared workflow boundaries). */
   nextStages: { id: string; name: string; boundary: string }[];
   /** R7-4 rework routing, made VISIBLE. The governed workflow graph is
@@ -3187,6 +3210,26 @@ function findHumanDecisions(
   return found.length > 0 ? found : undefined;
 }
 
+/** Ruling 482: the snapshot's `gates` — the PR card's line plus what failed. */
+function operatorGatesOf(
+  declared: readonly ProjectGate[] | undefined,
+  fm: TaskFrontmatter,
+): OperatorTaskSnapshot["gates"] {
+  const view = projectGatesView(declared, fm);
+  if (!view) return null;
+  return {
+    line: view.line,
+    state: view.state,
+    failed: failedGateResults(view).map((r) => ({
+      name: r.name,
+      command: r.command,
+      outcome: gateOutcomeText(r),
+      log: r.log,
+    })),
+    error: view.error,
+  };
+}
+
 export function operatorSnapshot(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -3314,6 +3357,8 @@ export function operatorSnapshot(
     })(),
     // Ruling 178: from the project file, resolved the way the gate prints it.
     requiredReviewers: resolveRequiredReviewers(project.parsed.frontmatter, ctx.dataRoot),
+    // Ruling 482: the server's own gate record, in the PR card's words.
+    gates: operatorGatesOf(project.parsed.frontmatter.gates, fm),
     nextStages,
     reworkStages,
     stageIds: stages.map((s) => s.id),

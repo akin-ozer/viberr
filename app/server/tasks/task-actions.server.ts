@@ -66,7 +66,15 @@ import {
   PACKET_NOTE_MAX,
   VERDICT_REPORT_TITLE,
 } from "~/schemas/task-file.schema";
-import type { ProjectRole } from "~/schemas/project-file.schema";
+import type { ProjectGate, ProjectRole } from "~/schemas/project-file.schema";
+// Ruling 482: the gates' view and refusal, one pure home for every surface.
+import {
+  gateOutcomeText,
+  gateWallTime,
+  projectGatesRefusal,
+  projectGatesView,
+  type GatesView,
+} from "~/shared/project-gates";
 // R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
 // consult the human GitHub approval synchronously without the dynamic-import
 // dance the rest of the github/ surface needs to stay cycle-free.
@@ -1446,7 +1454,10 @@ export async function autoInvokeOperator(
     // the branch in conflict. Only the operator can run the workspace merge
     // that resolves it, so the refusal is handed here rather than left as a
     // sentence telling a person to do git they have no checkout for.
-    | "pr-conflicting",
+    | "pr-conflicting"
+    // Ruling 482: the project's gates failed on the revision under review.
+    // Only the operator dispatches the rework, so the result is handed here.
+    | "gates-failed",
   options: AutoInvokeOptions = {},
 ): Promise<void> {
   const { transitionDepth, transition, resolvedOption, dependencyRelease } = options;
@@ -1791,6 +1802,9 @@ export function canonicalTaskAnchor(input: {
    *  warning about the file it was given to own. Absent on a hand-built
    *  anchor; the real producers always pass the project's list. */
   fileLeases?: readonly FileLease[];
+  /** Ruling 482: the project's declared gates, so a run reads what Viberr
+   *  itself ran on the revision under review. Absent on a hand-built anchor. */
+  gates?: readonly ProjectGate[];
   parsed: ParsedTaskFile;
   /** Display name of the CURRENT stage (falls back to the stage id). */
   stageName: string;
@@ -1879,6 +1893,31 @@ export function canonicalTaskAnchor(input: {
         v.reason.trim()
           ? anchorClamp(v.reason, ANCHOR_VERDICT_MAX_CHARS)
           : "_No reason recorded._",
+      );
+    }
+  }
+  /**
+   * Ruling 482 (F40-52): the project's gates, as Viberr ran them. On WEB-1 the
+   * deliverer, the Site Reviewer and the Fact Checker each ran the same four
+   * gates by hand and reported the exit codes in prose, because nothing told
+   * them the server had a record. The reviewer reads the record here instead
+   * of re-running it, and nobody's report is what a person accepts on.
+   */
+  const gates = projectGatesView(input.gates, fm);
+  if (gates) {
+    lines.push("");
+    lines.push("### Project gates (run by Viberr on the revision under review)");
+    lines.push(
+      `${gates.line}. Viberr runs the project's gates itself on every delivered revision, as ` +
+        "this task's owner, and records each exit code; a person accepts on this record, not on " +
+        "any report. Do not re-run the gates to report their result, and never report a gate as " +
+        "passing that is not listed here as exit 0.",
+    );
+    if (gates.error) lines.push(`The run could not execute: ${gates.error}`);
+    for (const r of gates.results) {
+      const log = r.log ? ` · log: attachments/${r.log}` : "";
+      lines.push(
+        `- \`${r.name}\` (\`${anchorClamp(r.command, ANCHOR_EVENT_MAX_CHARS)}\`): ${gateOutcomeText(r)} in ${gateWallTime(r.wallMs)}${log}`,
       );
     }
   }
@@ -2226,6 +2265,8 @@ export async function commentToAgent(
       anchor = canonicalTaskAnchor({
         parsed: existing.parsed,
         stageName: stageName(project, existing.parsed.frontmatter.stage),
+        // Ruling 482: what Viberr ran on the revision under review.
+        gates: project.gates,
       });
     } catch {
       // A missing/unreadable project file must never block a reply run — fall
@@ -8107,6 +8148,15 @@ export async function performDelivery(
         // never turned into an error by a failure to record the follow-up card.
         await recordDeliveredNextStep(db, ctx, projectSlug, taskKey, result.prNumber);
       }
+      // Ruling 482 (F40-52): the delivered revision is gated by Viberr, not by
+      // an agent's report. Queued here and run off this path; a revision whose
+      // gates already ran (a reuse that moved nothing) is not run again.
+      const { requestProjectGatesQuietly } = await import("./project-gates.server");
+      await requestProjectGatesQuietly(
+        db,
+        { projectSlug, taskKey, dataRoot: ctx.dataRoot, deps: ctx.deps },
+        "delivery",
+      );
       return {
         status: "delivered",
         prNumber: result.prNumber,
@@ -8339,6 +8389,46 @@ export async function manualDeliverForReview(
         : { status: outcome.status },
   });
   return outcome;
+}
+
+/**
+ * Ruling 482 (F40-52): a person runs the project's gates on the revision under
+ * review again — after an interrupted or failed run, a gate list edited, or a
+ * flaky gate. The same authority as a manual delivery (maintainer+, or the
+ * task's owner), because it spends the same host time. Queued, never run on
+ * this request; a run already queued or running on this revision is not
+ * doubled. Audited `task.gates.requested`.
+ */
+export async function runProjectGatesByHand(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  ctx: TaskActionContext = {},
+): Promise<{ status: "queued" | "current" | "not_owed"; message: string }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  if (ownerException(project, actor, existing.parsed.frontmatter.ownerUserId)) {
+    requireProjectMutable(project, "run the project's gates");
+  } else {
+    requireAction(db, project, actor, "run-agents", "run the project's gates");
+  }
+  const { requestProjectGates } = await import("./project-gates.server");
+  const outcome = await requestProjectGates(
+    db,
+    { projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: ctx.dataRoot, deps: ctx.deps },
+    { reason: "person", force: true },
+  );
+  recordAudit(db, {
+    action: "task.gates.requested",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { status: outcome.status, runId: outcome.runId ?? null },
+  });
+  return { status: outcome.status, message: outcome.message };
 }
 
 /**
@@ -12515,6 +12605,12 @@ function acceptanceRefusalReasons(
         opts.noChange.refusal == null &&
         opts.noChange.verification?.basis !== "no_repo",
     ),
+    // Ruling 482 (F40-52): the project's gates, run by Viberr on the revision
+    // under review, must all have exited 0 there. Evidence that is missing,
+    // stale or still running refuses too; force accept bypasses it on the
+    // record like every gate here. Same position in the projection's
+    // `acceptanceBlockReason`.
+    projectGatesRefusal(project.gates, fm, taskKey),
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Resolving the packet clears readiness.
     opts.blockedPacket
@@ -13278,6 +13374,14 @@ export interface AcceptanceAffordance {
    * component tests keep compiling; every server path sets it explicitly.
    */
   verdictSatisfiedBy?: string | null;
+  /**
+   * Ruling 482 (F40-52): the project's gates on the revision under review, as
+   * Viberr ran them — the line the PR card and the accept dialog print
+   * ("Gates on a95c337: 4/4 exit 0 (run by Viberr)") and each result. Absent
+   * when the project declares no gates or nothing is delivered (the resolver
+   * never sets it to null, so a project without gates ships no key).
+   */
+  gates?: GatesView | null;
 }
 
 /**
@@ -13319,6 +13423,12 @@ export function resolveAcceptanceAffordance(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) return denied;
   const fm = existing.parsed.frontmatter;
+  // Ruling 482: shown whatever the viewer may do and wherever the task sits,
+  // so the evidence reads the same on a Done task as it did at the boundary.
+  // Absent (not null) when there is nothing to show: the task page's payload
+  // is budgeted (ruling 457), and a project with no gates ships no key.
+  const gates = projectGatesView(project.gates, fm);
+  if (gates) denied.gates = gates;
   const role = project.memberRoles.get(input.viewerUserId) ?? null;
   const hasAuthority =
     roleCan(role, "accept-completion") ||
@@ -13350,7 +13460,7 @@ export function resolveAcceptanceAffordance(
     blockedPacket: fm.readiness === "blocked" && existing.parsed.packet?.type === "blocked",
   });
   const blockedReason = blockedGates[0] ?? null;
-  return {
+  const affordance: AcceptanceAffordance = {
     hasAuthority,
     atBoundary,
     blockedReason,
@@ -13364,6 +13474,8 @@ export function resolveAcceptanceAffordance(
     // R19-B: name the human whose GitHub approval cleared the verdict gate.
     verdictSatisfiedBy: humanVerdictSentence(fm),
   };
+  if (gates) affordance.gates = gates;
+  return affordance;
 }
 
 /** R19-B — "Approved on GitHub by Arda (@arda) on the delivered revision
