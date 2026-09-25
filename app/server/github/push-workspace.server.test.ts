@@ -10,7 +10,12 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { gitOutSync, withLocalGithub } from "../../../test-support/git-origin";
-import { createPat, recordPatValidation, setProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  createPat,
+  getProjectCredentialHealth,
+  recordPatValidation,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
 import type { PatValidation } from "~/schemas/github-pat.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
@@ -263,6 +268,35 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     expect(handoff).toContain(
       path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "viberr"),
     );
+  });
+
+  it("ruling 480 (F40-43): a push GitHub accepted proves `repo` on the project's repository; a refused one proves nothing", async () => {
+    // Live, the card read "repo unproven (verified on first use)" after three
+    // pushes. Canary: drop the `markWriteScopeProven(…, "push")` call after the
+    // push and the last assertion reads `unchecked`.
+    bindPat();
+    const repoChip = () =>
+      getProjectCredentialHealth(store.db, store.slug).scopes.find((s) => s.id === "repo");
+    expect(repoChip()).toMatchObject({ source: "unchecked" });
+    const refused = fakeGit({
+      branch: "vib-1-work",
+      ahead: 1,
+      pushOk: false,
+      pushStderr: "remote: error: GH006: Protected branch update failed",
+    });
+    const failed = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: refused.exec,
+    });
+    expect(failed.status).toBe("push_failed");
+    expect(repoChip()).toMatchObject({ source: "unchecked" });
+    const git = fakeGit({ branch: "vib-1-work", ahead: 2 });
+    const res = await pushWorkspaceBranch({
+      db: store.db, projectSlug: store.slug, taskKey: "VIB-1",
+      dataRoot: store.dataRoot, exec: git.exec,
+    });
+    expect(res.status).toBe("pushed");
+    expect(repoChip()).toEqual({ id: "repo", ok: true, source: "probe" });
   });
 
   /**

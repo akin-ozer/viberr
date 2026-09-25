@@ -64,8 +64,9 @@ export function credentialGrantHolder(
  * DETAIL. The first two say only what the Connection pill already says out loud
  * ("no credential"), and required scopes are project policy — the same list the
  * Policy surface publishes to every member. What goes is the token's identity
- * and health: the masked tail, its label and id, when it was last validated, the
- * validator result, the per-scope verdicts and the open violations.
+ * and health: the masked tail, its label and id, the connection holding it, when
+ * it was last validated, the validator result, the per-scope verdicts and the
+ * open violations.
  */
 export function withoutCredentialDetail(
   credential: ProjectCredentialHealth,
@@ -77,6 +78,9 @@ export function withoutCredentialDetail(
     masked: null,
     lastValidatedAt: null,
     validation: null,
+    // Ruling 480: which connection holds the token is its identity too; an
+    // undefined key never reaches the serialized payload.
+    connectionId: undefined,
     scopes: [],
     openViolations: [],
   };

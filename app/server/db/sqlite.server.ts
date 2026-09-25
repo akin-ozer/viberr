@@ -512,6 +512,15 @@ const BASELINE_COLUMNS: readonly {
     table: "github_connections",
     columns: [{ name: "reach_json", ddl: "reach_json TEXT" }],
   },
+  // Ruling 480: what each repository proved about a token. Every PAT read
+  // names it (the project credential card, the connection card, every GitHub
+  // call's context), so a root that predates it would fail all of them. No
+  // backfill: NULL is "nothing stored yet", and `repoScopeProofsOf` still reads
+  // the repository an older row's cached validation probed.
+  {
+    table: "github_pats",
+    columns: [{ name: "repo_scopes_json", ddl: "repo_scopes_json TEXT" }],
+  },
   // Ruling 178: the project's resolved required-reviewer rules. The rebuilder
   // names the column on every project write and every task walk reads it, so
   // a root that predates it would stop projecting entirely; its DEFAULT is the

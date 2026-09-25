@@ -12,7 +12,7 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { createPat, getPatMetadata, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { getProjectGithubContext } from "./github-context.server";
 import { ensureDefaultBranch } from "./repo-bootstrap.server";
 
@@ -93,6 +93,17 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     expect(timeline[0]!.text).toContain("`d2e0fb0`");
     const audit = listAuditEvents(store.db).find((e) => e.action === "github.repo.bootstrapped");
     expect(audit?.details).toMatchObject({ how: "initial_commit", sha: ROOT, defaultBranch: "main" });
+    // Ruling 480 (F40-43): the commit this token just made proves `repo` on this
+    // repository. Canary: drop the bootstrap's `markWriteScopeProven`.
+    const proof = getPatMetadata(store.db, contextFor(store, gh).patId)!.repoScopes;
+    expect(proof).toEqual([
+      {
+        repo: "akin-ozer/viberr",
+        scopes: [
+          expect.objectContaining({ id: "repo", ok: true, source: "probe", note: "the initial commit Viberr made here" }),
+        ],
+      },
+    ]);
   });
 
   /**

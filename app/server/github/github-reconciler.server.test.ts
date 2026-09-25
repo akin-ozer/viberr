@@ -34,8 +34,8 @@ import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import {
   createPat,
-  getPatMetadata,
   getProjectCredential,
+  getProjectCredentialHealth,
   recordPatValidation,
   setProjectCredential,
 } from "~/server/secrets/pat-store.server";
@@ -2177,10 +2177,11 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     return { store, actor };
   }
 
-  it("F28-U2a: a merge with NO open violation still proves pull_request:write", async () => {
+  it("F28-U2a / ruling 480: a merge with NO open violation proves pull_request:write, and repo", async () => {
     const { store, actor } = setup(); // VIB-301 owns PR #318, PAT bound, NO violation
-    // Give the bound PAT the honest "verified on first use" state: fine-grained,
-    // pull_request:write ASSUMED (never write-probed).
+    // Give the bound PAT the state the connection's own Re-check leaves on a
+    // fine-grained token (ruling 480, F40-43): asked about no repository, so
+    // BOTH scopes are assumed, "verified on first use".
     const bound = getProjectCredential(store.db, store.slug)!;
     recordPatValidation(store.db, bound.id, {
       status: "valid",
@@ -2188,23 +2189,25 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
       login: "viberr-bot",
       tokenKind: "fine_grained",
       expiresAt: null,
-      repo: "akin-ozer/viberr",
+      repo: null,
       scopes: [
-        { id: "repo", ok: true, source: "probe" },
+        { id: "repo", ok: true, source: "assumed" },
         { id: "pull_request:write", ok: true, source: "assumed" },
       ],
       missingScopes: [],
       headerScopes: null,
       detail: "Authenticated.",
     });
-    const scopeSource = () =>
-      getPatMetadata(store.db, bound.id)!.validation!.scopes.find(
-        (s) => s.id === "pull_request:write",
-      )!.source;
+    // Ruling 480: read as the card reads it, the project's repository's proof.
+    const sourceOf = (id: string) =>
+      getProjectCredentialHealth(store.db, store.slug).scopes.find((s) => s.id === id)!
+        .source;
+    const scopeSource = () => sourceOf("pull_request:write");
     // The PR was opened out-of-band (e.g. an agent's own git creds), so nothing
     // ever exercised viberr's PAT — no violation is open, chip still "assumed".
     expect(countOpenPolicyViolations(store.db, store.slug)).toBe(0);
     expect(scopeSource()).toBe("assumed");
+    expect(sourceOf("repo")).toBe("assumed");
 
     const gh = fakeGithubFetch({
       [`PUT ${REPO_PATH}/pulls/318/merge`]: {
@@ -2220,8 +2223,11 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     );
     expect(result).toEqual({ status: "merged", prNumber: 318, sha: "mergesha02" });
     // The merge — the FIRST real use of the bound PAT — proved the scope, even
-    // though there was no violation to resolve.
+    // though there was no violation to resolve. Ruling 480: merging moved the
+    // base branch (Contents write), so `repo` is proven on this repository too.
+    // Canary: prove only `pull_request:write` on a merge (WRITE_PROOF.merge).
     expect(scopeSource()).toBe("probe");
+    expect(sourceOf("repo")).toBe("probe");
   });
 
   it("merges, flips the cache, writes the github event, resolves the task's pull_request:write violation", async () => {

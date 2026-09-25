@@ -5,6 +5,7 @@ import {
   useModelCatalog,
 } from "~/features/agents/create-profile-modal";
 import { Icon } from "~/ui/icon";
+import { LocalDayDotTime } from "~/ui/local-time";
 import { kbDirsOf, kbLegacyOf, MissingChips } from "./agent-template-modal";
 import { useOrgAction } from "./use-org-action";
 
@@ -222,8 +223,12 @@ function GrantRequestRow({ request: r }: { request: ControllerGrantRequestView }
       <code className="mono">{r.name}</code> ({CONTROLLER_SECTION_LABEL[r.kind]}):{" "}
       {r.reason || "no reason given"}
       <br />
+      {/* Ruling 480 (F40-47): the stored ISO string ("2026-09-24T20:25:54.327Z")
+          used to print as is, in UTC with milliseconds, hours off from every
+          other time on the page. It renders like the audit rows below. */}
       <span className="sub">
-        Asked {r.askedAt} by {r.askedByLabel || "someone"}. {r.remedy}
+        Asked <LocalDayDotTime iso={r.askedAt} /> by{" "}
+        {r.askedByLabel || "someone"}. {r.remedy}
       </span>{" "}
       <button
         type="button"

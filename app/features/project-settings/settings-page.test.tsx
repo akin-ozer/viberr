@@ -75,6 +75,7 @@ const CREDENTIAL: SettingsViewData["credential"] = {
   masked: "github_pat_••••42af",
   lastValidatedAt: "2026-07-10T00:00:00.000Z",
   validation: null,
+  connectionId: "akin-ozer",
   requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
   scopes: [
     { id: "repo", ok: true, source: "header" },
@@ -1012,11 +1013,11 @@ describe("RepoPanel", () => {
     fireEvent.click(getByText("Re-check scopes"));
     expect(onGrant).toHaveBeenCalled();
 
-    // A bound PAT → Rotate (managed by `configured`, not the removed
+    // A bound PAT → Re-attach (managed by `configured`, not the removed
     // policy_display source); no "Attach credential" affordance.
     expect(container.querySelector(".cred-manage")).not.toBeNull();
     expect(queryByText("Attach credential")).toBeNull();
-    fireEvent.click(getByText("Rotate credential"));
+    fireEvent.click(getByText("Re-attach connection"));
     expect(onSet).toHaveBeenCalled();
   });
 
@@ -1150,7 +1151,7 @@ describe("RepoPanel", () => {
       />,
     );
     expect(queryByText("Attach credential")).toBeNull();
-    fireEvent.click(getByText("Rotate credential"));
+    fireEvent.click(getByText("Re-attach connection"));
     expect(onSet).toHaveBeenCalled();
 
     // Remove goes through the confirm dialog, not straight to the action.
@@ -2011,9 +2012,9 @@ describe("ruling 368: Settings' requests in flight", () => {
     expect(b.hasAttribute("aria-busy")).toBe(false);
   });
 
-  it("a rotation in flight reads Rotating… on the credential row", () => {
+  it("a re-attach in flight reads Re-attaching… on the credential row", () => {
     const { getByText } = repoPanel(null, "set-credential");
-    const b = getByText("Rotating…").closest("button")!;
+    const b = getByText("Re-attaching…").closest("button")!;
     expect(b.getAttribute("aria-busy")).toBe("true");
     // Re-check rides the other fetcher and is untouched by this one.
     expect(getByText("Re-check scopes").closest("button")!.disabled).toBe(false);

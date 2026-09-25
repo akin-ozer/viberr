@@ -9,10 +9,17 @@ import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { ConfirmDelete } from "./confirm-delete";
 import { useOrgAction } from "./use-org-action";
-import { useBusyRow, rel, updatedLabel } from "./resource-helpers";
+import { useBusyRow } from "./resource-helpers";
 import { KBModal, McpModal, SkillModal } from "./resource-modals";
 import { AgentModal } from "./agent-template-modal";
-import { AgentPanel, KbPanel, McpPanel, SkillPanel } from "./resource-rows";
+import {
+  AgentPanel,
+  KbPanel,
+  McpPanel,
+  RelativeStamp,
+  SkillPanel,
+  UpdatedStamp,
+} from "./resource-rows";
 
 /**
  * Agent resources tab (org-settings spec §4.3/§4.4): four CRUD panels —
@@ -292,7 +299,11 @@ export function ResourcesPanel({
         <StoreBrowser
           title={browsingKb.name}
           subMono={browsingKb.uri + "/ · read live"}
-          metaTail={"re-scanned " + rel(browsingKb.lastIndexedAt)}
+          metaTail={
+            <>
+              re-scanned <RelativeStamp iso={browsingKb.lastIndexedAt} />
+            </>
+          }
           tree={browsingKb.tree}
           resource={{ kind: "kb", id: browsingKb.id }}
           onClose={() => setBrowsing(null)}
@@ -302,7 +313,7 @@ export function ResourcesPanel({
         <StoreBrowser
           title={browsingSkill.name}
           subMono={browsingSkill.uri + "/ · SKILL.md + supporting files"}
-          metaTail={updatedLabel(browsingSkill.updatedAt)}
+          metaTail={<UpdatedStamp iso={browsingSkill.updatedAt} />}
           tree={browsingSkill.tree}
           resource={{ kind: "skill", id: browsingSkill.id }}
           onClose={() => setBrowsing(null)}

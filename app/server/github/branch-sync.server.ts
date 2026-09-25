@@ -18,6 +18,7 @@ import {
   type GithubClient,
 } from "./github-client.server";
 import { ensureDefaultBranch } from "./repo-bootstrap.server";
+import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
 export { isMissingRefAnswer };
 import {
   getProjectGithubContext,
@@ -671,6 +672,8 @@ export async function ensureTaskBranch(
       );
       if (createRef.ok) {
         created = true;
+        // Ruling 480: a ref created through the token proves `repo` here.
+        markWriteScopeProven(db, gh.patId, gh.repo, "branch");
       } else if (
         createRef.kind === "http" &&
         createRef.status === 422 &&

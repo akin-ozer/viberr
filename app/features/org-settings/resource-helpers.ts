@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { formatRelative } from "~/shared/dates/format";
 import { useToast } from "~/ui/toast";
 import { useOrgAction, type OrgAction, type OrgActionData } from "./use-org-action";
 
@@ -9,19 +8,6 @@ import { useOrgAction, type OrgAction, type OrgActionData } from "./use-org-acti
  * likely place for concurrent UI work to collide). Behaviour is unchanged;
  * these are the pieces the modals and the row panels both need.
  */
-
-export function rel(iso: string | null): string {
-  return iso ? formatRelative(iso) : "never";
-}
-
-/**
- * F17-L2: a skill/resource that has never been edited since it was seeded read
- * "updated never", which sounds like something went wrong. An un-edited resource
- * reads "not yet edited"; an edited one keeps "updated <when>".
- */
-export function updatedLabel(iso: string | null): string {
-  return iso ? "updated " + formatRelative(iso) : "not yet edited";
-}
 
 /** Shared modal-close-with-inline-error fetcher wiring. */
 export function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void) {

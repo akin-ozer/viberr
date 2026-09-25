@@ -89,3 +89,40 @@ export function parsePatValidation(raw: string | null): PatValidation | null {
     return null;
   }
 }
+
+/**
+ * Ruling 480 (F40-43): what one REPOSITORY proved about a token, kept per
+ * repository in `github_pats.repo_scopes_json`.
+ *
+ * A fine-grained token is granted per repository, so its `repo` and
+ * `pull_request:write` answers are facts about one repository: GitHub's
+ * permission block on `GET /repos/{r}`, or a write Viberr made there (a branch,
+ * a push, a pull request, a merge). The token's own `validation_json` is the
+ * NEWEST validator run, whatever it asked, and the connection's Re-check asks
+ * about no repository at all; when that was the only home of the evidence, a
+ * Re-check on Instance settings turned a project's proven `repo` back into
+ * "unproven". Each entry is the verdict one scope last received on one
+ * repository (`at` is when), always `source: "probe"`: an `assumed` answer is
+ * no evidence and is never stored here.
+ */
+const repoScopeEvidenceSchema = scopeCheckSchema.extend({ at: z.string() });
+export type RepoScopeEvidence = z.infer<typeof repoScopeEvidenceSchema>;
+
+const repoScopeProofSchema = z.object({
+  /** "owner/name", as the probe or the write named it. */
+  repo: z.string().min(1),
+  scopes: z.array(repoScopeEvidenceSchema),
+});
+export type RepoScopeProof = z.infer<typeof repoScopeProofSchema>;
+
+/** Tolerant parse of `repo_scopes_json`: NULL or a value this code did not
+ *  write is "nothing proven yet" (an empty list), never a crash. */
+export function parseRepoScopeProofs(raw: string | null): RepoScopeProof[] {
+  if (!raw) return [];
+  try {
+    const result = z.array(repoScopeProofSchema).safeParse(JSON.parse(raw));
+    return result.success ? result.data : [];
+  } catch {
+    return [];
+  }
+}

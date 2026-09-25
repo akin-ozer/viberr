@@ -240,7 +240,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       }
       case "set-credential":
       case "clear-credential": {
-        // Attach/rotate + remove the credential — `grant-github-scope` tier.
+        // Attach/re-attach + remove the credential — `grant-github-scope` tier.
         // Archived read-only gate enforced (R8-5).
         assertProjectAction(db, "grant-github-scope", slug, actor, "change the credential");
         return intent === "set-credential"
@@ -281,6 +281,7 @@ export default function SettingsView({ loaderData }: Route.ComponentProps) {
       data={loaderData.view}
       meId={layout?.user.id ?? null}
       myRole={layout?.myRole ?? null}
+      instanceAdmin={layout?.user.role === "admin"}
     />
   );
 }

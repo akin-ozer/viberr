@@ -327,7 +327,11 @@ CREATE TABLE github_pats (
   token_suffix TEXT NOT NULL,
   created_at TEXT NOT NULL,
   last_validated_at TEXT,
-  validation_json TEXT
+  validation_json TEXT,
+  -- Ruling 480: what each repository proved about the token (`repo`,
+  -- `pull_request:write`), as the JSON `parseRepoScopeProofs` reads; NULL until
+  -- a repository-scoped probe or a write through the token proves something.
+  repo_scopes_json TEXT
 );
 CREATE TABLE project_github_credentials (
   project_slug TEXT PRIMARY KEY,

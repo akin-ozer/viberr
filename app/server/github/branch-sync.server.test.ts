@@ -15,7 +15,11 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  createPat,
+  getProjectCredentialHealth,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
 import { createGithubClient } from "./github-client.server";
 import {
   deriveSyncState,
@@ -246,6 +250,11 @@ describe("ensureTaskBranch", () => {
     // free gets no allocation note — the note is for the suffixed case only.
     expect(created[0]!.details).toMatchObject({ canonical: branch, branch, suffixed: false });
     expect(file!.parsed.timeline.some((e) => e.text.includes("allocated:"))).toBe(false);
+    // Ruling 480 (F40-43): the ref this token just created proves `repo` on
+    // this repository. Canary: drop the `markWriteScopeProven(…, "branch")`.
+    expect(
+      getProjectCredentialHealth(store.db, store.slug).scopes.find((s) => s.id === "repo"),
+    ).toEqual({ id: "repo", ok: true, source: "probe" });
   });
 
   it("ruling 122: takes a suffixed name when a past pull request used the canonical one", async () => {
@@ -382,6 +391,10 @@ describe("ensureTaskBranch", () => {
     }
     expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
     expect(listAuditEvents(store.db, { action: "github.branch.created" })).toHaveLength(0);
+    // Ruling 480: a read wrote nothing, so it proves nothing.
+    expect(
+      getProjectCredentialHealth(store.db, store.slug).scopes.find((s) => s.id === "repo"),
+    ).toMatchObject({ source: "unchecked" });
   });
 
   it("treats a 422 'Reference already exists' race as success", async () => {

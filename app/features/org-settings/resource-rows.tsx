@@ -4,7 +4,7 @@ import type { StageDef } from "~/schemas/project-file.schema";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
-import { rel, updatedLabel } from "./resource-helpers";
+import { LocalRelative, useHydrated } from "~/ui/local-time";
 import { isMcpHealthStale } from "~/shared/freshness";
 import { mcpSignInPhrase } from "~/shared/mcp-oauth";
 import { looksLikeWriteTool } from "~/shared/mcp-tools";
@@ -18,6 +18,39 @@ import { BACKEND_LABEL } from "~/shared/text/backend-label";
  * `resources-panel.tsx` (pass 16, pure structural refactor — no behaviour or
  * copy change).
  */
+
+/**
+ * Ruling 480 (F40-44): a resource row's "when", hydration-safe. The rows built
+ * these as strings with `formatRelative`, which reads NOW and the host zone
+ * ("yesterday" is a local-day fact), so the server's UTC render and the
+ * viewer's hydration disagreed around either midnight and on any minute
+ * rollover between them: React #418, and the whole Agent resources tab thrown
+ * away and painted again. `LocalRelative` keeps the first pass free of the
+ * clock (docs/ui/surfaces.md, the hydration contract).
+ */
+export function RelativeStamp({ iso }: { iso: string | null }) {
+  return iso ? <LocalRelative iso={iso} /> : <>never</>;
+}
+
+/** F17-L2: an un-edited resource reads "not yet edited", never "updated
+ *  never"; an edited one "updated <when>", through `RelativeStamp`. */
+export function UpdatedStamp({ iso }: { iso: string | null }) {
+  return iso ? (
+    <>
+      updated <LocalRelative iso={iso} />
+    </>
+  ) : (
+    <>not yet edited</>
+  );
+}
+
+/** Ruling 480 (F40-44): a signed-in MCP sign-in's phrase says when its token
+ *  runs out ("expires in 52 minutes"), which reads the clock, so the first
+ *  pass says only what the row holds and the expiry arrives with hydration. */
+function signInPhrase(oauth: McpView["oauth"], hydrated: boolean): string | null {
+  if (hydrated || oauth?.status !== "signed_in") return mcpSignInPhrase(oauth);
+  return oauth.renews ? "signed in (renews itself)" : "signed in";
+}
 
 export function KbPanel({
   kbs,
@@ -94,9 +127,8 @@ export function KbPanel({
                 )}
               </span>
               <span className="sub">
-                {kb.folderExists
-                  ? "re-scanned " + rel(kb.lastIndexedAt)
-                  : "last scanned " + rel(kb.lastIndexedAt)}
+                {kb.folderExists ? "re-scanned " : "last scanned "}
+                <RelativeStamp iso={kb.lastIndexedAt} />
                 {usedBy(kb.dir) > 0
                   ? " · " + countLabel(usedBy(kb.dir), "template")
                   : ""}
@@ -203,6 +235,9 @@ export function McpPanel({
   onEdit: (m: McpView) => void;
   onDelete: (m: McpView) => void;
 }) {
+  // Ruling 480 (F40-44): "stale" reads the clock too, so it waits for
+  // hydration like the stamp beside it; the first pass depends on the row alone.
+  const hydrated = useHydrated();
   return (
     <section className="panel">
       <div className="panel-head">
@@ -219,7 +254,7 @@ export function McpPanel({
         {mcps.map((m) => (
           <div className="rsrc-row" key={m.id}>
             {(() => {
-              const stale = m.up === true && isMcpHealthStale(m.lastCheckedAt);
+              const stale = hydrated && m.up === true && isMcpHealthStale(m.lastCheckedAt);
               // R19-18: a first-run install is neither up nor broken, and it
               // outranks the stored `up` — that value is the verdict of the
               // probe this install was started BY.
@@ -270,24 +305,33 @@ export function McpPanel({
                     that an npx/uvx-style command is still fetching, not a
                     reported install. One copy for both bases: the reader can act
                     on neither distinction. */}
-                {m.warmingSince !== null
-                  ? "first run, installing in the background"
-                  : m.oauth != null && m.oauth.status !== "signed_in"
-                  ? // Ruling 469: "needs sign-in" / "sign-in expired: …",
-                    // said as itself rather than as "unreachable".
-                    `${mcpSignInPhrase(m.oauth)} · checked ${rel(m.lastCheckedAt)}`
-                  : m.up === true
-                  ? (m.tools !== null
+                {m.warmingSince !== null ? (
+                  "first run, installing in the background"
+                ) : m.oauth != null && m.oauth.status !== "signed_in" ? (
+                  // Ruling 469: "needs sign-in" / "sign-in expired: …",
+                  // said as itself rather than as "unreachable".
+                  <>
+                    {mcpSignInPhrase(m.oauth)} · checked{" "}
+                    <RelativeStamp iso={m.lastCheckedAt} />
+                  </>
+                ) : m.up === true ? (
+                  <>
+                    {m.tools !== null
                       ? // D32-6 (pass 32): "1 tools" — count its noun.
                         `${countLabel(m.tools, "tool")} · `
-                      : "reachable · ") +
-                    "checked " + rel(m.lastCheckedAt) +
-                    (isMcpHealthStale(m.lastCheckedAt) ? " · stale, retest" : "")
-                  : m.up === false
-                    ? "unreachable · checked " + rel(m.lastCheckedAt)
-                    : /* P13-UI-16: defensive — every save/test writes `up`, so a
-                         null only appears for a row written outside Viberr. */
-                      "not health-checked yet"}
+                      : "reachable · "}
+                    checked <RelativeStamp iso={m.lastCheckedAt} />
+                    {hydrated && isMcpHealthStale(m.lastCheckedAt) ? " · stale, retest" : ""}
+                  </>
+                ) : m.up === false ? (
+                  <>
+                    unreachable · checked <RelativeStamp iso={m.lastCheckedAt} />
+                  </>
+                ) : (
+                  /* P13-UI-16: defensive — every save/test writes `up`, so a
+                     null only appears for a row written outside Viberr. */
+                  "not health-checked yet"
+                )}
                 {/* A9 (F17 hygiene): a stored credential that no longer decrypts
                     (e.g. the encryption key was rotated without the PREVIOUS key)
                     used to still read "auth: configured" while the server mounted
@@ -304,7 +348,7 @@ export function McpPanel({
                       " · auth: configured (held by Viberr; runs connect through its gateway)"
                   : m.oauth?.status === "signed_in"
                     ? // Ruling 469: the sign-in's tokens take the same road.
-                      ` · auth: OAuth, ${mcpSignInPhrase(m.oauth)}; held by Viberr, runs connect through its gateway`
+                      ` · auth: OAuth, ${signInPhrase(m.oauth, hydrated)}; held by Viberr, runs connect through its gateway`
                     : ""}
                 {/* P14-KM-09: KB and skill rows have counted their templates
                     since P13-KM-08; MCP rows showed nothing, so an admin about
@@ -441,7 +485,7 @@ export function SkillPanel({
               </span>
               <span className="sub mono">
                 store://skills/{s.name}/ · {countLabel(s.fileCount, "file")} ·{" "}
-                {updatedLabel(s.updatedAt)}
+                <UpdatedStamp iso={s.updatedAt} />
                 {usedBy(s.name) > 0
                   ? " · " + countLabel(usedBy(s.name), "template")
                   : ""}

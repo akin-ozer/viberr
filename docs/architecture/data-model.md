@@ -172,7 +172,7 @@ engagement.
 
 | Table | Kind | What it holds |
 |---|---|---|
-| `github_pats` | P | User-owned PATs: `id`, `user_id`, `label`, AES-256-GCM sealed `encrypted_token`, `token_suffix`, `created_at`, `last_validated_at`, cached `validation_json`. |
+| `github_pats` | P | User-owned PATs: `id`, `user_id`, `label`, AES-256-GCM sealed `encrypted_token`, `token_suffix`, `created_at`, `last_validated_at`, cached `validation_json` (the newest validator run), and `repo_scopes_json` (ruling 480: per repository, the last `probe` verdict each of `repo` / `pull_request:write` received there, from a repository-scoped validation or a write Viberr made; NULL until one; cleared when the token is replaced). |
 | `github_connections` | P | Org-level owner connections: `id` (`slugify(owner)`), `owner` (unique) → `pat_id`, `is_default`, `repos_count`, `expires_at`, `created_at`, `updated_at`. |
 | `project_github_credentials` | P | Which PAT a project uses (one per project): `project_slug` → `pat_id`, `created_at`, `updated_at`. |
 | `scope_violations` | P | PAT scope violations per project (and optional task): `id`, `project_slug`, `task_key`, `scope`, `detail`, `status` (`open \| resolved`), `created_at`, `resolved_at`, `resolved_by`; at most one open row per (`project_slug`, `scope`, `task_key`). |
