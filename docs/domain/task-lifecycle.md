@@ -902,6 +902,23 @@ Post-acceptance: the task workspace is reclaimed once no run is live, goal chain
 reconcile, held dependents are swept (ruling 131(e): a task whose every `blockedBy`
 entry is now done is released), and the board renders "accepted" (or "merged").
 
+**A post-merge proof is a follow-up read task** (ruling 492, the owner's F40-64 decision).
+A person's acceptance merges the PR and moves the task to Done in the same write (a
+full-autonomy operator's acceptance moves it to Done and leaves the merge to a person), and
+no stage sits after the merge boundary, so nothing that happens after the merge happens
+inside the task. A task's done signal is therefore something it can show before
+acceptance: its gates, its reviewers' verdicts, a measurement made on the branch or
+locally. A proof only the merged or deployed code can show (a production deploy, a cron
+run on the merged code, a live page, a production log) belongs to a follow-up read task
+whose `blockedBy` names this one, raised before or at this task's acceptance: it is held
+until this task is done, then released by the sweep above (after a person's acceptance,
+the merge has landed by then).
+Every door that writes a goal says so, from one constant (`DONE_SIGNAL_RULE`,
+`app/server/tasks/done-signal.server.ts`): the controller's four
+([controller-and-goals.md §7.2](controller-and-goals.md#72-defining)) and the operator's,
+which also raises the read's `create_task` option itself
+([operator.md §6](operator.md#6-decision-packets)). Nothing refuses a goal for its words.
+
 **The review queue's membership** (`review-queue.server.ts`, U35-5) has two halves with
 two rules. "Waiting on your acceptance" is about the boundary: a non-archived task
 standing at a stage acceptance is legal from (the acceptance boundary the workflow graph

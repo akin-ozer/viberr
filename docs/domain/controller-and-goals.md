@@ -11,7 +11,7 @@
 > `app/routes/resources.controller.ts`, `app/routes/resources.controller-unseen.ts`, `app/root.tsx`
 > (the dock mount), `app/features/org-settings/controller-admin-panel.tsx`,
 > `db/migrations/0001_baseline.sql` (the two controller tables).
-> Rulings 99, 100, 106, 107, 108, 121, 127, 373, 390, 398, 411 and 483 in
+> Rulings 99, 100, 106, 107, 108, 121, 127, 373, 390, 398, 411, 483 and 492 in
 > [decisions.md](../architecture/decisions.md) set most of what is here.
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
@@ -923,6 +923,21 @@ toolkit by the turn's mounts; ruling 476(h)). Audit `goal.created {title, links,
 which the project's Activity audit column reads as "<person> created goal **goal-N** (<title>)
 with N links." (ruling 477(b)); the reply names every link started ("2 started
 now (link 1 is KNC-3, link 3 is KNC-4)") or says every link waits on something.
+
+**A link's done signal is one its task can show before acceptance** (ruling 492).
+Acceptance merges a task's PR and moves it to Done in one write
+([task-lifecycle.md §11](task-lifecycle.md#11-acceptance-and-the-endings)), so a link whose
+outcome needs a proof only the merged or deployed code can show (a production deploy, a
+cron run on the merged code, a live page, a production log) is split in two: the delivery
+link, whose done signal is its gates, its reviewers' verdicts or a measurement made on the
+branch, and a read link whose `blockedBy` names it (goal-1 links 12 and 13 on
+akinozer-com). A task created outside a chain gets the same pair: the delivery task and a
+read task whose `blockedBy` names its key. The controller's four goal doors
+(`create_task.goal`, `update_task.goal`, `create_goal.links[].goal` and `update_goal.goal`,
+the field `add_link` and `edit_link` write) carry the rule in the goal field's description,
+from one constant (`DONE_SIGNAL_RULE`, `app/server/tasks/done-signal.server.ts`), and the
+controller guide says it under "Creating a task" and "Chained goals". It is guidance:
+nothing refuses a goal for its words.
 
 ### 7.3 Advancing
 
