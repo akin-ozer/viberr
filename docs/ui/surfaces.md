@@ -333,11 +333,25 @@ in, the pasted-credential field is replaced by a sentence saying none is used, a
 editing the endpoint warns that saving drops the sign-in. `mcp-oauth-sign-out` revokes
 and drops the tokens. The row says the same without a click: "needs sign-in · checked
 …" on a red dot instead of "unreachable", or "auth: OAuth, signed in (…); held by
-Viberr, runs connect through its gateway".
+Viberr, runs connect through its gateway". Ruling 486 adds what the sign-in was
+granted: the row reads "auth: OAuth, signed in (…), read-only · 194 scopes; held by
+Viberr, runs connect through its gateway" ("194 scopes · 12 writes" for a grant that
+writes), and under the editor's status line "Granted read-only · 194 scopes. Runs can
+read through it, and the server refuses any call that writes. To allow writes, add
+write scopes to Requested scopes above, save, and sign in again." with a disclosure
+"The 194 scopes it granted" (every scope, each write marked "write"); a server that
+named no scope reads "The server did not say which scopes it granted." The editor's
+optional "Requested scopes" text area (HTTP only, above the sign-in) is hinted "Sent as
+the sign-in's scope, separated by spaces; blank asks for what the server advertises.
+The server's own sign-in page decides what it grants, so this editor shows what it
+granted. A change applies at the next sign-in."
 `mcp-save` carries the MCP editor's `writeTools`, a JSON array of tool names (ruling 176):
 absent keeps the stored marks, a malformed list or a name outside the MCP alphabet is
 refused. The editor's "Write tools" section lists the probe's tool names as chips and
 takes a typed name; every server row states where it stands on write tools (ruling 220).
+For an HTTP server it also carries `requestedScopes` (ruling 486): absent keeps what is
+stored, blank clears it, and a scope OAuth does not allow is refused ("The requested
+scope … is not one OAuth allows").
 
 The **Controller** tab (screen label `Controller settings`) is the one org-settings
 surface whose controls are not all live (rulings 106, 107, 108): model and effort use

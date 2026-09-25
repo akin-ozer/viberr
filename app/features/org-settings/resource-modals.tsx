@@ -1,8 +1,9 @@
 import { useState } from "react";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { slugify } from "~/shared/ids/slugify";
-import { mcpSignInPhrase } from "~/shared/mcp-oauth";
+import { isWriteScope, mcpGrantPhrase, mcpSignInPhrase, summarizeMcpGrant } from "~/shared/mcp-oauth";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE } from "~/shared/mcp-tools";
+import { countLabel } from "~/shared/text/plural";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
@@ -169,6 +170,42 @@ function sentenceCase(text: string): string {
 }
 
 /**
+ * Ruling 486: what a sign-in was granted, under its status line. The summary
+ * ("read-only · 194 scopes") says whether a run may write through the
+ * connection; the full list sits in a disclosure, each write marked. It looks
+ * like a GitHub connection's reach list (`.conn-reach`), so the stylesheet
+ * every page loads does not grow for it.
+ */
+function McpGrant({ scope }: { scope: string | null }) {
+  const grant = summarizeMcpGrant(scope);
+  if (!grant) return <span className="fhint">The server did not say which scopes it granted.</span>;
+  return (
+    <>
+      <span className="fhint">
+        Granted {mcpGrantPhrase(scope)}
+        {grant.writes.length === 0
+          ? ". Runs can read through it, and the server refuses any call that writes. To allow writes, add write scopes to Requested scopes above, save, and sign in again."
+          : "."}
+      </span>
+      <details className="conn-reach">
+        <summary>
+          <span>The {countLabel(grant.scopes.length, "scope")} it granted</span>
+          <Icon name="chevron" className="disc-chev" />
+        </summary>
+        <ul className="conn-reach-list" aria-label="Granted scopes">
+          {grant.scopes.map((granted) => (
+            <li key={granted}>
+              <span className="mono">{granted}</span>
+              {isWriteScope(granted) && <span className="conn-reach-ro">write</span>}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </>
+  );
+}
+
+/**
  * Ruling 469: the editor's OAuth sign-in, beside the pasted credential. "Sign
  * in" asks the server to discover the server's authorization server, register
  * Viberr there and hand back the authorization URL; the admin opens it in a
@@ -216,6 +253,7 @@ function McpSignIn({ mcp }: { mcp: McpView }) {
         {status}
       </span>
       {oauth?.status === "expired" && oauth.reason && <span className="fhint mono">{oauth.reason}</span>}
+      {signedIn && <McpGrant scope={oauth?.scope ?? null} />}
       <span className="cred-manage" role="group" aria-labelledby="mcp-oauth-label">
         <button
           type="button"
@@ -299,6 +337,8 @@ export function McpModal({
   const [clearCred, setClearCred] = useState(false);
   // Ruling 469: read live from the row, which the panel keeps current.
   const signedIn = initial?.oauth?.status === "signed_in";
+  // Ruling 486(c): what the next OAuth sign-in asks for, as stored.
+  const [scopes, setScopes] = useState(initial?.requestedScope ?? "");
   // Ruling 176: the write-tool marks. The editor proposes and the admin
   // decides: a server nobody has reviewed opens with the discovery suggestion
   // selected; a reviewed one opens with exactly what was saved.
@@ -361,6 +401,8 @@ export function McpModal({
         // nothing to show yet stays unreviewed, so the names its first probe
         // discovers still arrive as a suggestion.
         if (reviewed || toolChoices.length > 0) fields.writeTools = JSON.stringify(marked);
+        // Ruling 486(c): only an HTTP server signs in, so only it asks for scopes.
+        if (transport === "HTTP") fields.requestedScopes = scopes.trim();
         action.submit(fields);
       }}
     >
@@ -515,6 +557,32 @@ export function McpModal({
           </span>
         </div>
       </div>
+      )}
+      {transport === "HTTP" && (
+        <div className="field">
+          <label className="flabel" htmlFor="mcp-scopes">
+            Requested scopes <span className="fhint">optional · for an OAuth sign-in</span>
+          </label>
+          <textarea
+            id="mcp-scopes"
+            className="mono"
+            rows={2}
+            value={scopes}
+            placeholder="e.g. workers-scripts.write workers-ci.write zone.read"
+            autoComplete="off"
+            spellCheck={false}
+            aria-describedby="mcp-scopes-hint"
+            onChange={(e) => {
+              setScopes(e.target.value);
+              setErr(null);
+            }}
+          />
+          <span className="fhint" id="mcp-scopes-hint">
+            Sent as the sign-in&apos;s scope, separated by spaces; blank asks for what the server
+            advertises. The server&apos;s own sign-in page decides what it grants, so this editor
+            shows what it granted. A change applies at the next sign-in.
+          </span>
+        </div>
       )}
       {initial && initial.transport === "HTTP" && transport === "HTTP" && <McpSignIn mcp={initial} />}
       <div className="field">

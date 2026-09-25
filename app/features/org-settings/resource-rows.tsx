@@ -7,7 +7,7 @@ import { AgentGlyph } from "~/ui/identity";
 import { storedStageLabel } from "./resource-helpers";
 import { LocalRelative, useHydrated } from "~/ui/local-time";
 import { isMcpHealthStale } from "~/shared/freshness";
-import { mcpSignInPhrase } from "~/shared/mcp-oauth";
+import { mcpGrantPhrase, mcpSignInPhrase } from "~/shared/mcp-oauth";
 import { looksLikeWriteTool } from "~/shared/mcp-tools";
 import { countLabel } from "~/shared/text/plural";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
@@ -51,6 +51,13 @@ export function UpdatedStamp({ iso }: { iso: string | null }) {
 function signInPhrase(oauth: McpView["oauth"], hydrated: boolean): string | null {
   if (hydrated || oauth?.status !== "signed_in") return mcpSignInPhrase(oauth);
   return oauth.renews ? "signed in (renews itself)" : "signed in";
+}
+
+/** Ruling 486: ", read-only · 194 scopes" after the sign-in, or nothing when
+ *  the server did not say what it granted. */
+function grantPhrase(scope: string | null): string {
+  const phrase = mcpGrantPhrase(scope);
+  return phrase ? `, ${phrase}` : "";
 }
 
 export function KbPanel({
@@ -349,7 +356,8 @@ export function McpPanel({
                       " · auth: configured (held by Viberr; runs connect through its gateway)"
                   : m.oauth?.status === "signed_in"
                     ? // Ruling 469: the sign-in's tokens take the same road.
-                      ` · auth: OAuth, ${signInPhrase(m.oauth, hydrated)}; held by Viberr, runs connect through its gateway`
+                      // Ruling 486: and the row says what the sign-in may do.
+                      ` · auth: OAuth, ${signInPhrase(m.oauth, hydrated)}${grantPhrase(m.oauth.scope)}; held by Viberr, runs connect through its gateway`
                     : ""}
                 {/* P14-KM-09: KB and skill rows have counted their templates
                     since P13-KM-08; MCP rows showed nothing, so an admin about

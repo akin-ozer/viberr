@@ -4524,6 +4524,55 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
     }
   });
 
+  it("ruling 486: list_mcp_servers and test_mcp_server report the grant; save_mcp_server records Requested scopes", async () => {
+    // CANARY: map `signIn` without `grant`, and the controller reads
+    // "signed_in" over 194 read-only scopes, as it did live (F40-63).
+    const { startOAuthMcpServer, signInWithOAuth } = await import("../../../test-support/mcp-oauth-server");
+    const { CLOUDFLARE_READ_ONLY_GRANT } = await import("../../../test-support/cloudflare-read-only-grant");
+    const { resetMcpOAuthForTests } = await import("~/server/org/mcp-oauth.server");
+    const oauth = await startOAuthMcpServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
+    try {
+      await call(ids.orgAdminOutsider, "save_mcp_server", {
+        name: "grant-probe",
+        transport: "HTTP",
+        target: oauth.url,
+        writeTools: [],
+        requestedScopes: "workers-scripts.write zone.read",
+      });
+      // SAFETY: `list_mcp_servers` answers the JSON array of the row shape the
+      // toolkit maps; the row is asserted to exist below.
+      const listed = async () =>
+        (JSON.parse(await call(ids.orgAdminOutsider, "list_mcp_servers")) as {
+          id: string;
+          name: string;
+          signIn: { status: string; grant: unknown } | null;
+          signInNote: string | null;
+          requestedScopes: string | null;
+        }[]).find((m) => m.name === "grant-probe")!;
+      expect((await listed()).requestedScopes).toBe("workers-scripts.write zone.read");
+
+      await signInWithOAuth(app.db, (await listed()).id);
+      const signedIn = await listed();
+      expect(signedIn.signIn?.grant).toEqual({
+        scopes: 194,
+        writes: 0,
+        readOnly: true,
+        summary: "read-only · 194 scopes",
+        writeScopes: [],
+      });
+      expect(signedIn.signInNote).toContain("Its grant is read-only (194 scopes)");
+      // The whole list is not dumped into the controller's context.
+      expect(JSON.stringify(signedIn)).not.toContain("workers-ci.read");
+      expect(oauth.authorizeRequests.at(-1)?.get("scope")).toBe("workers-scripts.write zone.read");
+
+      const tested = await call(ids.orgAdminOutsider, "test_mcp_server", { id: signedIn.id });
+      expect(tested).toMatch(/signed in \(expires in 60 minutes, renews itself\) · read-only · 194 scopes$/);
+    } finally {
+      resetMcpOAuthForTests();
+      await oauth.close();
+    }
+  });
+
   it("save_mcp_server's description names the sign-in as the admin's", async () => {
     const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const toolkit = buildControllerToolkit({

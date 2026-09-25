@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
 import { mcpGatewayMountUrl } from "~/server/mcp-proxy/gateway.server";
+import { mcpGrantPhrase, summarizeMcpGrant, type McpOAuthView } from "~/shared/mcp-oauth";
 import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import {
@@ -173,20 +174,63 @@ export interface SpecialistMcpResolution {
    * is held by Viberr and a 401 from the gateway means the run ended.
    */
   proxied: string[];
+  /**
+   * Ruling 486: the proxied servers signed in with OAuth, each with the scope
+   * its sign-in was granted (null when the server did not say), so the prompt
+   * tells the run what the connection may do before a write is refused.
+   */
+  oauthGrants: McpRunGrant[];
+}
+
+/** Ruling 486: an OAuth-signed-in server a run mounts, and its sign-in's grant. */
+export interface McpRunGrant {
+  name: string;
+  /** The granted scope, space-joined (`McpOAuthView.scope`). */
+  scope: string | null;
+}
+
+/**
+ * Ruling 486: one line per OAuth-signed-in server, naming its grant. A
+ * read-only grant says what a write will meet and whose act the remedy is.
+ */
+function grantLine(grant: McpRunGrant): string {
+  const phrase = mcpGrantPhrase(grant.scope);
+  if (!phrase) {
+    return `- ${grant.name}: signed in with OAuth; the server did not say which scopes it granted.`;
+  }
+  if (summarizeMcpGrant(grant.scope)?.writes.length) {
+    return `- ${grant.name}: signed in with OAuth, granted ${phrase}.`;
+  }
+  return (
+    `- ${grant.name}: signed in with OAuth, granted ${phrase}. The server refuses any call ` +
+    "that writes, so do not attempt one; if the task needs a write, report that an org admin " +
+    "must sign it in again with write scopes in Instance settings → Agent resources."
+  );
 }
 
 /**
  * Ruling 461: what a run is told about the servers it reaches through Viberr's
  * gateway. One renderer for the specialist, operator and controller prompts.
+ * Ruling 486: an OAuth-signed-in server's grant is named with it.
  */
-export function gatewayMcpSection(proxied: readonly string[]): string {
+export function gatewayMcpSection(
+  proxied: readonly string[],
+  grants: readonly McpRunGrant[] = [],
+): string {
   if (proxied.length === 0) return "";
   const names = [...proxied].sort().join(", ");
+  const signedIn = grants
+    .filter((grant) => proxied.includes(grant.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
   return (
     "\n\n---\n# MCP servers reached through Viberr's gateway\n\n" +
     `${names} ${proxied.length === 1 ? "is" : "are"} mounted through Viberr's MCP ` +
     "gateway: the credential is held by Viberr, and you never need it or see it; a 401 " +
-    "from the gateway means this run has ended."
+    "from the gateway means this run has ended." +
+    (signedIn.length > 0
+      ? "\n\nWhat each OAuth sign-in was granted, which the server enforces:\n\n" +
+        signedIn.map(grantLine).join("\n")
+      : "")
   );
 }
 
@@ -199,7 +243,8 @@ export function resolveSpecialistMcpServersDetailed(
   const unresolved: UnresolvedMcpGrant[] = [];
   const toolDenials: McpToolDenial[] = [];
   const proxied: string[] = [];
-  if (mcpNames.length === 0) return { servers, unresolved, toolDenials, proxied };
+  const oauthGrants: McpRunGrant[] = [];
+  if (mcpNames.length === 0) return { servers, unresolved, toolDenials, proxied, oauthGrants };
   let registry: {
     name: string;
     transport: "HTTP" | "stdio";
@@ -207,6 +252,7 @@ export function resolveSpecialistMcpServersDetailed(
     up: boolean | null;
     lastCheckedAt: string | null;
     writeTools: string[];
+    oauth?: McpOAuthView | null;
   }[];
   try {
     registry = listMcpServers(db);
@@ -227,7 +273,7 @@ export function resolveSpecialistMcpServersDetailed(
         reason: "the org MCP registry could not be read — it exposes no tools",
       });
     }
-    return { servers, unresolved, toolDenials, proxied };
+    return { servers, unresolved, toolDenials, proxied, oauthGrants };
   }
   const byName = new Map(registry.map((m) => [m.name, m]));
 
@@ -316,6 +362,8 @@ export function resolveSpecialistMcpServersDetailed(
       }
       servers[name] = gateway;
       proxied.push(name);
+      // Ruling 486: the run is told what the sign-in may do.
+      if (credential.state === "oauth") oauthGrants.push({ name, scope: row.oauth?.scope ?? null });
     } else if (command) {
       servers[name] = { command, args: parts.slice(1) };
     } else {
@@ -332,7 +380,7 @@ export function resolveSpecialistMcpServersDetailed(
     // attached MCP server" with "no callable tools ever surfaced for it".
     if (row.up === false) flagDown(name, row.lastCheckedAt ?? null);
   }
-  return { servers, unresolved, toolDenials, proxied };
+  return { servers, unresolved, toolDenials, proxied, oauthGrants };
 }
 
 /**
@@ -415,5 +463,6 @@ export async function verifyStdioMcpMountsForRun(
   // A dropped server exposes nothing, so it has nothing left to deny.
   const toolDenials = resolution.toolDenials.filter((d) => d.server in servers);
   const proxied = resolution.proxied.filter((name) => name in servers);
-  return { servers, unresolved, toolDenials, proxied };
+  const oauthGrants = resolution.oauthGrants.filter((grant) => grant.name in servers);
+  return { servers, unresolved, toolDenials, proxied, oauthGrants };
 }

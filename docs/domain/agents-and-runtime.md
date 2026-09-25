@@ -1565,7 +1565,21 @@ runtime's answer for a missing grant.
   `temporarily_unavailable`) is reported and keeps the sign-in. A server that answers
   the MCP authorization challenge and holds no token (or whose sign-in expired) is not
   mounted at all: the run's prompt names it with that reason instead of a server that
-  answers every call 401. The Agents page says the same before any run (ruling 479(b)):
+  answers every call 401. What a sign-in was GRANTED is public (ruling 486): the token
+  reply's `scope` (or, when it names none, the scope asked for) is kept in `oauth_json`,
+  replaced by a refresh that names one and cleared by a sign-out or an expiry, and one
+  classifier (`isWriteScope`, `app/shared/mcp-oauth.ts`: a write is any scope whose
+  action is not `read`, `metadata_read`, `monitoring` or `report`, other than
+  `offline_access`) summarizes it everywhere as "read-only · 194 scopes" or "194 scopes ·
+  12 writes". A run's prompt names each signed-in server's grant, and a read-only one adds
+  that the server refuses any call that writes. When a call through the gateway meets an
+  upstream authorization refusal (an HTTP 401 or 403, a JSON-RPC error, or an `isError`
+  tool result that says authentication or authorization, as Cloudflare's "10000:
+  Authentication error" does) and the grant has no write, the run's error gains "This
+  connection's sign-in granted read-only scopes (N); an admin must sign it in again with
+  write scopes in Instance settings → Agent resources." after the upstream's own words,
+  which stay untouched. The next sign-in asks for the admin's Requested scopes
+  (`oauth_requested_scope`) when set, else the resource's advertised `scopes_supported`. The Agents page says the same before any run (ruling 479(b)):
   `buildResourceCatalog` carries a `warning` on each MCP item a run would not get tools
   from, read off the registry row the Settings list renders ("needs sign-in", "sign-in
   expired", "credential unreadable", or "unreachable" for a failed last check, which is
@@ -1585,7 +1599,8 @@ runtime's answer for a missing grant.
   the run's actor (the agent, the operator, or the asker as the controller's
   instrument). The prompt names a proxied server in one sentence (`gatewayMcpSection`:
   the credential is held by Viberr, the agent never needs or sees it, a 401 means the
-  run ended). A gateway that is not listening leaves a credentialed server unmounted,
+  run ended), and each OAuth-signed-in one in a line with its grant (`oauthGrants` on the
+  resolution, ruling 486). A gateway that is not listening leaves a credentialed server unmounted,
   with that reason in the run's prompt. Reserved names are skipped; a missing row is
   reported "unresolved"; an unhealthy row is still mounted but flagged; a credential that
   cannot be opened drops the server; stdio servers get a real discovery handshake, WITH

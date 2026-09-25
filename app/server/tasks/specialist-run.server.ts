@@ -150,6 +150,7 @@ import {
   type SpecialistMcpServerConfig,
   unavailableMcpSection,
   gatewayMcpSection,
+  type McpRunGrant,
   type UnresolvedMcpGrant,
 } from "./specialist-mcp.server";
 import {
@@ -319,6 +320,8 @@ interface RunMcpMounts {
   toolDenials: McpToolDenial[];
   /** Ruling 461: the mounted servers reached through Viberr's MCP gateway. */
   proxied: string[];
+  /** Ruling 486: the proxied servers signed in with OAuth, with their grants. */
+  oauthGrants: McpRunGrant[];
 }
 
 /**
@@ -398,6 +401,7 @@ async function mcpServersFor(
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
     toolDenials: resolution.toolDenials,
     proxied: resolution.proxied,
+    oauthGrants: resolution.oauthGrants,
   };
   // Absent rather than empty: callers read the key's PRESENCE as "this run has
   // MCP mounts at all" before they build the prompt or the run spec.
@@ -1581,7 +1585,7 @@ async function dispatchAgentRun(
   // whether the admin's marked MCP write tools go too — one predicate.
   const resolvedMcps: RunMcpMounts = realBackend
     ? await mcpServersFor(db, mcpNames, repoWriteWithheldFromDenylist(disallowedTools))
-    : { unresolved: [], unhealthy: [], toolDenials: [], proxied: [] };
+    : { unresolved: [], unhealthy: [], toolDenials: [], proxied: [], oauthGrants: [] };
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
@@ -1834,6 +1838,7 @@ async function dispatchAgentRun(
     unhealthyMcps: resolvedMcps.unhealthy,
     mcpWriteToolsDenied: resolvedMcps.toolDenials,
     mcpProxied: resolvedMcps.proxied,
+    mcpOAuthGrants: resolvedMcps.oauthGrants,
     // Ruling 159: the agent is handed the ABSOLUTE directory (inside the
     // container `/data/...` is real; on bare metal it is the data root's own
     // absolute path). The store-relative form is a display form for humans.
@@ -2789,6 +2794,8 @@ export interface SpecialistPersonaInput {
   /** Ruling 461: the mounted org servers reached through Viberr's MCP gateway
    *  (those with a stored credential), named in their own sentence. */
   mcpProxied?: string[];
+  /** Ruling 486: what each OAuth-signed-in proxied server was granted. */
+  mcpOAuthGrants?: McpRunGrant[];
   /** R19-19: browser state — mounted (with the ABSOLUTE attachments dir for
    *  the guardrail text, ruling 159) or granted-but-refused (with the reason).
    *  The section renders only when the server actually mounted, so prompt and
@@ -2979,7 +2986,7 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
     // credential and what a 401 means. (F27-P2's "MCP credentials on this
     // Codex run" section, which told a Codex run it was unauthenticated, went
     // with the limitation it described.)
-    const gateway = gatewayMcpSection(input.mcpProxied ?? []);
+    const gateway = gatewayMcpSection(input.mcpProxied ?? [], input.mcpOAuthGrants ?? []);
     if (gateway) parts.push(gateway);
   }
   // F32-8 (pass 32): say when there are NONE. Live (VIB-1, VIB-2) a reviewer
@@ -3783,6 +3790,7 @@ export async function resolveResumeConfinement(
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
       mcpWriteToolsDenied: resumeMcps.toolDenials,
       mcpProxied: resumeMcps.proxied,
+      mcpOAuthGrants: resumeMcps.oauthGrants,
       // Ruling 159: the absolute dir, exactly as the fresh path hands it.
       browser: resumeBrowser.server
         ? {

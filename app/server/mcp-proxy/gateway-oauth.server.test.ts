@@ -5,15 +5,18 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
+  CLOUDFLARE_AUTH_ERROR_TEXT,
   signInWithOAuth,
   startOAuthMcpServer,
   TEST_OAUTH_ADMIN,
   type OAuthMcpServerHandle,
 } from "../../../test-support/mcp-oauth-server";
+import { CLOUDFLARE_READ_ONLY_GRANT } from "../../../test-support/cloudflare-read-only-grant";
 import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
 import { getMcpServer, saveMcpServer } from "~/server/org/resources.server";
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { bindRunToMcpGateway, startMcpGateway, stopMcpGateway } from "./gateway.server";
+import { errorMessage } from "~/shared/errors";
 import { OAUTH_NEEDS_SIGN_IN, OAUTH_SIGN_IN_EXPIRED } from "./upstream.server";
 
 /**
@@ -39,6 +42,8 @@ const gatewayConfig = z.strictObject({
 const textResult = z.object({
   content: z.array(z.object({ type: z.literal("text"), text: z.string() })),
 });
+
+const toolResult = textResult.extend({ isError: z.boolean().optional() });
 
 beforeEach(async () => {
   db = ctx.makeDb();
@@ -144,6 +149,66 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
     } finally {
       await moved.close();
     }
+  });
+
+  describe("an upstream authorization refusal names a read-only grant (ruling 486)", () => {
+    const SENTENCE =
+      "This connection's sign-in granted read-only scopes (194); an admin must sign it in again with write scopes in Instance settings → Agent resources.";
+
+    /** Sign in again, the server granting `scope` this time. */
+    async function grantedAgain(scope: string): Promise<void> {
+      server.options.grantedScope = scope;
+      expect((await signInWithOAuth(db, "mcp_cf")).ok).toBe(true);
+    }
+
+    /** What the run's own client reads when a call fails. */
+    async function refusalOf(call: ReturnType<Client["callTool"]>): Promise<string> {
+      try {
+        await call;
+      } catch (cause) {
+        return errorMessage(cause);
+      }
+      return "answered";
+    }
+
+    it("an upstream 403 on a read-only grant gains the sentence; on a grant that writes it does not", async () => {
+      // CANARY: relay the refusal as it came, and the run reads only
+      // "insufficient_scope" beside a connection every surface calls signed in.
+      await grantedAgain(CLOUDFLARE_READ_ONLY_GRANT);
+      server.options.refuseWrites = "http-403";
+      const { client } = await runClient();
+      const readOnly = await refusalOf(client.callTool({ name: "delete_zone", arguments: {} }));
+      expect(readOnly).toContain('MCP server "cloudflare-api" failed through Viberr\'s gateway');
+      // The upstream's own words stay as they were, the sentence after them.
+      expect(readOnly).toContain('{"error":"insufficient_scope"}');
+      expect(readOnly.endsWith(SENTENCE)).toBe(true);
+      expect(server.calls).toEqual(["refused:delete_zone"]);
+      // The sign-in stands: a refusal of authority is not an expired token.
+      expect(getMcpServer(db, "mcp_cf")?.oauth?.status).toBe("signed_in");
+
+      await grantedAgain(`${CLOUDFLARE_READ_ONLY_GRANT} workers-scripts.write`);
+      const writes = await refusalOf(client.callTool({ name: "delete_zone", arguments: {} }));
+      expect(writes).toContain('{"error":"insufficient_scope"}');
+      expect(writes).not.toContain("read-only scopes");
+    });
+
+    it("a tool result that says 'Authentication error' on a read-only grant gains the sentence after the upstream's text", async () => {
+      // CANARY: look only at thrown errors, and Cloudflare's "10000:
+      // Authentication error" (a tool result) reaches the run bare.
+      await grantedAgain(CLOUDFLARE_READ_ONLY_GRANT);
+      server.options.refuseWrites = "tool-error";
+      const { client } = await runClient();
+      const refused = toolResult.parse(await client.callTool({ name: "delete_zone", arguments: {} }));
+      expect(refused.isError).toBe(true);
+      expect(refused.content.map((block) => block.text)).toEqual([CLOUDFLARE_AUTH_ERROR_TEXT, SENTENCE]);
+      // A result that is not a refusal is left alone.
+      const fine = toolResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
+      expect(fine.content.map((block) => block.text)).toEqual(["whoami: ok"]);
+
+      await grantedAgain(`${CLOUDFLARE_READ_ONLY_GRANT} workers-scripts.write`);
+      const writes = toolResult.parse(await client.callTool({ name: "delete_zone", arguments: {} }));
+      expect(writes.content.map((block) => block.text)).toEqual([CLOUDFLARE_AUTH_ERROR_TEXT]);
+    });
   });
 
   it("a sign-out takes effect on the run's next call", async () => {

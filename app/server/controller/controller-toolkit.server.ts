@@ -83,7 +83,7 @@ import {
   type RequestableKind,
 } from "./controller-requests.server";
 import { CONTROLLER_SECTION_LABEL } from "~/shared/controller-locks";
-import { mcpSignInNote } from "~/shared/mcp-oauth";
+import { mcpGrantPhrase, mcpSignInNote, summarizeMcpGrant } from "~/shared/mcp-oauth";
 import {
   listKnowledgeBases,
   listMcpServers,
@@ -338,6 +338,24 @@ function divergedSentence(diverged: TemplateCopyDrift[]): string {
 }
 
 /** The ceiling the task page's schedule form applies (28 days). */
+/**
+ * Ruling 486: an OAuth sign-in's grant as `list_mcp_servers` reports it —
+ * counted, labelled and with its writes by name, never the whole list (a
+ * Cloudflare read-only grant is 194 scopes). Null when the server did not
+ * say what it granted.
+ */
+function grantOf(scope: string | null) {
+  const grant = summarizeMcpGrant(scope);
+  if (!grant) return null;
+  return {
+    scopes: grant.scopes.length,
+    writes: grant.writes.length,
+    readOnly: grant.writes.length === 0,
+    summary: mcpGrantPhrase(scope),
+    writeScopes: grant.writes,
+  };
+}
+
 const SCHEDULE_MAX_MINUTES = 40_320;
 
 /** Build the toolkit for one controller turn. */
@@ -1108,7 +1126,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_mcp_servers",
-      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. `signIn` is an HTTP server's OAuth sign-in (ruling 469): null when it is not an OAuth server, else `needs_sign_in` (runs do not mount it), `signed_in` (with `expiresAt` and whether it `renews`) or `expired` (with the reason); `signInNote` says it in words. Only an org admin signs a server in or out, in Instance settings → Agent resources; you cannot. Credentials and tokens are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
+      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. `signIn` is an HTTP server's OAuth sign-in (ruling 469): null when it is not an OAuth server, else `needs_sign_in` (runs do not mount it), `signed_in` (with `expiresAt` and whether it `renews`) or `expired` (with the reason); `signInNote` says it in words. A signed-in server's `signIn.grant` is what its authorization server granted (ruling 486): `scopes` and `writes` counted, `readOnly` when no scope writes, `summary` (such as read-only · 194 scopes), and `writeScopes` by name; null when the server did not say. A read-only grant refuses every call that writes, so relay it before anyone plans a write through that server. `requestedScopes` is what the next sign-in asks for (null asks for what the server advertises). Only an org admin signs a server in or out, in Instance settings → Agent resources; you cannot. Credentials and tokens are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
       {},
       run(() => {
         requireOrgAdmin("read the MCP connections");
@@ -1165,9 +1183,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                   renews: m.oauth.renews,
                   issuer: m.oauth.issuer,
                   reason: m.oauth.reason,
+                  // Ruling 486 (F40-63): what the sign-in may do. Live, this
+                  // read said "signed_in" over a grant of 194 read-only
+                  // scopes, and the first write came back "Authentication
+                  // error" with nothing here to say why.
+                  grant: grantOf(m.oauth.scope),
                 }
               : null,
             signInNote: mcpSignInNote(m.oauth),
+            requestedScopes: m.requestedScope ?? null,
           })),
         );
       }),
@@ -1178,7 +1202,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_mcp_server",
-      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. Credentials do NOT travel through chat: tell the admin to add the secret in Instance settings → Agent resources, then test the server. An HTTP server that asks for an OAuth sign-in (the reply says so) is signed in by an org admin from its editor in Instance settings → Agent resources (Sign in), which you cannot do: tell the admin, and until then runs do not mount it (ruling 469). `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
+      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. `requestedScopes` records the OAuth scopes an HTTP server's next sign-in asks for (ruling 486); it takes effect when an org admin signs in again, and the server decides what it grants. Credentials do NOT travel through chat: tell the admin to add the secret in Instance settings → Agent resources, then test the server. An HTTP server that asks for an OAuth sign-in (the reply says so) is signed in by an org admin from its editor in Instance settings → Agent resources (Sign in), which you cannot do: tell the admin, and until then runs do not mount it (ruling 469). `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
       {
         id: z.string().optional().describe("Existing server id to update; omit to create."),
         name: z.string(),
@@ -1190,6 +1214,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .describe(
             "Tool names to withhold from read-only runs. Omit on create for the heuristic default; omit on update to leave the marking unchanged; pass [] to mark none.",
           ),
+        requestedScopes: z
+          .string()
+          .optional()
+          .describe(
+            "HTTP only (ruling 486): the OAuth scopes the next sign-in asks for, space-separated (e.g. \"workers-scripts.write zone.read\"). The authorization server decides what it grants; list_mcp_servers shows it. Omit to leave the stored request unchanged; \"\" clears it, so the server's advertised scopes are asked for.",
+          ),
       },
       runWith(
         async (args: {
@@ -1198,6 +1228,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           transport: "HTTP" | "stdio";
           target: string;
           writeTools?: string[];
+          requestedScopes?: string;
         }) => {
           requireOrgAdmin("manage MCP connections");
           // Ruling 188 (pass 37, F37-7): this tool could create an MCP server
@@ -1217,6 +1248,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             cred: "",
           };
           if (args.writeTools !== undefined) input.writeTools = args.writeTools;
+          if (args.requestedScopes !== undefined) input.requestedScopes = args.requestedScopes;
           const saved = await saveMcpServer(db, input, auditActor, {}, { dataRoot });
           // `saveMcpServer` answers with the row it wrote, so the reply states
           // the marking that actually landed rather than the one we asked for.
@@ -1252,7 +1284,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "test_mcp_server",
-      "Probe one org MCP connection now and report its health in the command's own words. Org admins only.",
+      "Probe one org MCP connection now and report its health in the command's own words; a server signed in with OAuth also names what its sign-in was granted (\"read-only · 194 scopes\", ruling 486). Org admins only.",
       { id: z.string().describe("The server id (from list_mcp_servers).") },
       runWith(async (args: { id: string }) => {
         requireOrgAdmin("test MCP connections");

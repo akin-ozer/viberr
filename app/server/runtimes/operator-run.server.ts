@@ -107,6 +107,7 @@ import {
   type SpecialistMcpServerConfig,
   unavailableMcpSection,
   gatewayMcpSection,
+  type McpRunGrant,
   type UnresolvedMcpGrant,
 } from "~/server/tasks/specialist-mcp.server";
 import {
@@ -3871,6 +3872,9 @@ export interface OperatorMcpResolution {
   toolDenials: McpToolDenial[];
   /** Ruling 461: the mounted servers reached through Viberr's MCP gateway. */
   proxied: string[];
+  /** Ruling 486: the proxied servers signed in with OAuth, with their grants.
+   *  Optional: a prompt-shape fixture mounts none. */
+  oauthGrants?: McpRunGrant[];
 }
 
 /** Resolve the operator's MCP grants once per run (see OperatorMcpResolution).
@@ -3891,7 +3895,7 @@ async function operatorMcpResolution(
   db: DatabaseSync,
   names: readonly string[],
 ): Promise<OperatorMcpResolution> {
-  const { servers, unresolved, toolDenials, proxied } = await verifyStdioMcpMountsForRun(
+  const { servers, unresolved, toolDenials, proxied, oauthGrants } = await verifyStdioMcpMountsForRun(
     db,
     resolveSpecialistMcpServersDetailed(db, names, { withholdWriteTools: true }),
   );
@@ -3902,6 +3906,7 @@ async function operatorMcpResolution(
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
     toolDenials,
     proxied,
+    oauthGrants,
   };
 }
 
@@ -4288,7 +4293,7 @@ export function buildOperatorSystemPrompt(
   }
   // Ruling 461: the servers reached through Viberr's gateway, in the sentence
   // the specialist and controller prompts share.
-  const gateway = gatewayMcpSection(mcp.proxied);
+  const gateway = gatewayMcpSection(mcp.proxied, mcp.oauthGrants ?? []);
   if (gateway) dynamic.push(gateway);
   if (toolDenials.length > 0) {
     dynamic.push(

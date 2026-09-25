@@ -486,9 +486,14 @@ CREATE TABLE org_mcp_servers (
   -- Viberr registered as and the tokens; `oauth_json` is the public half every
   -- surface reads without opening it (status needs_sign_in | signed_in |
   -- expired, expiry, whether it renews, issuer host). NULL for a connection
-  -- that is not an OAuth one.
+  -- that is not an OAuth one. Ruling 486: the public half also carries the
+  -- scope the server granted.
   oauth_ref TEXT,
   oauth_json TEXT,
+  -- Ruling 486(c): the scope an admin asks the next OAuth sign-in for
+  -- ("Requested scopes", space-joined), sent as the authorization request's
+  -- `scope`. NULL sends the resource's advertised scopes_supported.
+  oauth_requested_scope TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

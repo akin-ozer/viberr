@@ -105,6 +105,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
       // `listMcpServers` names both on every Settings render and run mount.
       // Ruling 469: and the OAuth sign-in's sealed and public halves, which
       // every MCP read (`oauth_json`) and the gateway (`oauth_ref`) name.
+      // Ruling 486: and the scope an admin asks the next sign-in for.
       db.exec(`CREATE TABLE org_mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL)`);
       ensureBaselineColumns(db);
       ensureBaselineColumns(db);
@@ -119,6 +120,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "tool_names_json",
         "oauth_ref",
         "oauth_json",
+        "oauth_requested_scope",
       ]);
       db.close();
     } finally {

@@ -55,7 +55,9 @@ import { publishResourceUpdated } from "./resource-events.server";
  * (its secret, when one was issued) and the tokens. `oauth_json` is the public
  * half every surface reads without opening a box: the status, when the access
  * token expires, whether it renews, the issuer's host, the challenge's
- * metadata URL and, once a sign-in expires, why. Nothing here logs, audits or
+ * metadata URL, the scope the server granted (ruling 486: not a secret, and
+ * the one thing that says whether a run may write through the connection)
+ * and, once a sign-in expires, why. Nothing here logs, audits or
  * publishes a token, a code, a verifier or a client secret, and a reason quoted
  * from an authorization server is scrubbed of every one of them before it is
  * stored.
@@ -129,6 +131,8 @@ const publicOAuthSchema = z.object({
   issuer: z.string().nullable().catch(null),
   resourceMetadataUrl: z.string().nullable().catch(null),
   reason: z.string().nullable().catch(null),
+  /** Ruling 486: the granted scope; absent on a row written before it. */
+  scope: z.string().nullable().catch(null),
 });
 type PublicOAuth = z.infer<typeof publicOAuthSchema>;
 
@@ -153,6 +157,7 @@ export function mcpOAuthView(raw: string | null): McpOAuthView | null {
     renews: pub.renews,
     issuer: pub.issuer,
     reason: pub.reason,
+    scope: pub.scope,
   };
 }
 
@@ -164,14 +169,16 @@ interface OAuthRow {
   cred_ref: string | null;
   oauth_ref: string | null;
   oauth_json: string | null;
+  /** Ruling 486(c): the scope the admin asked the next sign-in for. */
+  oauth_requested_scope: string | null;
 }
 
-const ROW_SQL = `SELECT id, name, transport, target, cred_ref, oauth_ref, oauth_json FROM org_mcp_servers`;
+const ROW_SQL = `SELECT id, name, transport, target, cred_ref, oauth_ref, oauth_json, oauth_requested_scope FROM org_mcp_servers`;
 
 function rowById(db: DatabaseSync, id: string): OAuthRow | null {
-  // SAFETY: `ROW_SQL` selects exactly the seven `org_mcp_servers` columns
+  // SAFETY: `ROW_SQL` selects exactly the eight `org_mcp_servers` columns
   // `OAuthRow` declares (0001_baseline.sql): id/name/transport/target NOT NULL
-  // TEXT, the other three nullable TEXT.
+  // TEXT, the other four nullable TEXT.
   return (db.prepare(`${ROW_SQL} WHERE id = ?`).get(id) as OAuthRow | undefined) ?? null;
 }
 
@@ -249,7 +256,18 @@ function storedTokens(tokens: OAuthTokens, now: number = Date.now()): StoredToke
   return stored;
 }
 
-function signedInPublic(sealed: SealedOAuth, tokens: StoredTokens, previous: PublicOAuth | null): PublicOAuth {
+/**
+ * The public half of a sign-in that holds tokens. `scope` is what the token
+ * reply granted (ruling 486); a reply that names none granted `granted`
+ * (RFC 6749: the scope asked for on a code exchange, and the scope already
+ * held on a refresh, §5.1 and §6).
+ */
+function signedInPublic(
+  sealed: SealedOAuth,
+  tokens: StoredTokens,
+  previous: PublicOAuth | null,
+  granted: string | null,
+): PublicOAuth {
   return {
     status: "signed_in",
     expiresAt: tokens.expires_at,
@@ -257,6 +275,7 @@ function signedInPublic(sealed: SealedOAuth, tokens: StoredTokens, previous: Pub
     issuer: hostOf(sealed.authorizationServer),
     resourceMetadataUrl: previous?.resourceMetadataUrl ?? null,
     reason: null,
+    scope: tokens.scope ?? granted,
   };
 }
 
@@ -329,6 +348,7 @@ export function recordMcpOAuthChallenge(db: DatabaseSync, id: string, resourceMe
     issuer: pub?.issuer ?? null,
     resourceMetadataUrl,
     reason: pub?.reason ?? null,
+    scope: null,
   };
   if (JSON.stringify(next) === JSON.stringify(pub)) return;
   db.prepare(`UPDATE org_mcp_servers SET oauth_json = ? WHERE id = ?`).run(JSON.stringify(next), id);
@@ -428,6 +448,10 @@ export async function startMcpOAuthSignIn(
   } catch (error) {
     return refuse("discovery", oauthFailureReason(error));
   }
+  // Ruling 486(c): the scope the admin asked for, when there is one, is what
+  // the authorization request (and a registration) sends; else the scopes
+  // the resource advertises, as before. The server decides what it grants.
+  if (row.oauth_requested_scope) discovery = { ...discovery, scope: row.oauth_requested_scope };
   // A client whose secret has lapsed is registered again, not reused
   // (R-oauth-4); one the server refused is no longer stored at all.
   const known =
@@ -491,6 +515,7 @@ function forgetRefusedClient(db: DatabaseSync, id: string, clientId: string, rea
     issuer: hostOf(opened.sealed.authorizationServer),
     resourceMetadataUrl: readPublic(row.oauth_json)?.resourceMetadataUrl ?? null,
     reason: scrubbed,
+    scope: null,
   });
   logger.warn("mcp oauth client refused by its authorization server; the registration is dropped", {
     mcp: row.name,
@@ -607,7 +632,7 @@ export async function completeMcpOAuthSignIn(
     client: entry.client,
     tokens: stored,
   };
-  const pub = signedInPublic(sealed, stored, readPublic(row.oauth_json));
+  const pub = signedInPublic(sealed, stored, readPublic(row.oauth_json), entry.discovery.scope);
   const replacedStaticCredential = row.cred_ref !== null;
   // A connection holds one credential: the sign-in the admin just chose takes
   // the place of a pasted token, which would otherwise win (ruling 469(e)).
@@ -622,7 +647,7 @@ export async function completeMcpOAuthSignIn(
     details: {
       name: row.name,
       issuer: pub.issuer,
-      scope: stored.scope ?? entry.discovery.scope,
+      scope: pub.scope,
       expiresAt: stored.expires_at,
       renews: pub.renews,
       replacedStaticCredential,
@@ -685,6 +710,8 @@ export async function signOutMcpOAuth(
     issuer: pub?.issuer ?? (sealed ? hostOf(sealed.authorizationServer) : null),
     resourceMetadataUrl: pub?.resourceMetadataUrl ?? null,
     reason: null,
+    // Ruling 486: the grant went with the tokens.
+    scope: null,
   });
   recordAudit(db, {
     action: "org.mcp.oauth_signed_out",
@@ -790,6 +817,7 @@ export function mcpOAuthTokenSource(
       issuer: hostOf(sealed.authorizationServer),
       resourceMetadataUrl: pub?.resourceMetadataUrl ?? null,
       reason: scrubbed,
+      scope: null,
     });
     auditFailure(db, row, SYSTEM_ACTOR, "refresh", scrubbed);
     logger.warn("mcp oauth sign-in expired", { mcp: row.name, reason: scrubbed });
@@ -834,7 +862,10 @@ export function mcpOAuthTokenSource(
     }
     const stored = storedTokens(fresh);
     const next: SealedOAuth = { ...sealed, tokens: stored };
-    writeOAuth(db, row.id, next, signedInPublic(next, stored, readPublic(again.oauth_json)));
+    // Ruling 486: a refresh reply that names a scope updates the grant; one
+    // that names none keeps the grant the sign-in held.
+    const previous = readPublic(again.oauth_json);
+    writeOAuth(db, row.id, next, signedInPublic(next, stored, previous, tokens.scope ?? previous?.scope ?? sealed.scope));
     logger.info("mcp oauth token renewed", { mcp: row.name });
     publishResourceUpdated("mcp", row.id);
     return stored.access_token;

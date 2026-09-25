@@ -61,7 +61,12 @@ import {
   UpstreamSignInNeeded,
   type UpstreamTokenSource,
 } from "~/server/mcp-proxy/upstream.server";
-import { mcpSignInPhrase, type McpOAuthView } from "~/shared/mcp-oauth";
+import {
+  mcpGrantPhrase,
+  mcpSignInPhrase,
+  parseRequestedScopes,
+  type McpOAuthView,
+} from "~/shared/mcp-oauth";
 import {
   clearMcpOAuthChallenge,
   mcpOAuthCredential,
@@ -693,6 +698,13 @@ export interface McpView {
    * real row from `mapMcp` sets it explicitly.
    */
   oauth?: McpOAuthView | null;
+  /**
+   * Ruling 486(c): the scope an admin asks the next OAuth sign-in for
+   * ("Requested scopes"), space-joined; null asks for what the resource
+   * advertises. What was GRANTED is `oauth.scope`. Optional so hand-built
+   * fixtures elsewhere stay valid; every real row from `mapMcp` sets it.
+   */
+  requestedScope?: string | null;
 }
 
 type McpRow = {
@@ -711,6 +723,7 @@ type McpRow = {
   tool_policy_json: string | null;
   tool_names_json: string | null;
   oauth_json: string | null;
+  oauth_requested_scope: string | null;
 };
 
 /** Ruling 176: the stored write-tool policy, `{ name, gate }` per marked tool.
@@ -770,6 +783,38 @@ function checkedWriteTools(names: readonly string[]): string[] {
     throw AppError.validation(`Mark at most ${MCP_WRITE_TOOLS_MAX} write tools on one server.`);
   }
   return out;
+}
+
+/** What `org.mcp.added` / `org.mcp.updated` record. `requestedScope`
+ *  (ruling 486) only when the save set or changed it. */
+type McpSaveAudit = {
+  name: string;
+  transport: string;
+  renamed?: boolean;
+  oauthDropped?: boolean;
+  requestedScope?: string | null;
+};
+
+function addedAudit(name: string, transport: string, requestedScope: string | null): McpSaveAudit {
+  const details: McpSaveAudit = { name, transport };
+  if (requestedScope !== null) details.requestedScope = requestedScope;
+  return details;
+}
+
+/**
+ * Ruling 486(c): the "Requested scopes" an admin typed, as the next sign-in's
+ * authorization request sends them (`parseRequestedScopes`). A token RFC 6749
+ * does not allow would make the authorization server refuse the request, so
+ * it is refused here, before anything is probed. Null clears the field.
+ */
+function checkedRequestedScope(raw: string): string | null {
+  const { scope, invalid } = parseRequestedScopes(raw);
+  if (invalid.length > 0) {
+    throw AppError.validation(
+      `The requested scope ${(invalid[0] ?? "").slice(0, 60)} is not one OAuth allows: a scope is printable characters without spaces, quotes or backslashes. Separate scopes with spaces.`,
+    );
+  }
+  return scope;
 }
 
 function sameNameSet(a: readonly string[], b: readonly string[]): boolean {
@@ -863,6 +908,7 @@ function mapMcp(row: McpRow): McpView {
     // credential wins when present (469(e)) — it is what a run mounts — so a
     // row holding one has no sign-in status to report (R-oauth-2).
     oauth: row.cred_ref ? null : mcpOAuthView(row.oauth_json),
+    requestedScope: row.oauth_requested_scope,
   };
 }
 
@@ -1018,11 +1064,12 @@ function openedForNewRow(sealed: string, name: string): ProbeCredential {
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
                         up, last_checked_at, last_error, warming_since,
                         first_success_at, heuristic_warmups,
-                        tool_policy_json, tool_names_json, oauth_json
+                        tool_policy_json, tool_names_json, oauth_json,
+                        oauth_requested_scope
                  FROM org_mcp_servers`;
 
 export function listMcpServers(db: DatabaseSync): McpView[] {
-  // SAFETY: `MCP_SQL` selects exactly the fifteen `org_mcp_servers` columns
+  // SAFETY: `MCP_SQL` selects exactly the sixteen `org_mcp_servers` columns
   // `McpRow` declares; the baseline DDL types each one as the column this row
   // reads (0001_baseline.sql), NOT NULL on id/name/transport/target.
   const rows = db
@@ -1571,6 +1618,10 @@ export async function saveMcpServer(
      *  keeps what is stored (the controller's tool and any other caller that
      *  does not edit the list); an empty array is a reviewed "none". */
     writeTools?: readonly string[];
+    /** Ruling 486(c): the scopes the next OAuth sign-in asks for, as typed
+     *  (spaces, commas or newlines between them). Absent keeps what is
+     *  stored; blank clears it (the resource's advertised scopes are sent). */
+    requestedScopes?: string;
   },
   actor: AuditActor,
   options: McpProbeOptions = {},
@@ -1631,6 +1682,8 @@ export async function saveMcpServer(
   // Checked before the probe, so a bad name is refused without spawning anything.
   const writeTools =
     input.writeTools === undefined ? undefined : checkedWriteTools(input.writeTools);
+  const requestedScope =
+    input.requestedScopes === undefined ? undefined : checkedRequestedScope(input.requestedScopes);
 
   // Ruling 469: a connection holds one credential. A sign-in drops a pasted
   // token when it lands, so a pasted token over a live sign-in is refused
@@ -1657,6 +1710,9 @@ export async function saveMcpServer(
   }
   const oauthAuth =
     signedIn && !repointed && input.id ? mcpOAuthTokenSource(db, input.id, target) : undefined;
+  // Ruling 486: a save leaves the sign-in's grant as it was, so the toast
+  // names the grant the row already records.
+  const oauthGrant = oauthAuth ? mcpGrantPhrase(before?.oauth?.scope) : null;
 
   // SAFETY: `id` is the TEXT PRIMARY KEY of `org_mcp_servers`
   // (0001_baseline.sql), so a matching row hands back a string.
@@ -1740,7 +1796,7 @@ export async function saveMcpServer(
     : "";
   const toast =
     (disc.kind === "up"
-      ? `${name} saved: ${countLabel(disc.tools, "tool")} discovered${spawnNote}${oauthAuth ? " · signed in with OAuth" : ""}`
+      ? `${name} saved: ${countLabel(disc.tools, "tool")} discovered${spawnNote}${oauthAuth ? ` · signed in with OAuth${oauthGrant ? ` (${oauthGrant})` : ""}` : ""}`
       : lastError !== null && isSignInReason(lastError)
         ? `${name} saved: ${lastError}`
         : transport === "stdio"
@@ -1778,6 +1834,7 @@ export async function saveMcpServer(
            first_success_at = COALESCE(first_success_at, ?),
            tool_names_json = ?,
            tool_policy_json = COALESCE(?, tool_policy_json),
+           oauth_requested_scope = ?,
            updated_at = ?
        WHERE id = ?`,
       // R20-4: stamp the first-ever success idempotently — COALESCE keeps an
@@ -1788,6 +1845,9 @@ export async function saveMcpServer(
       up === 1 ? now : null,
       toolNames === null ? null : JSON.stringify(toolNames),
       effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
+      // Ruling 486(c): an absent field keeps what is stored; a stdio row
+      // signs nothing in, so it asks for nothing.
+      transport === "stdio" ? null : requestedScope === undefined ? (existing.requestedScope ?? null) : requestedScope,
       now, id,
     );
     // Ruling 469: tokens never follow a row to another endpoint. And a
@@ -1810,14 +1870,18 @@ export async function saveMcpServer(
     if (existing.name !== name) {
       await updateResourceReferences("mcps", existing.name, name, ctx.dataRoot);
     }
+    const details: McpSaveAudit = { name, transport, renamed: existing.name !== name };
+    if (oauthDropped) details.oauthDropped = true;
+    // Ruling 486(c): what the next sign-in asks for, when this save changed it.
+    if (requestedScope !== undefined && requestedScope !== (existing.requestedScope ?? null)) {
+      details.requestedScope = requestedScope;
+    }
     recordAudit(db, {
       action: "org.mcp.updated",
       actor,
       subjectKind: "org_mcp",
       subjectId: id,
-      details: oauthDropped
-        ? { name, transport, renamed: existing.name !== name, oauthDropped }
-        : { name, transport, renamed: existing.name !== name },
+      details,
     });
     if (writeTools !== undefined && !sameNameSet(existing.writeTools, writeTools)) {
       recordAudit(db, {
@@ -1835,8 +1899,9 @@ export async function saveMcpServer(
       `INSERT INTO org_mcp_servers
          (id, name, transport, target, cred_ref, tools_count, up,
           last_checked_at, last_error, first_success_at,
-          tool_names_json, tool_policy_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          tool_names_json, tool_policy_json, oauth_requested_scope,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       // R20-4: a brand-new row records its first success immediately when the
       // save probe already answered up; otherwise NULL (never worked here yet).
     ).run(
@@ -1844,6 +1909,7 @@ export async function saveMcpServer(
       up === 1 ? now : null,
       disc.kind === "up" ? JSON.stringify(disc.toolNames) : null,
       effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
+      transport === "stdio" ? null : (requestedScope ?? null),
       now, now,
     );
     recordAudit(db, {
@@ -1851,7 +1917,7 @@ export async function saveMcpServer(
       actor,
       subjectKind: "org_mcp",
       subjectId: id,
-      details: { name, transport },
+      details: addedAudit(name, transport, requestedScope ?? null),
     });
     if (writeTools?.length) {
       recordAudit(db, {
@@ -1942,9 +2008,12 @@ export async function testMcpServer(
     if (probedBare) clearMcpOAuthChallenge(db, id);
     const fresh = getMcpServer(db, id)!;
     const signIn = auth ? mcpSignInPhrase(fresh.oauth) : null;
+    // Ruling 486: what the sign-in may do ("read-only · 194 scopes"), since
+    // "healthy" alone is also true of a grant that refuses every write.
+    const grant = auth ? mcpGrantPhrase(fresh.oauth?.scope) : null;
     return {
       mcp: fresh,
-      toast: `${fresh.name} healthy: ${countLabel(disc.tools, "tool")} · ${disc.latencyMs}ms${signIn ? ` · ${signIn}` : ""}${credNote}`,
+      toast: `${fresh.name} healthy: ${countLabel(disc.tools, "tool")} · ${disc.latencyMs}ms${signIn ? ` · ${signIn}` : ""}${grant ? ` · ${grant}` : ""}${credNote}`,
     };
   }
   // An expired sign-in answers the challenge like one never made: the row
