@@ -69,12 +69,12 @@ const MCPS: McpView[] = [
   {
     ...MCP_BASE, id: "m3", name: "cloudflare-api", hasCred: false, up: false,
     lastCheckedAt: "2026-07-03T23:30:00.000Z",
-    oauth: { status: "needs_sign_in", expiresAt: null, renews: false, issuer: "mcp.cloudflare.com", reason: null },
+    oauth: { status: "needs_sign_in", expiresAt: null, renews: false, issuer: "mcp.cloudflare.com", reason: null, scope: null },
   },
   {
     ...MCP_BASE, id: "m4", name: "linear", hasCred: false, up: true,
     lastCheckedAt: "2026-07-03T23:30:00.000Z",
-    oauth: { status: "signed_in", expiresAt: "2026-07-04T00:52:00.000Z", renews: true, issuer: "mcp.linear.app", reason: null },
+    oauth: { status: "signed_in", expiresAt: "2026-07-04T00:52:00.000Z", renews: true, issuer: "mcp.linear.app", reason: null, scope: null },
   },
 ];
 const SKILLS: SkillView[] = [

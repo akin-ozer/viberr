@@ -5719,8 +5719,9 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     }
     // Four, and since ruling 463 a GitHub connection's reach, and since ruling
     // 479(a) the capability matrix's "Advisory only" list, and since ruling 484
-    // a changed file in the task's Changes panel.
-    expect(summaries).toHaveLength(7);
+    // a changed file in the task's Changes panel, and since ruling 486 the
+    // scopes an MCP server's OAuth sign-in was granted.
+    expect(summaries).toHaveLength(8);
     expect(bare).toEqual([]);
   });
 

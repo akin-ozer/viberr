@@ -246,7 +246,16 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   offers revocation and drops them. Audited as `org.mcp.oauth_connected` {name, issuer,
   scope, expiresAt, renews, replacedStaticCredential}, `org.mcp.oauth_failed` {name,
   stage, reason} and `org.mcp.oauth_signed_out` {name, revocation, reason}; no token,
-  code or client secret is in any of them. The MCP editor's "Write tools" section (ruling 176) marks the
+  code or client secret is in any of them. A signed-in server also says what its sign-in
+  was granted (ruling 486): the row's auth phrase ends with "read-only · 194 scopes" (or
+  "194 scopes · 12 writes"), and the editor puts "Granted read-only · 194 scopes" under
+  the sign-in's status (for a read-only grant, that the server refuses any call that
+  writes and how to ask for write scopes) with a disclosure listing every granted scope,
+  each write marked. An HTTP server's editor has an optional "Requested scopes" field
+  (spaces, commas or newlines between scopes; a token OAuth does not allow is refused at
+  save), stored as `oauth_requested_scope` and sent as the next sign-in's `scope`; left
+  blank, the resource's advertised scopes are asked for. The authorization server decides
+  what it grants, which is why the editor shows the grant rather than the request. The MCP editor's "Write tools" section (ruling 176) marks the
   tools that a run withholding repo write, and every operator run, does not get: the
   probe's tool names are offered, the write-looking ones pre-selected until the server
   is first reviewed, a name can be typed, and each change is audited as

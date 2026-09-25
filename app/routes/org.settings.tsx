@@ -595,6 +595,9 @@ export async function action({ request }: Route.ActionArgs) {
         // Absent keeps the stored marks; only the editor sends the section.
         const writeTools = parseWriteTools(formData.get("writeTools"));
         if (writeTools !== undefined) input.writeTools = writeTools;
+        // Ruling 486(c): absent keeps what the next sign-in asks for; the
+        // editor sends the field for an HTTP server only.
+        if (formData.has("requestedScopes")) input.requestedScopes = field("requestedScopes");
         const result = await saveMcpServer(db, input, actor);
         return ok(result.toast);
       }

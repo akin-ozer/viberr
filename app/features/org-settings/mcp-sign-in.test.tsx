@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/re
 import { createRoutesStub } from "react-router";
 import { z } from "zod";
 import type { McpView } from "~/server/org/resources.server";
+import { CLOUDFLARE_READ_ONLY_GRANT } from "../../../test-support/cloudflare-read-only-grant";
 import { ToastProvider } from "~/ui/toast";
 import { ResourcesPanel } from "./resources-panel";
 
@@ -38,7 +39,7 @@ const BASE: McpView = {
   writeToolsReviewed: true,
   discoveredTools: null,
   storePaths: [],
-  oauth: { status: "needs_sign_in", expiresAt: null, renews: false, issuer: null, reason: null },
+  oauth: { status: "needs_sign_in", expiresAt: null, renews: false, issuer: null, reason: null, scope: null },
 };
 
 function renderPanel(mcp: McpView) {
@@ -121,6 +122,7 @@ describe("the MCP editor's OAuth sign-in (ruling 469)", () => {
         renews: true,
         issuer: "mcp.cloudflare.com",
         reason: null,
+        scope: null,
       },
     };
     const { container, getByLabelText, getByRole, queryByLabelText } = renderPanel(signedIn);
@@ -152,6 +154,7 @@ describe("the MCP editor's OAuth sign-in (ruling 469)", () => {
         renews: false,
         issuer: "mcp.cloudflare.com",
         reason: "the authorization server answered invalid_grant: The refresh token is no longer valid.",
+        scope: null,
       },
     };
     const { container, getByLabelText, getByRole } = renderPanel(expired);
@@ -173,5 +176,80 @@ describe("the MCP editor's OAuth sign-in (ruling 469)", () => {
     });
     fireEvent.click(getByLabelText("Edit cloudflare-api"));
     expect(queryByRole("group", { name: /OAuth sign-in/ })).toBeNull();
+    // Ruling 486(c): a command signs nothing in, so it asks for no scopes.
+    expect(queryByRole("textbox", { name: /Requested scopes/ })).toBeNull();
+  });
+});
+
+describe("what the sign-in was granted, and what it asks for (ruling 486)", () => {
+  const signedIn: NonNullable<McpView["oauth"]> = {
+    status: "signed_in",
+    expiresAt: new Date(Date.now() + 52 * 60_000 + 20_000).toISOString(),
+    renews: true,
+    issuer: "mcp.cloudflare.com",
+    reason: null,
+    scope: CLOUDFLARE_READ_ONLY_GRANT,
+  };
+  const readOnly: McpView = { ...BASE, up: true, tools: 2, lastError: null, requestedScope: null, oauth: signedIn };
+
+  it("the row and the editor say 'read-only · 194 scopes', and the editor's disclosure lists every scope", () => {
+    // CANARY: drop the grant from the row's auth phrase, or the editor's
+    // grant block, and a read-only sign-in reads like any other.
+    const { container, getByLabelText, getByRole, getByText } = renderPanel(readOnly);
+    expect(row(container).textContent).toContain(
+      "auth: OAuth, signed in (expires in 52 minutes, renews itself), read-only · 194 scopes; held by Viberr, runs connect through its gateway",
+    );
+    fireEvent.click(getByLabelText("Edit cloudflare-api"));
+    const dialog = getByRole("dialog");
+    expect(dialog.textContent).toContain(
+      "Granted read-only · 194 scopes. Runs can read through it, and the server refuses any call that writes.",
+    );
+    const summary = getByText("The 194 scopes it granted");
+    const disclosure = summary.closest("details");
+    if (!disclosure) throw new Error("no disclosure");
+    expect(disclosure.open).toBe(false);
+    fireEvent.click(summary);
+    const list = within(disclosure).getByRole("list", { name: "Granted scopes" });
+    const items = within(list).getAllByRole("listitem").map((item) => item.textContent);
+    expect(items).toHaveLength(194);
+    expect(items).toContain("workers-ci.read");
+    expect(items).toContain("teams.report");
+    expect(items.filter((item) => item?.endsWith("write"))).toEqual([]);
+  });
+
+  it("a grant that writes is counted, and each write is marked in the list", () => {
+    const { container, getByLabelText, getByRole } = renderPanel({
+      ...readOnly,
+      oauth: { ...signedIn, scope: "zone.read workers-scripts.write dns.edit" },
+    });
+    expect(row(container).textContent).toContain("renews itself), 3 scopes · 2 writes; held by Viberr");
+    fireEvent.click(getByLabelText("Edit cloudflare-api"));
+    const list = within(getByRole("dialog")).getByRole("list", { name: "Granted scopes" });
+    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "zone.read",
+      "workers-scripts.writewrite",
+      "dns.editwrite",
+    ]);
+  });
+
+  it("the editor offers Requested scopes, explains who decides the grant, and saves what the admin typed", async () => {
+    // CANARY: drop the field (or stop sending it) and the only way to ask
+    // for write scopes is gone.
+    const { getByLabelText, getByRole } = renderPanel({ ...readOnly, requestedScope: "zone.read" });
+    fireEvent.click(getByLabelText("Edit cloudflare-api"));
+    const field = getByRole("textbox", { name: /Requested scopes/ });
+    if (!(field instanceof HTMLTextAreaElement)) throw new Error("Requested scopes is not a text area");
+    expect(field.value).toBe("zone.read");
+    expect(field.getAttribute("aria-describedby")).toBe("mcp-scopes-hint");
+    expect(document.getElementById("mcp-scopes-hint")?.textContent).toContain(
+      "The server's own sign-in page decides what it grants, so this editor shows what it granted.",
+    );
+    fireEvent.change(field, { target: { value: "zone.read workers-scripts.write" } });
+    fireEvent.click(getByRole("button", { name: /Save & re-test/ }));
+    await waitFor(() =>
+      expect(posted).toEqual([
+        expect.objectContaining({ intent: "mcp-save", mcpId: "mcp_cf", requestedScopes: "zone.read workers-scripts.write" }),
+      ]),
+    );
   });
 });

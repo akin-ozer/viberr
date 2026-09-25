@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
@@ -16,7 +17,8 @@ import {
   listAllTools,
   type McpFetch,
 } from "~/server/mcp-proxy/upstream.server";
-import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
+import { gatewayMcpSection, resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
+import { CLOUDFLARE_READ_ONLY_GRANT } from "../../../test-support/cloudflare-read-only-grant";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
 import {
   completeMcpOAuthSignIn,
@@ -558,6 +560,116 @@ describe("a pasted credential and what is left of a sign-in (R-oauth-2)", () => 
     );
     expect(getMcpServer(db, MCP_ID)).toMatchObject({ hasCred: true, oauth: null });
     expect(listMcpServers(db).find((mcp) => mcp.id === MCP_ID)?.oauth).toBeNull();
+  });
+});
+
+describe("what a sign-in was granted, and what it asks for (ruling 486)", () => {
+  /** The stored public half, as far as these tests read it. `scope` may be
+   *  missing, which is what a canary that drops it produces. */
+  const publicHalf = z.object({ status: z.string(), scope: z.string().nullable().optional() });
+
+  function oauthJson(): z.infer<typeof publicHalf> {
+    return publicHalf.parse(JSON.parse(rawRow().oauth_json ?? "null"));
+  }
+
+  it("keeps the granted scope in the public half on the callback, updates it on a refresh and clears it on sign-out", async () => {
+    // CANARY: leave `scope` out of the public half the callback writes, and
+    // no surface can say the live grant is read-only.
+    await startServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
+    await signIn();
+    expect(oauthJson().scope).toBe(CLOUDFLARE_READ_ONLY_GRANT);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe(CLOUDFLARE_READ_ONLY_GRANT);
+    const [connected] = listAuditEvents(db, { action: "org.mcp.oauth_connected" });
+    expect(connected?.details?.scope).toBe(CLOUDFLARE_READ_ONLY_GRANT);
+
+    // CANARY: re-seal a renewal with the old public half's scope, and a
+    // refresh that grants more is never seen.
+    server.options.grantedScope = "user:read offline_access workers-scripts.write";
+    server.invalidateAccessTokens();
+    expect(await callWhoami()).toContain("whoami");
+    expect(server.tokenRequests.at(-1)).toEqual({ grant: "refresh_token", answered: "tokens" });
+    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe("user:read offline_access workers-scripts.write");
+
+    // A refresh reply that names no scope keeps the grant the sign-in held.
+    server.options.grantedScope = null;
+    server.invalidateAccessTokens();
+    expect(await callWhoami()).toContain("whoami");
+    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe("user:read offline_access workers-scripts.write");
+
+    // CANARY: keep `scope` through a sign-out, and a signed-out row still
+    // claims a grant.
+    await signOutMcpOAuth(db, MCP_ID, ADMIN.actor);
+    expect(oauthJson()).toMatchObject({ status: "needs_sign_in", scope: null });
+    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBeNull();
+  });
+
+  it("an expired sign-in holds no grant", async () => {
+    await startServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT, refresh: "invalid_grant" });
+    await signIn();
+    server.invalidateAccessTokens();
+    await expect(callWhoami()).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
+    expect(oauthJson()).toMatchObject({ status: "expired", scope: null });
+  });
+
+  it("sends Requested scopes as the authorization request's scope, and the resource's scopes_supported when there are none", async () => {
+    // CANARY: start the sign-in from the discovered scope alone, and the
+    // admin's Requested scopes never reach the authorization server.
+    await startServer({ scopesSupported: ["mcp.read", "mcp.write"] });
+    const base = { id: MCP_ID, name: "cloudflare-api", transport: "HTTP", target: server.url, cred: "" };
+    await expect(saveMcpServer(db, { ...base, requestedScopes: 'zone.read "x"' }, ADMIN.actor)).rejects.toThrow(
+      'The requested scope "x" is not one OAuth allows',
+    );
+    // Empty: the resource's advertised scopes, as before ruling 486.
+    await signIn();
+    expect(server.authorizeRequests.at(-1)?.get("scope")).toBe("mcp.read mcp.write");
+    // A token reply that names no scope granted what was asked (RFC 6749 §5.1).
+    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe("mcp.read mcp.write");
+
+    const saved = await saveMcpServer(
+      db,
+      { ...base, requestedScopes: "workers-scripts.write, zone.read\nworkers-scripts.write" },
+      ADMIN.actor,
+    );
+    expect(saved.mcp.requestedScope).toBe("workers-scripts.write zone.read");
+    expect(listAuditEvents(db, { action: "org.mcp.updated" })[0]?.details).toMatchObject({
+      requestedScope: "workers-scripts.write zone.read",
+    });
+    await signIn();
+    expect(server.authorizeRequests.at(-1)?.get("scope")).toBe("workers-scripts.write zone.read");
+    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe("workers-scripts.write zone.read");
+
+    // Absent keeps it; blank clears it.
+    await saveMcpServer(db, base, ADMIN.actor);
+    expect(getMcpServer(db, MCP_ID)?.requestedScope).toBe("workers-scripts.write zone.read");
+    await saveMcpServer(db, { ...base, requestedScopes: " " }, ADMIN.actor);
+    expect(getMcpServer(db, MCP_ID)?.requestedScope).toBeNull();
+  });
+
+  it("tells a run what each OAuth sign-in was granted, and the save and test toasts say it too", async () => {
+    // CANARY: resolve a signed-in server without its grant, and the run's
+    // prompt says only that it is mounted through the gateway.
+    await startServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
+    await signIn();
+    const saved = await saveMcpServer(
+      db,
+      { id: MCP_ID, name: "cloudflare-api", transport: "HTTP", target: server.url, cred: "" },
+      ADMIN.actor,
+    );
+    expect(saved.toast).toBe("cloudflare-api saved: 4 tools discovered · signed in with OAuth (read-only · 194 scopes)");
+    const tested = await testMcpServer(db, MCP_ID);
+    expect(tested.toast).toMatch(/ · signed in \(expires in 60 minutes, renews itself\) · read-only · 194 scopes$/);
+    await startMcpGateway({ port: 0 });
+    try {
+      const resolved = resolveSpecialistMcpServersDetailed(db, ["cloudflare-api"]);
+      expect(resolved.oauthGrants).toEqual([{ name: "cloudflare-api", scope: CLOUDFLARE_READ_ONLY_GRANT }]);
+      const section = gatewayMcpSection(resolved.proxied, resolved.oauthGrants);
+      expect(section).toContain(
+        "- cloudflare-api: signed in with OAuth, granted read-only · 194 scopes. The server refuses any call that writes, so do not attempt one; if the task needs a write, report that an org admin must sign it in again with write scopes in Instance settings → Agent resources.",
+      );
+      expect(section).not.toContain("workers-ci.read");
+    } finally {
+      await stopMcpGateway();
+    }
   });
 });
 

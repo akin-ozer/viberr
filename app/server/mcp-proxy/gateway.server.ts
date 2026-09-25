@@ -39,6 +39,8 @@ import {
   type ServerNotification,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SseError } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { z } from "zod";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
@@ -49,6 +51,7 @@ import type { RunSpec } from "~/server/runtimes/adapter.server";
 import { mcpWriteToolDenyReason } from "~/server/tasks/specialist-tool-policy";
 import type { HttpMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
 import { errorMessage, toError } from "~/shared/errors";
+import { mcpReadOnlyRefusal } from "~/shared/mcp-oauth";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import { connectStdioUpstream } from "./upstream-stdio.server";
 import {
@@ -91,7 +94,9 @@ import {
  *    the access token, renewed as it runs out, ruling 469), one upstream per (run, server),
  *    closed at revoke. Withheld write tools are filtered from `tools/list` and
  *    refused on `tools/call`; every forwarded call is logged (never its
- *    arguments or result) and a call to a marked write tool is audited.
+ *    arguments or result) and a call to a marked write tool is audited. An
+ *    upstream authorization refusal on an OAuth connection whose grant holds
+ *    no write gains one sentence naming the grant and the remedy (ruling 486).
  *
  * State lives on `globalThis`, like the run service's, so a dev-server module
  * reload keeps the listener and the live tokens instead of opening a second port.
@@ -836,7 +841,9 @@ async function forward<T>(
   try {
     return await send(connection.client);
   } catch (error) {
-    if (!(error instanceof UpstreamReconnectNeeded)) throw namedError(upstream.server, error, connection);
+    if (!(error instanceof UpstreamReconnectNeeded)) {
+      throw withGrantNote(grant, upstream.server, error, namedError(upstream.server, error, connection));
+    }
     let fresh: UpstreamConnection;
     try {
       fresh = await reconnectUpstream(grant, upstream, connection, error.reason);
@@ -849,7 +856,7 @@ async function forward<T>(
     try {
       return await send(fresh.client);
     } catch (retry) {
-      throw namedError(upstream.server, retry, fresh);
+      throw withGrantNote(grant, upstream.server, retry, namedError(upstream.server, retry, fresh));
     }
   }
 }
@@ -892,6 +899,55 @@ function namedError(server: string, cause: unknown, connection: UpstreamConnecti
     UPSTREAM_UNREACHABLE_CODE,
     `MCP server "${server}" failed through Viberr's gateway: ${closed ?? errorMessage(cause)}`,
   );
+}
+
+/**
+ * Ruling 486(d): the words an upstream uses when it refuses the caller's
+ * authority rather than the request — Cloudflare's API answers a write on a
+ * read-only grant with "10000: Authentication error", inside a tool result.
+ */
+const AUTHORITY_REFUSAL = /authenticat|authori[sz]|forbidden|insufficient[_ ]scope|permission denied/i;
+
+/** Whether an upstream failure is an authorization refusal: an HTTP 401 or
+ *  403, or a JSON-RPC error that says so. */
+function refusedAuthority(cause: unknown): boolean {
+  if (cause instanceof StreamableHTTPError || cause instanceof SseError) {
+    return cause.code === 401 || cause.code === 403;
+  }
+  return cause instanceof McpError && AUTHORITY_REFUSAL.test(cause.message);
+}
+
+/** Whether a tool result is an error whose text is an authorization refusal. */
+function toolRefusedAuthority(result: CallToolResult): boolean {
+  return (
+    result.isError === true &&
+    result.content.some((block) => block.type === "text" && AUTHORITY_REFUSAL.test(block.text))
+  );
+}
+
+/**
+ * Ruling 486(d): the sentence an authorization refusal gains when `server` is
+ * signed in with OAuth and its grant holds no write — read from the row now,
+ * so a sign-in again with write scopes stops it at once. Before, the run read
+ * only the upstream's words ("Authentication error") beside a connection
+ * every surface called "signed in", and the owner was asked to choose a
+ * remedy without seeing why (F40-63).
+ */
+function readOnlyGrantNote(grant: RunGrant, server: string): string | null {
+  try {
+    return mcpReadOnlyRefusal(listMcpServers(grant.db).find((entry) => entry.name === server)?.oauth);
+  } catch (error) {
+    logger.warn("mcp gateway could not read a server's grant", { mcp: server, err: toError(error) });
+    return null;
+  }
+}
+
+/** A named upstream error, with ruling 486's sentence after the upstream's
+ *  own words when it is an authorization refusal on a read-only grant. */
+function withGrantNote(grant: RunGrant, server: string, cause: unknown, named: GatewayRpcError): GatewayRpcError {
+  if (!refusedAuthority(cause)) return named;
+  const note = readOnlyGrantNote(grant, server);
+  return note ? new GatewayRpcError(named.code, `${named.message} ${note}`) : named;
 }
 
 /** R-gateway-4: a run whose process has exited lists, and calls nothing. */
@@ -986,7 +1042,10 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
           client.request({ method: "tools/call", params }, CallToolResultSchema, options),
         );
         outcome = result.isError ? "tool_error" : "ok";
-        return result;
+        // Ruling 486(d): the upstream's words stay as they are; the note
+        // follows them as one more text block.
+        const note = toolRefusedAuthority(result) ? readOnlyGrantNote(grant, server) : null;
+        return note ? { ...result, content: [...result.content, { type: "text", text: note }] } : result;
       } finally {
         const durationMs = Date.now() - started;
         // Ruling 461(5): every forwarded call, never its arguments or result.

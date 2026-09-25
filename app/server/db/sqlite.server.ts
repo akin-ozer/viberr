@@ -476,6 +476,10 @@ const BASELINE_COLUMNS: readonly {
       // connection was signed in with OAuth before they existed).
       { name: "oauth_ref", ddl: "oauth_ref TEXT" },
       { name: "oauth_json", ddl: "oauth_json TEXT" },
+      // Ruling 486(c): the scope an admin asks the next sign-in for. The
+      // sign-in and every MCP read name it; NULL (ask for what the resource
+      // advertises) is the truth for every row that predates it.
+      { name: "oauth_requested_scope", ddl: "oauth_requested_scope TEXT" },
     ],
   },
   {

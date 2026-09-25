@@ -40,6 +40,19 @@ export interface OAuthServerOptions {
   /** RFC 7591 `client_secret_expires_at` on the next registration (seconds
    *  since the epoch); null leaves it out. Recorded, not enforced. */
   clientSecretExpiresAt: number | null;
+  /** Ruling 486: the `scope` the next token reply (a code exchange or a
+   *  refresh) names, space-joined; null leaves it out, which RFC 6749 reads
+   *  as "the scope requested" (or, on a refresh, the scope already held). */
+  grantedScope: string | null;
+  /** Ruling 486: the protected-resource metadata's `scopes_supported`; null
+   *  leaves it out, as Cloudflare's does. */
+  scopesSupported: string[] | null;
+  /** Ruling 486(d): how the MCP endpoint answers a call to `delete_zone`, the
+   *  fixture's write tool: `http-403` is an RFC 6750 `insufficient_scope`
+   *  refusal, `tool-error` the shape Cloudflare's API gives a write on a
+   *  read-only grant (a tool result, `isError`, "10000: Authentication
+   *  error"); null runs the tool. */
+  refuseWrites: "http-403" | "tool-error" | null;
 }
 
 export interface OAuthRegistration {
@@ -91,7 +104,14 @@ const DEFAULTS: OAuthServerOptions = {
   registration: true,
   pkce: true,
   clientSecretExpiresAt: null,
+  grantedScope: null,
+  scopesSupported: null,
+  refuseWrites: null,
 };
+
+/** What Cloudflare's API MCP server answers a write on a read-only grant
+ *  (cloudflare/mcp's `formatError` around its API error). */
+export const CLOUDFLARE_AUTH_ERROR_TEXT = "Error: Cloudflare API error: 10000: Authentication error";
 
 interface PendingCode {
   clientId: string;
@@ -99,6 +119,14 @@ interface PendingCode {
   challenge: string;
   resource: string | null;
 }
+
+/** A `tools/call` of the fixture's write tool, which `refuseWrites` answers. */
+const writeCall = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: z.union([z.string(), z.number()]),
+  method: z.literal("tools/call"),
+  params: z.object({ name: z.literal("delete_zone") }),
+});
 
 const registrationBody = z.object({
   redirect_uris: z.array(z.string()),
@@ -112,12 +140,21 @@ interface TokenReply {
   token_type: "Bearer";
   expires_in: number;
   refresh_token?: string;
+  scope?: string;
 }
 
 /** An OAuth error reply (RFC 6749 §5.2). */
 interface ErrorReply {
   error: string;
   error_description?: string;
+}
+
+/** RFC 9728 protected-resource metadata, as much of it as this server publishes. */
+interface ProtectedResourceDocument {
+  resource: string;
+  authorization_servers: string[];
+  bearer_methods_supported: string[];
+  scopes_supported?: string[];
 }
 
 /** RFC 8414 metadata, as much of it as this server publishes. */
@@ -212,21 +249,20 @@ export async function startOAuthMcpServer(
       issued.push(refresh);
       body.refresh_token = refresh;
     }
+    if (options.grantedScope !== null) body.scope = options.grantedScope;
     return body;
   };
 
   const server = await listen(async (req, res) => {
     const url = new URL(req.url ?? "/", origin);
     if (url.pathname === "/.well-known/oauth-protected-resource/mcp") {
-      sendJson(
-        res,
-        200,
-        JSON.stringify({
-          resource: resourceUrl(),
-          authorization_servers: [origin],
-          bearer_methods_supported: ["header"],
-        }),
-      );
+      const metadata: ProtectedResourceDocument = {
+        resource: resourceUrl(),
+        authorization_servers: [origin],
+        bearer_methods_supported: ["header"],
+      };
+      if (options.scopesSupported) metadata.scopes_supported = options.scopesSupported;
+      sendJson(res, 200, JSON.stringify(metadata));
       return;
     }
     if (url.pathname === "/.well-known/oauth-authorization-server") {
@@ -376,6 +412,28 @@ export async function startOAuthMcpServer(
         );
         return;
       }
+      const body: unknown = req.method === "POST" ? JSON.parse(await readBody(req)) : undefined;
+      const write = writeCall.safeParse(body);
+      if (write.success && options.refuseWrites === "http-403") {
+        calls.push(`refused:${write.data.params.name}`);
+        sendJson(res, 403, JSON.stringify({ error: "insufficient_scope" } satisfies ErrorReply), {
+          "www-authenticate": `Bearer error="insufficient_scope", resource_metadata="${metadataUrl()}"`,
+        });
+        return;
+      }
+      if (write.success && options.refuseWrites === "tool-error") {
+        calls.push(`refused:${write.data.params.name}`);
+        sendJson(
+          res,
+          200,
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: write.data.id,
+            result: { content: [{ type: "text", text: CLOUDFLARE_AUTH_ERROR_TEXT }], isError: true },
+          }),
+        );
+        return;
+      }
       const mcp = fixtureServer(calls);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       res.on("close", () => {
@@ -383,7 +441,7 @@ export async function startOAuthMcpServer(
         void mcp.close();
       });
       await mcp.connect(transport);
-      await transport.handleRequest(req, res);
+      await transport.handleRequest(req, res, body);
       return;
     }
     res.writeHead(404);
