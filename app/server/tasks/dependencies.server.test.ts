@@ -65,6 +65,7 @@ async function seed(store: TestStore): Promise<void> {
           status: "active",
           createdBy: store.users.arda.id,
           createdByLabel: store.users.arda.email,
+          conversationId: null,
           onFailure: "pause",
           links: links.map((l) => ({
             index: l.index,
@@ -490,7 +491,7 @@ describe("the release engine", () => {
       { projectSlug: store.slug, goalId: "goal-3", dataRoot: store.dataRoot },
       {
         frontmatter: {
-          id: "goal-3", title: "goal-3", status: "active", createdBy: store.users.arda.id, createdByLabel: "arda",
+          id: "goal-3", title: "goal-3", status: "active", createdBy: store.users.arda.id, createdByLabel: "arda", conversationId: null,
           onFailure: "continue",
           links: [{ index: 1, title: "l1", goal: "g", taskKey: null, status: "skipped", note: null, redeclared: false, blockedBy: [] }],
           createdAt: null, updatedAt: null,
@@ -862,6 +863,7 @@ describe("ruling 155: an active link's wait mirrors its task's list", () => {
           status: "active",
           createdBy: store.users.arda.id,
           createdByLabel: store.users.arda.email,
+          conversationId: null,
           onFailure: "pause",
           links: [
             { index: 1, title: "Log view", goal: "g", taskKey: "VIB-7", status: "active", note: null, redeclared: false, blockedBy: ["goal-1 link 2"] },

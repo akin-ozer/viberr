@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   activeWorkRevision,
   EVIDENCE_EMPTY_COLUMN,
+  type PrBodyWritten,
   type PrRef,
   type TaskFileEvent,
+  type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import type { AuditActor } from "~/server/audit/audit-recorder.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
@@ -14,13 +17,17 @@ import {
   patchTaskFrontmatter,
   readTaskFile,
   resolveTaskFilePath,
+  type TaskFileReadResult,
+  type TaskFileRef,
+  updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { appOrigin } from "~/server/config/env.server";
 import { logger } from "~/server/logging/logger.server";
+import { toError } from "~/shared/errors";
 import { taskBranchName } from "./branch-sync.server";
 import type { GithubActionContext } from "./github-reconciler.server";
-import { githubWebHost } from "./github-client.server";
+import { githubFailureMessage, githubWebHost } from "./github-client.server";
 import {
   getProjectGithubContext,
   type GithubContext,
@@ -206,6 +213,79 @@ function deliveredStatsToPrParts(
   };
 }
 
+/**
+ * Ruling 474: the hash recorded for a PR body Viberr wrote (`pr.bodyWritten`),
+ * compared with the body GitHub holds to tell a person's edit from Viberr's
+ * own text. Line endings read as LF: GitHub's web editor saves CRLF, so a
+ * description opened and saved unchanged is not an edit.
+ */
+export function prBodySha256(body: string): string {
+  return createHash("sha256").update(body.replace(/\r\n/g, "\n"), "utf8").digest("hex");
+}
+
+/**
+ * The app origin the PR body links back to (N20-4, §5a): `appOrigin()`
+ * (BETTER_AUTH_URL), never a request, since delivery runs off background
+ * operator runs. `null` means the link is omitted (a relative link 404s on
+ * github.com); logged once at debug so the deployment fix is discoverable.
+ */
+function prBodyOrigin(
+  ctx: OpenTaskPrContext,
+  input: { projectSlug: string; taskKey: string },
+): string | null {
+  const origin = ctx.appOrigin ?? appOrigin();
+  if (!origin) {
+    logger.debug(
+      "PR body omits the task back-link — no absolute app origin; set BETTER_AUTH_URL",
+      { taskKey: input.taskKey, projectSlug: input.projectSlug },
+    );
+  }
+  return origin;
+}
+
+/**
+ * The review PR body for the task as it stands: the current goal, the
+ * delivered revision and the live compare's stats. The create path and ruling
+ * 474's rewrite of a reused PR both compose through here, so a rewritten body
+ * is exactly the body a freshly opened PR would carry.
+ */
+function composeTaskPrBody(
+  input: { projectSlug: string; taskKey: string },
+  file: TaskFileReadResult,
+  branch: string,
+  origin: string | null,
+  liveStats: DeliveredDiffStats | null,
+): string {
+  const fm = file.parsed.frontmatter;
+  // F22-10: prefer the LIVE compare of the base against the freshly-pushed head
+  // for the change-summary + evidence. `fm.github.changed`/`commits` are
+  // reconciled values that can carry a colliding branch's stats at open time
+  // (PR #187 shipped "3 file(s) changed (+214/-16)" over a 1-file diff). Fall
+  // back to the frontmatter only when the compare is unreachable.
+  const liveParts = liveStats
+    ? deliveredStatsToPrParts(liveStats, branch, activeWorkRevision(fm.workRevision)?.headSha ?? null)
+    : null;
+  return composePrBody({
+    taskKey: input.taskKey,
+    projectSlug: input.projectSlug,
+    title: fm.title,
+    goal: file.parsed.goal,
+    appOrigin: origin,
+    changeSummary:
+      liveParts?.changeSummary ??
+      (fm.github?.changed
+        ? `${fm.github.changed.files} file(s) changed (+${fm.github.changed.add}/-${fm.github.changed.del}).`
+        : null),
+    // P13-D-26: `composePrBody` has always taken `evidence` and its one caller
+    // never passed it, so the "## Evidence" section was unreachable. The task
+    // record now carries real evidence rows on outcome events — hand the newest
+    // set to the PR body so the governed hand-off (FR31/FR32) actually carries
+    // the evidence the PRD promises a GitHub reviewer. F22-10: the live compare
+    // wins when available so the numbers match the actual PR diff.
+    evidence: liveParts?.evidence ?? latestEvidenceLines(file.parsed.timeline),
+  });
+}
+
 export interface OpenTaskPrContext {
   dataRoot?: string;
   fetchImpl?: typeof fetch;
@@ -287,6 +367,10 @@ const ghPullSchema = z.object({
     .object({ sha: z.string().optional().catch(undefined) })
     .optional()
     .catch(undefined),
+  /** Ruling 474: the description as GitHub holds it now (null when empty), on
+   *  the list item and the detail alike. Absent only on drift, which leaves a
+   *  recorded body unverifiable rather than assumed unedited. */
+  body: z.string().nullable().optional().catch(undefined),
 });
 type GhPull = z.output<typeof ghPullSchema>;
 
@@ -430,6 +514,7 @@ export async function openTaskPr(
         live.data.state === "open" && live.data.merged !== true;
       if (liveIsOpen) {
         await writePrToTask(db, ref, input, gh, live.data, actor, false, ctx, fm.pr);
+        await refreshReusedPrBody(db, ref, input, gh, live.data, actor, ctx);
         return {
           status: "ok",
           prNumber: live.data.number,
@@ -546,6 +631,7 @@ export async function openTaskPr(
           actor,
         );
       }
+      await refreshReusedPrBody(db, ref, input, gh, pr, actor, ctx);
       return { status: "ok", prNumber: pr.number, created: false, url: pr.html_url };
     }
     if (existing.kind === "network") {
@@ -571,45 +657,22 @@ export async function openTaskPr(
   const occupied = await prAlreadyOnHead();
   if (occupied) return occupied;
 
-  // 2. Create the PR.
-  // N20-4 (§5a): the back-link origin comes from `appOrigin()` (BETTER_AUTH_URL),
-  // never from a request — delivery runs off background operator runs. `null`
-  // means the link is omitted (a relative link 404s on github.com); log it once
-  // at debug so the deployment fix (set BETTER_AUTH_URL) is discoverable.
-  const origin = ctx.appOrigin ?? appOrigin();
-  if (!origin) {
-    logger.debug(
-      "PR body omits the task back-link — no absolute app origin; set BETTER_AUTH_URL",
-      { taskKey: input.taskKey, projectSlug: input.projectSlug },
-    );
-  }
-  // F22-10: prefer the LIVE compare of the base against the freshly-pushed head
-  // for the change-summary + evidence. `fm.github.changed`/`commits` are
-  // reconciled values that can carry a colliding branch's stats at open time
-  // (PR #187 shipped "3 file(s) changed (+214/-16)" over a 1-file diff). Fall
-  // back to the frontmatter only when the compare is unreachable.
-  const liveStats = await deliveredDiffStats(gh, gh.defaultBranch, branch);
-  const liveParts = liveStats
-    ? deliveredStatsToPrParts(liveStats, branch, activeWorkRevision(fm.workRevision)?.headSha ?? null)
-    : null;
-  const body = composePrBody({
-    taskKey: input.taskKey,
-    projectSlug: input.projectSlug,
-    title: fm.title,
-    goal: file.parsed.goal,
-    appOrigin: origin,
-    changeSummary:
-      liveParts?.changeSummary ??
-      (fm.github?.changed
-        ? `${fm.github.changed.files} file(s) changed (+${fm.github.changed.add}/-${fm.github.changed.del}).`
-        : null),
-    // P13-D-26: `composePrBody` has always taken `evidence` and its one caller
-    // never passed it, so the "## Evidence" section was unreachable. The task
-    // record now carries real evidence rows on outcome events — hand the newest
-    // set to the PR body so the governed hand-off (FR31/FR32) actually carries
-    // the evidence the PRD promises a GitHub reviewer. F22-10: the live compare
-    // wins when available so the numbers match the actual PR diff.
-    evidence: liveParts?.evidence ?? latestEvidenceLines(file.parsed.timeline),
+  // 2. Create the PR, from the file as it stands now (a closed-PR repair above
+  // may have rewritten it).
+  const bodyFile = readTaskFile(ref) ?? file;
+  const body = composeTaskPrBody(
+    input,
+    bodyFile,
+    branch,
+    prBodyOrigin(ctx, input),
+    await deliveredDiffStats(gh, gh.defaultBranch, branch),
+  );
+  // Ruling 474: what this body is, recorded with the PR so a later delivery
+  // can tell whether it still describes the head and whether a person has
+  // edited it since.
+  const bodyWritten = (prHeadSha: string | undefined): PrBodyWritten => ({
+    sha256: prBodySha256(body),
+    revision: bodyRevisionOf(bodyFile.parsed.frontmatter, prHeadSha),
   });
   const created = await gh.client.request(
     "POST",
@@ -626,12 +689,23 @@ export async function openTaskPr(
   );
 
   if (created.ok) {
-    await writePrToTask(db, ref, input, gh, created.data, actor, true, ctx, fm.pr);
+    await writePrToTask(
+      db,
+      ref,
+      input,
+      gh,
+      created.data,
+      actor,
+      true,
+      ctx,
+      fm.pr,
+      bodyWritten(created.data.head?.sha),
+    );
     // F27-U2: a fresh PR just opened — a real, solicited write that PROVES
     // `pull_request:write`, so its cached scope stops reading "unproven
     // (verified on first use)" after the first actual use. F28-U2b: prove it on
     // the credential that MADE the call (`gh.patId`), not whatever is bound now.
-    markWriteScopeProven(db, gh.patId);
+    markWriteScopeProven(db, gh.patId, gh.repo, "pull_request");
     return {
       status: "ok",
       prNumber: created.data.number,
@@ -677,10 +751,11 @@ export async function openTaskPr(
       true,
       ctx,
       fm.pr,
+      bodyWritten(undefined),
     );
     // F28-U2a: GitHub still CREATED the PR (2xx) — a real write proves the
     // scope here too, not only on the cleanly-decoded success path above.
-    markWriteScopeProven(db, gh.patId);
+    markWriteScopeProven(db, gh.patId, gh.repo, "pull_request");
     return { status: "ok", prNumber: pr.number, created: true, url };
   }
   if (created.kind === "network") {
@@ -765,7 +840,7 @@ export async function openTaskPr(
 
 async function writePrToTask(
   db: DatabaseSync,
-  ref: { projectSlug: string; taskKey: string; dataRoot?: string },
+  ref: TaskFileRef,
   input: { projectSlug: string; taskKey: string },
   gh: { repo: string },
   pr: GhPull,
@@ -773,6 +848,9 @@ async function writePrToTask(
   created: boolean,
   ctx: OpenTaskPrContext,
   existingPr: PrRef | null,
+  /** Ruling 474: the body this call just sent, on a create. A reuse passes
+   *  nothing and the SAME number keeps its record through the spread below. */
+  bodyWritten: PrBodyWritten | null = null,
 ): Promise<void> {
   // Canonical cache vocabulary: an open PR is "review" — never the raw
   // GitHub "open" (off-contract, and it would ping-pong against reconcilers).
@@ -796,6 +874,7 @@ async function writePrToTask(
   // a reuse of the SAME number by the spread below; a different PR never
   // inherits the old head (the salvage path passes no `head` at all).
   if (pr.head?.sha) fresh.headSha = pr.head.sha;
+  if (bodyWritten) fresh.bodyWritten = bodyWritten;
   const next: PrRef = samePr ? { ...existingPr, ...fresh } : fresh;
   // A recorded unpushed revision that the live head now carries is satisfied.
   if (next.headSha && next.unpushedRevision?.revisionSha === next.headSha) {
@@ -861,4 +940,219 @@ async function writePrToTask(
       details: { repo: gh.repo, prNumber: pr.number, created },
     });
   }
+}
+
+/** Ruling 474: the revision a PR body describes — the delivered revision its
+ *  Evidence line names, else the PR head as GitHub reported it. */
+function bodyRevisionOf(
+  fm: TaskFrontmatter,
+  prHeadSha: string | null | undefined,
+): string | null {
+  return activeWorkRevision(fm.workRevision)?.headSha ?? prHeadSha ?? null;
+}
+
+/** A revision as the timeline names it. */
+function revisionPhrase(sha: string | null, unknown: string): string {
+  return sha ? `revision \`${sha.slice(0, 7)}\`` : unknown;
+}
+
+/** What a body refresh moves from and to: the audit row's details. */
+interface PrBodyChange {
+  prNumber: number;
+  fromRevision: string | null;
+  toRevision: string | null;
+}
+
+/** The delivery's own note on the task timeline (the author every other
+ *  delivery-surfaced event carries). */
+function deliveryNote(text: string): TaskFileEvent {
+  return {
+    occurredAt: new Date().toISOString(),
+    type: "github",
+    actor: { kind: "system", systemId: "delivery" },
+    title: null,
+    text,
+    toAgent: false,
+    evidence: null,
+  };
+}
+
+/**
+ * Ruling 474 (pass 40, F40-19): a reused review PR's body follows the delivery
+ * it describes. The body used to be composed on the create path only, so a
+ * rework pushed to the same PR left it describing the FIRST delivery: live on
+ * akin-ozer/website PR #2 the Evidence said "3 commit(s) delivered, revision
+ * 7cf1edc" over a head at cc9aa30 carrying 5 commits.
+ *
+ * Runs after `writePrToTask` on both reuse arms. When the revision the body was
+ * written for (`pr.bodyWritten.revision`) is not the one delivered now, the body
+ * is recomposed from the current task through `composeTaskPrBody` (the create
+ * path's inputs) and sent as ONE `PATCH`, never retried on a 5xx. First the body
+ * GitHub holds is hashed against the one Viberr last wrote: a mismatch is a
+ * person's edit, which is kept, with one timeline note per revision saying so
+ * and what changed. A body Viberr never recorded (a PR opened before this
+ * ruling, or one it adopted) counts as Viberr's. A failed `PATCH` is a timeline
+ * note and a `github.pr.body_update_failed` row, never a failed delivery; nor is
+ * anything else here, so a throw is logged and the reuse stands.
+ */
+async function refreshReusedPrBody(
+  db: DatabaseSync,
+  ref: TaskFileRef,
+  input: { projectSlug: string; taskKey: string },
+  gh: GithubContext,
+  pr: GhPull,
+  actor: AuditActor,
+  ctx: OpenTaskPrContext,
+): Promise<void> {
+  try {
+    const file = readTaskFile(ref);
+    const cached = file?.parsed.frontmatter.pr;
+    // `writePrToTask` just recorded this number; any other is not this
+    // delivery's PR to describe.
+    if (!file || cached?.number !== pr.number) return;
+    const fm = file.parsed.frontmatter;
+    const branch = fm.branch ?? taskBranchName(input.taskKey);
+    if (!branch) return;
+    const written = cached.bodyWritten ?? null;
+    const toRevision = bodyRevisionOf(fm, pr.head?.sha);
+    // The body already describes what is delivered.
+    if (written && written.revision === toRevision) return;
+    const change: PrBodyChange = {
+      prNumber: pr.number,
+      fromRevision: written?.revision ?? null,
+      toRevision,
+    };
+    if (written) {
+      if (pr.body === undefined) {
+        await recordPrBodyUpdateFailed(
+          db,
+          ref,
+          input,
+          gh,
+          change,
+          "GitHub's answer did not include the current description, so a person's edit could not be ruled out",
+          actor,
+          ctx,
+        );
+        return;
+      }
+      if (prBodySha256(pr.body ?? "") !== written.sha256) {
+        if (written.keptRevision !== toRevision) {
+          await recordPrBodyKept(
+            db,
+            ref,
+            change,
+            await deliveredDiffStats(gh, gh.defaultBranch, branch),
+            ctx,
+          );
+        }
+        return;
+      }
+    }
+    const body = composeTaskPrBody(
+      input,
+      file,
+      branch,
+      prBodyOrigin(ctx, input),
+      await deliveredDiffStats(gh, gh.defaultBranch, branch),
+    );
+    const patched = await gh.client.request(
+      "PATCH",
+      `/repos/${gh.repo}/pulls/${pr.number}`,
+      z.unknown(),
+      { body: { body }, retryServerError: false },
+    );
+    if (!patched.ok) {
+      const reason =
+        patched.kind === "network"
+          ? `GitHub could not be reached (${patched.message})`
+          : patched.kind === "http"
+            ? `GitHub answered ${patched.status} (${patched.message})`
+            : githubFailureMessage(patched);
+      await recordPrBodyUpdateFailed(db, ref, input, gh, change, reason, actor, ctx);
+      return;
+    }
+    await updateTaskFile(ref, (parsed) => {
+      const current = parsed.frontmatter.pr;
+      if (current?.number === pr.number) {
+        current.bodyWritten = { sha256: prBodySha256(body), revision: toRevision };
+      }
+    });
+    rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+    recordAudit(db, {
+      action: "github.pr.body_updated",
+      actor,
+      subjectKind: "pull_request",
+      subjectId: `${gh.repo}#${pr.number}`,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: { ...change },
+    });
+  } catch (error) {
+    logger.warn("review PR body refresh failed; the delivery stands", {
+      taskKey: input.taskKey,
+      projectSlug: input.projectSlug,
+      prNumber: pr.number,
+      err: toError(error),
+    });
+  }
+}
+
+/** Ruling 474: a person edited the body on GitHub, so it stays as written. One
+ *  note per delivered revision (`keptRevision`), naming what it no longer says. */
+async function recordPrBodyKept(
+  db: DatabaseSync,
+  ref: TaskFileRef,
+  change: PrBodyChange,
+  stats: DeliveredDiffStats | null,
+  ctx: OpenTaskPrContext,
+): Promise<void> {
+  const delivered = stats
+    ? ` (${stats.commits} commit(s), ${stats.truncated ? "300+" : stats.files} file(s) changed, +${stats.add}/−${stats.del})`
+    : "";
+  const text =
+    `The description of **PR #${change.prNumber}** was edited on GitHub, so Viberr left it as the person wrote it. ` +
+    `It was written for ${revisionPhrase(change.fromRevision, "an earlier revision")}; the PR now carries ` +
+    `${revisionPhrase(change.toRevision, "a later one")}${delivered}.`;
+  await updateTaskFile(ref, (parsed) => {
+    parsed.timeline.unshift(deliveryNote(text));
+    const current = parsed.frontmatter.pr;
+    if (current?.number === change.prNumber && current.bodyWritten) {
+      current.bodyWritten.keptRevision = change.toRevision;
+    }
+  });
+  rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+}
+
+/** Ruling 474: the body could not be brought up to date. The delivery stands;
+ *  the timeline says which revision the body still describes, and why. */
+async function recordPrBodyUpdateFailed(
+  db: DatabaseSync,
+  ref: TaskFileRef,
+  input: { projectSlug: string; taskKey: string },
+  gh: { repo: string },
+  change: PrBodyChange,
+  reason: string,
+  actor: AuditActor,
+  ctx: OpenTaskPrContext,
+): Promise<void> {
+  await appendTimelineEvent(
+    ref,
+    deliveryNote(
+      `The description of **PR #${change.prNumber}** still describes ` +
+        `${revisionPhrase(change.fromRevision, "an earlier revision")}; updating it to ` +
+        `${revisionPhrase(change.toRevision, "this delivery")} failed: ${reason}. ` +
+        `The delivery itself went through, and the next delivery tries the description again.`,
+    ),
+  );
+  rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
+  recordAudit(db, {
+    action: "github.pr.body_update_failed",
+    actor,
+    subjectKind: "pull_request",
+    subjectId: `${gh.repo}#${change.prNumber}`,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { ...change, reason },
+  });
 }

@@ -15,6 +15,7 @@ import {
   cloneFailureSentence,
   createGitHubClonePlan,
   githubRemoteSanitizationArgs,
+  workspaceFault,
 } from "./git-clone-auth.server";
 
 describe("createGitHubClonePlan", () => {
@@ -245,6 +246,45 @@ describe("clone timeout + failure sentence", () => {
     expect(sentence).not.toContain("ran anonymously");
     expect(sentence).toContain("never reached GitHub");
     expect(sentence).toContain("git exit 128");
+  });
+
+  /**
+   * Ruling 485 (F40-62, live on WEB-5): the replace of a supporting checkout
+   * died on an agent's 0700 directory, and the log said `credential: absent`;
+   * the operator asked the owner to attach a GitHub credential. A local step's
+   * failure is a workspace fault: it names the path and the OS error, and
+   * nothing in it speaks of access. CANARY: drop the `WorkspaceFault` arm of
+   * `cloneFailureLogDetails` and a mkdir's ENOENT reads as "git is not
+   * installed"; drop the `workspace_fault` arm of the sentence and it carries a
+   * credential clause.
+   */
+  it("ruling 485: a local step's fault names the path and the OS error, never a credential or a missing git", () => {
+    const mkdir = Object.assign(new Error("ENOENT: no such file or directory, mkdir"), {
+      code: "ENOENT",
+      path: "/data/projects/web/tasks/WEB-5/workspace/support",
+    });
+    const fault = workspaceFault("`/data/projects/web/tasks/WEB-5/workspace/support` could not be created", mkdir);
+    const details = cloneFailureLogDetails(fault);
+    expect(details).toEqual({
+      reason: "workspace_fault",
+      fault:
+        "`/data/projects/web/tasks/WEB-5/workspace/support` could not be created: ENOENT on /data/projects/web/tasks/WEB-5/workspace/support",
+    });
+    for (const credential of ["supplied", "absent", "not_involved"] as const) {
+      const sentence = cloneFailureSentence(details, { credential });
+      expect(sentence).toContain("could not be created: ENOENT on /data/projects/web/tasks/WEB-5/workspace/support");
+      expect(sentence).not.toMatch(/credential|git is not installed/i);
+    }
+    // git's own exit and words, for a local clone that failed.
+    const clone = workspaceFault(
+      "`/w/support/r/site` could not be cloned from the delivering checkout `/w/site`",
+      Object.assign(new Error("Command failed"), { code: 128, stderr: "fatal: not a git repository" }),
+    );
+    expect(cloneFailureLogDetails(clone)).toMatchObject({
+      reason: "workspace_fault",
+      fault: "`/w/support/r/site` could not be cloned from the delivering checkout `/w/site`: git exit 128",
+      detail: "fatal: not a git repository",
+    });
   });
 
   it("names a missing git binary as the server's problem, not the repo's", () => {

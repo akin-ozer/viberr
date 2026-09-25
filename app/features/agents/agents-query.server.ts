@@ -297,6 +297,44 @@ function identityOverride(
 
 
 /**
+ * Ruling 479(g): the definition fields a profile save always writes
+ * (`updateAgentProfile`) and a template also supplies. While the deployment
+ * leaves one unset the view resolves it from the template live, so the save is
+ * what ends that. `effort` and `persona` are not listed: a save writes each
+ * only when it has a value, so an absent one keeps resolving live after it.
+ * `kind` is not listed either: no template edit changes it.
+ */
+const SAVE_SNAPSHOT_FIELDS = [
+  "name",
+  "role",
+  "icon",
+  "backends",
+  "model",
+  "scope",
+  "desc",
+  "stages",
+  "spanAll",
+  "resources",
+] as const satisfies readonly (keyof AgentDeploymentDefinition)[];
+
+/**
+ * Ruling 479(g): does a save on the Agents page still cut this copy loose from
+ * its template? The editor said "Saving forks this profile" for every
+ * template-sourced profile, but a library deploy and every earlier save already
+ * hold a full snapshot, which a template edit never reaches (ruling 156,
+ * P13-AP-07): on akinozer.com all seven deployments did, and the sentence told
+ * the owner that editing would end an inheritance that had already ended.
+ */
+function tracksTemplateLive(
+  def: AgentDeploymentDefinition | null,
+  template: TemplateProfile | null,
+): boolean {
+  if (!template) return false;
+  if (!def) return true;
+  return SAVE_SNAPSHOT_FIELDS.some((field) => def[field] === undefined);
+}
+
+/**
  * Ruling 156 (pass 35, F35-7): how a deployment's COPY of the grants differs
  * from its template's. Null when there is no template (a project-created
  * profile), no copy (a definition-less deployment resolves the template live)
@@ -569,6 +607,7 @@ export function effectiveProfileView(
     // definition-less row resolves the template live and cannot drift.
     templateDrift: templateDriftOf(def, template),
     source: template ? "template" : "project",
+    tracksTemplate: tracksTemplateLive(def, template),
     // B5: the record this view was built from, for the editor to submit back.
     fingerprint: deploymentFingerprint(deployment),
   };

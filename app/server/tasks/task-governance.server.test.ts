@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
-import { gitOutSync } from "../../../test-support/git-origin";
+import { gitOutSync, withLocalGithub } from "../../../test-support/git-origin";
 import { taskDir } from "~/server/files/file-store-root.server";
 import {
   actorOf,
@@ -68,6 +68,13 @@ const PACKET: TaskPacket = {
     { kind: "hold_runtime_debug", t: "Hold for runtime debug", d: "", rec: false },
     { kind: "redirect", t: "Start a fresh specialist", d: "", rec: false },
   ],
+};
+
+/** PACKET with its `accept_completion` option removed: a decision no
+ *  acceptance answers (ruling 471), which an acceptance still withdraws. */
+const PACKET_WITHOUT_ACCEPTANCE: TaskPacket = {
+  ...PACKET,
+  options: PACKET.options.filter((o) => o.kind !== "accept_completion"),
 };
 
 /** The delivering developer engagement (workspace owner; never a required
@@ -324,7 +331,10 @@ describe("P3.7 governance & lifecycle fixes", () => {
         verdicts: [rejectionVerdict("rev_1")], // required reviewer requested changes
         validation: "failing",
       },
-      PACKET,
+      // Ruling 471: a decision offering `accept_completion` (or
+      // `force_accept`) is ANSWERED by this override, so the F32-11
+      // withdrawal below needs one that offers neither.
+      PACKET_WITHOUT_ACCEPTANCE,
     );
     const res = await forceAcceptCompletion(
       store.db,
@@ -2437,7 +2447,10 @@ describe("resolvePacket kind matrix", () => {
     gitOutSync(repoDir, ["commit", "-q", "-m", "work"]);
     gitOutSync(repoDir, ["checkout", "-q", "main"]);
     if (opts.onRemote) {
-      const remoteDir = path.join(store.dataRoot, "bare-origin.git");
+      // The PROJECT's repository (`akin-ozer/viberr`) stood in for on disk
+      // under `origins/`: pass 40 review (R-seams-1) asks GitHub by the
+      // project's own URL, never through the checkout's config.
+      const remoteDir = path.join(store.dataRoot, "origins", "akin-ozer", "viberr.git");
       mkdirSync(remoteDir, { recursive: true });
       gitOutSync(remoteDir, ["init", "-q", "--bare"]);
       gitOutSync(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -2595,11 +2608,13 @@ describe("resolvePacket kind matrix", () => {
       DISCARD_PACKET,
     );
     initTaskWorkspace(store, { onRemote: true });
-    const { task } = await resolvePacket(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      actorOf(store.users.murat),
-      { dataRoot: store.dataRoot },
+    const { task } = await withLocalGithub(path.join(store.dataRoot, "origins"), () =>
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actorOf(store.users.murat),
+        { dataRoot: store.dataRoot },
+      ),
     );
     // The packet resolves in every case (the discard is best-effort after it).
     expect(task.packet).toBeNull();
@@ -4564,6 +4579,55 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
       { dataRoot: store.dataRoot },
     );
     expect(goalOf(store)).toBe(before);
+  });
+
+  /**
+   * Ruling 478(e) (F40-31): WEB-3's "Connected; the first build succeeded"
+   * asked for the Worker name and URL, and one Confirm sent it without them.
+   * The card refuses first; `resolvePacket` refuses for every other door.
+   *
+   * CANARY: drop the `picked.reply` check in `resolvePacket`.
+   */
+  it("ruling 478(e): a choice marked `reply` is refused without the person's typed answer, and nothing is recorded", async () => {
+    const store = setupProjectedStore(ctx);
+    withTask(
+      store,
+      { stage: "impl", ownerUserId: store.users.arda.id },
+      {
+        ...QUESTION,
+        options: [
+          { kind: "custom", t: "Connected; the first build succeeded", d: "", rec: false, reply: true },
+          { kind: "custom", t: "Not yet", d: "", rec: false },
+        ],
+      },
+    );
+    await expect(
+      resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, note: "   " },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("needs your answer") });
+    const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(file.parsed.packet).not.toBeNull();
+    expect(listAuditEvents(store.db, { action: "task.packet.resolved" })).toHaveLength(0);
+
+    // With the answer, the same choice resolves and carries it.
+    await resolvePacket(
+      store.db,
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        optionIndex: 0,
+        note: "Worker viberr-site, https://viberr-site.example.workers.dev",
+      },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    const after = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
+    expect(after.parsed.packet).toBeNull();
+    expect(after.parsed.timeline.map((e) => e.text).join("\n")).toContain("viberr-site.example.workers.dev");
   });
 });
 

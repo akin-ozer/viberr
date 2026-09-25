@@ -79,7 +79,15 @@ services:
       # agent-backend runtime home (runtimes/users/<userId>/…, ruling 127).
       # Back this up. Wiping it signs everyone out of Claude and Codex; they
       # reconnect on Profile → Agent accounts.
-      - ./docker-data:/data
+      #
+      # Ruling 460: a NAMED volume, not a host directory. Every agent process
+      # runs as its person's own OS user, and what keeps it out of the
+      # projection database and other people's sign-ins is file permissions —
+      # which a macOS bind mount (`./docker-data`) does not enforce between
+      # uids at all (measured: uid 65534 read a 0600 file owned by 1000). A
+      # store still on the bind mount boots `agentIsolation: degraded`. Moving
+      # it once: `npm run store:to-volume` (docs/operations/deployment.md).
+      - viberr-data:/data
     # A run is not the unit of load. The instance's run-concurrency cap counts
     # RUNS, and one run is an agent that will happily `pnpm -r test` — which
     # forks a vitest worker per host CPU. Measured on a 10-core / 16 GB Mac
@@ -106,3 +114,16 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+
+volumes:
+  # Ruling 460: the store. Named `viberr-data` exactly (not project-prefixed),
+  # so the one-time move, the backup and the runbook can name it.
+  #
+  # Ruling 473: EXTERNAL, so Compose never owns it. A volume Compose creates is
+  # one `docker compose down -v` deletes, and this one is the whole store
+  # (canonical files, the database, everyone's sealed credentials and sign-ins).
+  # `npm run deploy` creates it when it is missing; by hand it is
+  # `docker volume create viberr-data` before the first `up`.
+  viberr-data:
+    name: viberr-data
+    external: true

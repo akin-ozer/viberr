@@ -27,6 +27,7 @@ import {
 } from "./operator-recommendations";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { AttachmentsPanel } from "./attachments-panel";
+import { ChangesPanel } from "./changes-slot";
 import { MoveBackConfirm } from "./move-back-confirm";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
@@ -41,6 +42,7 @@ import {
   acceptanceDisclosureFields,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
+import type { PrOverlap } from "~/shared/pr-overlaps";
 import {
   useActionFeedback,
   useLogSelection,
@@ -120,6 +122,7 @@ export function TaskDetailPage({
   attachmentsTotal,
   attachmentProducers = {},
   attachmentsBase = null,
+  changesUrl = null,
   runtime: loadedRuntime,
   deployedSpecialists,
   operatorBackend,
@@ -147,6 +150,7 @@ export function TaskDetailPage({
   githubHost,
   githubReconciledAt = null,
   baseBehindBy = null,
+  mergeCollisions = [],
   githubCheckedAt = null,
   workRevisionSha = null,
   noChanges = false,
@@ -171,6 +175,9 @@ export function TaskDetailPage({
    *  built by the route component (the one place that knows the params).
    *  Null hides the panel and the evidence links (e.g. bare test renders). */
   attachmentsBase?: string | null;
+  /** Ruling 484: `/projects/<slug>/tasks/<KEY>/changes`, the Changes panel's
+   *  read, built by the route component. Null hides the panel. */
+  changesUrl?: string | null;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
   /** Deployed specialists the run-agent selector offers (loader). */
@@ -232,6 +239,9 @@ export function TaskDetailPage({
   /** U39-32: base commits the branch lacked at the reconciler's last
    *  compare; null when never compared. */
   baseBehindBy?: number | null;
+  /** Ruling 475: the other open PRs this task's merge would likely put in
+   *  conflict, for the accept dialog. */
+  mergeCollisions?: readonly PrOverlap[];
   /** F19-22: newest COMPLETED reconcile pass for this task (`github.reconcile.task`
    *  audit row). The panel needs both — one number could never say both "the
    *  poller is alive" and "nothing has moved since Tuesday". */
@@ -412,6 +422,19 @@ export function TaskDetailPage({
     fd.set("_csrf", csrf);
     fd.set("intent", "deliver-review");
     deliverFetcher.submit(fd, { method: "post" });
+  };
+
+  // Ruling 482: run the project's gates on the revision under review again,
+  // from the PR card. Same tier as the manual delivery above.
+  const gatesFetcher = useFetcher<ActionResult>();
+  useActionFeedback(gatesFetcher);
+  const gatesBusy = gatesFetcher.state !== "idle";
+  const onRunGates = () => {
+    if (gatesBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "run-gates");
+    gatesFetcher.submit(fd, { method: "post" });
   };
 
   // The run-log console's store (ruling 457): it follows the task's runs
@@ -870,9 +893,11 @@ export function TaskDetailPage({
           {...(onForceAccept
             ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
             : {})}
-          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
+          {...(canDeliver && !taskClosed ? { onDeliver, onRunGates } : {})}
           delivering={deliverBusy}
           runIntent={runIntent}
+          runningGates={gatesBusy}
+          attachmentsBase={attachmentsBase}
         />
         <CurrentStatePanel
           task={task}
@@ -990,6 +1015,20 @@ export function TaskDetailPage({
           </section>
         ) : null}
 
+        {/* Ruling 484 (F40-54): the delivered revision's files and patches,
+            with a note on any line going to the deliverer as one comment.
+            Only while the review PR is open and carries a delivered revision;
+            the reader is its own chunk, loaded when the panel opens. */}
+        {changesUrl && task.pr?.state === "review" && workRevisionSha ? (
+          <ChangesPanel
+            url={changesUrl}
+            githubHost={githubHost}
+            prNumber={task.pr.number}
+            revisionSha={workRevisionSha}
+            delivererName={task.specialist?.profileName ?? null}
+          />
+        ) : null}
+
         {attachmentsBase ? (
           <AttachmentsPanel
             base={attachmentsBase}
@@ -1026,6 +1065,8 @@ export function TaskDetailPage({
           // loop" — directly under the Live-run strip saying otherwise. Same
           // condition that renders that strip, so the two cannot disagree.
           runLive={runtime.length > 0}
+          // Ruling 483: a proposal event links to the project's open proposals.
+          proposalsHref={`/projects/${encodeURIComponent(task.projectSlug)}/controller#kb-proposals`}
           {...(attachmentsBase
             ? {
                 attachmentNames: attachments.map((a) => a.name),
@@ -1051,6 +1092,7 @@ export function TaskDetailPage({
           task={task}
           workRevisionSha={workRevisionSha}
           baseBehindBy={baseBehindBy}
+          mergeCollisions={mergeCollisions}
           noChanges={noChanges}
           // F32-11: the open decision this acceptance withdraws, if any.
           // Ruling 164 + F19-7, applied to the sibling row: a PACKET resolution
@@ -1058,11 +1100,23 @@ export function TaskDetailPage({
           // 164 added) ANSWERS the open decision, so nothing is withdrawn. The
           // row used to name that packet and say it "closes unanswered", while
           // `task.acceptance.forced` recorded `withdrawnPacket: null` — the
-          // disclosure is read after the packet path has cleared it. Only the
-          // direct doors (Accept, Force accept, a recommendation, a stage move)
-          // close a standing decision unanswered.
+          // disclosure is read after the packet path has cleared it. The direct
+          // doors (Accept, Force accept, a recommendation, a stage move) close a
+          // standing decision too.
           openPacketTitle={
             confirmAccept.mode === "packet" ? null : (task.packet?.title ?? null)
+          }
+          // Ruling 471: and a direct door ANSWERS it when it offers the option
+          // that door performs. The loader names that option per door (the
+          // packet render's `forceAnswersWith` for Force accept, and
+          // `acceptAnswersWith` for every plain acceptance); without one the
+          // row stays "Withdraws".
+          answersWith={
+            confirmAccept.mode === "force"
+              ? (task.packet?.forceAnswersWith ?? null)
+              : confirmAccept.mode === "packet"
+                ? null
+                : (task.packet?.acceptAnswersWith ?? null)
           }
           // F20-6 (R20-2): no PR + the completion never claimed no-change → the
           // accept path auto-detects it by re-probing the branch. The dialog
@@ -1076,6 +1130,8 @@ export function TaskDetailPage({
           // R19-B: the human GitHub approval carrying the verdict gate, rendered
           // on the verdict row (null when an agent verdict cleared it).
           verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
+          // Ruling 482: Viberr's own gate run on the revision this accepts.
+          gates={acceptance.gates ?? null}
           ceremony={
             "label" in confirmAccept
               ? {

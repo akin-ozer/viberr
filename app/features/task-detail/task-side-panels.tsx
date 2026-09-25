@@ -22,7 +22,9 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageLabel } from "~/shared/workflow/stage-label";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import { checksPill, checksUnreadPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
+import { checksPill, checksUnreadPill, gatesPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
+import type { GatesView } from "~/shared/project-gates";
+import { useAttachmentLightbox } from "./attachment-lightbox";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
@@ -74,6 +76,9 @@ export function GithubTrace({
   onDeliver,
   delivering = false,
   runIntent = null,
+  onRunGates,
+  runningGates = false,
+  attachmentsBase = null,
 }: {
   task: TaskDetail;
   /** GitHub web host for browse links — always the loader's `githubWebHost()`
@@ -89,7 +94,7 @@ export function GithubTrace({
    *  down. One source, one sentence, no contradiction. */
   acceptance: Pick<
     AcceptanceAffordance,
-    "atBoundary" | "blockedReason" | "terminallyBlocked"
+    "atBoundary" | "blockedReason" | "terminallyBlocked" | "gates"
   >;
   /** UI-57: ISO of the newest `github.reconcile` PROVENANCE row for THIS task —
    *  i.e. the last pass that actually CHANGED something, not the last pass that
@@ -134,6 +139,14 @@ export function GithubTrace({
    *  carries interrupt and retry), null while idle. Complete merge and Force
    *  accept wait on any of them and show the work when it is theirs. */
   runIntent?: string | null;
+  /** Ruling 482: queue the project's gates on the revision under review again
+   *  (maintainer+ or the owner, the manual delivery's tier); undefined hides
+   *  the control. */
+  onRunGates?: () => void;
+  runningGates?: boolean;
+  /** The attachments route's base, so each gate's log opens where it lives.
+   *  Null renders the log names as text. */
+  attachmentsBase?: string | null;
 }) {
   const merging = runIntent !== null;
   const completingMerge = runIntent === "complete-merge";
@@ -268,6 +281,11 @@ export function GithubTrace({
     : null;
   return (
     <div className="panel flush">
+      {/* Ruling 478(f) (F40-35): the panel's name, for heading navigation. The
+          bar's icon and repo already say it to the eye; without this the
+          panel was the one region of the page a screen reader's heading list
+          could not reach once the task had a branch. */}
+      <h2 className="vh">GitHub</h2>
       <div className="gh-bar">
         <Icon name="github" />
         <span className="repo">{task.repo}</span>
@@ -314,6 +332,17 @@ export function GithubTrace({
         {task.prReview && (
           <Pill kind={reviewPill(task.prReview).kind} sm>
             {reviewPill(task.prReview).label}
+          </Pill>
+        )}
+        {/* Ruling 482: what Viberr's own run of the project's gates says about
+            the revision under review, beside what GitHub's checks say. */}
+        {acceptance.gates && (
+          <Pill
+            kind={gatesPill(acceptance.gates.state).kind}
+            sm
+            quiet={gatesPill(acceptance.gates.state).quiet}
+          >
+            {gatesPill(acceptance.gates.state).label}
           </Pill>
         )}
         {/* Ruling 162 (pass 35, F35-12 (c)): the conflict the acceptance gate
@@ -442,6 +471,14 @@ export function GithubTrace({
             ))}
           </div>
         )}
+        {acceptance.gates && (
+          <GatesRow
+            gates={acceptance.gates}
+            attachmentsBase={attachmentsBase}
+            {...(onRunGates ? { onRunGates } : {})}
+            running={runningGates}
+          />
+        )}
         {/* Ruling 135: the delivered revision is not on the open PR. Named
             beside the branch so the push control below reads from a fact. */}
         {pushOffer && (
@@ -532,6 +569,83 @@ export function GithubTrace({
           </a>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Ruling 482 (F40-52): the PR card's gate record — "Gates on a95c337: 4/4 exit
+ * 0 (run by Viberr)" — with each gate's outcome, time and log, and the control
+ * that runs them again. The line is the server's (`projectGatesView`), so the
+ * card, the accept dialog, the refusal and every agent's anchor say the same.
+ */
+function GatesRow({
+  gates,
+  attachmentsBase,
+  onRunGates,
+  running,
+}: {
+  gates: GatesView;
+  attachmentsBase: string | null;
+  onRunGates?: () => void;
+  running: boolean;
+}) {
+  const lightbox = useAttachmentLightbox();
+  const inFlight = gates.state === "queued" || gates.state === "running";
+  return (
+    <div className="gate-block" data-gates={gates.state}>
+      <div className="kv-row">
+        <span className="k">Gates</span>
+        <span className="v" role="status">
+          {gates.line}
+        </span>
+      </div>
+      {gates.rows.length > 0 && (
+        <ul className="gate-results" aria-label="Gate results">
+          {gates.rows.map((row) => (
+            <li key={row.name} className={row.ok ? "ok" : "bad"}>
+              <Icon name={row.ok ? "check" : "x"} />
+              <span className="gate-name mono">{row.name}</span>
+              <span className="gate-outcome">{row.outcome}</span>
+              <span className="gate-wall">{row.wall}</span>
+              {row.log && attachmentsBase ? (
+                <a
+                  className="gate-log"
+                  href={`${attachmentsBase}/${encodeURIComponent(row.log)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`${row.name} log`}
+                  onClick={lightbox({
+                    name: row.log,
+                    url: `${attachmentsBase}/${encodeURIComponent(row.log)}`,
+                  })}
+                >
+                  log
+                </a>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {gates.error && (
+        <p className="deny-note spaced">
+          <Icon name="alert" />
+          {gates.error}
+        </p>
+      )}
+      {onRunGates && (
+        <button
+          type="button"
+          className="btn ghost sm panel-act"
+          disabled={running || inFlight}
+          aria-busy={running || undefined}
+          onClick={onRunGates}
+          title="Run the project's gates on this revision again (audited)"
+        >
+          <GlyphSwap rest="refresh" alt="loader" on={running} spinAlt />
+          {running ? "Queuing gates…" : gates.state === "not_run" ? "Run gates" : "Run gates again"}
+        </button>
+      )}
     </div>
   );
 }

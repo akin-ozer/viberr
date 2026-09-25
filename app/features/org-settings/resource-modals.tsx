@@ -1,11 +1,15 @@
 import { useState } from "react";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { slugify } from "~/shared/ids/slugify";
+import { isWriteScope, mcpGrantPhrase, mcpSignInPhrase, summarizeMcpGrant } from "~/shared/mcp-oauth";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE } from "~/shared/mcp-tools";
+import { countLabel } from "~/shared/text/plural";
+import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
 import { MiniModal } from "./mini-modal";
 import { useModalAction } from "./resource-helpers";
+import { useOrgAction } from "./use-org-action";
 
 /**
  * The knowledge-base / MCP-server / skill editors for the Agent-resources tab.
@@ -160,6 +164,155 @@ export function KBModal({
   );
 }
 
+/** "needs sign-in" → "Needs sign-in". */
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * Ruling 486: what a sign-in was granted, under its status line. The summary
+ * ("read-only · 194 scopes") says whether a run may write through the
+ * connection; the full list sits in a disclosure, each write marked. It looks
+ * like a GitHub connection's reach list (`.conn-reach`), so the stylesheet
+ * every page loads does not grow for it.
+ */
+function McpGrant({ scope }: { scope: string | null }) {
+  const grant = summarizeMcpGrant(scope);
+  if (!grant) return <span className="fhint">The server did not say which scopes it granted.</span>;
+  return (
+    <>
+      <span className="fhint">
+        Granted {mcpGrantPhrase(scope)}
+        {grant.writes.length === 0
+          ? ". Runs can read through it, and the server refuses any call that writes. To allow writes, add write scopes to Requested scopes above, save, and sign in again."
+          : "."}
+      </span>
+      <details className="conn-reach">
+        <summary>
+          <span>The {countLabel(grant.scopes.length, "scope")} it granted</span>
+          <Icon name="chevron" className="disc-chev" />
+        </summary>
+        <ul className="conn-reach-list" aria-label="Granted scopes">
+          {grant.scopes.map((granted) => (
+            <li key={granted}>
+              <span className="mono">{granted}</span>
+              {isWriteScope(granted) && <span className="conn-reach-ro">write</span>}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </>
+  );
+}
+
+/**
+ * Ruling 469: the editor's OAuth sign-in, beside the pasted credential. "Sign
+ * in" asks the server to discover the server's authorization server, register
+ * Viberr there and hand back the authorization URL; the admin opens it in a
+ * new tab (a link, so no popup blocker stands in the way) and approves Viberr
+ * on the server's own page. The callback tab seals the tokens and says it can
+ * be closed; this page revalidates on the resource event it publishes, so the
+ * status line below turns to "signed in" by itself. "Sign out" revokes the
+ * tokens at the server when it offers revocation and drops them here.
+ */
+function McpSignIn({ mcp }: { mcp: McpView }) {
+  const oauth = mcp.oauth ?? null;
+  const [err, setErr] = useState<string | null>(null);
+  // The authorization URL, and the sign-in state it was fetched against: once
+  // that state moves (the callback landed, or the admin signed out), the link
+  // has done its job and goes away.
+  const [pendingLink, setPendingLink] = useState<{
+    url: string;
+    issuer: string | null;
+    from: string;
+  } | null>(null);
+  const stateKey = `${oauth?.status ?? "none"}|${oauth?.expiresAt ?? ""}`;
+  const start = useOrgAction({
+    onResult: (d) => {
+      if (!d.ok) {
+        setErr(d.error);
+        return;
+      }
+      if (d.authorizeUrl) setPendingLink({ url: d.authorizeUrl, issuer: d.issuer ?? null, from: stateKey });
+    },
+  });
+  const signOut = useOrgAction();
+  const link = pendingLink && pendingLink.from === stateKey ? pendingLink : null;
+  const signedIn = oauth?.status === "signed_in";
+  const phrase = mcpSignInPhrase(oauth);
+  const status = phrase
+    ? sentenceCase(phrase) + (signedIn && oauth?.issuer ? ` · ${oauth.issuer}` : "")
+    : "Not signed in. Use this when the server asks for an OAuth sign-in instead of a token.";
+  const busy = start.busy || signOut.busy;
+  return (
+    <div className="field">
+      <span className="flabel" id="mcp-oauth-label">
+        OAuth sign-in <span className="fhint">for a server that asks for one</span>
+      </span>
+      <span className="fhint" role="status">
+        {status}
+      </span>
+      {oauth?.status === "expired" && oauth.reason && <span className="fhint mono">{oauth.reason}</span>}
+      {signedIn && <McpGrant scope={oauth?.scope ?? null} />}
+      <span className="cred-manage" role="group" aria-labelledby="mcp-oauth-label">
+        <button
+          type="button"
+          className={"btn sm" + (signedIn ? " ghost" : "")}
+          disabled={busy}
+          aria-busy={start.busy || undefined}
+          onClick={() => {
+            setErr(null);
+            start.submit({ intent: "mcp-oauth-start", mcpId: mcp.id });
+          }}
+        >
+          <GlyphSwap rest="user" alt="loader" on={start.busy} spinAlt />
+          {start.busy ? "Starting sign-in…" : oauth?.status === "needs_sign_in" || !oauth ? "Sign in" : "Sign in again"}
+        </button>
+        {(signedIn || oauth?.status === "expired") && (
+          <button
+            type="button"
+            className="btn sm ghost"
+            disabled={busy}
+            aria-busy={signOut.busy || undefined}
+            onClick={() => {
+              setErr(null);
+              signOut.submit({ intent: "mcp-oauth-sign-out", mcpId: mcp.id });
+            }}
+          >
+            <GlyphSwap rest="x" alt="loader" on={signOut.busy} spinAlt />
+            {signOut.busy ? "Signing out…" : "Sign out"}
+          </button>
+        )}
+        {link && (
+          <a className="btn sm" href={link.url} target="_blank" rel="noopener noreferrer">
+            <Icon name="ext" />
+            {link.issuer ? `Continue at ${link.issuer}` : "Continue to the sign-in page"}
+          </a>
+        )}
+      </span>
+      {link && (
+        <span className="fhint">
+          Approve Viberr there. That tab says when it is done, and this editor updates by itself.
+        </span>
+      )}
+      {err && (
+        <div className="form-err">
+          <Icon name="alert" />
+          {err}
+        </div>
+      )}
+      <div className="def-note">
+        <Icon name="lock" />
+        <span>
+          Viberr registers itself with the server, you approve it on the server&apos;s own
+          sign-in page, and Viberr keeps the tokens sealed and renews them. Agent runs reach
+          the server through Viberr&apos;s MCP gateway and never see a token.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function McpModal({
   initial,
   usedBy,
@@ -182,6 +335,10 @@ export function McpModal({
   // P13-KM-06: blank means "keep the stored secret", so removing one needs an
   // explicit intent — without it a repointed server kept sending the old token.
   const [clearCred, setClearCred] = useState(false);
+  // Ruling 469: read live from the row, which the panel keeps current.
+  const signedIn = initial?.oauth?.status === "signed_in";
+  // Ruling 486(c): what the next OAuth sign-in asks for, as stored.
+  const [scopes, setScopes] = useState(initial?.requestedScope ?? "");
   // Ruling 176: the write-tool marks. The editor proposes and the admin
   // decides: a server nobody has reviewed opens with the discovery suggestion
   // selected; a reviewed one opens with exactly what was saved.
@@ -244,6 +401,8 @@ export function McpModal({
         // nothing to show yet stays unreviewed, so the names its first probe
         // discovers still arrive as a suggestion.
         if (reviewed || toolChoices.length > 0) fields.writeTools = JSON.stringify(marked);
+        // Ruling 486(c): only an HTTP server signs in, so only it asks for scopes.
+        if (transport === "HTTP") fields.requestedScopes = scopes.trim();
         action.submit(fields);
       }}
     >
@@ -318,6 +477,13 @@ export function McpModal({
           }}
         />
       </div>
+      {initial?.oauth?.status === "signed_in" &&
+        (transport !== initial.transport || target.trim() !== initial.target) && (
+        <span className="fhint">
+          Saving this drops the server&apos;s OAuth sign-in: its tokens were issued for the old
+          endpoint. Sign in again afterwards.
+        </span>
+      )}
       {/* P14-KM-09/KM-01: renaming a server rewrites every grant that names it
           (KB and skill renames always did; the MCP leg didn't, which orphaned
           them silently). Say how many grants are at stake before the rename. */}
@@ -331,6 +497,17 @@ export function McpModal({
           </span>
         </div>
       )}
+      {signedIn && transport === "HTTP" && target.trim() === initial?.target ? (
+        // Ruling 469: a connection holds one credential, and a live sign-in is
+        // it. The server refuses a pasted token over it; the field says why.
+        <div className="field">
+          <span className="flabel">Credential</span>
+          <span className="fhint">
+            Signed in with OAuth, so no pasted credential is used. Sign out below to paste one
+            instead.
+          </span>
+        </div>
+      ) : (
       <div className="field">
         <label className="flabel" htmlFor="mcp-cred">
           Credential{" "}
@@ -373,13 +550,41 @@ export function McpModal({
         <div className="def-note">
           <Icon name="lock" />
           <span>
-            Encrypted at rest and injected only into the agent run (Authorization header
-            or MCP_CREDENTIAL env). Never shown again, and never in task timelines,
-            comments, or audit records. On a Codex-backend agent this credential is not
-            sent: Codex mounts the server unauthenticated.
+            Encrypted at rest and held by Viberr: runs on either backend reach the server
+            through Viberr&apos;s MCP gateway, which sends it as the Authorization header (or
+            starts a stdio command with it in MCP_CREDENTIAL). No agent sees it. Never shown
+            again, and never in task timelines, comments, or audit records.
           </span>
         </div>
       </div>
+      )}
+      {transport === "HTTP" && (
+        <div className="field">
+          <label className="flabel" htmlFor="mcp-scopes">
+            Requested scopes <span className="fhint">optional · for an OAuth sign-in</span>
+          </label>
+          <textarea
+            id="mcp-scopes"
+            className="mono"
+            rows={2}
+            value={scopes}
+            placeholder="e.g. workers-scripts.write workers-ci.write zone.read"
+            autoComplete="off"
+            spellCheck={false}
+            aria-describedby="mcp-scopes-hint"
+            onChange={(e) => {
+              setScopes(e.target.value);
+              setErr(null);
+            }}
+          />
+          <span className="fhint" id="mcp-scopes-hint">
+            Sent as the sign-in&apos;s scope, separated by spaces; blank asks for what the server
+            advertises. The server&apos;s own sign-in page decides what it grants, so this editor
+            shows what it granted. A change applies at the next sign-in.
+          </span>
+        </div>
+      )}
+      {initial && initial.transport === "HTTP" && transport === "HTTP" && <McpSignIn mcp={initial} />}
       <div className="field">
         <span className="flabel" id="mcp-write-tools-label">
           Write tools{" "}

@@ -7,8 +7,8 @@ import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 import { formatAbsoluteUTC } from "~/shared/dates/format";
 import { formatUsd } from "~/shared/run-failure";
-import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
+import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
 import {
   RULING_NAMESPACE_NOTE,
   attachedResourcesBlock,
@@ -32,6 +32,8 @@ import {
   type RunFailure,
 } from "~/server/tasks/agent-reply.server";
 import {
+  gatewayMcpSection,
+  type McpRunGrant,
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
 } from "~/server/tasks/specialist-mcp.server";
@@ -58,13 +60,14 @@ import { getRun, listRunsForTaskRows } from "~/server/runtimes/run-store.server"
 import {
   appendMessage,
   getConversation,
+  messagesUpTo,
   normalizeSurface,
   publishConversationUpdated,
-  recentMessages,
   requireConversation,
   type ControllerConversation,
   type ControllerMessage,
 } from "./controller-conversations.server";
+import { inReplyOrder } from "~/shared/controller-thread";
 import {
   cachedToolchain,
   shellInventoryPrompt,
@@ -90,8 +93,14 @@ import {
 } from "~/server/runtimes/prompt-prefix.server";
 import { controllerCompactAnchor } from "~/server/runtimes/context-policy.server";
 import { normalizeTimeZone } from "~/shared/dates/time-zone";
-import { countLabel } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
+import {
+  DROPPED_AFTER_QUEUED_START,
+  DROPPED_AFTER_START,
+  RESTART_NOTE,
+  queuedStartFailedNote,
+  startFailedNote,
+} from "./controller-reply-links.server";
 
 /**
  * The controller conversation engine (ruling 99).
@@ -114,9 +123,29 @@ import { toError } from "~/shared/errors";
 
 const LEASE_KEY = Symbol.for("viberr.controllerLease");
 
+/** A user message waiting behind the turn that holds the lease. */
+interface QueuedMessage {
+  messageId: string;
+  /** Ruling 465: the message's `seq`, where its turn's digest stops. */
+  seq: number;
+  text: string;
+  surface: string | null;
+  timeZone: string | null;
+}
+
 interface LeaseEntry {
   runId: string | null;
-  queue: { messageId: string; text: string; surface: string | null; timeZone: string | null }[];
+  /** Ruling 465: the user message the current turn answers — what every
+   *  reply, failure note and the "answering now" state name. */
+  messageId: string | null;
+  queue: QueuedMessage[];
+}
+
+/** Ruling 465: the user message one turn answers. */
+interface AnsweredMessage {
+  id: string;
+  seq: number;
+  text: string;
 }
 
 interface LeaseHost {
@@ -179,6 +208,9 @@ export interface ControllerMountInput {
   projectSlug: string | null;
   /** Ruling 121: the conversation's anchored task, when it has one. */
   taskKey: string | null;
+  /** Ruling 476(h): the conversation the turn answers in, which a goal the
+   *  turn creates records. */
+  conversationId?: string | null;
   /** The ORG MCP grants that resolved and pre-flighted for this turn. */
   orgServers: RunMcpServers;
   /** Ruling 283: the knowledge bases this turn's prompt indexes, so the tool
@@ -242,6 +274,7 @@ export function buildControllerMounts(
     user: input.user,
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
+    conversationId: input.conversationId ?? null,
     kb: input.kb,
   });
   const ops = buildControllerOpsMcp({ db, ctx, user: input.user });
@@ -317,6 +350,7 @@ export async function runControllerTurn(
       conversationId: conversation.id,
       author: "controller",
       text: note,
+      replyTo: message.id,
     });
     return { state: "refused", reason: note };
   }
@@ -335,13 +369,18 @@ export async function runControllerTurn(
         conversationId: conversation.id,
         author: "controller",
         text: `I could not take that on: ${note} Say it again once I have replied.`,
+        replyTo: message.id,
       });
       return { state: "refused", reason: note };
     }
-    held.queue.push({ messageId: message.id, text, surface, timeZone });
+    held.queue.push({ messageId: message.id, seq: message.seq, text, surface, timeZone });
+    // Ruling 465: the queue is part of what every open transcript shows
+    // ("queued · N ahead"), and the append above published before the
+    // message joined it.
+    publishConversationUpdated(conversation.id, conversation.userId);
     return { state: "queued", messageId: message.id };
   }
-  const entry: LeaseEntry = { runId: null, queue: [] };
+  const entry: LeaseEntry = { runId: null, messageId: message.id, queue: [] };
   map.set(conversation.id, entry);
   try {
     const runId = await startTurnRun(
@@ -349,13 +388,19 @@ export async function runControllerTurn(
       conversation,
       entry,
       input,
-      text,
+      { id: message.id, seq: message.seq, text },
       principal.principal.userId,
       surface,
       timeZone,
     );
     return { state: "started", runId, messageId: message.id };
   } catch (error) {
+    // The start awaits (the stdio MCP pre-flight, a continuity reset), and a
+    // message sent from another surface meanwhile joined this lease's queue.
+    // The lease dies here and that queue with it, so each such message gets
+    // its own note, as `settleTurn`'s queued-start failure writes them: none
+    // may read back as a question the controller ignored (ruling 465).
+    const dropped = entry.queue.splice(0);
     map.delete(conversation.id);
     const reason =
       error instanceof AppError
@@ -364,8 +409,17 @@ export async function runControllerTurn(
     appendMessage(db, {
       conversationId: conversation.id,
       author: "controller",
-      text: `I could not start this turn: ${reason}`,
+      text: startFailedNote(reason),
+      replyTo: message.id,
     });
+    for (const lost of dropped) {
+      appendMessage(db, {
+        conversationId: conversation.id,
+        author: "controller",
+        text: DROPPED_AFTER_START,
+        replyTo: lost.messageId,
+      });
+    }
     if (error instanceof AppError) throw error;
     logger.error("controller turn start failed", {
       conversationId: conversation.id,
@@ -434,7 +488,8 @@ async function startTurnRun(
   conversation: ControllerConversation,
   entry: LeaseEntry,
   input: ControllerTurnInput,
-  text: string,
+  /** Ruling 465: the user message this turn answers. */
+  message: AnsweredMessage,
   /** Ruling 127: the asker's user id — the account this turn bills. */
   credentialUserId: string,
   /** The surface of THIS message (a queued turn carries its own, not the
@@ -444,21 +499,22 @@ async function startTurnRun(
   timeZone: string | null,
 ): Promise<string> {
   const dataRoot = input.dataRoot;
+  entry.messageId = message.id;
   const config = resolveControllerConfig(dataRoot);
 
   // Org MCP grants: resolved + stdio-pre-flighted ONCE, prompt and mount from
   // the same result (the F21-3 rule).
   const mcpDetail = resolveSpecialistMcpServersDetailed(db, config.mcps);
-  const { servers: orgServers, unresolved } = await verifyStdioMcpMountsForRun(
+  const { servers: orgServers, unresolved, proxied, oauthGrants } = await verifyStdioMcpMountsForRun(
     db,
     mcpDetail,
-    { backend: "claude" },
   );
 
   const { mcpServers, allowedTools, toolManifest: manifest } = buildControllerMounts(db, {
     user: { id: input.user.id, email: input.user.email, name: input.user.name },
     projectSlug: conversation.projectSlug,
     taskKey: conversation.taskKey,
+    conversationId: conversation.id,
     orgServers,
     kb: controllerKbNames(config.kb, conversation.projectSlug, dataRoot),
     dataRoot,
@@ -477,6 +533,8 @@ async function startTurnRun(
     config,
     toolManifest: manifest,
     mountedMcps: Object.keys(orgServers),
+    proxiedMcps: proxied,
+    oauthGrants,
     // Ruling 310: with the reason each server gave, not just its name —
     // this is the surface a person asks "why?" on.
     unresolvedMcps: unresolved.filter((u) => !u.mounted),
@@ -508,7 +566,16 @@ async function startTurnRun(
   };
   if (dataRoot) contextInput.dataRoot = dataRoot;
   const context = gatherControllerContext(db, contextInput);
-  const prompt = buildTurnPrompt(db, conversation, text, context.text, config.model ?? null);
+  // Ruling 465: the digest stops at THIS message, and the messages still
+  // queued behind it are counted, never shown.
+  const prompt = buildTurnPrompt(
+    db,
+    conversation,
+    message,
+    context.text,
+    config.model ?? null,
+    entry.queue.length,
+  );
 
   const actor = {
     userId: input.user.id,
@@ -521,7 +588,7 @@ async function startTurnRun(
   // turn, which resumes this same session.
   const answered: RunAnsweredCallback = (answeredRunId) => {
     try {
-      postReply(db, conversation.id, answeredRunId);
+      postReply(db, conversation.id, answeredRunId, message.id);
     } catch (error) {
       logger.error("controller answer could not be posted early", {
         conversationId: conversation.id,
@@ -615,7 +682,8 @@ async function startTurnRun(
       anchor: null,
       spendCapUsd: getMaxRunSpendUsd(db),
       // The person's own message is the whole reason this turn exists.
-      directive: { from: input.user.email, chars: input.text.trim().length },
+      // The QUEUED message's own length on a queued turn, not the first one's.
+      directive: { from: input.user.email, chars: message.text.length },
     },
   });
   publishConversationUpdated(conversation.id, conversation.userId);
@@ -631,6 +699,7 @@ async function startTurnRun(
           ? finished.state
           : "error",
         input,
+        message.id,
       ).catch(
         (error) => {
           logger.error("controller turn settle failed", {
@@ -655,8 +724,10 @@ export function settleTurnForTests(
   input: ControllerTurnInput,
   state: "finished" | "error" | "interrupted" = "finished",
   runId = "run_test",
+  /** Ruling 465: the user message the settling turn answered. */
+  answering: string | null = null,
 ): Promise<void> {
-  return settleTurn(db, conversationId, runId, state, input);
+  return settleTurn(db, conversationId, runId, state, input, answering);
 }
 
 /**
@@ -740,12 +811,18 @@ function replyPosted(db: DatabaseSync, conversationId: string, runId: string): b
 
 /** U39-30: post a finished run's answer, once. False when it wrote nothing
  *  (no answer text, or already posted). */
-function postReply(db: DatabaseSync, conversationId: string, runId: string): boolean {
+function postReply(
+  db: DatabaseSync,
+  conversationId: string,
+  runId: string,
+  /** Ruling 465: the user message this run answered. */
+  replyTo: string,
+): boolean {
   if (replyPosted(db, conversationId, runId)) return false;
   const text = fullReplyTextForRun(db, runId);
   const reply = text ? normalizeEscapedNewlines(text).trim() : "";
   if (!reply) return false;
-  appendMessage(db, { conversationId, author: "controller", text: reply, runId });
+  appendMessage(db, { conversationId, author: "controller", text: reply, runId, replyTo });
   return true;
 }
 
@@ -756,6 +833,8 @@ async function settleTurn(
   runId: string,
   state: "finished" | "error" | "interrupted",
   input: ControllerTurnInput,
+  /** Ruling 465: the user message this turn answered. */
+  answering: string | null,
 ): Promise<void> {
   const conversation = getConversation(db, conversationId);
   // U39-30: a reply the answered hook already posted is this turn's reply.
@@ -781,6 +860,7 @@ async function settleTurn(
       author: "controller",
       text: reply,
       runId,
+      replyTo: answering,
     });
   }
 
@@ -801,7 +881,7 @@ async function settleTurn(
       conversation,
       entry,
       input,
-      next.text,
+      { id: next.messageId, seq: next.seq, text: next.text },
       input.user.id,
       next.surface,
       next.timeZone,
@@ -813,17 +893,24 @@ async function settleTurn(
     });
     // The lease dies here and the FIFO dies with it. Every message still in it
     // is ALREADY in the transcript and has no other scheduler that will ever
-    // reach it, so one note has to speak for all of them — otherwise those
-    // messages read back as questions the controller simply ignored.
-    const dropped = entry.queue.length;
+    // reach it, so none may read back as a question the controller ignored.
+    // Ruling 465: the note sits under the message it tried to start, and each
+    // message dropped behind it gets its own, under it.
+    const dropped = entry.queue.splice(0);
     appendMessage(db, {
       conversationId,
       author: "controller",
-      text:
-        dropped === 0
-          ? "I could not start the queued turn. Say it again to retry."
-          : `I could not start the queued turn, and I dropped the ${countLabel(dropped, "message")} you sent after it. Say them again to retry.`,
+      text: queuedStartFailedNote(dropped.length),
+      replyTo: next.messageId,
     });
+    for (const lost of dropped) {
+      appendMessage(db, {
+        conversationId,
+        author: "controller",
+        text: DROPPED_AFTER_QUEUED_START,
+        replyTo: lost.messageId,
+      });
+    }
     map.delete(conversationId);
   }
 }
@@ -872,14 +959,30 @@ export interface ConversationTurnState {
    */
   phase: string | null;
   step: string | null;
+  /**
+   * Ruling 465 (F40-8): the user message the live turn is answering, from the
+   * lease — null with no turn. The transcript reads it as "answering now" and
+   * puts "is working…" under THIS message, never under a later one.
+   */
+  answering: string | null;
+  /**
+   * Ruling 465: the user messages queued behind it, in the order they will be
+   * answered. `ahead` counts the turns that run before that message's own, the
+   * one answering now included, so the first queued message is "1 ahead".
+   * Read off the lease's in-memory FIFO: the transcript shows the server's
+   * view, never a guess of its own.
+   */
+  queued: { messageId: string; ahead: number }[];
 }
 
 /** Nothing running: the shape a caller reads when there is no live turn. */
-const IDLE_TURN: ConversationTurnState = {
+export const IDLE_TURN: ConversationTurnState = {
   working: false,
   runId: null,
   phase: null,
   step: null,
+  answering: null,
+  queued: [],
 };
 
 /**
@@ -896,37 +999,53 @@ export function conversationTurnState(
   conversationId: string,
 ): ConversationTurnState {
   const entry = leases().get(conversationId);
-  if (!entry?.runId) return IDLE_TURN;
+  if (!entry) return IDLE_TURN;
+  // Ruling 465: the lease says which message is answered and which wait,
+  // including between two turns (the next one starting, the last one settling).
+  const pending = {
+    answering: entry.messageId ?? null,
+    queued: entry.queue.map((q, i) => ({ messageId: q.messageId, ahead: i + 1 })),
+  };
+  if (!entry.runId) return { ...IDLE_TURN, ...pending };
   const run = getRun(db, entry.runId);
   if (!run || run.state === "finished" || run.state === "error" || run.state === "interrupted") {
-    return { ...IDLE_TURN, runId: entry.runId };
+    return { ...IDLE_TURN, ...pending, runId: entry.runId };
   }
   return {
     working: true,
     runId: entry.runId,
     phase: namedTurnPhase(run.phase),
     step: run.step,
+    ...pending,
   };
 }
 
 /**
- * Boot catch-up: a restart orphans the in-process completion callback, so a
- * conversation whose newest message is the user's and whose turn run died
- * gets an honest note instead of eternal silence.
+ * Boot catch-up: a restart orphans the in-process completion callback and the
+ * in-memory FIFO, so every user message no reply answers gets an honest note
+ * instead of eternal silence.
+ *
+ * Ruling 465: "unanswered" is exact now — every reply, refusal and note names
+ * the message it answers (`reply_to`) — so the rule is simply that each such
+ * message in a conversation no live turn holds gets the restart note, under
+ * it. That covers the three shapes a restart leaves: the turn whose run died
+ * (its run is terminal and no message carries its id), a message whose run
+ * never started, and the messages still waiting in the lost queue, which the
+ * old order-based arms never reached (the note for the dead turn made the
+ * newest message a controller one). A dead turn's note also carries its run
+ * id, which settles that run: turns ran in FIFO order, so the dead runs answer
+ * the oldest waiting messages, in order.
+ *
+ * A message marked `unlinked_history` is not unanswered: it predates reply
+ * links, and the backfill (`backfillControllerReplyLinks`) could not prove its
+ * answer, because an earlier restart or failure lost it or the order stopped
+ * proving anything. A restart note under it would be false, and it would be
+ * written into a thread weeks old.
  */
 export function recoverControllerConversations(db: DatabaseSync): number {
-  const note =
-    "This turn was interrupted by a server restart before I could answer. Say it again and I will pick it up.";
+  const note = RESTART_NOTE;
   let recovered = 0;
 
-  // TWO arms, because message ORDER cannot see the common case. A turn taken
-  // off the FIFO always has the PREVIOUS turn's reply sitting after its own
-  // user message, so "the newest message is the user's" misses every queued
-  // turn a restart killed. The RUN identifies those: a run-linked controller
-  // message is written only as a turn's reply (by `settleTurn`, or early by
-  // U39-30's answered hook), so a terminal controller run with no message
-  // carrying its id is exactly a turn that was never answered.
-  //
   // SAFETY: `agent_runs.id` and `.task_key` are both declared NOT NULL TEXT
   // (0001_baseline). A controller run's `task_key` is its conversation id
   // (ruling 99), and the EXISTS clause proves that conversation is real.
@@ -945,46 +1064,52 @@ export function recoverControllerConversations(db: DatabaseSync): number {
         ORDER BY r.created_at ASC`,
     )
     .all() as { run_id: string; conversation_id: string }[];
+  // SAFETY: both columns are selected by name; `id` and `conversation_id`
+  // are NOT NULL TEXT in 0001_baseline.
+  const unanswered = db
+    .prepare(
+      `SELECT m.id, m.conversation_id FROM controller_messages m
+        WHERE m.author = 'user'
+          AND m.unlinked_history = 0
+          AND NOT EXISTS (SELECT 1 FROM controller_messages r
+                           WHERE r.conversation_id = m.conversation_id
+                             AND r.reply_to = m.id)
+        ORDER BY m.conversation_id, m.seq`,
+    )
+    .all() as { id: string; conversation_id: string }[];
+
+  const waiting = new Map<string, string[]>();
+  for (const row of unanswered) {
+    const list = waiting.get(row.conversation_id);
+    if (list) list.push(row.id);
+    else waiting.set(row.conversation_id, [row.id]);
+  }
+  const deadRuns = new Map<string, string[]>();
   for (const row of orphanedTurns) {
-    if (leases().has(row.conversation_id)) continue; // a live turn owns it
-    appendMessage(db, {
-      conversationId: row.conversation_id,
-      author: "controller",
-      // The note IS this turn's settlement, so it carries the run id — that is
-      // what stops the next boot writing a second one for the same run.
-      runId: row.run_id,
-      text: note,
-    });
-    recovered += 1;
+    const list = deadRuns.get(row.conversation_id);
+    if (list) list.push(row.run_id);
+    else deadRuns.set(row.conversation_id, [row.run_id]);
   }
 
-  // Second arm: a message whose run NEVER started (the start threw before the
-  // row existed, or the process died between the message write and the run).
-  // Nothing links those but message order. Read AFTER the notes above landed,
-  // so a conversation the run arm just answered no longer ends in a user
-  // message and cannot be noted twice.
-  // SAFETY: the statement selects the single `id` column, the TEXT PRIMARY KEY
-  // (NOT NULL) of `controller_conversations`.
-  const rows = db
-    .prepare(
-      `SELECT c.id FROM controller_conversations c
-        WHERE EXISTS (
-          SELECT 1 FROM controller_messages m
-           WHERE m.conversation_id = c.id
-             AND m.seq = (SELECT MAX(seq) FROM controller_messages
-                           WHERE conversation_id = c.id)
-             AND m.author = 'user'
-        )`,
-    )
-    .all() as { id: string }[];
-  for (const row of rows) {
-    if (leases().has(row.id)) continue; // a live turn is really working it
-    appendMessage(db, {
-      conversationId: row.id,
-      author: "controller",
-      text: note,
-    });
-    recovered += 1;
+  for (const conversationId of new Set([...deadRuns.keys(), ...waiting.keys()])) {
+    if (leases().has(conversationId)) continue; // a live turn owns it
+    const messages = waiting.get(conversationId) ?? [];
+    for (const runId of deadRuns.get(conversationId) ?? []) {
+      // The note IS this turn's settlement, so it carries the run id — that is
+      // what stops the next boot writing a second one for the same run.
+      appendMessage(db, {
+        conversationId,
+        author: "controller",
+        runId,
+        text: note,
+        replyTo: messages.shift() ?? null,
+      });
+      recovered += 1;
+    }
+    for (const messageId of messages) {
+      appendMessage(db, { conversationId, author: "controller", text: note, replyTo: messageId });
+      recovered += 1;
+    }
   }
 
   if (recovered > 0) {
@@ -997,28 +1122,46 @@ export function recoverControllerConversations(db: DatabaseSync): number {
 
 function controllerScratchDir(dataRoot?: string): string {
   const dir = path.join(getDataRoot(dataRoot), "runtimes", "controller-scratch");
-  mkdirSync(dir, { recursive: true });
+  // Ruling 460: the controller's turn runs as the asker's own user.
+  shareDirWithAgents(dir);
   return dir;
 }
 
 export function buildTurnPrompt(
   db: DatabaseSync,
   conversation: ControllerConversation,
-  text: string,
+  /** Ruling 465: the user message this turn answers. */
+  message: AnsweredMessage,
   /** The context read (controller-context.server.ts), already labelled. */
   context: string | null = null,
   /** The model this turn runs on, as the controller's settings name it. */
   model: string | null = null,
+  /** Ruling 465: how many of the person's messages wait behind this one. */
+  queuedBehind = 0,
 ): string {
   // Every turn carries a SHORT recent-exchange digest: cheap insurance that
   // keeps the conversation coherent even when the provider session behind the
   // resume was silently swept (the controller has no task.md to re-anchor on).
+  // Ruling 465 (F40-10): the digest is the conversation UP TO the message
+  // this turn answers, in reply order. It was the newest 30 rows with no
+  // bound, so a message queued behind this turn reached it as a 600-character
+  // stub, and the model told its owner the message "never reached me … please
+  // resend it" while it was simply next in the queue.
   const digest = transcriptDigest(
-    recentMessages(db, conversation.id, CONTEXT_MESSAGES),
+    inReplyOrder(messagesUpTo(db, conversation.id, message, CONTEXT_MESSAGES)),
   );
   const head = digest
     ? `Recent exchange (for orientation; the store is the truth for anything that may have changed):\n\n${digest}\n\n---\n\n`
     : "";
+  // Ruling 465: the queue is named, never shown. Each waiting message is
+  // answered in full by its own turn, so the model must neither answer it
+  // here from a fragment nor report it lost.
+  const queue =
+    queuedBehind > 0
+      ? `${queuedBehind === 1 ? "1 more message" : `${queuedBehind} more messages`} from ${conversation.userLabel} ` +
+        `${queuedBehind === 1 ? "is" : "are"} queued behind this one; each is answered in its own turn, in order — ` +
+        "do not treat them as lost.\n\n---\n\n"
+      : "";
   const lead = context ? `${context}\n---\n\n` : "";
   // Ruling 444: the model is named here, in the one part of the request
   // rendered fresh every turn. The system prompt is recorded when the
@@ -1027,7 +1170,7 @@ export function buildTurnPrompt(
   const runtime = model
     ? `You run on model \`${model}\` this turn. Where your system prompt or earlier turns name another model, this line is current.\n\n---\n\n`
     : "";
-  return `${lead}${runtime}${head}${conversation.userLabel} says:\n\n${text}`;
+  return `${lead}${runtime}${head}${queue}${conversation.userLabel} says:\n\n${message.text}`;
 }
 
 /** Bounded transcript digest, oldest first. */
@@ -1057,6 +1200,11 @@ interface SystemPromptInput {
   config: ReturnType<typeof resolveControllerConfig>;
   mountedMcps: string[];
   unresolvedMcps: readonly UnresolvedMcpGrant[];
+  /** Ruling 461: the mounted org servers reached through Viberr's MCP gateway.
+   *  Optional: a prompt-shape test mounts no gateway. */
+  proxiedMcps?: readonly string[];
+  /** Ruling 486: what each OAuth-signed-in proxied server was granted. */
+  oauthGrants?: readonly McpRunGrant[];
   /** Ruling 297: the list of every tool this turn mounts, from
    *  `buildControllerMounts`. Rebuilt per turn, so a conversation that was
    *  already running when a tool shipped is told about it. */
@@ -1166,6 +1314,10 @@ export function buildControllerSystemPrompt(
       // Ruling 297: generated from the registries this very turn mounted.
       (input.toolManifest ?? ""),
   );
+  // Ruling 461: the org servers this turn reaches through Viberr's gateway,
+  // in the sentence the specialist and operator prompts share.
+  const gateway = gatewayMcpSection(input.proxiedMcps ?? [], input.oauthGrants ?? []);
+  if (gateway) parts.push(gateway);
 
   // Ruling 191: the controller has no shell, but it writes the profiles, the
   // knowledge bases and the architecture the agents that DO have one are

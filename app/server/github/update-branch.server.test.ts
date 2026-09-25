@@ -220,19 +220,28 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
     // Fetches the base by EXPLICIT refspec — `origin/main` is what the merge
     // reads, and relying on git's opportunistic tracking update would make that
     // a git-version question.
-    const fetch = git.calls.find((c) => c.includes("fetch"));
-    expect(fetch).toContain("+refs/heads/main:refs/remotes/origin/main");
+    // Pass 40 review (R-seams-1): GitHub's base lands in the server's own
+    // stage (with the PAT), and the WORKSPACE fetches it from there.
+    const stageFetch = git.calls.find((c) => c.includes("fetch"))!;
+    expect(stageFetch[0]).toMatch(/^--git-dir=.*\.repo-stage/);
+    expect(stageFetch).toContain("https://github.com/akin-ozer/viberr.git");
+    expect(stageFetch).toContain("+refs/heads/main:refs/heads/main");
+    const fetch = git.calls.find(
+      (c) => c.includes("fetch") && c.includes("+refs/heads/main:refs/remotes/origin/main"),
+    );
+    expect(fetch?.slice(0, 2)).toEqual(["-C", expect.any(String)]);
+    expect(fetch).toContain(stageFetch[0]!.slice("--git-dir=".length));
     const merge = git.calls.find(
       (c) => c.includes("merge") && !c.includes("--abort"),
     );
     expect(merge).toContain("origin/main");
     expect(merge!.join(" ")).toContain("[VIB-1] merge main into vib-1");
+    // The merge commit is pushed from the stage, not from the workspace.
     expect(git.calls.find((c) => c.includes("push"))).toEqual([
-      "-C",
-      expect.any(String),
+      stageFetch[0],
       "push",
-      "origin",
-      "HEAD:refs/heads/vib-1",
+      "https://github.com/akin-ozer/viberr.git",
+      `${MERGE_SHA}:refs/heads/vib-1`,
     ]);
   });
 
@@ -353,7 +362,11 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
     bindPat();
     const git = fakeGit({ behind: 1, shallow: true });
     expect((await run(git.exec)).status).toBe("updated");
-    const fetch = git.calls.find((c) => c.includes("fetch"));
+    // The WORKSPACE's fetch (from the server's stage) is the one that
+    // unshallows: the stage borrows the mirror's full history.
+    const fetch = git.calls.find(
+      (c) => c.includes("fetch") && c.includes("+refs/heads/main:refs/remotes/origin/main"),
+    );
     expect(fetch).toContain("--unshallow");
   });
 

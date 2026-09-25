@@ -91,7 +91,8 @@ from the workflow graph, never a stored preset).
 | `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer, or when the answer names another actor (ruling 447). The payload carries the option (kind, title), the person's own note, and, for a ceremony that performs work of its own (`resolve_remote_collision`), Viberr's record of what it did in a separate `serverOutcome` field rendered as Viberr's sentence, never inside the quoted note (ruling 136(a)) |
 | `dependencies-released` | proceed after a hold | the release engine (ruling 131(e)): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot |
 | `head-unpushed` | deliver | a person's refused acceptance whose cause is an unpushed reviewed revision, which only the operator can push (ruling 235) |
-| `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict (ruling 332) |
+| `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict (ruling 332), or the reconciler's flip of an open PR to conflicting (ruling 475(b)); the instruction names both origins |
+| `gates-failed` | rework | Viberr's own run of the project's gates on the revision under review finished with a gate that did not exit 0 (ruling 482). The turn names each failing gate, its command and its log's attachment name, tells the operator to `run_agent` the deliverer with them and deliver the fix, and forbids asking an agent to re-run the gates to report them |
 | `stranded` | decide what happens next | the stranded-task sweep (§3.1, ruling 330) |
 | `scheduled` | re-check | the schedule runner |
 | `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
@@ -260,6 +261,15 @@ locked write, offering `question_reviewer` among its options (ruling 237); when 
 packet is open at that instant the escalation is skipped and raised again when that one is
 answered (ruling 328).
 
+**Knowledge the work proved wrong.** The `agent-reply` instruction carries two duties
+about knowledge bases. A reviewer's objection to a defect CLASS the rulings have no
+convention for is proposed as that convention (ruling 418). And a report that says a
+line in a knowledge base is wrong (a version, a path, a command, a step it measured),
+with no proposal for it on the timeline, is relayed with `propose_kb_correction` against
+that document and the agent's evidence (ruling 483): a Codex agent has no tool to file
+one itself, and its prompt tells it to end its report with a `Knowledge-base correction`
+section for exactly this.
+
 `get_task` returns the `OperatorTaskSnapshot` (JSON-embedded in the Codex prompt):
 
 - **The task**: key, title, goal, priority, labels, due date, stage and stage name,
@@ -287,7 +297,12 @@ answered (ruling 328).
   is ahead of the branch from the reconciler's last compare: `0` is level, `null` is "not
   compared yet" and never a reason to skip `update_branch_from_base`), and
   `notRefreshableReason` (the sentence `update_branch_from_base` refuses with from where
-  the task stands, ruling 424).
+  the task stands, ruling 424). `gates` (ruling 482): the project's gates as Viberr ran
+  them on the revision under review, `{line, state, failed[], error}` with the PR card's
+  own line ("Gates on `<sha7>`: N/M exit 0 (run by Viberr)"), or null when the project
+  declares none or nothing is delivered. While gates are declared, the stage rule and the
+  `delivered` turn carry a gate rule: Viberr runs them, the record is the result, and
+  `accept_completion` is never offered or performed while `gates.state` is not `passed`.
 - **Decisions and history**: `openPacket` and `packet` (type, title, body, options,
   `awaiting`, `raisedBy`, `yours`, ruling 437), `recommendations` (pending and recently
   declined, at most 5 each, so a supervised operator does not re-propose a just-dismissed
@@ -314,7 +329,11 @@ failure is a first-class `unavailable` arm carrying git's redacted complaint. Th
 operator reads it with `Read` / `Grep` / `Glob`; what the DEFAULT branch holds is answered
 only by `read_default_branch_file`, which reads the project's bare mirror (falling back to
 the checkout's clone-time `origin/<default>` and saying it may be stale) and pages long
-files by whole lines (`fromLine`, 40,000 characters a page; ruling 436).
+files by whole lines (`fromLine`, 40,000 characters a page; ruling 436). A checkout of an
+EMPTY repository (HEAD with no commit) is initialized first: the server makes the default
+branch's first commit (ruling 128's bootstrap) and moves the checkout onto it, and the
+doctrine tells the operator an empty repository is never a person's chore, so it never asks
+anyone to push a first commit (ruling 468).
 
 **Backends.** Writes and shell are denied on both. On Claude the operator gets the
 in-process MCP server `viberr` (loaded up front, `alwaysLoad`), its granted org MCP servers
@@ -324,7 +343,7 @@ On Codex it runs in a scratch working directory with the task store and checkout
 and returns a structured plan over thirteen verbs (`post_comment`, `open_packet`,
 `resolve_packet`, `set_goal`, `run_agent`, `transition_stage`, `deliver_for_review`,
 `update_branch_from_base`, `accept_completion`, `flag_context_conflict`,
-`set_dependencies`, `propose_ruling`, `lease_files`), the schema narrowed to what its
+`set_dependencies`, `propose_kb_correction`, `lease_files`), the schema narrowed to what its
 policy allows (`operatorPlanToolsFor`) and its packet options carrying every payload the
 Claude tool does (ruling 433). The server executes the plan after the run
 (`runtime.operator.plan_executed` is the idempotency marker boot recovery reads). Once a
@@ -349,14 +368,14 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `post_comment` | `operatorPostComment` (guardrails applied, §7; narration stored verbatim, ruling 104) | `append-typed-events` |
 | `set_goal` | `operatorSetGoal` (fills only an unspecified goal; refuses to overwrite a specified one) | `append-typed-events` |
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 56) | `append-typed-events` |
-| `propose_ruling` | `operatorProposeRuling` (ruling 378: appends one non-binding, dated, task-stamped entry under `## Proposed (not binding)` in a document of the project's rulings KB, with the evidence; edits no settled line; refuses when the project names no rulings KB or the document is not one it holds; ruling 418 widens its use to a convention review shows is MISSING) | `append-typed-events` |
+| `propose_kb_correction` | `operatorProposeKbCorrection` → `proposeKbCorrection` (rulings 378 and 483: files one non-binding, dated, task-stamped entry, `- **[<task>, <day>, Operator]** <correction>` with `Line:` and `Evidence:`, under `## Proposed corrections (not binding)` in a document of any knowledge base a run on the task was given, the operator's own or an engaged agent's; `kb` omitted means the project's rulings; the quoted `line` must stand in the settled text; edits no settled line; the same open correction of the same line is a `noop`; refuses a knowledge base no run on the task was given, a project with no rulings KB when `kb` is omitted, and a document the knowledge base does not hold; writes a `proposal` event titled "Proposed ruling change" or "Proposed knowledge-base correction", audit `task.kb_proposal.filed`, and a `quality` notification to the task's watchers; ruling 418 widens its use to a convention review shows is MISSING, and ruling 483 to relaying a correction an agent's report proved) | `append-typed-events` |
 | `open_decision_packet` | `operatorOpenPacketDisclosed` → `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 84; refuses while a packet is open) | `generate-packets` |
 | `resolve_decision_packet` | `operatorResolvePacket` (withdraws only a packet the operator raised: `from: operator` and no `askedBy`, `packetIsOperators`) | `generate-packets` |
 | `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`) | `generate-packets` (the wait is the hold packet's replacement) |
 | `run_agent` | `operatorDispatchAgent` (`profileId`, `prompt`, `delivers`, `reason`, `completeness`) | `dispatch-agents` |
 | `deliver_for_review` | `operatorDeliverForReview` → `performDelivery` | `deliver-review-pr` |
 | `lease_files` | `operatorLeaseFiles` (ruling 417: lease path globs to THIS task until it merges) | `deliver-review-pr` |
-| `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → packet) | `update-task-branch` |
+| `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → the delivering agent, or a packet when no agent can take it, ruling 475) | `update-task-branch` |
 | `transition_stage` | `operatorTransitionStage` | `stage-transitions` |
 | `accept_completion` | `operatorAcceptCompletion` | `completion-for-acceptance` |
 
@@ -393,9 +412,9 @@ Details that matter:
   run (`reworkStages` lists it; ruling 163); a move INTO the acceptance-boundary stage
   is refused with the gate's own sentence while the PR conflicts (`pr.mergeable:
   "conflicting"`) or lacks the delivered revision (`pr.unpushedRevision`) ("... KNC-6
-  stays at Review: Merge is where acceptance happens, and the gate would refuse it. Open
-  the conflict packet (update_branch_from_base) or deliver the revision instead of moving
-  the task.", ruling 162); a move into the terminal stage is rerouted to
+  stays at Review: Merge is where acceptance happens, and the gate would refuse it. Call
+  update_branch_from_base, which routes the conflict (ruling 475), or deliver the revision
+  instead of moving the task.", ruling 162); a move into the terminal stage is rerouted to
   `operatorAcceptCompletion` under either gate so the acceptance capability, not
   `stage-transitions`, answers for it. The done reply names the next boundary, and a move
   onto the acceptance boundary files the acceptance recommendation in the same call
@@ -445,19 +464,32 @@ Details that matter:
   revision awaits its verdict the refresh stays the operator's, and a PR GitHub already
   reports conflicting is the exception, so the conflict list and the packet can be
   produced. `notRefreshableReason` in the snapshot is that refusal, read before planning
-  (ruling 424). A conflict aborts the merge, leaves the branch as it was and opens a
-  blocking packet; its redirect option carries `rework: true` and says "The task returns
-  to Review for the re-verdict." when the task stands past the stage where its reviewers
-  can run (ruling 163); once a person routes the conflict to the deliverer, that agent
-  merges `origin/<base>` in its own workspace and the operator delivers the result
-  (ruling 438). Ruling 134(c): it also fetches origin's copy of the TASK branch and
-  reports it beside the base answer: current, behind by N ("call `deliver_for_review` to
-  push it; do not ask a person to push"), diverged ("a person resolves the branch
-  history"), absent, or unknown with git's reason; it never becomes a second push door. A
-  lagging origin lands once on the timeline; the audit row `github.branch_update.operator`
+  (ruling 424). A conflict aborts the merge and leaves the branch as it was. Ruling 475
+  (owner decision): when the task's delivering engagement is deployed with a repo-write
+  grant, the tool hands the conflict to that agent itself: it starts the agent's run with
+  ruling 438's directive (merge `origin/<base>` in its own workspace, resolve, run the
+  gates, commit; the operator then delivers the result), returns a task past the stage
+  where its reviewers can run to that stage (ruling 163), and writes one person-facing
+  timeline line. While that run is live on the same conflict the tool sends nothing new;
+  once it has ended with the branch conflicting the same way (the same files against the
+  same base commit), the deliverer has failed it once and a person decides. The blocking
+  packet is the fallback for that, for no deliverer or grant, for a `dispatch-agents`
+  policy that only recommends, and for a run that could not start; its redirect option
+  carries `rework: true` and says "The task returns to Review for the re-verdict." when
+  the task stands past the stage where its reviewers can run (ruling 163), and a person
+  who routes the conflict to the deliverer through it gets the same directive (ruling
+  438). An open packet offering `accept_completion` is withdrawn first. Ruling 134(c): it
+  also fetches origin's copy of the TASK branch and reports it beside the base answer:
+  current, behind by N ("call `deliver_for_review` to push it; do not ask a person to
+  push"), diverged ("a person resolves the branch history"), absent, or unknown with
+  git's reason; it never becomes a second push door. A lagging origin lands once on the
+  timeline, in a sentence written for a person ("`web-2` is level with `main`. GitHub's
+  copy of the branch (`9f96fc9`) is 7 commits behind the workspace; the operator's next
+  delivery pushes them.", ruling 475(c)); the audit row `github.branch_update.operator`
   fires on every call and always carries the `status`, plus `remote` / `remoteHeadSha`,
-  `commits` / `mergeSha` or the conflicting `files` and the offered `resolver` as the
-  outcome held (ruling 133(b)). Ruling 132: a successful update records the refresh in
+  `commits` / `mergeSha` or the conflicting `files` / `baseSha`, and on a conflict the
+  `resolver` and `route` (`deliverer`, `packet`, `in_progress`) with `handedTo`, `repeat`
+  or `handoffRefused` as the outcome held (rulings 133(b), 475). Ruling 132: a successful update records the refresh in
   `baseRefreshes` under the file lock, reconciles the task at once so `pr.revisionDrift` is
   re-measured, and writes its timeline line and tool message from the re-read. Every `done`
   answer stamps the drive as having refreshed (`operatorRun.refreshed`, ruling 442).
@@ -518,7 +550,7 @@ Resolution effects by option kind (`resolvePacket`):
 | Kind | Effect |
 |---|---|
 | `accept_completion` | Runs the full acceptance contract (authority, disclosure echo, live no-change probe, refusal stack, PR head check, merge). Not re-queued. |
-| `request_edit`, `redirect`, `custom` | Task back to `waiting: agent`, `readiness: ready`, packet cleared, operator re-queued. An agent question resumes the asker's own session with the answer, unless the chosen option or the person's note names another deployed agent or the operator (`answerNamesAnotherActor`, longest names first), in which case the operator gets it as `packet-resolved` and a note says why the asker was not resumed (ruling 447). |
+| `request_edit`, `redirect`, `custom` | Task back to `waiting: agent`, `readiness: ready`, packet cleared, operator re-queued. An agent question resumes the asker's own session with the answer, unless the chosen option or the person's note names another deployed agent or the operator (`answerNamesAnotherActor`, longest names first), in which case the operator gets it as `packet-resolved` and a note says why the asker was not resumed (ruling 447). An option carrying `reply: true` is refused without a note ("… needs your answer …"), nothing recorded (ruling 478(e)). |
 | `block_on_policy` | The re-run kind: `readiness: ready`, `waiting: agent`, re-queued (ruling 76). Its label states what the human asserts ("The usage window has reset (…), or I switched the Claude account: re-run", "I connected a different Claude account or an API key on Profile → Agent accounts: re-run", or the stock "Re-run the operator now"); the recorded decision is the option's pre-authored `ev` or its own title (ruling 130(c)). The toast says "Unblocked · the operator re-runs to re-check", and the re-run's instruction tells the operator to assume nothing about credentials or policy beyond the decision's own words. The credential half is a person connecting their own backend on Profile → Agent accounts, usually the task owner (ruling 127). |
 | `hold_runtime_debug` | `readiness: blocked`, `waiting: human`, packet cleared, not re-queued; lifted by the next person-started operator run, a scheduled operator run, or any dispatch (ruling 157: `readiness: ready`, a "Hold lifted" note, `task.hold.lifted`). |
 | `retry_other_backend` | Re-runs the failed agent on the named backend under operator authority; the switch sticks on the engagement's `pinnedBackend`. Offered only when the TASK OWNER has that backend connected (ruling 127). |
@@ -557,6 +589,16 @@ re-compared before the irreversible GitHub write and again inside the file lock;
 replaced packet answers "This decision was replaced by a newer one." Confirming any
 recovery option resolves the packet (no repeat confirms) and a repeat failure opens a
 **new** packet (ruling 76).
+
+The task page's own acceptances answer these two kinds too (ruling 471). A person's
+plain acceptance (Accept, a board or stage-menu move into the terminal stage, an applied
+acceptance card) answers an open decision that offers `accept_completion`; a Force accept
+answers `force_accept`, or `accept_completion` when no `force_accept` is offered. The
+record is the packet door's: the packet cleared, a `task.packet.resolved` row under the
+person with `optionKind`, `optionTitle`, `packetKind` and `via` (`accept` or
+`force-accept`), the packet notifications marked read, and no operator hand-off. A
+decision offering neither kind is withdrawn by the acceptance (F32-11). The operator's own
+full-autonomy acceptance answers nothing and withdraws as before.
 
 ## 7. Guardrails on what the operator writes
 

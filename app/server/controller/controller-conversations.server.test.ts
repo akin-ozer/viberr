@@ -182,6 +182,8 @@ describe("conversation access", () => {
       expect(messages).toHaveLength(2);
       expect(messages[0]!.author).toBe("user");
       expect(messages[1]!.author).toBe("controller");
+      // Ruling 465: the refusal names the message it refused.
+      expect(messages[1]!.replyTo).toBe(messages[0]!.id);
       // Addressed to the person, naming where THEY fix it.
       expect(messages[1]!.text).toContain("your own Claude account");
       expect(messages[1]!.text).toContain("Profile → Agent accounts");
@@ -370,6 +372,8 @@ describe("conversation access", () => {
       expect(messages[0]!.text).toBe("One more thing.");
       expect(messages[1]!.author).toBe("controller");
       expect(messages[1]!.text).toContain("queue for this conversation is full");
+      // Ruling 465: under the message it refused, not under the busy turn's.
+      expect(messages[1]!.replyTo).toBe(messages[0]!.id);
     } finally {
       map.delete(conversation.id);
     }
@@ -506,6 +510,8 @@ describe("stopping a turn", () => {
       author: "controller",
       runId,
       text: "This turn was stopped before I could answer.",
+      // Ruling 465: the settle's note names the message the turn answered.
+      replyTo: messages[0]!.id,
     });
     expect(conversationTurnState(app.db, conversationId).working).toBe(false);
   });
@@ -529,11 +535,12 @@ describe("stopping a turn", () => {
     });
     // CANARY: return `run.phase` unconditionally and `phase` reads "Working",
     // which the row's own sentence already says.
-    expect(conversationTurnState(app.db, conversationId)).toEqual({
+    expect(conversationTurnState(app.db, conversationId)).toMatchObject({
       working: true,
       runId,
       phase: null,
       step: 'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
+      queued: [],
     });
 
     // A phase that means something else survives.
@@ -557,6 +564,8 @@ describe("stopping a turn", () => {
       runId: null,
       phase: null,
       step: null,
+      answering: null,
+      queued: [],
     });
   });
 
@@ -674,7 +683,7 @@ describe("a working turn streams to its owner", () => {
 });
 
 describe("a failed queued start accounts for the messages behind it", () => {
-  it("names how many follow-ups were dropped", async () => {
+  it("names how many follow-ups were dropped, under the message it tried, and notes each dropped one", async () => {
     const { createConversation, appendMessage, listMessages } = await import(
       "./controller-conversations.server"
     );
@@ -703,51 +712,62 @@ describe("a failed queued start accounts for the messages behind it", () => {
       userLabel: "selin@viberr.dev",
       projectSlug: null,
     });
-    for (const text of ["A", "B", "C", "D"]) {
+    const [a, b, c, d] = ["A", "B", "C", "D"].map((text) =>
       appendMessage(app.db, {
         conversationId: conversation.id,
         author: "user",
         userId: ownerId,
         text,
-      });
-    }
+      }),
+    );
 
-    // A lease whose current turn is settling with B, C, D still queued.
+    // A lease whose current turn (A) is settling with B, C, D still queued.
     const leaseKey = Symbol.for("viberr.controllerLease");
     // SAFETY: the module creates this Map on first use and only ever stores
     // lease entries in it; the test seeds one entry and deletes it after.
     const host = globalThis as {
-      [leaseKey]?: Map<
-        string,
-        { runId: string | null; queue: { messageId: string; text: string }[] }
-      >;
+      [leaseKey]?: Map<string, unknown>;
     };
     const map = host[leaseKey] ?? new Map();
     host[leaseKey] = map;
+    const queued = (m: typeof b) => ({ messageId: m!.id, seq: m!.seq, text: m!.text, surface: null, timeZone: null });
     map.set(conversation.id, {
       runId: "run_busy",
-      queue: [
-        { messageId: "m_b", text: "B" },
-        { messageId: "m_c", text: "C" },
-        { messageId: "m_d", text: "D" },
-      ],
+      messageId: a!.id,
+      queue: [queued(b), queued(c), queued(d)],
     });
 
     try {
-      await settleTurnForTests(app.db, conversation.id, {
-        conversationId: conversation.id,
-        text: "A",
-        user: {
-          id: ownerId,
-          email: "selin@viberr.dev",
-          name: "Selin Aksoy",
-          orgRole: "member",
+      await settleTurnForTests(
+        app.db,
+        conversation.id,
+        {
+          conversationId: conversation.id,
+          text: "A",
+          user: {
+            id: ownerId,
+            email: "selin@viberr.dev",
+            name: "Selin Aksoy",
+            orgRole: "member",
+          },
+          dataRoot: app.dataRoot,
         },
-        dataRoot: app.dataRoot,
-      });
-      const texts = listMessages(app.db, conversation.id).map((m) => m.text);
+        "finished",
+        "run_test",
+        a!.id,
+      );
+      const notes = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
       // B was shifted off and attempted; C and D are the ones abandoned.
-      expect(texts.some((t) => t.includes("dropped the 2 messages"))).toBe(true);
+      const head = notes.find((m) => m.text.includes("dropped the 2 messages"));
+      expect(head?.replyTo).toBe(b!.id);
+      // Ruling 465: every dropped message has its own note under it, so none
+      // reads back as a question nobody answered (and boot recovery, which
+      // notes every unanswered message, does not call them a restart).
+      // CANARY: drop the per-message notes and C and D have none.
+      expect(notes.filter((m) => m.replyTo === c!.id || m.replyTo === d!.id).map((m) => m.text)).toEqual([
+        "I dropped this message: the queued turn before it could not start. Say it again to retry.",
+        "I dropped this message: the queued turn before it could not start. Say it again to retry.",
+      ]);
     } finally {
       map.delete(conversation.id);
       installFakeRuntime(); // restore the shared adapters for later files
@@ -798,13 +818,13 @@ describe("boot recovery", () => {
       projectSlug: null,
     });
     // The FIFO transcript: two questions, then the FIRST turn's reply.
-    appendMessage(app.db, {
+    const first = appendMessage(app.db, {
       conversationId: conversation.id,
       author: "user",
       userId: ownerId,
       text: "First question.",
     });
-    appendMessage(app.db, {
+    const second = appendMessage(app.db, {
       conversationId: conversation.id,
       author: "user",
       userId: ownerId,
@@ -816,16 +836,32 @@ describe("boot recovery", () => {
       author: "controller",
       runId: "run_ctrl_a",
       text: "Answer to the first.",
+      replyTo: first.id,
     });
     // The queued turn's run, as boot's orphan finalizer leaves it.
     upsertRun(app.db, controllerRun("run_ctrl_b", conversation.id, "error"));
+    // Ruling 465: a third message was still in the lost in-memory queue. The
+    // old order-based arms never reached it (the dead turn's note made the
+    // newest message a controller one).
+    const third = appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "user",
+      userId: ownerId,
+      text: "Third question, queued behind the second.",
+    });
 
-    expect(recoverControllerConversations(app.db)).toBeGreaterThan(0);
+    // Other threads in this shared store may be noted too; this one's two are
+    // what the assertions below pin.
+    expect(recoverControllerConversations(app.db)).toBeGreaterThanOrEqual(2);
 
     const messages = listMessages(app.db, conversation.id);
-    const last = messages[messages.length - 1]!;
-    expect(last.author).toBe("controller");
-    expect(last.text).toContain("interrupted by a server restart");
+    const notes = messages.filter((m) => m.text.includes("interrupted by a server restart"));
+    // The dead run settles the OLDEST waiting message; the lost one gets its own.
+    // CANARY: drop the unanswered-message arm and the third has no note.
+    expect(notes.map((m) => [m.replyTo, m.runId])).toEqual([
+      [second.id, "run_ctrl_b"],
+      [third.id, null],
+    ]);
     // The note settles that run, so a second boot does not write another.
     const before = messages.length;
     recoverControllerConversations(app.db);
@@ -1176,6 +1212,9 @@ describe("U39-30: the answer does not wait for the compaction", () => {
     expect(duringCompaction).toEqual([answer]);
     const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
     expect(replies.map((m) => [m.text, m.runId])).toEqual([[answer, result.runId]]);
+    // Ruling 465: the answer posted before the compaction names its message.
+    // CANARY: drop `replyTo` from `postReply`.
+    expect(replies[0]!.replyTo).toBe(result.messageId);
 
     // The next turn in the thread takes the resume door. CANARY: drop
     // `resumeInput.onAnswered = answered`.
@@ -1223,5 +1262,177 @@ describe("U39-30: the answer does not wait for the compaction", () => {
     }
     for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
     expect(duringSecond).toEqual([answer, second]);
+  });
+});
+
+/**
+ * Ruling 465 (F40-8, F40-10): a queued message is visible as queued, each
+ * reply names the message it answers, and a turn's prompt stops at its own
+ * message with a line for the ones behind it.
+ */
+describe("ruling 465: the queue is visible and every reply names its message", () => {
+  it("exposes the answered and queued ids with their positions, then links each reply as the FIFO drains", async () => {
+    const { createConversation, listMessages } = await import("./controller-conversations.server");
+    const { runControllerTurn, conversationTurnState, interruptControllerTurn } = await import(
+      "./controller-run.server"
+    );
+    const { getControllerSurface } = await import("~/features/controller/controller-query.server");
+    const { queueFakeRun, startedRunSpecs } = await import("../../../test-support/fake-runtime");
+    const { getRun } = await import("~/server/runtimes/run-store.server");
+    const user = { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" as const };
+    const conversation = createConversation(app.db, {
+      userId: ownerId,
+      userLabel: "selin@viberr.dev",
+      projectSlug: null,
+    });
+    const send = (text: string) =>
+      runControllerTurn(app.db, { conversationId: conversation.id, text, user, dataRoot: app.dataRoot });
+
+    queueFakeRun({
+      lines: [{ t: "1", ev: "text", tag: "assistant", text: "reading part one" }],
+      sessionId: "sess-465",
+      keepRunning: true,
+    });
+    const first = await send("Dossier part 1.");
+    if (first.state !== "started") throw new Error(`turn ${first.state}`);
+    const second = await send("Dossier part 2.");
+    const third = await send("QUEUED-THIRD: the correction.");
+    if (second.state !== "queued" || third.state !== "queued") {
+      throw new Error(`expected two queued sends, got ${second.state} and ${third.state}`);
+    }
+
+    // CANARY: drop `queued` from `conversationTurnState` and the transcript has
+    // nothing to say about where the two waiting messages are.
+    const expected = {
+      answering: first.messageId,
+      queued: [
+        { messageId: second.messageId, ahead: 1 },
+        { messageId: third.messageId, ahead: 2 },
+      ],
+    };
+    expect(conversationTurnState(app.db, conversation.id)).toMatchObject({ working: true, ...expected });
+    // The page's view carries the server's own reading.
+    const view = getControllerSurface(
+      app.db,
+      { id: ownerId, email: "selin@viberr.dev" },
+      { conversationId: conversation.id, dataRoot: app.dataRoot },
+    );
+    expect(view.turn).toMatchObject(expected);
+
+    // Drain the FIFO: stop turn one; turns two and three answer in order.
+    const specsBefore = startedRunSpecs().length;
+    const answer = (text: string) => ({
+      lines: [
+        { t: "1", ev: "text" as const, tag: "assistant", text },
+        { t: "2", ev: "result" as const, tag: "result", text: "done" },
+      ],
+      sessionId: "sess-465",
+    });
+    queueFakeRun(answer("Answer two."));
+    queueFakeRun(answer("Answer three."));
+    await interruptControllerTurn(
+      app.db,
+      { conversationId: conversation.id, runId: first.runId, dataRoot: app.dataRoot },
+      { userId: ownerId, label: "selin@viberr.dev" },
+    );
+    for (let i = 0; i < 400; i += 1) {
+      const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
+      if (replies.length >= 3 && !conversationTurnState(app.db, conversation.id).answering) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(getRun(app.db, first.runId)?.state).toBe("interrupted");
+    const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
+    // CANARY: drop `replyTo` from the settle and no reply names its message.
+    expect(replies.map((m) => [m.text, m.replyTo])).toEqual([
+      ["This turn was stopped before I could answer.", first.messageId],
+      ["Answer two.", second.messageId],
+      ["Answer three.", third.messageId],
+    ]);
+
+    // Turn two's prompt stops at part 2 and counts the one behind it.
+    const turnTwo = startedRunSpecs()[specsBefore]!.prompt;
+    expect(turnTwo).toContain("says:\n\nDossier part 2.");
+    expect(turnTwo).not.toContain("QUEUED-THIRD");
+    expect(turnTwo).toContain("1 more message from selin@viberr.dev is queued behind this one");
+    const turnThree = startedRunSpecs()[specsBefore + 1]!.prompt;
+    expect(turnThree).toContain("says:\n\nQUEUED-THIRD: the correction.");
+    expect(turnThree).not.toContain("queued behind this one");
+  });
+
+  it("a turn that cannot start names the message it could not answer", async () => {
+    const { createConversation, listMessages } = await import("./controller-conversations.server");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { configureRunServiceForTests } = await import("~/server/runtimes/run-service.server");
+    const { installFakeRuntime } = await import("../../../test-support/fake-runtime");
+    const throwingAdapter = (backend: "claude" | "codex") => ({
+      backend,
+      start(): never {
+        throw new Error("the turn could not start");
+      },
+    });
+    configureRunServiceForTests({ claude: throwingAdapter("claude"), codex: throwingAdapter("codex") });
+    try {
+      const conversation = createConversation(app.db, {
+        userId: ownerId,
+        userLabel: "selin@viberr.dev",
+        projectSlug: null,
+      });
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "Start, please.",
+        user: { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" },
+        dataRoot: app.dataRoot,
+      }).catch(() => undefined);
+      const [asked, note] = listMessages(app.db, conversation.id);
+      expect(note?.text).toContain("I could not start this turn");
+      // CANARY: drop `replyTo` from the start-failure note.
+      expect(note?.replyTo).toBe(asked!.id);
+    } finally {
+      installFakeRuntime();
+    }
+  });
+
+  it("a message queued while a first turn was starting gets its own note when that start fails", async () => {
+    // The start awaits (the MCP pre-flight here; a stdio server's spawn or a
+    // continuity reset live), and a send from another surface in that window
+    // joins the lease's queue. The catch deleted the lease and noted only the
+    // first message, so the second read back as a question nobody answered.
+    const { createConversation, listMessages } = await import("./controller-conversations.server");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { configureRunServiceForTests } = await import("~/server/runtimes/run-service.server");
+    const { installFakeRuntime } = await import("../../../test-support/fake-runtime");
+    const throwingAdapter = (backend: "claude" | "codex") => ({
+      backend,
+      start(): never {
+        throw new Error("the turn could not start");
+      },
+    });
+    configureRunServiceForTests({ claude: throwingAdapter("claude"), codex: throwingAdapter("codex") });
+    try {
+      const conversation = createConversation(app.db, {
+        userId: ownerId,
+        userLabel: "selin@viberr.dev",
+        projectSlug: null,
+      });
+      const user = { id: ownerId, email: "selin@viberr.dev", name: "Selin", orgRole: "member" as const };
+      const send = (text: string) =>
+        runControllerTurn(app.db, { conversationId: conversation.id, text, user, dataRoot: app.dataRoot });
+      // Both sends begin before the first start reaches the adapter.
+      const [first, second] = await Promise.allSettled([send("Part 1."), send("Part 2.")]);
+      expect(first.status).toBe("rejected");
+      expect(second.status === "fulfilled" ? second.value.state : second.status).toBe("queued");
+
+      const messages = listMessages(app.db, conversation.id);
+      const [one, two] = messages.filter((m) => m.author === "user");
+      const notes = messages.filter((m) => m.author === "controller");
+      // CANARY: drop the queue drain from `runControllerTurn`'s catch and part
+      // 2 has no note (and the next boot calls it a restart).
+      expect(notes.map((m) => [m.text, m.replyTo])).toEqual([
+        ["I could not start this turn: The controller turn could not start.", one!.id],
+        ["I dropped this message: the turn before it could not start. Say it again to retry.", two!.id],
+      ]);
+    } finally {
+      installFakeRuntime();
+    }
   });
 });

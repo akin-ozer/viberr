@@ -8,6 +8,7 @@ import { createRoutesStub } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { ModelCatalog } from "~/server/runtimes/model-catalog.server";
+import { formatDayDotTime } from "~/shared/dates/format";
 import { ToastProvider } from "~/ui/toast";
 import {
   ControllerAdminPanel,
@@ -176,6 +177,18 @@ describe("ruling 390: grants the controller asked for and cannot make", () => {
     // It declines the ask. It posts no grant list, so no lock applies to it.
     expect(lastForm).not.toHaveProperty("kb");
     expect(lastForm).not.toHaveProperty("skills");
+  });
+
+  // Ruling 480 (F40-47): live it read "Asked 2026-09-24T20:25:54.327Z by …",
+  // the stored UTC ISO with milliseconds, hours off from the audit rows on the
+  // same page. Canary: interpolate `r.askedAt` again.
+  it("ruling 480: the request says when it was asked through the local primitive, never the stored ISO", () => {
+    const { container } = renderPanel({}, ["qa-echo"], LOCKED, [REQUEST]);
+    const note = container.querySelector('[data-testid="controller-grant-requests"]')!;
+    expect(note.textContent).not.toContain("2026-09-22T11:00:00.000Z");
+    expect(note.textContent).toContain(
+      `Asked ${formatDayDotTime(REQUEST.askedAt)} by arda@viberr.dev · via controller.`,
+    );
   });
 
   it("says nothing at all when there is nothing outstanding", () => {

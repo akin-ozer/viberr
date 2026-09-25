@@ -14,6 +14,7 @@ import { insertUser } from "~/server/auth/user-store.server";
 import { patchRun, upsertRun } from "~/server/runtimes/run-store.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
+import { setNotifRoutingPref } from "~/features/profile/profile-actions.server";
 import {
   buildAgentToolkit,
   postAgentComment,
@@ -156,13 +157,66 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     );
 
     const note = listNotifications(store.db, store.users.arda.id).find(
-      (n) => n.kind === "approval" && n.taskKey === "VIB-9",
+      (n) => n.kind === "question" && n.taskKey === "VIB-9",
     );
     expect(note, "the owner must hear about a question put to them").toBeTruthy();
     // CANARY: drop the `notice.from` and this is { kind: "agent", name:
     // "Operator" } — the default every un-attributed notice falls back to.
     expect(note!.from).toMatchObject({ kind: "agent", name: "Security review" });
     expect(note!.from).not.toMatchObject({ name: "Operator" });
+  });
+
+  /**
+   * Ruling 481(a) (F40-48): the question is filed as what it is. As `approval`
+   * it wore the stage arrow and the "approval" pill, and "Approval requests"
+   * off (a person quieting stage traffic) meant no bell row and no "Waiting on
+   * you" row for any agent question, with nothing on that toggle saying so.
+   *
+   * Canary: write `kind: "approval"` in `openAgentQuestionPacket` again and
+   * the owner with approvals silenced gets nothing.
+   */
+  it("files an agent's question as a `question` that waits on the owner and ignores the approvals toggle (ruling 481)", async () => {
+    const store = setupTestStore(ctx);
+    const owner = store.users.arda.id;
+    setNotifRoutingPref(store.db, owner, "approvals", false);
+    for (const key of ["VIB-9", "VIB-8"]) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "impl", ownerUserId: owner }),
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await openAgentQuestionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-9",
+        actorRef: AGENT_REF,
+        title: "Connect the Worker to Workers Builds",
+        body: "Only the owner can press Connect.",
+      },
+    );
+
+    const mine = listNotifications(store.db, owner).filter((n) => n.taskKey === "VIB-9");
+    expect(mine.map((n) => n.kind)).toEqual(["question"]);
+    expect(mine[0]!.title).toBe("Security review asks: Connect the Worker to Workers Builds");
+    expect(mine[0]!.waitingOnYou).toBe(true);
+
+    // Its own toggle is the one that silences it.
+    setNotifRoutingPref(store.db, owner, "questions", false);
+    const opened = await openAgentQuestionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-8",
+        actorRef: AGENT_REF,
+        title: "Another question",
+      },
+    );
+    expect(opened).toBe(true);
+    expect(listNotifications(store.db, owner).filter((n) => n.taskKey === "VIB-8")).toEqual([]);
   });
 
   it("ruling 137: an agent's question withdraws the standing acceptance offers on the record", async () => {
@@ -398,6 +452,47 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(JSON.stringify(ok)).not.toMatch(/too big|at most|maximum/i);
   });
 
+  /**
+   * Ruling 478(e) (F40-31, F40-57): `ask_human` lets the agent say a choice
+   * needs a typed answer, and tells it an unmarked list recommends nothing.
+   */
+  it("ruling 478(e): a `reply` choice reaches the packet, and an unmarked list recommends nothing", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const server = mountFor({ ...BASE, ask: true });
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+
+    const listed = await client.listTools();
+    const ask = listed.tools.find((t) => t.name === "ask_human");
+    // CANARY: put "(first is presented as suggested)" back in the description.
+    expect(JSON.stringify(ask?.inputSchema)).toContain("an unmarked list carries none");
+    expect(JSON.stringify(ask?.inputSchema)).not.toMatch(/presented as suggested/);
+
+    await client.callTool({
+      name: "ask_human",
+      arguments: {
+        title: "Is Workers Builds connected?",
+        options: [
+          { title: "Connected; the first build succeeded", reply: true },
+          { title: "Not yet" },
+        ],
+      },
+    });
+    const packet = readTaskFile({
+      projectSlug: lastStore.slug,
+      taskKey: "VIB-3",
+      dataRoot: lastStore.dataRoot,
+    })!.parsed.packet!;
+    // CANARY: drop `if (o.reply) option.reply = true;` in the tool handler.
+    expect(packet.options.map((o) => [o.reply ?? false, o.rec])).toEqual([
+      [true, false],
+      [false, false],
+    ]);
+  });
+
   let lastStore: ReturnType<typeof setupTestStore>;
 
   const BASE = { comment: false, ask: false, verdict: true };
@@ -467,6 +562,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     // a silently shorter list agreeing with itself.
     expect(mounted).toEqual([
       "github_read",
+      "propose_kb_correction",
       "read_board",
       "read_knowledge_doc",
       "report_outcome",
@@ -725,7 +821,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
      * is the KB grant, not U11's collaboration grants — an agent granted a
      * knowledge base and nothing else still has to be able to read it.
      */
-    it("ruling 283: a KB grant alone mounts read_knowledge_doc, and nothing else", () => {
+    it("ruling 283 and 483: a KB grant alone mounts read_knowledge_doc and propose_kb_correction, and nothing else", () => {
       const store = setupTestStore(ctx);
       writeTask(store.dataRoot, store.slug, {
         frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
@@ -749,7 +845,86 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       });
       expect(built).not.toBeNull();
       const names = mountedTools.parse(built!.mcpServers.viberr_agent);
-      expect(Object.keys(names)).toEqual(["read_knowledge_doc"]);
+      // Ruling 483 mounts after `read_board`, so a knowledge base alone still
+      // widens nothing on U11's collaboration gate.
+      expect(Object.keys(names)).toEqual(["read_knowledge_doc", "propose_kb_correction"]);
+    });
+
+    /**
+     * Ruling 483 (F40-53): an agent that PROVES a line of one of its knowledge
+     * bases wrong files the correction in the document. Live on WEB-3 the
+     * Platform Engineer wrote "the knowledge-base runbook is read-only to me",
+     * an hour after the Site Engineer found the same stale dossier fact.
+     */
+    it("ruling 483: propose_kb_correction files against the agent's own knowledge base, and only its own", async () => {
+      const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
+      const { writeStoreDoc } = await import("~/server/org/store-files.server");
+      const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+      const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const admin = { userId: store.users.arda.id, label: "arda" };
+      const { kb } = await saveKnowledgeBase(
+        store.db,
+        { name: "akin-dossier", refresh: "on change" },
+        admin,
+        { dataRoot: store.dataRoot },
+      );
+      const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
+      writeStoreDoc(store.db, target, [], "06-platform-facts.md", "# Facts\n\n- T-003: wrangler 4.138.0\n", admin);
+      const built = buildAgentToolkit({
+        db: store.db,
+        ctx: { dataRoot: store.dataRoot },
+        projectSlug: store.slug,
+        taskKey: "VIB-3",
+        actorRef: AGENT_REF,
+        outcomeKey: "oc_kb_propose",
+        collab: { comment: false, ask: false, verdict: false, evidence: false, githubRead: false },
+        kb: [kb.dir],
+      })!;
+      const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+      await built.mcpServers.viberr_agent.instance.connect(serverEnd);
+      const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+      await client.connect(clientEnd);
+      const textResult = z
+        .object({ content: z.array(z.object({ text: z.string() })) })
+        .transform((r) => r.content.map((c) => c.text).join("\n"));
+
+      const filed = textResult.parse(
+        await client.callTool({
+          name: "propose_kb_correction",
+          arguments: {
+            kb: kb.dir,
+            doc: "06-platform-facts.md",
+            line: "T-003: wrangler 4.138.0",
+            correction: "The measured wrangler is 4.139.0.",
+            evidence: "`npx wrangler --version` printed 4.139.0.",
+          },
+        }),
+      );
+      // CANARY: drop the tool and the agent can only say so in a comment.
+      expect(filed).toMatch(/^\[done\] Proposed as kp-[0-9a-f]{10}/);
+      const { readFileSync } = await import("node:fs");
+      const path = await import("node:path");
+      const body = readFileSync(path.join(store.dataRoot, "kb", kb.dir, "06-platform-facts.md"), "utf8");
+      expect(body).toContain("- T-003: wrangler 4.138.0");
+      expect(body).toContain(", Security review]** The measured wrangler is 4.139.0.");
+      const top = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!
+        .parsed.timeline[0]!;
+      expect(top.type).toBe("proposal");
+      expect(top.actor).toMatchObject({ kind: "agent", profileId: "security-reviewer" });
+
+      // A knowledge base this run was not given is not its to amend.
+      const refused = textResult.parse(
+        await client.callTool({
+          name: "propose_kb_correction",
+          arguments: { kb: "someone-elses", doc: "x.md", correction: "y", evidence: "z" },
+        }),
+      );
+      expect(refused).toContain("[noop] No knowledge base `someone-elses` was given to a run on this task");
     });
   });
 

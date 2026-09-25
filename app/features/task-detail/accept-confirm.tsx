@@ -1,8 +1,10 @@
 import { describeRevisionDrift } from "~/shared/revision-drift";
 import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
+import type { PrOverlap } from "~/shared/pr-overlaps";
 import type { PrChecksRender, PrChecksUnread } from "~/shared/mapping/task.server";
-import { checksPill, checksUnreadPill, prStatePill } from "~/features/github/github-pills";
+import { checksPill, checksUnreadPill, gatesPill, prStatePill } from "~/features/github/github-pills";
+import type { GatesView } from "~/shared/project-gates";
 import { Icon } from "~/ui/icon";
 import { Pill, ValidationPill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
@@ -140,6 +142,52 @@ function subjectKeyFor(mode: AcceptCeremonyMode): string | undefined {
 /** The Blocked row's id, so the disabled confirm can be described by it. */
 const BLOCKED_ROW_ID = "accept-confirm-blocked";
 
+/** Paths named per colliding PR before the rest are counted. */
+const COLLIDES_PATHS_SHOWN = 3;
+
+/**
+ * Ruling 475 (F40-55 (c)): "Merging this will likely put WEB-2's PR #3 in
+ * conflict on `package.json`." Live on akinozer-com the owner accepted WEB-4
+ * while WEB-2's open PR changed the same file; Viberr knew, the dialog was
+ * silent, and WEB-2's acceptance was refused a minute later. The row names
+ * each PR and the shared paths, and what Viberr does after the merge.
+ */
+function CollidesRow({ collisions }: { collisions: readonly PrOverlap[] }) {
+  const partial = collisions.some((c) => c.partial);
+  const one = collisions.length === 1;
+  return (
+    <div className="obs warn" data-merge-collisions>
+      <span className="k">Collides</span>
+      <span>
+        {one
+          ? "Merging this will likely put "
+          : `Merging this will likely put ${collisions.length} open pull requests in conflict: `}
+        {collisions.map((c, i) => {
+          const shown = c.paths.slice(0, COLLIDES_PATHS_SHOWN);
+          const more = c.paths.length - shown.length;
+          return (
+            <span key={c.taskKey}>
+              {i > 0 ? "; " : ""}
+              {c.taskKey}'s PR #{c.prNumber}
+              {one ? " in conflict" : ""} on{" "}
+              {shown.map((path, j) => (
+                <span key={path}>
+                  {j > 0 ? ", " : ""}
+                  <span className="mono">{path}</span>
+                </span>
+              ))}
+              {more > 0 ? ` and ${more === 1 ? "1 more file" : `${more} more files`}` : ""}
+            </span>
+          );
+        })}
+        . Viberr re-checks {one ? "it" : "them"} right after the merge, and the operator hands a
+        conflict to the delivering agent.
+        {partial ? " A changed-file list was capped, so the overlap may be larger." : ""}
+      </span>
+    </div>
+  );
+}
+
 export function AcceptConfirm({
   task,
   workRevisionSha,
@@ -171,26 +219,43 @@ export function AcceptConfirm({
    */
   blockedGates = [],
   blockedReasonAuthoritative = true,
-  /** F32-11 (pass 32): the OPEN decision packet this acceptance withdraws
-   *  (its title), or null. Accepting a task with an open packet used to clear
+  /** F32-11 (pass 32): the OPEN decision packet this acceptance closes (its
+   *  title), or null. Accepting a task with an open packet used to clear
    *  it silently — no row here, no timeline note, no audit — so the human
    *  never learned a question died with the acceptance. */
   openPacketTitle = null,
+  /** Ruling 471: the title of the option this acceptance ANSWERS that
+   *  decision with, or null when it withdraws it. The loader decides
+   *  (`acceptAnswersWith` / `forceAnswersWith` on the packet render, from the
+   *  predicate the server's write uses); this component only says which. */
+  answersWith = null,
   baseBehindBy = null,
+  mergeCollisions = [],
+  gates = null,
   onRefreshFirst,
   busy,
   onCancel,
   onConfirm,
 }: {
   task: AcceptConfirmTask;
+  /** Ruling 475 (F40-55 (c)): the other open pull requests that change a
+   *  path this one changes, so merging it will likely put them in conflict.
+   *  Both doors pass it: the task page from its loader, the board from the
+   *  cards it holds (`mergeCollisions` in `~/shared/pr-overlaps`). */
+  mergeCollisions?: readonly PrOverlap[];
   /** U39-32: how many base commits the branch lacked at the reconciler's last
    *  compare, or null when that was never measured (the board door). */
   baseBehindBy?: number | null;
+  /** Ruling 482 (F40-52): the project's gates as Viberr ran them on the
+   *  revision this click accepts, or null (no gates declared, or the board
+   *  door, whose refusal row already carries the gate's sentence). */
+  gates?: GatesView | null;
   /** Ruling 449 (O39-c): bring the branch up to date and re-review it before
    *  accepting. Offered only where the caller passes it (the task page's
    *  direct Accept) and only while the branch is behind its base. */
   onRefreshFirst?: () => void;
   openPacketTitle?: string | null;
+  answersWith?: string | null;
   /** The delivered revision's head sha (task file), or null before delivery. */
   workRevisionSha: string | null;
   /** R17-2: a verified no-change completion. TWO shapes reach this, and the
@@ -519,6 +584,12 @@ export function AcceptConfirm({
               </span>
             </div>
           )}
+          {/* Ruling 475 (F40-55 (c)): the pull requests this merge will
+              likely put in conflict, named before the click rather than found
+              by the next person's refused Accept. Only where a merge happens. */}
+          {pr && !alreadyMerged && mergeCollisions.length > 0 && (
+            <CollidesRow collisions={mergeCollisions} />
+          )}
           <div className="obs">
             <span className="k">Revision</span>
             <span>
@@ -563,6 +634,36 @@ export function AcceptConfirm({
               )}
             </span>
           </div>
+          {/* Ruling 482 (F40-52): the owner accepted two production deploys on
+              agents' reports of the gate exit codes. This row is the server's
+              own run, bound to the sha on the Revision row above. A failure
+              also stands in the Blocked row below, because it refuses a plain
+              acceptance; force accept records it as bypassed. */}
+          {gates && (
+            <div className={gates.state === "passed" ? "obs" : "obs warn"}>
+              <span className="k">Gates</span>
+              <div>
+                <Pill kind={gatesPill(gates.state).kind} sm quiet={gatesPill(gates.state).quiet}>
+                  {gatesPill(gates.state).label}
+                </Pill>{" "}
+                {gates.line}
+                {gates.rows.some((r) => !r.ok) && (
+                  <ul className="gate-results">
+                    {gates.rows
+                      .filter((r) => !r.ok)
+                      .map((r) => (
+                        <li key={r.name} className="bad">
+                          <Icon name="x" />
+                          <span className="gate-name mono">{r.name}</span>
+                          <span className="gate-outcome">{r.outcome}</span>
+                          <span className="gate-wall">{r.wall}</span>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
           {/* R19-5: the skip is allowed — being quiet about it is not. Name the
               stages this jump goes past, in order, plus the review gate; the
               Force accept button that opened this dialog says the same thing in
@@ -607,18 +708,31 @@ export function AcceptConfirm({
               )}
             </div>
           )}
-          {openPacketTitle && (
-            <div className="obs warn">
-              {/* F32-11: the acceptance closes the task, so the open decision is
-                  withdrawn unanswered — said here, and recorded on the timeline
-                  and in the audit trail when it happens. */}
-              <span className="k">Withdraws</span>
-              <span>
-                the open decision "{openPacketTitle}". It closes unanswered with the
-                task; a timeline note and an audit row record the withdrawal.
-              </span>
-            </div>
-          )}
+          {openPacketTitle &&
+            (answersWith ? (
+              <div className="obs">
+                {/* Ruling 471: the decision offers the option this acceptance
+                    performs, so the acceptance IS its answer, recorded the way
+                    the packet's own confirm records it. */}
+                <span className="k">Answers</span>
+                <span>
+                  the open decision "{openPacketTitle}" with "{answersWith}". The
+                  answer is recorded on the timeline and in the audit trail.
+                </span>
+              </div>
+            ) : (
+              <div className="obs warn">
+                {/* F32-11: a decision that offers neither acceptance option is
+                    withdrawn unanswered when the acceptance closes the task.
+                    Said here, and recorded on the timeline and in the audit
+                    trail when it happens. */}
+                <span className="k">Withdraws</span>
+                <span>
+                  the open decision "{openPacketTitle}". It closes unanswered with the
+                  task; a timeline note and an audit row record the withdrawal.
+                </span>
+              </div>
+            ))}
         </div>
       </div>
       <div className="modal-foot">

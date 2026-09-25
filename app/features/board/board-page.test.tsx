@@ -886,6 +886,32 @@ describe("R16-2: the attention chip says what it selects", () => {
     await waitFor(() => expect(queryByText("Perfectly fine")).toBeNull());
     expect(queryByText("Waiting on an answer")).toBeTruthy();
   });
+
+  // Ruling 477(a) (F40-27): live, `?filter=risk` read "0 of 4 tasks · 1
+  // waiting on a human in this project" above lanes saying every task was
+  // hidden, because WEB-3's question left its stored readiness `ready`.
+  it("keeps a ready card holding an open question visible, so the head and the lanes agree", () => {
+    const { container, queryByText } = renderBoard(
+      [
+        task({
+          key: "WEB-3",
+          title: "Connect Workers Builds",
+          readiness: "ready",
+          displayReadiness: "input_required",
+          waiting: "human",
+          waitingOnMe: true,
+          packet: { type: "input", title: "Connect Workers Builds" },
+        }),
+        task({ key: "WEB-2", title: "Perfectly fine", readiness: "ready" }),
+      ],
+      { search: "filter=risk" },
+    );
+    expect(container.querySelector('[data-board-card="WEB-3"]')).toBeTruthy();
+    expect(queryByText("Perfectly fine")).toBeNull();
+    expect(container.querySelector(".board-head .sub")!.textContent).toBe(
+      "1 of 2 tasks · 1 waiting on a human in this project",
+    );
+  });
 });
 
 describe("the new-task dialog does not accuse an untouched form", () => {
@@ -2198,6 +2224,44 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
       .textContent!.replace(/\s+/g, " ");
     expect(text).toContain("a4c790ce63ef");
     expect(text).not.toContain("No delivered revision recorded.");
+  });
+
+  it("ruling 471: a decision the move answers reads Answers, from the card the loader built", () => {
+    // CANARY: stop passing `answersWith` from AcceptOnBoardConfirm and this
+    // reads "Withdraws … closes unanswered".
+    const answered = openConfirm({
+      packet: { type: "input", title: "Ready to accept?", acceptAnswersWith: "Accept VIB-1" },
+    })
+      .container.querySelector("dialog")!
+      .textContent!.replace(/\s+/g, " ");
+    expect(answered).toContain("Answers");
+    expect(answered).toContain('the open decision "Ready to accept?" with "Accept VIB-1"');
+    expect(answered).not.toContain("Withdraws");
+  });
+
+  it("ruling 475: names the other open PR on the board that shares a changed path, as the task page does", () => {
+    // CANARY: stop passing `mergeCollisions` to the board's AcceptOnBoardConfirm
+    // and the board's door is silent where the task page's names the collision.
+    const r = renderBoard(
+      [
+        task({
+          key: "VIB-1",
+          stage: "impl",
+          pr: { number: 2, state: "review", title: "t", paths: { headSha: "h2", changed: ["package.json", "src/a.ts"], truncated: false } },
+        }),
+        task({
+          key: "VIB-2",
+          stage: "triage",
+          atAcceptanceBoundary: false,
+          pr: { number: 3, state: "review", title: "u", paths: { headSha: "h3", changed: ["package.json"], truncated: false } },
+        }),
+      ],
+      { action: () => ({ ok: true as const, toast: "moved" }) },
+    );
+    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
+    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+    const row = r.container.querySelector("[data-merge-collisions]");
+    expect(row?.textContent).toContain("Merging this will likely put VIB-2's PR #3 in conflict on package.json.");
   });
 
   it("names the acceptance and the move it performs, in the shared vocabulary", () => {

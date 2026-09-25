@@ -13,6 +13,7 @@ import {
 import { repoFootprintTasks } from "./settings-actions.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { staleFileLeases } from "~/server/tasks/file-leases.server";
+import type { ProjectGate } from "~/schemas/project-file.schema";
 import { listMembershipViews, type MembershipView } from "./membership.server";
 
 /**
@@ -62,6 +63,10 @@ export interface SettingsViewData {
   fileLeases: FileLeaseView[];
   /** The tasks a lease may name — every live task on the board. */
   leaseCandidates: { key: string; title: string }[];
+  /** Ruling 482: the commands Viberr runs on every delivered revision.
+   *  Absent when the project declares none (the settings payload is budgeted,
+   *  ruling 457). */
+  gates?: ProjectGate[];
 }
 
 /**
@@ -113,7 +118,7 @@ export function getSettingsViewData(
   const tasks = listProjectTasks(db, projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {})
     .map((t) => ({ key: t.key, title: t.title }));
 
-  return {
+  const view: SettingsViewData = {
     project: {
       slug: project.slug,
       name: project.name,
@@ -140,6 +145,8 @@ export function getSettingsViewData(
     fileLeases: fileLeaseViews(db, projectSlug, tasks, ctx),
     leaseCandidates: tasks.map((t) => ({ key: t.key, title: t.title })),
   };
+  if (project.gates.length > 0) view.gates = project.gates;
+  return view;
 }
 
 /**

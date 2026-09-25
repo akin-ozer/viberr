@@ -150,6 +150,22 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(shipped()).not.toContain("does not work the CURRENT stage");
   });
 
+  /**
+   * Ruling 468 (F40-12): the operator never asks a person for a repository's
+   * first commit. Live on WEB-1 its first run found an unborn `main` and
+   * opened a packet whose recommended option was "I pushed an initial commit
+   * to main"; nothing it read said Viberr makes that commit.
+   */
+  it("ruling 468: the doctrine says an empty repository is Viberr's to initialize, and its outgoing hash is recorded", async () => {
+    // Canaries: drop the sentence; remove the outgoing hash.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "1763e3889a2da992052bebd5accbe51854baea010bc80d7e8d7aa96266715c13", {})).toBe(true);
+    expect(shipped()).toContain("An EMPTY repository (no commit yet, an unborn default branch) is never a person's chore");
+    expect(shipped()).toContain("Never ask anyone to push an initial commit or a README");
+    // Nothing in it instructs a manual first commit.
+    expect(shipped()).not.toMatch(/(ask|tell) (a person|the owner|a human)[^.]*(push|make)[^.]*(initial|first) commit/i);
+  });
+
   it("pass 34 A13: the operator doctrine shipped before `set_dependencies` is a recorded prior hash, so a live store upgrades in place", async () => {
     // Canary: remove the outgoing hash from PRIOR_SHIPPED_HASHES.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -163,6 +179,33 @@ describe("shipped-asset refresh (B-OP1)", () => {
     const path = await import("node:path");
     expect(shippedCopyIsUnedited(path.join("agents", "definitions", "controller.md"), "e600925f824e5ec43ca962c56304e5099ae76a1ad41dff8bc94a431666756712", {})).toBe(true);
     expect(shippedCopyIsUnedited(path.join("skills", "controller-guide", "SKILL.md"), "69805ce6bb7bd0180014e164ae6d863268813bd4fb6a0f61bfa4e333b6674608", {})).toBe(true);
+  });
+
+  it("ruling 483: the operator skill and controller guide shipped before knowledge-base proposals are recorded prior hashes", async () => {
+    // Canary: omit either outgoing hash and a live store keeps the version that
+    // names `propose_ruling` or never mentions `resolve_kb_proposal`.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    const path = await import("node:path");
+    expect(
+      shippedCopyIsUnedited(
+        path.join("skills", "viberr-app-expertise", "SKILL.md"),
+        "20acdfcb363f22622c38a48ca0f5963a5a09399aa76f87cccace59c15a2c2509",
+        {},
+      ),
+    ).toBe(true);
+    expect(
+      shippedCopyIsUnedited(
+        path.join("skills", "controller-guide", "SKILL.md"),
+        "7418f3499b14e1c8ce8a0cc46d6efdec850370712f1ec56728c1130302fcb948",
+        {},
+      ),
+    ).toBe(true);
+    const assets = path.join(import.meta.dirname, "assets");
+    const skill = readFileSync(path.join(assets, "viberr-app-expertise.skill.md"), "utf8");
+    const guide = readFileSync(path.join(assets, "controller-guide.skill.md"), "utf8");
+    expect(skill).toContain("`propose_kb_correction`");
+    expect(skill).not.toContain("propose_ruling");
+    expect(guide).toContain("`resolve_kb_proposal`");
   });
 
   it("refreshes an UNEDITED copy of an older shipped version", async () => {
@@ -365,6 +408,81 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
     expect(definition).toContain("context block the server gathered when the turn started");
     expect(definition).toContain("A comment never starts a run by itself");
     expect(skill).toContain("## The context you are handed");
+  });
+});
+
+/**
+ * Ruling 462 (pass 40, F40-5): the controller's playbook says a project's
+ * repository need not exist first and names `createRepository`. The outgoing
+ * version is listed so an unedited store copy upgrades at boot.
+ *
+ * Canary: drop the bullet, or the outgoing hash, and the matching assertion
+ * fails.
+ */
+describe("the controller playbook learns createRepository (ruling 462)", () => {
+  const assetsDir = path.join(import.meta.dirname, "assets");
+  it("names the flag and lists its outgoing version", async () => {
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
+      "./default-assets.server"
+    );
+    const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
+    expect(skill).toContain("The repository does not have to exist first.");
+    expect(skill).toContain("pass `createRepository` to `create_project`");
+    expect(skill).not.toMatch(/[–—]/);
+    const rel = path.join("skills", "controller-guide", "SKILL.md");
+    const outgoing = "f58275ca76e09a6d149e8fa3b7e8bec73cd9a7f34627e642ced603fdb1dcfd91";
+    expect(shippedCopyIsUnedited(rel, outgoing, {})).toBe(true);
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+  });
+});
+
+/**
+ * Ruling 463 (pass 40, F40-6): the controller's playbook sends it to
+ * `list_github_connections` before `create_project`. The outgoing version is
+ * listed so an unedited store copy upgrades at boot.
+ *
+ * Canary: drop the bullet, or the outgoing hash, and the matching assertion
+ * fails.
+ */
+describe("the controller playbook learns list_github_connections (ruling 463)", () => {
+  const assetsDir = path.join(import.meta.dirname, "assets");
+  it("names the read and lists its outgoing version", async () => {
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
+      "./default-assets.server"
+    );
+    const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
+    expect(skill).toContain("Read the GitHub connections before you create anything.");
+    expect(skill).toContain("Call `list_github_connections` first");
+    expect(skill).not.toMatch(/[–—]/);
+    const rel = path.join("skills", "controller-guide", "SKILL.md");
+    const outgoing = "26672ee429c9089c9c676bc178b5afaf401927f90596c6cb2f36660da185c762";
+    expect(shippedCopyIsUnedited(rel, outgoing, {})).toBe(true);
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+  });
+});
+
+/**
+ * Ruling 464 (pass 40, F40-7): the controller's playbook says to pass the
+ * designed roster as `agents` and names the one removal it holds. The
+ * outgoing version is listed so an unedited store copy upgrades at boot.
+ *
+ * Canary: drop the bullet, the removal sentence, or the outgoing hash, and the
+ * matching assertion fails.
+ */
+describe("the controller playbook learns `agents` and remove_agent_deployment (ruling 464)", () => {
+  const assetsDir = path.join(import.meta.dirname, "assets");
+  it("names both and lists its outgoing version", async () => {
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
+      "./default-assets.server"
+    );
+    const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
+    expect(skill).toContain("Pass the roster you designed as `agents` to `create_project`");
+    expect(skill).toContain("The one removal you hold is `remove_agent_deployment`");
+    expect(skill).not.toMatch(/[–—]/);
+    const rel = path.join("skills", "controller-guide", "SKILL.md");
+    const outgoing = "df3a250cbd5fbbaccdd7843199a1d9e23e836250119db2f87a7693e57b6a17d8";
+    expect(shippedCopyIsUnedited(rel, outgoing, {})).toBe(true);
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
   });
 });
 

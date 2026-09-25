@@ -39,6 +39,8 @@ interface TaskLoaderData {
   taskLinks: TaskLinks;
   /** U39-32. */
   baseBehindBy: number | null;
+  /** Ruling 475. */
+  mergeCollisions: { taskKey: string; prNumber: number; paths: string[]; partial: boolean }[];
 }
 
 /**
@@ -241,6 +243,32 @@ describe("U39-31: the task page's task links", () => {
     expect(data.taskLinks).toMatchObject({ "VIB-145": "/projects/viberr-core/tasks/VIB-145" });
     expect(data.taskLinks["VIB-142"]).toBeUndefined();
     expect(data.taskLinks["VIB-9999"]).toBeUndefined();
+  });
+});
+
+describe("ruling 475 (F40-55 (c)): the accept dialog's merge collisions", () => {
+  it("carries the other open PRs that share a changed path with this task's, and nothing for a task with none", async () => {
+    // CANARY: return `mergeCollisions: []` from the loader.
+    const { updateTaskFile, resolveTaskFilePath } = await import("~/server/files/task-writer.server");
+    const { rebuildPath } = await import("~/server/projections/rebuilder.server");
+    const withPr = async (taskKey: string, number: number, changed: string[]) => {
+      const ref = { projectSlug: "viberr-core", taskKey, dataRoot: app.dataRoot };
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.pr = {
+          number,
+          state: "review",
+          title: `[${taskKey}] work`,
+          paths: { headSha: `h${number}`, changed, truncated: false },
+        };
+      });
+      rebuildPath(app.db, resolveTaskFilePath(ref), { dataRoot: app.dataRoot });
+    };
+    await withPr("VIB-151", 2, ["package.json", "app/layout.tsx"]);
+    await withPr("VIB-153", 3, ["package.json"]);
+    expect((await loadTask("VIB-151")).mergeCollisions).toEqual([
+      { taskKey: "VIB-153", prNumber: 3, paths: ["package.json"], partial: false },
+    ]);
+    expect((await loadTask("VIB-148")).mergeCollisions).toEqual([]);
   });
 });
 

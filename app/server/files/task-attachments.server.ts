@@ -1,6 +1,5 @@
 import {
   existsSync,
-  mkdirSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -9,6 +8,7 @@ import {
   type Dirent,
 } from "node:fs";
 import { AppError } from "~/server/errors/app-error.server";
+import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
 import {
   INLINE_TYPES,
   MAX_UPLOAD_BYTES,
@@ -16,6 +16,7 @@ import {
   UPLOADABLE_EXTENSIONS,
 } from "~/shared/attachment-kinds";
 import path from "node:path";
+import { isGateLogName } from "~/shared/project-gates";
 import {
   resolveStoreSegment,
   taskAttachmentsDir,
@@ -145,6 +146,10 @@ export function attachmentNamesSince(
   const inWindow: { name: string; at: string }[] = [];
   for (const name of names) {
     if (name.startsWith(".")) continue;
+    // Ruling 482: a gate log is Viberr's own evidence, written by the gate
+    // runner while any run may be in flight. Claiming it for that run would
+    // name the run as its author and, for a deliverer, move `deliveredAt`.
+    if (isGateLogName(name)) continue;
     try {
       const st = statSync(path.join(dir, name));
       if (!st.isFile()) continue;
@@ -366,7 +371,8 @@ export function writeTaskAttachment(
   const abs = resolveStoreSegment(dir, cleaned);
   const replaced = existsSync(abs);
   if (replaced && refuseReplace) throw AppError.validation(refuseReplace);
-  mkdirSync(dir, { recursive: true });
+  // Ruling 460: the same directory agents drop evidence into, as their users.
+  shareDirWithAgents(dir);
   writeFileSync(abs, data);
   return { name: cleaned, bytes: data.byteLength, replaced };
 }

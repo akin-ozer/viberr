@@ -1,8 +1,10 @@
 import { spawn as spawnProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { z } from "zod";
 import type { CompactOutcome } from "./adapter.server";
+import { launchEnv, type AgentLaunch } from "./agent-isolation.server";
 import { errorMessage } from "../../shared/errors";
 
 /**
@@ -67,6 +69,9 @@ export interface CompactThreadInput {
   /** Injected for tests; the real one spawns the vendored binary. */
   spawn?: SpawnAppServer;
   binary?: string;
+  /** Ruling 460: run the app-server as the person's own OS user, through the
+   *  launcher — the compaction writes into their home like the run did. */
+  launch?: AgentLaunch | null;
   /** How long the whole exchange may take before it is a failure (a 175k
    *  thread compacted in about a minute live). */
   timeoutMs?: number;
@@ -88,18 +93,46 @@ const PLATFORM_PACKAGES = new Map<string, PlatformPackage>([
   ["linux-x64", { pkg: "@openai/codex-linux-x64", triple: "x86_64-unknown-linux-musl" }],
 ]);
 
-/** The vendored `codex` binary for this platform, or `codex` on PATH when the
- *  platform package is not installed (the SDK would fail the same way). */
-export function codexBinaryPath(): string {
+/** The vendored `codex` binary and the helper directories the SDK puts on the
+ *  child's PATH when it resolves the binary itself (`codex-path/`, which holds
+ *  `rg`). A caller that overrides the binary (`codexPathOverride`, ruling 460)
+ *  must prepend them itself: the SDK adds none for an override. */
+export interface CodexVendor {
+  binary: string;
+  pathDirs: string[];
+}
+
+/** The ONE resolver of the vendored Codex CLI (the run's launch through
+ *  `viberr-launch` and the completion compaction both read it), mirroring the
+ *  SDK's own lookup: `codex` on PATH when the platform package is not
+ *  installed (the SDK would fail the same way). */
+export function codexVendor(): CodexVendor {
   const entry = PLATFORM_PACKAGES.get(`${process.platform}-${process.arch}`);
-  if (!entry) return "codex";
+  if (!entry) return { binary: "codex", pathDirs: [] };
   try {
     const require = createRequire(import.meta.url);
     const manifest = require.resolve(`${entry.pkg}/package.json`);
-    return path.join(path.dirname(manifest), "vendor", entry.triple, "bin", "codex");
+    const root = path.join(path.dirname(manifest), "vendor", entry.triple);
+    const helpers = path.join(root, "codex-path");
+    return {
+      binary: path.join(root, "bin", "codex"),
+      pathDirs: existsSync(helpers) ? [helpers] : [],
+    };
   } catch {
-    return "codex";
+    return { binary: "codex", pathDirs: [] };
   }
+}
+
+/** The vendored `codex` binary for this platform. */
+export function codexBinaryPath(): string {
+  return codexVendor().binary;
+}
+
+/** `env` with `dirs` first on its PATH, as the SDK does for its own lookup. */
+export function withPathDirs(env: Record<string, string>, dirs: readonly string[]) {
+  if (dirs.length === 0) return env;
+  const rest = (env.PATH ?? "").split(path.delimiter).filter((dir) => dir && !dirs.includes(dir));
+  return { ...env, PATH: [...dirs, ...rest].join(path.delimiter) };
 }
 
 const rpcLineSchema = z.object({
@@ -132,7 +165,10 @@ const realSpawn: SpawnAppServer = (binary, args, env) =>
  */
 export function compactCodexThread(input: CompactThreadInput): Promise<CompactOutcome> {
   const spawn = input.spawn ?? realSpawn;
-  const binary = input.binary ?? codexBinaryPath();
+  const realBinary = input.binary ?? codexBinaryPath();
+  const binary = input.launch ? input.launch.launcher : realBinary;
+  // A launched run always carries its env (the credential's home rides it).
+  const env = input.launch ? launchEnv(input.launch, realBinary, input.env ?? {}) : input.env;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return new Promise<CompactOutcome>((resolve) => {
     let settled = false;
@@ -154,7 +190,7 @@ export function compactCodexThread(input: CompactThreadInput): Promise<CompactOu
     );
     timer.unref?.();
     try {
-      child = spawn(binary, ["app-server"], input.env);
+      child = spawn(binary, ["app-server"], env);
     } catch (error) {
       clearTimeout(timer);
       resolve({

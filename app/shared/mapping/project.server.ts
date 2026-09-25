@@ -2,6 +2,7 @@ import type {
   AgentDeployment,
   CredentialPolicy,
   Guardrail,
+  ProjectGate,
   ProjectRole,
   StageDef,
   WorkflowBoundary,
@@ -30,6 +31,7 @@ export type ProjectRow = {
   credential_policy_json: string | null;
   guardrails_json: string;
   required_reviewers_json: string;
+  gates_json: string;
   source_path: string;
   content_hash: string;
   parsed_at: string;
@@ -52,6 +54,8 @@ export interface ProjectRecord {
    *  names at project-rebuild time (the rebuilder's task walk prints them in
    *  `validation_block_reason`, so the queue needs no file read). */
   requiredReviewers: RequiredReviewerView[];
+  /** Ruling 482: the gates Viberr runs on every delivered revision. */
+  gates: ProjectGate[];
   /** Store-relative path, e.g. "projects/viberr-core/project.md". */
   sourcePath: string;
   contentHash: string;
@@ -59,12 +63,12 @@ export interface ProjectRecord {
 }
 
 export function mapProjectRow(row: ProjectRow): ProjectRecord {
-  // SAFETY: the six `*_json` columns have ONE writer — `rebuildProjectFile`
+  // SAFETY: the seven `*_json` columns have ONE writer — `rebuildProjectFile`
   // (server/projections/rebuilder.server.ts) stores `JSON.stringify` of the
   // frontmatter `parseProjectFileContent` just produced (the required-reviewer
   // column holds the RESOLVED views that walk derives from it), so each column
   // holds exactly the type named below. `credential_policy_json` is the one
-  // nullable column of the six and its null is checked before the parse.
+  // nullable column of the seven and its null is checked before the parse.
   return {
     slug: row.slug,
     name: row.name,
@@ -81,6 +85,7 @@ export function mapProjectRow(row: ProjectRow): ProjectRecord {
       : null,
     guardrails: JSON.parse(row.guardrails_json) as Guardrail[],
     requiredReviewers: JSON.parse(row.required_reviewers_json) as RequiredReviewerView[],
+    gates: JSON.parse(row.gates_json) as ProjectGate[],
     sourcePath: row.source_path,
     contentHash: row.content_hash,
     parsedAt: row.parsed_at,

@@ -249,6 +249,9 @@ const AUDIT_ACTION_KINDS = {
   // Ruling 178: the required-reviewer rule (Settings → Required reviewers,
   // or the controller's set_required_reviewers) — acceptance policy.
   "project.required_reviewers.updated": "change",
+  // Ruling 482: the project's gates (Settings → Gates, or the controller's
+  // set_project_gates) — what acceptance waits on, like the rule above.
+  "project.gates.updated": "change",
   "project.member.role_changed": "change",
   "project.member.invited": "change",
   "project.member.removed": "change",
@@ -266,6 +269,8 @@ const AUDIT_ACTION_KINDS = {
   // creating one here, and was the only sibling missing.
   "project.agent_profile.deployed": "change",
   "project.created": "change",
+  // Ruling 462: the GitHub repository a project was created with.
+  "project.repository.created": "change",
   "project.archived": "change",
   "project.unarchived": "change",
   "project.deleted": "change",
@@ -293,9 +298,21 @@ const AUDIT_ACTION_KINDS = {
   // decision in front of a person. On the feed because the alternative is that
   // "why did this task sit for a day" is only answerable by opening the task.
   "task.review.deadlock": "audit",
+  // Ruling 482: Viberr's own run of the project's gates on a revision, and a
+  // person asking for one. The run is the evidence an acceptance stands on.
+  "task.gates.run": "audit",
+  "task.gates.requested": "audit",
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
+  // Ruling 477(b) (F40-28): a goal chain is the automation that starts, strands
+  // and closes a project's work, and the page promises "human decisions … and
+  // policy changes". Defining a chain and redirecting it (pause, resume,
+  // cancel, skip, retry, edit, add, remove, adopt, rename) are a person's
+  // decisions; the runner closing one is its own record.
+  "goal.created": "change",
+  "goal.updated": "change",
+  "goal.completed": "audit",
 } satisfies Record<string, AuditLogKind>;
 
 /** The whitelist above as the lookup `listAuditLog` reads: `action` arrives as
@@ -376,7 +393,28 @@ const auditDetailsSchema = z.object({
   // Ruling 237: the reviewer whose objections deadlocked, and how many rounds.
   rounds: z.number().optional().catch(undefined),
   profileId: detailText,
+  // Ruling 462: the repository created with the project, and its visibility.
+  repo: detailText,
+  private: z.boolean().optional().catch(undefined),
+  // Ruling 477(b): a goal row's chain title, its link count at creation, the
+  // op a redirect ran, the link it touched, the reason given, and whether it
+  // changed nothing (`from`/`to` above carry a rename's two titles).
+  title: detailText,
+  links: z.number().optional().catch(undefined),
+  index: z.number().optional().catch(undefined),
+  reason: detailText,
+  unchanged: z.boolean().optional().catch(undefined),
+
+  // Ruling 482: the gate list as written, and one gate run's outcome.
+  gates: z.array(z.object({ name: z.string().catch("?") })).catch([]),
+  headSha: detailText,
+  status: detailText,
+  passed: z.number().optional().catch(undefined),
+  total: z.number().optional().catch(undefined),
 });
+
+/** The decoded details one audit sentence reads. */
+type AuditDetailsRead = z.infer<typeof auditDetailsSchema>;
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
  * the column is free text — reads as "nothing recorded", like an absent one. */
@@ -484,6 +522,11 @@ function auditText(
       return `${actor} deployed agent profile **${d.name ?? "?"}** to the project.`;
     case "project.created":
       return `${actor} created the project.`;
+    case "project.repository.created": {
+      const visibility =
+        d.private === undefined ? "" : d.private ? " private" : " public";
+      return `${actor} created the${visibility} GitHub repository **${d.repo ?? "?"}**.`;
+    }
     case "project.archived":
       return `${actor} archived the project.`;
     case "project.unarchived":
@@ -542,6 +585,19 @@ function auditText(
       const live = d.liveHeadSha ? ` (head \`${d.liveHeadSha.slice(0, 7)}\`)` : "";
       return `Acceptance refused: ${reviewed} is not on ${pr}${live}, so the merge would not have carried the reviewed work, on`;
     }
+    case "project.gates.updated": {
+      // Ruling 482: the whole list as it now stands; a clear says so.
+      if (d.gates.length === 0) return `${actor} cleared the project's gates.`;
+      return `${actor} set the project's gates to ${d.gates.map((g) => `**${g.name}**`).join(", ")}.`;
+    }
+    case "task.gates.run": {
+      // Ruling 482. The actor is the server; the row says what its run found.
+      const sha = d.headSha ? `\`${d.headSha.slice(0, 7)}\`` : "the revision under review";
+      if (d.status === "error") return `Viberr could not run the project's gates on ${sha} on`;
+      return `Viberr ran the project's gates on ${sha}: ${d.passed ?? 0}/${d.total ?? 0} exit 0, on`;
+    }
+    case "task.gates.requested":
+      return `${actor} asked Viberr to run the project's gates again on`;
     case "task.review.deadlock": {
       // Ruling 237. The actor is the policy engine, so this says what happened,
       // not who did it. The reviewer is named by profile id, which is what the
@@ -568,6 +624,18 @@ function auditText(
       const memberRole = d.memberRole;
       return `${actor} used the org-admin override to ${what} (project role: ${memberRole ?? "not a member"}).`;
     }
+    // Ruling 477(b) (F40-28): the goal-chain rows.
+    case "goal.created": {
+      const goal = `goal ${goalLabel(row, d)}`;
+      return d.links === undefined
+        ? `${actor} created ${goal}.`
+        : `${actor} created ${goal} with ${countLabel(d.links, "link")}.`;
+    }
+    case "goal.updated":
+      return goalUpdatedText(row, actor, d);
+    case "goal.completed":
+      // The runner's own record names no actor, like the policy engine's rows.
+      return `Goal ${goalLabel(row, d)} completed: every link is settled.`;
     // P13-D-8: a refused attempt. Reads as a blocked action, like the merge
     // refusal above.
     case "project.authority.denied": {
@@ -582,6 +650,49 @@ function auditText(
     default:
       // Whitelisted-but-untemplated (future additions): honest fallback.
       return `${actor}: ${row.action.replace(/[._]/g, " ")}.`;
+  }
+}
+
+/** Ruling 477(b): a goal row names its chain by id, with the title the row
+ *  recorded (a row written before the writer recorded one has none). */
+function goalLabel(row: AuditRow, d: AuditDetailsRead): string {
+  return `**${row.subject_id ?? "?"}**${d.title ? ` (${d.title})` : ""}`;
+}
+
+/**
+ * Ruling 477(b) (F40-28): a `goal.updated` row reads as what the person did to
+ * the chain, op by op, from the facts the writer records beside `op`.
+ */
+function goalUpdatedText(row: AuditRow, actor: string, d: AuditDetailsRead): string {
+  const goal = `goal ${goalLabel(row, d)}`;
+  if (d.unchanged) return `${actor} changed nothing on ${goal}.`;
+  const link = d.index === undefined ? "a link" : `link ${d.index}`;
+  const because = d.reason ? `: ${d.reason.replace(/\.$/, "")}` : "";
+  switch (d.op) {
+    case "pause":
+      return `${actor} paused ${goal}.`;
+    case "resume":
+      return `${actor} resumed ${goal}.`;
+    case "cancel":
+      return `${actor} cancelled ${goal}${because}.`;
+    case "skip_link":
+      return `${actor} skipped ${link} of ${goal}${because}.`;
+    case "retry_link":
+      return `${actor} retried ${link} of ${goal}.`;
+    case "edit_link":
+      return `${actor} edited ${link} of ${goal}.`;
+    case "add_link":
+      return `${actor} added ${link} to ${goal}.`;
+    case "remove_pending_link":
+      return `${actor} removed pending ${link} from ${goal}.`;
+    case "adopt_task":
+      return `${actor} bound ${link} of ${goal} to an existing task on`;
+    case "rename":
+      return d.from && d.to
+        ? `${actor} renamed goal **${row.subject_id ?? "?"}** from **${d.from}** to **${d.to}**.`
+        : `${actor} rewrote the description of ${goal}.`;
+    default:
+      return `${actor} updated ${goal}.`;
   }
 }
 

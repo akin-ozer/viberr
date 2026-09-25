@@ -184,7 +184,18 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   becomes the default; the default cannot be removed; removing a connection deletes
   its PAT and cascades every project binding. A `valid` verdict older than 24 hours
   (`CONNECTION_REVALIDATE_AFTER_MS`) is re-proven before use. Audit `org.connection.*`,
-  `github.pat.*`.
+  `github.pat.*`. Creating a repository with a project (ruling 462) needs more than
+  the required pair and is never checked at save: a fine-grained token needs
+  **Administration: Read and write** for All repositories (a classic token's `repo`
+  covers it), and a token without it is refused at creation with that sentence.
+  Each row says which repositories the TOKEN reaches ("Reaches 3 repositories · 1
+  private", the list one disclosure away; ruling 463), read from `GET /user/repos`
+  whenever the token is validated, and carries **Re-check**, which validates the
+  stored token again and re-reads that list. A connection saved before the read
+  existed says it has not been read yet; a failed read says why. The account's
+  public-repo count is no longer shown: it described the account, not the token.
+  The controller reads the same facts through `list_github_connections`, open to any
+  signed-in person, without token material.
 - **Users & access**: allow access by local account (temp password shown once, reset
   forced), Google account, Google domain, or GitHub handle; edit name/email; link the
   GitHub handle of a local or Google account (ruling 154: the handle whose PR approval
@@ -208,9 +219,43 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
 - **Sign-in & SSO**: §2.
 - **Agent resources**: knowledge bases (`name`, `dir`, refresh `on change | manual`,
   re-index, delete), MCP servers (`HTTP` or `stdio`, target, sealed credential; saving
-  runs a real `initialize` → `tools/list` handshake, stdio children get a filtered env
-  plus `MCP_CREDENTIAL`, first-run installers finish in a 15-minute background warm-up;
-  reserved names refused). The MCP editor's "Write tools" section (ruling 176) marks the
+  runs a real `initialize` → `tools/list` handshake — over HTTP through the same client
+  the MCP gateway uses, with the SSE fallback (ruling 461) — stdio children get a
+  filtered env plus `MCP_CREDENTIAL`, first-run installers finish in a 15-minute
+  background warm-up; reserved names refused). A server with a stored credential is
+  reached by every run through Viberr's loopback MCP gateway, so the credential never
+  enters an agent process (ruling 461); its row reads "auth: configured (held by Viberr;
+  runs connect through its gateway)". An HTTP server can instead be **signed in with
+  OAuth** (ruling 469): its editor's "OAuth sign-in" section, beside the credential
+  field, offers **Sign in** (`mcp-oauth-start`), which discovers the server's
+  protected-resource and authorization-server metadata, registers Viberr dynamically
+  with the redirect URI `<origin>/resources/mcp-oauth/callback` (the origin of
+  `BETTER_AUTH_URL`, else of the request) and hands back the authorization URL; the
+  editor shows it as a link that opens in a new tab ("Continue at <host>"). The admin
+  approves Viberr on the server's own page, the callback (org admin, the same session
+  that started it, the `state` spent once) exchanges the code with the PKCE verifier,
+  seals the tokens beside the row and says the tab can be closed; this page updates on
+  the resource event. A sign-in replaces a pasted credential (a connection holds one),
+  a pasted one over a live sign-in is refused, a pasted one over a sign-in that is not
+  live ("needs sign-in", "expired") clears what is left of it — a row holding a pasted
+  credential reports no sign-in status at all — and changing the endpoint drops the
+  sign-in. The row and the editor read "needs sign-in" (the server answered the MCP
+  authorization challenge and holds no token), "auth: OAuth, signed in (expires in …,
+  renews itself)" or "sign-in expired: an admin must sign in again" with the server's
+  reason; **Sign out** (`mcp-oauth-sign-out`) revokes the tokens at the server when it
+  offers revocation and drops them. Audited as `org.mcp.oauth_connected` {name, issuer,
+  scope, expiresAt, renews, replacedStaticCredential}, `org.mcp.oauth_failed` {name,
+  stage, reason} and `org.mcp.oauth_signed_out` {name, revocation, reason}; no token,
+  code or client secret is in any of them. A signed-in server also says what its sign-in
+  was granted (ruling 486): the row's auth phrase ends with "read-only · 194 scopes" (or
+  "194 scopes · 12 writes"), and the editor puts "Granted read-only · 194 scopes" under
+  the sign-in's status (for a read-only grant, that the server refuses any call that
+  writes and how to ask for write scopes) with a disclosure listing every granted scope,
+  each write marked. An HTTP server's editor has an optional "Requested scopes" field
+  (spaces, commas or newlines between scopes; a token OAuth does not allow is refused at
+  save), stored as `oauth_requested_scope` and sent as the next sign-in's `scope`; left
+  blank, the resource's advertised scopes are asked for. The authorization server decides
+  what it grants, which is why the editor shows the grant rather than the request. The MCP editor's "Write tools" section (ruling 176) marks the
   tools that a run withholding repo write, and every operator run, does not get: the
   probe's tool names are offered, the write-looking ones pre-selected until the server
   is first reviewed, a name can be typed, and each change is audited as
@@ -229,8 +274,10 @@ tabs sit the run-concurrency and spending-cap rows, then the Audit log card.
   save, ruling 156). The store browser (upload, folders, doc editing, GitHub import).
   Renames rewrite every template and deployment reference. Audit `org.kb.*`,
   `org.mcp.*`, `org.skill.*`, `org.store.*`, `org.agent_profile.*` (the `updated`
-  row's details carry `diverged` and `propagated` project slugs), and one
-  `project.agent_profile.resources_synced` row per project a propagation rewrote.
+  row's details carry `diverged`, `propagated` and `personaPropagated` project slugs),
+  one `project.agent_profile.resources_synced` row per project a propagation rewrote,
+  and one `project.agent_profile.updated` row with `personaChanged` per copy whose
+  persona it rewrote (ruling 467).
 - **Controller**: model and effort are always editable; the grant lists and the
   doctrine body are deployment-locked (ruling 108); a note lists the grants the
   controller asked for and cannot make (`request_resource_grant`, ruling 390), each
@@ -281,8 +328,9 @@ Action families (about 200 distinct strings; the authoritative list is a grep fo
 `project.rulings_kb.updated` and `project.stage.recolored`), `task.*` (creation, title,
 goal, metadata, dependencies, comments, attachments, transitions, ownership, packets,
 acceptance, recommendations, quality, schedules, review deadlocks, agent and operator
-actions, session compactions `task.agent.compaction`, ruling proposals
-`task.operator.ruling_proposed`), `goal.*`, `github.*` (branches, PRs, delivery,
+actions, session compactions `task.agent.compaction`, knowledge-base proposals
+`task.kb_proposal.filed`, ruling 483), `org.kb.proposal_promoted` and
+`org.kb.proposal_dismissed` (ruling 483), `goal.*`, `github.*` (branches, PRs, delivery,
 reconcile, workspace, scope violations, repository bootstrap), `runtime.run.*`,
 `runtime.operator.plan_executed`, `run.recovery.*`, `run.completion.effects_lost`
 (ruling 207(a)), `controller.authority.denied`, the controller's audited reads
@@ -320,7 +368,12 @@ raw vendor line never reach an audit row.
   or the project settings form).
 - `task.acceptance.forced` carries `bypassed` (the gate sentences joined with " | "),
   `bypassedGates` (the same list), `skippedStages`, `validation` and `withdrawnPacket`
-  (U35-3).
+  (U35-3; null when the force answered the open decision instead, ruling 471).
+- `task.packet.resolved {optionKind, optionTitle, packetKind}` is a person resolving a
+  decision packet, actor that person. With `via: "accept" | "force-accept"` it was
+  answered by the task page's acceptance rather than the packet's confirm (ruling 471);
+  `task.packet.withdrawn {title, kind, type, by}` (actor the system) is an acceptance
+  that closed a decision it did not answer (F32-11).
 - `task.hold.lifted {cause: "operator-run" | "dispatch", trigger?, profileId?,
   byUserId?, previous: "blocked"}` is written by `liftHoldForRun`, actor the person who
   started the operator or the operator actor for a dispatch (ruling 157).
@@ -402,6 +455,11 @@ attachments) is out of it too (ruling 407). A delivered revision with no PR stay
 on purpose; an unpushed delivery is exactly the untraceable one the number exists to
 show.
 
+A reading whose own window has reset (`readingWindowReset`, ruling 481(d)) keeps its
+row in the past tense with no bar and no percentage: "<window> · window reset, no reading
+since", "reset <time>", and the old window's warning and overage words dropped. It used to
+read "92% of five hour · resets 03:30" hours after 03:30 on an idle instance.
+
 The backend quota panel names whose account a refusal or an exhaustion was recorded on
 (`credentialLabel`, ruling 130(d)). That is org-admin information: it names a person's
 provider account state, so it reaches this page, the signed-in `instance_health` read and
@@ -416,16 +474,28 @@ The page renders inside a `PageOverlay` in two columns. Left: the Profile card
 the change-password modal, ruling 148(b)), notification routing and appearance. Right:
 "Your access", **Agent accounts** (below) and GitHub identity.
 
-- **Notification routing**: eight in-app opt-out toggles (`NOTIF_PREF_CATEGORIES`:
-  packets, approvals, mentions, policy, quality, controller, dependencies, ownership),
-  each mapped from one notification kind and enforced inside `createNotification`: an
-  off category means the row is never written.
+- **Notification routing**: nine in-app opt-out toggles (`NOTIF_PREF_CATEGORIES`:
+  packets, questions, approvals, mentions, policy, quality, controller, dependencies,
+  ownership), each mapped from one notification kind and enforced inside
+  `createNotification`: an off category means the row is never written. Each toggle's
+  description names what its writers send (ruling 481(a)): "Decision packets for you" is
+  the operator's packets (a blocked task, a question about scope, a completion report);
+  "Agent questions" is an agent's `ask_human` or Codex outcome-envelope question, kind
+  `question`, which used to be filed as an `approval` and was silenced by the approvals
+  toggle; "Approval requests" is the operator's recommendations and a delivery's recorded
+  next step. Below them, **Desktop notifications** is a per-browser opt-in (ruling
+  481(c)): the switch is the only place the browser's permission is requested, it turns
+  on once the browser allowed it and showed one notification, and a denial or an
+  unsupported browser leaves it off with the reason on the row. The opt-in lives in that
+  browser's storage, not in `user_prefs`, because the permission it rests on is the
+  browser's.
 - **Appearance & workspace**: theme `light | dark | system`, persisted to `users.theme`
   and the `viberr_theme` cookie; the timeline's default filter. There is no in-app
   reduce-motion setting (ruling 148(c)); the OS preference is the one signal.
 - **Your access**: a read-only table rendered from the same RBAC rows.
 - **GitHub identity**: disconnect flips `idp` back to `local` (audit
-  `identity.github.disconnected`), refused without a password. On a deployment without
+  `identity.github.disconnected`), refused without a password. The Disconnect asks first,
+  on the shared `ConfirmDialog` ("Disconnect GitHub?", ruling 481(b)). On a deployment without
   GitHub sign-in the card shows an admin-linked handle as `@handle · linked by an org
   admin` and says what the link does (ruling 154); the person cannot set their own handle
   because the verdict path counts approvals by it.
@@ -473,7 +543,11 @@ Two routes in, both the vendor's own:
   Platform API key with a FREE `GET /v1/models` probe before sealing it; a ChatGPT
   workspace access token has no free probe and is stored `verified_at = null` with the
   card saying so. `backend-disconnect` runs the vendor's own logout, removes the
-  credential file and drops the row (transcripts stay).
+  credential file and drops the row (transcripts stay). The card's Disconnect asks first
+  (ruling 481(b)): the shared `ConfirmDialog`, "Disconnect Claude?" (or Codex), whose body
+  says tasks the person owns and their controller conversations can't start a run on
+  that backend until they connect again, confirmed by "Disconnect Claude". One tap used
+  to sign the vendor session out with no undo short of a fresh sign-in.
 
 **The last refusal Viberr observed** (ruling 130(d)). A connected card also reads the
 quota store (`latestBackendRateLimits`) and shows, ONLY when the record's
@@ -499,7 +573,11 @@ a utilization reading (`rate_limit_event`) shows a "Usage" row: the percentage o
 named window, clamped, "not reported" rather than 0% when the provider sent none, with
 the reading's age and a note that it is the last figure a run reported, not a live probe.
 The same principal check applies, and the reading retires with the account like the
-refusal does. Codex reports no readings, so a Codex card shows none.
+refusal does. Codex reports no readings, so a Codex card shows none. Once the reading's
+own `resetsAt` has passed (`readingWindowReset`, computed in `latestBackendRateLimits`,
+the one home Insights reads too; ruling 481(d)) the pill drops the percentage and reads
+"<window> window reset", and the note says "That window reset <time>, and no Claude run
+has reported a reading since." instead of "The window resets <time>."
 
 Viberr never implements the vendors' OAuth, never reads, copies or stores a Claude.ai or
 ChatGPT **session** token, and offers no setup-token field: Anthropic's Claude Code

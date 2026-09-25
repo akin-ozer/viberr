@@ -34,10 +34,14 @@ export interface FilterableTask {
   /** D4: 'degraded' when this task's runtime continuity was lost (projected
    *  task fact — same state the Continuity Recovery panel shows on task detail). */
   continuity?: string | null;
+  /** Ruling 477(a): the open decision packet, when there is one. Only its
+   *  presence is read here: a packet a human has not answered holds the task. */
+  packet?: { type: string } | null;
 }
 
 /** "Blocked or waiting" = work that CANNOT PROCEED: readiness blocked /
- * input_required / risk-detected, failing validation, urgent, or a rejected PR.
+ * input_required / risk-detected, an open decision a human has not answered
+ * (ruling 477(a)), failing validation, urgent, or a rejected PR.
  * The "Waiting on me" filter is member-scoped (R8-3): a decision the viewer can
  * actually act on, not the project-wide `waiting === "human"` enum.
  *
@@ -92,6 +96,17 @@ export function matchesBoardFilter(
       (task.readiness === "input_required" &&
         task.waiting !== "agent" &&
         task.waiting !== "schedule") ||
+      // Ruling 477(a) (F40-27): R16-2 again, through the packet door. An agent's
+      // ask-human or an operator's input packet sets `waiting` to "human" and
+      // leaves the STORED readiness where it was (only a `blocked` packet moves
+      // it), so a `ready` task holding for an answer carried none of the signals
+      // above. Live, WEB-3 read "waiting on you" under the Platform Engineer's
+      // question while this filter said "All 4 tasks here are hidden", and the
+      // head counted it "1 waiting on a human". The open packet IS the demand;
+      // `waiting === "human"` keeps ruling 91's exclusion (an agent carrying
+      // the task) and ruling 225's (a packet outranks the clock, so a task
+      // with one never rests on a schedule).
+      (task.waiting === "human" && task.packet != null) ||
       task.validation === "failing" ||
       task.urgent ||
       // P14-WL-03: a PR closed without merging is a DIVERGENCE the review queue

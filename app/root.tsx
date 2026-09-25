@@ -12,7 +12,7 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "./app.css";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { z } from "zod";
 import {
   isRouteErrorResponse,
@@ -212,7 +212,31 @@ export default function App() {
           surface. A csrf token in the root payload is the signed-in signal;
           the dock hides itself on the login and controller pages. */}
       {rootData?.csrf ? <ControllerDock /> : null}
+      {/* Ruling 481(c): the tab's title counts the unread decisions, and an
+          opted-in browser shows a desktop notification for a new one. */}
+      {rootData?.csrf ? <AttentionWatcherSlot /> : null}
     </ToastProvider>
+  );
+}
+
+/**
+ * Ruling 481(c): the attention watcher is its own chunk, fetched once the page
+ * has hydrated. It renders nothing and works only in a browser, and imported
+ * here it would ride every route's closure (ruling 457).
+ */
+const LazyAttentionWatcher = lazy(() =>
+  import("./features/notifications/attention-watcher").then((module) => ({
+    default: module.AttentionWatcher,
+  })),
+);
+
+function AttentionWatcherSlot() {
+  const hydrated = useSyncExternalStore(subscribeToNothing, clientSnapshot, serverSnapshot);
+  if (!hydrated) return null;
+  return (
+    <Suspense fallback={null}>
+      <LazyAttentionWatcher />
+    </Suspense>
   );
 }
 

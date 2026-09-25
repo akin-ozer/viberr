@@ -60,6 +60,10 @@ CREATE TABLE projects (
   credential_policy_json TEXT,
   guardrails_json TEXT NOT NULL DEFAULT '[]',
   required_reviewers_json TEXT NOT NULL DEFAULT '[]',
+  -- Ruling 482: the project's declared gates (project.md `gates`), so a task's
+  -- projected acceptance block can say the gates have not passed without a
+  -- file read. '[]' when the project declares none.
+  gates_json TEXT NOT NULL DEFAULT '[]',
   source_path TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   parsed_at TEXT NOT NULL
@@ -274,10 +278,12 @@ CREATE TABLE notifications (
   -- progress note addressed to the conversation owner / goal creator.
   -- 'dependency' (ruling 131): the work a task waited on landed (or can never).
   -- 'ownership' (ruling 140): the reader's task-owner seat changed hands.
+  -- 'question' (ruling 481): an agent's question only a person can answer.
   -- This list IS NOTIFICATION_KINDS in app/shared/mapping/notification.server.ts,
   -- and the boot integrity check compares the live CHECK against it, because a root
-  -- that predates a kind would otherwise reject every INSERT of it silently.
-  kind TEXT NOT NULL CHECK (kind IN ('packet', 'approval', 'mention', 'quality', 'policy', 'controller', 'dependency', 'ownership')),
+  -- that predates a kind would otherwise reject every INSERT of it silently. Boot
+  -- widens a lagging CHECK in place (`widenNotificationKindCheck`, ruling 481).
+  kind TEXT NOT NULL CHECK (kind IN ('packet', 'question', 'approval', 'mention', 'quality', 'policy', 'controller', 'dependency', 'ownership')),
   -- packet kind only: input | blocked (card tint + pill).
   ptype TEXT CHECK (ptype IN ('input', 'blocked')),
   title TEXT,
@@ -327,7 +333,11 @@ CREATE TABLE github_pats (
   token_suffix TEXT NOT NULL,
   created_at TEXT NOT NULL,
   last_validated_at TEXT,
-  validation_json TEXT
+  validation_json TEXT,
+  -- Ruling 480: what each repository proved about the token (`repo`,
+  -- `pull_request:write`), as the JSON `parseRepoScopeProofs` reads; NULL until
+  -- a repository-scoped probe or a write through the token proves something.
+  repo_scopes_json TEXT
 );
 CREATE TABLE project_github_credentials (
   project_slug TEXT PRIMARY KEY,
@@ -355,6 +365,15 @@ CREATE TABLE user_backend_credentials (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (user_id, backend)
+);
+-- Ruling 460: the OS user each person's agent processes run as. Allocated once, sequentially
+-- from 20001 (`agentUidFor`), and never deleted — deliberately no foreign key to `users`: a
+-- removed account's transcripts stay on disk owned by its uid, and a uid handed to a second
+-- person would own them.
+CREATE TABLE agent_os_users (
+  user_id TEXT PRIMARY KEY,
+  os_uid INTEGER NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
 );
 -- U33-2 (pass 33): the last repository-access probe per project. App-owned
 -- OBSERVATION, not a projection of project.md, so a rebuild must not clear it —
@@ -384,8 +403,10 @@ CREATE TABLE github_connections (
   owner TEXT NOT NULL UNIQUE,
   pat_id TEXT NOT NULL REFERENCES github_pats (id) ON DELETE CASCADE,
   is_default INTEGER NOT NULL DEFAULT 0,
-  repos_count INTEGER,                -- from GitHub at validation time
   expires_at TEXT,                    -- token expiry (ISO) when advertised
+  -- Ruling 463: which repositories the token reaches (GET /user/repos), as
+  -- the JSON `readTokenReach` stores; NULL until a validation has read it.
+  reach_json TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -460,6 +481,19 @@ CREATE TABLE org_mcp_servers (
   -- offered in the editor. An observation like tools_count, but kept across a
   -- failed probe: a stale list is still the right thing to mark from.
   tool_names_json TEXT,
+  -- Ruling 469: an OAuth sign-in. `oauth_ref` is a secret-box (like cred_ref,
+  -- rotated with it) around the authorization server's endpoints, the client
+  -- Viberr registered as and the tokens; `oauth_json` is the public half every
+  -- surface reads without opening it (status needs_sign_in | signed_in |
+  -- expired, expiry, whether it renews, issuer host). NULL for a connection
+  -- that is not an OAuth one. Ruling 486: the public half also carries the
+  -- scope the server granted.
+  oauth_ref TEXT,
+  oauth_json TEXT,
+  -- Ruling 486(c): the scope an admin asks the next OAuth sign-in for
+  -- ("Requested scopes", space-joined), sent as the authorization request's
+  -- `scope`. NULL sends the resource's advertised scopes_supported.
+  oauth_requested_scope TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -536,6 +570,18 @@ CREATE TABLE controller_messages (
   -- controller rows and on messages sent before the dock existed.
   surface TEXT,
   created_at TEXT NOT NULL,
+  -- Ruling 465: on a controller row, the id of the user message it answers
+  -- (a turn's reply, a refusal, a failure or restart note). A user message
+  -- takes its seq when it is QUEUED, so seq alone cannot say which reply
+  -- belongs to which message. NULL on user rows and on a note that answers
+  -- no message (a released project's note).
+  reply_to TEXT,
+  -- Ruling 465: 1 on a user message written before reply links whose answer
+  -- the backfill could not prove (a restart or a failed start lost it, or the
+  -- writers' order stopped proving anything): earlier history, not linked,
+  -- which boot recovery never notes as unanswered. 0 on everything written
+  -- since.
+  unlinked_history INTEGER NOT NULL DEFAULT 0,
   UNIQUE (conversation_id, seq)
 );
 CREATE TABLE "agent_runs" (

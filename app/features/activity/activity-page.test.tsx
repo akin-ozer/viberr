@@ -858,3 +858,37 @@ describe("C5: the controller instrument and the runtime-session fold", () => {
     expect(isRuntimeSessionOpen(trailing)).toBe(false);
   });
 });
+
+/**
+ * Ruling 477(c) (F40-29, live on akinozer.com): every task key on Activity
+ * (WEB-2, WEB-3…) was a `<button class="keybtn">` calling navigate(), so a
+ * key could not be opened in a new tab or copied, and a screen reader heard
+ * "button" for a page link.
+ */
+describe("ruling 477(c): task keys are links to their tasks", () => {
+  it("in the stream, on audit rows, and on rows a compacted run gives back", () => {
+    // CANARY: render either key as `<button type="button" onClick={…}>` again
+    // and its lookup below finds no link.
+    const { container, getByText, getAllByRole } = renderActivity(STREAM, [
+      ...AUDIT,
+      session(1, 9, 30),
+      session(2, 9, 20),
+    ]);
+    const stream = container.querySelectorAll(".panel:first-child .pol-ev .keybtn");
+    expect([...stream].map((k) => [k.tagName, k.getAttribute("href")])).toEqual([
+      ["A", "/projects/viberr-core/tasks/VIB-142"],
+      ["A", "/projects/viberr-core/tasks/VIB-142"],
+      ["A", "/projects/viberr-core/tasks/VIB-145"],
+    ]);
+    fireEvent.click(getByText("Show each"));
+    const audit = container.querySelectorAll(".pev-list .keybtn:not(.act-toggle)");
+    expect([...audit].map((k) => [k.tagName, k.getAttribute("href")])).toEqual([
+      ["A", "/projects/viberr-core/tasks/VIB-142"],
+      ["A", "/projects/viberr-core/tasks/VC-4"],
+      ["A", "/projects/viberr-core/tasks/VC-4"],
+    ]);
+    // Announced as links, by the key they carry.
+    expect(getAllByRole("link", { name: "VC-4" })).toHaveLength(2);
+    expect(getAllByRole("link", { name: "VIB-145" })).toHaveLength(1);
+  });
+});

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { formatRelative } from "~/shared/dates/format";
 import { useToast } from "~/ui/toast";
 import { useOrgAction, type OrgAction, type OrgActionData } from "./use-org-action";
 
@@ -9,19 +8,6 @@ import { useOrgAction, type OrgAction, type OrgActionData } from "./use-org-acti
  * likely place for concurrent UI work to collide). Behaviour is unchanged;
  * these are the pieces the modals and the row panels both need.
  */
-
-export function rel(iso: string | null): string {
-  return iso ? formatRelative(iso) : "never";
-}
-
-/**
- * F17-L2: a skill/resource that has never been edited since it was seeded read
- * "updated never", which sounds like something went wrong. An un-edited resource
- * reads "not yet edited"; an edited one keeps "updated <when>".
- */
-export function updatedLabel(iso: string | null): string {
-  return iso ? "updated " + formatRelative(iso) : "not yet edited";
-}
 
 /** Shared modal-close-with-inline-error fetcher wiring. */
 export function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void) {
@@ -38,6 +24,26 @@ export function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void
     },
   });
   return { action, err, setErr };
+}
+
+/**
+ * Ruling 479(h): what a global agent profile's stored stage id says beside the
+ * default workflow's stages. A template deployed onto a project with its own
+ * stages keeps that project's ids (`build` on akinozer.com): the row printed
+ * the raw id and the editor offered no chip for it at all, so Content Writer
+ * looked eligible nowhere while it worked at `build`. One wording for the row
+ * and the editor's chip.
+ */
+export const STAGE_OUTSIDE_DEFAULT = "not in the default workflow";
+
+/** A stored stage id as the row prints it: the default stage's name, else the
+ *  id with the sentence above. */
+export function storedStageLabel(
+  id: string,
+  stages: readonly { id: string; name: string }[],
+): string {
+  const known = stages.find((s) => s.id === id);
+  return known ? known.name : `${id} (${STAGE_OUTSIDE_DEFAULT})`;
 }
 
 /** Busy-row tracking for spin icons (re-index / test connection). */

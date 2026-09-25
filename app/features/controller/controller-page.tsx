@@ -6,6 +6,7 @@ import {
 } from "~/shared/dependencies";
 import {
   createContext,
+  Fragment,
   useContext,
   useEffect,
   useMemo,
@@ -13,8 +14,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { TurnStep, WorkingSentence } from "./turn-step";
+import { MessageState, TurnStep, WorkingSentence } from "./turn-step";
+import { answeredMessageIds, inReplyOrder, workingRowAfter } from "~/shared/controller-thread";
 import { useFreshMessageIds } from "./use-fresh-messages";
+import { useTranscriptFollow, useTurnAnnouncement } from "./transcript-follow";
 import {
   Link,
   useFetcher,
@@ -23,10 +26,13 @@ import {
   useSearchParams,
 } from "react-router";
 import type {
+  ControllerGoalView,
   ControllerSurfaceView,
   ConversationListItem,
 } from "./controller-query.server";
-import type { GoalView } from "~/server/tasks/goal-actions.server";
+import type { GoalLinkView, GoalView } from "~/server/tasks/goal-actions.server";
+import type { CardStatusKind } from "~/features/board/card-status";
+import { dependencyAnchor, goalLinkAnchor } from "~/shared/goal-anchor";
 import { Icon } from "~/ui/icon";
 import { Markdown } from "~/ui/markdown";
 import { RichText } from "~/ui/rich-text";
@@ -50,6 +56,7 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { controllerExamples } from "./controller-examples";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
+import { ProposalsPanel } from "./proposals-panel";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 
 /**
@@ -216,6 +223,7 @@ export function ControllerPage({
           )}
         </div>
       </header>
+      <TurnAnnouncer view={view} />
       <div className="ctl-layout">
         <div className="ctl-main">
           {view.conversation ? (
@@ -257,6 +265,28 @@ export function ControllerPage({
             buries the list above it nor stretches the page beside it. */}
         <aside className="ctl-side">
           <ConversationList view={view} />
+          {/* Ruling 483 (F40-59): what the board's agents proposed about its
+              knowledge, where the owner looks, before the chains. */}
+          {view.proposals !== null && projectSlug && (
+            <ProposalsPanel
+              proposals={view.proposals}
+              projectSlug={projectSlug}
+              canResolve={view.viewerIsOrgAdmin}
+              available={view.available}
+              sending={send.state !== "idle"}
+              onAsk={(text) =>
+                send.submit(
+                  sendForm(
+                    csrf,
+                    text,
+                    `${location.pathname}${location.search}`,
+                    view.conversation?.id ?? null,
+                  ),
+                  { method: "post" },
+                )
+              }
+            />
+          )}
           {view.goals !== null && (
             <GoalsPanel
               goals={view.goals}
@@ -268,6 +298,22 @@ export function ControllerPage({
         </aside>
       </div>
     </main>
+  );
+}
+
+/**
+ * Ruling 476(d) (F40-24): the page's one status region, mounted outside the
+ * per-thread subtree so it is on the page before the first message of a new
+ * thread starts a turn, and only its text changes: "<name> is working" when a
+ * turn starts, "<name> replied: <first sentence>" when the reply lands.
+ */
+function TurnAnnouncer({ view }: { view: ControllerSurfaceView }) {
+  const fresh = useFreshMessageIds(view.messages, view.conversation?.id ?? null);
+  const said = useTurnAnnouncement(view.controllerName, view.messages, fresh, view.turn.working);
+  return (
+    <span className="vh" role="status" aria-live="polite" data-turn-announcer>
+      {said}
+    </span>
   );
 }
 
@@ -464,6 +510,7 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
   // mark the row the transcript is actually showing.
   const active = view.conversation?.id ?? null;
   const href = (c: ConversationListItem) => conversationHref(params, view.showingAll, c.id);
+  const planned = view.plannedElsewhere ?? [];
   return (
     <section className="panel ctl-convs">
       {/* Ruling 419(a): New moved to the page head, where it is reachable
@@ -486,7 +533,10 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
         </p>
       )}
       {view.conversations.length === 0 ? (
-        <p className="empty sm">No conversations yet. Say something below.</p>
+        <p className="empty sm">
+          {planned.length > 0 ? "No conversations on this board yet." : "No conversations yet."}{" "}
+          Say something below.
+        </p>
       ) : (
         <ul className="ctl-conv-list">
           {view.conversations.map((c) => (
@@ -520,6 +570,26 @@ function ConversationList({ view }: { view: ControllerSurfaceView }) {
           ))}
         </ul>
       )}
+      {/* Ruling 476(h) (F40-61): the threads this board's chains were planned
+          in that the list above does not hold, an instance thread most often,
+          so the reasoning behind a chain is one click from the chain. */}
+      {planned.length > 0 && (
+        <>
+          <h3 className="ctl-planned-head">Where this board&apos;s chains were planned</h3>
+          <ul className="ctl-conv-list" data-planned-elsewhere>
+            {planned.map((p) => (
+              <li key={p.id}>
+                <Link className="ctl-conv" to={p.href}>
+                  <span className="ctl-conv-title">{p.title}</span>
+                  <span className="fine xs dim">
+                    {p.scopeLabel} · planned {p.goalIds.join(", ")}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   );
 }
@@ -537,20 +607,17 @@ function Transcript({
   onExample?: (text: string) => void;
 }) {
   const scrollRef = useRef<HTMLElement | null>(null);
-  const count = view.messages.length;
   // Ruling 451(d): a reply that lands while the transcript is up enters the way
   // it does in the dock; history never animates.
   const fresh = useFreshMessageIds(view.messages, view.conversation?.id ?? null);
-  useEffect(() => {
-    // Ruling 419(b): scroll the TRANSCRIPT, never the page. This used to be
-    // `scrollIntoView` on an end marker, which scrolls every scrollable
-    // ancestor too: on a phone the page itself jumped to the bottom of a
-    // 12,625px conversation, past the header, the thread switcher and the
-    // goals, on every load and every new message. The transcript is its own
-    // capped scroller at every width now, so only its own box moves.
-    const box = scrollRef.current;
-    if (box) box.scrollTop = box.scrollHeight;
-  }, [count, view.turn.working]);
+  // Ruling 419(b): scroll the TRANSCRIPT, never the page. This used to be
+  // `scrollIntoView` on an end marker, which scrolls every scrollable
+  // ancestor too: on a phone the page itself jumped to the bottom of a
+  // 12,625px conversation, past the header, the thread switcher and the
+  // goals, on every load and every new message. The transcript is its own
+  // capped scroller at every width now, so only its own box moves. Ruling
+  // 476(c): and a reply that lands shows its first line, not its last.
+  useTranscriptFollow(scrollRef, view.messages, fresh, view.turn.working, view.conversation?.id ?? "");
 
   if (!view.conversation) {
     return (
@@ -592,6 +659,28 @@ function Transcript({
       </section>
     );
   }
+  // Ruling 465 (F40-8): each reply sits under the message it answers, an
+  // unanswered message says where it stands, and "is working…" sits under
+  // the message the live turn answers, never under a later one.
+  const ordered = inReplyOrder(view.messages);
+  const answered = answeredMessageIds(view.messages);
+  const workingAfter = workingRowAfter(ordered, view.turn.answering);
+  // Ruling 476(d): the row is what a sighted person watches. The page's one
+  // status region (`TurnAnnouncer`) says that the turn started and that it
+  // replied; this row, inserted with its sentence already in it, was skipped.
+  const working = view.turn.working && (
+    <div className="ctl-working">
+      <span className="live-dot" />
+      <WorkingSentence name={view.controllerName} />
+      {/* Ruling 250 (F37-79): the turn's own phase and step, in the place
+          the person is waiting. Both are on the run row already and both
+          already render in the live-run panel further down this page;
+          the conversation showed one static line for turns measured in
+          minutes. `phase` is null while it is the generic "Working" —
+          the sentence above already says that. */}
+      <LiveTurnStep turn={view.turn} runtime={view.runtime} />
+    </div>
+  );
   return (
     <section
       ref={scrollRef}
@@ -599,47 +688,41 @@ function Transcript({
       aria-label="Conversation transcript"
     >
       <div className="ctl-msgs">
-        {view.messages.map((m) => (
-          <article
-            key={m.id}
-            className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
-            data-fresh={fresh.has(m.id) ? "true" : undefined}
-          >
-            <header>
-              <span className="ctl-msg-who">
-                {m.author === "user" ? (
-                  view.conversation?.userLabel
-                ) : (
-                  <>
-                    <Icon name="cpu" /> {view.controllerName}
-                  </>
-                )}
-              </span>
-              <LocalDayDotTime iso={m.createdAt} />
-              {m.surface && (
-                <span className="ctl-msg-surface" title={m.surface}>
-                  from {surfaceLabel(m.surface)}
+        {ordered.map((m) => (
+          <Fragment key={m.id}>
+            <article
+              className={`ctl-msg ${m.author === "user" ? "from-user" : "from-controller"}`}
+              data-message-id={m.id}
+              data-fresh={fresh.has(m.id) ? "true" : undefined}
+            >
+              <header>
+                <span className="ctl-msg-who">
+                  {m.author === "user" ? (
+                    view.conversation?.userLabel
+                  ) : (
+                    <>
+                      <Icon name="cpu" /> {view.controllerName}
+                    </>
+                  )}
                 </span>
-              )}
-            </header>
-            <div className="md-body">
-              <Markdown text={m.text} taskLinks={view.taskLinks} />
-            </div>
-          </article>
+                <LocalDayDotTime iso={m.createdAt} />
+                {m.surface && (
+                  <span className="ctl-msg-surface" title={m.surface}>
+                    from {surfaceLabel(m.surface)}
+                  </span>
+                )}
+                {m.author === "user" && !answered.has(m.id) && (
+                  <MessageState turn={view.turn} messageId={m.id} />
+                )}
+              </header>
+              <div className="md-body">
+                <Markdown text={m.text} taskLinks={view.taskLinks} />
+              </div>
+            </article>
+            {m.id === workingAfter && working}
+          </Fragment>
         ))}
-        {view.turn.working && (
-          <div className="ctl-working" role="status">
-            <span className="live-dot" />
-            <WorkingSentence name={view.controllerName} />
-            {/* Ruling 250 (F37-79): the turn's own phase and step, in the place
-                the person is waiting. Both are on the run row already and both
-                already render in the live-run panel further down this page;
-                the conversation showed one static line for turns measured in
-                minutes. `phase` is null while it is the generic "Working" —
-                the sentence above already says that. */}
-            <LiveTurnStep turn={view.turn} runtime={view.runtime} />
-          </div>
-        )}
+        {workingAfter === null && working}
       </div>
     </section>
   );
@@ -790,6 +873,55 @@ const LINK_PILL = {
  */
 const HELD_PILL = { kind: "blocked", label: "blocked" } satisfies { kind: PillKind; label: string };
 
+/**
+ * Ruling 476(g): the pill tint for each of the board card's status words, the
+ * colour its `chip st` carries on the board (`.pill.info` is the board's
+ * "waiting on you" blue, `.pill.neutral` its grey for a human or a clock).
+ * `blocked` keeps ruling 425(a)'s pill.
+ */
+const CARD_PILL = {
+  archived: "neutral",
+  queued: "agent",
+  agent: "agent",
+  you: "info",
+  human: "neutral",
+  scheduled: "neutral",
+  ready: "ready",
+  input: "input",
+  blocked: "blocked",
+  done: "done",
+  unknown: "neutral",
+} satisfies Record<CardStatusKind, PillKind>;
+
+/** A link's pill: its tint, its word, and the clock a scheduled task names. */
+interface LinkPill {
+  kind: PillKind;
+  label: string;
+  resumesAt: string | null;
+}
+
+/**
+ * What a link's pill says. Ruling 476(g) (F40-56): a started link says what
+ * the board's card for its task says, in its colour: live, goal-1 called
+ * WEB-2, WEB-3 and WEB-5 "active" in the agent-working purple while their
+ * cards said "waiting on you", and WEB-3's open packet held five other links.
+ * Without the card's status (a surface that does not carry it), ruling
+ * 425(a)'s held rule and the chain's own word stand.
+ */
+function linkPill(link: GoalLinkView): LinkPill {
+  const status = link.status === "active" ? link.taskStatus : undefined;
+  if (status) {
+    return {
+      kind: CARD_PILL[status.kind],
+      label: status.label,
+      resumesAt: status.kind === "scheduled" ? status.resumesAt : null,
+    };
+  }
+  const held = link.status === "active" && (link.waits ?? []).some((e) => e.state !== "done");
+  const pill = held ? HELD_PILL : (LINK_PILL[link.status] ?? LINK_PILL.pending);
+  return { ...pill, resumesAt: null };
+}
+
 /** Ruling 425(b): the one word each entry of a wait list gets. */
 function waitStateWord(entry: DependencyRender): string {
   switch (entry.state) {
@@ -848,10 +980,13 @@ function LinkWaits({
   const open = entries.filter((e) => e.state !== "done");
   const done = entries.filter((e) => e.state === "done");
   const dead = open.filter((e) => isDeadDependencyState(e.state)).length;
+  // Ruling 476(b): a count that cannot read as a link number. "waits on 1"
+  // beside a row, on a page where everything else says "link 1", read as
+  // "waits on link 1": live, link 10 said it while it waited on link 9.
   const summary =
     open.length === 0
-      ? `waited on ${entries.length === 1 ? "one entry" : `${entries.length}`}, all done`
-      : `waits on ${open.length}${done.length > 0 ? ` · ${done.length} done` : ""}`;
+      ? `waited on ${entries.length === 1 ? "one entry" : `${entries.length} entries`}, all done`
+      : `waits on ${open.length} open${done.length > 0 ? ` · ${done.length} done` : ""}`;
   return (
     <details className="ctl-link-waits" data-link-wait>
       <summary>
@@ -862,6 +997,8 @@ function LinkWaits({
       <ul>
         {[...open, ...done].map((e) => {
           const title = waitEntryTitle(e, goals);
+          // Ruling 476(b): a goal link opens its own row, not its chain's head.
+          const anchor = dependencyAnchor(e);
           return (
             <li key={e.ref} data-state={e.state}>
               <span className="ctl-wait-state">{waitStateWord(e)}</span>
@@ -869,10 +1006,10 @@ function LinkWaits({
                 <Link className="mono" to={`../tasks/${e.taskKey}`} relative="path">
                   {e.taskKey}
                 </Link>
-              ) : e.goalId ? (
+              ) : anchor ? (
                 <Link
                   className="mono"
-                  to={{ pathname: location.pathname, search: location.search, hash: e.goalId }}
+                  to={{ pathname: location.pathname, search: location.search, hash: anchor }}
                 >
                   {e.ref}
                 </Link>
@@ -893,18 +1030,25 @@ function LinkWaits({
 const HISTORY_PREVIEW = 6;
 
 /**
- * Ruling 419(h): open the chain a link pointed at (`#goal-4`, from the task
- * page's chain chip) and bring it into view. Only the nearest scroller moves
- * (the rail on a desktop, the page column on a phone): `scrollIntoView` would
- * move the document as well, which the shell never lets a person scroll back.
+ * Ruling 419(h): open the chain a link pointed at (`#goal-4`) and bring it into
+ * view. Only the nearest scroller moves (the rail on a desktop, the page column
+ * on a phone): `scrollIntoView` would move the document as well, which the
+ * shell never lets a person scroll back.
+ *
+ * Ruling 476(b): a link's own row is a target too (`#goal-4-link-6`, from the
+ * task page's chain chip and from a wait entry naming a goal link). Its chain
+ * opens, the row comes to the top of the scroller and takes focus, and the
+ * returned id marks it (`data-targeted`). A keyboard or screen-reader user
+ * following "goal-1 link 5" used to land on goal-1's summary, 5 rows short.
  */
-function useTargetedGoal(): void {
+function useTargetedGoal(): string {
   const location = useLocation();
+  const id = hashTarget(location.hash);
   useEffect(() => {
-    const id = decodeURIComponent(location.hash.slice(1));
     if (!id) return;
-    const card = document.getElementById(id);
-    if (!(card instanceof HTMLDetailsElement) || !card.classList.contains("ctl-goal")) return;
+    const target = document.getElementById(id);
+    const card = target?.closest("details.ctl-goal");
+    if (!target || !(card instanceof HTMLDetailsElement)) return;
     card.open = true;
     let box = card.parentElement;
     while (
@@ -913,9 +1057,43 @@ function useTargetedGoal(): void {
     ) {
       box = box.parentElement;
     }
-    if (box) box.scrollTop += card.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
-    card.querySelector("summary")?.focus({ preventScroll: true });
-  }, [location.hash]);
+    if (box) box.scrollTop += target.getBoundingClientRect().top - box.getBoundingClientRect().top - 8;
+    const focusable = target === card ? card.querySelector("summary") : target;
+    focusable?.focus({ preventScroll: true });
+  }, [id]);
+  return id;
+}
+
+/** The element id a URL's hash names; a hash that is not valid percent-encoding
+ *  names nothing (the id is read while rendering now, so it must not throw). */
+function hashTarget(hash: string): string {
+  try {
+    return decodeURIComponent(hash.slice(1));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Ruling 476(f) (F40-26): the Goals head counts chains by what they are doing.
+ * It said "N running · M settled", and `running` was every chain not completed
+ * or cancelled, so a chain the owner paused, or one stopped on a failed link
+ * and waiting for Retry or Skip, was counted as running: the headline said
+ * work was moving when the chain was waiting for the person reading it.
+ */
+export function goalsCountLine(goals: readonly GoalView[]): string {
+  const count = (test: (g: GoalView) => boolean) => goals.filter(test).length;
+  const attention = count((g) => g.status === "attention");
+  const parts: [number, string][] = [
+    [count((g) => g.status === "active"), "active"],
+    [count((g) => g.status === "paused"), "paused"],
+    [attention, attention === 1 ? "needs attention" : "need attention"],
+    [count(isSettled), "settled"],
+  ];
+  return parts
+    .filter(([n]) => n > 0)
+    .map(([n, word]) => `${n} ${word}`)
+    .join(" · ");
 }
 
 function GoalsPanel({
@@ -924,23 +1102,20 @@ function GoalsPanel({
   canRedirect,
   viewerId,
 }: {
-  goals: GoalView[];
+  goals: ControllerGoalView[];
   csrf: string;
   canRedirect: boolean;
   /** Ruling 260: the viewer, so a chain's own creator gets its controls. */
   viewerId: string;
 }) {
-  useTargetedGoal();
-  const running = goals.filter((g) => !isSettled(g)).length;
+  const targeted = useTargetedGoal();
   return (
     <section className="panel ctl-goals" aria-label="Goal chains">
       <div className="panel-head">
         <Icon name="flag" />
         <h2>Goals</h2>
         {goals.length > 0 && (
-          <span className="fine xs dim ctl-goals-count">
-            {running} running · {goals.length - running} settled
-          </span>
+          <span className="fine xs dim ctl-goals-count">{goalsCountLine(goals)}</span>
         )}
       </div>
       {goals.length === 0 ? (
@@ -955,6 +1130,7 @@ function GoalsPanel({
             key={g.id}
             goal={g}
             goals={goals}
+            targeted={targeted}
             csrf={csrf}
             // Ruling 260 (F37-91): the server's gate is creator OR run-agents
             // (`requireGoalAuthority`). The page knew only the role half, so a
@@ -1010,12 +1186,15 @@ type GoalConfirm = { kind: "cancel" } | { kind: "skip"; index: number; title: st
 function GoalCard({
   goal,
   goals,
+  targeted,
   csrf,
   canRedirect,
 }: {
-  goal: GoalView;
+  goal: ControllerGoalView;
   /** Every chain on the board, for what a cancel would strand in the others. */
   goals: readonly GoalView[];
+  /** Ruling 476(b): the element id the URL's hash points at. */
+  targeted: string;
   csrf: string;
   canRedirect: boolean;
 }) {
@@ -1047,6 +1226,15 @@ function GoalCard({
   const settled = isSettled(goal);
   const done = goal.links.filter((l) => l.status === "done").length;
   const skipped = goal.links.filter((l) => l.status === "skipped").length;
+  // Ruling 476(g): the links whose task waits on a person, by the board's word.
+  const waitingOn = (kind: CardStatusKind) =>
+    goal.links.filter((l) => l.status === "active" && l.taskStatus?.kind === kind).length;
+  const progress = [
+    `${done} of ${goal.links.length} done`,
+    skipped > 0 && `${skipped} skipped`,
+    waitingOn("you") > 0 && `${waitingOn("you")} waiting on you`,
+    waitingOn("human") > 0 && `${waitingOn("human")} waiting on a human`,
+  ].filter((part) => part !== false);
   const unstarted = goal.links.filter(
     (l) => !l.taskKey && l.status !== "done" && l.status !== "skipped",
   ).length;
@@ -1075,8 +1263,13 @@ function GoalCard({
             {pill.label}
           </Pill>
           <span className="ctl-goal-progress" data-goal-progress>
-            {done} of {goal.links.length} done
-            {skipped > 0 && ` · ${skipped} skipped`}
+            {/* Each part keeps its words together; the line breaks between. */}
+            {progress.map((part, i) => (
+              <Fragment key={part}>
+                {i > 0 && " · "}
+                <span>{part}</span>
+              </Fragment>
+            ))}
           </span>
           <Icon name="chevron" className="disc-chev" />
         </span>
@@ -1084,13 +1277,33 @@ function GoalCard({
       </summary>
       <ol className="ctl-links">
         {goal.links.map((l) => {
-          const held =
-            l.status === "active" && (l.waits ?? []).some((e) => e.state !== "done");
-          const lp = held ? HELD_PILL : (LINK_PILL[l.status] ?? LINK_PILL.pending);
+          const lp = linkPill(l);
+          const anchor = goalLinkAnchor(goal.id, l.index);
           return (
-            <li key={l.index} className={l.index === goal.currentIndex ? "on" : ""}>
+            // Ruling 476(b): every surface names a link by its number ("goal-1
+            // · link 3", "waiting on goal-1 link 1", the controller's "Links 6
+            // and 10"), and the rail printed none, so finding link N meant
+            // counting rows. The row says its number and is the target of
+            // `#goal-1-link-3` (focusable only by that jump).
+            <li
+              key={l.index}
+              id={anchor}
+              tabIndex={-1}
+              className={l.index === goal.currentIndex ? "on" : ""}
+              data-targeted={anchor === targeted || undefined}
+            >
+              <span className="ctl-link-n">
+                <span className="vh">Link </span>
+                {l.index}
+              </span>
               <Pill kind={lp.kind} sm>
                 {lp.label}
+                {lp.resumesAt && (
+                  <>
+                    {" "}
+                    <LocalDayDotTime iso={lp.resumesAt} />
+                  </>
+                )}
               </Pill>
               {/* Ruling 425(c): the link's OWN task sits beside its title. After
                   the wait sentence it read as one more thing waited on: "waits
@@ -1158,12 +1371,25 @@ function GoalCard({
           The task page sends a person here to read the whole chain, and the
           page showed neither the outcome it serves nor its history, where a
           pause, a skip and a cancel's reason are recorded. */}
-      {(goal.description.trim() || goal.history.length > 0) && (
+      {(goal.description.trim() || goal.history.length > 0 || goal.plannedIn) && (
         <details className="ctl-goal-more">
           <summary>
             About this chain
             <Icon name="chevron" className="disc-chev" />
           </summary>
+          {/* Ruling 476(h): the conversation that planned the chain holds the
+              reasoning behind its links and waits; the project's own page
+              said "No conversations yet" beside a chain built in 16 messages
+              at instance scope. Shown only to a viewer who can open it. */}
+          {goal.plannedIn && (
+            <p className="ctl-goal-planned" data-goal-planned>
+              Planned in{" "}
+              <Link className="linkish" to={goal.plannedIn.href}>
+                {goal.plannedIn.title}
+              </Link>
+              <span className="dim"> · {goal.plannedIn.scopeLabel}</span>
+            </p>
+          )}
           {goal.description.trim() && (
             <div className="md-body ctl-goal-desc">
               <Markdown text={goal.description} />

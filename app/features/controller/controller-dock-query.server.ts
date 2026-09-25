@@ -21,6 +21,7 @@ import { resolveControllerName } from "~/server/controller/controller-profile.se
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import {
   conversationTurnState,
+  IDLE_TURN,
   type ConversationTurnState,
 } from "~/server/controller/controller-run.server";
 
@@ -222,7 +223,7 @@ export function getControllerDock(
     ),
     turn: conversation
       ? conversationTurnState(db, conversation.id)
-      : { working: false, runId: null, phase: null, step: null },
+      : IDLE_TURN,
     threads: rows.map((c) => ({
       id: c.id,
       title: c.title || "New conversation",
@@ -280,7 +281,7 @@ export function unavailableDockView(
     conversation: null,
     messages: [],
     taskLinks: {},
-    turn: { working: false, runId: null, phase: null, step: null },
+    turn: IDLE_TURN,
     threads: [],
     viewerOwnsActive: false,
   };

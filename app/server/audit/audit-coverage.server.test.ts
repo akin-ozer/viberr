@@ -44,6 +44,18 @@ import {
   startBackendLogin,
 } from "~/server/runtimes/backend-login.server";
 import { resetSseBrokerForTests } from "~/server/events/sse-broker.server";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  bindRunToMcpGateway,
+  startMcpGateway,
+  stopMcpGateway,
+} from "~/server/mcp-proxy/gateway.server";
+import { sealSecret } from "~/server/secrets/secret-box.server";
+import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
+import { startHttpUpstream } from "../../../test-support/mcp-upstream";
+import { signInWithOAuth, startOAuthMcpServer } from "../../../test-support/mcp-oauth-server";
+import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   installFakeRuntime,
@@ -138,6 +150,8 @@ interface CoverageRow {
   taskKey?: string;
   /** Instance-wide maintenance events have no project subject. */
   instanceWide?: boolean;
+  /** A row about a project other than the fixture's (one being created). */
+  projectSlug?: string;
 }
 
 describe("governed actions record audit rows (table-driven)", () => {
@@ -472,6 +486,61 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // Ruling 461: a call to an admin-marked MCP write tool, made through
+        // Viberr's gateway by a run whose token opens that server.
+        name: "an MCP write-tool call through the gateway",
+        action: "task.agent.mcp_write_call",
+        taskKey: "VIB-1",
+        run: async () => {
+          const upstream = await startHttpUpstream("audit-sentinel");
+          await startMcpGateway({ port: 0 });
+          const client = new Client({ name: "agent-cli", version: "1.0.0" });
+          try {
+            const now = new Date().toISOString();
+            store.db
+              .prepare(
+                `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, tool_policy_json, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              )
+              .run(
+                "mcp_audit",
+                "cloudflare",
+                "HTTP",
+                upstream.url,
+                sealSecret("audit-sentinel"),
+                JSON.stringify([{ name: "delete_zone", gate: "repo-write" }]),
+                now,
+                now,
+              );
+            const resolution = resolveSpecialistMcpServersDetailed(store.db, ["cloudflare"]);
+            const mount = z
+              .object({ url: z.string(), headers: z.object({ Authorization: z.string() }) })
+              .parse(
+                bindRunToMcpGateway({
+                  db: store.db,
+                  runId: "run_audit_gateway",
+                  servers: resolution.servers,
+                  toolDenials: resolution.toolDenials,
+                  actor: { userId: null, label: "agent:claude/developer (Developer)" },
+                  projectSlug: store.slug,
+                  taskKey: "VIB-1",
+                  isLive: () => true,
+                }).cloudflare,
+              );
+            await client.connect(
+              new StreamableHTTPClientTransport(new URL(mount.url), {
+                requestInit: { headers: mount.headers },
+              }),
+            );
+            await client.callTool({ name: "delete_zone", arguments: {} });
+          } finally {
+            await client.close();
+            await stopMcpGateway();
+            await upstream.close();
+          }
+        },
+      },
+      {
         name: "openScopeViolation",
         action: "github.scope_violation.opened",
         run: () =>
@@ -603,6 +672,71 @@ describe("governed actions record audit rows (table-driven)", () => {
           );
         },
       },
+      ...(["updated", "update_failed"] as const).map(
+        (outcome): CoverageRow => ({
+          // Ruling 474: a re-delivery brings the reused PR's body up to date,
+          // and a PATCH GitHub refuses is recorded too.
+          name: `openTaskPr (a reused PR's body, ${outcome === "updated" ? "rewritten" : "refused"})`,
+          action: `github.pr.body_${outcome}`,
+          taskKey: "VIB-74",
+          run: async () => {
+            const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+            const { createPat, setProjectCredential } = await import(
+              "~/server/secrets/pat-store.server"
+            );
+            const { openTaskPr } = await import("~/server/github/pr-open.server");
+            const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
+            const pat = createPat(
+              store.db,
+              {
+                userId: store.users.arda.id,
+                label: "bot",
+                token: `ghp_coverage0000000000000000000474${outcome === "updated" ? "0" : "1"}`,
+              },
+              patActor,
+            );
+            setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+            writeTask(store.dataRoot, store.slug, {
+              frontmatter: baseTaskFrontmatter("VIB-74", {
+                stage: "review",
+                branch: "vib-74-work",
+                pr: { number: 74, state: "review", title: "[VIB-74] work" },
+                workRevision: {
+                  id: "rev_74",
+                  headSha: "f".repeat(40),
+                  treeSha: null,
+                  branch: "vib-74-work",
+                  createdAt: "2026-09-25T08:00:00.000Z",
+                  sourceProfileId: "developer",
+                },
+              }),
+            });
+            rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+            const github = fakeGithubFetch({
+              "GET /repos/akin-ozer/viberr/pulls/74": {
+                body: {
+                  number: 74,
+                  html_url: "https://github.com/akin-ozer/viberr/pull/74",
+                  title: "[VIB-74] work",
+                  state: "open",
+                  head: { sha: "f".repeat(40) },
+                  body: "An older description.",
+                },
+              },
+              "PATCH /repos/akin-ozer/viberr/pulls/74":
+                outcome === "updated"
+                  ? { body: { number: 74 } }
+                  : { status: 422, body: { message: "Validation Failed" } },
+            });
+            await openTaskPr(
+              store.db,
+              { projectSlug: store.slug, taskKey: "VIB-74" },
+              actorArda(),
+              { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+            );
+          },
+        }),
+      ),
       {
         // Ruling 136: one row per collision ceremony with its typed outcome.
         // No credential here, so the ceremony refuses (`no_context`) and is
@@ -785,6 +919,116 @@ describe("governed actions record audit rows (table-driven)", () => {
           }),
       },
       {
+        // Ruling 462: a repository created on GitHub for a project being
+        // created. Its row names the NEW project, not the fixture's.
+        name: "createProject (createRepository: a missing repository is created)",
+        action: "project.repository.created",
+        projectSlug: "audit-site",
+        run: async () => {
+          const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+          const { createPat } = await import("~/server/secrets/pat-store.server");
+          const { createProject } = await import("~/features/home/project-create.server");
+          const pat = createPat(
+            store.db,
+            { userId: store.users.arda.id, label: "connection · audit-org", token: "ghp_coverage000000000000000000000462" },
+            actorArda(),
+          );
+          const now = new Date().toISOString();
+          store.db
+            .prepare(
+              `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+               VALUES (?, ?, ?, 0, ?, ?)`,
+            )
+            .run("audit-org", "audit-org", pat.id, now, now);
+          let created = false;
+          const gh = fakeGithubFetch({
+            "GET /repos/audit-org/audit-site": () =>
+              created
+                ? { body: { default_branch: "main", permissions: { push: true } } }
+                : { status: 404, body: { message: "Not Found" } },
+            "POST /orgs/audit-org/repos": () => {
+              created = true;
+              return { status: 201, body: { full_name: "audit-org/audit-site" } };
+            },
+          });
+          await createProject(
+            store.db,
+            {
+              name: "Audit Site",
+              key: "AUS",
+              owner: "audit-org",
+              repoName: "audit-site",
+              policy: "balanced",
+              createRepository: { private: true },
+            },
+            actorArda(),
+            { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
+          );
+        },
+      },
+      {
+        // Ruling 463: Re-check on a GitHub connection's card re-validates the
+        // stored token and re-reads what it reaches. Instance-wide.
+        name: "recheckConnection",
+        action: "org.connection.rechecked",
+        instanceWide: true,
+        run: async () => {
+          const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+          const { createConnection, recheckConnection } = await import(
+            "~/server/org/connections.server"
+          );
+          const gh = fakeGithubFetch({
+            "GET /user": { body: { login: "audit-reach" }, headers: { "x-oauth-scopes": "repo" } },
+            "GET /users/audit-reach": { body: {} },
+            "GET /user/repos": { body: [] },
+          });
+          await createConnection(
+            store.db,
+            { owner: "audit-reach", token: "ghp_auditreach00000000000000000463", userId: store.users.arda.id },
+            actorArda(),
+            { fetchImpl: gh.fetchImpl },
+          );
+          await recheckConnection(store.db, "audit-reach", actorArda(), {
+            fetchImpl: gh.fetchImpl,
+          });
+        },
+      },
+      {
+        // Ruling 464: the controller's `remove_agent_deployment` reaches the
+        // Agents page's own removal, with its reason and the open-engagement
+        // refusal, and records the page's own audit action.
+        name: "deleteAgentProfile (the controller's removal, with a reason)",
+        action: "project.agent_profile.deleted",
+        run: async () => {
+          seedDefaultAgentAssets(store.dataRoot);
+          writeFileSync(
+            path.join(store.dataRoot, "agents", "profiles", "audit-removal.md"),
+            "---\nid: audit-removal\nkind: specialist\nname: Audit Removal\nrole: Docs\nbackends:\n  - claude\nmodel: sonnet\nstages:\n  - impl\n---\n\nA probe.\n",
+            "utf8",
+          );
+          await deployAgentProfileFromLibrary(
+            store.db,
+            { projectSlug: store.slug, profileId: "audit-removal" },
+            actorArda(),
+            fileCtx,
+          );
+          const { deleteAgentProfile } = await import(
+            "~/features/agents/agent-profile-actions.server"
+          );
+          await deleteAgentProfile(
+            store.db,
+            {
+              projectSlug: store.slug,
+              profileId: "audit-removal",
+              reason: "Not in the designed roster.",
+              refuseOpenEngagements: true,
+            },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
+      {
         // Ruling 156 (pass 35): a template's grants copied onto a project's
         // deployment, one row per project.
         name: "propagateTemplateResources",
@@ -820,6 +1064,69 @@ describe("governed actions record audit rows (table-driven)", () => {
           );
         },
       },
+      {
+        // Ruling 482: the project's gates (Settings → Gates, the controller's
+        // set_project_gates).
+        name: "setProjectGates",
+        action: "project.gates.updated",
+        run: async () => {
+          const { setProjectGates } = await import(
+            "~/features/project-settings/settings-actions.server"
+          );
+          await setProjectGates(
+            store.db,
+            { projectSlug: store.slug, gates: [{ name: "build", command: "true" }] },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
+      {
+        // Ruling 482: a person asks Viberr to run the gates again.
+        name: "runProjectGatesByHand",
+        action: "task.gates.requested",
+        taskKey: "VIB-2",
+        run: async () => {
+          const { runProjectGatesByHand } = await import("~/server/tasks/task-actions.server");
+          await runProjectGatesByHand(
+            store.db,
+            { projectSlug: store.slug, taskKey: "VIB-2" },
+            actorArda(),
+            fileCtx,
+          );
+        },
+      },
+      // Ruling 469: an MCP connection's OAuth sign-in, against the in-test
+      // authorization server. Instance-wide: the registry is org-level.
+      ...(["org.mcp.oauth_connected", "org.mcp.oauth_failed", "org.mcp.oauth_signed_out"] as const).map(
+        (action): CoverageRow => ({
+          name: `MCP OAuth sign-in (${action})`,
+          action,
+          instanceWide: true,
+          run: async () => {
+            const oauth = await startOAuthMcpServer(
+              action === "org.mcp.oauth_failed" ? { consent: "deny" } : {},
+            );
+            try {
+              const id = `mcp_${action.replace(/\W/g, "_")}`;
+              const now = new Date().toISOString();
+              store.db
+                .prepare(
+                  `INSERT INTO org_mcp_servers (id, name, transport, target, created_at, updated_at)
+                   VALUES (?, ?, 'HTTP', ?, ?, ?)`,
+                )
+                .run(id, id.replace(/_/g, "-"), oauth.url, now, now);
+              await signInWithOAuth(store.db, id);
+              if (action === "org.mcp.oauth_signed_out") {
+                await signOutMcpOAuth(store.db, id, actorArda());
+              }
+            } finally {
+              resetMcpOAuthForTests();
+              await oauth.close();
+            }
+          },
+        }),
+      ),
     ];
 
     for (const row of table) {
@@ -835,7 +1142,7 @@ describe("governed actions record audit rows (table-driven)", () => {
       expect(
         newest.projectSlug,
         `${row.name}: ${row.action} must carry projectSlug`,
-      ).toBe(row.instanceWide ? null : store.slug);
+      ).toBe(row.instanceWide ? null : (row.projectSlug ?? store.slug));
       const taskless = [
         "github.credential.revalidated",
         "projection.rescan",
@@ -848,6 +1155,18 @@ describe("governed actions record audit rows (table-driven)", () => {
         "profile.backend.login_cancelled",
         // Ruling 156: a project-scoped row with no task.
         "project.agent_profile.resources_synced",
+        // Ruling 462: the repository a new project is created with.
+        "project.repository.created",
+        // Ruling 463: a GitHub connection belongs to the instance.
+        "org.connection.rechecked",
+        // Ruling 464: a deployment taken off a project's roster.
+        "project.agent_profile.deleted",
+        // Ruling 469: an org MCP connection's OAuth sign-in.
+        "org.mcp.oauth_connected",
+        "org.mcp.oauth_failed",
+        "org.mcp.oauth_signed_out",
+        // Ruling 482: the project's gate list, a project-scoped row.
+        "project.gates.updated",
       ].includes(row.action);
       if (!taskless) {
         expect(

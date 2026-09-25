@@ -3530,6 +3530,35 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".md-body code.mono")).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
+  it("ruling 476(a): a link in markdown may break a long URL rather than push the transcript sideways", () => {
+    // Measured live (F40-21): the dock's transcript scrolled 702px in 388,
+    // with 142 of 228 links past its edge; /controller at 375px 693px in 315.
+    // CANARY: drop `overflow-wrap: anywhere` from `.md-body a`.
+    expect(ruleBody(CODE, ".md-body a")).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("ruling 476(i): markdown prose may break any long token, and code blocks and tables keep their scrollers", () => {
+    // Measured live after the 476(a) fix: "Added/Changed/Deprecated/Removed/
+    // Fixed/Security." in a list item scrolled /controller's transcript at
+    // 375px 433px in 315, and the dock's 442 in 388.
+    // CANARY: drop the prose rule, or the reset on code blocks and tables.
+    const wrap = (selector: string) =>
+      RULES.filter((r) => r.at.length === 0 && r.selector.split(",").map((s) => s.trim()).includes(selector))
+        .flatMap((r) => r.decls.get("overflow-wrap") ?? [])
+        .at(-1);
+    const prose = [".md-body p", ".md-body li", ".md-body blockquote", ".md-body h1", ".md-body h2", ".md-body h3", ".md-body h4", ".md-body h5", ".md-body h6"];
+    for (const selector of prose) expect(wrap(selector), selector).toBe("anywhere");
+    for (const scroller of [".md-body pre", ".md-table-wrap"]) expect(wrap(scroller), scroller).toBe("normal");
+  });
+
+  it("ruling 476(e): in one column the thread switcher takes a row of its own", () => {
+    // Measured at 375px (F40-25): 97px beside New and Home, reading "Hi. I'm s".
+    // CANARY: restore `flex: 1 1 0` on the picker, or drop the row's wrap.
+    const narrow = collapse();
+    expect(ruleBody(narrow, ".ctl-wrap .ctl-head-acts")).toMatch(/flex-wrap:\s*wrap/);
+    expect(ruleBody(narrow, ".ctl-wrap .ctl-picker")).toMatch(/flex:\s*1 1 100%/);
+  });
+
   it("ruling 419(e): a packet's code observation keeps its line breaks", () => {
     // CANARY: drop `white-space: pre-wrap` from `.obs code`.
     expect(ruleBody(CODE, ".obs code")).toMatch(/white-space:\s*pre-wrap/);
@@ -3746,8 +3775,10 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
       }
     }
     expect(problems).toEqual([]);
-    // Sixteen boxes keyed on a refusal counter, and the login page's two.
-    expect(carriers).toHaveLength(18);
+    // Eighteen boxes keyed on a refusal counter, and the login page's two.
+    // Ruling 478(e) added the packet's "Choose an answer" and "Write your
+    // answer" refusals.
+    expect(carriers).toHaveLength(20);
   });
 
   it("every motion this ruling adds has a reduced-motion answer that does not move", () => {
@@ -4361,6 +4392,47 @@ describe("interface review 2026-09-24: the MEDIUM fixes", () => {
  * The move-back glyph and the markup halves of the other two are pinned by
  * the task-disposition, execution-profile and top-bell suites.
  */
+describe("app.css ruling 478: the task page at phone width", () => {
+  const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
+  const PHONE = "@media (max-width: 720px)";
+  /** The declarations `selector` gets from its own rules in `at` (plain when empty). */
+  const declsAt = (selector: string, at: string[]) => {
+    const hit = RULES.filter((r) => parts(r).includes(selector) && r.at.join("|") === at.join("|"));
+    expect(hit.length, `${selector} must have a rule in ${at.join(" ") || "the plain sheet"}`).toBeGreaterThan(0);
+    const out = new Map<string, string>();
+    for (const r of hit) for (const [k, v] of r.decls) out.set(k, v);
+    return out;
+  };
+
+  it("(b) F40-32: a file row's name takes its own line on a phone and shows whole", () => {
+    // WEB-3 at 375px: both files read "WEB-3…", the name left 48px beside a
+    // fixed 144px by-line and the size. CANARY: drop the `a.attach-file` rules
+    // from the 720px block.
+    expect(declsAt("a.attach-file", [PHONE]).get("flex-wrap")).toBe("wrap");
+    const name = declsAt("a.attach-file .attach-name", [PHONE]);
+    // The whole row beside the icon (15px) and its gap (.5rem).
+    expect(name.get("flex")).toBe("1 1 calc(100% - 15px - .5rem)");
+    expect(name.get("white-space")).toBe("normal");
+    expect(name.get("overflow-wrap")).toBe("anywhere");
+    // The by-line gives way instead of holding its width.
+    const by = declsAt("a.attach-file .attach-by", [PHONE]);
+    expect(by.get("flex")).toBe("0 1 auto");
+    expect(by.get("min-width")).toBe("0");
+    // The base rules the phone rules must outrank are declared LATER in the
+    // sheet, so the phone selectors carry one type selector more.
+    expect(declsAt(".attach-file .attach-name", []).get("flex")).toBe("1");
+    expect(declsAt(".attach-file .attach-by", []).get("flex")).toBe("none");
+  });
+
+  it("(c) F40-33: the live strip's text column may shrink below the step's 44ch", () => {
+    // WEB-2 at 375px: the step ran to x=388 in a 341px strip and the page
+    // scrolled sideways. CANARY: drop `.run-phase-text { min-width: 0 }`.
+    expect(declsAt(".run-phase-text", []).get("min-width")).toBe("0");
+    expect(declsAt(".run-phase", []).get("min-width")).toBe("0");
+    expect(declsAt(".run-phase .step", []).get("text-overflow")).toBe("ellipsis");
+  });
+});
+
 describe("better-ui review 2026-09-24: the small leftovers", () => {
   const parts = (r: CssRule) => r.selector.split(",").map((s) => s.trim());
   const plain = RULES.filter((r) => r.at.length === 0);
@@ -5645,7 +5717,11 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
         if ((m[1]!.match(/<Icon name="chevron" className="disc-chev" \/>/g) ?? []).length !== 1) bare.push(where);
       }
     }
-    expect(summaries).toHaveLength(4);
+    // Four, and since ruling 463 a GitHub connection's reach, and since ruling
+    // 479(a) the capability matrix's "Advisory only" list, and since ruling 484
+    // a changed file in the task's Changes panel, and since ruling 486 the
+    // scopes an MCP server's OAuth sign-in was granted.
+    expect(summaries).toHaveLength(8);
     expect(bare).toEqual([]);
   });
 
@@ -5948,8 +6024,23 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/org-settings/users-panel.tsx: lock → loader (spins)",
         "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
         "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
+        // Ruling 469: the MCP editor's Sign in and Sign out.
+        "features/org-settings/resource-modals.tsx: user → loader (spins)",
+        "features/org-settings/resource-modals.tsx: x → loader (spins)",
         "features/task-detail/decision-packet.tsx: message → loader (spins)",
         "features/policy/policy-page.tsx: x → loader (spins)",
+        // Ruling 463: a GitHub connection's Re-check.
+        "features/org-settings/connections-panel.tsx: refresh → loader (spins)",
+        // Ruling 482: the PR card's Run gates, an in-flight starter like the
+        // ones above.
+        "features/task-detail/task-side-panels.tsx: refresh → loader (spins)",
+
+        // Ruling 484: the Changes panel's toggle (while its reader loads), its
+        // Try again, a file's Load this file, and Send to the deliverer.
+        "features/task-detail/changes-slot.tsx: chevron → loader (spins)",
+        "features/task-detail/changes-panel.tsx: refresh → loader (spins)",
+        "features/task-detail/changes-panel.tsx: file → loader (spins)",
+        "features/task-detail/changes-panel.tsx: send → loader (spins)",
       ].sort(),
     );
     // The cell centres both marks, whatever their box.

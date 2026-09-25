@@ -27,6 +27,7 @@ import {
   setProjectArchived,
   inviteMember,
   parseFileLeasesField,
+  parseProjectGatesField,
   parseRequiredReviewerRulesField,
   removeMember,
   removeStage,
@@ -35,6 +36,7 @@ import {
   repairProjectRepo,
   setBranchCleanup,
   setProjectFileLeases,
+  setProjectGates,
   setRequiredReviewers,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
@@ -229,6 +231,16 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         return { ok: true as const, toast: result.toast };
       }
+      // Ruling 482: the gate table, posted whole through the writer the
+      // controller's `set_project_gates` calls.
+      case "set-project-gates": {
+        const result = await setProjectGates(
+          db,
+          { projectSlug: slug, gates: parseProjectGatesField(field("gates")) },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
       case "grant-scope": {
         // The single guard path consulting the ACTION_ROLES source:
         // `grant-github-scope` (maintainer+), same as the GitHub view's action
@@ -240,7 +252,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       }
       case "set-credential":
       case "clear-credential": {
-        // Attach/rotate + remove the credential — `grant-github-scope` tier.
+        // Attach/re-attach + remove the credential — `grant-github-scope` tier.
         // Archived read-only gate enforced (R8-5).
         assertProjectAction(db, "grant-github-scope", slug, actor, "change the credential");
         return intent === "set-credential"
@@ -281,6 +293,7 @@ export default function SettingsView({ loaderData }: Route.ComponentProps) {
       data={loaderData.view}
       meId={layout?.user.id ?? null}
       myRole={layout?.myRole ?? null}
+      instanceAdmin={layout?.user.role === "admin"}
     />
   );
 }

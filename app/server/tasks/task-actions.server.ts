@@ -47,6 +47,7 @@ import {
   deliveringEngagement,
   type Engagement,
   deriveValidation,
+  requiredReviewers,
   normalizeEvidenceRows,
   sanitizeEventAttachmentNames,
   EVIDENCE_EMPTY_COLUMN,
@@ -66,7 +67,15 @@ import {
   PACKET_NOTE_MAX,
   VERDICT_REPORT_TITLE,
 } from "~/schemas/task-file.schema";
-import type { ProjectRole } from "~/schemas/project-file.schema";
+import type { ProjectGate, ProjectRole } from "~/schemas/project-file.schema";
+// Ruling 482: the gates' view and refusal, one pure home for every surface.
+import {
+  gateOutcomeText,
+  gateWallTime,
+  projectGatesRefusal,
+  projectGatesView,
+  type GatesView,
+} from "~/shared/project-gates";
 // R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
 // consult the human GitHub approval synchronously without the dynamic-import
 // dance the rest of the github/ surface needs to stay cycle-free.
@@ -85,6 +94,7 @@ import type {
   OperatorAutonomy,
   OperatorOpenPacketInput,
   OperatorPacketOptionInput,
+  operatorDispatchAgent,
 } from "./operator-actions.server";
 import {
   agentNamesOf,
@@ -158,6 +168,9 @@ import {
   acceptanceDisclosureDrift,
   type AcceptanceDisclosure,
 } from "~/shared/acceptance-disclosure";
+// Ruling 471: which open-decision option a direct acceptance answers — the one
+// predicate the write below and the accept dialog's loader both read.
+import { acceptanceAnswerOf } from "~/shared/packet-acceptance-answer";
 import {
   taskRef,
   reprojectTask,
@@ -334,6 +347,11 @@ export interface TaskActionDeps {
    *  drain's contract is WHAT it sends and in what order, and both are
    *  unobservable through a real run. */
   startAgentRun?: typeof startAgentRun;
+  /** Ruling 475: the dispatch the operator's conflict handoff starts the
+   *  delivering agent through. Injected for the same reason: the handoff's
+   *  contract is WHOM it sends and with WHAT directive, and a real run would
+   *  prepare a workspace from GitHub. */
+  dispatchAgent?: typeof operatorDispatchAgent;
 }
 
 /** The mutation ctx plus the test seams: the impls above, and the mock
@@ -756,12 +774,37 @@ export async function createTask(
     frontmatter,
     goal: input.goal?.trim() || DEFAULT_GOAL,
   };
+  // Ruling 477(b) (F40-28): a goal chain starting its link is the chain's act,
+  // done on a person's authority, not that person's own. Live, the Activity
+  // stream's Humans filter credited the owner with three "Took task ownership
+  // by creating the task" rows (and three "Waits on other work" notes) in the
+  // second WEB-1 was accepted, for WEB-2..4 the chain made. The creation's
+  // events are signed by the chain and name the person whose authority it ran
+  // on; the seat, the `task.created` audit row and its actor are unchanged.
+  const chainLink = input.goalRef ?? null;
+  const chain: FileActorRef | null = chainLink
+    ? { kind: "system", systemId: "goal-chain" }
+    : null;
   // The same `assign` event a take through `setOwner` writes, so the timeline
   // reads the same however the seat was filled (ruling 127).
   // Ruling 255: ONE creation is one instant. Every event this write puts on the
   // timeline carries the frontmatter's own `now`, so the file's order is the
   // deliberate arrangement and not a race between two `new Date()` calls.
-  if (creator && seat === "named" && namedOwner) {
+  if (creator && chain && chainLink) {
+    const authority = userName(db, creator.userId);
+    const owner = seat === "named" && namedOwner ? namedOwner.name : authority;
+    createInput.timeline = [
+      {
+        ...ownerAssignEvent(
+          db,
+          creator,
+          `Started by **${chainLink.goalId}** as link ${chainLink.linkIndex}, on ${authority}'s authority, with ${owner} as owner. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.`,
+          now,
+        ),
+        actor: chain,
+      },
+    ];
+  } else if (creator && seat === "named" && namedOwner) {
     createInput.timeline = [
       ownerAssignEvent(
         db,
@@ -786,7 +829,8 @@ export async function createTask(
     const waitNote: TaskFileEvent = {
       occurredAt: now,
       type: "note",
-      actor: creator ? humanActorRef(db, creator) : { kind: "operator" },
+      // Ruling 477(b): a chain's link declared this wait, so the chain signs it.
+      actor: chain ?? (creator ? humanActorRef(db, creator) : { kind: "operator" }),
       title: "Waits on other work",
       // Ruling 356(b): the note names a done entry as done, like every other
       // hold sentence — 4 of 56 creation notes on the instance had named a task
@@ -1443,7 +1487,10 @@ export async function autoInvokeOperator(
     // the branch in conflict. Only the operator can run the workspace merge
     // that resolves it, so the refusal is handed here rather than left as a
     // sentence telling a person to do git they have no checkout for.
-    | "pr-conflicting",
+    | "pr-conflicting"
+    // Ruling 482: the project's gates failed on the revision under review.
+    // Only the operator dispatches the rework, so the result is handed here.
+    | "gates-failed",
   options: AutoInvokeOptions = {},
 ): Promise<void> {
   const { transitionDepth, transition, resolvedOption, dependencyRelease } = options;
@@ -1559,6 +1606,11 @@ export async function appendComment(
      *  agent like `@dev` is mentioned — the reserved-handle regex alone would
      *  miss profile-name mentions). */
     forceToAgent?: boolean;
+    /** Ruling 484: a server-side writer's own record, applied in the SAME
+     *  locked write that appends the comment (the review relay stamps the
+     *  GitHub ids it relayed, so a relay is recorded exactly when its comment
+     *  is). Never set by a route. */
+    alsoWrite?: (parsed: ParsedTaskFile) => void;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -1610,6 +1662,7 @@ export async function appendComment(
   const nonDeliveryNote = mentionNonDeliveryNote(db, text, input.projectSlug);
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.timeline.unshift(event);
+    input.alsoWrite?.(parsed);
     if (nonDeliveryNote.length > 0) {
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
@@ -1788,6 +1841,9 @@ export function canonicalTaskAnchor(input: {
    *  warning about the file it was given to own. Absent on a hand-built
    *  anchor; the real producers always pass the project's list. */
   fileLeases?: readonly FileLease[];
+  /** Ruling 482: the project's declared gates, so a run reads what Viberr
+   *  itself ran on the revision under review. Absent on a hand-built anchor. */
+  gates?: readonly ProjectGate[];
   parsed: ParsedTaskFile;
   /** Display name of the CURRENT stage (falls back to the stage id). */
   stageName: string;
@@ -1876,6 +1932,31 @@ export function canonicalTaskAnchor(input: {
         v.reason.trim()
           ? anchorClamp(v.reason, ANCHOR_VERDICT_MAX_CHARS)
           : "_No reason recorded._",
+      );
+    }
+  }
+  /**
+   * Ruling 482 (F40-52): the project's gates, as Viberr ran them. On WEB-1 the
+   * deliverer, the Site Reviewer and the Fact Checker each ran the same four
+   * gates by hand and reported the exit codes in prose, because nothing told
+   * them the server had a record. The reviewer reads the record here instead
+   * of re-running it, and nobody's report is what a person accepts on.
+   */
+  const gates = projectGatesView(input.gates, fm);
+  if (gates) {
+    lines.push("");
+    lines.push("### Project gates (run by Viberr on the revision under review)");
+    lines.push(
+      `${gates.line}. Viberr runs the project's gates itself on every delivered revision, as ` +
+        "this task's owner, and records each exit code; a person accepts on this record, not on " +
+        "any report. Do not re-run the gates to report their result, and never report a gate as " +
+        "passing that is not listed here as exit 0.",
+    );
+    if (gates.error) lines.push(`The run could not execute: ${gates.error}`);
+    for (const r of gates.results) {
+      const log = r.log ? ` · log: attachments/${r.log}` : "";
+      lines.push(
+        `- \`${r.name}\` (\`${anchorClamp(r.command, ANCHOR_EVENT_MAX_CHARS)}\`): ${gateOutcomeText(r)} in ${gateWallTime(r.wallMs)}${log}`,
       );
     }
   }
@@ -2000,6 +2081,8 @@ export async function commentToAgent(
      *  skips the "Mention not started" note on a second failure, because the
      *  first attempt's note already says why. Never set by a route. */
     redelivered?: boolean;
+    /** Ruling 484: see `appendComment`. Never set by a route. */
+    alsoWrite?: (parsed: ParsedTaskFile) => void;
   },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
@@ -2223,6 +2306,8 @@ export async function commentToAgent(
       anchor = canonicalTaskAnchor({
         parsed: existing.parsed,
         stageName: stageName(project, existing.parsed.frontmatter.stage),
+        // Ruling 482: what Viberr ran on the revision under review.
+        gates: project.gates,
       });
     } catch {
       // A missing/unreadable project file must never block a reply run — fall
@@ -3713,6 +3798,9 @@ function deadlockAgentNames(
   return file ? agentNamesOf(file.parsed.frontmatter) : new Map();
 }
 
+/** "A", "A and B", "A, B, and C": the reviewers a verdict event names. */
+const LIST_AND = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+
 /**
  * Ruling 292: the longest verdict justification stored on a task, and the
  * sentence that ships when it does not fit.
@@ -4127,10 +4215,36 @@ export async function recordAgentCompletion(
               `, verified against \`${noChangeMint.baseBranch}\` at \`${noChangeMint.baseSha!.slice(0, 12)}\`. Accepting completes this task with no changes.`
             : `${roleDisplay} approved the work${onRevision}.`;
         } else {
-          // Approved, but not yet cleared: another required reviewer is
-          // outstanding or has requested changes on the current revision.
-          title = "Approval noted, rework still needed";
-          summary = `${roleDisplay} approved, but the current revision is not yet cleared by all required reviewers.`;
+          // Approved, but not yet cleared. Ruling 478(g) (F40-58): WHY decides
+          // the words. "Rework still needed" is true only when another
+          // required reviewer has requested changes (`failing`); while one has
+          // simply not reported (`changed`), the same title told the owner's
+          // bell that rework was needed on a revision nobody had objected to,
+          // minutes before "Review passed" (WEB-1, WEB-2, WEB-4).
+          const names = deadlockAgentNames(ctx, projectSlug);
+          const current = currentVerdicts(parsed.frontmatter);
+          const resultOf = (profileId: string) =>
+            current.find((v) => v.profileId === profileId)?.result;
+          const nameList = (engagements: readonly Engagement[]) =>
+            LIST_AND.format(engagements.map((e) => names.get(e.profileId) ?? e.role));
+          const required = requiredReviewers(parsed.frontmatter);
+          const objecting = required.filter((e) => resultOf(e.profileId) === "request_changes");
+          const pending = required.filter((e) => resultOf(e.profileId) !== "approve");
+          if (validation === "failing" && objecting.length > 0) {
+            title = "Approval noted, rework still needed";
+            summary =
+              `${roleDisplay} approved${onRevision}, but ${nameList(objecting)} ` +
+              `requested changes on it, so it is not cleared.`;
+          } else if (pending.length > 0) {
+            title = `Approval noted, waiting on ${nameList(pending)}`;
+            summary =
+              `${roleDisplay} approved${onRevision}. ${nameList(pending)} ` +
+              `${pending.length === 1 ? "has" : "have"} not reviewed it yet, ` +
+              "and acceptance waits for every required reviewer.";
+          } else {
+            title = "Approval noted";
+            summary = `${roleDisplay} approved${onRevision}.`;
+          }
         }
         // A not-yet-acceptable state makes a pending accept-completion
         // recommendation stale (the acceptance gate would 409), so drop it: the
@@ -4405,7 +4519,9 @@ export async function recordAgentCompletion(
       const askNotice: TaskWatcherNotice = {
         projectSlug,
         taskKey,
-        kind: "approval",
+        // Ruling 481(a) (F40-48): the same `question` kind the Claude door
+        // writes (agent-toolkit.server.ts), with its own pill and toggle.
+        kind: "question",
         title: `${roleDisplay} asks: ${question!.title.trim()}`,
         text: question!.body ?? "An engaged agent needs a human decision.",
         // Ruling 361: the asker by name; the Operator only when the operator asked.
@@ -8104,6 +8220,15 @@ export async function performDelivery(
         // never turned into an error by a failure to record the follow-up card.
         await recordDeliveredNextStep(db, ctx, projectSlug, taskKey, result.prNumber);
       }
+      // Ruling 482 (F40-52): the delivered revision is gated by Viberr, not by
+      // an agent's report. Queued here and run off this path; a revision whose
+      // gates already ran (a reuse that moved nothing) is not run again.
+      const { requestProjectGatesQuietly } = await import("./project-gates.server");
+      await requestProjectGatesQuietly(
+        db,
+        { projectSlug, taskKey, dataRoot: ctx.dataRoot, deps: ctx.deps },
+        "delivery",
+      );
       return {
         status: "delivered",
         prNumber: result.prNumber,
@@ -8336,6 +8461,46 @@ export async function manualDeliverForReview(
         : { status: outcome.status },
   });
   return outcome;
+}
+
+/**
+ * Ruling 482 (F40-52): a person runs the project's gates on the revision under
+ * review again — after an interrupted or failed run, a gate list edited, or a
+ * flaky gate. The same authority as a manual delivery (maintainer+, or the
+ * task's owner), because it spends the same host time. Queued, never run on
+ * this request; a run already queued or running on this revision is not
+ * doubled. Audited `task.gates.requested`.
+ */
+export async function runProjectGatesByHand(
+  db: DatabaseSync,
+  input: { projectSlug: string; taskKey: string },
+  actor: TaskActor,
+  ctx: TaskActionContext = {},
+): Promise<{ status: "queued" | "current" | "not_owed"; message: string }> {
+  const project = loadProjectContext(ctx, input.projectSlug);
+  const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+  if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
+  if (ownerException(project, actor, existing.parsed.frontmatter.ownerUserId)) {
+    requireProjectMutable(project, "run the project's gates");
+  } else {
+    requireAction(db, project, actor, "run-agents", "run the project's gates");
+  }
+  const { requestProjectGates } = await import("./project-gates.server");
+  const outcome = await requestProjectGates(
+    db,
+    { projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: ctx.dataRoot, deps: ctx.deps },
+    { reason: "person", force: true },
+  );
+  recordAudit(db, {
+    action: "task.gates.requested",
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "task",
+    subjectId: input.taskKey,
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    details: { status: outcome.status, runId: outcome.runId ?? null },
+  });
+  return { status: outcome.status, message: outcome.message };
 }
 
 /**
@@ -9853,6 +10018,15 @@ export async function resolvePacket(
   } else {
     const picked = packet.options[input.optionIndex];
     if (!picked) throw AppError.validation("Unknown packet option.");
+    // Ruling 478(e) (F40-31): a choice the asking agent marked as needing the
+    // person's typed answer is not an answer without it. The card refuses
+    // first; this is the same refusal for any other door.
+    if (picked.reply && noteText.trim() === "") {
+      throw AppError.validation(
+        `"${picked.t}" needs your answer: write it in the box under the options and ` +
+          "confirm again. Nothing was recorded.",
+      );
+    }
     option = picked;
   }
   // R20-1 (F20-5): a packet that has already recorded a decision accepts no
@@ -12512,6 +12686,12 @@ function acceptanceRefusalReasons(
         opts.noChange.refusal == null &&
         opts.noChange.verification?.basis !== "no_repo",
     ),
+    // Ruling 482 (F40-52): the project's gates, run by Viberr on the revision
+    // under review, must all have exited 0 there. Evidence that is missing,
+    // stale or still running refuses too; force accept bypasses it on the
+    // record like every gate here. Same position in the projection's
+    // `acceptanceBlockReason`.
+    projectGatesRefusal(project.gates, fm, taskKey),
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Resolving the packet clears readiness.
     opts.blockedPacket
@@ -12561,7 +12741,10 @@ export interface ForceAcceptDisclosure {
    *  the task is not at the acceptance boundary (R19-5: force may skip them). */
   skippedStageIds: string[];
   validation: Validation;
-  /** The open decision packet the acceptance withdraws unanswered, by title. */
+  /** The open decision packet the acceptance withdraws unanswered, by title.
+   *  Null when there is none, and (ruling 471) when the forced acceptance
+   *  ANSWERS it instead, because it offers `force_accept` or
+   *  `accept_completion`. */
   withdrawnPacket: string | null;
 }
 
@@ -12598,7 +12781,13 @@ function forceAcceptDisclosure(
     gates,
     skippedStageIds,
     validation: deriveValidation(fm),
-    withdrawnPacket: parsed.packet?.title ?? null,
+    // Ruling 471: a decision this force answers is not withdrawn, so neither
+    // the forced completion event nor the `task.acceptance.forced` row may say
+    // it died unanswered.
+    withdrawnPacket:
+      parsed.packet && !acceptanceAnswerOf(parsed.packet, "force")
+        ? parsed.packet.title
+        : null,
   };
 }
 
@@ -12632,7 +12821,9 @@ function forceBypassClause(project: ProjectContext, disclosure: ForceAcceptDiscl
   if (disclosure.withdrawnPacket) {
     parts.push(`the open decision "${disclosure.withdrawnPacket}" withdrawn unanswered`);
   }
-  return parts.length > 0 ? ` Bypassed: ${parts.join("; ")}` : "";
+  // Ruling 471: the list ends its sentence, because the answered-decision
+  // clause `applyAcceptanceWrite` may append starts a new one.
+  return parts.length > 0 ? ` Bypassed: ${parts.join("; ")}.` : "";
 }
 
 /**
@@ -13264,6 +13455,14 @@ export interface AcceptanceAffordance {
    * component tests keep compiling; every server path sets it explicitly.
    */
   verdictSatisfiedBy?: string | null;
+  /**
+   * Ruling 482 (F40-52): the project's gates on the revision under review, as
+   * Viberr ran them — the line the PR card and the accept dialog print
+   * ("Gates on a95c337: 4/4 exit 0 (run by Viberr)") and each result. Absent
+   * when the project declares no gates or nothing is delivered (the resolver
+   * never sets it to null, so a project without gates ships no key).
+   */
+  gates?: GatesView | null;
 }
 
 /**
@@ -13305,6 +13504,12 @@ export function resolveAcceptanceAffordance(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) return denied;
   const fm = existing.parsed.frontmatter;
+  // Ruling 482: shown whatever the viewer may do and wherever the task sits,
+  // so the evidence reads the same on a Done task as it did at the boundary.
+  // Absent (not null) when there is nothing to show: the task page's payload
+  // is budgeted (ruling 457), and a project with no gates ships no key.
+  const gates = projectGatesView(project.gates, fm);
+  if (gates) denied.gates = gates;
   const role = project.memberRoles.get(input.viewerUserId) ?? null;
   const hasAuthority =
     roleCan(role, "accept-completion") ||
@@ -13336,7 +13541,7 @@ export function resolveAcceptanceAffordance(
     blockedPacket: fm.readiness === "blocked" && existing.parsed.packet?.type === "blocked",
   });
   const blockedReason = blockedGates[0] ?? null;
-  return {
+  const affordance: AcceptanceAffordance = {
     hasAuthority,
     atBoundary,
     blockedReason,
@@ -13350,6 +13555,8 @@ export function resolveAcceptanceAffordance(
     // R19-B: name the human whose GitHub approval cleared the verdict gate.
     verdictSatisfiedBy: humanVerdictSentence(fm),
   };
+  if (gates) affordance.gates = gates;
+  return affordance;
 }
 
 /** R19-B — "Approved on GitHub by Arda (@arda) on the delivered revision
@@ -13564,6 +13771,11 @@ interface WithdrawnPacket {
 interface WithdrawnPacketRef {
   current: WithdrawnPacket | null;
 }
+/** Ruling 471: the open decision a direct human acceptance ANSWERED, and the
+ *  option it answered with, captured inside the file lock like its sibling. */
+interface AnsweredPacketRef {
+  current: { packetKind: string; option: PacketOption } | null;
+}
 
 export async function applyAcceptanceWrite(
   db: DatabaseSync,
@@ -13591,6 +13803,15 @@ export async function applyAcceptanceWrite(
     /** Ruling 88 (F21-2): the disclosure the human acknowledged, re-compared
      *  under the lock. See `assertAcceptanceDisclosure` for the three states. */
     ack?: AcceptanceDisclosure | null;
+    /** Ruling 471: the PERSON whose direct acceptance this is. Set by every
+     *  human door (`acceptCompletion`, plain or forced), and then an open
+     *  decision that offers the option this acceptance performs
+     *  (`acceptanceAnswerOf`) is ANSWERED with it: the `task.packet.resolved`
+     *  row the packet door writes, under this person, marked `via`, and no
+     *  withdrawal. Absent on the operator's own acceptance, which answers no
+     *  question put to a person, so every open decision is withdrawn as
+     *  before (F32-11). */
+    answerer?: TaskActor;
   },
 ): Promise<{ accepted: boolean }> {
   const project = loadProjectContext(ctx, input.projectSlug);
@@ -13614,6 +13835,9 @@ export async function applyAcceptanceWrite(
   // captured inside the lock so the note and the audit row name the packet
   // that was actually there, not the one the caller read before waiting.
   const withdrawn: WithdrawnPacketRef = { current: null };
+  // Ruling 471: or the open decision this acceptance ANSWERS, captured in the
+  // same place for the same reason.
+  const answered: AnsweredPacketRef = { current: null };
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     // U3 (NFR16) — the callers' "already Done → return" check reads the file
     // OUTSIDE this lock, so two concurrent acceptances of one task both passed
@@ -13704,7 +13928,24 @@ export async function applyAcceptanceWrite(
     // Done task); acceptance consumes every open offer, matching the packet
     // resolution path's long-standing behavior.
     parsed.frontmatter.recommendations = [];
-    if (parsed.packet) {
+    // Ruling 471: a person's direct acceptance ANSWERS the open decision when
+    // it offers the option this acceptance performs. Live on WEB-1 the
+    // operator recommended "Accept WEB-1 and merge PR #1", the owner pressed
+    // Accept, and the note below said the decision "was never answered". The
+    // packet door choosing that same option recorded an answer.
+    const answer =
+      parsed.packet && input.answerer
+        ? acceptanceAnswerOf(parsed.packet, input.forced ? "force" : "accept")
+        : null;
+    if (parsed.packet && answer) {
+      answered.current = { packetKind: parsed.packet.kind, option: answer.option };
+      // The packet door's own `accept_completion` answer IS its completion
+      // event, so the answer rides this one as a single clause (it needs
+      // saying here: the person pressed Accept, not the decision's option).
+      input.event.text +=
+        ` This acceptance answers the open decision "${parsed.packet.title}" with ` +
+        `"${answer.option.t}".`;
+    } else if (parsed.packet) {
       withdrawn.current = {
         title: parsed.packet.title,
         kind: parsed.packet.kind,
@@ -13783,6 +14024,29 @@ export async function applyAcceptanceWrite(
         by: input.forced ? "force-accept" : "accept",
       },
     });
+  }
+  if (accepted && answered.current && input.answerer) {
+    // Ruling 471: the row the packet door writes when a person resolves this
+    // option (same action, actor and fields), plus `via`, the direct
+    // acceptance it came through, in the vocabulary of the withdrawal row's
+    // `by`. The operator hand-off the packet door skips for both kinds
+    // (`NO_REQUEUE`: the task is Done) is skipped here by never being made.
+    recordAudit(db, {
+      action: "task.packet.resolved",
+      actor: { userId: input.answerer.userId, label: input.answerer.label },
+      subjectKind: "task",
+      subjectId: input.taskKey,
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      details: {
+        optionKind: answered.current.option.kind,
+        optionTitle: answered.current.option.t,
+        packetKind: answered.current.packetKind,
+        via: input.forced ? "force-accept" : "accept",
+      },
+    });
+    // And the notifications the packet door marks read for a settled decision.
+    markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
   }
   // Ruling 99: an acceptance that closed a goal-chain link advances its chain
   // (the next link's task is created under the goal creator's re-proven
@@ -14140,6 +14404,10 @@ async function acceptCompletion(
     event,
     headCheck,
     noChangeCheck: noChange,
+    // Ruling 471: every door into this function is a person's acceptance
+    // (Accept, Force accept, a stage move into the terminal stage, an applied
+    // acceptance card), so it answers the open decision it performs.
+    answerer: actor,
   };
   // Ruling 88: the same acknowledgment is re-compared under the write lock.
   if ("ack" in input) acceptance.ack = input.ack ?? null;

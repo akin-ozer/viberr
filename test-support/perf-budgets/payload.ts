@@ -63,16 +63,22 @@ export const PAYLOAD_BUDGETS: PerfBudgetTable = {
   // BOARD-3 / BOARD-6 / FL-4: 85,091 before. 38,717 was first recorded on
   // the wall clock in the small hours, before the demo's "today" agent
   // activity was an hour old; on the pinned clock twelve cards read `quiet:
-  // true`, a byte shorter each (the same for card-bytes below).
+  // true`, a byte shorter each (the same for card-bytes below). Raised 38705
+  // to 38865 by ruling 471: the four cards cloned from VIB-142 carry the
+  // option the board's acceptance answers their open decision with
+  // (`"acceptAnswersWith":"Accept completion"`, 40 bytes each), so the
+  // dialog can say "Answers" from the loader instead of "Withdraws".
   "payload:board-40.revalidation-bytes": {
-    ceiling: 38705,
+    ceiling: 38865,
     unit: "bytes",
     journey: "board-live",
     fixture: `${BOARD_40}; /board`,
   },
-  // BOARD-3: 74,188 before (the whole TaskSummary per card).
+  // BOARD-3: 74,188 before (the whole TaskSummary per card). Raised 37048 to
+  // 37208 by ruling 471: the same four cards' `acceptAnswersWith` (40 bytes
+  // each, as above).
   "payload:board-40.card-bytes": {
-    ceiling: 37048,
+    ceiling: 37208,
     unit: "bytes",
     journey: "board-live",
     fixture: `${BOARD_40}; /board; the 40 cards' JSON`,

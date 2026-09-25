@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
-import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
+import { mcpGatewayMountUrl } from "~/server/mcp-proxy/gateway.server";
+import { mcpGrantPhrase, summarizeMcpGrant, type McpOAuthView } from "~/shared/mcp-oauth";
 import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import {
@@ -19,8 +20,10 @@ import { toError } from "~/shared/errors";
  * decorative — a profile's `resources.mcps` reached no run. This turns each
  * declared name into a real server config. The Claude adapter accepts this
  * shape directly; the Codex adapter translates it to `mcp_servers` config:
- *   - HTTP  → `{ type: "http", url: <target>, headers?: { Authorization } }`
- *   - stdio → `{ command, args, env?: { MCP_CREDENTIAL } }`
+ *   - HTTP  → `{ type: "http", url: <target> }`
+ *   - stdio → `{ command, args }`
+ *   - a server with a stored credential, either transport →
+ *     `{ type: "http", url: <Viberr's gateway>/mcp/<name> }` (ruling 461)
  *
  * `viberr` and `viberr_agent` are skipped (Viberr's own in-process governance
  * and collaboration servers, built separately and never resolved from the org
@@ -29,12 +32,17 @@ import { toError } from "~/shared/errors";
  * {@link resolveSpecialistMcpServersDetailed} when the caller can record what
  * failed to resolve.
  *
- * CREDENTIALS (F7-MCP1, ruling 8): a server's credential is stored SEALED in the
- * org registry (secret-box). When present it is decrypted only here, at
- * run-spawn time, and attached — as an `Authorization: Bearer <token>` header
- * for HTTP, or the `MCP_CREDENTIAL` env var for stdio. The plaintext never
- * touches task files, timelines, logs, or any client surface. Servers with no
- * credential connect unauthenticated (e.g. a local stdio tool).
+ * CREDENTIALS (F7-MCP1, ruling 461): a server's credential is stored SEALED in
+ * the org registry (secret-box) and never leaves the server process. It used
+ * to be decrypted here and attached to the run's own config — an
+ * `Authorization: Bearer` header, or `MCP_CREDENTIAL` in a stdio server's env —
+ * which the Claude SDK serializes onto the CLI's argv, readable with `ps` from
+ * the agent's own shell (F40-2); Codex dropped it for that reason and connected
+ * anonymously (F40-3). Now a credentialed server is mounted THROUGH Viberr's
+ * loopback MCP gateway (`app/server/mcp-proxy/gateway.server.ts`): the config
+ * names the gateway's URL, `startRun` adds the run's own token, and the
+ * gateway attaches the credential upstream. Same config on both backends. A
+ * server with no credential mounts directly, as before.
  *
  * A9: a server whose credential is CONFIGURED but unopenable (a retired
  * encryption key, a legacy plaintext ref) is NOT mounted. It used to fall
@@ -42,14 +50,6 @@ import { toError } from "~/shared/errors";
  * downgrading on a key mismatch — while the persona still announced its tools.
  * It now joins the structured `unresolved` list with the reason, so the run
  * reads it in its own prompt instead of discovering it as a wall of 401s.
- *
- * BACKEND SCOPE: the credential is honored on CLAUDE runs (the Agent SDK accepts
- * `headers`/`env` on an mcpServer directly). On CODEX it is intentionally
- * dropped — the codex SDK serializes MCP config into `--config` argv, so a
- * literal secret there would be `ps`-visible (the standing codex-argv exposure
- * the owner scoped out of security work). See `codexMcpServers` in
- * codex-runtime.server.ts. A credentialed org MCP therefore authenticates on
- * Claude-backed specialists only; on Codex it connects unauthenticated.
  */
 export function resolveSpecialistMcpServers(
   db: DatabaseSync,
@@ -66,15 +66,16 @@ export interface McpResolveOptions {
   withholdWriteTools?: boolean;
 }
 
-/** A stdio mount: the registered command, its parsed argv, and — Claude only,
- *  see BACKEND SCOPE above — the decrypted org credential. */
+/** A stdio mount: the registered command and its parsed argv. A stdio server
+ *  with a credential is never mounted this way — the server spawns it behind
+ *  the gateway (ruling 461). */
 export interface StdioMcpServerConfig {
   command: string;
   args: string[];
-  env?: { MCP_CREDENTIAL: string };
 }
 
-/** An HTTP mount, with the decrypted org credential as a bearer header. */
+/** An HTTP mount. `headers` exists only on a gateway mount, set by `startRun`
+ *  (`bindRunToMcpGateway`): the RUN's token, never a credential (ruling 461). */
 export interface HttpMcpServerConfig {
   type: "http";
   url: string;
@@ -87,7 +88,7 @@ export interface HttpMcpServerConfig {
 }
 
 /** The portable per-server config both adapters accept; the Codex adapter
- *  translates it to `mcp_servers` and drops the credential. */
+ *  translates it to `mcp_servers`. */
 export type SpecialistMcpServerConfig =
   | StdioMcpServerConfig
   | HttpMcpServerConfig;
@@ -167,6 +168,70 @@ export interface SpecialistMcpResolution {
    * Claude and as `disabled_tools` on Codex.
    */
   toolDenials: McpToolDenial[];
+  /**
+   * Ruling 461: the mounted servers reached through Viberr's MCP gateway —
+   * those with a stored credential. Their prompt sentence says the credential
+   * is held by Viberr and a 401 from the gateway means the run ended.
+   */
+  proxied: string[];
+  /**
+   * Ruling 486: the proxied servers signed in with OAuth, each with the scope
+   * its sign-in was granted (null when the server did not say), so the prompt
+   * tells the run what the connection may do before a write is refused.
+   */
+  oauthGrants: McpRunGrant[];
+}
+
+/** Ruling 486: an OAuth-signed-in server a run mounts, and its sign-in's grant. */
+export interface McpRunGrant {
+  name: string;
+  /** The granted scope, space-joined (`McpOAuthView.scope`). */
+  scope: string | null;
+}
+
+/**
+ * Ruling 486: one line per OAuth-signed-in server, naming its grant. A
+ * read-only grant says what a write will meet and whose act the remedy is.
+ */
+function grantLine(grant: McpRunGrant): string {
+  const phrase = mcpGrantPhrase(grant.scope);
+  if (!phrase) {
+    return `- ${grant.name}: signed in with OAuth; the server did not say which scopes it granted.`;
+  }
+  if (summarizeMcpGrant(grant.scope)?.writes.length) {
+    return `- ${grant.name}: signed in with OAuth, granted ${phrase}.`;
+  }
+  return (
+    `- ${grant.name}: signed in with OAuth, granted ${phrase}. The server refuses any call ` +
+    "that writes, so do not attempt one; if the task needs a write, report that an org admin " +
+    "must sign it in again with write scopes in Instance settings → Agent resources."
+  );
+}
+
+/**
+ * Ruling 461: what a run is told about the servers it reaches through Viberr's
+ * gateway. One renderer for the specialist, operator and controller prompts.
+ * Ruling 486: an OAuth-signed-in server's grant is named with it.
+ */
+export function gatewayMcpSection(
+  proxied: readonly string[],
+  grants: readonly McpRunGrant[] = [],
+): string {
+  if (proxied.length === 0) return "";
+  const names = [...proxied].sort().join(", ");
+  const signedIn = grants
+    .filter((grant) => proxied.includes(grant.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    "\n\n---\n# MCP servers reached through Viberr's gateway\n\n" +
+    `${names} ${proxied.length === 1 ? "is" : "are"} mounted through Viberr's MCP ` +
+    "gateway: the credential is held by Viberr, and you never need it or see it; a 401 " +
+    "from the gateway means this run has ended." +
+    (signedIn.length > 0
+      ? "\n\nWhat each OAuth sign-in was granted, which the server enforces:\n\n" +
+        signedIn.map(grantLine).join("\n")
+      : "")
+  );
 }
 
 export function resolveSpecialistMcpServersDetailed(
@@ -177,7 +242,9 @@ export function resolveSpecialistMcpServersDetailed(
   const servers: Record<string, SpecialistMcpServerConfig> = {};
   const unresolved: UnresolvedMcpGrant[] = [];
   const toolDenials: McpToolDenial[] = [];
-  if (mcpNames.length === 0) return { servers, unresolved, toolDenials };
+  const proxied: string[] = [];
+  const oauthGrants: McpRunGrant[] = [];
+  if (mcpNames.length === 0) return { servers, unresolved, toolDenials, proxied, oauthGrants };
   let registry: {
     name: string;
     transport: "HTTP" | "stdio";
@@ -185,6 +252,7 @@ export function resolveSpecialistMcpServersDetailed(
     up: boolean | null;
     lastCheckedAt: string | null;
     writeTools: string[];
+    oauth?: McpOAuthView | null;
   }[];
   try {
     registry = listMcpServers(db);
@@ -205,7 +273,7 @@ export function resolveSpecialistMcpServersDetailed(
         reason: "the org MCP registry could not be read — it exposes no tools",
       });
     }
-    return { servers, unresolved, toolDenials };
+    return { servers, unresolved, toolDenials, proxied, oauthGrants };
   }
   const byName = new Map(registry.map((m) => [m.name, m]));
 
@@ -259,40 +327,60 @@ export function resolveSpecialistMcpServersDetailed(
     // Refuse the mount and tell the RUN why, in the same structured shape a
     // missing server uses.
     const credential = getMcpCredentialState(db, name);
-    if (credential.state === "unreadable") {
+    // Ruling 469: a server that asks for an OAuth sign-in it does not have
+    // (or whose sign-in expired) would answer every call 401; the run is told
+    // why instead.
+    if (credential.state === "unreadable" || credential.state === "signed_out") {
       drop(name, credential.reason);
       continue;
     }
-    const token = credential.state === "ok" ? credential.token : null;
     // Ruling 176: the admin's marks bind only on a run that withholds repo
     // write; a server with none marked is mounted exactly as before.
     const denied = options.withholdWriteTools ? row.writeTools : [];
-    if (denied.length) toolDenials.push({ server: name, tools: [...denied] });
-    if (row.transport === "stdio") {
-      const parts = splitMcpCommand(row.target);
-      const command = parts[0];
-      if (!command) {
-        drop(name, "the registered stdio command is empty");
+    const parts = row.transport === "stdio" ? splitMcpCommand(row.target) : [];
+    const command = parts[0];
+    if (row.transport === "stdio" && !command) {
+      drop(name, "the registered stdio command is empty");
+      continue;
+    }
+    if (credential.state === "ok" || credential.state === "oauth") {
+      // Ruling 461: the credential stays in this process. The run mounts the
+      // gateway's URL for the server (either transport — the gateway spawns a
+      // stdio command itself) and `startRun` adds the run's own token. An
+      // OAuth sign-in's tokens take the same road (ruling 469).
+      const url = mcpGatewayMountUrl(name);
+      if (!url) {
+        drop(
+          name,
+          "it has a stored credential and Viberr's MCP gateway, the only way a run reaches such a server, is not running",
+        );
         continue;
       }
-      const stdio: StdioMcpServerConfig = { command, args: parts.slice(1) };
-      if (token) stdio.env = { MCP_CREDENTIAL: token };
-      servers[name] = stdio;
+      const gateway: HttpMcpServerConfig = { type: "http", url };
+      if (denied.length) {
+        gateway.tools = denied.map((tool) => ({ name: tool, permission_policy: "always_deny" }));
+      }
+      servers[name] = gateway;
+      proxied.push(name);
+      // Ruling 486: the run is told what the sign-in may do.
+      if (credential.state === "oauth") oauthGrants.push({ name, scope: row.oauth?.scope ?? null });
+    } else if (command) {
+      servers[name] = { command, args: parts.slice(1) };
     } else {
       const http: HttpMcpServerConfig = { type: "http", url: row.target };
-      if (token) http.headers = { Authorization: `Bearer ${token}` };
       if (denied.length) {
         http.tools = denied.map((tool) => ({ name: tool, permission_policy: "always_deny" }));
       }
       servers[name] = http;
     }
+    if (denied.length) toolDenials.push({ server: name, tools: [...denied] });
     // P14-LV-09b: a REGISTERED but known-down server resolves to a config, so it
     // was mounted and announced as usable while exposing nothing. Live, a scout
     // granted `broken-mcp` reported it "named in the initial context as an
     // attached MCP server" with "no callable tools ever surfaced for it".
     if (row.up === false) flagDown(name, row.lastCheckedAt ?? null);
   }
-  return { servers, unresolved, toolDenials };
+  return { servers, unresolved, toolDenials, proxied, oauthGrants };
 }
 
 /**
@@ -320,11 +408,17 @@ export function resolveSpecialistMcpServersDetailed(
  * (`specialist-run.server.ts`, both the fresh mount and the resume mount), the
  * operator (`operatorMcpResolution` in `operator-run.server.ts`, F21-3) and the
  * controller (`controller-run.server.ts`).
+ *
+ * Ruling 461: the pre-flight runs WITH the server's credential on every
+ * backend. A credentialed stdio server is started by Viberr's gateway with
+ * `MCP_CREDENTIAL` for Claude and Codex runs alike, so the Codex-only
+ * credential-less pre-flight (B-4) and the re-probe that kept it from
+ * corrupting the shared health row (P9) have nothing left to model.
  */
 export async function verifyStdioMcpMountsForRun(
   db: DatabaseSync,
   resolution: SpecialistMcpResolution,
-  options: { spawnImpl?: McpSpawn; timeoutMs?: number; backend?: RealBackend } = {},
+  options: { spawnImpl?: McpSpawn; timeoutMs?: number } = {},
 ): Promise<SpecialistMcpResolution> {
   const names = Object.keys(resolution.servers);
   if (names.length === 0) return resolution;
@@ -342,58 +436,20 @@ export async function verifyStdioMcpMountsForRun(
     const row = byName.get(name);
     if (!row || row.transport !== "stdio") continue; // HTTP is not spawned here
     const credential = getMcpCredentialState(db, name);
-    // B-4 (pass 24): pre-flight under the SAME credential the run will actually
-    // spawn with. Codex drops `MCP_CREDENTIAL` (it would leak into `--config`
-    // argv), so verifying a Codex mount WITH the credential passes a server that
-    // then dies credential-less inside the run — announced healthy, silently
-    // absent. Pre-flighting WITHOUT it on Codex makes a credential-requiring
-    // server fail here and be disclosed as unresolved, matching the run.
-    const token =
-      options.backend === "codex"
-        ? null
-        : credential.state === "ok"
-          ? credential.token
-          : null;
     const disc = await discoverStdioMcpTools(row.target, {
       spawnImpl: options.spawnImpl,
       timeoutMs: options.timeoutMs,
-      token,
+      token: credential.state === "ok" ? credential.token : null,
     });
     if (disc.kind === "up") continue; // it starts — leave the mount as it was
 
-    // The mount failed at run-spawn: drop it and disclose it for THIS run.
+    // The mount failed at run-spawn: drop it, disclose it for THIS run, and
+    // correct the shared row so Settings stops calling it healthy.
     delete servers[name];
-
-    // P9 (pass 25): the shared `org_mcp_servers.up` row is backend-agnostic. On
-    // Codex we pre-flight WITHOUT the credential (B-4), so a server that needs
-    // its credential just to START fails here even though it is perfectly
-    // healthy for Claude runs (which DO receive the credential). Writing `up=0`
-    // from that failure would corrupt the shared health — falsely marking a
-    // Claude-healthy server down org-wide and poisoning the next Claude run's
-    // disclosure. So on a Codex credential-less failure, re-probe WITH the
-    // credential before touching the row: only downgrade the shared row if it
-    // fails WITH the credential too; otherwise leave the row alone and disclose
-    // the drop as Codex-specific (it mounts unauthenticated there).
-    let corruptsSharedHealth = true;
-    let disclosedReason = disc.reason;
-    if (options.backend === "codex" && credential.state === "ok") {
-      const credProbe = await discoverStdioMcpTools(row.target, {
-        spawnImpl: options.spawnImpl,
-        timeoutMs: options.timeoutMs,
-        token: credential.token,
-      });
-      if (credProbe.kind === "up") {
-        corruptsSharedHealth = false;
-        disclosedReason =
-          "it needs its stored credential just to start, and a Codex run is pre-flighted without one, so it is not mounted for this run; it is healthy for Claude runs, which receive the credential";
-      }
-    }
-    if (corruptsSharedHealth) {
-      markMcpServerUnreachableFromRun(db, name, disc.reason);
-    }
+    markMcpServerUnreachableFromRun(db, name, disc.reason);
     const entry = {
       name,
-      reason: `it failed to start for this run — ${disclosedReason}`,
+      reason: `it failed to start for this run — ${disc.reason}`,
       mounted: false,
     };
     const idx = unresolved.findIndex((u) => u.name === name);
@@ -402,10 +458,11 @@ export async function verifyStdioMcpMountsForRun(
     logger.warn("org MCP server failed to start at run-mount — dropped and flagged", {
       mcp: name,
       reason: disc.reason,
-      sharedHealthDowngraded: corruptsSharedHealth,
     });
   }
   // A dropped server exposes nothing, so it has nothing left to deny.
   const toolDenials = resolution.toolDenials.filter((d) => d.server in servers);
-  return { servers, unresolved, toolDenials };
+  const proxied = resolution.proxied.filter((name) => name in servers);
+  const oauthGrants = resolution.oauthGrants.filter((grant) => grant.name in servers);
+  return { servers, unresolved, toolDenials, proxied, oauthGrants };
 }

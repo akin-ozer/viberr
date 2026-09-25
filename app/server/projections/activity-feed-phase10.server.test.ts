@@ -104,6 +104,24 @@ describe("audit panel — Phase 10 action kinds render readably", () => {
     expect(entry.taskKey).toBe("VIB-7");
   });
 
+  it("ruling 462: a repository created with the project reads as a sentence naming it", () => {
+    // CANARY: drop the action from AUDIT_ACTION_KINDS and the row never
+    // reaches the panel.
+    recordAudit(store.db, {
+      action: "project.repository.created",
+      actor: arda(),
+      subjectKind: "project",
+      subjectId: store.slug,
+      projectSlug: store.slug,
+      details: { repo: "akin-ozer/website", private: true },
+    });
+    const entry = listAuditLog(store.db, store.slug)[0]!;
+    expect(entry.kind).toBe("change");
+    expect(entry.text).toBe(
+      "Arda Test created the private GitHub repository **akin-ozer/website**.",
+    );
+  });
+
   it("messy details never leak — templates render sentences, not JSON", () => {
     recordAudit(store.db, {
       action: "project.settings.updated",

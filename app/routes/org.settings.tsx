@@ -16,6 +16,7 @@ import { disableUser, enableUser } from "~/server/auth/user-admin.server";
 import { getDb } from "~/server/db/sqlite.server";
 import {
   createConnection,
+  recheckConnection,
   removeConnection,
   replaceConnectionToken,
   setDefaultConnection,
@@ -105,6 +106,11 @@ import {
   type UploadFileInput,
 } from "~/server/org/store-files.server";
 import { errorMessage } from "~/shared/errors";
+import {
+  mcpOAuthRedirectUri,
+  signOutMcpOAuth,
+  startMcpOAuthSignIn,
+} from "~/server/org/mcp-oauth.server";
 
 /**
  * /org/settings — the instance-level admin surface (org-settings spec),
@@ -187,6 +193,10 @@ type SettingsOk = {
   truncated?: boolean;
   /** `store-import-github`: the store-relative folder the snapshot landed in. */
   folder?: string;
+  /** `mcp-oauth-start` (ruling 469): where the admin's browser signs in, and
+   *  the authorization server's host the editor names. */
+  authorizeUrl?: string;
+  issuer?: string;
 };
 
 /** The per-intent half of `SettingsOk` — what a case hands `ok()` beyond copy. */
@@ -280,6 +290,13 @@ export async function action({ request }: Route.ActionArgs) {
         if (result.status !== "saved") {
           return fail(result.message, result.status === "not_found" ? 404 : 400);
         }
+        return ok(result.toast);
+      }
+      case "connection-recheck": {
+        // Ruling 463: validate the stored token again and re-read its reach.
+        const result = await recheckConnection(db, field("connectionId"), actor);
+        if (result.status === "not_found") return fail(result.message, 404);
+        if (result.status === "refused") return fail(result.message);
         return ok(result.toast);
       }
       case "connection-default": {
@@ -578,6 +595,9 @@ export async function action({ request }: Route.ActionArgs) {
         // Absent keeps the stored marks; only the editor sends the section.
         const writeTools = parseWriteTools(formData.get("writeTools"));
         if (writeTools !== undefined) input.writeTools = writeTools;
+        // Ruling 486(c): absent keeps what the next sign-in asks for; the
+        // editor sends the field for an HTTP server only.
+        if (formData.has("requestedScopes")) input.requestedScopes = field("requestedScopes");
         const result = await saveMcpServer(db, input, actor);
         return ok(result.toast);
       }
@@ -653,6 +673,21 @@ export async function action({ request }: Route.ActionArgs) {
         deleteOAuthProvider(db, provider, actor);
         return ok(`${providerLabel(provider)} configuration removed.`);
       }
+      // ---- Ruling 469: an HTTP MCP connection's OAuth sign-in ----
+      case "mcp-oauth-start": {
+        const started = await startMcpOAuthSignIn(db, {
+          mcpId: field("mcpId"),
+          redirectUri: mcpOAuthRedirectUri(request),
+          userId: admin.id,
+          sessionId: ctx.sessionId,
+          actor,
+        });
+        const payload: SettingsOkPayload = { authorizeUrl: started.authorizationUrl };
+        if (started.issuer) payload.issuer = started.issuer;
+        return ok(undefined, payload);
+      }
+      case "mcp-oauth-sign-out":
+        return ok((await signOutMcpOAuth(db, field("mcpId"), actor)).toast);
       case "mcp-test":
         return ok((await testMcpServer(db, field("mcpId"))).toast);
       case "mcp-delete":

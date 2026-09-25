@@ -21,6 +21,7 @@ import {
   ensureUserBackendHome,
   userBackendHome,
 } from "./user-homes.server";
+import { agentLaunchFor, launchEnv, resolveExecutable } from "./agent-isolation.server";
 import { toError } from "~/shared/errors";
 
 /**
@@ -281,6 +282,42 @@ export function vendorSpawnEnv(
   return env;
 }
 
+/** What a vendor binary run for one person is spawned as. */
+export interface VendorCommand {
+  file: string;
+  env: Record<string, string>;
+  /** Ruling 460: `file` is the agent launcher, whose hard kill is SIGUSR2. */
+  launched: boolean;
+}
+
+/**
+ * Ruling 460: a vendor binary run for one person outside a run — the hosted
+ * sign-in, its confirmation, the sign-out — runs as that person's own OS user
+ * through the launcher, exactly like their runs, so every file it writes into
+ * their home is theirs (and, once the launcher has handed the home back after
+ * it exits, readable by the server's group). Off (no launcher), it is the
+ * binary on `vendorSpawnEnv`, as before. Throws the launch's `run_unavailable`
+ * AppError when the person's home cannot be prepared.
+ */
+export function vendorCommand(
+  db: DatabaseSync,
+  userId: string,
+  backend: RealBackend,
+  binary: string,
+  dataRoot?: string,
+): VendorCommand {
+  const env = vendorSpawnEnv(userId, backend, dataRoot);
+  const home = env[HOME_ENV_KEY[backend]] ?? userBackendHome(userId, backend, dataRoot);
+  const agent = agentLaunchFor(db, userId, home, dataRoot);
+  if (!agent) return { file: binary, env, launched: false };
+  if (agent.home) env.HOME = agent.home;
+  return {
+    file: agent.launcher,
+    env: launchEnv(agent, resolveExecutable(binary, env.PATH), env),
+    launched: true,
+  };
+}
+
 const LOGOUT_ARGS = {
   claude: ["auth", "logout"],
   codex: ["logout"],
@@ -297,15 +334,17 @@ const LOGOUT_ARGS = {
  * server.
  */
 async function runVendorLogout(
+  db: DatabaseSync,
   userId: string,
   backend: RealBackend,
   binary: string,
   dataRoot?: string,
 ): Promise<void> {
-  const env = vendorSpawnEnv(userId, backend, dataRoot);
   try {
-    await execFileAsync(binary, [...LOGOUT_ARGS[backend]], {
-      env,
+    // Ruling 460: as the person's own OS user, like the sign-in that wrote it.
+    const command = vendorCommand(db, userId, backend, binary, dataRoot);
+    await execFileAsync(command.file, [...LOGOUT_ARGS[backend]], {
+      env: command.env,
       timeout: LOGOUT_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
     });
@@ -376,7 +415,7 @@ async function clearExistingCredential(
   if (!existing) return;
   if (existing.kind === "login") {
     if (deps.binary) {
-      await runVendorLogout(userId, backend, deps.binary, deps.dataRoot);
+      await runVendorLogout(db, userId, backend, deps.binary, deps.dataRoot);
     } else {
       // The route hands `backendBinaryIfPresent(backend)` in. Without it the
       // sign-in can still be made unusable here (the file goes), but the

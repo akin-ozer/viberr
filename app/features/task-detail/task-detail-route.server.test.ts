@@ -1938,3 +1938,22 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
     expect(result.data.error).toContain("Choose a file");
   });
 });
+
+/**
+ * Ruling 482: "Run gates" on the PR card. The intent reaches the gate request
+ * at the manual delivery's tier; on a project that declares no gates it says
+ * so rather than claiming a run.
+ */
+describe("run-gates (ruling 482)", () => {
+  it("refuses a contributor, and answers a maintainer honestly when nothing is owed", async () => {
+    // CANARY: drop the `run-gates` case and both answers are the unknown
+    // intent's 400.
+    // SAFETY: a refused intent always answers on the refusal arm.
+    const denied = (await postIntent("VIB-141", ids.selin, { intent: "run-gates" })) as ActionRefusal;
+    expect(denied.init.status).toBe(403);
+    // SAFETY: as above — `not_owed` is the intent's own 409 refusal arm.
+    const none = (await postIntent("VIB-141", ids.murat, { intent: "run-gates" })) as ActionRefusal;
+    expect(none.init.status).toBe(409);
+    expect(none.data.error).toBe("The project declares no gates.");
+  });
+});

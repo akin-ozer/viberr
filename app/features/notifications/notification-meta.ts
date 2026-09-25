@@ -34,6 +34,10 @@ export function ntfMeta(n: {
       ? { icon: "alert", cls: "act-blocked" }
       : { icon: "hand", cls: "act-policy" };
   }
+  // Ruling 481(a) (F40-48): an agent's question waits on a human exactly like
+  // an operator's open question, so it wears the same hand on the same
+  // palette. Filed as an `approval` it wore the stage-transition arrow.
+  if (n.kind === "question") return { icon: "hand", cls: "act-policy" };
   if (n.kind === "approval") return { icon: "arrow", cls: "act-transition" };
   if (n.kind === "mention") return { icon: "message", cls: "act-comment" };
   if (n.kind === "quality") return { icon: "flag", cls: "act-quality" };
@@ -76,6 +80,10 @@ export function ntfPill(n: {
   ptype?: "input" | "blocked" | null;
 }): NtfPill {
   if (n.kind === "approval") return { kind: "info", label: "approval" };
+  // Ruling 481(a): the task page names the same packet "Agent question"
+  // (`AGENT_QUESTION_PACKET_KIND`); the pill is its lowercased form, on the input tone
+  // every other decision that waits on a person wears.
+  if (n.kind === "question") return { kind: "input", label: "agent question" };
   // F19-24: this used to end in `return { kind: "input", label: "completion
   // report" }` as the FALL-THROUGH, so every non-blocked packet was pilled a
   // completion report — a scoping question, a redirect, an edit_goal. That name
@@ -93,8 +101,8 @@ export function ntfPill(n: {
       ? { kind: "blocked", label: "blocked decision" }
       : { kind: "input", label: "decision required" };
   }
-  // Nothing else reaches this pill — "Waiting on you" holds packets and
-  // approvals only (notifications-page-helpers.ts). If something ever does, it
+  // Nothing else reaches this pill — "Waiting on you" holds the decision
+  // kinds only (`DECISION_NOTIFICATION_KINDS`). If something ever does, it
   // names itself rather than borrowing a decision's vocabulary (the UI-57
   // tolerant-AND-honest fallback, event-meta.ts).
   return { kind: "info", label: n.kind || "notification" };

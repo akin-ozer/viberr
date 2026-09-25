@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { CardStatusKind } from "~/features/board/card-status";
 import { actorProseName } from "./user-display-name.server";
 import {
   deadDependencies,
@@ -15,7 +16,7 @@ import {
   type ParsedGoalFile,
   goalLinkSchema,
 } from "~/schemas/goal-file.schema";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { recordAudit, type AuditDetails } from "~/server/audit/audit-recorder.server";
 import {
   resolveProjectAuthority,
   type AuthorityProject,
@@ -95,6 +96,9 @@ export interface CreateGoalInput {
   description?: string;
   onFailure?: "pause" | "continue";
   links: GoalLinkInput[];
+  /** Ruling 476(h): the controller conversation the chain is planned in,
+   *  recorded on the goal so the project's Controller page links back to it. */
+  conversationId?: string | null;
 }
 
 export interface GoalActionResult {
@@ -374,6 +378,7 @@ export async function createGoal(
         status: "active",
         createdBy: actor.userId,
         createdByLabel: actor.label,
+        conversationId: input.conversationId ?? null,
         onFailure: input.onFailure ?? "pause",
         links,
         createdAt: now,
@@ -576,6 +581,11 @@ export async function updateGoal(
   // below is not re-entrant, and the task writer mirrors the list back onto
   // this very file, so the forward runs AFTER the lock is released.
   const forward: LinkWaitForward = { wait: null, adopted: null };
+  // Ruling 477(b) (F40-28): what the `goal.updated` row records beyond `op` and
+  // `message`, so the project's Activity audit column can say what changed in
+  // a sentence: the link an op touched, the reason a person gave, a rename's
+  // two titles, and whether the op changed nothing at all.
+  const facts: AuditDetails = {};
 
   const parsed = await updateGoalFile(
     goalRef(ctx, input.projectSlug, input.goalId),
@@ -615,6 +625,8 @@ export async function updateGoal(
           let titleMoved = false;
           if (title !== undefined && title !== fm.title) {
             parts.push(`renamed from "${fm.title}" to "${title}"`);
+            facts.from = fm.title;
+            facts.to = title;
             fm.title = title;
             titleMoved = true;
           }
@@ -624,6 +636,7 @@ export async function updateGoal(
           }
           if (parts.length === 0) {
             message = `Goal ${fm.id} is unchanged.`;
+            facts.unchanged = true;
             return;
           }
           message = `Goal ${fm.id} ${parts.join(" and ")}.`;
@@ -644,6 +657,7 @@ export async function updateGoal(
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           if (fm.status === "paused") {
             message = `Goal ${fm.id} is already paused.`;
+            facts.unchanged = true;
             return;
           }
           fm.status = "paused";
@@ -654,6 +668,7 @@ export async function updateGoal(
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           if (fm.status === "active") {
             message = `Goal ${fm.id} is already active.`;
+            facts.unchanged = true;
             return;
           }
           fm.status = "active";
@@ -664,6 +679,7 @@ export async function updateGoal(
         case "cancel": {
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           fm.status = "cancelled";
+          facts.reason = op.reason?.trim() || undefined;
           message = `Goal ${fm.id} cancelled. Its record stays readable.`;
           return `Cancelled by ${by}${op.reason ? `: ${op.reason}` : ""}.`;
         }
@@ -681,6 +697,8 @@ export async function updateGoal(
           }
           link.status = "skipped";
           link.note = op.reason?.trim() || link.note;
+          facts.index = op.index;
+          facts.reason = op.reason?.trim() || undefined;
           if (fm.status === "attention") fm.status = "active";
           advanceAfter = true;
           message = `Link ${op.index} skipped.`;
@@ -696,6 +714,7 @@ export async function updateGoal(
             );
           }
           retryLinkIndex = op.index;
+          facts.index = op.index;
           if (fm.status === "attention") fm.status = "active";
           message = `Link ${op.index} queued for retry.`;
           return `Link ${op.index} (${link.title}) retried by ${by}.`;
@@ -704,6 +723,7 @@ export async function updateGoal(
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           const link = fm.links.find((l) => l.index === op.index);
           if (!link) throw AppError.validation(`No link ${op.index}.`);
+          facts.index = op.index;
           if (link.status === "active" && link.taskKey) {
             // Ruling 155 (F35-3): the task carries the wait; its title and
             // goal are settled the moment work started. `blockedBy` alone is
@@ -813,6 +833,7 @@ export async function updateGoal(
           });
           refuseLinkCycles(fm.id, fm.links);
           advanceAfter = true;
+          facts.index = nextIndex;
           message = `Link ${fm.links.length} added.`;
           return `Link ${fm.links.length} (${title}) added by ${by}.`;
         }
@@ -871,6 +892,7 @@ export async function updateGoal(
             goalId: fm.id,
             linkIndex: op.index,
           };
+          facts.index = op.index;
           message = `Link ${op.index} is now carried by ${op.taskKey}.`;
           return `Link ${op.index} (${link.title}) adopted existing task ${op.taskKey}, by ${by}.`;
         }
@@ -901,6 +923,7 @@ export async function updateGoal(
           fm.links = fm.links
             .filter((l) => l.index !== op.index)
             .map((l, i) => ({ ...l, index: i + 1 }));
+          facts.index = op.index;
           message = `Link removed; the chain now has ${countLabel(fm.links.length, "link")}.`;
           return `Pending link ${op.index} (${link.title}) removed by ${by}.`;
         }
@@ -950,7 +973,10 @@ export async function updateGoal(
     subjectKind: "goal",
     subjectId: input.goalId,
     projectSlug: input.projectSlug,
-    details: { op: op.op, message },
+    // Ruling 477(b): an adoption names the task it bound, so the Activity row
+    // carries its chip and the audit panel's task filter finds it.
+    taskKey: forward.adopted?.taskKey,
+    details: { op: op.op, message, title: parsed.frontmatter.title, ...facts },
   });
 
   // A retry creates the fresh link task under the PRESENT caller's authority.
@@ -1464,6 +1490,8 @@ export async function reconcileGoal(
       subjectKind: "goal",
       subjectId: goalId,
       projectSlug,
+      // Ruling 477(b): the Activity audit column names the chain it closed.
+      details: { title: fm?.title },
     });
   }
 
@@ -1704,7 +1732,23 @@ export type GoalLinkView = GoalLink & {
    * text — so this is entirely about the read.
    */
   declaredGoal?: string;
+  /**
+   * Ruling 476(g) (F40-56): the word and colour the board's card gives this
+   * link's task (`cardStatus`, features/board/card-status.ts), so a chain link
+   * whose task waits on a person says "waiting on you" where the chain said
+   * "active" in the agent-working colour. Filled by the project Controller
+   * page for a link that has a task on the board; absent elsewhere.
+   */
+  taskStatus?: LinkTaskStatus;
 };
+
+/** Ruling 476(g): the board card's status for a link's task, as the rail draws it. */
+export interface LinkTaskStatus {
+  kind: CardStatusKind;
+  label: string;
+  /** `scheduled` only: when the task picks itself back up (ruling 225). */
+  resumesAt: string | null;
+}
 
 export interface GoalView {
   id: string;
@@ -1712,6 +1756,10 @@ export interface GoalView {
   status: GoalFrontmatter["status"];
   createdBy: string;
   createdByLabel: string;
+  /** Ruling 476(h): the controller conversation the chain was planned in.
+   *  Read from the goal's file (the detail read and the Controller page);
+   *  the projection does not carry it, so `listGoals` leaves it absent. */
+  conversationId?: string | null;
   onFailure: "pause" | "continue";
   description: string;
   links: GoalLinkView[];
@@ -1763,6 +1811,7 @@ function toGoalView(parsed: ParsedGoalFile): GoalView {
     status: fm.status,
     createdBy: fm.createdBy,
     createdByLabel: fm.createdByLabel,
+    conversationId: fm.conversationId,
     onFailure: fm.onFailure,
     description: parsed.description,
     links: fm.links,
@@ -1787,19 +1836,31 @@ const goalProjectionRowSchema = z.object({
   updated_at: z.string().nullable(),
 });
 
+/** What the Controller page reads from a chain's own file (below). */
+export interface GoalFileFacts {
+  history: GoalView["history"];
+  conversationId: string | null;
+}
+
 /**
  * Ruling 419(h): a chain's history, newest first, straight from its canonical
  * file. The projection carries no history (`listGoals` returns it empty), and
  * the controller page is the surface the task page sends a person to "where the
  * whole chain is read" — which showed neither why a chain paused nor the reason
- * a person gave when they cancelled it. Empty when the file is gone.
+ * a person gave when they cancelled it. Ruling 476(h): the same read carries
+ * the conversation the chain was planned in, which the projection does not
+ * hold either. Empty and null when the file is gone.
  */
-export function readGoalHistory(
+export function readGoalFileFacts(
   projectSlug: string,
   goalId: string,
   ctx: TaskMutationContext = {},
-): GoalView["history"] {
-  return readGoalFile(goalRef(ctx, projectSlug, goalId))?.parsed.timeline ?? [];
+): GoalFileFacts {
+  const parsed = readGoalFile(goalRef(ctx, projectSlug, goalId))?.parsed;
+  return {
+    history: parsed?.timeline ?? [],
+    conversationId: parsed?.frontmatter.conversationId ?? null,
+  };
 }
 
 /** List a project's goals from the projection (board panel read model). */

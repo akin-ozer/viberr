@@ -56,11 +56,9 @@ import {
   operatorDispatchAgent,
   operatorOpenPacket,
   operatorPostComment,
-  operatorProposeRuling,
+  operatorProposeKbCorrection,
   operatorLeaseFiles,
   operatorSetGoal,
-  PROPOSED_RULINGS_HEADING,
-  RULING_PROPOSAL_TITLE,
   operatorResolvePacket,
   operatorSnapshot,
   OPERATOR_TIMELINE_DEFAULT,
@@ -72,6 +70,8 @@ import {
   type OperatorPacketOptionInput,
   GOAL_DRAFT_MAX_CHARS,
 } from "./operator-actions.server";
+import { KB_CORRECTION_TITLE, RULING_PROPOSAL_TITLE } from "./kb-proposal-actions.server";
+import { KB_PROPOSALS_HEADING } from "~/server/org/kb-proposals.server";
 
 /**
  * The operator's capability-GATED, operator-authorized actions: the RBAC the
@@ -3779,97 +3779,131 @@ describe("operatorLeaseFiles (ruling 417)", () => {
   });
 });
 
-describe("operatorProposeRuling", () => {
+describe("operatorProposeKbCorrection (rulings 378 and 483)", () => {
   /**
-   * F39-1/F39-7 (pass 39, owner ruling): the operator can write a CORRECTION
-   * into the project's settled rulings, as a proposal, and nothing more.
-   *
-   * Before this the delivery loop had no writer for the rulings KB at all — the
-   * operator's toolkit had none, specialists have none, and the controller only
-   * runs when a human talks to it. Live, the rulings demanded
-   * `go test -race ./...`, the host had CGO off and no C compiler, the developer
-   * proved it, the reviewer re-proved it independently, and the false rule kept
-   * being injected into every run as binding truth while the operator could only
-   * say so in a comment.
+   * F39-1/F39-7 (pass 39): the operator can write a CORRECTION into the
+   * project's settled rulings, as a proposal, and nothing more. Ruling 483
+   * (F40-53) widened it to every knowledge base a run on the task was given:
+   * live in pass 40 the stale facts were in the akin-dossier and the deploy
+   * runbook, which propose_ruling could not reach.
    */
-  async function seedRulingsKb(docBody: string): Promise<string> {
-    const { saveKnowledgeBase } = await import("~/server/org/resources.server");
-    const { resolveStoreTarget } = await import("~/server/org/resources.server");
+  const arda = () => ({ kind: "user" as const, userId: store.users.arda.id, label: "arda" });
+
+  async function seedKb(name: string, doc: string, body: string): Promise<string> {
+    const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");
-    const actor = { kind: "user" as const, userId: store.users.arda.id, label: "arda" };
     const { kb } = await saveKnowledgeBase(
       store.db,
-      { name: "ax-rulings", refresh: "on change" },
-      actor,
+      { name, refresh: "on change" },
+      arda(),
       { dataRoot: store.dataRoot },
     );
-    const target = resolveStoreTarget(store.db, "kb", kb.id, {
-      dataRoot: store.dataRoot,
-    })!;
-    writeStoreDoc(store.db, target, [], "environment-and-gates.md", docBody, actor);
+    const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
+    writeStoreDoc(store.db, target, [], doc, body, arda());
+    return kb.dir;
+  }
+
+  async function seedRulingsKb(docBody: string): Promise<string> {
+    const dir = await seedKb("ax-rulings", "environment-and-gates.md", docBody);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, rulingsKb: dir });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    return path.join(store.dataRoot, "kb", dir);
+  }
+
+  /** The developer granted `kb` and engaged on VIB-1, the shape WEB-3 had. */
+  function engageDeveloperWithKb(kb: string): void {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
-      rulingsKb: kb.dir,
+      agents: file.parsed.frontmatter.agents.map((a) =>
+        a.profileId === "developer"
+          ? {
+              ...a,
+              definition: {
+                ...a.definition,
+                resources: { skills: [], mcps: [], kb: [kb] },
+              },
+            }
+          : a,
+      ),
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "impl",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Operator drive",
+        engagements: [
+          { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+        ],
+      }),
+      goal: "Prove the operator drives the task.",
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    return target.rootAbs;
   }
 
-  it("appends a non-binding proposal into the named rulings document, with the event, audit and notification", async () => {
-    deployRoster(DEFAULT_POLICY);
-    seedTask("impl");
-    const root = await seedRulingsKb(
-      "# Environment and gates\n\n- Every test must pass under `go test -race ./...`.\n",
-    );
-    const r = await operatorProposeRuling(
+  const propose = (input: Partial<Parameters<typeof operatorProposeKbCorrection>[2]>) =>
+    operatorProposeKbCorrection(
       store.db,
       { dataRoot: store.dataRoot },
       {
         projectSlug: store.slug,
         taskKey: "VIB-1",
+        kb: null,
         doc: "environment-and-gates.md",
-        text: "Strike the -race requirement: this host cannot run it.",
-        // A model answering a field called `evidence` writes the label too;
-        // the writer strips one rather than doubling it.
-        evidence: "Evidence: `CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.",
+        line: null,
+        correction: "x",
+        evidence: "y",
+        ...input,
       },
       authority("full"),
     );
+
+  it("files a non-binding ruling proposal beside the rule, as a `proposal` event with a neutral title, audited and notified", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const root = await seedRulingsKb(
+      "# Environment and gates\n\n- Every test must pass under `go test -race ./...`.\n",
+    );
+    const r = await propose({
+      line: "Every test must pass under go test -race",
+      correction: "Strike the -race requirement: this host cannot run it.",
+      // A model answering a field called `evidence` writes the label too; the
+      // writer strips one rather than doubling it.
+      evidence: "Evidence: `CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.",
+    });
     expect(r.outcome).toBe("done");
     expect(r.message).toContain("NOT binding");
 
     const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
-    // The settled line is untouched — a proposal never edits or removes one.
+    // The settled line is untouched: a proposal never edits or removes one.
     expect(body).toContain("- Every test must pass under `go test -race ./...`.");
-    // CANARY: drop the heading from `operatorProposeRuling` and this goes red;
-    // the proposal would then read as settled text.
-    expect(body).toContain(PROPOSED_RULINGS_HEADING);
+    expect(body).toContain(KB_PROPOSALS_HEADING);
     expect(body).toContain("Nothing here is binding.");
-    expect(body).toContain("**[VIB-1,");
-    expect(body).toContain("Strike the -race requirement");
+    expect(body).toContain("**[VIB-1, ");
+    expect(body).toContain(", Operator]** Strike the -race requirement");
+    expect(body).toContain("  Line: Every test must pass under go test -race");
     expect(body).toContain("exited 127");
-    // CANARY: drop the label strip and this reads "Evidence: Evidence: …" in
-    // the rulings document and again on the timeline, which is what the first
-    // live proposal wrote.
     expect(body).not.toMatch(/Evidence:\s*Evidence:/i);
     // Filed AFTER the settled text, so a reader meets the rule first.
-    expect(body.indexOf("- Every test must pass")).toBeLessThan(
-      body.indexOf(PROPOSED_RULINGS_HEADING),
-    );
+    expect(body.indexOf("- Every test must pass")).toBeLessThan(body.indexOf(KB_PROPOSALS_HEADING));
 
     const top = task().timeline[0]!;
-    expect(top.type).toBe("quality");
+    // CANARY (F40-59): write the event as `quality` again, or title it "Ruling
+    // contradicted by evidence", and the proposal reads as a failed review.
+    expect(top.type).toBe("proposal");
     expect(top.title).toBe(RULING_PROPOSAL_TITLE);
-    expect(top.text).toContain("Proposed, not binding");
+    expect(RULING_PROPOSAL_TITLE).toBe("Proposed ruling change");
+    expect(top.text).toContain("Not binding until a person promotes it");
     expect(top.text).toContain("environment-and-gates.md");
+    expect(top.text).toMatch(/Filed as `kp-[0-9a-f]{10}`/);
 
     expect(
       listAuditEvents(store.db).some(
-        (e) => e.action === "task.operator.ruling_proposed" && e.taskKey === "VIB-1",
+        (e) => e.action === "task.kb_proposal.filed" && e.taskKey === "VIB-1",
       ),
     ).toBe(true);
-    // A settled ruling is a human's to change, so the proposal must reach one.
     expect(
       listNotifications(store.db, store.users.arda.id).some(
         (n) => n.title === RULING_PROPOSAL_TITLE,
@@ -3877,137 +3911,129 @@ describe("operatorProposeRuling", () => {
     ).toBe(true);
   });
 
-  it("a second proposal stacks under the same heading instead of duplicating it", async () => {
+  it("F40-53: proposes against a knowledge base an ENGAGED agent was given, not only the operator's own", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const root = await seedRulingsKb("# Gates\n\n- Run every gate.\n");
-    const base = {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      doc: "environment-and-gates.md",
-    };
-    for (const [text, evidence] of [
-      ["First correction.", "run A"],
-      ["Second correction.", "run B"],
-    ]) {
-      const r = await operatorProposeRuling(
-        store.db,
-        { dataRoot: store.dataRoot },
-        { ...base, text: text!, evidence: evidence! },
-        authority("full"),
-      );
-      expect(r.outcome).toBe("done");
-    }
-    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
-    expect(body.split(PROPOSED_RULINGS_HEADING)).toHaveLength(2);
-    expect(body).toContain("First correction.");
-    expect(body).toContain("Second correction.");
+    const dossier = await seedKb(
+      "akin-dossier",
+      "06-platform-facts.md",
+      "# Platform facts\n\n- T-003: wrangler 4.138.0 is the pinned version.\n- T-013: output lands in `dist/server/`.\n",
+    );
+    engageDeveloperWithKb(dossier);
+    // The operator itself holds no knowledge base at all here.
+    expect(authority("full").kb).toEqual([]);
+    const r = await propose({
+      kb: dossier,
+      doc: "06-platform-facts.md",
+      line: "T-003: wrangler 4.138.0",
+      correction: "The measured wrangler is 4.139.0.",
+      evidence: "`npx wrangler --version` printed 4.139.0 on WEB-1 at 22:21Z.",
+    });
+    // CANARY: allow only `authority.kb` (the operator's own grants) and this
+    // is refused, which is ruling 378's reach: the dossier stays wrong.
+    expect(r.outcome).toBe("done");
+    const body = readFileSync(
+      path.join(store.dataRoot, "kb", dossier, "06-platform-facts.md"),
+      "utf8",
+    );
+    expect(body).toContain("- T-003: wrangler 4.138.0 is the pinned version.");
+    expect(body).toContain("The measured wrangler is 4.139.0.");
+    const top = task().timeline[0]!;
+    expect(top.type).toBe("proposal");
+    expect(top.title).toBe(KB_CORRECTION_TITLE);
+    expect(top.text).toContain(`${dossier}/06-platform-facts.md`);
   });
 
-  /**
-   * The entry goes in with `String.replace`, and a replacement STRING expands
-   * `$&`, `$'`, `` $` `` and `$$`. Operator evidence is shell and Makefile
-   * text, where `$$` is ordinary.
-   */
-  it("files a proposal's `$` characters exactly as written", async () => {
+  it("refuses a knowledge base no run on the task was given, and a line the document does not hold", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    await seedRulingsKb("# Gates\n\n- Run every gate.\n");
+    const stranger = await seedKb("someone-elses", "notes.md", "# Notes\n\n- A fact.\n");
+    const notOurs = await propose({ kb: stranger, doc: "notes.md", correction: "No.", evidence: "run A" });
+    expect(notOurs.outcome).toBe("noop");
+    expect(notOurs.message).toContain(`No knowledge base \`${stranger}\` was given to a run on this task`);
+    expect(readFileSync(path.join(store.dataRoot, "kb", stranger, "notes.md"), "utf8")).not.toContain(
+      KB_PROPOSALS_HEADING,
+    );
+
+    // CANARY: skip the anchor check and a proposal lands "beside" a line the
+    // document never had.
+    const unanchored = await propose({ line: "Deploy on Fridays only", correction: "No.", evidence: "run A" });
+    expect(unanchored.outcome).toBe("noop");
+    expect(unanchored.message).toContain("The line you quote is not in the settled text");
+  });
+
+  it("ruling 466: the audit row counts the entry in UTF-8 bytes", async () => {
+    deployRoster(DEFAULT_POLICY);
+    seedTask("impl");
+    const root = await seedRulingsKb("# Kurallar\n\n- Her kapı çalışır.\n");
+    const r = await propose({
+      correction: "Yarış kapısını kaldır: bu makine çalıştıramaz.",
+      evidence: "`go test -race` çıkış kodu 127 döndü.",
+    });
+    expect(r.outcome).toBe("done");
+    const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
+    // The first proposal is the document's tail, exactly as filed.
+    const entry = body.slice(body.indexOf("- **[VIB-1,")).trimEnd();
+    const row = listAuditEvents(store.db, { action: "task.kb_proposal.filed" })[0];
+    expect(row?.details).toMatchObject({ bytes: Buffer.byteLength(entry, "utf8") });
+    expect(Buffer.byteLength(entry, "utf8")).toBeGreaterThan(entry.length);
+  });
+
+  it("a second proposal stacks under the same heading, and `$` characters are filed as written", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     const root = await seedRulingsKb("# Gates\n\n- Run every gate.\n");
-    const base = { projectSlug: store.slug, taskKey: "VIB-1", doc: "environment-and-gates.md" };
-    await operatorProposeRuling(
-      store.db,
-      { dataRoot: store.dataRoot },
-      { ...base, text: "First correction.", evidence: "run A" },
-      authority("full"),
-    );
-    // The heading now exists, so this one is spliced in after it.
-    await operatorProposeRuling(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        ...base,
-        text: "The race gate needs cgo: keep `$&` and `$'` literal.",
-        evidence: "`for p in $$(go list ./...); do go test -race $$p; done` exited 2",
-      },
-      authority("full"),
-    );
+    expect((await propose({ correction: "First correction.", evidence: "run A" })).outcome).toBe("done");
+    expect(
+      (
+        await propose({
+          correction: "The race gate needs cgo: keep `$&` and `$'` literal.",
+          evidence: "`for p in $$(go list ./...); do go test -race $$p; done` exited 2",
+        })
+      ).outcome,
+    ).toBe("done");
     const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
-    // CANARY: pass the replacement as a string again and `$$` collapses to `$`,
-    // `$&` becomes the heading and `$'` splices the rest of the document in.
+    expect(body.split(KB_PROPOSALS_HEADING)).toHaveLength(2);
+    expect(body).toContain("First correction.");
     expect(body).toContain("for p in $$(go list ./...); do go test -race $$p; done");
     expect(body).toContain("keep `$&` and `$'` literal");
-    expect(body.split(PROPOSED_RULINGS_HEADING)).toHaveLength(2);
+    // The same correction of the same line again is the same proposal.
+    const again = await propose({ correction: "First correction.", evidence: "run B" });
+    expect(again.outcome).toBe("noop");
+    expect(again.message).toContain("already proposed");
   });
 
-  it("refuses by name when the project names no rulings KB, and when the document is not in it", async () => {
+  it("refuses by name when the project names no rulings KB, and when the document is not in the knowledge base", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
-    const noKb = await operatorProposeRuling(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        doc: "whatever.md",
-        text: "x",
-        evidence: "y",
-      },
-      authority("full"),
-    );
+    const noKb = await propose({ doc: "whatever.md" });
     expect(noKb.outcome).toBe("noop");
     expect(noKb.message).toContain("names no rulings knowledge base");
     // The rulings KB is named through the controller (`set_project_rulings_kb`,
-    // edit-policy): no settings page has a control for it, so the way out must
-    // not send anyone to one.
-    expect(noKb.message).toContain("a project admin can name one by asking the controller");
+    // edit-policy): no settings page has a control for it.
+    expect(noKb.message).toContain("a project admin can name a rulings knowledge base by asking the controller");
     expect(noKb.message).not.toContain("settings");
 
     await seedRulingsKb("# Gates\n\n- Run every gate.\n");
-    const wrongDoc = await operatorProposeRuling(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        // CANARY: skip the existence check and this CREATES a settled-looking
-        // document nobody asked for, named by a typo.
-        doc: "enviroment-and-gates.md",
-        text: "x",
-        evidence: "y",
-      },
-      authority("full"),
-    );
+    // CANARY: skip the existence check and this CREATES a settled-looking
+    // document nobody asked for, named by a typo.
+    const wrongDoc = await propose({ doc: "enviroment-and-gates.md" });
     expect(wrongDoc.outcome).toBe("noop");
-    expect(wrongDoc.message).toContain("is not a document in the rulings knowledge base");
+    expect(wrongDoc.message).toContain("is not a document in the knowledge base");
     expect(wrongDoc.message).toContain("environment-and-gates.md");
   });
 
-  it("needs all three fields, and is denied without append-typed-events", async () => {
+  it("needs the document, the correction and the evidence, and is denied without append-typed-events", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     await seedRulingsKb("# Gates\n\n- Run every gate.\n");
-    const thin = await operatorProposeRuling(
-      store.db,
-      { dataRoot: store.dataRoot },
-      { projectSlug: store.slug, taskKey: "VIB-1", doc: "environment-and-gates.md", text: "x", evidence: "  " },
-      authority("full"),
-    );
+    const thin = await propose({ evidence: "  " });
     expect(thin.outcome).toBe("noop");
     expect(thin.message).toContain("evidence that proves it");
 
     deployRoster([{ capabilityId: "append-typed-events", mode: "off" }]);
-    const denied = await operatorProposeRuling(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        doc: "environment-and-gates.md",
-        text: "x",
-        evidence: "y",
-      },
-      authority("full"),
-    );
+    const denied = await propose({});
     expect(denied.outcome).toBe("denied");
   });
 });
@@ -6011,7 +6037,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(r.outcome).toBe("noop");
     expect(r.message).toContain("VIB-1's review PR #7 conflicts with the base branch");
     expect(r.message).toContain("VIB-1 stays at In Progress");
-    expect(r.message).toContain("Open the conflict packet (update_branch_from_base)");
+    expect(r.message).toContain("Call update_branch_from_base, which routes the conflict (ruling 475)");
     expect(task().frontmatter.stage).toBe("impl");
     expect(task().frontmatter.recommendations).toEqual([]);
     // A clean PR crosses the same boundary as before (a recommendation card) —

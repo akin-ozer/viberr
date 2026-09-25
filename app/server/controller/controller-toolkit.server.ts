@@ -83,6 +83,7 @@ import {
   type RequestableKind,
 } from "./controller-requests.server";
 import { CONTROLLER_SECTION_LABEL } from "~/shared/controller-locks";
+import { mcpGrantPhrase, mcpSignInNote, summarizeMcpGrant } from "~/shared/mcp-oauth";
 import {
   listKnowledgeBases,
   listMcpServers,
@@ -106,20 +107,28 @@ import {
   readStoreDoc,
   scanStoreTree,
   storeDocVersion,
+  utf8Bytes,
   writeStoreDoc,
 } from "~/server/org/store-files.server";
 import { getInsightsSummary } from "~/server/insights/insights-query.server";
+import { describePersonaChange } from "~/server/agents/persona-change.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { getGithubViewData } from "~/features/github/github-query.server";
+import { listConnections } from "~/server/org/connections.server";
+import { reachSummary } from "~/shared/connection-reach";
 import {
   createProject,
   type CreateProjectInput,
+  type CreateRepositoryRequest,
   type CustomProjectBlueprint,
+  type RosterEntry,
 } from "~/features/home/project-create.server";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import {
+  deleteAgentProfile,
   deployAgentProfileFromLibrary,
   updateAgentProfile,
+  type DeployOverrides,
   type SubmittedProfileForm,
   deploymentFingerprint,
 } from "~/features/agents/agent-profile-actions.server";
@@ -138,10 +147,12 @@ import {
   renameStage,
   reorderStages,
   setProjectFileLeases,
+  setProjectGates,
   setProjectRulingsKb,
   setRequiredReviewers,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
+import { projectGatesView } from "~/shared/project-gates";
 import { resolveRequiredReviewers } from "~/server/tasks/required-reviewers.server";
 import {
   setMemberRole,
@@ -200,6 +211,10 @@ import {
 } from "~/server/tasks/schedule.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
+  listProjectKbProposals,
+  resolveKbProposal,
+} from "~/server/org/kb-proposals.server";
+import {
   describeDriftLists,
   listTemplateResourceDrift,
   listTemplateTextDrift,
@@ -230,7 +245,11 @@ import { errorMessage } from "~/shared/errors";
  * not-visible sentence for missing AND forbidden alike (R15-4's 404 posture:
  * a probe must not learn that a project exists).
  *
- * NO DELETES: no tool destroys anything, in either scope. The always-human
+ * NO DELETES: no tool destroys a project, task, user, template or resource, in
+ * either scope. Ruling 464 amends the older "nothing is deleted" wording by
+ * one edit: `remove_agent_deployment` takes a specialist off a project's
+ * roster, the way `update_stages op: remove` takes a stage off its board, and
+ * the global template stays. The always-human
  * decisions (merge, acceptance, force-accept, packet resolution, a move into
  * the terminal stage) have no tool here at all — the move tool refuses a
  * terminal target and points at the task page's own ceremony (ruling 88).
@@ -248,7 +267,9 @@ import { errorMessage } from "~/shared/errors";
 
 export interface ControllerToolkitDeps {
   db: DatabaseSync;
-  ctx: { dataRoot?: string };
+  /** `fetchImpl` is a test seam for the GitHub calls `create_project` makes
+   *  (ruling 462); production leaves it off and reaches the real `fetch`. */
+  ctx: { dataRoot?: string; fetchImpl?: typeof fetch };
   /** The asking user — the only authority anything here runs under. */
   user: { id: string; email: string; name: string };
   /** The conversation's bound project, when it has one (tool default). */
@@ -256,6 +277,10 @@ export interface ControllerToolkitDeps {
   /** Ruling 121: the conversation's anchored task, when it has one — every
    *  task tool's `taskKey` defaults to it. */
   taskKey?: string | null;
+  /** Ruling 476(h): the conversation this turn answers in. `create_goal`
+   *  records it on the chain, so the project's Controller page can link back
+   *  to where the chain was planned. */
+  conversationId?: string | null;
   /** Ruling 283: the knowledge bases this turn's prompt INDEXED. The pull tool
    *  is mounted over exactly these — `controllerKbNames` builds the list once
    *  so the prompt and the tool cannot name different sets. */
@@ -273,7 +298,9 @@ const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "Viberr controller tools. Every action runs under the ASKING PERSON's own permissions, " +
   "checked by the server per call: instance tools follow their org role, board tools follow " +
   "their role in that project. A [denied] answer is final — relay it with its reason. Reads " +
-  "are your ground truth; call them before asserting state. Nothing here deletes, merges, " +
+  "are your ground truth; call them before asserting state. Nothing here deletes a project, " +
+  "task, user, template or resource (taking a deployment off a project's roster edits the " +
+  "roster, ruling 464), merges, " +
   "accepts completions, resolves decision packets, or moves a task into its final stage \u2014 " +
   "ruling 251: those stay with the person, and `list_decisions` is how you put each one in " +
   "front of them, with its options and the link that opens it. " +
@@ -311,6 +338,24 @@ function divergedSentence(diverged: TemplateCopyDrift[]): string {
 }
 
 /** The ceiling the task page's schedule form applies (28 days). */
+/**
+ * Ruling 486: an OAuth sign-in's grant as `list_mcp_servers` reports it —
+ * counted, labelled and with its writes by name, never the whole list (a
+ * Cloudflare read-only grant is 194 scopes). Null when the server did not
+ * say what it granted.
+ */
+function grantOf(scope: string | null) {
+  const grant = summarizeMcpGrant(scope);
+  if (!grant) return null;
+  return {
+    scopes: grant.scopes.length,
+    writes: grant.writes.length,
+    readOnly: grant.writes.length === 0,
+    summary: mcpGrantPhrase(scope),
+    writeScopes: grant.writes,
+  };
+}
+
 const SCHEDULE_MAX_MINUTES = 40_320;
 
 /** Build the toolkit for one controller turn. */
@@ -772,7 +817,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         }
         return json({
           path: args.path,
-          bytes: doc.text.length,
+          // Ruling 466: UTF-8 bytes, the unit the write replies use.
+          bytes: utf8Bytes(doc.text),
           truncated: doc.truncated,
           // Ruling 305: hand back the version this text IS, so a replace can
           // say which one it is replacing and Viberr can refuse when the
@@ -788,7 +834,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole).",
+      "Create or update a knowledge base (name, refresh mode), optionally writing one document into its folder. Org admins only. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 466), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
       {
         id: z
           .string()
@@ -814,7 +860,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               .boolean()
               .optional()
               .describe(
-                "F39-1: add `content` to the END of the document instead of replacing it, creating the file when it is absent. Destroys nothing, so no `replace`/`replaces` is needed (passing either with this is refused). Use it to build a long document in bounded calls rather than one large one.",
+                "F39-1: add `content` to the END of the document instead of replacing it, creating the file when it is absent. Destroys nothing, so no `replace`/`replaces` is needed (passing either with this is refused). Use it to build a long document in bounded calls rather than one large one. Ruling 466: `content` is appended byte for byte, with no trimming and no separator, so end a part with a newline if the next part starts a new line.",
               ),
             replace: z
               .boolean()
@@ -873,7 +919,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // refused once the folder has a metadata row), and the project's
             // rulings KB — injected into EVERY run on the project — is one call
             // away from being erased by a model writing the obvious filename.
-            const before = readStoreDoc(target, [args.doc.path]);
             // F39-1: APPEND. It cannot destroy anything, so rulings 257 and
             // 305 (the collision guard and the version check) do not apply —
             // they exist to stop a whole-document replace deleting text the
@@ -888,24 +933,28 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                   "a replace overwrites the whole document. Send one or the other."
                 );
               }
-              const joined = before
-                ? `${before.text.replace(/\s+$/, "")}\n\n${args.doc.content.trim()}\n`
-                : `${args.doc.content.trim()}\n`;
+              // Ruling 466 (F40-13): the writer concatenates EXACTLY what was
+              // sent. This used to trim the part and force a blank line before
+              // it, so a part boundary inside a markdown table split the table
+              // in two (live, the controller rewrote the whole document to
+              // mend it), and it rebuilt the file from the editor's capped
+              // read, so a document past the cap lost its tail.
               const appended = writeStoreDoc(
                 db,
                 target,
                 [],
                 args.doc.path,
-                joined,
+                args.doc.content,
                 auditActor,
-                { overwrite: true },
+                { append: true },
               );
               return (
-                `${head} Appended ${args.doc.content.trim().length} bytes to ` +
-                `${appended.path.join("/")}${before ? "" : " (created)"}; it is now ` +
+                `${head} Appended ${appended.appendedBytes ?? 0} bytes to ` +
+                `${appended.path.join("/")}${appended.previousBytes === null ? " (created)" : ""}; it is now ` +
                 `${appended.bytes} bytes. Nothing was replaced.`
               );
             }
+            const before = readStoreDoc(target, [args.doc.path]);
             // Ruling 305: a whole-document replace names the version it read.
             // `writeStoreDoc`'s own collision guard (ruling 257) asks whether
             // the file EXISTS; this asks whether it is still the one you read.
@@ -943,7 +992,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               { overwrite: args.doc.replace === true },
             );
             docNote = written.replaced
-              ? ` Document ${written.path.join("/")} REPLACED: its previous ${before?.text.length ?? "unknown"} bytes are gone, ${written.bytes} written.`
+              ? ` Document ${written.path.join("/")} REPLACED: its previous ${written.previousBytes ?? 0} bytes are gone, ${written.bytes} written.`
               : ` Document ${written.path.join("/")} saved (${written.bytes} bytes).`;
           }
           return `${head}${docNote}`;
@@ -951,6 +1000,64 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       ),
     ),
     "save_knowledge_base",
+  );
+
+  // Ruling 483 (F40-59): the door a person's Promote or Dismiss button asks
+  // the controller to walk. Ruling 378 left promotion to "a human or the
+  // controller" and gave neither a way to find or close a proposal; live on
+  // WEB-1 two sat unpromoted while the next packet asked the owner to type the
+  // "not binding" build command into Cloudflare. Org-admin gated like every
+  // other knowledge-base write, because a proposal lives in an org knowledge
+  // base.
+  add(
+    tool(
+      "resolve_kb_proposal",
+      "Promote or dismiss one open knowledge-base proposal (ruling 483): an entry an agent filed under \"Proposed corrections (not binding)\" in a knowledge-base document, listed in your turn context and in get_project's `openProposals` by id. Org admins only, and only when the person asked you to: a proposal binds nobody until a person decides, and their Promote and Dismiss buttons on a project's Controller page send you exactly that request. `promote` writes `text` into the document's SETTLED text, in place of `replaces` (the exact passage it corrects, which must stand once in the settled text; read the document first with read_knowledge_base_doc) or appended to the settled text when `replaces` is omitted, and removes the entry in the same write. `dismiss` removes the entry and changes nothing else. `reason` is recorded on the audit row.",
+      {
+        id: z.string().describe("The proposal's id, e.g. 'kp-3f9a1c2b7d'."),
+        action: z.enum(["promote", "dismiss"]),
+        replaces: z
+          .string()
+          .optional()
+          .describe(
+            "promote only: the settled passage the correction takes the place of, exactly as the document has it. Omit to append `text` to the settled text instead.",
+          ),
+        text: z
+          .string()
+          .optional()
+          .describe("promote only, and required there: the settled text to write."),
+        reason: z
+          .string()
+          .describe("Why, in a sentence: what the person decided and on what evidence."),
+      },
+      runWith(
+        async (args: {
+          id: string;
+          action: "promote" | "dismiss";
+          replaces?: string;
+          text?: string;
+          reason: string;
+        }) => {
+          requireOrgAdmin("promote or dismiss knowledge-base proposals");
+          const result = await resolveKbProposal(
+            db,
+            args.action === "promote"
+              ? {
+                  id: args.id,
+                  action: "promote",
+                  replaces: args.replaces ? prose(args.replaces) : null,
+                  text: prose(args.text ?? ""),
+                  reason: prose(args.reason),
+                }
+              : { id: args.id, action: "dismiss", reason: prose(args.reason) },
+            actor,
+            { dataRoot },
+          );
+          return `[${result.outcome}] ${result.message}`;
+        },
+      ),
+    ),
+    "resolve_kb_proposal",
   );
 
   add(
@@ -1019,7 +1126,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_mcp_servers",
-      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. Credentials are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
+      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. `signIn` is an HTTP server's OAuth sign-in (ruling 469): null when it is not an OAuth server, else `needs_sign_in` (runs do not mount it), `signed_in` (with `expiresAt` and whether it `renews`) or `expired` (with the reason); `signInNote` says it in words. A signed-in server's `signIn.grant` is what its authorization server granted (ruling 486): `scopes` and `writes` counted, `readOnly` when no scope writes, `summary` (such as read-only · 194 scopes), and `writeScopes` by name; null when the server did not say. A read-only grant refuses every call that writes, so relay it before anyone plans a write through that server. `requestedScopes` is what the next sign-in asks for (null asks for what the server advertises). Only an org admin signs a server in or out, in Instance settings → Agent resources; you cannot. Credentials and tokens are never shown. `grantKey` is the REGISTRY NAME — the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
       {},
       run(() => {
         requireOrgAdmin("read the MCP connections");
@@ -1068,6 +1175,23 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // against. Found live on this instance.
             storePaths: m.storePaths,
             storeAccessNote: mcpStoreAccessNote(m.storePaths),
+            // Ruling 469: the public half of an OAuth sign-in, never a token.
+            signIn: m.oauth
+              ? {
+                  status: m.oauth.status,
+                  expiresAt: m.oauth.expiresAt,
+                  renews: m.oauth.renews,
+                  issuer: m.oauth.issuer,
+                  reason: m.oauth.reason,
+                  // Ruling 486 (F40-63): what the sign-in may do. Live, this
+                  // read said "signed_in" over a grant of 194 read-only
+                  // scopes, and the first write came back "Authentication
+                  // error" with nothing here to say why.
+                  grant: grantOf(m.oauth.scope),
+                }
+              : null,
+            signInNote: mcpSignInNote(m.oauth),
+            requestedScopes: m.requestedScope ?? null,
           })),
         );
       }),
@@ -1078,7 +1202,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_mcp_server",
-      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. Credentials do NOT travel through chat: tell the admin to add the secret in Instance settings → Agent resources, then test the server. `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
+      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. `requestedScopes` records the OAuth scopes an HTTP server's next sign-in asks for (ruling 486); it takes effect when an org admin signs in again, and the server decides what it grants. Credentials do NOT travel through chat: tell the admin to add the secret in Instance settings → Agent resources, then test the server. An HTTP server that asks for an OAuth sign-in (the reply says so) is signed in by an org admin from its editor in Instance settings → Agent resources (Sign in), which you cannot do: tell the admin, and until then runs do not mount it (ruling 469). `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
       {
         id: z.string().optional().describe("Existing server id to update; omit to create."),
         name: z.string(),
@@ -1090,6 +1214,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .describe(
             "Tool names to withhold from read-only runs. Omit on create for the heuristic default; omit on update to leave the marking unchanged; pass [] to mark none.",
           ),
+        requestedScopes: z
+          .string()
+          .optional()
+          .describe(
+            "HTTP only (ruling 486): the OAuth scopes the next sign-in asks for, space-separated (e.g. \"workers-scripts.write zone.read\"). The authorization server decides what it grants; list_mcp_servers shows it. Omit to leave the stored request unchanged; \"\" clears it, so the server's advertised scopes are asked for.",
+          ),
       },
       runWith(
         async (args: {
@@ -1098,6 +1228,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           transport: "HTTP" | "stdio";
           target: string;
           writeTools?: string[];
+          requestedScopes?: string;
         }) => {
           requireOrgAdmin("manage MCP connections");
           // Ruling 188 (pass 37, F37-7): this tool could create an MCP server
@@ -1117,6 +1248,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             cred: "",
           };
           if (args.writeTools !== undefined) input.writeTools = args.writeTools;
+          if (args.requestedScopes !== undefined) input.requestedScopes = args.requestedScopes;
           const saved = await saveMcpServer(db, input, auditActor, {}, { dataRoot });
           // `saveMcpServer` answers with the row it wrote, so the reply states
           // the marking that actually landed rather than the one we asked for.
@@ -1136,8 +1268,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 ? `NOTHING is withheld: no tool on this server is marked, so every tool it exposes — including the ones that write — reaches every run that mounts it. From the names the probe listed, these look like write tools: ${suggestion.join(", ")}. Call save_mcp_server again with \`writeTools\` to mark them (or an explicit [] to record that none should be), then say which you chose. `
                 : "Nothing is marked as a write tool, so nothing is withheld. The probe listed no tool whose name looks like a write. ") +
             (storeNote ? `${storeNote} ` : "") +
-            "If it needs a credential, the admin adds it in " +
-            "Instance settings → Agent resources (secrets never travel through this chat)."
+            // Ruling 469: a server that asked for an OAuth sign-in is the
+            // admin's to sign in; the reply says so rather than "add a secret".
+            (saved.mcp.oauth && saved.mcp.oauth.status !== "signed_in"
+              ? `${mcpSignInNote(saved.mcp.oauth)} `
+              : "If it needs a credential, the admin adds it in " +
+                "Instance settings → Agent resources (secrets never travel through this chat).")
           );
         },
       ),
@@ -1148,7 +1284,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "test_mcp_server",
-      "Probe one org MCP connection now and report its health in the command's own words. Org admins only.",
+      "Probe one org MCP connection now and report its health in the command's own words; a server signed in with OAuth also names what its sign-in was granted (\"read-only · 194 scopes\", ruling 486). Org admins only.",
       { id: z.string().describe("The server id (from list_mcp_servers).") },
       runWith(async (args: { id: string }) => {
         requireOrgAdmin("test MCP connections");
@@ -1245,7 +1381,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .boolean()
           .optional()
           .describe(
-            "Also rewrite the grants of every project copy that no longer matches this template. Off by default: a project's copy is its own record.",
+            "Also rewrite the grants of every project copy that no longer matches this template, and, when THIS call changes the persona, the persona of every copy still running older text (ruling 467); the reply names each copy and what it rewrote. Off by default: a project's copy is its own record.",
           ),
         skills: z
           .array(z.string())
@@ -1329,14 +1465,27 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // grants", and four runs still mounted the old text. This rides
           // EVERY arm because the two facts are independent: grants can be in
           // step while the text is not, which is exactly the case that misled.
+          // Ruling 467: the doors that now exist for an older copy. Propagate
+          // rewrites a persona only in a call that changes it, and never a
+          // summary, so both of the other doors stay named.
+          const olderFields = [...new Set(saved.textBehind.flatMap((d) => d.fields))];
+          const doors = olderFields.includes("persona")
+            ? "a save_global_agent call that changes the persona with propagate: true rewrites the copies' persona, " +
+              "update_agent_deployment with persona sets one copy, and an org admin can edit each copy on that " +
+              "project's Agents page."
+            : "propagate does not rewrite a summary — an org admin fixes each copy on that project's Agents page.";
           const behind =
             saved.textBehind.length > 0
               ? ` ${saved.textBehind.length} project cop${saved.textBehind.length === 1 ? "y" : "ies"} still ` +
-                `run${saved.textBehind.length === 1 ? "s" : ""} the older ` +
-                `${[...new Set(saved.textBehind.flatMap((d) => d.fields))].join(" and ")}: ` +
+                `run${saved.textBehind.length === 1 ? "s" : ""} the older ${olderFields.join(" and ")}: ` +
                 `${saved.textBehind.map((d) => d.projectSlug).join(", ")}. A deployment snapshots ` +
-                `that text and propagate does not rewrite it — an org admin fixes each copy on ` +
-                `that project's Agents page.`
+                `that text: ${doors}`
+              : "";
+          // Ruling 467: per project, what the persona propagation rewrote.
+          const personaCopies =
+            saved.personaPropagated.length > 0
+              ? ` Persona rewritten on ${countLabel(saved.personaPropagated.length, "project copy", "project copies")}: ` +
+                `${saved.personaPropagated.map((p) => `${p.projectSlug} (${p.change})`).join("; ")}.`
               : "";
           if (saved.propagated.length > 0) {
             const per = saved.propagated.map((p) => {
@@ -1345,15 +1494,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               if (p.removed.length) parts.push(`dropped ${p.removed.join(", ")}`);
               return `${p.projectSlug}${parts.length ? ` (${parts.join("; ")})` : ""}`;
             });
-            return `${head} Grants copied to ${countLabel(saved.propagated.length, "project")}: ${per.join("; ")}.${behind}${defaults}`;
+            return `${head} Grants copied to ${countLabel(saved.propagated.length, "project")}: ${per.join("; ")}.${personaCopies}${behind}${defaults}`;
           }
           if (saved.diverged.length > 0) {
-            return `${head} ${divergedSentence(saved.diverged)} Call save_global_agent again with propagate: true to rewrite those copies, or an org admin takes the template's grants on that project's Agents page.${behind}${defaults}`;
+            return `${head} ${divergedSentence(saved.diverged)} Call save_global_agent again with propagate: true to rewrite those copies, or an org admin takes the template's grants on that project's Agents page.${personaCopies}${behind}${defaults}`;
           }
           if (args.id && saved.profile.used > 0) {
-            return `${head} Every project copy carries the template's grants.${behind}${defaults}`;
+            return `${head} Every project copy carries the template's grants.${personaCopies}${behind}${defaults}`;
           }
-          return `${head}${behind}${defaults}`;
+          return `${head}${personaCopies}${behind}${defaults}`;
         },
       ),
     ),
@@ -1474,13 +1623,75 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
 
   add(
     tool(
+      "list_github_connections",
+      "The instance's GitHub connections, the ones create_project needs (ruling 463). Per connection: `owner` (what create_project's `owner` takes), whether it is the `default`, the token's kind (classic or fine_grained), its validation (`valid`, `failed` with GitHub's reason, or `unvalidated`) and when it was last checked, its expiry, the required scopes it lacks, and `reach`: which repositories the TOKEN can reach, read from GitHub when the token was last validated, each with whether it is private and whether the token can push to it. `reach.status` is `read`, `unknown` (the read failed, with the reason; never read it as zero) or `not_read` (the connection predates the read; an org admin presses Re-check on it in Instance settings). A fine-grained token reaches exactly the repositories it was granted, so a repository missing from a `read` reach is one this token cannot see. Never carries token material. Open to any signed-in person, the same people the New project dialog shows these connections to.",
+      {},
+      run(() => {
+        const connections = listConnections(db).map((c) => ({
+          owner: c.owner,
+          default: c.def,
+          tokenKind: c.tokenKind ?? "unknown",
+          validation: c.validationState,
+          // The validator's own secret-free reason when the verdict failed.
+          validationDetail: c.validationDetail,
+          lastValidatedAt: c.lastValidatedAt,
+          expiresAt: c.expiresAt,
+          daysLeft: c.daysLeft,
+          missingScopes: c.missingScopes,
+          boundProjects: c.boundProjects,
+          reach:
+            c.reach === null
+              ? {
+                  status: "not_read" as const,
+                  note: "Read when the token is next validated: an org admin presses Re-check on this connection in Instance settings → GitHub connections.",
+                }
+              : c.reach.status === "unknown"
+                ? c.reach
+                : {
+                    status: c.reach.status,
+                    readAt: c.reach.readAt,
+                    summary: reachSummary(c.reach),
+                    total: c.reach.total,
+                    private: c.reach.privateCount,
+                    capped: c.reach.capped,
+                    repos: c.reach.repos,
+                  },
+        }));
+        if (connections.length === 0) {
+          return json({
+            connections,
+            note: "No GitHub connection exists, so create_project cannot run yet. An org admin adds one in Instance settings → GitHub connections.",
+          });
+        }
+        return json({ connections });
+      }),
+    ),
+    "list_github_connections",
+  );
+
+  add(
+    tool(
       "create_project",
-      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Requires a GitHub connection for the repo owner. The move into the final stage stays a human decision whatever is asked. Deploy extra agents afterward with deploy_agent.",
+      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Requires a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 463), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). The move into the final stage stays a human decision whatever is asked. When you have designed the project's agents, pass them as `agents` (ruling 464), each with its model and effort: the project then gets the operator plus exactly that roster, not the generic Developer and Reviewer beside it. The reply lists every deployment written. deploy_agent adds one later; remove_agent_deployment takes one off.",
       {
         name: z.string(),
         key: z.string().describe("Task key prefix, 2 to 4 letters."),
         owner: z.string().describe("GitHub owner of the repo (a configured connection)."),
         repoName: z.string().describe("Repository name under that owner."),
+        createRepository: z
+          .strictObject({
+            private: z
+              .boolean()
+              .describe("true unless the person asked for a public repository."),
+            description: z
+              .string()
+              .optional()
+              .describe("The repository's description on GitHub."),
+          })
+          .optional()
+          .describe(
+            "Pass it when the person wants the repository created, or says it does not exist yet. The server creates owner/repoName on GitHub through the connection's token BEFORE it writes the project; a repository that already exists is used as it is and the reply says so. When the token cannot create repositories the reply names what it lacks and nothing is created: relay that sentence, the person decides what to change.",
+          ),
         policy: z.enum(["strict", "balanced", "auto"]).describe("strict = humans gate every advance · balanced = defaults · auto = full operator autonomy."),
         description: z.string().optional(),
         stages: z
@@ -1514,6 +1725,36 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             }),
           )
           .optional(),
+        agents: z
+          .array(
+            z.strictObject({
+              profileId: z
+                .string()
+                .describe("A global template's store key from list_global_agents, as deploy_agent takes it."),
+              model: z
+                .string()
+                .optional()
+                .describe("Model id for the template's backend; omit for the template's own."),
+              effort: z
+                .string()
+                .optional()
+                .describe(`Effort tier the backend offers (${EFFORT_TIERS_SENTENCE}); omit for the template's own.`),
+            }),
+          )
+          .optional()
+          .describe(
+            "Ruling 464: the roster you designed. Pass it when you have one: the project is then written with the operator plus EXACTLY these deployments and no generic Developer or Reviewer; leave it out and the base roster (operator, Developer, Reviewer) is written. Every entry is checked before anything is written, the repository included: an unknown template, a model or effort its backend does not offer, or an entry listed twice is refused by name. At least one entry.",
+          ),
+        operator: z
+          .strictObject({
+            model: z.string().optional(),
+            effort: z
+              .string()
+              .optional()
+              .describe(`Effort tier (${EFFORT_TIERS_SENTENCE}).`),
+          })
+          .optional()
+          .describe("The operator's own model and effort, checked the same way; omit to keep its defaults."),
       },
       runWith(
         async (args: {
@@ -1521,11 +1762,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           key: string;
           owner: string;
           repoName: string;
+          createRepository?: CreateRepositoryRequest;
           policy: "strict" | "balanced" | "auto";
           description?: string;
           stages?: { name: string; color?: StageColor }[];
           boundaries?: { from: string; to: string; boundary: "auto" | "approval" | "human" }[];
           members?: { email: string; role: (typeof PROJECT_ROLES)[number] }[];
+          agents?: RosterEntry[];
+          operator?: DeployOverrides;
         }) => {
           const input: CreateProjectInput = {
             name: args.name,
@@ -1534,6 +1778,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             repoName: args.repoName,
             policy: args.policy,
           };
+          if (args.createRepository) input.createRepository = args.createRepository;
+          if (args.agents) input.agents = args.agents;
+          if (args.operator) input.operator = args.operator;
           if (args.description || args.stages || args.boundaries || args.members) {
             const custom: CustomProjectBlueprint = {};
             if (args.description) custom.description = args.description;
@@ -1542,11 +1789,20 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (args.members) custom.members = args.members;
             input.custom = custom;
           }
-          const created = await createProject(db, input, actor, { dataRoot });
+          const created = await createProject(db, input, actor, {
+            dataRoot,
+            fetchImpl: ctx.fetchImpl,
+          });
+          // Ruling 464: the reply lists what was deployed, read off the write.
+          const deployed = created.agents
+            .map((a) => `${a.name} (${a.profileId}, ${a.model || "default model"}, effort ${a.effort || "default"})`)
+            .join("; ");
           return (
             `[done] Project ${created.name} created at ${created.storePath} (slug ${created.slug}, keys ${created.key}-n). ` +
             `You are its admin.` +
-            (created.repoWarning ? ` Warning: ${created.repoWarning}` : "")
+            (created.repoNote ? ` ${created.repoNote}` : "") +
+            (created.repoWarning ? ` Warning: ${created.repoWarning}` : "") +
+            ` Deployed: ${deployed}.`
           );
         },
       ),
@@ -1559,7 +1815,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment) \u2014 a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change (F39-4), goals summary, and `rulingsKb` \u2014 the knowledge base every run on this project reads (ruling 239), null when none is named \u2014 `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 483: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks) \u2014 and `fileLeases`, which task owns which shared paths until it merges (ruling 245) \u2014 resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247) \u2014 and `gates`, the commands Viberr itself runs on every delivered revision (ruling 482; set with set_project_gates). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -1586,6 +1842,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // not any profile grants it. Null means the project has named none,
           // and a settled rule has nowhere to live but each task's goal.
           rulingsKb: fm.rulingsKb ?? null,
+          // Ruling 483 (F40-59): the knowledge-base corrections agents on this
+          // project's tasks proposed and nobody has promoted or dismissed. Read
+          // from the documents themselves, where every run reads them.
+          openProposals: listProjectKbProposals(db, slug, dataRoot).map((p) => ({
+            ...p,
+            rulings: p.kb === (fm.rulingsKb ?? null),
+          })),
           // Ruling 245: who owns which shared paths until they merge. Read here
           // rather than inferred from prose, which is what every agent was doing.
           //
@@ -1600,6 +1863,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // Named, not dropped: the declaration was made and is now spent, and
           // somebody may want to clear the row.
           spentFileLeases: staleFileLeases(db, slug, dataRoot ? { dataRoot } : {}),
+          // Ruling 482: the commands Viberr itself runs on every delivered
+          // revision; set with set_project_gates.
+          gates: fm.gates ?? [],
           stages: project.stages.map((s) => ({
             id: s.id,
             name: s.name,
@@ -1804,6 +2070,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             `newest first. Pass events up to ${CONTROLLER_EVENTS_MAX} to widen this ` +
             "window, and read_timeline_entry with an `at` for one in full.";
         }
+        // Ruling 482: the project's gates as Viberr ran them on the revision
+        // under review, in the PR card's own line.
+        const gates = projectGatesView(
+          readProjectFile({ projectSlug: slug, dataRoot })?.parsed.frontmatter.gates,
+          readTaskFile({ projectSlug: slug, taskKey: key, dataRoot })?.parsed.frontmatter ?? {
+            workRevision: null,
+          },
+        );
         return json({
           task: {
             ...task,
@@ -1811,6 +2085,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               { projectSlug: slug, taskKey: key },
               { dataRoot },
             ),
+            gates: gates
+              ? {
+                  line: gates.line,
+                  state: gates.state,
+                  results: gates.rows,
+                  error: gates.error,
+                }
+              : null,
           },
           schedules,
           // Ruling 302, extended to the sibling it was first written without.
@@ -2746,6 +3028,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           repo: data.project.repo,
           defaultBranch: data.project.defaultBranch,
           connection: data.connection.status,
+          // Ruling 468: say it, so nobody is asked to push a first commit.
+          // Null when the repository has commits (or its state is unknown).
+          // Its dated note (R-repo-2): a token that can only read gets that
+          // commit refused, so the line names the token instead.
+          contents:
+            data.connection.status === "connected" && data.connection.empty
+              ? data.connection.readOnly
+                ? `empty, and this token can only read it: viberr cannot create the first commit on ${data.project.defaultBranch} until the token is granted write access (the fix is the token, not a pushed commit)`
+                : `empty: viberr will create the first commit on ${data.project.defaultBranch} before the first task branch`
+              : null,
           reconcile: data.reconcile,
           prs: data.prs.map((p) => ({
             task: p.taskKey,
@@ -3001,6 +3293,46 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
 
   add(
     tool(
+      "set_project_gates",
+      "Ruling 482: declare the project's GATES, the commands VIBERR ITSELF runs on every delivered revision, or pass [] to clear them. Project admin (edit-policy). The WHOLE list, in run order, replacing what project.md holds; read `gates` from get_project first. Each gate is `{name, command, timeoutSeconds?}` (a short unique name, a command run with `sh -c` in the checkout's root, and a timeout of 1 to 3600 seconds, 600 when omitted); at most 10. Viberr runs them itself, in a fresh checkout of the exact delivered revision, as the task owner's own agent user with no credentials, and records each exit code, wall time and log on the task: the PR card and the accept dialog print \"Gates on <sha>: N/M exit 0 (run by Viberr)\". A plain acceptance is refused until every gate exited 0 on the revision under review (force accept stays, on the record), and a failing gate hands the rework to the operator. This is where a MEASURED gate set belongs once a task has proven it on this host (`instance_health` and a task's run show what the host has): promote it here rather than writing the commands into the rulings knowledge base as prose, which every directive then re-types and no one can check. A changed list queues the gates on every open task that already has a delivered revision; an unchanged one answers `[noop]`. A duplicate or empty name, an empty command, or a timeout out of range is refused by name with nothing written.",
+      {
+        projectSlug: z.string().optional(),
+        gates: z
+          .array(
+            z.strictObject({
+              name: z.string().describe("Short and unique, e.g. \"build\"."),
+              command: z.string().describe("Run with `sh -c` in the checkout's root, e.g. \"pnpm build\"."),
+              timeoutSeconds: z
+                .number()
+                .int()
+                .optional()
+                .describe("1 to 3600; 600 when omitted."),
+            }),
+          )
+          .describe("The COMPLETE gate list, in run order; [] clears it."),
+      },
+      runWith(
+        async (args: {
+          projectSlug?: string;
+          gates: { name: string; command: string; timeoutSeconds?: number }[];
+        }) => {
+          const slug = slugOf(args.projectSlug);
+          requireVisible(slug, "change this project's policy");
+          const result = await setProjectGates(
+            db,
+            { projectSlug: slug, gates: args.gates },
+            actor,
+            { dataRoot },
+          );
+          return result.changed ? `[done] ${result.toast}.` : `[noop] ${result.toast}; nothing was written.`;
+        },
+      ),
+    ),
+    "set_project_gates",
+  );
+
+  add(
+    tool(
       "update_stages",
       "Edit the project's stage list: add (inserted before the final stage), rename, recolor (one of the twenty presets), remove, or reorder. Project admin. The workflow chain follows automatically; removing a stage never loosens a boundary.",
       {
@@ -3179,7 +3511,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "deploy_agent",
-      "Deploy a global agent template into the project (from list_global_agents). Project admin. This toolkit does not remove a deployment - the product does: a project admin deletes one on that project's Agents page (the Operator is a system profile and is never deletable). Say that rather than offering to neuter a live deployment's grants, which leaves it selectable and is a workaround, not a removal. A deploy COPIES the template's own capability grants, so whether the profile can write the repo depends on the template: the reply says which, read off what was written. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 153; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
+      "Deploy a global agent template into the project (from list_global_agents). Project admin. remove_agent_deployment takes a deployment off again, the same removal as Delete on the project's Agents page (the Operator is a system profile and is never removable); use it rather than neutering a live deployment's grants, which leaves it selectable and is a workaround, not a removal. A deploy COPIES the template's own capability grants, so whether the profile can write the repo depends on the template: the reply says which, read off what was written. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 153; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -3222,7 +3554,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_agent_deployment",
-      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, or the deployment's own resource grants (skills, mcps, kbs — every kind, the operator included). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases — never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
+      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, the deployment's own resource grants (skills, mcps, kbs — every kind, the operator included), or its persona (ruling 467: the deployment's own system-prompt text, which a template edit does not reach). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases — never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -3239,6 +3571,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           ),
         stages: z.array(z.string()).optional(),
         autonomy: z.enum(["supervised", "full"]).optional().describe("Operator only."),
+        persona: z
+          .string()
+          .optional()
+          .describe(
+            "Ruling 467: the deployment's WHOLE persona (its system prompt), replacing the copy it holds. Omit to keep it; an empty one is refused. Read the current text first (get_project lists the deployment; list_global_agents has the template's). The reply names the length before and after and the first and last changed lines.",
+          ),
         skills: z
           .array(z.string())
           .optional()
@@ -3268,12 +3606,23 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           effort?: string;
           stages?: string[];
           autonomy?: "supervised" | "full";
+          persona?: string;
           skills?: string[];
           mcps?: string[];
           kbs?: string[];
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "manage this project's agents");
+          // Ruling 467: an empty persona would leave the agent with no system
+          // prompt of its own, and the form writer reads "" as "keep", so an
+          // empty one sent here is a request nothing could honour. Refused
+          // before anything is read or written.
+          const persona = args.persona === undefined ? undefined : prose(args.persona).trim();
+          if (persona !== undefined && !persona) {
+            throw AppError.validation(
+              "An empty persona is refused: a deployment runs on its persona, and omitting the field keeps the one it has. Nothing was written.",
+            );
+          }
           const file = readProjectFile({ projectSlug: slug, dataRoot });
           const deployment = file?.parsed.frontmatter.agents.find(
             (a) => a.profileId === args.profileId,
@@ -3367,7 +3716,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             backend,
             stages,
             definition: "",
-            persona: "",
+            // Ruling 467: "" keeps the deployment's persona (the form writer's
+            // own rule); a persona sent here replaces it whole.
+            persona: persona ?? "",
             model: args.model ?? (switched ? defaultModelFor(backend) : view.model),
             effort,
             caps,
@@ -3414,12 +3765,65 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           changed("skills", view.resources.skills.join(", "), resources.skills.join(", "));
           changed("mcps", view.resources.mcps.join(", "), resources.mcps.join(", "));
           changed("kb", view.resources.kb.join(", "), resources.kb.join(", "));
+          if (persona !== undefined) {
+            // Ruling 467: from the record the writer left, not the request.
+            const written =
+              readProjectFile({ projectSlug: slug, dataRoot })?.parsed.frontmatter.agents.find(
+                (a) => a.profileId === args.profileId,
+              )?.definition?.persona ?? view.definition;
+            const personaChange = describePersonaChange(view.definition, written);
+            if (personaChange) changes.push(`persona ${personaChange}`);
+          }
           const summary = changes.length ? `: ${changes.join("; ")}.` : ". No field changed.";
           return `[done] ${result.name} updated on ${slug}${summary}${governance}${notices}`;
         },
       ),
     ),
     "update_agent_deployment",
+  );
+
+  add(
+    tool(
+      "remove_agent_deployment",
+      "Take one specialist's deployment off a project (ruling 464): the same removal as Delete on the project's Agents page, under the same gate (project admin, `manage-agents`) and the same audit row, with your `reason` recorded in it. It edits the project's roster; the global template is untouched and can be deployed again with deploy_agent. Refused by name: the Operator (a system profile, never removable), and a profile that is the delivering or an engaged agent on any open task (the refusal names the tasks; finish, archive or re-engage that work first, so no task is left mid-work with an agent that can no longer deliver). A project left with no specialist at all gets the base Developer and Reviewer back at the next restart, and the reply says so.",
+      {
+        projectSlug: z.string().optional(),
+        profileId: z.string().describe("The deployment's profile id, as get_project lists it."),
+        reason: z
+          .string()
+          .min(1)
+          .describe("Why it is coming off, in the person's words; recorded in the audit row."),
+      },
+      runWith(async (args: { projectSlug?: string; profileId: string; reason: string }) => {
+        const slug = slugOf(args.projectSlug);
+        requireVisible(slug, "manage this project's agents");
+        const reason = args.reason.trim();
+        if (!reason) {
+          throw AppError.validation("Say why the deployment is coming off; the reason is recorded. Nothing was removed.");
+        }
+        const removed = await deleteAgentProfile(
+          db,
+          {
+            projectSlug: slug,
+            profileId: args.profileId.trim(),
+            reason,
+            refuseOpenEngagements: true,
+          },
+          actor,
+          { dataRoot },
+        );
+        const left = readProjectFile({ projectSlug: slug, dataRoot })?.parsed.frontmatter.agents ?? [];
+        const specialists = left.filter(
+          (a) => effectiveProfileView(a, dataRoot, VIEW_WITHOUT_POLICY).kind !== "operator",
+        );
+        const tail =
+          specialists.length === 0
+            ? " The project has no specialist left, so the next restart deploys the base Developer and Reviewer again; deploy the one you want now to keep it that way."
+            : ` Deployed now: ${specialists.map((a) => a.profileId).join(", ")}.`;
+        return `[done] ${removed.name} (${removed.profileId}) removed from ${slug}. The global template is untouched.${tail}`;
+      }),
+    ),
+    "remove_agent_deployment",
   );
 
 
@@ -3630,6 +4034,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           };
           if (args.description) goalInput.description = prose(args.description);
           if (args.onFailure) goalInput.onFailure = args.onFailure;
+          // Ruling 476(h): where the chain was planned, for its card's
+          // "Planned in" link on the project's Controller page.
+          if (deps.conversationId) goalInput.conversationId = deps.conversationId;
           const result = await createGoal(db, goalInput, actor, { dataRoot });
           return `[done] ${result.message}`;
         },

@@ -245,6 +245,14 @@ Every test under `app/shared/docs/`, and the two elsewhere that read a doc:
   or deleted owner, or an owner with nothing connected. A refusal writes an honest
   `run·unavailable` error run through the normal completion pipeline, so the packet and
   timeline effects are observable without any process having started.
+- **Agent isolation is off in the suite, and a test turns it on with a stand-in launcher
+  (ruling 460).** No host running the suite has `/usr/local/libexec/viberr-launch`, so
+  `agentIsolation()` is `off` and runs spawn as the test process. A test of the launched
+  path calls `resetAgentIsolationForTests({ status: "on", … }, { launcher })` with a
+  0o755 shell script that logs its argv and environment (and, for the sign-in, `exec`s
+  `$VIBERR_LAUNCH_EXEC`), and resets it in `afterEach`. What only the kernel can answer —
+  another uid refused, the setuid drop, the signal relay — is the in-image check's, not
+  the suite's.
 - **The hosted sign-in is driven by a FAKE BINARY, never a mock.** `backend-login.server.ts`
   takes its vendor binaries through `deps.binaries` (route-level tests use
   `setBackendBinariesForTests`), so its tests hand it the pair
@@ -331,10 +339,28 @@ Playwright (`npm run e2e -- e2e/01-home-board.spec.ts`).
    `up` fails, the script prints the last 100 log lines of the stack and tears it down.
 3. Reads the mapped port (`compose port app 3000`), polls `/resources/health` for
    `200` + `ok: true` up to 60 s.
-4. `npx playwright test <args>` with `VIBERR_E2E_BASE_URL`; on failure prints the last
+4. Ruling 460: requires `agentIsolation.status` `on` in that body (the stack's store is a
+   named volume, so anything else is a fault) and runs
+   `docker compose exec -T app sh scripts/check-agent-isolation.sh` inside the running
+   app container, failing the run on a non-zero exit. That script is the one place the
+   kernel's side of the isolation is asserted: as two throwaway agent uids through the
+   real setuid launcher it checks the server's `/proc/<pid>/environ`, the projection
+   database and another person's home are refused, its own home and a shared workspace
+   are writable, an agent's own git runs the hooks it planted while a workspace git
+   launched with the server's overrides runs none, the server's own git cannot read a
+   checkout only its agent can while a fetch through the launcher's `git-upload-pack`
+   can (pass 40 review, R-seams-1), a checkout two agent uids wrote 0700 directories into
+   defeats the server's own `rm -rf` half-way while the server's replace
+   (`removeAgentTree`, run with the image's `tsx`) removes it as its persons and a fresh
+   clone lands in the freed path (ruling 485), the launcher relays SIGTERM, SIGUSR2 kills the agent's group with a
+   grandchild, PDEATHSIG takes the agent down with its server, `--reap` finds a detached
+   process by marker, and every refusal (a uid below the floor, uid 0, a relative exec, a
+   home outside `runtimes/users/`, a `..`, another agent's home, a malformed marker, an
+   agent executing the launcher) holds.
+5. `npx playwright test <args>` with `VIBERR_E2E_BASE_URL`; on failure prints the last
    100 app log lines.
-5. `down --volumes --remove-orphans` unless `VIBERR_E2E_KEEP=1`. Exit code is
-   Playwright's.
+6. `down --volumes --remove-orphans` unless `VIBERR_E2E_KEEP=1`. Exit code is
+   Playwright's (or 1 when step 4 failed).
 
 `playwright.config.ts` throws without `VIBERR_E2E_BASE_URL`; `testDir: "e2e"`,
 `fullyParallel: false`, `workers: 1`, `forbidOnly` and `retries: 1` on CI (0 locally),

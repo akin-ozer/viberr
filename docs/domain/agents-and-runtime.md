@@ -9,7 +9,9 @@
 > `app/server/tasks/specialist-*.ts`, `app/server/tasks/agent-*.ts`,
 > `app/server/tasks/run-failure-remedy.server.ts`, `app/shared/capabilities.ts`,
 > `app/shared/run-failure.ts`, `app/server/files/kb-injection.server.ts`,
-> `app/server/ops/toolchain.server.ts`, `app/server/seed/*`.
+> `app/server/ops/toolchain.server.ts`, `app/server/seed/*`; the OS user a run executes as:
+> `app/server/runtimes/agent-isolation.server.ts`, `tools/viberr-launch/viberr-launch.c`
+> (ruling 460).
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
 ## 1. Vocabulary that bites
@@ -74,10 +76,31 @@ no other account to fall back to.
 
 - `<dataRoot>/runtimes/users/<userId>/claude-home` is the child's `CLAUDE_CONFIG_DIR`
   (sessions under `projects/`); `…/codex-home` is its `CODEX_HOME` (sessions under
-  `sessions/`). Created `0o700` on demand by `ensureUserBackendHome`
-  (`user-homes.server.ts`); the user id is path-checked against
-  `/^[A-Za-z0-9_-]{1,64}$/` first. There is no deployment-wide `runtimes/claude-home` /
-  `runtimes/codex-home` and no host `~/.codex` mount.
+  `sessions/`). Created on demand by `ensureUserBackendHome` (`user-homes.server.ts`);
+  the user id is path-checked against `/^[A-Za-z0-9_-]{1,64}$/` first. There is no
+  deployment-wide `runtimes/claude-home` / `runtimes/codex-home` and no host `~/.codex`
+  mount.
+- **Every agent process runs as its person's own OS user (ruling 460).** In the image,
+  each person gets a stable agent uid (`agent_os_users`, allocated from 20001, never
+  reused) and every agent shares the primary group `viberr-agents` (gid 20000); the
+  server (`node`) is a supplementary member of that group. The person's runtime root
+  `runtimes/users/<userId>/` and everything under it — `claude-home`, `codex-home` and
+  `home` (the agent's `$HOME`: npm's cache, a `git config --global`) — is owned
+  `<uid>:node`, directories 2770: the person's agents own it, the server reads and writes it
+  through group `node`, and another person's agents (neither owner nor in `node`) reach
+  nothing. The server never becomes root: `agentLaunchFor`
+  (`agent-isolation.server.ts`) hands those three directories to the uid through the
+  setuid launcher's `--prepare-home` when they are not already its, and `startRun` puts
+  the launch on `RunSpec.agent` (uid, launcher, the vendor home to hand back) and
+  `HOME=<runtime root>/home` on the env. After every launched process exits, the launcher
+  hands the vendor home back again (owner the uid, group `node`, files gaining group read
+  and write), because a vendor writes its sign-in 0600 and the server copies, re-points or
+  backs it up. Without a launcher (the host dev server, the test harness) nothing of this
+  applies and runs spawn as the server's user; health says `agentIsolation: off`. The
+  project's gates (ruling 482) are agent processes in this sense: each `sh -c` command,
+  the clone it runs in and its clean-up go through the launcher as the task owner's uid
+  (`agentGitLaunchFor`, no vendor home), with `filteredSpawnEnv()` and the agent `$HOME`;
+  a task with no owner records a gate error and runs nothing as the server.
 - **Every Codex run gets a private `CODEX_HOME` (ruling 181).** The Codex CLI extracts
   its exec helpers (`codex-linux-sandbox`, `codex-execve-wrapper`, `apply_patch`) into
   ONE directory per home, `$CODEX_HOME/tmp/arg0/codex-arg0XXXXXX/`, and every new
@@ -85,7 +108,10 @@ no other account to fall back to.
   `codex-home` (a reviewer, the operator, a developer) delete each other's helper mid-run
   (F36-3). So the Codex adapter forks
   `<codex-home>/runs/<runId>/` at spawn (`prepareCodexRunHome`, `user-homes.server.ts`)
-  and hands it to the CLI as `CODEX_HOME`: `auth.json` and `config.toml` are **copied**
+  and hands it to the CLI as `CODEX_HOME` — the server builds it as itself, so on a
+  launched run it is handed to the person's uid (`--prepare-home`) before the CLI starts,
+  and at the settle handed over again before the server reads it, with the written-back
+  `auth.json` handed back after (ruling 460): `auth.json` and `config.toml` are **copied**
   in when present (a copy, so two runs never write one shared file through a link);
   `sessions/`, `skills/` and `memories/` are **symlinks** to the shared home's
   directories, created first, so a rollout the CLI writes lands where
@@ -97,7 +123,8 @@ no other account to fall back to.
   per-person lockfile (`.auth.json.lock`, `O_EXCL` with retry; a holder older than 30 s,
   or one still held after a 3 s wait, is broken; last writer wins), only while the shared
   file still exists (a disconnect mid-run is not undone), and the run directory is
-  deleted; a run a restart orphaned is finished the same way by boot recovery before the
+  deleted — on a launched run as the person, through the launcher (ruling 485: their CLI
+  wrote it); a run a restart orphaned is finished the same way by boot recovery before the
   operator is re-invoked. **The settle also re-points the CLI's thread index** (ruling 199,
   F37-20): the CLI finds a rollout by `threads.rollout_path` in its own state database,
   and what it records there is the path it SAW through the link,
@@ -147,7 +174,13 @@ no other account to fall back to.
   is set after the caller's overlay, so nothing renames a run's processes, and a refused
   run, which spawns nothing, carries none. The run sink redacts those plaintext values
   from every persisted line (`createRunSink(db, spec, { secrets })`) — the key belongs to
-  one person and the run console is visible to every project member.
+  one person and the run console is visible to every project member. What a run can READ
+  is a separate question, answered by the OS user it runs as (ruling 460): this env never
+  carried the server's secrets, but before that ruling a run's shell could read them out of
+  `/proc/<server pid>/environ`, and the projection database and every home off the disk,
+  because it ran as the server's own uid. The launcher's environment is also where glibc's
+  secure mode applies: a setuid program's `LD_*`, `TMPDIR` and the like are dropped before
+  it runs, so an agent never inherits them from the server.
 
 ### 2.3 Models and effort
 
@@ -161,7 +194,12 @@ defaultEffort } }` to the profile editor (unknown backend → claude; `requireUs
 The route resolves the viewer's own `runCredentialFor(db, user.id, "claude")` and passes
 it to the catalog; a viewer who has not connected Claude gets the curated list and no
 probe is spawned, and one person's live list is never served to another (the cache entry
-carries the home that produced it). Each returned model is stamped with its availability
+carries the home that produced it). The probe's CLI runs against the viewer's own
+`claude-home`, where a token refresh rewrites their sign-in, so wherever the server
+launches agents it runs as the viewer through the launcher like their runs (the route
+passes `userId`; `spawnClaudeCodeProcess` = `spawnClaudeCli` with `agentLaunchFor`'s
+launch; the home is handed back when it exits), and with no viewer to run as the curated
+list is served instead (ruling 460 note (l), R-launcher-1). Each returned model is stamped with its availability
 mark on every request, after the cache. A template (`agents/profiles/<id>.md`) may carry
 its own default `model` and `effort` (ruling 153, pass 35 G35-2): `save_global_agent`
 takes both, checked by name against the template's backend (a backend switch whose stored
@@ -178,6 +216,13 @@ the SAME list the effort select renders — the selected model's own tiers when 
 the backend-wide list — so a tier the picker never shows is never left standing to be
 saved, and picking a model with fewer tiers clamps the pick to one that model offers (the
 catalog default when it is among them, else its first).
+
+The Agents page's profile panel shows both values for every kind, the operator included
+(ruling 479(e)): a "Model · effort" cell ("Claude Opus · Maximum", the effort in the
+picker's words, "default effort" when none is stored), with the operator's Autonomy as
+its own cell beside it. The Live tab's Backend column names the backend an operator run
+starts on (the operator profile's first backend, Claude when it names none), the rule
+`resolveOperatorAuthority` applies.
 
 **Availability marks** (`model_availability`): a model is marked unavailable only from a
 real run failure whose redacted text matches `MODEL_UNSUPPORTED_RE`, and cleared by a
@@ -303,7 +348,17 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
 - The CLI is spawned by Viberr, not the SDK (`spawnClaudeCodeProcess` → `spawnClaudeCli`,
   `claude-spawn.server.ts`; ruling 174): `detached`, so its pid is its process group and
   the stdio MCP servers it starts share that group. Every signal the SDK sends it — its
-  close ladder and its kill-all when the server exits — goes to the whole group. The SDK
+  close ladder and its kill-all when the server exits — goes to the whole group. On a
+  launched run (ruling 460) what is spawned, detached, is the launcher: the SDK's command
+  resolved to an absolute path rides `VIBERR_LAUNCH_EXEC`, the principal's uid
+  `VIBERR_LAUNCH_UID`, the SDK's argv passes through untouched. The launcher forks; its
+  child drops to the uid, makes the agent's own process group and execs the CLI; the
+  launcher relays every signal it receives (TERM, INT, HUP, QUIT, USR1) to that group,
+  escalates a relayed SIGTERM to SIGKILL after 5 s, and takes **SIGUSR2 as "kill the whole
+  group"** — so the server's SIGKILL of a launched group is sent as SIGUSR2
+  (`launchedSignal`): a SIGKILL of the launcher alone would leave the agent's processes
+  under a uid the server cannot signal. PDEATHSIG binds both ways (the launcher gets SIGTERM
+  when the server dies, the agent SIGKILL when the launcher dies). The SDK
   reads only stdin and stdout from a custom spawn, so Viberr drains stderr itself, keeps
   the SDK's 2 KB tail and delivers `exit` once stderr has closed, or 200 ms after the CLI
   exits if it has not (`STDERR_DRAIN_MS`); the adapter adds that tail back onto the SDK's
@@ -318,7 +373,7 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   to 2 and 7-10 s to 4 s, $0.03-0.04 to $0.02 warm, for a turn-1 prompt of 12.9k tokens
   instead of 5.3k (cached after the first run; a cold first run pays the cache write
   once); a reviewer went from 4 turns to 3 at the same cost. The controller's
-  `viberr_controller` (51 tools, 52 when the conversation has a knowledge base and so
+  `viberr_controller` (53 tools, 54 when the conversation has a knowledge base and so
   `read_knowledge_doc`) and `viberr_ops` stay deferred: loading them (at 41 tools)
   saved a turn but tripled turn 1 (6.0k to 18.0k tokens) and quadrupled a cold turn's cost
   ($0.05 to $0.21). The controller's prompt carries a tool manifest instead (ruling 297),
@@ -473,12 +528,13 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   enforcement is rendered), and the operator's OS network is not forced off; it holds no
   shell tool anyway. `approvalPolicy: "never"`, `skipGitRepoCheck: true`, and withheld
   egress still sets `webSearchMode: "disabled"` (the CLI's own tool, not the sandbox).
-- MCP servers are passed **without credentials** (argv exposure), and in-process SDK
-  servers are skipped. A bearer-token HTTP MCP is therefore unauthenticated on Codex; the
-  persona says so in its "MCP credentials on this Codex run" section, and a stdio server
-  that needs its credential just to start is dropped from the run with the reason given.
-  A Codex run therefore mounts none of Viberr's own in-process tools either (no
-  `viberr_agent`, no `read_knowledge_doc`).
+- MCP servers are translated to `mcp_servers` and in-process SDK servers are skipped, so a
+  Codex run mounts none of Viberr's own in-process tools (no `viberr_agent`, no
+  `read_knowledge_doc`). A server with a stored credential arrives the same way it does
+  on Claude (ruling 461, §6): as a mount on Viberr's loopback MCP gateway whose
+  `Authorization: Bearer <run token>` becomes the server's `http_headers`. The run token
+  sits in the CLI's `--config` argv; the credential never does, because it never leaves
+  the server process.
 - Ruling 176: a server's entries in `spec.mcpToolDenials` become its `disabled_tools`
   (the CLI reads it per `mcp_servers.<name>`, beside `enabled_tools`), by
   the server's own tool names. Live (2026-09-11), a withheld run listed and called only the
@@ -488,9 +544,19 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   this run is bounded by its idle timer only"). Idle 15 min
   (`VIBERR_CODEX_IDLE_TIMEOUT_MS`); interrupt settle 20 s. The SDK spawns the CLI itself
   with a plain `spawn()` and only ever SIGTERMs it, so the settle sweep (§3.4) is what
-  reaches a CLI that outlived its abort and everything its shell started. There is no
-  wrapper around the Codex binary: the owner's decision D1 (a wrapper pointed at by
-  `codexPathOverride`) was replaced by the sweep before it shipped, ruling 174.
+  reaches a CLI that outlived its abort and everything its shell started.
+- **As the principal's own OS user (ruling 460).** On a launched run the SDK is given
+  `codexPathOverride: <viberr-launch>` and the run's env plus `VIBERR_LAUNCH_EXEC` = the
+  SDK's own vendored binary (`codexVendor()`, `codex-app-server.server.ts`, the one resolver
+  the compaction also reads) and `VIBERR_LAUNCH_UID`; the SDK spawns the launcher with the
+  argv it builds, and the launcher execs the CLI as the uid. The SDK prepends its helper
+  directory (`codex-path/`, which holds `rg`) to `PATH` only when it resolves the binary
+  itself, so the adapter prepends it for the override. The launcher leads no group the
+  server shares (the SDK's spawn is not detached): its CHILD makes the agent's group, and
+  the SDK's SIGTERM reaches the launcher, which relays it. Ruling 174's decision D1 (a
+  wrapper pointed at by `codexPathOverride`) was replaced by the sweep; the launcher is not
+  that wrapper — it confines nothing about the run and exists to change its user. The
+  completion compaction's `codex app-server` is launched the same way, in the shared home.
 - Success requires a `turn.completed` with no top-level `turn.failed`/`error`; item-level
   errors are non-fatal. Ruling 394: the adapter tracks whether anything started after the
   last completed turn (`turn.started` / `item.started` set it, `turn.completed` clears
@@ -512,6 +578,13 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   carries `outputSchema = AGENT_OUTCOME_JSON_SCHEMA` and the envelope replaces the tool
   calls a Claude specialist would make. The Codex operator returns a plan the server
   executes ([operator.md §5](operator.md#5-tools-and-the-governed-actions-behind-them)).
+- A knowledge-base correction (ruling 483): a Codex specialist with a knowledge base has
+  no `propose_kb_correction` tool, so its prompt's Collaboration section
+  (`KB_CORRECTION_NOTE_CODEX`) tells it to end its report with a `Knowledge-base
+  correction` section naming the knowledge base, document, line, correction and
+  evidence, and the operator's `agent-reply` turn relays it with its own
+  `propose_kb_correction`. A Claude specialist's note (`KB_CORRECTION_NOTE_CLAUDE`) names
+  the tool instead.
 
 ## 3. A run's life
 
@@ -747,6 +820,17 @@ signalled. Codex sweeps the same way without the group, since its SDK owns the s
 is cleanup, not containment: a process that clears its own environment escapes it, and
 the container plus the server-owned delivery gate stay the boundary (ruling 93). The log
 line is `reaped the processes a settled run left behind`, with the counts.
+
+On a launched run (ruling 460) the processes are another user's: the server can neither
+read their `/proc/<pid>/environ` nor signal them. So the sweep also asks the launcher —
+`viberr-launch --reap TERM <runId>…`, then after the grace `--reap KILL <runId>…` — which,
+as root, signals every process whose uid is in the agent range and whose environment
+carries one of the markers (root borrows the process's filesystem ids for the one
+`environ` read: the container holds no `CAP_SYS_PTRACE`; a pidfd pins each process so a
+recycled pid is never signalled). The group signal goes to the launcher, which relays it;
+its hard kill is SIGUSR2 (`ReapTargets.launched`). When the agent exits on its own, the
+launcher SIGTERMs whatever is still in the agent's group before it exits. The boot sweep
+of restart-orphaned runs (§8) goes through the same `--reap`.
 
 ### 3.5 Failure kinds
 
@@ -1110,7 +1194,7 @@ on every attempt; the run still starts in its workspace and delivery retries the
 
 ### 4.2 The `viberr_agent` toolkit (Claude specialists)
 
-`buildAgentToolkit` (`agent-toolkit.server.ts`) builds up to six tools on independent
+`buildAgentToolkit` (`agent-toolkit.server.ts`) builds up to seven tools on independent
 gates and mounts the server only when at least one was built, with `alwaysLoad: true`
 (§2.4). It returns `toolNames`, read off the definitions it pushed, which is the tool list
 the run's `run·inputs` record discloses (ruling 339). Codex specialists mount none of it
@@ -1119,11 +1203,12 @@ and get the outcome envelope instead (§2.5).
 | Tool | Gate | Effect |
 |---|---|---|
 | `post_comment` | `comment-on-task` | timeline comment, audit `task.agent.commented`; a comment that tags an agent says it reached nobody (ruling 252) |
-| `ask_human {title, body?, options?}` | `ask-human` | opens an "Agent question" input packet with `askedBy = profileId`, audit `task.agent.packet_opened`, the owner's notification under the agent's name (ruling 222); more than 4 options is refused by the schema with nothing written, never trimmed (ruling 298); refused while a packet is open. An answer that sends work back (`request_edit`, `redirect`, `custom`) resumes this agent (ruling 33), unless the chosen option or the person's note names another deployed agent or the operator, in which case it goes to the operator with a note saying why (ruling 447, `answerNamesAnotherActor`) |
+| `ask_human {title, body?, options?: [{title, detail?, reply?}]}` | `ask-human` | opens an "Agent question" input packet with `askedBy = profileId`, audit `task.agent.packet_opened`, the owner's notification under the agent's name (ruling 222), filed as kind `question` with its own "Agent questions" toggle, pill and hand glyph (ruling 481(a); the Codex outcome envelope's question writes the same kind); more than 4 options is refused by the schema with nothing written, never trimmed (ruling 298); refused while a packet is open. Only the option whose title ends "(Recommended)" is recommended; an unmarked list recommends nothing and the card preselects nothing. `reply: true` marks an option that needs the person's typed answer, which the card and `resolvePacket` require (ruling 478(e)); the Codex envelope's `question.options[]` carries the same `reply`. An answer that sends work back (`request_edit`, `redirect`, `custom`) resumes this agent (ruling 33), unless the chosen option or the person's note names another deployed agent or the operator, in which case it goes to the operator with a note saying why (ruling 447, `answerNamesAnotherActor`) |
 | `report_outcome {summary, verdict?, evidence?}` | `report-validation-verdict` (the `verdict` field) or `attach-evidence-references` (the `evidence` field); built when either is granted | staged ONCE under the run's `outcome_key`, consumed once at completion; a second call changes nothing, is answered `[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.` and audits `task.agent.outcome_duplicate` {`runId`, `outcomeKey`, `count`} |
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 48 000 chars), audit `task.agent.github_read` |
 | `read_board {taskKey?}` | none; built only when another tool already was | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
+| `propose_kb_correction {kb, doc, line?, correction, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | files one non-binding entry under `## Proposed corrections (not binding)` in that document (`proposeKbCorrection`, ruling 483): only against a knowledge base this run was given, the quoted `line` must stand in the settled text, the same open correction is a `[noop]`; a `proposal` timeline event under the agent's own name, audit `task.kb_proposal.filed`, a `quality` notification from the agent |
 
 The outcome is the first envelope a run reports. The already-staged check reads the
 in-process map and the persisted row, so an envelope staged before a restart still stands
@@ -1146,6 +1231,7 @@ resources, MCP server editor), per mounted server, derived from the same denylis
 |---|---|---|
 | `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)` | advisory (ruling 185) |
 | `execute-code-or-write-repo`, org MCP write tools (ruling 176) | `mcp__<server>__<tool>` for each marked tool; an HTTP config also carries `always_deny` | that server's `disabled_tools` (binds) |
+| the same, on a server reached through the MCP gateway (ruling 461) | as above, and the gateway leaves the tool out of `tools/list` and refuses a call to it | as above, plus the gateway's filter and refusal |
 | `create-task-branch` | `Bash(git checkout -b:*)`, `-B`, `git switch -c/-C` | advisory |
 | `commit-push-branch` | `Bash(git push:*) Bash(git commit:*)` | advisory |
 | `open-review-pr` | `Bash(gh pr create:*)` | advisory |
@@ -1308,6 +1394,17 @@ grants. MCP grants are outside the
 matrix (ruling 39), except the tools an admin marks as write tools, which a withheld
 repo-write grant denies (ruling 176).
 
+**The matrix, the profile panel and the Policy counts count the same capabilities**
+(ruling 479(a)). `GOVERNED_CAP_LABELS` (every catalog row with a `group`) is the
+partition all three read. The capability matrix modal's grid is the agent editor's groups
+plus an "Operator actions" group (the operator's own capabilities); an advisory line
+(`group: null`, the three verdict outcomes among them, or a bespoke extra) is never a
+grid row. It is listed under the grid in a collapsed "Advisory only · N lines the runtime
+does not read", with the profiles that hold it and the mode it is stored at, the way the
+profile panel lists them (ruling 31); a line stored `off` holds nothing and is not listed.
+Whether a profile's review can approve or request changes is its `report-validation-verdict`
+row.
+
 Absent-grant polarity is deliberately not uniform: `dispatch-agents` and
 `use-web-search-fetch` absent ⇒ granted; `deliver-review-pr` absent ⇒ derived from
 workflow strictness and `update-task-branch` absent ⇒ whatever delivery resolves to
@@ -1385,7 +1482,8 @@ runtime's answer for a missing grant.
   toolkits, one implementation, `readKbDocForRun`, only the KBs attached to that run,
   one document whole up to `KB_DOC_READ_CHARS` 48 000 chars, flagged when clipped), or,
   on Codex, which mounts no Viberr tools, the file itself at the printed path (the
-  workspace contract allows those reads, ruling 422). `KB_PRECEDENCE_NOTE` (repo
+  workspace contract allows those reads, ruling 422; `kb/` stays readable, and never
+  writable, to the agent's own OS user, ruling 460). `KB_PRECEDENCE_NOTE` (repo
   conventions outrank KBs, ruling 56) is emitted only when an index is present. All three
   runtimes assemble the block (the attached-resources banner, injected skill bodies, these
   notes, the indexes) with one helper, `attachedResourcesBlock`, and pass only their own
@@ -1410,12 +1508,104 @@ runtime's answer for a missing grant.
   live. A template edit therefore changes nothing a run mounts until the copy is
   rewritten (the template writer's `propagate`, the org modal's box, or an org admin's
   "Use the template's grants" on the Agents page), and the roster marks a copy whose
-  grants differ with the exact difference (`templateDrift`).
-- **MCP servers**: org registry rows resolve to stdio `{command, args, env:
-  {MCP_CREDENTIAL}}` or http `{url, headers: {Authorization: Bearer}}`; reserved names are
-  skipped; a missing row is reported "unresolved"; an unhealthy row is still mounted but
-  flagged; a credential that cannot be opened drops the server; stdio mounts get a real
-  discovery handshake before the run and are dropped (and marked unreachable) on failure.
+  grants differ with the exact difference (`templateDrift`). The button replaces the
+  copy's three lists, so it opens a confirm ("Template grants dialog") that names what
+  the press removes and adds, and the toast repeats both (ruling 479(d)). The operator's
+  template is a source like any other (ruling 479(c)): an operator run mounts its copy's
+  lists, and `propagateTemplateResources` refuses only a profile with no template. The
+  profile editor says a save "forks" the profile only while the copy still resolves some
+  field from the template live (`tracksTemplate`: a definition-less deployment, or one
+  whose definition leaves a field a save writes unset); a copy that already holds its
+  snapshot (a library deploy, any earlier save) is told the save updates it (ruling
+  479(g)). The copy's persona is a
+  snapshot too: it changes through the Agents page editor, `update_agent_deployment`'s
+  `persona`, or a template save that changes the persona with `propagate` (the org
+  modal's box), which rewrites every copy still running the older text (ruling 467).
+- **MCP servers**: an org registry row with no credential resolves to stdio
+  `{command, args}` or http `{type: "http", url}` and the CLI connects to it directly. A
+  row WITH a stored credential (a pasted one, or an OAuth sign-in's tokens, ruling 469)
+  never reaches an agent process (ruling 461, F40-2, F40-3):
+  it resolves, on either transport and on both backends, to `{type: "http", url:
+  "http://127.0.0.1:<port>/mcp/<name>"}` on Viberr's loopback MCP gateway
+  (`app/server/mcp-proxy/gateway.server.ts`), and `startRun` — the one funnel every
+  specialist, operator, controller and resumed run goes through — mints ONE random
+  256-bit token for the run (`bindRunToMcpGateway`) and adds `headers: {Authorization:
+  "Bearer <token>"}` to each such mount. The token is bound to the run id, the exact
+  server names the run mounts and the write tools it withholds on each; it is revoked on
+  every path that ends the run (the settle — which stops its calls when the process exits
+  and revokes it once a completion compaction, which lists the same servers to keep the
+  cached prefix, is done — an interrupt with or without a live handle,
+  a queued run the drain drops, a launch that throws) and dies with the process, and the
+  gateway also refuses it once the run's row is no longer running or queued. An unknown,
+  revoked or wrong-server token gets a 401 with a JSON-RPC error and nothing is
+  forwarded. The gateway speaks MCP to the run (Streamable HTTP, SDK server transport)
+  and MCP to the real server with the credential attached in the server process
+  (`app/server/mcp-proxy/upstream*.server.ts`): an HTTP server over Streamable HTTP with
+  `Authorization: Bearer <credential>`, falling back to the legacy SSE transport on a
+  4xx other than 401/403; a stdio server is a command the SERVER spawns (its own uid, the
+  secret-filtered env plus `MCP_CREDENTIAL`, a process group of its own), one upstream
+  per (run, server), killed at revoke — and at shutdown, even mid-handshake. An HTTP
+  upstream that ends the session the gateway holds (a 404, or the 400 of servers built
+  from the SDK's examples, to a request that carried it) gets a new session and the
+  request is sent again, once; the run's own session never notices. An HTTP server an org admin **signed in with
+  OAuth** (ruling 469) takes the same road: its tokens are sealed beside the registry row
+  (`oauth_ref`), and the gateway (and the health probe) ask
+  `mcpOAuthTokenSource` — bound to the endpoint its connection was opened against, so a
+  connection to an endpoint the row no longer names is handed nothing and the gateway
+  reconnects to the new one — for the access token on every request — renewed with the refresh
+  token when it is within a minute of running out and once after an upstream 401
+  (single-flight per server, so two runs spend a rotating refresh token once), then
+  re-sealed. A renewal the authorization server refuses ends the sign-in — only while the
+  refused tokens are still the stored ones, so a sign-in that landed meanwhile stands —
+  the tokens are dropped (and the client registration too when the server refused the
+  client itself, `invalid_client`, so the next sign-in registers again), the row reads
+  "sign-in expired: an admin must sign in again" with the
+  server's words, `org.mcp.oauth_failed` {stage: "refresh"} is audited, and the run's
+  call fails with that sentence; a renewal that fails for now (unreachable, a 5xx,
+  `temporarily_unavailable`) is reported and keeps the sign-in. A server that answers
+  the MCP authorization challenge and holds no token (or whose sign-in expired) is not
+  mounted at all: the run's prompt names it with that reason instead of a server that
+  answers every call 401. What a sign-in was GRANTED is public (ruling 486): the token
+  reply's `scope` (or, when it names none, the scope asked for) is kept in `oauth_json`,
+  replaced by a refresh that names one and cleared by a sign-out or an expiry, and one
+  classifier (`isWriteScope`, `app/shared/mcp-oauth.ts`: a write is any scope whose
+  action is not `read`, `metadata_read`, `monitoring` or `report`, other than
+  `offline_access`) summarizes it everywhere as "read-only · 194 scopes" or "194 scopes ·
+  12 writes". A run's prompt names each signed-in server's grant, and a read-only one adds
+  that the server refuses any call that writes. When a call through the gateway meets an
+  upstream authorization refusal (an HTTP 401 or 403, a JSON-RPC error, or an `isError`
+  tool result that says authentication or authorization, as Cloudflare's "10000:
+  Authentication error" does) and the grant has no write, the run's error gains "This
+  connection's sign-in granted read-only scopes (N); an admin must sign it in again with
+  write scopes in Instance settings → Agent resources." after the upstream's own words,
+  which stay untouched. The next sign-in asks for the admin's Requested scopes
+  (`oauth_requested_scope`) when set, else the resource's advertised `scopes_supported`. The Agents page says the same before any run (ruling 479(b)):
+  `buildResourceCatalog` carries a `warning` on each MCP item a run would not get tools
+  from, read off the registry row the Settings list renders ("needs sign-in", "sign-in
+  expired", "credential unreadable", or "unreachable" for a failed last check, which is
+  mounted and flagged down), and a profile's granted chip for that server is marked the
+  way a missing one is, with the remedy (an org admin, Instance settings → Agent
+  resources) in its title and its text. It forwards `tools/list` (withheld write tools
+  removed), `tools/call` (a withheld one refused with `mcpWriteToolDenyReason`),
+  resources and prompts when the upstream declares them, and `list_changed`
+  notifications; a timeout (5 minutes a call, reset by progress) or an upstream error
+  comes back as a JSON-RPC error naming the server. A stdio server that exits mid-call
+  answers the call with its own exit and stderr (the run's session then 404s and it
+  re-initializes onto a fresh process), and one that prints a single message over the
+  SDK's 10 MiB stdio line limit is stopped and its calls fail saying so — nothing a
+  child prints can throw out of the server's stream listener. Every forwarded call is logged at
+  info (run id, server, tool, duration, outcome; never arguments or results), and a call
+  to a tool an admin marked as a write tool is audited `task.agent.mcp_write_call` under
+  the run's actor (the agent, the operator, or the asker as the controller's
+  instrument). The prompt names a proxied server in one sentence (`gatewayMcpSection`:
+  the credential is held by Viberr, the agent never needs or sees it, a 401 means the
+  run ended), and each OAuth-signed-in one in a line with its grant (`oauthGrants` on the
+  resolution, ruling 486). A gateway that is not listening leaves a credentialed server unmounted,
+  with that reason in the run's prompt. Reserved names are skipped; a missing row is
+  reported "unresolved"; an unhealthy row is still mounted but flagged; a credential that
+  cannot be opened drops the server; stdio servers get a real discovery handshake, WITH
+  the credential on both backends, before the run and are dropped (and marked
+  unreachable) on failure.
   Every grant that produced no usable server is listed in the prompt with the reason its
   own probe returned and an instruction not to infer another cause
   (`unavailableMcpSection`, `specialist-mcp.server.ts`, shared by the specialist and
@@ -1454,21 +1644,97 @@ runtime's answer for a missing grant.
   store-relative spelling here is a display form (ruling 159); an agent is only ever
   handed the absolute path, and a delivery whose tree carries `projects/<slug>/tasks/`
   is refused.
+- **Shared between the server and the agents' users (ruling 460).** The directories a run
+  writes — a task's `workspace/`, `attachments/` and `.operator-scratch/`, and
+  `runtimes/controller-scratch`, `uv-cache`, `uv-python` — are `node:viberr-agents` 2770
+  (`shareDirWithAgents`, called where each is created; boot hands an older tree over once,
+  recursively). setgid keeps whatever either side creates inside in the agent group; the
+  agent's umask is 0007 (the launcher sets it) and the server's is 0002 (set at boot when the
+  launcher exists), so a file the server's clone checks out is one an agent can edit and a
+  file one agent writes is one the delivery (the owner's uid) can commit. Nothing else the server
+  writes is in the agent group (its own files are `node:node`), so the canonical
+  `task.md`, `project.md`, knowledge bases and skills stay readable and unwritable to an
+  agent. A correction an agent proves goes through the server instead, as a proposal the
+  document carries and a person promotes (ruling 483, §4.2). Git refuses a repository another uid owns, so the image's SYSTEM git config
+  (`/etc/gitconfig`, root-owned, which no agent can edit) carries `safe.directory=*` and
+  `core.sharedRepository=group`; it binds the server's git, an agent's shell and a tool that
+  clears its environment alike.
+- **Who runs git (pass 40 review, R-seams-1).** The server never executes git with an
+  agent-writable repository as its working repository under its own uid: an agent can write
+  any checkout's `.git` (hooks, `core.fsmonitor`, a filter or credential helper,
+  `url.insteadOf`), and the server's git there ran them as `node` with the server's
+  environment. So every git IN a workspace — the pre-run refresh (ruling 129), the unborn
+  checkout's check (ruling 468), the supporting clone of the delivering checkout, the
+  origin rewrite and identity, the `.claude` strip, the review pin, the delivery's
+  status/add/commit and gate reads, the branch update's merge and abort, the reconcile's
+  reads, the discard, the operator's default-branch fallback read — runs as the task
+  owner's agent uid through the launcher (`taskWorkspaceGit` → `agentGitLaunchFor`, the
+  agent's `$HOME`, no credential in its env); with no launcher (dev, tests) the same git
+  runs as the server, as before, and with isolation on and no owner to name it refuses
+  rather than fall back. What needs the PAT runs as the server in a repository it owns:
+  the mirror, or a per-operation bare **stage** (`withServerStage`,
+  `projects/<slug>/.repo-stage/`, readable by agents, never writable, borrowing the
+  mirror's objects under its lock), which fetches GitHub's refs for the workspace to fetch
+  from and takes the delivered branch out of the workspace through the launcher's
+  `git-upload-pack` before pushing it (github-delivery §1). A new checkout is cloned by
+  the server into a stage of its own, handed to the agent group (a file hardlinked from
+  the mirror stays read-only) and renamed into place (`cloneThroughStage`). Every git the
+  server spawns, as itself or as a person, carries `core.hooksPath=/dev/null` and
+  `core.fsmonitor=false` at command-line precedence on a `filteredSpawnEnv()` base
+  (`serverGitEnv`); an agent's own git keeps its hooks. `gh` (the reconcile's PR lookup)
+  runs as the server but in the task's directory, never the checkout. The server's own
+  non-git work — the stdio MCP probes, reading transcripts — stays `node`.
+- **Who removes a tree (ruling 485).** A tool an agent runs can leave a directory only its
+  uid can enter (wrangler's `mkdtemp` dirs are 0700); the server's own recursive remove
+  then deleted what the group could, `.git` first, and died on the rest (F40-62), leaving
+  a checkout no later clone could land in. So every removal or replacement of a tree an
+  agent can write — a supporting checkout's replace, an unfinished clone, a clone
+  destination in the way, a gate checkout, a finished task's `workspace/`, the stripped
+  `.claude`, a run's skill plugin, a Codex run home, the seed's reset of a task's shared
+  directories — goes through `removeAgentTree` / `removeAgentTreeSync`
+  (`runtimes/agent-trees.server.ts`): `chmod -R u+rwX` then `rm -rf --`, absolute binaries,
+  through the launcher as the task owner (`taskWorkspaceLaunch`, the launch the
+  workspace's git uses) or, for a run home, the run's own launch. What that leaves is
+  another uid's (a task whose owner changed): the server reads the owners it can see in
+  what is left and removes as each of them, opening their entries to the group
+  (`g+rwX`) so a deeper layer shows on the next round, three rounds at most. A tree still
+  there is a fault naming the path and the errno ("EACCES on …/dev-1wnDsF"). With no
+  launcher the same commands run as the server; with isolation on and no owner to name
+  the removal refuses and nothing is removed. A checkout with no `.git/HEAD` found when a
+  run (or the operator) prepares its checkout is removed as its person and cloned again,
+  so a tree an older build half-removed heals on the next run. Every local step of
+  preparing a checkout (the removal, the directory, the clone of the delivering checkout,
+  the origin rewrite, the strip) fails as a `workspace_fault` with `credential:
+  not_involved` and a sentence that names the path and the OS error and nothing about
+  access (ruling 249's note).
 - Mirror (ruling 87): bare `projects/<slug>/.repo-mirror/<owner>__<repo>.git`, `fetch
   --prune` with a heads-to-heads refspec before each clone (timeout 120 s, rebuilt after
-  2 consecutive failures), then a local hardlinked clone with `origin` rewritten to the
-  credential-free `https://github.com/<repo>.git`; a shallow direct clone is the
-  fallback.
+  2 consecutive failures), then a local hardlinked clone (in a stage, then moved into the
+  workspace) with `origin` rewritten to the credential-free
+  `https://github.com/<repo>.git`; a shallow direct clone (into a stage too) is the
+  fallback. The mirror is the server's alone: boot takes group and other write off every
+  mirror file, and a hand-over never widens a file with a second link.
 - Credentials never touch argv or `.git/config`: the PAT is delivered through
   `GIT_ASKPASS` (`x-access-token`), `GIT_TERMINAL_PROMPT=0`, credential helper reset.
   Clone timeout 15 min (`VIBERR_GIT_CLONE_TIMEOUT_MS`); progress is streamed to the run
   strip ("Receiving objects" 0..90 %, "Resolving deltas" 90..100 %).
 - Retention: workspaces of tasks in the terminal stage are removed at boot (after run
-  recovery, only when no run is live) and on every maintenance pass; transcripts and
+  recovery, only when no run is live) and on every maintenance pass, each as its task's
+  owner (ruling 485; a task with no owner keeps its workspace while isolation is on); transcripts and
   session homes older than 30 days are pruned (`VIBERR_TRANSCRIPT_RETENTION_DAYS`,
   `VIBERR_SESSION_HOME_RETENTION_DAYS`, `0` = forever).
 
 ## 8. Boot recovery
+
+First of all, right after the projection opens, `bootAgentIsolation` (ruling 460,
+`agent-isolation.server.ts`): with a launcher present it sets the server's umask to 0002,
+enforces the store layout (`enforceStoreLayout`: the root 0750 in the agent group, `state/`,
+`audit-exports/` and the raw run logs 0700, `runtimes/users/` 0710, `agents/`, `kb/`,
+`skills/`, `projects/` 0755, the shared directories of §7 2770, every task's pre-460
+workspace handed over once), hands each person's runtime root to their uid (whole when it
+is not yet theirs, else just the two vendor homes), and probes the store as the reserved
+uid below the range: refused → `on`, readable → `degraded` (a bind mount; health names
+it). Without a launcher it only records `off`. It never throws.
 
 Before the chain, boot runs `repairCodexRolloutPaths` once (ruling 199, §2.2): every Codex
 thread still indexed under a removed per-run home is re-pointed at the file in the shared
@@ -1482,7 +1748,9 @@ thread still indexed under a removed per-run home is re-pointed at the file in t
    private home is finished the way its settle would have (auth write-back, directory
    removed, thread paths re-pointed; ruling 181), and the orphans' run ids are swept
    (ruling 174, §3.4): a Claude CLI leads its own group, so a server that died without
-   shutting down does not take it along. One "Interrupted by a restart" note per task
+   shutting down did not take it along — in the image the launcher's PDEATHSIG now does
+   (ruling 460), and the sweep, through the launcher's `--reap`, finds what a SIGKILLed
+   launcher's agent had already detached. One "Interrupted by a restart" note per task
    lists what was running and, separately, what was queued and had not started (ruling
    310(b)); then one `runOperator({ trigger: "manual" })` per affected task (controller
    turns get a conversation note instead), capped at 3 per task per 30 min via
@@ -1559,7 +1827,14 @@ The shipped operator doctrine (`operator.definition.md`, upgraded in place throu
 own tool, `set_dependencies`, and never a packet (ruling 131).
 
 `ensureBaseAgentsDeployed` runs at boot: the operator is ensured on every project;
-Developer and Reviewer are backfilled only into a project with **no** specialists. Profile
+Developer and Reviewer are backfilled only into a project with **no** specialists. A new
+project gets the operator, Developer and Reviewer, unless the controller's `create_project`
+passes `agents` (ruling 464): then the operator plus exactly those library deployments, each
+built by `buildLibraryDeployment` (the deploy the Agents page makes) with its `model` and
+`effort` checked before anything is written. An empty `agents` is refused, because the
+backfill above would put the base specialists back. `remove_agent_deployment` is the
+controller's door to the Agents page's Delete (`deleteAgentProfile`), which also refuses a
+profile engaged on an open task. Profile
 files use `agentProfileFrontmatterSchema` (kind, icon default `cpu`, `resources {skills,
 mcps, kb}`); the schema is `.loose()`, so an unknown key is kept and written back, and
 raises a drift warning. Deployment overrides (`project.md` `agents[]`) carry autonomy
@@ -1570,9 +1845,9 @@ raises a drift warning. Deployment overrides (`project.md` `agents[]`) carry aut
 1. `kind: reviewer` means "supporting run", not "the Reviewer profile".
 2. Specialist `recommend` coerces down to `off`; operator `recommend` promotes up to
    `direct` under full autonomy, except acceptance.
-3. Codex drops MCP credentials and browser images: a bearer-token HTTP MCP runs
-   unauthenticated there (the persona says so), and a stdio server that needs its
-   credential to start is dropped from the run with the reason.
+3. Codex drops browser images. It no longer drops MCP credentials: a credentialed
+   server is a gateway mount on both backends (ruling 461, §6), so the run token rides the
+   Codex CLI's argv and the credential stays in Viberr.
 4. Foreign-backend models are substituted at start and disclosed: the run log's first
    line, the switched-backend timeline event and the `retry_other_backend` option all
    name the model (F36-8). The run row stores what ran.

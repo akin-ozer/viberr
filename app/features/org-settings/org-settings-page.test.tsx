@@ -84,20 +84,33 @@ function renderPanel(ui: ReactNode) {
 const CONNECTIONS: ConnectionRecord[] = [
   {
     id: "akin-ozer", owner: "akin-ozer", method: "PAT", patId: "pat_1",
-    masked: "····0000", def: true, repos: null, expiresAt: null, daysLeft: null,
-    validationState: "unvalidated", scopes: [], lastValidatedAt: null,
+    masked: "····0000", def: true, expiresAt: null, daysLeft: null,
+    validationState: "unvalidated", tokenKind: null, validationDetail: null,
+    missingScopes: [], reach: null, scopes: [], lastValidatedAt: null,
     createdAt: "2026-07-01T09:00:00.000Z", boundProjects: 0, advisories: [],
+    repoProofs: [],
   },
   {
     id: "hepapi", owner: "hepapi", method: "PAT", patId: "pat_2",
-    masked: "····42af", def: false, repos: 12, expiresAt: "2026-07-20T00:00:00.000Z",
-    daysLeft: 15, validationState: "valid",
+    masked: "····42af", def: false, expiresAt: "2026-07-20T00:00:00.000Z",
+    daysLeft: 15, validationState: "valid", tokenKind: "fine_grained",
+    validationDetail: null, missingScopes: [],
+    reach: {
+      status: "read", readAt: "2026-07-01T09:00:00.000Z", capped: false,
+      total: 3, privateCount: 1,
+      repos: [
+        { fullName: "hepapi/api", private: false, canPush: true },
+        { fullName: "hepapi/docs", private: false, canPush: false },
+        { fullName: "hepapi/website", private: true, canPush: true },
+      ],
+    },
     scopes: [
       { id: "repo", ok: true, source: "header" },
       { id: "workflow", ok: true, source: "header" },
       { id: "pull_request:write", ok: true, source: "header" },
     ], lastValidatedAt: "2026-07-01T09:00:00.000Z",
     createdAt: "2026-07-01T09:05:00.000Z", boundProjects: 2, advisories: [],
+    repoProofs: [],
   },
 ];
 
@@ -112,6 +125,48 @@ describe("ConnectionsPanel", () => {
     expect(getByText("default")).toBeTruthy();
     expect(getByText("expires in 15 days")).toBeTruthy();
     expect(queryByText("validation failed")).toBeNull();
+  });
+
+  // Ruling 480 (F40-45): a project's credential card links an instance admin
+  // to `?update=<connection id>`, the one place a token is replaced. Canary:
+  // start the modal state at null and no dialog opens.
+  it("ruling 480: ?update=<id> opens that connection's Update token, and its note promises no dry-run", async () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <ConnectionsPanel connections={CONNECTIONS} />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { findByRole } = render(
+      <Stub initialEntries={["/org/settings?tab=connections&update=hepapi"]} />,
+    );
+    const dialog = await findByRole("dialog", { name: "Update token for hepapi" });
+    // F40-43: the dry-run is an env opt-in that is off by default.
+    expect(dialog.textContent).not.toContain("dry-run");
+    expect(dialog.textContent).toContain(
+      "GitHub reports its write access when a project attaches it, and the first branch, push or pull request Viberr makes there proves the rest.",
+    );
+  });
+
+  it("ruling 480: an unknown ?update= id opens nothing", () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <ConnectionsPanel connections={CONNECTIONS} />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { queryByRole } = render(
+      <Stub initialEntries={["/org/settings?tab=connections&update=nobody"]} />,
+    );
+    expect(queryByRole("dialog")).toBeNull();
   });
 
   it("C6: a PAT expiry hydrates safely — the UTC day first, the viewer's calendar date after hydration", () => {
@@ -159,6 +214,61 @@ describe("ConnectionsPanel", () => {
     await waitFor(() =>
       expect(lastForm).toMatchObject({
         intent: "connection-remove",
+        connectionId: "hepapi",
+      }),
+    );
+  });
+
+  /**
+   * Ruling 463 (F40-6): the row says what the TOKEN reaches. It read "3
+   * public repos", the account's public count, while the fine-grained token
+   * behind it had been granted a private repository that count cannot show.
+   */
+  it("ruling 463: a row says which repositories the token reaches, private ones marked, one disclosure away", () => {
+    // CANARY: drop <ReachLine> from the row, or render the list outside the
+    // <details>, and the matching assertion fails.
+    const { container } = renderPanel(<ConnectionsPanel connections={CONNECTIONS} />);
+    expect(container.textContent).not.toMatch(/public repo/);
+    const reach = container.querySelector("details.conn-reach[data-reach='read']");
+    expect(reach).toBeTruthy();
+    expect(reach!.querySelector("summary")!.textContent).toBe(
+      "Reaches 3 repositories · 1 private",
+    );
+    const items = [...reach!.querySelectorAll(".conn-reach-list li")].map(
+      (li) => li.textContent,
+    );
+    expect(items).toEqual(["hepapi/api", "hepapi/docsread only", "hepapi/websiteprivate"]);
+    // The unvalidated row has no reach yet and says how it gets one.
+    expect(container.querySelector("[data-reach='unread']")!.textContent).toContain(
+      "has not been read yet. Re-check reads it.",
+    );
+  });
+
+  it("ruling 463: a reach GitHub would not give says why instead of a count", () => {
+    const unknown: ConnectionRecord[] = [
+      {
+        ...CONNECTIONS[1]!,
+        reach: {
+          status: "unknown",
+          readAt: "2026-07-01T09:00:00.000Z",
+          reason: "GitHub answered 403 on /user/repos (Forbidden)",
+        },
+      },
+    ];
+    const { container } = renderPanel(<ConnectionsPanel connections={unknown} />);
+    expect(container.querySelector("details.conn-reach")).toBeNull();
+    expect(container.querySelector("[data-reach='unknown']")!.textContent).toBe(
+      "Which repositories this token reaches could not be read: GitHub answered 403 on /user/repos (Forbidden)",
+    );
+  });
+
+  it("ruling 463: Re-check posts connection-recheck for its own row", async () => {
+    // CANARY: post another intent, or the default connection's id.
+    const { getAllByText } = renderPanel(<ConnectionsPanel connections={CONNECTIONS} />);
+    fireEvent.click(getAllByText("Re-check")[1]!);
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "connection-recheck",
         connectionId: "hepapi",
       }),
     );
@@ -721,6 +831,45 @@ describe("ResourcesPanel", () => {
   });
 
   /**
+   * Ruling 479(h) (F40-46): live, Design Engineer and Content Writer carried
+   * akinozer.com's own `build` stage. The row printed the bare id, and the
+   * editor offered only the default workflow's chips, so Content Writer opened
+   * with nothing pressed and `build` could be neither seen nor removed while
+   * every save kept it. Canary: drop the `storedOnlyStages` chips.
+   */
+  it("ruling 479(h): a stored stage the default workflow lacks is named on the row and is a removable chip", async () => {
+    const outside: GagentView[] = [
+      { ...GAGENTS[1]!, id: "design-engineer", name: "Design Engineer", stages: ["ready", "build"] },
+    ];
+    const { getByText, getByLabelText, getByRole } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={outside}
+        templateGrants={TEMPLATE_GRANTS}
+        stages={STAGES}
+      />,
+    );
+    expect(getByText(/Claude · Ready · build \(not in the default workflow\) · /)).toBeTruthy();
+    fireEvent.click(getByLabelText("Edit Design Engineer"));
+    const chip = getByRole("button", { name: "build not in the default workflow" });
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    expect(chip.getAttribute("title")).toContain("the default workflow does not offer");
+    // Removable, and still on screen to be pressed back on before the save.
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(getByText("Save changes"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "agent-save",
+        profileId: "design-engineer",
+        stages: JSON.stringify(["ready"]),
+      }),
+    );
+  });
+
+  /**
    * Ruling 156 (pass 35, F35-7): a project's deployment is its own COPY of the
    * grants, so an org edit never reached it. The modal offers the propagation
    * as a box, unchecked by default, and the save carries the decision. Canary:
@@ -843,11 +992,12 @@ describe("ResourcesPanel", () => {
     const { getByText, getByLabelText } = renderResources();
     // KB and skill rows have counted templates since P13-KM-08; the MCP row was
     // the one destructive path with no idea what depended on it.
-    // F-P3 (pass 25): a credentialed server's row now carries the backend caveat
-    // between "auth: configured" and the grant tail.
+    // Ruling 461: a credentialed server's row says who holds the credential,
+    // between "auth: configured" and the grant tail (it used to carry F-P3's
+    // Claude-only caveat, which the gateway ended).
     expect(
       getByText(
-        /14 tools · checked just now · auth: configured \(Claude runs only · Codex mounts it unauthenticated\) · 1 template/,
+        /14 tools · checked just now · auth: configured \(held by Viberr; runs connect through its gateway\) · 1 template/,
       ),
     ).toBeTruthy();
 
@@ -1079,8 +1229,37 @@ describe("ConnectionsPanel — scope evidence", () => {
       <ConnectionsPanel connections={[assumed]} />,
     );
     expect(container.querySelectorAll(".conn-row .scope-chip").length).toBe(0);
+    // Ruling 480 (F40-43): no promise the card then never kept.
     expect(container.querySelector(".conn-row .scope-chips")!.textContent).toContain(
-      "repo, pull_request:write unproven. Verified when attached to a project",
+      "repo, pull_request:write unproven for the token as a whole: each repository proves them. No repository has proven them yet: attaching the token to a project does, and so does Viberr's first write there.",
+    );
+  });
+
+  // Ruling 480 (F40-43): live, the card read "repo unproven. Verified when
+  // attached to a project" for a token attached to a project that had pushed
+  // and merged. Canary: stop rendering `repoProofs` and the line is gone.
+  it("ruling 480: lists what each repository proved, and no longer says none has", () => {
+    const proven: ConnectionRecord = {
+      ...CONNECTIONS[1]!,
+      id: "cx_proven",
+      owner: "akin-ozer",
+      scopes: [
+        { id: "repo", ok: true, source: "assumed" },
+        { id: "pull_request:write", ok: true, source: "assumed" },
+      ],
+      repoProofs: [
+        { repo: "akin-ozer/website", proven: ["repo", "pull_request:write"], refused: [] },
+        { repo: "akin-ozer/docs", proven: [], refused: ["repo"] },
+      ],
+    };
+    const { container } = renderPanel(<ConnectionsPanel connections={[proven]} />);
+    const lines = [...container.querySelectorAll("[data-repo-proof]")].map((l) => l.textContent);
+    expect(lines).toEqual([
+      "akin-ozer/website: repo, pull_request:write proven",
+      "akin-ozer/docs: repo refused",
+    ]);
+    expect(container.querySelector(".conn-row .scope-chips")!.textContent).not.toContain(
+      "No repository has proven them yet",
     );
   });
 
@@ -2348,5 +2527,54 @@ describe("McpModal — write tools (ruling 176)", () => {
     fireEvent.click(getByText("Add & test connection"));
     await waitFor(() => expect(lastForm).toMatchObject({ intent: "mcp-save", name: "gh-new" }));
     expect(lastForm).not.toHaveProperty("writeTools");
+  });
+});
+
+/**
+ * Ruling 483 (F40-59): a knowledge-base proposal links to the document it
+ * stands in. `?kb=<dir>&doc=<path>` opens that base's browser and reads that
+ * document, the way a click on its row would.
+ */
+describe("ResourcesPanel: the link a knowledge-base proposal carries (ruling 483)", () => {
+  it("opens the named knowledge base on the named document", async () => {
+    const reads: Record<string, string>[] = [];
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <ResourcesPanel kbs={KBS} mcps={[]} skills={[]} gagents={[]} stages={STAGES} />
+          </ToastProvider>
+        ),
+        action: async ({ request }) => {
+          const fd = await request.formData();
+          const form: Record<string, string> = {};
+          for (const [k, v] of fd.entries()) {
+            const field = textField.safeParse(v);
+            if (field.success) form[k] = field.data;
+          }
+          reads.push(form);
+          return { ok: true, text: "# ADR 001\nSETTLED", truncated: false };
+        },
+      },
+    ]);
+    const params = new URLSearchParams({
+      tab: "resources",
+      kb: "architecture-notes",
+      doc: "decisions/adr-001.md",
+    });
+    render(<Stub initialEntries={[`/org/settings?${params.toString()}`]} />);
+    // CANARY: drop the `kb` search-param read and the panel opens on the list,
+    // with no browser and no document.
+    await waitFor(() =>
+      expect(reads).toContainEqual(
+        expect.objectContaining({
+          intent: "store-read-doc",
+          kind: "kb",
+          id: "kb1",
+          path: JSON.stringify(["decisions", "adr-001.md"]),
+        }),
+      ),
+    );
   });
 });

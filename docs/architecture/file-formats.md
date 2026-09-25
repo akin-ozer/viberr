@@ -177,6 +177,21 @@ fileLeases:                       # ruling 245: which TASK owns which shared pat
   - paths: ["pnpm-lock.yaml"]
     taskKey: SHOP-11
     reason: regenerating it for the cart importer
+gates:                            # ruling 482: the commands VIBERR runs on every
+                                  # delivered revision, in order, each with `sh -c`
+                                  # in a fresh checkout of the revision's sha, as the
+                                  # task owner's agent uid (ruling 460), with no
+                                  # credential. A plain acceptance waits until every
+                                  # one exited 0 on the revision under review. Absent
+                                  # (not `[]`) when the project declares none; at most
+                                  # 10; `timeoutSeconds` 1..3600, 600 when absent. Set
+                                  # on Settings → Gates or by set_project_gates
+                                  # (edit-policy).
+  - name: install
+    command: pnpm install --frozen-lockfile
+  - name: build
+    command: pnpm build
+    timeoutSeconds: 900
 ---
 
 Project description prose (markdown body).
@@ -189,7 +204,7 @@ Notes:
   `tasks/<PREFIX>-<n>` directories rescues a stale/missing counter. Concurrent
   creates can never mint the same key.
 - Every list (`stages`, `workflow`, `members`, `agents`, `guardrails`,
-  `requiredReviewers`, `fileLeases`) parses per row, and each deployment's `capabilities`
+  `requiredReviewers`, `fileLeases`, `gates`) parses per row, and each deployment's `capabilities`
   per grant: one malformed grant costs only itself, with a diagnostic. A missing `stages`
   list is an error diagnostic (`project.no_stages`).
 - Membership is authoritative here (files are truth); `project_members` in
@@ -205,7 +220,11 @@ Notes:
   time (ruling 156): it changes only through the project editor,
   `update_agent_deployment`, the org resource-rename rewriter, or a propagation
   from the template (`save_global_agent { propagate }`, the org modal's box, the
-  Agents page's "Use the template's grants"), and a run mounts the copy.
+  Agents page's "Use the template's grants", the operator's template included, ruling
+  479(c)), and a run mounts the copy.
+  `definition.persona` is a snapshot the same way: the project editor,
+  `update_agent_deployment`'s `persona` and a template save that changes the persona
+  with `propagate` rewrite it (ruling 467).
 - A lease whose holder task is archived, in the terminal stage or gone binds nobody
   (resolved at read time by `activeFileLeases`, ruling 247); the row stays in the file until
   someone clears it.
@@ -375,6 +394,20 @@ pr:                               # GitHub projection mirrored into the file
       at: 2026-09-06T19:40:02Z    # person resolves a packet while the PR is closed
       byUserId: u_arda            # (null until then). Until answered, delivery
                                   # refuses `closed_by_human`; dropped on reopen
+  bodyWritten:                    # ruling 474: the PR body Viberr last wrote, set
+    sha256: 03a8caef…             # on create and on every rewrite: its hash (CRLF
+    revision: 60049586…           # read as LF) and the revision it describes (the
+    keptRevision: 60049586…       # PR head when the task records none, else null);
+                                  # keptRevision: the revision a person's edit was
+                                  # found and kept at (one note each). Absent = never
+                                  # recorded, and a delivery treats the body as its
+                                  # own. Carried for the same PR, never inherited
+  reviewRelay:                    # ruling 484 (a loose key, like humanApproval):
+    relayed: [review:2197, comment:88410]  # the GitHub reviews and line comments
+                                  # the reconciler relayed to the deliverer, stamped
+                                  # in the write that appends their comment (a
+                                  # review with nothing to relay is stamped alone);
+                                  # newest 500 kept; carried for the same PR
 github:                           # more GitHub cache: commits + change stats
   commits: [{ sha: a91f7c2, msg: "[VIB-142] …", pushed: true }]
   changed: { files: 9, add: 412, del: 87 }
@@ -404,6 +437,24 @@ blockedBy:                        # ruling 131: what this task WAITS ON, in exac
                                   # reserved taskPrefix: `GOAL-1` would read as
                                   # a goal reference missing its link
 acceptance: forced                # optional; N20-14 — set when an admin force-accepted
+gateRun:                          # optional; ruling 482 — the project's gates as VIBERR
+  id: gate_Xk2…                   # last ran them, bound to a revision like a verdict.
+  revisionId: rev_9f2c            # The workRevision.id and the full sha checked out.
+  headSha: a91f7c2e…              # status: queued | running | finished | error (the
+  status: finished                # run could not execute; `error` says why). Written
+  reason: delivery                # by the server alone: a delivery, a new head while a
+  requestedAt: 2026-09-25T10:14:58Z  # PR stands, the reconciler's external revision, a
+  startedAt: 2026-09-25T10:15:00Z    # changed gate list or a person's "Run gates" asks;
+  finishedAt: 2026-09-25T10:16:12Z   # each result lands as it finishes. A malformed
+  error: null                     # record reads as absent (gates not run: fail closed)
+  results:
+    - name: build
+      command: pnpm build
+      exitCode: 0                 # null when killed at its timeout or never started
+      timedOut: false
+      wallMs: 41230
+      log: gate-a91f7c2-02-build-20260925T101512Z.log  # the task attachment holding
+                                  # the combined output (null when it could not be saved)
 headCheckWaiver:                  # optional; ruling 226 — a maintainer took a merge whose
   prNumber: 114                   # containment check GitHub refused to run. Pinned to all
   revisionHeadSha: a1b2c3d…       # three: the gate re-reads the LIVE head and honours it only
@@ -584,6 +635,7 @@ Packet notes:
   | `blockedBy` | `block_on_dependencies` | what this task will wait on, in `blockedBy` spellings (ruling 230) |
   | `newTask` | `create_task` | `{ title, goal, blockedBy?, blocks?, labels? }`: the task the resolution creates; `blocks` names existing tasks that must wait on it (rulings 269, 287) |
   | `rework` | `redirect` | set by the branch-conflict packet: the resolution returns a task standing at or past the review stage to it in the same write (ruling 163) |
+  | `reply` | `custom` (an agent's question) | `true` when choosing the option needs the person's typed answer: the card requires the answer box and `resolvePacket` refuses the option without a note (ruling 478(e)). Written by `ask_human` and the Codex envelope; the options-less fallback always carries it |
 
   The schema is `.loose()`, so an unknown option key round-trips and is read by nothing. There
   is no `accept:` field: acceptance is gated **solely** on `kind === "accept_completion"`, plus
@@ -595,8 +647,9 @@ Packet notes:
   successful run may withdraw), and `askedBy` (R15-14: the profile of the agent that raised
   the question; resolving it resumes that agent's session).
 - `options` and `observations` parse per row: a malformed row drops only itself
-  (`packet.invalid_option`, `packet.invalid_observation`). A packet with options but not
-  exactly one `rec: true` gets a `packet.rec_count` info diagnostic.
+  (`packet.invalid_option`, `packet.invalid_observation`). A packet with more than one
+  `rec: true` gets a `packet.rec_count` info diagnostic. None is legitimate: an agent's
+  question carries `rec` only on the option the agent marked "(Recommended)" (ruling 478(e)).
 - The writer fences the block with more backticks than the longest run inside it, and the
   reader closes it only on a fence at least as long, so packet prose that quotes a code fence
   stays inside the block.
@@ -605,7 +658,9 @@ Packet notes:
   `app/shared/mapping/task.server.ts`): `goalDraftForOption` of the option
   `decided.optionIndex` names, present exactly while `awaiting: goal_edit` and a decision is
   recorded. It is never written to the file. Every door into the goal editor reads that one
-  field.
+  field. The render also derives `answerTo` (ruling 478(e)): the asking agent's display name,
+  set exactly when `kind` is `Agent question` and `askedBy` is set, the packets whose answer
+  `resolvePacket` sends back to that agent; the card names its answer box after it.
 
 ### Timeline entry grammar (append contract for agents)
 
@@ -618,10 +673,13 @@ Packet notes:
   diagnostic is recorded when it happens; that diagnostic reports the damage,
   it does not undo it.
 - Heading line: `### <UTC ISO> · <type> · <actor-ref>` — separator is
-  `<space>·<space>` (U+00B7). `type` is one of the 11 contract types in
+  `<space>·<space>` (U+00B7). `type` is one of the 12 contract types in
   `TIMELINE_EVENT_TYPES` (`comment completion github policy note quality transition blocked
-  agent assign continuity`); unknown types are kept (info diagnostic) and render as plain
-  comments. `continuity` marks a runtime-continuity RESET — a resumed session whose provider
+  agent assign continuity proposal`); unknown types are kept (info diagnostic) and render as plain
+  comments. `proposal` is a proposed knowledge-base correction (ruling 483), titled
+  "Proposed ruling change" or "Proposed knowledge-base correction"; it asks a person to
+  decide, so it is neither a review verdict (`quality`, where ruling 378 filed it) nor a
+  neutral `note`. `continuity` marks a runtime-continuity RESET — a resumed session whose provider
   transcript was gone, so the agent re-anchored on `task.md` in a fresh one. It is
   warning-toned on purpose: nothing was violated (not `policy`) and nothing is stuck (not
   `blocked`), but a supervisor scanning the board must get a cue that context was lost and
@@ -634,8 +692,10 @@ Packet notes:
   reviewer's verdict report, `Compacted` on a compaction marker), `to: agent` (a comment
   routed to the operator — `comment-card toagent` tint) and `notified: <id>, <id>` (ruling
   382: the users this event's own notification reached, after routing preferences).
-- Then a blank line and the event text (RichText micro-format: `**bold**`,
-  `` `code` ``, `@mention`). Multi-line text is allowed.
+- Then a blank line and the event text: GFM markdown for every event type, comments and
+  typed events alike (ruling 478(a); `@mention` chips for known names). Multi-line text,
+  paragraphs and fenced blocks are allowed. The activity and notification feeds render it
+  through the inline `RichText` micro-format (`**bold**`, `` `code` ``, `@mention`).
 - **Body-line escaping** (structure-like text): an event-body line whose raw
   form would read as file structure — starting with `## `, `### `,
   `title:<ws>`, `to:<ws>`, `notified:<ws>`, or a line that is only (whitespace and)
@@ -687,6 +747,11 @@ title: Ship the billing revamp
 status: active                    # active | paused | attention | completed | cancelled
 createdBy: u_abc123               # the authority chain advancement re-proves
 createdByLabel: arda@viberr.dev
+conversationId: cnv_3fQk9x2LmP0a  # ruling 476(h): the controller conversation whose
+                                  # turn created the chain (null when none, or for a
+                                  # chain written before the key that boot could not
+                                  # match, ruling 476(j)); the project's Controller
+                                  # page links back to it
 onFailure: pause                  # pause (default) | continue
 links:
   - index: 1                      # 1-based chain position
@@ -726,6 +791,12 @@ Notes:
   task move cannot leave the chain lying.
 - Goal files are app-written and never deleted by the product; terminal chains
   stay readable. `goals/*.md` is watched and projected like every canonical file.
+- `conversationId` is read from the file (`readGoalFileFacts`, the Controller page's one
+  read of each chain's file beside its history); `goal_projections` does not carry it. A
+  controller-made chain written before the key is given it at boot through `updateGoalFile`
+  (`backfillGoalConversations`, ruling 476(j)) when exactly one of its creator's
+  controller turns was running at its `goal.created` audit row; none or several leave it
+  null, and a chain that names one is never rewritten.
 - The goal parser is **strict**, unlike the task and project parsers: any schema failure makes
   the file unreadable, and the store doctor reports every finding as a hard stop, so hand
   edits must round-trip exactly. Unknown frontmatter keys are still preserved on write.
@@ -741,7 +812,7 @@ Notes:
 | Agent | `agent:<backend>/<profileId>` e.g. `agent:codex/developer`, optionally with a role snapshot `agent:codex/developer (Implementation)` | `{ kind:"agent", backend, name, role }` — the second segment is the **profile id**, never a role slug; `name` is the deployed agent's own name, falling back to the backend label "Codex" or "Claude" (ruling 92) |
 | Operator | `operator` | `{ kind:"agent", name:"Operator" }` (NO backend, NO role) |
 | Controller | `controller` | `{ kind:"agent", name:"Controller" }` (ruling 99 — instance machinery, same backend-less shape) |
-| System | `system:<id>` e.g. `system:policy-engine` | `{ kind:"system", name:"Policy engine" }` |
+| System | `system:<id>` e.g. `system:policy-engine`; `system:goal-chain` signs the creation events of a task a goal chain starts (ruling 477(b)) | `{ kind:"system", name:"Policy engine" }` |
 
 Any other string decodes as an unknown actor: it is re-encoded verbatim and renders as
 `{ kind:"system", name:"Unknown actor" }`, so an event is never dropped over its author. The
@@ -818,7 +889,41 @@ re-attach them.)
 | `agents/definitions/{operator,controller}.md` | boot (`seedDefaultAgentAssets`) | frontmatter `id`, `name`, `backend` + the doctrine body. The controller's body is the instructions its settings edit (locked by default, ruling 108); a save keeps the frontmatter head. |
 | `agents/controller-requests.md` | the controller's `request_resource_grant` tool (ruling 390); Instance settings lists the open ones | frontmatter `requests:`, newest first, each `{ id, kind (skills \| kb \| mcps), name, reason, askedAt, askedByUserId, askedByLabel, status (open \| granted \| declined \| withdrawn), closedAt, closedByLabel }`, parsed per row, + a one-line header body. One open request per (`kind`, `name`). A request leaves `open` through `closeResourceRequest`: `granted` when a Controller-tab save (`saveControllerConfig`) leaves the resource in the controller's resolved grants, `declined` from the tab's Decline button. Either stamps `closedAt` and `closedByLabel` (the admin's email), and the closed row stays as history. Nothing in the app writes `withdrawn`. |
 | `skills/<name>/SKILL.md` | the org skill writers and the store browser | markdown; every writer judges the body with `assertSkillBodyWellFormed` (ruling 183). A mounted copy gets normalized frontmatter. |
-| `kb/<dir>/**` | the KB store browser, uploads, GitHub import | any documents; agents read the live folder at run time |
+| `kb/<dir>/**` | the KB store browser, uploads, GitHub import; a proposal filed from a task (ruling 483) | any documents; agents read the live folder at run time. A document may end in a proposals section (§7) |
 | `state/shipped-assets.json` | boot | JSON map of store-relative asset path → SHA-256 of the bytes last shipped |
 | `audit-exports/audit-events-<YYYY-MM-DD>.jsonl` | the audit purge | one `audit_events` row per line, exactly as the table stores it, appended per purge day |
 | `runtimes/<backend>/<runId>.jsonl` | the run sink | one raw provider envelope per line; the truth `run_log_lines` projects |
+
+## 7. A knowledge-base document's proposals section (ruling 483)
+
+An agent that proves a line of a knowledge-base document wrong files the correction in
+that document (`fileKbProposal`, `app/server/org/kb-proposals.server.ts`). The section is
+the record: an entry is open while it stands under the heading, and nothing else lists
+proposals.
+
+```markdown
+## Proposed corrections (not binding)
+
+Raised by agents from evidence on a task. **Nothing here is binding.** A person, or the controller when a person asks it, promotes an entry into the settled text above or dismisses it.
+
+- **[WEB-3, 2026-09-24, Platform Engineer]** The build writes dist/worker and dist/client.
+  Line: T-013: output in dist/server/
+  Evidence: `ls dist` after `npm run build` listed client and worker.
+```
+
+- The heading is `KB_PROPOSALS_HEADING`, created at the END of the document the first
+  time; later entries are filed at the end of the section, in order. The reader also
+  takes ruling 378's `## Proposed (not binding)` as the section, and the next filing
+  renames it. A heading inside a fenced block is not the section; the section ends at
+  the next `#` or `##` heading.
+- An entry is a list item opening with a bold `[<task key>, <YYYY-MM-DD>, <filer>]`
+  stamp (ruling 378's entries have no filer), then the correction; its other lines are
+  indented two spaces: `Line:` (the settled line it corrects, absent when it adds
+  something) and `Evidence:`. Blank lines inside a value are dropped, since they would
+  end the list item.
+- An entry's id is `kp-` and the first ten hex characters of the SHA-256 of
+  `<kb>\n<doc>\n<entry text>`: stable while nobody edits that entry.
+- The settled text is the document without this section. A filed `line` must stand in
+  it (compared without case, emphasis, quotes or runs of whitespace), and a promotion's
+  `replaces` must stand in it exactly once. Promoting or dismissing the last entry
+  removes the heading and the intro with it.

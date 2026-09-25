@@ -2,9 +2,24 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
   AgentDeployment,
+  AgentDeploymentDefinition,
   ProjectFrontmatter,
   WorkflowBoundary,
 } from "~/schemas/project-file.schema";
+import {
+  buildLibraryDeployment,
+  readLibraryTemplate,
+  type DeployOverrides,
+} from "~/features/agents/agent-profile-actions.server";
+import {
+  effectiveProfileView,
+  VIEW_WITHOUT_POLICY,
+} from "~/features/agents/agents-query.server";
+import { deploymentRuntimeIdentity } from "~/server/agents/deployment-view.server";
+import {
+  assertEffortForBackend,
+  assertModelForBackend,
+} from "~/server/runtimes/model-catalog.server";
 import { withActionWatchdog } from "~/server/actions/action-watchdog.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -15,12 +30,28 @@ import {
   isReservedTaskPrefix,
   RESERVED_TASK_PREFIX_REFUSAL,
 } from "~/shared/dependencies";
-import { getConnection } from "~/server/org/connections.server";
+import {
+  getConnection,
+  recordCreatedRepositoryInReach,
+} from "~/server/org/connections.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import { recordRepoAccess } from "~/server/github/repo-health.server";
-import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
-import { getPatToken, setProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  repositoryIsEmpty,
+  type RepoAccessResult,
+} from "~/server/github/repo-access-check.server";
+import {
+  getPatMetadata,
+  getPatToken,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
+import {
+  createGithubClient,
+  githubFailureMessage,
+  type GithubClientOptions,
+  type GithubResponse,
+} from "~/server/github/github-client.server";
 import {
   repoPermissionsSchema,
   repoWritable,
@@ -137,11 +168,19 @@ function presetAgents(
  * REPORTED now so creation can disclose it; creation itself is deliberately not
  * blocked (creating the Viberr project before the GitHub repo exists is a real
  * flow), and a 10s timeout keeps the action from hanging on a blackholed
- * network.
+ * network. The one exception is a creation that asked for the repository
+ * (ruling 462, `createRepositoryWhenMissing`): there the probe decides whether
+ * to create, so an answer it cannot give refuses instead.
  */
 type RepoProbe =
-  | { status: "ok"; defaultBranch: string | null }
-  | { status: "read_only"; defaultBranch: string | null }
+  | {
+      status: "ok";
+      defaultBranch: string | null;
+      empty: boolean;
+      /** `repoWritable`: true, or null when GitHub sent no permissions block. */
+      canPush: boolean | null;
+    }
+  | { status: "read_only"; defaultBranch: string | null; empty: boolean }
   | { status: "not_found" }
   | { status: "forbidden" }
   | { status: "unreachable" };
@@ -157,8 +196,10 @@ const repoResponseSchema = z
   .object({
     default_branch: z.string().optional().catch(undefined),
     permissions: repoPermissionsSchema.optional().catch(undefined),
+    // Ruling 468: the cue for the empty-repository read below.
+    size: z.number().optional().catch(undefined),
   })
-  .catch({ default_branch: undefined, permissions: undefined });
+  .catch({ default_branch: undefined, permissions: undefined, size: undefined });
 
 /** The optional overrides `proveAttachedCredential` accepts, named so the call
  *  below can be built one key at a time. */
@@ -170,9 +211,10 @@ interface ProveCredentialContext {
 async function probeRemoteRepo(
   token: string,
   repo: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<RepoProbe> {
   try {
-    const res = await fetch(`https://api.github.com/repos/${repo}`, {
+    const res = await fetchImpl(`https://api.github.com/repos/${repo}`, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
@@ -185,16 +227,192 @@ async function probeRemoteRepo(
     if (!res.ok) return { status: "unreachable" };
     const data = repoResponseSchema.parse(await res.json());
     const defaultBranch = data.default_branch ?? null;
+    // Ruling 468 (F40-12): an EXISTING repository with no commit. Live,
+    // `akin-ozer/website` was accepted as `ok` with `default_branch: main`, and
+    // the first operator run found an unborn `main` and asked the owner to push
+    // a README. `size: 0` is the cue, the 409 on the commits read the proof.
+    const empty = await repositoryIsEmpty(createGithubClient({ token, fetchImpl }), repo, data.size);
     // F20-14/F20-15: Repair refuses a repo the credential can only read; the same
     // check belongs at create time (live: creating against a read-only-visible
     // repo was silently accepted and failed only at first delivery).
-    if (repoWritable(data.permissions) === false) {
-      return { status: "read_only", defaultBranch };
+    const canPush = repoWritable(data.permissions);
+    if (canPush === false) {
+      return { status: "read_only", defaultBranch, empty };
     }
-    return { status: "ok", defaultBranch };
+    return { status: "ok", defaultBranch, empty, canPush };
   } catch {
     return { status: "unreachable" };
   }
+}
+
+/** The characters GitHub keeps in a repository name. Anything else it rewrites
+ *  to `-` on creation, which would bind the project to a name that does not
+ *  exist, so a creation is refused before any call instead. */
+const GITHUB_REPO_NAME = /^[A-Za-z0-9._-]+$/;
+
+/** The `POST /user/repos` and `POST /orgs/{org}/repos` fields Viberr sends. */
+interface RepositoryCreateBody {
+  name: string;
+  private: boolean;
+  /** The default branch exists from the first moment, so the project can
+   *  adopt it and a task branch has something to start from. */
+  auto_init: true;
+  description?: string;
+}
+
+/** GitHub's 422 body names each failed field in `errors[].message` beside the
+ *  top-level "Repository creation failed."; any other shape reads as none. */
+const githubFieldErrorsSchema = z
+  .object({ errors: z.array(z.object({ message: z.string() })).catch([]) })
+  .catch({ errors: [] });
+
+/**
+ * Ruling 462: why GitHub would not create the repository, in words a person
+ * can act on. Every branch is thrown before `project.md` is written, so each
+ * one can say that no project exists yet. Only the 422 also says nothing was
+ * created: a 5xx or a dropped connection may have landed on GitHub's side, so
+ * those promise only the project.
+ */
+function repositoryRefusal(
+  result: Extract<GithubResponse<unknown>, { ok: false }>,
+  owner: string,
+  repo: string,
+  personal: boolean,
+): string {
+  if (result.kind === "network") {
+    return `Couldn't reach GitHub to create ${repo}. No project was written; ask again once GitHub answers.`;
+  }
+  if (result.status === 401 || result.status === 403) {
+    return `The ${owner} connection's token cannot create repositories. A fine-grained token needs Administration: Read and write for All repositories (a classic token needs \`repo\`). Create ${repo} on GitHub, or widen the token, and ask again.`;
+  }
+  if (result.status === 422) {
+    const fields = githubFieldErrorsSchema.parse(result.data).errors.map((e) => e.message);
+    const said = githubFailureMessage(result).replace(/\.$/, "");
+    return `GitHub refused to create ${repo}: ${said}${fields.length > 0 ? ` (${fields.join("; ")})` : ""}. Nothing was created.`;
+  }
+  if (result.status === 404 && !personal) {
+    return `GitHub has no organization ${owner} that this token can create repositories in. If ${owner} is a personal account, only that account's own token can create repositories there. Create ${repo} on GitHub, or connect ${owner} with a token that can, and ask again.`;
+  }
+  return `GitHub answered ${result.status} when asked to create ${repo}: ${githubFailureMessage(result).replace(/\.$/, "")}. No project was written; ask again.`;
+}
+
+/**
+ * Ruling 462: create the repository a project is about to be bound to, when
+ * the probe found none, through the connection's own token on the server.
+ *
+ * The account decides the endpoint: `POST /user/repos` when the connection's
+ * owner is the token's own login (as its stored validation recorded it), else
+ * `POST /orgs/{owner}/repos`. `auto_init` gives the repository its default
+ * branch, so the re-probe that follows adopts it the way an existing
+ * repository's is adopted. A repository that already exists is used as it is,
+ * and a probe that could not tell (a refused token, an unreachable GitHub)
+ * refuses rather than creating a project whose repository nobody made: asked
+ * again, that project would only answer "already exists".
+ */
+async function createRepositoryWhenMissing(
+  db: DatabaseSync,
+  target: {
+    probe: RepoProbe;
+    token: string;
+    patId: string;
+    /** The connection whose token makes it: its stored reach gains it. */
+    connectionId: string;
+    owner: string;
+    repoName: string;
+    slug: string;
+    request: CreateRepositoryRequest;
+  },
+  actor: { userId: string; label: string },
+  fetchImpl: typeof fetch | undefined,
+): Promise<{ probe: RepoProbe; note: string }> {
+  const { probe, token, owner, repoName, request } = target;
+  const repo = `${owner}/${repoName}`;
+  if (probe.status === "ok" || probe.status === "read_only") {
+    return { probe, note: `${repo} already exists on GitHub, so the project uses it as it is.` };
+  }
+  if (probe.status === "forbidden") {
+    throw AppError.validation(
+      `The ${owner} connection's token was refused for ${repo}, so Viberr cannot tell whether it exists or create it. Replace the token in Instance settings → GitHub connections and ask again.`,
+    );
+  }
+  if (probe.status === "unreachable") {
+    throw AppError.validation(
+      `Couldn't reach GitHub to check whether ${repo} exists, so nothing was created. Ask again once GitHub answers.`,
+    );
+  }
+  const login = getPatMetadata(db, target.patId)?.validation?.login ?? null;
+  const personal = login !== null && login.toLowerCase() === owner.toLowerCase();
+  const clientOptions: GithubClientOptions = { token };
+  if (fetchImpl) clientOptions.fetchImpl = fetchImpl;
+  const body: RepositoryCreateBody = {
+    name: repoName,
+    private: request.private,
+    auto_init: true,
+  };
+  const description = request.description?.trim();
+  if (description) body.description = description;
+  // Sent once: the client's 5xx retry would turn a create GitHub made before
+  // failing into a 422 "name already exists", and so into "Nothing was
+  // created" (R-repo-1).
+  const created = await createGithubClient(clientOptions).request(
+    "POST",
+    personal ? "/user/repos" : `/orgs/${encodeURIComponent(owner)}/repos`,
+    z.unknown(),
+    { body, retryServerError: false },
+  );
+  const made = `Created ${repo} on GitHub (${request.private ? "private" : "public"})`;
+  // Ruling 463's dated note (R-seams-4): the token that made the repository
+  // reaches it, so the connection's stored reach lists it from now on.
+  const reachIt = (after: RepoProbe) =>
+    recordCreatedRepositoryInReach(db, target.connectionId, {
+      fullName: repo,
+      private: request.private,
+      canPush: after.status === "ok" ? after.canPush : after.status === "read_only" ? false : null,
+    });
+  if (created.ok) {
+    recordRepositoryCreated(db, target.slug, repo, request.private, actor);
+    const after = await probeRemoteRepo(token, repo, fetchImpl);
+    reachIt(after);
+    return { probe: after, note: `${made}.` };
+  }
+  // A 5xx or a dropped connection does not say whether GitHub made it (a slow
+  // `auto_init` create can outlive the gateway), so GitHub is asked. The probe
+  // said 404 a moment ago; a repository there now is the one this call made.
+  const unanswered =
+    created.kind === "network" || (created.kind === "http" && created.status >= 500);
+  if (unanswered) {
+    const after = await probeRemoteRepo(token, repo, fetchImpl);
+    if (after.status === "ok" || after.status === "read_only") {
+      recordRepositoryCreated(db, target.slug, repo, request.private, actor);
+      reachIt(after);
+      const answer =
+        created.kind === "network"
+          ? "the connection dropped before GitHub answered"
+          : `GitHub answered ${created.status}`;
+      return { probe: after, note: `${made}: ${answer}, but the repository is there now.` };
+    }
+  }
+  throw AppError.validation(repositoryRefusal(created, owner, repo, personal));
+}
+
+/** A GitHub-side write the person asked for: audited the moment GitHub is
+ *  known to have made it, so a project write that fails after it still leaves
+ *  the repository on the record. */
+function recordRepositoryCreated(
+  db: DatabaseSync,
+  slug: string,
+  repo: string,
+  isPrivate: boolean,
+  actor: { userId: string; label: string },
+): void {
+  recordAudit(db, {
+    action: "project.repository.created",
+    actor,
+    subjectKind: "project",
+    subjectId: slug,
+    projectSlug: slug,
+    details: { repo, private: isPrivate },
+  });
 }
 
 /**
@@ -222,6 +440,31 @@ export interface CreateProjectInput {
    *  here composes BEFORE the single project.md write, so a refused shape
    *  creates nothing. */
   custom?: CustomProjectBlueprint;
+  /** Ruling 462: create `<owner>/<repoName>` on GitHub through the
+   *  connection's token when the probe finds no such repository. Both doors
+   *  (the controller's `create_project` and the New project modal) set it the
+   *  same way; an existing repository makes it a no-op. */
+  createRepository?: CreateRepositoryRequest;
+  /** Ruling 464: the roster a controller designed. Given, the project is
+   *  written with the operator plus exactly these deployments and no base
+   *  Developer or Reviewer; absent (the New project modal), the base roster.
+   *  Every entry is checked before anything is written. */
+  agents?: RosterEntry[];
+  /** Ruling 464: the operator's own model and effort, checked the same way. */
+  operator?: DeployOverrides;
+}
+
+/** Ruling 464: one deployment of a designed roster — a global template by its
+ *  store key (as `deploy_agent` takes it), with optional model and effort. */
+export interface RosterEntry extends DeployOverrides {
+  profileId: string;
+}
+
+/** Ruling 462: how a repository created with its project is made. */
+export interface CreateRepositoryRequest {
+  private: boolean;
+  /** The repository's description on GitHub. */
+  description?: string;
 }
 
 /** The optional custom blueprint a controller-driven creation carries. */
@@ -253,7 +496,27 @@ export interface CreateProjectResult {
    * that instead of reporting a plain success.
    */
   repoWarning: string | null;
+  /**
+   * Ruling 462: what a requested repository creation did, as a sentence (the
+   * repository was created, or it already existed and was used as it is);
+   * null when no creation was asked for.
+   */
+  repoNote: string | null;
+  /** Ruling 464: every deployment written, the operator first, with the model
+   *  and effort each resolves to, so a reply can list what was deployed. */
+  agents: DeployedAgentSummary[];
 }
+
+/** One deployment a creation wrote, as its reply names it. */
+export interface DeployedAgentSummary {
+  profileId: string;
+  name: string;
+  model: string;
+  effort: string;
+}
+
+/** The system operator's profile id; every roster carries it. */
+const OPERATOR_PROFILE_ID = "operator";
 
 /** Test overrides; production leaves every key off. `createProjectFileImpl`
  *  stands in for the project.md write (F20-1 fault injection), defaulting to
@@ -307,6 +570,11 @@ async function createProjectImpl(
       "A GitHub repository is required. Pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first.",
     );
   }
+  if (input.createRepository && !GITHUB_REPO_NAME.test(repoName)) {
+    throw AppError.validation(
+      `GitHub repository names use letters, digits, ".", "-" and "_" only, so "${repoName}" cannot be created. Pick a name in that alphabet and ask again.`,
+    );
+  }
   const slug = slugify(name);
   if (!slug) {
     throw AppError.validation("The project name must contain letters or digits.");
@@ -331,6 +599,10 @@ async function createProjectImpl(
   // refused shape creates nothing. The template stays the default.
   const template = GOVERNED_TEMPLATE;
   const blueprint = resolveProjectBlueprint(db, input.custom, actor.userId);
+  // Ruling 464: the roster, every template and model/effort judged BEFORE the
+  // repository probe and creation below (ruling 462), so a refused roster
+  // leaves nothing on GitHub or on disk.
+  const roster = resolveRoster(input, name, ctx.dataRoot);
   const repo = `${owner}/${repoName}`;
 
   // Resolve the selected connection so we can (a) fetch the repo's real
@@ -347,6 +619,7 @@ async function createProjectImpl(
   }
   let defaultBranch = "main";
   let repoWarning: string | null = null;
+  let repoNote: string | null = null;
   // U33-2: the SAME probe, remembered. Creation is the other place that already
   // knows whether GitHub can serve this repository, and until pass 33 it threw
   // the answer away after one toast — so a project pointed at a repository that
@@ -356,8 +629,35 @@ async function createProjectImpl(
   let repoAccess: RepoAccessResult | null = null;
   {
     const token = getPatToken(db, connection.patId);
+    if (!token && input.createRepository) {
+      throw AppError.validation(
+        `The ${owner} connection has no token Viberr can read, so ${repo} cannot be created. Replace the token in Instance settings → GitHub connections and ask again.`,
+      );
+    }
     if (token) {
-      const probe = await probeRemoteRepo(token, repo);
+      let probe = await probeRemoteRepo(token, repo, ctx.fetchImpl);
+      // Ruling 462: BEFORE project.md, so a refusal leaves nothing behind; the
+      // probe it hands back (the re-probe of a repository it just made) is the
+      // one recorded below.
+      if (input.createRepository) {
+        const made = await createRepositoryWhenMissing(
+          db,
+          {
+            probe,
+            token,
+            patId: connection.patId,
+            connectionId: connection.id,
+            owner,
+            repoName,
+            slug,
+            request: input.createRepository,
+          },
+          actor,
+          ctx.fetchImpl,
+        );
+        probe = made.probe;
+        repoNote = made.note;
+      }
       if (probe.status === "ok") {
         repoAccess = {
           status: "connected",
@@ -365,6 +665,7 @@ async function createProjectImpl(
           remoteDefaultBranch: probe.defaultBranch ?? null,
           private: false,
         };
+        if (probe.empty) repoAccess.empty = true;
         if (probe.defaultBranch) defaultBranch = probe.defaultBranch;
       } else if (probe.status === "read_only") {
         // The repo exists and is visible, so we can adopt its default branch —
@@ -378,7 +679,9 @@ async function createProjectImpl(
           repo,
           remoteDefaultBranch: probe.defaultBranch ?? null,
           private: false,
+          readOnly: true,
         };
+        if (probe.empty) repoAccess.empty = true;
         repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
       } else if (probe.status === "not_found") {
         repoAccess = { status: "repo_not_found", repo };
@@ -394,6 +697,17 @@ async function createProjectImpl(
         repoWarning = `Couldn't reach GitHub to verify ${repo}. The project was created with the default branch "main".`;
       }
     }
+  }
+
+  // Ruling 468: an empty repository is stated, not warned about: Viberr makes
+  // its first commit (ruling 128's bootstrap) before the first task branch.
+  // Its dated note (R-repo-2): not with a token that can only read, which
+  // GitHub refuses that commit; the fix is the token, and the note says so.
+  if (repoAccess?.status === "connected" && repoAccess.empty) {
+    const empty = repoAccess.readOnly
+      ? `${repo} is empty, and this connection's token can only read it, so Viberr cannot create its first commit on ${defaultBranch} yet. Once the token can push, Viberr makes that commit before the first task branch.`
+      : `${repo} is empty: Viberr will create its first commit on ${defaultBranch} before the first task branch, so nobody needs to push one.`;
+    repoNote = repoNote ? `${repoNote} ${empty}` : empty;
   }
 
   // Synthesized description — verbatim mock mapping (home spec §5.10), unless
@@ -439,7 +753,8 @@ async function createProjectImpl(
     ],
     // Preinstall the default agent roster — the operator plus the base
     // specialists it can assign — so every project can run governed agent work.
-    agents: presetAgents(input.policy, defaultAgentDeployments()),
+    // Ruling 464: a designed roster replaces the base specialists.
+    agents: presetAgents(input.policy, roster),
     credentialPolicy: null,
     // Ship the anti-noise guardrails ON — timeline compaction + chatter
     // rejection are product defaults (PRD's #1 risk), not opt-in.
@@ -489,6 +804,8 @@ async function createProjectImpl(
       policy: input.policy,
       customStages: blueprint?.stages?.length ?? 0,
       customMembers: blueprint?.members.length ?? 0,
+      // Ruling 464: which roster was written, the base one or a designed one.
+      agents: frontmatter.agents.map((a) => a.profileId),
     },
   });
 
@@ -498,7 +815,82 @@ async function createProjectImpl(
     name,
     storePath: `${getDataRoot(ctx.dataRoot)}/projects/${slug}`,
     repoWarning,
+    repoNote,
+    agents: frontmatter.agents.map((a) => {
+      const view = effectiveProfileView(a, ctx.dataRoot, VIEW_WITHOUT_POLICY);
+      return { profileId: a.profileId, name: view.name, model: view.model, effort: view.effort };
+    }),
   };
+}
+
+/**
+ * Ruling 464 (pass 40, F40-7): the roster a project is written with. Absent
+ * `agents`, the base one (operator, Developer, Reviewer), as every project
+ * got before. Given, the operator plus exactly the listed deployments: a
+ * controller that designed six specialists used to get the generic Developer
+ * and Reviewer beside them, dispatchable, with no tool to take them off.
+ *
+ * Every entry is the deployment `deploy_agent` would write for that template
+ * (`buildLibraryDeployment`), refused by name here, before any write: an
+ * unknown or non-specialist template, a model or effort its backend does not
+ * offer, an entry listed twice, and an empty list, which boot would refill
+ * with the base specialists (`ensureBaseAgentsDeployed` backfills a project
+ * with no specialist at all).
+ */
+function resolveRoster(
+  input: CreateProjectInput,
+  projectName: string,
+  dataRoot: string | undefined,
+): AgentDeployment[] {
+  const base = defaultAgentDeployments();
+  const operator = withOperatorOverrides(
+    base.find((a) => a.profileId === OPERATOR_PROFILE_ID),
+    input.operator,
+    dataRoot,
+  );
+  const withOperator = (rest: AgentDeployment[]) => (operator ? [operator, ...rest] : rest);
+  const specialists = base.filter((a) => a.profileId !== OPERATOR_PROFILE_ID);
+  if (!input.agents) return withOperator(specialists);
+  if (input.agents.length === 0) {
+    throw AppError.validation(
+      "Name at least one agent in `agents`, or leave it out for the base Developer and Reviewer: a project with no specialist gets the base ones back at the next restart. Nothing was created.",
+    );
+  }
+  const seen = new Set<string>();
+  const designed = input.agents.map((entry) => {
+    const id = entry.profileId.trim();
+    if (seen.has(id)) {
+      throw AppError.validation(`\`${id}\` is listed twice in \`agents\`. Nothing was created.`);
+    }
+    seen.add(id);
+    const overrides: DeployOverrides = {};
+    if (entry.model !== undefined) overrides.model = entry.model;
+    if (entry.effort !== undefined) overrides.effort = entry.effort;
+    return buildLibraryDeployment(readLibraryTemplate(id, dataRoot), overrides, projectName)
+      .deployment;
+  });
+  return withOperator(designed);
+}
+
+/** The operator's deployment with ruling 464's `operator: { model?, effort? }`
+ *  applied, each judged by name against the operator's own primary backend
+ *  before anything is written. Only the fields given are written. */
+function withOperatorOverrides(
+  operator: AgentDeployment | undefined,
+  overrides: DeployOverrides | undefined,
+  dataRoot: string | undefined,
+): AgentDeployment | undefined {
+  const model = overrides?.model?.trim() ?? "";
+  const effort = overrides?.effort?.trim() ?? "";
+  if (!operator || (!model && !effort)) return operator;
+  const backend =
+    deploymentRuntimeIdentity(operator, dataRoot).backends[0] === "codex" ? "codex" : "claude";
+  if (model) assertModelForBackend(backend, model);
+  if (effort) assertEffortForBackend(backend, effort);
+  const definition: AgentDeploymentDefinition = { ...operator.definition };
+  if (model) definition.model = model;
+  if (effort) definition.effort = effort;
+  return { ...operator, definition };
 }
 
 // ------------------------------------------------- custom shape (ruling 99)

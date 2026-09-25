@@ -6,7 +6,7 @@
 > `app/server/org/connections.server.ts`, `app/server/tasks/task-actions.server.ts`
 > (delivery and acceptance), `app/schemas/task-file.schema.ts` (revisions, `pr`,
 > `github`), `app/shared/revision-drift.ts`, `app/shared/credential-scopes.ts`,
-> `app/features/github/*`.
+> `app/features/github/*`, `app/features/task-detail/changes-*.tsx` (ruling 484).
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
 ## 1. Credentials
@@ -15,12 +15,31 @@ Three tables, one secret store:
 
 | Table | Role |
 |---|---|
-| `github_pats` | The only place a token lives, AES-256-GCM sealed (`v1$iv$ct$tag`, `secret-box.server.ts`), with `token_suffix` for display and a cached `validation_json`. |
-| `github_connections` | Org-level "owner → PAT" record (`id = slugify(owner)`, `is_default`, `repos_count`, `expires_at`). Used by the Connections panel, project creation and credential attach, and the store browser's GitHub import. |
+| `github_pats` | The only place a token lives, AES-256-GCM sealed (`v1$iv$ct$tag`, `secret-box.server.ts`), with `token_suffix` for display, a cached `validation_json` (the newest validator run, whatever it asked) and `repo_scopes_json` (what each repository proved, ruling 480). |
+| `github_connections` | Org-level "owner → PAT" record (`id = slugify(owner)`, `is_default`, `expires_at`, `reach_json`). Used by the Connections panel, project creation and credential attach, the store browser's GitHub import, and the controller's `list_github_connections`. |
 | `project_github_credentials` | One PAT bound per project. **Every project-scoped GitHub call** resolves through `getProjectGithubContext` (`projects.repo` + `default_branch` + this binding); it never consults connections. |
 
 Removing a connection deletes its PAT and cascades every project binding; the
 default connection cannot be removed.
+
+**A connection records which repositories its token reaches** (ruling 463). Every
+validation of the token (a save, a replaced token, the card's **Re-check**, the 24-hour
+re-proof) also reads `GET /user/repos?per_page=100&affiliation=owner,collaborator,organization_member`
+(`connection-reach.server.ts`), paged up to 300 repositories with the cap stated, and
+stores each one's `fullName`, `private` and `canPush` (the `permissions` block read
+through `repoWritable`) as `reach_json`. A fine-grained token lists exactly the
+repositories it was granted. A failed read is stored as `unknown` with GitHub's reason,
+never as zero; a token whose validation just failed gets an `unknown` reach without a
+read; NULL means the connection has not been validated since the read existed, and
+Re-check reads it. A repository Viberr creates through the token (ruling 462) joins a
+`read` reach at once (`recordCreatedRepositoryInReach`, no GitHub call, `readAt` kept); an
+unread or `unknown` reach is left for the next validation. The card says "Reaches 3 repositories · 1 private" with the list one
+disclosure away. The account's public-repo count (`GET /users/{owner}` →
+`public_repos`) is no longer read or stored: it said nothing about the token.
+`GET /users/{owner}` is still the owner-existence check. Re-check (`connection-recheck`,
+`recheckConnection`) validates the stored token again, metered like a save; GitHub's
+verdict replaces the cache either way, an unreachable GitHub changes nothing, and it
+audits `org.connection.rechecked {owner, status, reach}`.
 
 **Required scopes are exactly `repo` and `pull_request:write`**
 (`DEFAULT_REQUIRED_SCOPES`; `workflow` and `read:org` are not required or probed). A
@@ -49,8 +68,30 @@ access read-only). Scope evidence per token kind:
   merge proves it (`markWriteScopeProven`), or `VIBERR_GITHUB_WRITE_PROBE=1` enables an
   empty-payload `POST /pulls` dry run (422 = authorized, 403 = refused).
 
+**A fine-grained token is proven per repository** (ruling 480). `repo` and
+`pull_request:write` (`REPO_SCOPED_SCOPES`) are facts about one repository, so their
+evidence is kept per repository in `github_pats.repo_scopes_json` (`RepoScopeProof`: each
+scope's last `probe` verdict there, with its time and a note), not only in the token's
+newest validation. `recordPatValidation` folds every run into it: a run that probed a
+repository records its verdicts there (a refusal too); `repo_not_found` or
+`org_approval_missing` ends that repository's proof; `revoked` or `expired` ends every
+proof; a run that asked about no repository (the connection's save, **Re-check**, the
+24-hour re-proof) or never reached GitHub changes nothing, so an Instance-settings Re-check
+can no longer turn a project's proven `repo` back into "unproven". A write Viberr made
+proves what it needed, on the repository it went to, on the PAT that made the call
+(`markWriteScopeProven(db, patId, repo, write)`): a branch created or pushed, or the
+bootstrap's initial commit, proves `repo`; a pull request opened proves
+`pull_request:write`; a merge proves both. A replaced token starts with no proof. A row
+cached before the column existed still proves the repository its validation probed
+(`repoScopeProofsOf`).
+
 Chips render only `header`, `probe` and `violation` sources as proof; `assumed` and
-`unchecked` read "unproven (verified on first use)" (ruling 19). A connection's
+`unchecked` read "unproven (verified on first use)" (ruling 19). A project's chip for a
+repository-scoped scope reads the proof of the project's own repository (a classic token's
+`header` verdict answers for every repository); a verdict earned on another repository, or
+on none, is `assumed` there. The connection card keeps its chips token-wide and lists the
+repositories that proved something beneath them ("akin-ozer/website: repo,
+pull_request:write proven", `ConnectionRecord.repoProofs`). A connection's
 `valid` verdict is re-proven before use once it is older than 24 hours
 (`ensureConnectionFresh`; a downgrade audits `org.connection.validation_downgraded`).
 Project "Re-check scopes" (`revalidateProjectCredential`, 60-second
@@ -68,6 +109,24 @@ secret, and each person's agent-backend API keys (`user_backend_credentials`, ru
 **The token never reaches argv or a remote URL.** Git runs with a temporary
 `GIT_ASKPASS` helper fed from env (`createGitHubAskpassEnv`), `credential.helper`
 reset, `GIT_TERMINAL_PROMPT=0`; clone URLs are the plain `https://github.com/<owner>/<repo>.git`.
+
+**The token never enters a workspace's git either** (pass 40 review, R-seams-1; ruling
+460). A task workspace is writable by every agent uid, so its `.git` can hold hooks,
+`core.fsmonitor`, a credential helper or `url.<x>.insteadOf` an agent planted. The
+server therefore never runs git with a workspace as its working repository under its own
+uid: the workspace's own git (status, add, commit, merge, the reads the gates take) runs
+as the task owner's agent uid through the launcher, with no credential in its
+environment (`taskWorkspaceGit`, `workspace-git.server.ts`); everything that needs the
+PAT runs as the server in a bare **stage** it owns (`withServerStage`,
+`projects/<slug>/.repo-stage/`, borrowing the mirror's objects through `alternates`
+under the mirror's lock, removed afterwards), against the PROJECT's URL rather than the
+`origin` a checkout's config names. A branch leaves a workspace by the server's `git
+fetch` into the stage, whose `git-upload-pack` is the launcher running as the person
+(`workspaceUploadPack`), so the server's side only parses a pack. Every git the server
+spawns, as itself or as the person, is built on `filteredSpawnEnv()` (never
+`process.env`) and carries `core.hooksPath=/dev/null` and `core.fsmonitor=false` at
+command-line precedence (`serverGitEnv`, `GIT_CONFIG_COUNT`); an agent's own git keeps
+its hooks.
 `redactGitOutput` scrubs any git or provider text before it reaches a human: by value,
 URL userinfo, token-shaped patterns (`gh*_`, `github_pat_`, `sk-`), control
 characters; last 8 lines, 600 characters.
@@ -79,14 +138,38 @@ characters; last 8 lines, 600 characters.
   the remote default branch, a read-only repo still creates with a warning, and
   404/401/network produce warnings with `defaultBranch` falling back to `main`. The
   connection's PAT is bound to the project and proved against the repo.
+- **Creation can create the repository** (ruling 462). With `createRepository`
+  (`{ private, description? }`: the controller's `create_project` argument, or the New
+  project modal's "Create this repository on GitHub if it does not exist") a 404 probe
+  makes the server create it with the connection's PAT before `project.md` is written:
+  `POST /user/repos` when the connection's owner is the token's own login (the stored
+  validation's `login`), else `POST /orgs/{owner}/repos`, with `auto_init: true` so the
+  default branch exists, then a re-probe whose answer is recorded as for any creation.
+  An existing repository is used as it is. Everything else refuses and writes no
+  project: a 401/403 says the token cannot create repositories and that a fine-grained
+  token needs **Administration: Read and write** for All repositories (a classic one
+  `repo`); a 422 relays GitHub's message; a probe that cannot tell whether the
+  repository exists (token refused, GitHub unreachable) and a name outside
+  `[A-Za-z0-9._-]` refuse before any create. The create is sent once
+  (`retryServerError: false`: the client's 5xx retry would turn a create GitHub made
+  before failing into a 422 "name already exists"), and a 5xx or a dropped connection is
+  read back with the probe: a repository there now was made, is recorded and used, and
+  the reply says what GitHub answered; one that is not refuses without claiming nothing
+  was made. Audit `project.repository.created {repo, private}` under the acting person,
+  recorded as soon as GitHub is known to have made it.
 - **Changing the repo later is a repair** (`repair-repo`, `edit-policy`): normalizes
   `owner/name` or a URL, demands `confirmFootprint` when tasks already carry GitHub
   records, probes with the bound credential and refuses 404/401/403 or a read-only
   repo. Audit `project.repo.updated`.
-- **Attach, rotate or clear the credential** (`set-credential` / `clear-credential`,
+- **Attach, re-attach or clear the credential** (`set-credential` / `clear-credential`,
   `grant-github-scope`): prefers the connection whose owner matches the repo, else
   the default; a borrowed connection is probed against the repo first. Audit
-  `github.credential.assigned|cleared`.
+  `github.credential.assigned|cleared`. Re-attaching never replaces a token (ruling 480):
+  its result is `reattached` when the same PAT is bound again (the toast says the token is
+  unchanged and names Update token) and `switched` when another connection's PAT is bound.
+  A token is replaced only by its connection's **Update token** in Instance settings; the
+  credential card links an instance admin there (`/org/settings?tab=connections&update=<id>`,
+  the health's `connectionId`).
 - Without a credential or repo every service returns a typed degraded value
   (`no_pat_configured`, `no_repo_configured`, `auth_failed`, `network_unavailable`,
   …) that renders as a pill and an honest toast; nothing throws. The GitHub view
@@ -99,7 +182,32 @@ characters; last 8 lines, 600 characters.
   Contents API on a repository with no refs, or the configured default branch at the
   first commit of GitHub's current default (a task branch pushed first) with the
   repository default restored. Both are disclosed on the task timeline and audited as
-  `github.repo.bootstrapped` (`repo-bootstrap.server.ts`).
+  `github.repo.bootstrapped` (`repo-bootstrap.server.ts`). The Contents API is the one
+  door: GitHub answers every Git Database endpoint (blobs, trees, commits, refs) 409
+  "Git Repository is empty." until a first commit exists, so an empty-tree commit made
+  through them cannot be the first one (ruling 468).
+- **An empty repository is named, and initialized before anyone reads it** (ruling 468,
+  F40-12). Project creation's probe and the GitHub page's access check read `size: 0` on
+  `GET /repos/{r}` as the cue and `GET /repos/{r}/commits` answering 409 as the proof
+  (`repositoryIsEmpty`), and record `empty: true` on the connected repo access; creation's
+  reply and toast say "<repo> is empty: Viberr will create its first commit on <branch>
+  before the first task branch", the GitHub page's Repository panel carries a Contents
+  row, and `get_github_state` a `contents` line. When GitHub's permissions block says the
+  token cannot push, the connected access also records `readOnly: true` and all three say
+  instead that Viberr cannot make that commit until the token can push: the Contents PUT
+  would be refused, so the fix is the token, never a pushed commit. The operator's checkout
+  (`ensureOperatorRepoCheckout`) is the other path that needs the base: a checkout whose
+  HEAD has no commit runs the same bootstrap (actor `system:delivery`, the timeline naming
+  the operator's first checkout) and is moved onto the new commit by ruling 129's
+  refresh, on the first clone and on a checkout an earlier run left unborn
+  (`initializeUnbornCheckout`). The bootstrap is idempotent under a race: a create GitHub
+  refuses because another call already made the branch re-reads the ref and answers
+  `exists`, writing nothing. The PUT is sent once too, and when its answer said nothing
+  (a 5xx, a dropped connection) the branch's head is read: a root commit carrying the
+  PUT's own message is Viberr's first commit and is audited and put on the timeline as
+  the bootstrap; any other head is `exists`. A token that cannot write gets ruling 128's
+  `repo` scope violation, as delivery does. The operator's doctrine says the first commit is Viberr's
+  and never a person's.
 
 Only github.com is supported; there is no GitHub Enterprise host configuration.
 
@@ -159,7 +267,9 @@ steps below, with the hold sentence on the timeline (ruling 240).
    workspace; HEAD must be a task branch (the default branch means `no_branch`, with
    evidence from three read-only probes); auto-commit a dirty tree as `[KEY] deliver
    working-tree changes from the agent run`; count commits ahead of `origin/<default>`
-   (0 → `no_commits`). Then, in order:
+   (0 → `no_commits`). All of that is the workspace's git, run as the task owner's
+   agent uid; from `ls-remote` on, the PAT's steps run in the server's stage (§1).
+   Then, in order:
    - **Store layout** (ruling 159): the tree at HEAD is read under the store's own
      prefix (`git ls-tree -r -z --name-only HEAD -- projects/<slug>/tasks/`,
      NUL-delimited so a path git would quote for its non-ASCII bytes cannot read as an
@@ -170,9 +280,9 @@ steps below, with the hold sentence on the timeline (ruling 240).
      timeline line, a policy notification), and the operator's `deliver_for_review`
      reply says to re-prompt the delivering agent to remove the folder. An unreadable
      tree is not a measurement and the push answers for itself.
-   - **Origin's head**: `git ls-remote --heads origin <branch>` under the askpass env
-     (30 s); equal to the workspace HEAD → `up_to_date`, no push (ruling 134). An
-     unreadable `ls-remote` never blocks the push.
+   - **Origin's head**: `git ls-remote --heads <project URL> <branch>` from the stage
+     under the askpass env (30 s); equal to the workspace HEAD → `up_to_date`, no push
+     (ruling 134). An unreadable `ls-remote` never blocks the push.
    - **Workflow files** (ruling 144(b)): the files under `.github/workflows/` the push
      changes as GitHub measures them (`git log --format= --name-only <origin
      head>..HEAD`, falling back to the base only on a first push, so a workflow file
@@ -193,8 +303,11 @@ steps below, with the hold sentence on the timeline (ruling 240).
      (`push_refused_scope`, `before_push`); GitHub's own refusal of such a push, on any
      token kind, is classified the same way (`github`), never as a generic
      `push_failed`.
-   - **Push** `HEAD:refs/heads/<branch>` under the askpass env with a 120-second
-     timeout; `pushed` carries the head it published and the remote head it replaced. A
+   - **Push**: the branch is fetched out of the workspace into the stage (the
+     launcher's `git-upload-pack` as the person, no credential), then the head read for
+     the origin compare is pushed from the stage as `<sha>:refs/heads/<branch>` under the
+     askpass env with a 120-second timeout (a branch moved after that read cannot slip a
+     different head into the push); `pushed` carries the head it published and the remote head it replaced. A
      non-fast-forward is a `push_conflict` (a branch collision, never a credential
      error) whose timeline remedy first names what is on the branch (ruling 321): this
      task's own review PR (deleting the branch closes it, force-pushing rewrites what
@@ -240,7 +353,28 @@ steps below, with the hold sentence on the timeline (ruling 240).
    and the work is safe, deliver again in a few minutes (ruling 334); `auth_failed`
    points at the credential; only the two "nothing configured" statuses say to fix the
    repository/credential settings. Audit `github.pr.opened` on creation; `pr: {number,
-   state: review, title, headSha}` is written to the task.
+   state: review, title, headSha, bodyWritten}` is written to the task, `bodyWritten`
+   being the hash of the body just sent and the revision it describes.
+
+   A REUSED PR's body follows the delivery (ruling 474). When the revision the body was
+   written for (`pr.bodyWritten.revision`: the delivered revision, else the PR head) is
+   not the one delivered now, the body is recomposed from the current task with the
+   create path's inputs (the live compare, the delivered revision, the current goal)
+   and sent as one `PATCH /pulls/{n}` that is never retried on a 5xx; the record moves
+   to the new body and the audit row is `github.pr.body_updated {prNumber, fromRevision,
+   toRevision}`. An unchanged revision sends nothing. Before rewriting, the description
+   GitHub holds is hashed (`prBodySha256`, CRLF read as LF) against
+   `pr.bodyWritten.sha256`: a mismatch is a person's edit, which is never overwritten.
+   The timeline says so once per revision (a `github` note by `system:delivery`: the
+   description was left as the person wrote it, the revision it was written for, and the
+   revision, commits, files and +/− the PR now carries). A PR with no record (opened
+   before ruling 474, or adopted) counts as Viberr's and is rewritten. A `PATCH` that
+   fails, or a recorded description GitHub's answer did not include, never fails the
+   delivery: a `github` note says which revision the description still describes and
+   why, the audit row is `github.pr.body_update_failed` with the same fields plus
+   `reason`, and the next delivery tries again. The reconciler never reads the body; it
+   carries `bodyWritten` for the same PR, including one a delivery wrote during its
+   pass.
 5. **Afterwards**: `noChanges` is cleared, a stale push-conflict packet is withdrawn,
    `workRevision.pushedAt` is stamped on the revision whose head the push published
    (ruling 161; also a head that reaches the revision only through Viberr's own base
@@ -312,7 +446,7 @@ paths overlap this task's (`prPathOverlaps`, ruling 413), the same fact the revi
 |---|---|---|
 | `resolve_remote_collision` packet option | Refused before anything is written while the task waits on other work (ruling 354; the packet stays open). Deletes the stale remote branch first, closes the recorded unowned PR (audit `github.pr.closed_unowned` when Viberr's close went through), re-delivers this task's local work, lifts `readiness` from `blocked`. The ceremony writes ONE `github` event naming the PR's fate in every arm (U36-7): "Branch collision cleared: closed PR #N and deleted branch `b`" when the close answered 200; after a refused close it re-reads the PR and says what GitHub shows — "is closed on GitHub with its head", "still shows open on GitHub — close it there", or "could not be re-read" — with the refusal quoted. Ruling 136: the ceremony ends with exactly ONE hand-off (the `delivered` re-queue when the re-delivery fired it, else a `packet-resolved` re-queue carrying the outcome in its own `serverOutcome` field); a refusal because the PR on the ref is this task's OWN open PR is no collision: a behind or absent remote gets the delivery that pushes the work and the block lifts, a diverged remote keeps the block and prints `DIVERGED_BRANCH_REMEDY`; every other refusal keeps the block and hands the operator its typed reason. One audit row per ceremony: `github.collision.resolved {outcome, reason, prNumber, delivered, blockLifted}`. | `approve-transition` |
 | `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Ruling 161: the operator may author it until the revision has LEFT the workspace (`revisionLeftWorkspace`: a PR tracks the branch, an unowned PR stands on the name, or a push stamped `workRevision.pushedAt`); a revision the agent merely reported does not block it, and the refusal names the real reason. A confirmed discard retires the reported revision (`workRevision.kind: discarded`, verdicts kept as history, `validation: none`), says so in the outcome note ("Revision `rev_…` is retired with it") and records `retiredRevisionId` on `task.branch.discarded` (`localSha`, `remoteSha: null`, `basis: local_only`). | `approve-transition` |
-| `update_branch_from_base` (operator, capability `update-task-branch`) | `updateWorkspaceBranchFromBase` (`update-branch.server.ts`) merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, and `recordBranchRefresh` records the refresh in `baseRefreshes` (with `onto`, the head it merged onto, ruling 439), stamps `pushedAt`, and reconciles at once (ruling 132). Before fetching it refuses a branch that carries the store layout (`store_layout`, ruling 159(b)) or changes a path another task leases (`lease_held`, ruling 428); nothing is merged or pushed. It reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)); `already_current` is reported as done, not a refusal (ruling 229). A conflict or push conflict opens a human `blocked` packet whose options can all execute (ruling 133(b)): "Have <deliverer> resolve the conflict" is offered and recommended only when the task's delivering engagement is deployed with a repo-write grant (a person routing the conflict to it is the one case the operator directs an agent to merge `origin/<base>` in its workspace, ruling 438); otherwise "Resolve the branch yourself" is recommended, the body says why (no deliverer, undeployed, grant withdrawn), a "Delivering agent" observation names it or "none", and the `github.branch_update.operator` audit row records `resolver`. Refused at the acceptance-boundary stage and past it (`acceptanceBoundaryRefusal`, ruling 162: the acceptance ceremony refreshes once) unless the PR is `conflicting` at its current head or the work is still in its review loop (`validation` `failing` or `changed`, ruling 429); the operator snapshot carries the same refusal as `notRefreshableReason` (ruling 424). The redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 163). A drive that refreshed the branch and then left the task idle is resumed once (ruling 442). | operator gate; `recommend` is refused outright |
+| `update_branch_from_base` (operator, capability `update-task-branch`) | `updateWorkspaceBranchFromBase` (`update-branch.server.ts`) merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force; the merge and its abort run as the task owner's agent uid, GitHub's base and origin's copy of the branch are fetched with the PAT into the server's stage and fetched from there by the workspace, and the push goes out from the stage — §1, R-seams-1), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, and `recordBranchRefresh` records the refresh in `baseRefreshes` (with `onto`, the head it merged onto, ruling 439), stamps `pushedAt`, and reconciles at once (ruling 132). Before fetching it refuses a branch that carries the store layout (`store_layout`, ruling 159(b)) or changes a path another task leases (`lease_held`, ruling 428); nothing is merged or pushed. It reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 134(c)); the timeline line says the same fact for a person ("... the operator's next delivery pushes them", ruling 475(c)); `already_current` is reported as done, not a refusal (ruling 229). A conflict or push conflict goes to the task's delivering agent when its engagement is deployed with a repo-write grant (ruling 475(a), owner decision, narrowing 133(b) and 438): the tool starts that agent's run through `operatorDispatchAgent` with ruling 438's directive (merge `origin/<base>`, or origin's copy of the branch, into the task branch in its own workspace, never a rebase or force-push, resolve the files, run the gates, commit; the operator delivers the result), returns a task past review to the review stage in the same write (`task.transition {via: conflict_handoff}`), and writes one person-facing timeline line ("The operator sent the `package.json` conflict between `web-2` and `main` to Platform Engineer, ..."); while that agent's run on the same conflict is live nothing new is sent. The human `blocked` packet whose options can all execute (ruling 133(b)) is the fallback, and its body says which case it is: no deliverer, undeployed or grant withdrawn ("Resolve the branch yourself" recommended); the deliverer was already sent this same conflict (the same files against the same base commit, or the same origin head refusing the push) and the branch still conflicts (by hand recommended, "Have <deliverer> try the conflict again" second); a `dispatch-agents` policy that only recommends; or a run that could not start. A "Delivering agent" observation names it or "none". An open packet offering `accept_completion` is withdrawn first (ruling 475(b)). The `github.branch_update.operator` audit row records `resolver`, `route` (`deliverer`, `packet`, `in_progress`), `handedTo`, `repeat`, `handoffRefused` and the conflict's `baseSha` or `remoteHeadSha`; the earlier-handoff check reads those rows. Refused at the acceptance-boundary stage and past it (`acceptanceBoundaryRefusal`, ruling 162: the acceptance ceremony refreshes once) unless the PR is `conflicting` at its current head or the work is still in its review loop (`validation` `failing` or `changed`, ruling 429); the operator snapshot carries the same refusal as `notRefreshableReason` (ruling 424). The redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 163). A drive that refreshed the branch and then left the task idle is resumed once (ruling 442). | operator gate; `recommend` is refused outright |
 | Branch cleanup | `deleteTaskRemoteBranch`, after a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Ruling 136(c): a CACHED open PR is re-confirmed against GitHub before it can refuse (a pass with the divergence notification and the operator wake suppressed); a PR GitHub reports closed or merged lets the delete proceed on the refreshed file, a PR still open refuses (`own_pr_open`), and every degraded or unexpected reconcile status refuses as `unconfirmed` ("GitHub could not confirm"), never deleting on an unconfirmed state. The archive and empty-branch doors inherit the same check and sentence. Ruling 161: the ref's head is read before the DELETE and recorded (`github.branch.deleted {sha}`, "Deleted branch … Its head was `sha`"); the archive's local cleanup records both heads on `task.branch.discarded {localSha, remoteSha, basis: archive_cleanup}`, and the archive dialog says what origin holds when the reconciler recorded `github.foreignHead` ("origin's `branch` carries commits this task did not author; deleting it removes them too"). Only GitHub's explicit "does not exist" answer counts as `already_gone`; any other refusal of the DELETE (a protected branch, a ruleset) is `github_refused` (ruling 207(d)). | human `userId` required |
 
 ## 5. Revisions, verdicts and acceptance
@@ -363,6 +497,19 @@ paths overlap this task's (`prPathOverlaps`, ruling 413), the same fact the revi
   admin links it under Instance settings, Users & access for a local or Google account
   (`updateOrgUser`, audit `org.user.github_handle.set` / `.cleared`); the person cannot
   set their own. The `unlinked_handle` refusal names both doors.
+- **A person reads the delivered changes, and notes lines for the deliverer, on the
+  task page** (ruling 484). The task page's Changes panel (while the review PR is open
+  and a revision is delivered) loads `GET /projects/:slug/tasks/:key/changes`
+  (`task-changes.ts` → `readTaskChanges`, member-only) when it is opened: the files and
+  patches of `readPullRequestDiff`, BOUND to the delivered revision (`headSha`: the PR's
+  live head is read first, and a PR at any other head answers why instead of its files:
+  not pushed yet, or moved past the delivery), 200,000 encoded patch characters per
+  read and a file past that loaded alone by `?path=`. A note on a line posts through
+  the task route's `review-notes` intent as ONE comment through `commentToAgent`,
+  addressed `@<deliverer>` and quoting each note's `file:line` (`review-notes.server.ts`),
+  refused with a reason when the delivered revision moved since the read or no deployed
+  agent delivers the task. GitHub reviews of the delivered head reach the deliverer the
+  same way (§6, review relay).
 - **Acceptance gate order** (`acceptanceRefusalReasons`): archived → closed PR
   (terminal, withdraws force-accept) → stage boundary → engaged required reviewers →
   project-declared required reviewers → the live no-change probe's has-work refusal →
@@ -376,7 +523,16 @@ paths overlap this task's (`prPathOverlaps`, ruling 413), the same fact the revi
   accept-time merge refusal; no surface offers an acceptance the gate will refuse (the
   recommendation card, the accept dialog, the sidebar and the GitHub card's "conflicts"
   pill all read it), and the reconciler withdraws a pending `accept_completion` card
-  when `mergeable` flips to conflicting. The full ceremony is
+  when `mergeable` flips to conflicting. Ruling 475(b): the same flip withdraws an open
+  decision packet that offers `accept_completion` ("**Packet withdrawn:**", audit
+  `task.packet.withdrawn_superseded {reason: pr_conflicting}`), tells the watchers why,
+  and wakes the operator with `pr-conflicting`. After every merge Viberr performs
+  (`mergeTaskPr`), `recheckOpenReviewPrs` reconciles the project's other open review PRs
+  at once and again after 5 and 20 seconds while GitHub still computes their
+  mergeability, so a sibling the merge put in conflict flips before anyone presses its
+  Accept; and the accept dialog's "Collides" row names the open PRs that share a changed
+  path with the one it merges (`mergeCollisions`, `app/shared/pr-overlaps.ts`). The full
+  ceremony is
   [task-lifecycle.md §11](task-lifecycle.md#11-acceptance-and-the-endings).
 - **Mergeability belongs to the head it was measured on** (rulings 405, 435): the
   reconciler records `pr.mergeableAt` beside `pr.mergeable`, and every reader goes
@@ -456,6 +612,43 @@ stage where the reviewer works (`task.transition {boundary: "rework", via:
 The commits without the task's `[KEY]` prefix are kept as `github.otherCommits` and the
 Commits card lists them apart as "Also on the branch · not this task's".
 
+**Project gates: Viberr runs them itself** (ruling 482,
+`app/server/tasks/project-gates.server.ts`, `app/shared/project-gates.ts`). `project.md`
+declares `gates: [{name, command, timeoutSeconds?}]` (Settings → Gates, or the
+controller's `set_project_gates`; `edit-policy`). A run is asked for by a delivery
+(`performDelivery`'s delivered outcome), by a workspace reconcile that mints a new
+revision while the task's pull request stands, by the reconciler's external revision
+(ruling 179), by a changed gate list (every open task with a delivered revision), by a
+person's "Run gates" on the GitHub card (maintainer+ or the owner, audited
+`task.gates.requested`), and at boot for a record a restart left `queued` or `running`.
+The request only writes `gateRun: queued` onto the task and enqueues; one worker runs one
+task's gates at a time, instance-wide, off every request path. The run clones the
+delivering checkout (`clone --no-local`, as the task owner through the ruling-460
+launcher, pass 40 review R-seams-1/2) into `workspace/.gates/<runId>/`, fetches origin's
+heads from the mirror when the revision is not there (an external head), detaches at the
+revision's sha and runs each command with `sh -c` in order, as the owner's agent uid with
+`filteredSpawnEnv()` and the agent's own `$HOME` (with no launcher, as the server's own
+user, like workspace git; with isolation on and no owner, the run records an error and
+never runs as the server). Each gate is its own process group, stopped at its timeout
+(600 s by default; SIGTERM, then the group killed after 5 s) and swept by its
+`VIBERR_RUN_ID` marker afterwards. Per gate the task records the exit code (`null` when
+killed or not started; a signal reads as 128 + n), `timedOut`, the wall time and the log,
+saved as the task attachment `gate-<sha7>-<NN>-<name>-<stamp>.log` (the head 256 KB and
+the tail kept, the middle cut). The record binds to the revision id and sha like a
+verdict; results land as each gate finishes; the finished run writes one note from
+"Project gates" that claims its logs, and audit `task.gates.run`. A log never counts as
+a file a concurrent run produced (`isGateLogName` in `attachmentNamesSince`). The PR card,
+the accept dialog, the operator's snapshot (`gates`) and every agent's canonical anchor
+print the same line, "Gates on `<sha7>`: N/M exit 0 (run by Viberr)". **A plain
+acceptance waits until every declared gate exited 0 on the revision under review**:
+missing, stale (an edited list), queued, running, failed and could-not-run evidence all
+refuse (`projectGatesRefusal`, in `acceptanceRefusalReasons` and the projection's
+`acceptanceBlockReason`, after the verdict gate). Force accept bypasses it and names it in
+its record. A failing gate re-invokes the operator with the `gates-failed` trigger. A
+`verified` (no-change) revision and a files-only delivery have no checkout to gate and
+owe nothing; a base refresh that keeps the revision (ruling 439) keeps its gate record, as
+it keeps its verdicts.
+
 ## 6. Reconciliation and freshness
 
 `reconcileTask` (`github-reconciler.server.ts`, serialized per task) fetches the branch
@@ -499,6 +692,22 @@ Facts it records beside the state:
   before the compare, so finished work never reads `behind_main`; ruling 401). A pass
   whose only change is this verdict still writes a `github.reconcile` provenance row, so
   a branch that falls behind because `main` moved stops rendering a stale `synced`.
+- **Review relay** (ruling 484, `pr-review-relay.server.ts`): after its own write, on an
+  open PR whose reviews it read, the pass relays each submitted review (APPROVED,
+  CHANGES_REQUESTED or COMMENTED; never PENDING or DISMISSED) that was made on the
+  delivered revision's head by a project member (login mapped through
+  `users.github_handle`, failing closed like R19-B) and not relayed before. It lists that
+  review's line comments (`GET …/pulls/{n}/reviews/{id}/comments`, only for such a
+  review, so a quiet pass costs no call) and posts, per reviewer, ONE comment through
+  `commentToAgent` as that member (audit label `<email> · via GitHub`): `@<deliverer>`,
+  "from GitHub", a CHANGES_REQUESTED body first, then each line comment quoting its
+  `file:line` on the commit it was written on (a LEFT-side comment says "removed line"),
+  with every other `@` escaped so the deliverer is the one addressee. The ids relayed
+  (`review:<id>`, `comment:<id>`) are recorded on `pr.reviewRelay.relayed` in the SAME
+  locked write that appends the comment; a review with nothing to relay is recorded on
+  its own. The reconciler carries the record for the same PR. No deliverer (or none
+  deployed) relays and records nothing; a comments read GitHub refuses leaves the review
+  for the next pass; a relay failure is logged and never fails the pass.
 
 Out-of-band changes become typed `note` events from the policy engine ("Divergence":
 merged but not Done → accept; closed but active → rework or archive; reopened), a
@@ -571,7 +780,8 @@ credential handed to a model.
 ## 9. Identifiers and knobs
 
 - Audit: `github.pat.*`, `github.credential.*`, `org.connection.*`, `secrets.resealed`,
-  `project.repo.updated`, `github.repo.bootstrapped` (ruling 128, a repository-level
+  `project.repo.updated`, `project.repository.created` (ruling 462, a repository made
+  at project creation), `github.repo.bootstrapped` (ruling 128, a repository-level
   change like `github.credential.assigned`), `github.branch.created|deleted`,
   `github.branch.prepare_failed`, `github.branch_update.operator|acceptance`,
   `github.collision.resolved`,

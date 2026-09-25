@@ -6,6 +6,7 @@ import type {
 } from "~/server/projections/task-query.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { TaskLinks } from "~/shared/task-key-links";
+import { dependencyAnchor, goalLinkAnchor } from "~/shared/goal-anchor";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon } from "~/ui/icon";
 import { inFlightIntent } from "~/ui/in-flight";
@@ -264,8 +265,9 @@ export function TaskHero({
         {task.goalRef && (
           <Link
             className="pill agent sm hero-goal-chip"
-            // Ruling 419(h): straight to THIS chain, opened, on the rail.
-            to={`/projects/${task.projectSlug}/controller#${task.goalRef.goalId}`}
+            // Ruling 419(h): straight to THIS chain, opened, on the rail;
+            // ruling 476(b): to this task's own link row in it.
+            to={`/projects/${task.projectSlug}/controller#${goalLinkAnchor(task.goalRef.goalId, task.goalRef.linkIndex)}`}
           >
             <Icon name="flag" />
             {task.goalRef.goalId} · link {task.goalRef.linkIndex}
@@ -282,7 +284,8 @@ export function TaskHero({
             to={
               entry.taskKey
                 ? `/projects/${task.projectSlug}/tasks/${entry.taskKey}`
-                : `/projects/${task.projectSlug}/controller${entry.goalId ? `#${entry.goalId}` : ""}`
+                : // Ruling 476(b): a goal link opens its own row on the rail.
+                  `/projects/${task.projectSlug}/controller${dependencyAnchor(entry) ? `#${dependencyAnchor(entry)}` : ""}`
             }
             title={`Waits on ${entry.label} (${entry.state})`}
           >

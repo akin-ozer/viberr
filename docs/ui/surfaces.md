@@ -25,21 +25,22 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/` | `_index.tsx` | user, form | Home: pinned, all and archived projects, waiting counts, the Settings tiles (connections, users, resources, insights), store strip (org admin), new-project modal | `create-project`, `pin`, `view`, `rescan` (org admin), `rebuild-projections` (org admin) |
 | `/projects` | `projects.tsx` | user | redirects to `/` | |
 | `/projects/:slug` | `project.tsx` + `project._index.tsx` | user → member (404 parity) | workspace shell (rail, topbar, palette, live updates); index redirects to the board | |
-| `/projects/:slug/board` | `project.board.tsx` | member (the layout's `readWorkspace` gate), form | board by stage from its own loader (ruling 457: the columns, as board cards carrying the fields the board reads, `toBoardCard`; the layout carries none) (a card is one status chip, a row of problem chips and an avatar stack, ruling 365), filters in the URL (`filter`, `view`, `q`), drag-and-drop and the card's Move menu (a stage, or Move up / Move down within the lane: the keyboard and single-pointer path to a slot, ruling 455(c)), accept-from-board confirm, the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first) | `create-task`, `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
-| `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" (tasks at a stage the workflow makes acceptance legal from, whose acceptance nothing blocks, for a viewer who can accept) and "Still in review" (every other review-work row: at the review stage, an open review PR at any stage, or a required reviewer's verdict outstanding; a row before the boundary reads "Review in progress at Validation · PR #8 · awaiting verdict", or names the live PR fact instead when it carries one: unpushed revision, conflict, drifted head; U35-5). A row whose open PR shares changed paths with another open PR carries a "collides with <keys>" chip on both rows (ruling 236, read-only). A row's wait tag reads "waiting on you" for the tasks whose next move is the viewer's (`waitingOnViewer`, the same answer the board's loader gives its cards), and an agent still working keeps "agent working", as on the board card (ruling 455). Header: "N in review · M waiting on your acceptance" | |
-| `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project: New conversation in the page head, a sticky rail (conversations first, then goal chains) and a capped transcript (ruling 419); unseen replies marked (ruling 448); goal chain controls, `cancel` and skip behind a confirm; with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `goal-op` (`op`: `pause`, `resume`, `cancel`, `skip_link`, `retry_link`; `goalId`, `index`, `reason`), `interrupt` (`conversationId`, `runId`) |
-| `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail (a copy whose grants differ from its template says so on the scope line and under each list, ruling 156; the project's rulings knowledge base named when one is set, ruling 239), capability matrix modal | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile`, `sync-profile-resources` (org admin only, carries the record's fingerprint) |
+| `/projects/:slug/board` | `project.board.tsx` | member (the layout's `readWorkspace` gate), form | board by stage from its own loader (ruling 457: the columns, as board cards carrying the fields the board reads, `toBoardCard`; the layout carries none) (a card is one status chip, a row of problem chips and an avatar stack, ruling 365), filters in the URL (`filter`, `view`, `q`), drag-and-drop and the card's Move menu (a stage, or Move up / Move down within the lane: the keyboard and single-pointer path to a slot, ruling 455(c)), accept-from-board confirm (the shared accept dialog, whose "Collides" row the board computes from its own cards' `pr.paths`, ruling 475), the shared move-back confirm (ruling 381: a drag or keyboard move to an EARLIER stage asks why first) | `create-task`, `reorder` (carries `reason` on a backward move), `rescan` (admin/maintainer) |
+| `/projects/:slug/review` | `project.review.tsx` | member | review queue split into "Waiting on your acceptance" (tasks at a stage the workflow makes acceptance legal from, whose acceptance nothing blocks, for a viewer who can accept) and "Still in review" (every other review-work row: at the review stage, an open review PR at any stage, or a required reviewer's verdict outstanding; a row before the boundary reads "Review in progress at Validation · PR #8 · awaiting verdict", or names the live PR fact instead when it carries one: unpushed revision, conflict, drifted head; U35-5). A row whose open PR shares changed paths with another open PR carries a "collides with <keys>" chip on both rows (ruling 236, read-only). A row's wait tag reads "waiting on you" for the tasks whose next move is the viewer's (`waitingOnViewer`, the same answer the board's loader gives its cards), and an agent still working keeps "agent working", as on the board card (ruling 455). Every row, and the "Review → Done" policy chip, is a link to its page (`<a href>`), never a button that navigates, so a row opens in a new tab (ruling 477(c)). Header: "N in review · M waiting on your acceptance" | |
+| `/projects/:slug/controller` | `project.controller.tsx` | member (CSRF checked as a result, not a throw) | the instance controller addressed inside this project: New conversation in the page head, a sticky rail (conversations first, then the Proposals panel, then goal chains) and a capped transcript (ruling 419); the Proposals panel (`#kb-proposals`, ruling 483) heads "Proposals" with "N open" and lists each open knowledge-base proposal the project's tasks filed: a "Ruling" or "Knowledge base" pill, `<kb>/<doc>`, "Corrects" and the quoted line, the correction, "Evidence: …", the task (linked), filer, day and id; an org admin gets Promote, Dismiss (confirm "Dismiss <id>?", "Dismiss proposal" / "Keep it") and "Open document", and the note "Promote and Dismiss ask the controller in this conversation; it edits the document and closes the proposal."; Promote and Dismiss post the `send` intent with the request `proposalRequest` words, disabled while a message is on its way or Claude is not connected; everyone else reads "An org admin promotes or dismisses proposals."; none open reads "No open proposals. When an agent proves a line of a knowledge base wrong, its correction waits here, not binding, until a person promotes or dismisses it."; unseen replies marked (ruling 448); a reply shown from its first line and announced by one always-mounted status region (ruling 476(c), (d)); the Goals head counted by status ("1 active · 1 paused · 2 need attention · 3 settled"), each link row numbered and anchored `#goal-N-link-M`, a started link wearing its board card's status word, "N waiting on you" on the chain, "Planned in <conversation>" under About this chain and "Where this board's chains were planned" in the rail (ruling 476(b), (f), (g), (h)); goal chain controls, `cancel` and skip behind a confirm; with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `goal-op` (`op`: `pause`, `resume`, `cancel`, `skip_link`, `retry_link`; `goalId`, `index`, `reason`), `interrupt` (`conversationId`, `runId`) |
+| `/projects/:slug/agents` | `project.agents.tsx` | member, form | deployed roster, live runs, profile detail (a copy whose grants differ from its template says so on the scope line and under each list, ruling 156; the project's rulings knowledge base named when one is set, ruling 239; a granted MCP server no run gets tools from is marked, ruling 479(b)), capability matrix modal (enforced capabilities only; advisory lines collapsed under the grid, ruling 479(a)) | `create-profile`, `update-profile`, `deploy-profile`, `delete-profile`, `sync-profile-resources` (org admin only, carries the record's fingerprint, sent from a confirm that names what it removes and adds, ruling 479(d)) |
 | `/projects/:slug/policy` | `project.policy.tsx` | member, form | role matrix (rendered from `rbac.ts`), member roles, transition boundaries, guardrails (ruling 112), the required reviewers read-only (ruling 178; edited on Settings) | `set-role`, `set-boundary`, `set-guardrail` |
-| `/projects/:slug/github` | `project.github.tsx` | member, form | credential card (with the workflow-scope advisory, ruling 144; an advisory scope is a note, not a violation, ruling 380), repo state, branched tasks, scope violations, update status | `reconcile` (`reconcile-github`), `grant-scope`, `set-credential`, `clear-credential` (all three `grant-github-scope`) |
-| `/projects/:slug/activity` | `project.activity.tsx` | member | activity feed with day groups; audit column (compacted, ruling 61) | |
-| `/projects/:slug/settings` | `project.settings.tsx` | member, form; writes need `edit-policy` (admin) except `invite` / `remove-member` (`manage-members`, admin) and the credential intents (`grant-github-scope`, maintainer and above) | project profile, stages (the row's dot opens a 20-swatch colour menu, ruling 364), required reviewers (ruling 178: a stage + verdict-capable agent per row under Workflow stages, saved whole), File leases under them (ruling 396: paths as a glob line, the holder task, the reason; a spent lease is marked and "Clear finished" removes exactly those; read-only text without `edit-policy`), members (the invite form is a head button opening the `Add member` modal, ruling 148(b)), repository, branch cleanup, archive/delete | `save-project`, `add-stage`, `rename-stage`, `recolor-stage`, `remove-stage`, `reorder-stages`, `set-required-reviewers`, `set-file-leases`, `invite`, `remove-member`, `set-credential`, `clear-credential`, `grant-scope`, `repair-repo`, `set-branch-cleanup`, `archive-project`, `delete-project` |
-| `/projects/:slug/tasks/:key` | `project.task.tsx` | member, form | task detail (page label `Task <KEY>`): state (the "Waiting on" row reads "Other work: …" for a held task), the hero's wait chips (one neutral link per `blockedBy` entry with its state, ruling 131), execution profile (the operator run control carries a hold note with Run left enabled), packet, recommendations (an acceptance card prints the gate's refusal as an alert and its Apply refuses the click while one stands, ruling 162), Details (a "Blocked by" row and its own "Edit what it waits on" form), attachments (every task; "Attach a file" for `attach-file`, ruling 379), timeline, runs, GitHub trace (the "conflicts" pill on a conflicting open PR, ruling 162; the "Unpushed" row and the "Push `<sha>` to PR #N" control when the open PR lacks the delivered revision, ruling 134(c), disabled with the refusal named for a diverged remote), diagnostics | `comment`, `transition` (ruling 381: a BACKWARD move carries a `reason`, collected by the shared `MoveBackConfirm` dialog and refused server-side without one), `update-goal`, `set-task-metadata`, `set-task-dependencies` (ruling 131: the full `blockedBy` list, empty clears and releases), `owner-take`, `owner-release`, `owner-assign`, `run-agent`, `run-operator`, `run-interrupt`, `release-agent`, `resolve-packet`, `apply-recommendation`, `dismiss-recommendation`, `deliver-review`, `accept-completion`, `refresh-and-review` (ruling 449: the accept dialog's "update the branch and re-review first" when the head that would merge is one no review ran on), `force-accept`, `complete-merge`, `request-maintainer-decision`, `schedule-action`, `cancel-schedule`, `archive-task`, `restore-task`, `attach-file` (ruling 379: the one MULTIPART intent, contributor and above, one file per submit, at most 10 MB) |
+| `/projects/:slug/github` | `project.github.tsx` | member, form | credential card (with the workflow-scope advisory, ruling 144; an advisory scope is a note, not a violation, ruling 380; its `repo` / `pull_request:write` chips read the project repository's proof, ruling 480; its manage row is **Attach credential**, or **Re-attach connection** + **Remove credential** with **Replace token** linking an instance admin to the connection's Update token and a sentence for everyone else, ruling 480), repo state, branched tasks, scope violations, update status | `reconcile` (`reconcile-github`), `grant-scope`, `set-credential`, `clear-credential` (all three `grant-github-scope`) |
+| `/projects/:slug/activity` | `project.activity.tsx` | member | activity feed with day groups; audit column (compacted, ruling 61) carrying the goal-chain rows (ruling 477(b)); every task key is a link to the task (ruling 477(c)) | |
+| `/projects/:slug/settings` | `project.settings.tsx` | member, form; writes need `edit-policy` (admin) except `invite` / `remove-member` (`manage-members`, admin) and the credential intents (`grant-github-scope`, maintainer and above) | project profile, stages (the row's dot opens a 20-swatch colour menu, ruling 364), required reviewers (ruling 178: a stage + verdict-capable agent per row under Workflow stages, saved whole), File leases under them (ruling 396: paths as a glob line, the holder task, the reason; a spent lease is marked and "Clear finished" removes exactly those; read-only text without `edit-policy`), Gates under those (ruling 482: a name, the command and a timeout in seconds per row, saved whole; an empty timeout is the 600 s default; at most 10; read-only text without `edit-policy`; the note says Viberr runs each with `sh -c` in a fresh checkout of every delivered revision as the task owner and that acceptance waits until every one exited 0), members (the invite form is a head button opening the `Add member` modal, ruling 148(b)), repository, branch cleanup, archive/delete | `save-project`, `add-stage`, `rename-stage`, `recolor-stage`, `remove-stage`, `reorder-stages`, `set-required-reviewers`, `set-file-leases`, `set-project-gates` (ruling 482: the whole list as one JSON field; a changed list queues the gates on every open delivered task), `invite`, `remove-member`, `set-credential`, `clear-credential`, `grant-scope`, `repair-repo`, `set-branch-cleanup`, `archive-project`, `delete-project` |
+| `/projects/:slug/tasks/:key` | `project.task.tsx` | member, form | task detail (page label `Task <KEY>`): state (the "Waiting on" row reads "Other work: …" for a held task), the hero's wait chips (one neutral link per `blockedBy` entry with its state, ruling 131), execution profile (the operator run control carries a hold note with Run left enabled), packet, recommendations (an acceptance card prints the gate's refusal as an alert and its Apply refuses the click while one stands, ruling 162), the accept dialog (its "Collides" row, "Merging this will likely put WEB-2's PR #3 in conflict on `package.json`. Viberr re-checks it right after the merge, and the operator hands a conflict to the delivering agent.", names every other open PR that changes a path this one changes, from the loader's `mergeCollisions`, ruling 475), Details (a "Blocked by" row and its own "Edit what it waits on" form), attachments (every task; "Attach a file" for `attach-file`, ruling 379), timeline (a `proposal` event pills "Proposal", is titled "Proposed ruling change" or "Proposed knowledge-base correction", and links "Open proposals" to the project Controller page's `#kb-proposals`, ruling 483), runs, GitHub trace (the "conflicts" pill on a conflicting open PR, ruling 162; the "Unpushed" row and the "Push `<sha>` to PR #N" control when the open PR lacks the delivered revision, ruling 134(c), disabled with the refusal named for a diverged remote; ruling 482: a gates pill in the bar and a "Gates" row printing the server's line, "Gates on `<sha7>`: N/M exit 0 (run by Viberr)", one line per gate with its outcome, time and a "log" link to its attachment, and "Run gates" / "Run gates again" for maintainer+ or the owner, disabled while a run is queued or running), the accept dialog's "Gates" row (the same line, the failing gates listed; a failure is also the Blocked row, so the plain confirm is disabled and force names it under Bypassing), Changes (ruling 484: while the review PR is open and a revision is delivered, a closed panel whose Show changes loads its reader chunk and `…/changes`; each file is a `<details>` of its hunks, a line's number is the button that opens a note under it, and "Send to @<deliverer>" posts every note at once), diagnostics | `comment`, `review-notes` (ruling 484: `notes` as JSON `[{path, line, side, body}]`, at most 50, and the `headSha` they were written on; one comment addressed to the deliverer quoting each `file:line`, through the `comment` door and its toasts), `transition` (ruling 381: a BACKWARD move carries a `reason`, collected by the shared `MoveBackConfirm` dialog and refused server-side without one), `update-goal`, `set-task-metadata`, `set-task-dependencies` (ruling 131: the full `blockedBy` list, empty clears and releases), `owner-take`, `owner-release`, `owner-assign`, `run-agent`, `run-operator`, `run-interrupt`, `release-agent`, `resolve-packet`, `apply-recommendation`, `dismiss-recommendation`, `deliver-review`, `run-gates` (ruling 482: queue the project's gates on the revision under review again; maintainer+ or the owner, audited `task.gates.requested`), `accept-completion`, `refresh-and-review` (ruling 449: the accept dialog's "update the branch and re-review first" when the head that would merge is one no review ran on), `force-accept`, `complete-merge`, `request-maintainer-decision`, `schedule-action`, `cancel-schedule`, `archive-task`, `restore-task`, `attach-file` (ruling 379: the one MULTIPART intent, contributor and above, one file per submit, at most 10 MB) |
 | `/projects/:slug/tasks/:key/attachments/:file` | `task-attachment.ts` | member | raw bytes, whitelist renders inline, `?download=1` forces the save dialog (ruling 105); over 50 MB answers 413 | |
-| `/org/settings` | `org.settings.tsx` | org admin | "Instance settings" under the standalone-page header (ruling 145); tabs in order GitHub connections, Users & access, Sign-in & SSO, Agent resources, Controller (whose note lists grants the controller asked for and cannot make, each naming its unlock variable and the restart and carrying a Decline button, ruling 390); the run-concurrency and spending-cap rows; the Audit log card (browse, download, and the S3 target as one fact row plus a button that opens the target modal, ruling 148(b); "Export to S3 now" and "Remove" stay on the card) | see §3 |
+| `/projects/:slug/tasks/:key/changes` | `task-changes.ts` | member (404 parity); signed out answers 401, never a login redirect | the Changes panel's read (ruling 484): the delivered revision's files and patches from its pull request, bound to that revision (a PR at another head answers why, not its files), with who a note reaches; `?path=` reads one file the first read left out for size. `shouldRevalidate` false: the panel loads it itself, and its `clientLoader` turns a failed load into the panel's own failure row | |
+| `/org/settings` | `org.settings.tsx` | org admin | "Instance settings" under the standalone-page header (ruling 145); tabs in order GitHub connections, Users & access, Sign-in & SSO, Agent resources, Controller (whose note lists grants the controller asked for and cannot make, each naming its unlock variable and the restart and carrying a Decline button, ruling 390); `?tab=resources&kb=<dir>&doc=<path>` (a knowledge-base proposal's "Open document", ruling 483) opens that knowledge base's browser on that document; the run-concurrency and spending-cap rows; the Audit log card (browse, download, and the S3 target as one fact row plus a button that opens the target modal, ruling 148(b); "Export to S3 now" and "Remove" stay on the card) | see §3 |
 | `/org/settings/audit-export` | `org.settings.audit-export.ts` | org admin | CSV/JSON download, 100 000-row cap | |
-| `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user), same page layout as the project controller (ruling 419); with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `interrupt` (`conversationId`, `runId`) |
+| `/controller` | `controller.tsx` | user (CSRF checked as a result, not a throw) | instance controller conversation (per user), same page layout as the project controller (ruling 419; a reply shown from its first line and announced by one always-mounted status region, ruling 476(c), (d)); with a thread open, its Live-run strip and Agent-logs console (interrupt for the owner or an org admin) | `send` (`text`, `conversationId`, `surface`, `timeZone`), `interrupt` (`conversationId`, `runId`) |
 | `/insights` | `insights.tsx` | org admin | run analytics under the standalone-page header (ruling 145): totals, coordination share, outcomes (a restart-interrupted run is stopped, not an error, and a never-started one is out of the completion rate, ruling 158), breakdowns naming what their top 8 left out, the **Prompt cache** table (ruling 369: by run kind and by credential kind; every figure on a `data-` attribute, rows keyed `data-cache-row="by run kind:primary"`), oversight cards naming their exceptions (ruling 290), backend quota readings (a refused or exhausted row names whose account, a reading names the hour of its reset, ruling 130(d)). Details in [../domain/auth-and-rbac.md §6](../domain/auth-and-rbac.md#6-insights-insights-org-admin-only) | |
-| `/profile` | `profile.tsx` | user | identity, password, notification routing, appearance, Your access, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's; ruling 294: the last usage reading on it), GitHub identity. The password change is a row on the Profile card whose button opens a modal (ruling 148(b)); there is no reduce-motion setting (148(c)) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
+| `/profile` | `profile.tsx` | user | identity, password, notification routing (nine in-app toggles, agent questions on their own; and the per-browser Desktop notifications switch, the one place the browser permission is asked for; ruling 481), appearance, Your access, **Agent accounts** (ruling 127: connect Claude and Codex for yourself; ruling 130(d): each connected card shows the last refusal Viberr observed on YOUR account, never another person's; ruling 294: the last usage reading on it, in the past tense once its window has reset, ruling 481(d); Disconnect asks first, ruling 481(b)), GitHub identity (its Disconnect asks first too). The password change is a row on the Profile card whose button opens a modal (ruling 148(b)); there is no reduce-motion setting (148(c)) | `identity`, `change-password`, `github-disconnect`, `set-notif`, `set-tl-default`, `backend-login-start`, `backend-login-code`, `backend-login-cancel`, `backend-set-key`, `backend-disconnect` |
 | `/notifications` | `notifications.tsx` | user | newest 200, auto-read on viewing the target | |
 | `/notifications/read` | `notifications.read.tsx` | user (CSRF as a result) | fetcher target; GET redirects to `/notifications` | `read` (the default; repeatable `id`), `read-all` |
 | `/prefs/theme` | `prefs.theme.tsx` | user (CSRF as a result) | writes `theme` to the user row and the `viberr_theme` cookie; GET redirects to `/` | |
@@ -50,7 +51,9 @@ The intent lists below are every `intent ===` / `case "…"` branch in each rout
 | `/resources/model-catalog` | `resources.model-catalog.ts` | user | models and efforts per backend (Claude enhanced with the VIEWER's own account) | |
 | `/resources/controller` | `resources.controller.ts` | user; a project or task scope the viewer cannot reach answers an empty `unavailable` view (GET) or `{ ok:false }` (POST), never a thrown response, because it feeds a root-owned fetcher | the controller dock's view for the scope the person is standing in (ruling 121); `?seen=1` marks the shown transcript read (ruling 448) | `send` (`text`, `conversationId`, `project`, `task`, `surface`, `timeZone`) |
 | `/resources/notifications` | `resources.notifications.ts` | user | the bell popover's list: the viewer's newest `BELL_LIST_CAP` (100) notifications. Pages carry only the bell's counts (`bellCounts`); the bell loads this when the pointer or focus reaches it and on open, and again once the page has re-read the counts since (at once while open). It answers `shouldRevalidate` false; a signed-out request gets a 401, never a login redirect, and its `clientLoader` turns any failed load into the bell's failure row (ruling 457) | |
+| `/resources/attention` | `resources.attention.ts` | user; a signed-out request (or a pending password reset) gets a 401, never a login redirect | ruling 481(c): `{ waiting, items }` (`attentionSnapshot`), the viewer's unread decisions (an operator packet, an agent question, a recommendation to approve) that lead somewhere, and the newest ten worded for a desktop notification with the bell's destination. `Cache-Control: no-store`; `shouldRevalidate` false. The root's attention watcher reads it with a plain `fetch` | |
 | `/resources/controller-unseen` | `resources.controller-unseen.ts` | user | the dock's status: the viewer's controller conversations holding a reply they have not seen, each with the page that opens it; a thread in a project the viewer can no longer open is left out (ruling 448); and the viewer's turns working right now, with scope, phase and step (ruling 457). Like `/resources/controller`, it answers `shouldRevalidate` false: the dock loads it itself | |
+| `/resources/mcp-oauth/callback` | `resources.mcp-oauth.callback.ts` | org admin (a signed-out admin goes through `/login` and back with the query) | where an MCP server's authorization server sends the browser after an OAuth sign-in started in Instance settings (ruling 469): spends the `state` once (bound to the session that started it), exchanges the code with the PKCE verifier, seals the tokens, probes the connection, and answers a plain page (`MCP sign-in`, no-store, no referrer, no token, code or state in it) that says the tab can be closed; a refused callback is a 400 page with the reason | |
 | `/resources/backend-login` | `resources.backend-login.ts` | user | `?backend=claude\|codex` → the CALLER's own hosted sign-in session (`{ login, health }`), polled every 2 s by Profile → Agent accounts; an unknown backend is a 400 `{ error: { code: "validation_failed", message } }`, and it reads nobody else's session | |
 | `/resources/session-export` | `resources.session-export.ts` | member / conversation owner | `?run=<id>`: resume-script download | |
 
@@ -99,6 +102,21 @@ Intents behind `project.task.tsx` are explained in
   or the focus elsewhere took it back first (ruling 457). It holds "Profile &
   preferences", "Switch project" where it applies, "Switch theme · <value>" (cycles in
   place without closing), "Instance settings" for org admins, and Sign out.
+- **The tab title and desktop notifications** (ruling 481(c)). `AttentionWatcher`,
+  mounted once by `root.tsx` for a signed-in tab (its own chunk, fetched after
+  hydration), prefixes the page's own title with the
+  count of unread decisions ("(1) WEB-3 · … · Viberr"; "99+" past 99), re-applied
+  whenever `<head>` changes and taken off at zero. It reads `/resources/attention` on
+  mount, on a `notification.created` or `notification.read` its tab's live stream hands
+  it (`onLiveFrame`), when the tab gains or loses attention, and every 60 s while it has
+  not got it (visible and focused). A hidden tab holds no stream (ruling 301), so that
+  short read is how a background tab hears. When the person switched **Desktop
+  notifications** on for this browser (Profile), a decision that is new to every tab of
+  the browser shows a system notification (title, task and project, the first 180
+  characters of the text; tagged with the row id) while the tab is not attended; a
+  tab's first reading only records what was already waiting. A click focuses the tab,
+  marks the row read and opens where the bell would. Rows an attended tab saw are never
+  announced by another tab (a shared list of handled ids in `localStorage`).
 - **The standalone-page header** (ruling 145) is the same header on the instance
   pages that render outside the workspace: brand → Home, a `Home › <page>` crumb,
   the ⌘K trigger, the bell and the account menu. `palette-shell` mounts it, and
@@ -140,7 +158,15 @@ Intents behind `project.task.tsx` are explained in
   Claude (ruling 127). The button carries a pulsing dot while a turn works in its scope
   and a still blue dot when a reply its owner has not seen waits in any scope
   (`/resources/controller-unseen`, rulings 448 and 457); the open panel links to replies
-  elsewhere. Root ships only the button, the panel's frame and header; the panel's body
+  elsewhere. Both transcripts (the dock and the controller pages) read in reply order,
+  each reply under the message it answers, and a message with no reply yet says
+  "answering now" or "queued · N ahead" from the server's lease, never from what the page
+  sent; "… is working" sits under the answered message (ruling 465). Both transcripts show
+  a reply that lands from its first line, never pulling a reader who scrolled up to
+  history, and a link's URL or any other long token in prose wraps inside them (ruling
+  476(a), (c), (i)); the open panel has its
+  own always-mounted status region that says "<name> replied: <first sentence>" for the
+  thread on screen, and the working row is no live region (ruling 476(d)). Root ships only the button, the panel's frame and header; the panel's body
   loads on the first open, preloaded on hover or focus (ruling 457). The dock's data
   rides no page revalidation: the page's `user` stream hands it `controller.updated`
   instead (ruling 457). On `/insights`, which has no stream of its own, the open panel
@@ -235,7 +261,12 @@ Intents behind `project.task.tsx` are explained in
   starter (an empty picker is refused with "Choose an agent first", the combobox
   marked and focused; a live run on that profile and the owner-credential refusal
   are availability and keep `disabled`), the project's **Add member** modal (a
-  `MiniModal` opened from a head button, ruling 148(b)) and the agent profile editor.
+  `MiniModal` opened from a head button, ruling 148(b)), the agent profile editor, and the
+  task page's decision packet (ruling 478(e): a Confirm with nothing chosen is refused with
+  "Choose an answer above first.", the radiogroup marked and its first choice focused; a
+  choice the asking agent marked `reply` with the answer box empty is refused with "Write
+  your answer to <agent> first.", the box marked and focused; the empty directive keeps
+  "Write the directive first.").
   A save with nothing changed and a typed-name destructive confirmation keep
   `disabled` on purpose (147(d)).
   While the request is in flight, the New project primary shows it: the `loader`
@@ -245,6 +276,15 @@ Intents behind `project.task.tsx` are explained in
   on the all-projects live scope the moment the new project is projected, still
   mid-request, and the live list would already carry the key being created. It reads
   the live list again once a refused submit has settled.
+  Under its repository field, once a connection is picked, the dialog offers
+  "Create this repository on GitHub if it does not exist" (ruling 462), unchecked by
+  default so a typo never becomes a repository; checking it shows "Create it as a
+  private repository", checked by default. The choice travels as
+  `createRepository=private|public` on the `create-project` intent to the same server
+  function the controller's `create_project` reaches. A refusal (the token cannot
+  create repositories, GitHub's own 422 message) renders in the dialog's error alert
+  with nothing written; on success the toast adds what became of the repository
+  ("Created owner/name on GitHub (private)." or that the existing one was used).
 - **Requests in flight** (rulings 147(a) and 368): the button that started a request
   carries `aria-busy` (the sheet's .7 busy step, which wins over `.btn:disabled`), the
   `loader` glyph with `spin` in place of its icon, and a label naming the work
@@ -257,20 +297,61 @@ Intents behind `project.task.tsx` are explained in
 ## 3. Instance settings intents
 
 `org.settings.tsx` checks the org admin role and CSRF, then accepts, by tab:
-connections (`connection-add`, `connection-replace`, `connection-default`,
-`connection-remove`), users (`invite-local`, `invite-github`, `invite-google`,
+connections (`connection-add`, `connection-replace`, `connection-recheck`,
+`connection-default`, `connection-remove`), users (`invite-local`, `invite-github`, `invite-google`,
 `invite-domain`, `domain-remove`, `user-role`, `user-edit`, `user-disable`,
 `user-enable`, `user-remove`, `user-reset-password`), sign-in (`oauth-save`,
 `oauth-test`, `oauth-toggle`, `oauth-remove`), resources (`kb-save`, `kb-reindex`,
 `kb-delete`, `skill-save`, `skill-delete`, `mcp-save`, `mcp-test`, `mcp-delete`,
-`store-mkdir`, `store-upload`, `store-read-doc`, `store-write-doc`, `store-delete`,
-`store-import-github`), agent templates (`agent-save`, `agent-delete`), controller
-(`controller-save`), runtime (`set-concurrency`, `set-run-spend-cap`, ruling 175),
-audit (`audit-export-s3`, `s3-config-save`, `s3-config-clear`). That is 41 intents.
+`mcp-oauth-start`, `mcp-oauth-sign-out`, `store-mkdir`, `store-upload`,
+`store-read-doc`, `store-write-doc`, `store-delete`, `store-import-github`), agent
+templates (`agent-save`, `agent-delete`), controller (`controller-save`, `controller-request-decline`), runtime
+(`set-concurrency`, `set-run-spend-cap`, ruling 175), audit (`audit-export-s3`,
+`s3-config-save`, `s3-config-clear`). That is 45 intents.
+A GitHub connection row (ruling 463) says what its token reaches: a `<details>`
+(`.conn-reach`) whose summary reads "Reaches 3 repositories · 1 private" (or "300+"
+when the read stopped at its cap) and whose body lists each repository with a quiet
+"private" pill and "read only" where the token cannot push; a failed read says "could
+not be read" with GitHub's reason, and a connection not read yet says Re-check reads
+it. The row's **Re-check** (`connection-recheck`) carries the in-flight state of
+ruling 368 ("Checking…", the `loader` spinning where `refresh` was).
+Its scope chips are token-wide (ruling 480): a fine-grained token's `repo` and
+`pull_request:write` read "… unproven for the token as a whole: each repository proves
+them", followed while no repository has by how one will ("attaching the token to a project
+does, and so does Viberr's first write there"), and one `.sub` line per repository that
+proved something ("akin-ozer/website: repo, pull_request:write proven", "…: repo refused",
+`data-repo-proof`). `?tab=connections&update=<connection id>` opens that connection's
+**Update token** modal (the project credential card's **Replace token** link). The modal's
+note says a fine-grained PAT is proven when a project attaches it and by the first branch,
+push or pull request Viberr makes there; it promises no dry-run.
+`mcp-oauth-start` (ruling 469) answers `{ ok, authorizeUrl, issuer }`: the MCP editor's
+"OAuth sign-in" section, shown for a saved HTTP server, renders the URL as a link to a
+new tab ("Continue at <host>", so no popup blocker intervenes) and its status line
+reads "Needs sign-in", "Signed in (expires in 52 minutes, renews itself) · <host>" or
+"Sign-in expired: an admin must sign in again" with the server's reason; while signed
+in, the pasted-credential field is replaced by a sentence saying none is used, and
+editing the endpoint warns that saving drops the sign-in. `mcp-oauth-sign-out` revokes
+and drops the tokens. The row says the same without a click: "needs sign-in · checked
+…" on a red dot instead of "unreachable", or "auth: OAuth, signed in (…); held by
+Viberr, runs connect through its gateway". Ruling 486 adds what the sign-in was
+granted: the row reads "auth: OAuth, signed in (…), read-only · 194 scopes; held by
+Viberr, runs connect through its gateway" ("194 scopes · 12 writes" for a grant that
+writes), and under the editor's status line "Granted read-only · 194 scopes. Runs can
+read through it, and the server refuses any call that writes. To allow writes, add
+write scopes to Requested scopes above, save, and sign in again." with a disclosure
+"The 194 scopes it granted" (every scope, each write marked "write"); a server that
+named no scope reads "The server did not say which scopes it granted." The editor's
+optional "Requested scopes" text area (HTTP only, above the sign-in) is hinted "Sent as
+the sign-in's scope, separated by spaces; blank asks for what the server advertises.
+The server's own sign-in page decides what it grants, so this editor shows what it
+granted. A change applies at the next sign-in."
 `mcp-save` carries the MCP editor's `writeTools`, a JSON array of tool names (ruling 176):
 absent keeps the stored marks, a malformed list or a name outside the MCP alphabet is
 refused. The editor's "Write tools" section lists the probe's tool names as chips and
 takes a typed name; every server row states where it stands on write tools (ruling 220).
+For an HTTP server it also carries `requestedScopes` (ruling 486): absent keeps what is
+stored, blank clears it, and a scope OAuth does not allow is refused ("The requested
+scope … is not one OAuth allows").
 
 The **Controller** tab (screen label `Controller settings`) is the one org-settings
 surface whose controls are not all live (rulings 106, 107, 108): model and effort use
@@ -300,17 +381,20 @@ the project settings page), `Store strip`, `New project modal`, `Board`, `Empty 
 `Attachment lightbox`, `Command palette`, `Notifications`, `Notifications popover`,
 `Profile & preferences`, `Change password dialog`, `Instance settings`,
 `Settings · Users & access`, `Settings · GitHub connections`, `Settings · Sign-in &
-SSO`, `Settings · Agent resources`, `Controller settings`, `Audit log`, `Controller
+SSO`, `Settings · Agent resources`, `MCP sign-in` (the OAuth callback's page, ruling
+469), `Controller settings`, `Audit log`, `Controller
 dock` (the panel, ruling 121), `Insights`, `Capability matrix modal`, `Agent profile
 modal`, `S3 export target dialog` and `Add member dialog` (both ruling 148(b)), `Delete
 project dialog` (ruling 458(l)), `Rebuild projections dialog` (Home's hand-written confirm,
-ruling 458's 2026-09-24 note), and the fourteen confirms the shared `ConfirmDialog`
+ruling 458's 2026-09-24 note), and the seventeen confirms the shared `ConfirmDialog`
 names: `Resource removal dialog`, `Stage removal dialog`, `Member removal dialog`,
 `Schedule cancel dialog`, `Interrupt run dialog`, `Dismiss recommendation dialog`,
-`Interrupt turn dialog`, `Cancel goal dialog` and `Skip link dialog` (ruling 419), and
+`Interrupt turn dialog`, `Cancel goal dialog` and `Skip link dialog` (ruling 419),
 `Disable user dialog`, `Credential removal dialog`, `Store deletion dialog`, `Replace
 document dialog` and `Profile deletion dialog` (the hand-written confirms ruling 458(f)
-moved onto it).
+moved onto it), `Template grants dialog` (the Agents page's "Use the template's grants",
+ruling 479(d)), and `Disconnect agent account dialog` and `Disconnect GitHub dialog`
+(Profile's two Disconnects, ruling 481(b)).
 `screenLabel` is a required prop on `ConfirmDialog`, so a new call site cannot ship
 unlabelled; the typecheck refuses it.
 
@@ -347,7 +431,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   role-less profile card say "agent profile" / "agent threads", not "specialist".
 - Queue rows say "Review", not "Accept" (ruling 30). The board's attention chip is
   "Blocked or waiting" and excludes `input_required` while an agent is working or the
-  task rests on a clock (rulings 36, 91, 225).
+  task rests on a clock (rulings 36, 91, 225). It selects a task holding an open decision
+  packet with `waiting: human` whatever its stored readiness, so a `ready` task with an
+  agent's question open is not hidden under its own "waiting on you" (ruling 477(a)).
 - A failure toast never renders the success tick: the kind is passed from the server
   result (`use-action-toast.ts`).
 - An error toast stays until it is dismissed (it carries a Dismiss button); a success
@@ -389,7 +475,27 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   `attach-file` (contributor and above) on a task that is not archived. `accept` comes
   from the server's own whitelist, so the picker cannot offer a file the writer would
   refuse; the writer also refuses a traversing or dot-prefixed name and anything over
-  10 MB (`MAX_UPLOAD_BYTES`).
+  10 MB (`MAX_UPLOAD_BYTES`). Every file name carries its whole self in `title`, and under
+  the 720px breakpoint a file row gives the name its own line, whole, with "by <actor> ·
+  <time>" and the size under it (ruling 478(b)).
+- **An agent's question is answered to the agent** (ruling 478(e)): on a packet the render
+  marks with `answerTo` (an `Agent question` with `askedBy`) nothing is preselected, even
+  the option the agent recommends (its "recommended" pill stays, and only a "(Recommended)"
+  mark earns it); no packet that recommends nothing preselects anything. The box under the
+  options reads "Your answer to <agent>" with the hint "optional · goes back to <agent> with
+  your choice · 4,000 characters max", or "required · …" (and the `*`) when the chosen
+  option carries `reply`; the directive's hint reads "resolves this decision · goes back
+  to <agent>". Every other packet keeps "Note for the operator".
+- **Written text sits under the page's headings and shows what it holds** (ruling 478(a),
+  (f)): typed timeline events render as markdown like comments (a fenced block scrolls on
+  its own, inline code breaks); a timeline entry's or a packet body's top heading renders
+  at h3 with deeper ones following; the GitHub panel's bar carries a visually hidden h2
+  "GitHub". The Live run strip's step cuts at the strip's edge with its ellipsis
+  (`.run-phase-text`, ruling 478(c)).
+- **The stream pickers say whose console is shown** (ruling 478(d)): the Agent logs picker
+  is named "Agent log stream: <name> · <role>" and the live strip's "Running agent: …";
+  opening one moves focus to the stream shown, the arrows move focus between streams, and
+  only Enter, Space or a click switches the console, returning focus to the trigger.
 - **The Agent-logs console carries a prompt-cache facts row** (ruling 369) under its bar:
   quiet chips for the first call's temperature and figures (green "warm start · read 47.9k",
   amber "cold start · wrote 298k"), the provider's miss reason when it sent one, the TTL
@@ -413,8 +519,20 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   `LocalCalendarDate` for the same reason: `YYYY-MM-DD (UTC)` first, the local calendar
   date after hydration. Gated by `app/features/task-detail/hydration-determinism.test.tsx`
   (a real `renderToString` → `hydrateRoot` of the task page across the UTC/Auckland zone
-  pair and the UTC-midnight clock pair, interrupted hydration included) and
-  `e2e/06-activity-hydration.spec.ts`.
+  pair and the UTC-midnight clock pair, interrupted hydration included),
+  `app/features/org-settings/resources-hydration.test.tsx` (the same pair over the Agent
+  resources tab, ruling 480: its "re-scanned", "checked" and "updated" stamps are
+  `LocalRelative`, and the MCP row's stale mark and a signed-in token's "expires in …" wait
+  for hydration) and `e2e/06-activity-hydration.spec.ts`. The controller's grant requests
+  say when they were asked through `LocalDayDotTime` (ruling 480), never the stored ISO.
+- The Activity **audit** column carries the goal chains (ruling 477(b)): "<person> created
+  goal **goal-1** (<title>) with N links.", a sentence per redirect op ("paused", "skipped
+  link 3 of goal **goal-1** (<title>): <reason>", "bound link 2 of … to an existing task
+  on" with the task's chip, "changed nothing on" for a no-op), and "Goal **goal-1**
+  (<title>) completed: every link is settled." A task a chain starts has its creation
+  events signed by **Goal chain** (a system actor, so the stream's Humans filter leaves
+  them out): "Started by **goal-1** as link 2, on <creator>'s authority, with <owner> as
+  owner. …".
 - The Activity **audit** column names a controller-driven write as the person **(via the
   controller)** (ruling 99(b)): both producers write one shared instrument label and the
   column decodes it on both legs, so a row whose user no longer resolves reads the same
@@ -469,3 +587,41 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   declaration that resolves to nothing here (R14-1 rule 3), where naming "the stages above"
   would name a scope the profile does not have. The profile editor's Eligible stages hint
   reads "stages where this profile may be newly engaged". Pinned by `agents-page.test.tsx`.
+- **The Agents page and the global profile editor say what the runtime does** (ruling 479,
+  pinned by `agents-page.test.tsx` "ruling 479", `org-settings-page.test.tsx` "ruling
+  479(h)", and the server tests the ruling names):
+  - (a) The capability matrix's grid holds only capabilities something enforces: the
+    agent editor's groups plus "Operator actions". Advisory lines sit under the grid in a
+    collapsed "Advisory only · N lines the runtime does not read", each as "Move the task
+    to Review (acts directly: Site Engineer, Site Reviewer)", with the sentence "These
+    describe how a profile is meant to work. Nothing in the runtime enforces them, so
+    they never grant or refuse anything, and the grid above leaves them out. Whether a
+    profile's review can approve or request changes is its Report a validation verdict
+    row." There is no "Other actions" group.
+  - (b) A granted MCP chip a run gets no tools from carries the missing chip's look and
+    a note: "needs sign-in", "sign-in expired", "credential unreadable" or "unreachable";
+    its title and its visually hidden text give the remedy ("Runs do not mount
+    cloudflare-api until an org admin signs it in (Instance settings → Agent
+    resources).").
+  - (c) "Use the template's grants" works on the Operator as on any profile; it never
+    answers "No such agent profile." about the profile on screen.
+  - (d) "Use the template's grants" opens "Replace <name>'s grants with the template's?"
+    ("<project>'s copy of <name> takes the template's skills, MCP servers and knowledge
+    bases, and loses any it granted on its own. Removes MCP server cloudflare-api · adds
+    nothing. Changes apply from the next run.", confirm "Replace grants", danger-toned
+    when it removes something). The toast reads `"<name>" now carries the template's
+    grants · removed … · added … · changes apply from the next run`, each clause only when
+    it has grants to name.
+  - (e) The runtime row's "Model · effort" cell reads "Claude Opus · Maximum" ("default
+    effort" when none is stored) for every kind; the operator adds its Autonomy cell. The
+    Live tab's Backend column names the operator's backend ("Claude", "Codex"), never
+    "orchestration".
+  - (f) Each Eligible stages chip carries ", eligible" or ", not eligible" as visually
+    hidden text.
+  - (g) The profile editor says "Saving forks this profile for <project>…" only for a copy
+    that still follows its template (`tracksTemplate`); every other edit reads "Update
+    this project's copy. Changes apply from the next run."
+  - (h) In Instance settings → Agent resources, a global profile's stored stage the
+    default workflow lacks reads "build (not in the default workflow)" on the row, and the
+    editor shows it as a pressed chip "build" with the note "not in the default workflow"
+    that can be pressed off (and back on) before the save.

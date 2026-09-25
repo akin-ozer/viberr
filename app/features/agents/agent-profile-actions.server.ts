@@ -23,6 +23,7 @@ import {
   resolveStoreSegment,
 } from "~/server/files/file-store-root.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
+import { listAgentDeployments } from "~/server/projections/agent-deployments.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import {
   defaultEffortFor,
@@ -36,7 +37,10 @@ import {
 import { displayNameRefusal, normalizeDisplayName } from "~/shared/names";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { existsSync, readFileSync } from "node:fs";
-import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
+import {
+  parseAgentProfileContent,
+  type ParsedAgentProfile,
+} from "~/server/files/agent-profile-file.server";
 import {
   effectiveProfileView,
   VIEW_WITHOUT_POLICY,
@@ -153,6 +157,19 @@ type ProfileDeployedAuditDetails = CouplingAuditKeys & {
   effort?: string;
 };
 
+/** `project.agent_profile.deleted`; `reason` when the caller gave one
+ *  (ruling 464: the controller's removal always does). */
+type ProfileDeletedAuditDetails = {
+  name: string;
+  reason?: string;
+};
+
+/** Ruling 467: the persona an update wrote, when it changed the stored one;
+ *  filled inside the file writer's callback. */
+interface PersonaEditHolder {
+  after: string | null;
+}
+
 type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
   name: string;
   role: string;
@@ -164,6 +181,12 @@ type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
   operatorAutonomy?: "supervised" | "full";
   acceptCompletionIntoDone?: "direct" | "off";
   acceptCompletionActsDirectly?: boolean;
+  /** Ruling 467: the save rewrote the deployment's persona (the run's system
+   *  prompt), with its new length. Every door that edits a persona writes
+   *  these two keys: the Agents page, `update_agent_deployment` and a
+   *  template propagation (which adds `source: "org-template"`). */
+  personaChanged?: boolean;
+  personaChars?: number;
 };
 
 /** Stamp every coupling decision onto the audit row and the save result — a
@@ -554,34 +577,36 @@ export async function createAgentProfile(
  * live through this exact button. The project editor (which DOES have a
  * capability matrix) is where power gets opened up.
  */
-export async function deployAgentProfileFromLibrary(
-  db: DatabaseSync,
-  input: {
-    projectSlug: string;
-    profileId: string;
-    /** Ruling 139: EXPLICIT overrides of the template's model and effort,
-     *  judged by name against the deployment's primary backend before the
-     *  write. A library template's OWN model is still not refused (F21-13). */
-    model?: string;
-    effort?: string;
-  },
-  actor: ProfileActor,
-  ctx: ProfileMutationContext = {},
-): Promise<ProfileSaveResult> {
-  const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
-  const profileId = input.profileId.trim();
+/** A global specialist template, read and checked for a deploy. */
+export interface LibraryTemplate {
+  profileId: string;
+  parsed: ParsedAgentProfile;
+}
+
+/**
+ * Read the global template `profileId` names, refusing BY NAME an id that is
+ * not a store segment, a template that does not exist, and one that is not a
+ * specialist (the operator and the controller are never deployable this way).
+ * Reads only: the library deploy and a controller-built project's roster
+ * (ruling 464) both call it before anything is written.
+ */
+export function readLibraryTemplate(
+  rawProfileId: string,
+  dataRoot?: string,
+): LibraryTemplate {
+  const profileId = rawProfileId.trim();
   if (!profileId) throw AppError.validation("Pick a profile to add.");
   // P13-AP-11 (sibling): `agentProfileFilePath` path.joins its argument
   // straight into the store — unlike skills/KB, which got an explicit
   // containment guard (F10-18). `profileId` here comes from a form field, so
   // this new path validates the segment itself rather than inheriting the gap.
   try {
-    resolveStoreSegment(agentProfilesDir(ctx.dataRoot), profileId);
+    resolveStoreSegment(agentProfilesDir(dataRoot), profileId);
   } catch {
     throw AppError.validation(`\`${profileId}\` is not a valid profile id.`);
   }
 
-  const absPath = agentProfileFilePath(profileId, ctx.dataRoot);
+  const absPath = agentProfileFilePath(profileId, dataRoot);
   if (!existsSync(absPath)) {
     throw AppError.notFound(`No global agent profile \`${profileId}\`.`);
   }
@@ -593,6 +618,39 @@ export async function deployAgentProfileFromLibrary(
       `\`${profileId}\` is not a specialist template and can't be added to a project.`,
     );
   }
+  return { profileId, parsed };
+}
+
+/** Ruling 139: a deploy's explicit model and effort, each optional. */
+export interface DeployOverrides {
+  model?: string;
+  effort?: string;
+}
+
+/** What a library deploy writes and reports, built before any write. */
+export interface LibraryDeploymentBuild {
+  deployment: AgentDeployment;
+  applied: NonNullable<ProfileSaveResult["applied"]>;
+  /** Ruling 264: read off the grants the deployment carries. */
+  delivery: "granted" | "withheld";
+  notices: GrantCouplingNotice[];
+}
+
+/**
+ * The deployment a library deploy writes for `template` into the project
+ * called `projectName`, with ruling 139's explicit `model` / `effort`
+ * overrides judged by name against the backend it will run on — a pure
+ * build that throws before anything is written. Ruling 464: the Agents page's
+ * deploy and a controller-built project's `agents` roster share it, so a
+ * roster entry is exactly what deploying that template afterwards would have
+ * written.
+ */
+export function buildLibraryDeployment(
+  template: LibraryTemplate,
+  overrides: DeployOverrides,
+  projectName: string,
+): LibraryDeploymentBuild {
+  const { profileId, parsed } = template;
   const fm = parsed.frontmatter;
 
   // AP-06 / P14-LV-01: explicit grants, never an empty list — the template's own
@@ -614,7 +672,98 @@ export async function deployAgentProfileFromLibrary(
     })),
   );
 
-  let applied: ProfileSaveResult["applied"] | undefined;
+  const backend = fm.backends[0] === "codex" ? "codex" : "claude";
+  // F21-13: a LIBRARY template is not a form — refusing the deployment over
+  // a stale template's model would strand the human with nothing to fix on
+  // this screen. Fall back to the backend's default instead, which is what
+  // the run would have used anyway; the difference is that project.md now
+  // records it, so the agents page and the run agree.
+  const templateModel = fm.model.trim();
+  const templateEffort = fm.effort?.trim() ?? "";
+  // Ruling 139: an EXPLICIT override is judged by name against the backend
+  // the deployment will run on; the template's own values are taken as
+  // they are (the F21-13 rule above stays true).
+  const modelOverride = overrides.model?.trim() ?? "";
+  const effortOverride = overrides.effort?.trim() ?? "";
+  if (modelOverride) assertModelForBackend(backend, modelOverride);
+  if (effortOverride) assertEffortForBackend(backend, effortOverride);
+  const definition: AgentDeploymentDefinition = {
+    kind: "specialist",
+    name: fm.name,
+    role: fm.role || fm.name,
+    icon: fm.icon,
+    backends: fm.backends.length ? fm.backends : [backend],
+    model:
+      modelOverride ||
+      (templateModel && !foreignModelBackend(backend, templateModel)
+        ? templateModel
+        : defaultModelFor(backend)),
+    // Ruling 153 (pass 35, G35-2): the template's own default effort is
+    // taken when it is a tier this backend offers; an override still wins,
+    // and an absent or foreign tier falls back to the backend default.
+    effort:
+      effortOverride ||
+      (templateEffort && effortsFor(backend).includes(templateEffort)
+        ? templateEffort
+        : defaultEffortFor(backend)),
+    scope: `Added from the global library to ${projectName}`,
+    desc: fm.desc || parsed.description,
+  };
+  // The template's markdown body becomes the deployment's persona — absent
+  // when the template has none, so the key stays off the record entirely.
+  if (parsed.description) definition.persona = parsed.description;
+  definition.stages = fm.stages;
+  definition.spanAll = fm.spanAll;
+  definition.resources = {
+    skills: fm.resources.skills,
+    mcps: fm.resources.mcps,
+    kb: fm.resources.kb,
+  };
+
+  const model = definition.model ?? "";
+  return {
+    deployment: {
+      profileId,
+      capabilities: deployDelivery.grants,
+      extras: fm.extras.map((e) => ({ label: e.label, mode: e.mode })),
+      definition,
+    },
+    applied: {
+      backend,
+      model,
+      modelLabel: modelDisplayName(backend, model),
+      effort: definition.effort ?? "",
+    },
+    // Ruling 264: read the answer off the grants that are actually written,
+    // through the predicate the RUN gates on, so the reply cannot drift from it.
+    delivery: deliveryWithheld(deployDelivery.grants) ? "withheld" : "granted",
+    notices: deployDelivery.notices,
+  };
+}
+
+export async function deployAgentProfileFromLibrary(
+  db: DatabaseSync,
+  input: {
+    projectSlug: string;
+    profileId: string;
+    /** Ruling 139: EXPLICIT overrides of the template's model and effort,
+     *  judged by name against the deployment's primary backend before the
+     *  write. A library template's OWN model is still not refused (F21-13). */
+    model?: string;
+    effort?: string;
+  },
+  actor: ProfileActor,
+  ctx: ProfileMutationContext = {},
+): Promise<ProfileSaveResult> {
+  const { projectName } = requireProjectAction(db, ctx, input.projectSlug, actor);
+  const template = readLibraryTemplate(input.profileId, ctx.dataRoot);
+  const { profileId } = template;
+  const fm = template.parsed.frontmatter;
+  const overrides: DeployOverrides = {};
+  if (input.model !== undefined) overrides.model = input.model;
+  if (input.effort !== undefined) overrides.effort = input.effort;
+
+  let built: LibraryDeploymentBuild | undefined;
   await updateProjectFile(
     { projectSlug: input.projectSlug, dataRoot: ctx.dataRoot },
     (project) => {
@@ -623,67 +772,8 @@ export async function deployAgentProfileFromLibrary(
           `${fm.name} is already deployed in this project.`,
         );
       }
-      const backend = fm.backends[0] === "codex" ? "codex" : "claude";
-      // F21-13: a LIBRARY template is not a form — refusing the deployment over
-      // a stale template's model would strand the human with nothing to fix on
-      // this screen. Fall back to the backend's default instead, which is what
-      // the run would have used anyway; the difference is that project.md now
-      // records it, so the agents page and the run agree.
-      const templateModel = fm.model.trim();
-      const templateEffort = fm.effort?.trim() ?? "";
-      // Ruling 139: an EXPLICIT override is judged by name against the backend
-      // the deployment will run on; the template's own values are taken as
-      // they are (the F21-13 rule above stays true).
-      const modelOverride = input.model?.trim() ?? "";
-      const effortOverride = input.effort?.trim() ?? "";
-      if (modelOverride) assertModelForBackend(backend, modelOverride);
-      if (effortOverride) assertEffortForBackend(backend, effortOverride);
-      const definition: AgentDeploymentDefinition = {
-        kind: "specialist",
-        name: fm.name,
-        role: fm.role || fm.name,
-        icon: fm.icon,
-        backends: fm.backends.length ? fm.backends : [backend],
-        model:
-          modelOverride ||
-          (templateModel && !foreignModelBackend(backend, templateModel)
-            ? templateModel
-            : defaultModelFor(backend)),
-        // Ruling 153 (pass 35, G35-2): the template's own default effort is
-        // taken when it is a tier this backend offers; an override still wins,
-        // and an absent or foreign tier falls back to the backend default.
-        effort:
-          effortOverride ||
-          (templateEffort && effortsFor(backend).includes(templateEffort)
-            ? templateEffort
-            : defaultEffortFor(backend)),
-        scope: `Added from the global library to ${project.frontmatter.name}`,
-        desc: fm.desc || parsed.description,
-      };
-      // The template's markdown body becomes the deployment's persona — absent
-      // when the template has none, so the key stays off the record entirely.
-      if (parsed.description) definition.persona = parsed.description;
-      definition.stages = fm.stages;
-      definition.spanAll = fm.spanAll;
-      definition.resources = {
-        skills: fm.resources.skills,
-        mcps: fm.resources.mcps,
-        kb: fm.resources.kb,
-      };
-
-      const deployment: AgentDeployment = {
-        profileId,
-        capabilities: deployDelivery.grants,
-        extras: fm.extras.map((e) => ({ label: e.label, mode: e.mode })),
-        definition,
-      };
-      project.frontmatter.agents.push(deployment);
-      applied = {
-        backend,
-        model: definition.model ?? "",
-        modelLabel: modelDisplayName(backend, definition.model ?? ""),
-        effort: definition.effort ?? "",
-      };
+      built = buildLibraryDeployment(template, overrides, project.frontmatter.name);
+      project.frontmatter.agents.push(built.deployment);
     },
   );
 
@@ -693,16 +783,14 @@ export async function deployAgentProfileFromLibrary(
     source: "library",
     projectName,
   };
-  if (applied) {
-    details.model = applied.model;
-    details.effort = applied.effort;
-  }
   const result: ProfileSaveResult = { profileId, name: fm.name };
-  if (applied) result.applied = applied;
-  // Ruling 264: read the answer off the grants that were actually written,
-  // through the predicate the RUN gates on, so the reply cannot drift from it.
-  result.delivery = deliveryWithheld(deployDelivery.grants) ? "withheld" : "granted";
-  carryCouplingNotices(details, result, deployDelivery.notices);
+  if (built) {
+    details.model = built.applied.model;
+    details.effort = built.applied.effort;
+    result.applied = built.applied;
+    result.delivery = built.delivery;
+    carryCouplingNotices(details, result, built.notices);
+  }
   recordAudit(db, {
     action: "project.agent_profile.deployed",
     actor: { userId: actor.userId, label: actor.label },
@@ -742,6 +830,9 @@ export async function updateAgentProfile(
   };
 
   let appliedUpdate: ProfileSaveResult["applied"] | undefined;
+  // Ruling 467: the persona this save wrote when it differs from the one it
+  // replaced, for the audit row (a holder: the writer callback fills it).
+  const personaEdit: PersonaEditHolder = { after: null };
   await updateProjectFile(ref, (parsed) => {
     const deployment = parsed.frontmatter.agents.find(
       (a) => a.profileId === input.profileId,
@@ -840,6 +931,8 @@ export async function updateAgentProfile(
     }
     definition.resources = form.resources;
     deployment.definition = definition;
+    const personaAfter = definition.persona ?? current.definition;
+    if (personaAfter !== current.definition) personaEdit.after = personaAfter;
     appliedUpdate = {
       backend: form.backend,
       model: definition.model ?? "",
@@ -873,6 +966,10 @@ export async function updateAgentProfile(
   if (appliedUpdate) {
     details.model = appliedUpdate.model;
     details.effort = appliedUpdate.effort;
+  }
+  if (personaEdit.after !== null) {
+    details.personaChanged = true;
+    details.personaChars = personaEdit.after.length;
   }
   if (gov.isOperator) {
     details.operatorAutonomy = gov.newAutonomy;
@@ -926,9 +1023,56 @@ export async function updateAgentProfile(
 
 // ------------------------------------------------------------------ delete
 
+/**
+ * Ruling 464: the refusal the controller's `remove_agent_deployment` adds to
+ * the Agents page's Delete — a profile that is the delivering or an engaged
+ * agent on an open task stays, and the sentence names those tasks. "Open" is
+ * the population the Agents page lists under the profile's active
+ * deployments (`listAgentDeployments`: not archived, not in the final stage).
+ */
+function openEngagementRefusal(
+  db: DatabaseSync,
+  projectSlug: string,
+  profileId: string,
+  name: string,
+  dataRoot: string | undefined,
+): string | null {
+  const engaged = listAgentDeployments(db, projectSlug, { dataRoot }).filter(
+    (e) => e.profileId === profileId,
+  );
+  if (engaged.length === 0) return null;
+  const keys = (engagement: "primary" | "reviewer") => [
+    ...new Set(engaged.filter((e) => e.engagement === engagement).map((e) => e.taskKey)),
+  ];
+  const delivering = keys("primary");
+  const supporting = keys("reviewer").filter((k) => !delivering.includes(k));
+  const where = [
+    delivering.length ? `the delivering agent on ${delivering.join(", ")}` : "",
+    supporting.length ? `engaged on ${supporting.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  const count = delivering.length + supporting.length;
+  return (
+    `${name} is ${where}, ${count === 1 ? "an open task" : "open tasks"}. Nothing was removed: ` +
+    `taking it off the project now would leave ${count === 1 ? "that task" : "those tasks"} with an agent that can no longer deliver or comment. ` +
+    `Finish, archive or re-engage that work first.`
+  );
+}
+
 export async function deleteAgentProfile(
   db: DatabaseSync,
-  input: { projectSlug: string; profileId: string },
+  input: {
+    projectSlug: string;
+    profileId: string;
+    /** Ruling 464: why, recorded in the audit details (the controller's
+     *  `remove_agent_deployment` always gives one). */
+    reason?: string;
+    /** Ruling 464: refuse a profile engaged on an open task, naming the
+     *  tasks. The controller's door sets it; the Agents page's Delete keeps
+     *  its own confirm and does not. */
+    refuseOpenEngagements?: boolean;
+  },
   actor: ProfileActor,
   ctx: ProfileMutationContext = {},
 ): Promise<{ profileId: string; name: string }> {
@@ -955,6 +1099,16 @@ export async function deleteAgentProfile(
         "The Operator is a system profile and can't be deleted.",
       );
     }
+    if (input.refuseOpenEngagements) {
+      const refusal = openEngagementRefusal(
+        db,
+        input.projectSlug,
+        input.profileId,
+        current.name,
+        ctx.dataRoot,
+      );
+      if (refusal) throw AppError.conflict(refusal);
+    }
     name = current.name;
     parsed.frontmatter.agents = parsed.frontmatter.agents.filter(
       (a) => a.profileId !== input.profileId,
@@ -962,13 +1116,15 @@ export async function deleteAgentProfile(
   });
 
   reprojectProject(db, ctx, input.projectSlug);
+  const details: ProfileDeletedAuditDetails = { name };
+  if (input.reason) details.reason = input.reason;
   recordAudit(db, {
     action: "project.agent_profile.deleted",
     actor: { userId: actor.userId, label: actor.label },
     subjectKind: "agent_profile",
     subjectId: input.profileId,
     projectSlug: input.projectSlug,
-    details: { name },
+    details,
   });
   return { profileId: input.profileId, name };
 }

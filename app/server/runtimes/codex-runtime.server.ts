@@ -39,7 +39,9 @@ import {
   finishCodexRunHome,
   prepareCodexRunHome,
   type CodexRunHome,
+  type RunHomePerson,
 } from "./user-homes.server";
+import { removeAgentTreeSync } from "./agent-trees.server";
 import { projectEnvelope } from "./wire-format.server";
 import { redactProviderText } from "~/server/secrets/git-output-redact.server";
 import {
@@ -50,10 +52,13 @@ import {
 } from "./run-processes.server";
 import { codexCompactionConfig } from "./context-policy.server";
 import {
+  codexVendor,
   compactCodexThread,
+  withPathDirs,
   type SpawnAppServer,
   type ThreadResumeConfig,
 } from "./codex-app-server.server";
+import { launchEnv, prepareAgentPath, type AgentLaunch } from "./agent-isolation.server";
 import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server";
 import { toError } from "~/shared/errors";
 
@@ -191,8 +196,18 @@ const codexConfigTableSchema = z
 const codexMcpServerSchema = z.union([
   z.object({ type: z.literal("sdk") }).transform(() => null),
   z
-    .object({ type: z.literal("http"), url: z.string() })
-    .transform((server) => ({ transport: "http" as const, url: server.url })),
+    .object({
+      type: z.literal("http"),
+      url: z.string(),
+      /** Ruling 461: a gateway mount's run token. A header map that is not
+       *  all strings is not a declaration of one and reads as absent. */
+      headers: z.record(z.string(), z.string()).optional().catch(undefined),
+    })
+    .transform((server) => ({
+      transport: "http" as const,
+      url: server.url,
+      headers: server.headers ?? {},
+    })),
   z
     .object({
       command: z.string(),
@@ -235,7 +250,16 @@ const codexMcpServerSchema = z.union([
  * Ruling 176: a server's admin-marked write tools, on a run that withholds
  * repo write, become its `disabled_tools` (a per-server key the pinned CLI
  * reads, alongside `enabled_tools`). Tool names, not secrets, so argv is fine
- * here too. */
+ * here too.
+ *
+ * Ruling 461: an HTTP server's `headers` become its `http_headers` (the pinned
+ * CLI's per-server table for a Streamable HTTP server). The only headers a
+ * portable config carries are a gateway mount's `Authorization: Bearer <run
+ * token>`: never a credential — the credential stays in Viberr's gateway — and
+ * a token that opens only this run's grants, only through the loopback
+ * gateway and only while this run is live, so argv is an acceptable place for
+ * it. That is what ended "a credentialed org MCP connects unauthenticated on
+ * Codex" (F40-3): both backends now get the same gateway config. */
 function codexMcpServers(
   servers: RunSpec["mcpServers"],
   runMarker: string | undefined,
@@ -255,20 +279,15 @@ function codexMcpServers(
         .flatMap((denial) => denial.tools),
     );
 
-    // F7-MCP1 credential scope: resolveSpecialistMcpServers injects the decrypted
-    // token as `headers.Authorization` (HTTP) / `env.MCP_CREDENTIAL` (stdio).
-    // Those are DELIBERATELY NOT carried onto Codex: the codex SDK passes this
-    // config to the CLI as `--config key=value` argv, so a literal secret here
-    // would be visible in `ps auxww` (the standing codex-argv exposure the owner
-    // scoped out). So a credentialed org MCP authenticates on Claude runs only;
-    // on Codex it connects unauthenticated. This is an honest, documented
-    // limitation (same class as the S3 codex tool-confinement gap), not a silent
-    // drop — the specialist-mcp docstring says so.
     if (declaration.data.transport === "http") {
       const http: CodexConfig = {
         url: declaration.data.url,
         default_tools_approval_mode: "approve",
       };
+      // Ruling 461: the gateway mount's run token (see the docstring).
+      if (Object.keys(declaration.data.headers).length) {
+        http.http_headers = sortedRecord(declaration.data.headers);
+      }
       if (disabledTools.length) http.disabled_tools = disabledTools;
       translated[name] = http;
       continue;
@@ -727,6 +746,20 @@ const fatalEventMessageSchema = z
   })
   .catch({});
 
+/**
+ * Ruling 460: what hands a path in the principal's home to their uid (the
+ * launcher's `--prepare-home`) — the run home the server just forked, the
+ * sign-in it wrote back — and, ruling 485, what removes the run home as them
+ * (their CLI wrote it). None when the run is not launched.
+ */
+function agentOwner(agent: AgentLaunch | undefined): RunHomePerson | undefined {
+  if (!agent) return undefined;
+  return {
+    own: (target) => prepareAgentPath(agent.uid, target, agent.launcher),
+    remove: (target) => removeAgentTreeSync(target, agent),
+  };
+}
+
 let cachedFactory: CodexFactory | null = null;
 async function realFactory(): Promise<CodexFactory> {
   if (cachedFactory) return cachedFactory;
@@ -774,6 +807,8 @@ export function createCodexAdapter(
       if (spec.model) input.model = spec.model;
       if (env) input.env = env;
       if (deps.spawnAppServer) input.spawn = deps.spawnAppServer;
+      // Ruling 460: as the person's own OS user, like the run it compacts.
+      if (spec.agent) input.launch = spec.agent;
       const outcome = await compactCodexThread(input);
       if (!outcome.compacted) {
         const occurredAt = new Date().toISOString();
@@ -922,7 +957,7 @@ export function createCodexAdapter(
         // run it starts forks its own home from the shared file, which must
         // already hold this run's refresh. Never throws.
         if (runHome) {
-          finishCodexRunHome(runHome);
+          finishCodexRunHome(runHome, agentOwner(spec.agent));
           runHome = null;
         }
         cb.onExit({
@@ -1036,13 +1071,27 @@ export function createCodexAdapter(
         // merged env, whose process.env fallback could carry an ambient home.
         const sharedHome = spec.env?.CODEX_HOME;
         if (mergedEnv && sharedHome) {
-          runHome = prepareCodexRunHome(sharedHome, spec.runId);
+          runHome = prepareCodexRunHome(sharedHome, spec.runId, agentOwner(spec.agent));
           mergedEnv.CODEX_HOME = runHome.dir;
           mergedEnv.CODEX_SQLITE_HOME = runHome.sharedHome;
         }
         const config = codexConfigForRun(spec, deps.config);
         const codexOptions: CodexOptions = { config };
         if (mergedEnv) codexOptions.env = mergedEnv;
+        // Ruling 460: the SDK spawns `codexPathOverride` with the argv it
+        // builds, so the launcher stands in for the CLI and execs the SDK's own
+        // vendored binary (`VIBERR_LAUNCH_EXEC`) as the principal's uid. The
+        // SDK prepends its helper directories to PATH only when it resolves
+        // the binary itself, so an override carries them here.
+        if (spec.agent && mergedEnv) {
+          const vendor = codexVendor();
+          codexOptions.codexPathOverride = spec.agent.launcher;
+          codexOptions.env = launchEnv(
+            spec.agent,
+            vendor.binary,
+            withPathDirs(mergedEnv, vendor.pathDirs),
+          );
+        }
         const codex = factory(codexOptions);
         // Ruling 185: no OS confinement from Viberr. Every Codex run starts
         // `danger-full-access` — the mode that installs neither bubblewrap nor

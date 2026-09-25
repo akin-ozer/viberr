@@ -122,6 +122,17 @@ if (process.argv.includes("--no-up")) {
   process.exit(0);
 }
 
+// Ruling 473: the store volume is `external` in compose.yml, so Compose never
+// creates it (and `docker compose down -v` can never delete it). Make it here
+// when it is missing — a first deploy — and leave an existing store untouched.
+const STORE_VOLUME = "viberr-data";
+try {
+  execFileSync("docker", ["volume", "inspect", STORE_VOLUME], { stdio: "ignore" });
+} catch {
+  execFileSync("docker", ["volume", "create", STORE_VOLUME], { stdio: "ignore" });
+  console.log(`created the store volume ${STORE_VOLUME} (a first deploy)`);
+}
+
 // Every `up -d` kills the runs in flight — that is a property of the deploy, not
 // of this script, and it is why the runbook says to check the board first.
 compose("up", "-d");

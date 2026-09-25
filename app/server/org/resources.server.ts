@@ -50,6 +50,30 @@ import { scanStoreTree, type StoreTarget } from "./store-files.server";
 import { updateResourceReferences } from "./resource-references.server";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
+import {
+  connectHttpUpstream,
+  listAllTools,
+  MCP_CLIENT_CAPABILITIES,
+  MCP_CLIENT_INFO,
+  OAUTH_NEEDS_SIGN_IN,
+  OAUTH_SIGN_IN_EXPIRED,
+  upstreamFailureReason,
+  UpstreamSignInNeeded,
+  type UpstreamTokenSource,
+} from "~/server/mcp-proxy/upstream.server";
+import {
+  mcpGrantPhrase,
+  mcpSignInPhrase,
+  parseRequestedScopes,
+  type McpOAuthView,
+} from "~/shared/mcp-oauth";
+import {
+  clearMcpOAuthChallenge,
+  mcpOAuthCredential,
+  mcpOAuthTokenSource,
+  mcpOAuthView,
+  recordMcpOAuthChallenge,
+} from "./mcp-oauth.server";
 
 /**
  * Org agent resources: knowledge bases, MCP servers, skills (org-settings
@@ -666,6 +690,21 @@ export interface McpView {
   /** Ruling 278: paths in this server's command that lie inside Viberr's own
    *  data root. Empty for an HTTP server and for a command that names none. */
   storePaths: string[];
+  /**
+   * Ruling 469: where the connection stands on an OAuth sign-in — needs one,
+   * signed in (until when, and whether it renews) or expired — or null when it
+   * is not an OAuth connection. The public half only; the tokens never leave
+   * the server. Optional so hand-built fixtures elsewhere stay valid; every
+   * real row from `mapMcp` sets it explicitly.
+   */
+  oauth?: McpOAuthView | null;
+  /**
+   * Ruling 486(c): the scope an admin asks the next OAuth sign-in for
+   * ("Requested scopes"), space-joined; null asks for what the resource
+   * advertises. What was GRANTED is `oauth.scope`. Optional so hand-built
+   * fixtures elsewhere stay valid; every real row from `mapMcp` sets it.
+   */
+  requestedScope?: string | null;
 }
 
 type McpRow = {
@@ -683,6 +722,8 @@ type McpRow = {
   heuristic_warmups: number | null;
   tool_policy_json: string | null;
   tool_names_json: string | null;
+  oauth_json: string | null;
+  oauth_requested_scope: string | null;
 };
 
 /** Ruling 176: the stored write-tool policy, `{ name, gate }` per marked tool.
@@ -742,6 +783,38 @@ function checkedWriteTools(names: readonly string[]): string[] {
     throw AppError.validation(`Mark at most ${MCP_WRITE_TOOLS_MAX} write tools on one server.`);
   }
   return out;
+}
+
+/** What `org.mcp.added` / `org.mcp.updated` record. `requestedScope`
+ *  (ruling 486) only when the save set or changed it. */
+type McpSaveAudit = {
+  name: string;
+  transport: string;
+  renamed?: boolean;
+  oauthDropped?: boolean;
+  requestedScope?: string | null;
+};
+
+function addedAudit(name: string, transport: string, requestedScope: string | null): McpSaveAudit {
+  const details: McpSaveAudit = { name, transport };
+  if (requestedScope !== null) details.requestedScope = requestedScope;
+  return details;
+}
+
+/**
+ * Ruling 486(c): the "Requested scopes" an admin typed, as the next sign-in's
+ * authorization request sends them (`parseRequestedScopes`). A token RFC 6749
+ * does not allow would make the authorization server refuse the request, so
+ * it is refused here, before anything is probed. Null clears the field.
+ */
+function checkedRequestedScope(raw: string): string | null {
+  const { scope, invalid } = parseRequestedScopes(raw);
+  if (invalid.length > 0) {
+    throw AppError.validation(
+      `The requested scope ${(invalid[0] ?? "").slice(0, 60)} is not one OAuth allows: a scope is printable characters without spaces, quotes or backslashes. Separate scopes with spaces.`,
+    );
+  }
+  return scope;
 }
 
 function sameNameSet(a: readonly string[], b: readonly string[]): boolean {
@@ -831,6 +904,11 @@ function mapMcp(row: McpRow): McpView {
     discoveredTools: storedToolNames(row.tool_names_json),
     // Ruling 278: computed from the stored command, so it cannot go stale.
     storePaths: row.transport === "stdio" ? storePathsInMcpTarget(row.target) : [],
+    // Ruling 469: the public half; reading it opens no box. A pasted
+    // credential wins when present (469(e)) — it is what a run mounts — so a
+    // row holding one has no sign-in status to report (R-oauth-2).
+    oauth: row.cred_ref ? null : mcpOAuthView(row.oauth_json),
+    requestedScope: row.oauth_requested_scope,
   };
 }
 
@@ -841,10 +919,18 @@ function mapMcp(row: McpRow): McpView {
  * `ok`         — decrypted; use `token`.
  * `unreadable` — a credential IS configured and cannot be opened: a legacy
  *                plaintext ref, or a box no current/retired key opens.
+ * `oauth`      — ruling 469: signed in with OAuth. There is no token to hand
+ *                over here: the gateway asks `mcpOAuthTokenSource` on every
+ *                request, which renews it.
+ * `signed_out` — ruling 469: the server asks for an OAuth sign-in it does not
+ *                have (or its sign-in expired); `reason` says which, and a run
+ *                is told it instead of meeting a 401 on every call.
  */
 export type McpCredentialState =
   | { state: "none" }
   | { state: "ok"; token: string }
+  | { state: "oauth" }
+  | { state: "signed_out"; reason: string }
   | { state: "unreadable"; reason: string };
 
 /**
@@ -871,8 +957,13 @@ export function getMcpCredentialState(
   const row = db
     .prepare(`SELECT id, cred_ref FROM org_mcp_servers WHERE name = ?`)
     .get(name) as { id: string; cred_ref: string | null } | undefined;
-  if (!row?.cred_ref) return { state: "none" };
-  return openMcpCredential(db, row.id, name, row.cred_ref);
+  if (!row) return { state: "none" };
+  // Ruling 469(e): a static credential works exactly as before, and a sign-in
+  // drops it, so a row never holds both.
+  if (row.cred_ref) return openMcpCredential(db, row.id, name, row.cred_ref);
+  const oauth = mcpOAuthCredential(db, row.id);
+  if (oauth.state === "signed_in") return { state: "oauth" };
+  return oauth;
 }
 
 /** Shared open + lazy re-seal for one row's sealed credential. */
@@ -973,11 +1064,12 @@ function openedForNewRow(sealed: string, name: string): ProbeCredential {
 const MCP_SQL = `SELECT id, name, transport, target, cred_ref, tools_count,
                         up, last_checked_at, last_error, warming_since,
                         first_success_at, heuristic_warmups,
-                        tool_policy_json, tool_names_json
+                        tool_policy_json, tool_names_json, oauth_json,
+                        oauth_requested_scope
                  FROM org_mcp_servers`;
 
 export function listMcpServers(db: DatabaseSync): McpView[] {
-  // SAFETY: `MCP_SQL` selects exactly the fourteen `org_mcp_servers` columns
+  // SAFETY: `MCP_SQL` selects exactly the sixteen `org_mcp_servers` columns
   // `McpRow` declares; the baseline DDL types each one as the column this row
   // reads (0001_baseline.sql), NOT NULL on id/name/transport/target.
   const rows = db
@@ -1091,7 +1183,13 @@ export function mcpSpawnEnv(
   return env;
 }
 
-const defaultSpawn: McpSpawn = (command, args, token) => {
+/**
+ * Spawn a registered stdio MCP command the way every server-side caller does:
+ * the discovery probe, the warm-up and, since ruling 461, the MCP gateway's
+ * upstream for a credentialed stdio server. One definition, so what a probe
+ * measures is what a run's calls then reach.
+ */
+export const spawnMcpProcess: McpSpawn = (command, args, token) => {
   const options: SpawnOptions = {
     // stderr was "ignore" — discarded by the OS, so the one thing that
     // explains a failure never reached us. See `discoverStdioMcpTools`.
@@ -1117,7 +1215,7 @@ const defaultSpawn: McpSpawn = (command, args, token) => {
  * Falls back to `child.kill()` when there is no pid (the test fakes) or the
  * group is already gone.
  */
-function killProcessTree(child: McpChild): void {
+export function killMcpProcessTree(child: McpChild): void {
   const pid = child.pid ?? null;
   if (pid !== null) {
     try {
@@ -1147,6 +1245,10 @@ interface StdioDiscoveryFailure {
    *  CALLER can decide whether this is really a first run (it holds the row),
    *  so the probe reports it and stays DB-free. */
   firstRunInstaller?: boolean;
+  /** Ruling 469: an HTTP server probed with no credential answered the MCP
+   *  authorization challenge; this is the metadata URL it named. The caller
+   *  records it, so the row reads "needs sign-in". */
+  signInChallenge?: string;
 }
 
 export type StdioDiscovery =
@@ -1207,7 +1309,7 @@ export async function discoverStdioMcpTools(
 ): Promise<StdioDiscovery> {
   const parts = splitMcpCommand(command);
   if (parts.length === 0) return { kind: "down", reason: "no command" };
-  const spawnImpl = options.spawnImpl ?? defaultSpawn;
+  const spawnImpl = options.spawnImpl ?? spawnMcpProcess;
   /**
    * R19-17c: 5s was too short for the commands people actually register. `npx`
    * and `uvx` FETCH on first use, and the probe would kill them before either
@@ -1270,7 +1372,7 @@ export async function discoverStdioMcpTools(
       settled = true;
       clearTimeout(timer);
       // F20-2: signal the whole process group, not just the direct child.
-      killProcessTree(child);
+      killMcpProcessTree(child);
       resolve(result);
     };
     child.stderr?.on("data", (chunk) => {
@@ -1407,30 +1509,14 @@ export async function discoverStdioMcpTools(
   });
 }
 
-/**
- * The MCP client capabilities the discovery handshake declares (P13-LV-19).
- *
- * The old handshake advertised `capabilities: {}`, and a server that gates
- * tools on client capabilities then hid them: Viberr's Settings row said
- * "13 tools discovered" for the Everything server while both live runs
- * enumerated **15** from the same command. The number shown has to be the
- * number a run gets, so the probe declares the same capability set the SDK
- * clients do.
- */
-const MCP_CLIENT_CAPABILITIES = {
-  roots: { listChanged: true },
-  sampling: {},
-  elicitation: {},
-};
-
+/** The protocol version the stdio discovery handshake asks for. The HTTP probe
+ *  negotiates through the SDK client instead (ruling 461). */
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 
-const MCP_CLIENT_INFO = { name: "viberr", version: "1.0.0" };
-
 /**
- * Every JSON-RPC request the discovery handshake sends — its whole vocabulary,
- * shared by the stdio and HTTP paths. Not a general RPC client: anything else
- * would be a message no MCP server here is asked for.
+ * Every JSON-RPC request the stdio discovery handshake sends — its whole
+ * vocabulary. Not a general RPC client: anything else would be a message no
+ * MCP server here is asked for.
  */
 type McpHandshakeRequest =
   | {
@@ -1458,158 +1544,61 @@ const mcpToolListSchema = z.object({
 });
 
 /**
- * One JSON-RPC message off an MCP endpoint, decoded at the wire into the only
- * two facts the handshake asks of it: whether it carried a `result` at all (an
- * `initialize` answered with an `error` — or with no result member — is not an
- * MCP server), and how many tools that result listed.
- *
- * Tolerant per FIELD, like the hand decode it replaces: a `result` that is not
- * a tool listing decodes to `tools: null` ("answered, but not with a tool
- * list") instead of failing the whole message.
- */
-const mcpMessageSchema = z
-  .object({ result: z.unknown().optional() })
-  .transform((message) => {
-    const listed = mcpToolListSchema.safeParse(message.result).data;
-    return {
-      // JSON never yields `undefined`, so this is exactly "the body has a
-      // `result` member".
-      answered: message.result !== undefined,
-      tools: listed ? listed.tools.length : null,
-      toolNames: listed ? listed.tools.filter((name) => name !== null) : [],
-    };
-  });
-
-type McpMessage = z.infer<typeof mcpMessageSchema>;
-
-/** The JSON-RPC message in one body/SSE frame, or null when it is not one. */
-function parseMcpMessage(text: string): McpMessage | null {
-  try {
-    const parsed = mcpMessageSchema.safeParse(JSON.parse(text));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Real tool discovery over Streamable HTTP (P13-LV-10).
+ * Real tool discovery over HTTP (P13-LV-10).
  *
  * The old HTTP health check treated ANY HTTP response as "reachable": pointing
  * a server at a URL that answers 400 to a GET — or at any live website —
  * produced a green dot and the word "reachable", and no tool count was ever
  * discovered, so an HTTP MCP could never show what it actually offers. This
- * runs the same JSON-RPC handshake the stdio path does: `initialize` →
- * `notifications/initialized` → `tools/list`, carrying the session id the
- * server hands back, and accepting either a JSON or an SSE-framed body.
+ * runs the real handshake — `initialize`, `notifications/initialized`,
+ * `tools/list` — and counts the tools.
  *
- * A credentialed server is probed WITH its credential (P13-KM-05), so a server
- * that works in a run doesn't report "unreachable" in Settings.
+ * Ruling 461: through the SAME client the MCP gateway holds a run's upstream
+ * with (`connectHttpUpstream`): Streamable HTTP, the legacy SSE transport when
+ * the server answers that way, and the credential as `Authorization: Bearer`
+ * (P13-KM-05). A credentialed server's green dot therefore means "up with its
+ * credential, over the transport the run's calls will take".
  */
+/** Ruling 469: a probe that failed on the sign-in rather than the endpoint,
+ *  which the toast states as itself instead of "unreachable". */
+function isSignInReason(reason: string): boolean {
+  return reason === OAUTH_NEEDS_SIGN_IN || reason === OAUTH_SIGN_IN_EXPIRED;
+}
+
 async function discoverHttpMcpTools(
   target: string,
-  options: McpProbeOptions & { token?: string | null } = {},
+  options: McpProbeOptions & { token?: string | null; auth?: UpstreamTokenSource } = {},
 ): Promise<StdioDiscovery> {
-  let url: URL;
-  try {
-    url = new URL(target);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return { kind: "down", reason: "endpoint is not an http(s) URL" };
-    }
-  } catch {
-    return { kind: "down", reason: "endpoint is not a valid URL" };
-  }
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 5000;
   const started = Date.now();
-  let sessionId: string | null = null;
-
-  const rpc = async (body: McpHandshakeRequest): Promise<Response> => {
-    const headers = new Map([
-      ["content-type", "application/json"],
-      ["accept", "application/json, text/event-stream"],
-      ["mcp-protocol-version", MCP_PROTOCOL_VERSION],
-    ]);
-    // Both are conditional: the session id only exists after `initialize`
-    // answers with one, and an uncredentialed server is asked anonymously.
-    if (sessionId) headers.set("mcp-session-id", sessionId);
-    if (options.token) headers.set("authorization", `Bearer ${options.token}`);
-    return fetchImpl(url.toString(), {
-      method: "POST",
-      headers: Object.fromEntries(headers),
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+  const connectOptions: Parameters<typeof connectHttpUpstream>[1] = {
+    token: options.token ?? null,
+    timeoutMs: options.timeoutMs ?? 5000,
   };
-
-  /** Body → the first JSON-RPC message, whether raw JSON or SSE-framed. */
-  const readMessage = async (res: Response): Promise<McpMessage | null> => {
-    const text = await res.text();
-    if (!text.trim()) return null;
-    const direct = parseMcpMessage(text);
-    if (direct) return direct;
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.startsWith("data:")) continue;
-      const parsed = parseMcpMessage(line.slice(5).trim());
-      if (parsed) return parsed;
-    }
-    return null;
-  };
-
+  // Ruling 469: a signed-in server is probed with its OAuth token, renewed
+  // the way the gateway renews it, so "up" is earned by the same sign-in.
+  if (options.auth) connectOptions.auth = options.auth;
+  if (options.fetchImpl) connectOptions.fetchImpl = options.fetchImpl;
+  let connection: Awaited<ReturnType<typeof connectHttpUpstream>>;
   try {
-    const initRes = await rpc({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: MCP_CLIENT_CAPABILITIES,
-        clientInfo: MCP_CLIENT_INFO,
-      },
-    });
-    if (!initRes.ok) {
-      return {
-        kind: "down",
-        reason:
-          initRes.status === 401 || initRes.status === 403
-            ? "authentication rejected"
-            : `endpoint answered ${initRes.status} (not an MCP endpoint?)`,
-      };
+    connection = await connectHttpUpstream(target, connectOptions);
+  } catch (error) {
+    if (error instanceof UpstreamSignInNeeded) {
+      return { kind: "down", reason: error.reason, signInChallenge: error.resourceMetadataUrl };
     }
-    sessionId = initRes.headers.get("mcp-session-id");
-    const initMsg = await readMessage(initRes);
-    if (!initMsg?.answered) {
-      return { kind: "down", reason: "responded, but not with MCP initialize" };
-    }
-
-    await rpc({ jsonrpc: "2.0", method: "notifications/initialized" });
-
-    const listRes = await rpc({
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/list",
-      params: {},
-    });
-    if (!listRes.ok) {
-      return { kind: "down", reason: `tools/list answered ${listRes.status}` };
-    }
-    const listMsg = await readMessage(listRes);
-    const tools = listMsg?.tools ?? null;
-    if (tools === null) {
-      return { kind: "down", reason: "no tools in response" };
-    }
+    return { kind: "down", reason: upstreamFailureReason(error) };
+  }
+  try {
+    const tools = await listAllTools(connection.client, { timeoutMs: connectOptions.timeoutMs });
     return {
       kind: "up",
       latencyMs: Date.now() - started,
-      tools,
-      toolNames: listMsg?.toolNames ?? [],
+      tools: tools.length,
+      toolNames: tools.map((tool) => tool.name),
     };
   } catch (error) {
-    const reason =
-      error instanceof Error && error.name === "TimeoutError"
-        ? "connection timed out"
-        : "connection refused";
-    return { kind: "down", reason };
+    return { kind: "down", reason: `tools/list failed: ${upstreamFailureReason(error)}` };
+  } finally {
+    await connection.client.close().catch(() => undefined);
   }
 }
 
@@ -1629,6 +1618,10 @@ export async function saveMcpServer(
      *  keeps what is stored (the controller's tool and any other caller that
      *  does not edit the list); an empty array is a reviewed "none". */
     writeTools?: readonly string[];
+    /** Ruling 486(c): the scopes the next OAuth sign-in asks for, as typed
+     *  (spaces, commas or newlines between them). Absent keeps what is
+     *  stored; blank clears it (the resource's advertised scopes are sent). */
+    requestedScopes?: string;
   },
   actor: AuditActor,
   options: McpProbeOptions = {},
@@ -1689,6 +1682,37 @@ export async function saveMcpServer(
   // Checked before the probe, so a bad name is refused without spawning anything.
   const writeTools =
     input.writeTools === undefined ? undefined : checkedWriteTools(input.writeTools);
+  const requestedScope =
+    input.requestedScopes === undefined ? undefined : checkedRequestedScope(input.requestedScopes);
+
+  // Ruling 469: a connection holds one credential. A sign-in drops a pasted
+  // token when it lands, so a pasted token over a live sign-in is refused
+  // rather than silently shadowing it (the editor hides the field meanwhile).
+  const oauthBefore = input.id ? mcpOAuthCredential(db, input.id) : null;
+  const signedIn = oauthBefore?.state === "signed_in";
+  // SAFETY: `oauth_ref` and `oauth_json` are nullable TEXT columns of
+  // `org_mcp_servers` (0001_baseline.sql).
+  const oauthColumns = input.id
+    ? (db.prepare(`SELECT oauth_ref, oauth_json FROM org_mcp_servers WHERE id = ?`).get(input.id) as
+        | { oauth_ref: string | null; oauth_json: string | null }
+        | undefined)
+    : undefined;
+  const heldOAuth = oauthColumns !== undefined && (oauthColumns.oauth_ref !== null || oauthColumns.oauth_json !== null);
+  const before = input.id ? getMcpServer(db, input.id) : null;
+  // A sign-in's tokens are for the endpoint they were issued to: re-pointing
+  // the row (or switching it to stdio) drops them rather than sending them to
+  // another server.
+  const repointed = before !== null && (before.target !== target || before.transport !== transport);
+  if (signedIn && !repointed && rawCred && !input.clearCred) {
+    throw AppError.validation(
+      `${name} is signed in with OAuth. Sign it out first to use a pasted credential instead.`,
+    );
+  }
+  const oauthAuth =
+    signedIn && !repointed && input.id ? mcpOAuthTokenSource(db, input.id, target) : undefined;
+  // Ruling 486: a save leaves the sign-in's grant as it was, so the toast
+  // names the grant the row already records.
+  const oauthGrant = oauthAuth ? mcpGrantPhrase(before?.oauth?.scope) : null;
 
   // SAFETY: `id` is the TEXT PRIMARY KEY of `org_mcp_servers`
   // (0001_baseline.sql), so a matching row hands back a string.
@@ -1717,13 +1741,23 @@ export async function saveMcpServer(
   const disc =
     transport === "stdio"
       ? await discoverStdioMcpTools(target, { ...options, token: plainCred })
-      : await discoverHttpMcpTools(target, { ...options, token: plainCred });
+      : await discoverHttpMcpTools(target, { ...options, token: plainCred, auth: oauthAuth });
+  // Ruling 469: only a probe that sent no credential of any kind can tell
+  // whether the server asks for a sign-in.
+  const probedBare = transport === "HTTP" && !cred && !oauthAuth;
   const checkedAt: string | null = now;
   const up = disc.kind === "up" ? 1 : 0;
   const tools = disc.kind === "up" ? disc.tools : null;
   // R19-17: a failure keeps its reason on the row; a success CLEARS it, so a
   // stale explanation can never sit under a green dot.
-  const lastError = disc.kind === "up" ? null : disc.reason;
+  // Ruling 469: an expired sign-in answers the challenge like one never made,
+  // and the row keeps saying which it is.
+  const lastError =
+    disc.kind === "up"
+      ? null
+      : disc.signInChallenge && !repointed && oauthBefore?.state === "signed_out"
+        ? oauthBefore.reason
+        : disc.reason;
   // R19-18: a command that was still fetching gets a background install rather
   // than a red dot. Started AFTER the row is written, below, so the warm-up's
   // own `warming_since` write cannot be overwritten by this save.
@@ -1734,7 +1768,7 @@ export async function saveMcpServer(
   // too, but capped at ONE heuristic warm-up per row (the counter is bumped by
   // `startMcpWarmup({ heuristic })`), so a command that never works still
   // settles to `unreachable` instead of re-downloading forever.
-  const priorRow = input.id ? getMcpServer(db, input.id) : null;
+  const priorRow = before;
   const firstEver = !priorRow || priorRow.firstSuccessAt == null;
   const heuristicWarmable =
     disc.kind === "down" &&
@@ -1762,8 +1796,10 @@ export async function saveMcpServer(
     : "";
   const toast =
     (disc.kind === "up"
-      ? `${name} saved: ${countLabel(disc.tools, "tool")} discovered${spawnNote}`
-      : transport === "stdio"
+      ? `${name} saved: ${countLabel(disc.tools, "tool")} discovered${spawnNote}${oauthAuth ? ` · signed in with OAuth${oauthGrant ? ` (${oauthGrant})` : ""}` : ""}`
+      : lastError !== null && isSignInReason(lastError)
+        ? `${name} saved: ${lastError}`
+        : transport === "stdio"
         // R19-17: the wrapper used to add "command didn't respond" in front of
         // a reason that now says what actually happened, giving
         // "didn't respond (exited before responding — …)". The reason speaks
@@ -1798,6 +1834,7 @@ export async function saveMcpServer(
            first_success_at = COALESCE(first_success_at, ?),
            tool_names_json = ?,
            tool_policy_json = COALESCE(?, tool_policy_json),
+           oauth_requested_scope = ?,
            updated_at = ?
        WHERE id = ?`,
       // R20-4: stamp the first-ever success idempotently — COALESCE keeps an
@@ -1808,8 +1845,22 @@ export async function saveMcpServer(
       up === 1 ? now : null,
       toolNames === null ? null : JSON.stringify(toolNames),
       effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
+      // Ruling 486(c): an absent field keeps what is stored; a stdio row
+      // signs nothing in, so it asks for nothing.
+      transport === "stdio" ? null : requestedScope === undefined ? (existing.requestedScope ?? null) : requestedScope,
       now, id,
     );
+    // Ruling 469: tokens never follow a row to another endpoint. And a
+    // connection holds one credential: a pasted one (which wins, 469(e))
+    // replaces what is left of a sign-in that is not live — "needs sign-in",
+    // "expired", unreadable — whose status every surface would otherwise
+    // keep showing beside the credential runs mount, and whose sign-in the
+    // controller would advise, dropping the credential (R-oauth-2).
+    const pastedOverSignIn = cred !== null && !signedIn;
+    const oauthDropped = (repointed || pastedOverSignIn) && heldOAuth;
+    if (oauthDropped) {
+      db.prepare(`UPDATE org_mcp_servers SET oauth_ref = NULL, oauth_json = NULL WHERE id = ?`).run(id);
+    }
     // P14-KM-01: an MCP grant is a NAME reference, and this was the one rename
     // leg that never rewrote it — KB and skill renames did, every delete dropped
     // its grants, but renaming a server left each profile pointing at a name the
@@ -1819,12 +1870,18 @@ export async function saveMcpServer(
     if (existing.name !== name) {
       await updateResourceReferences("mcps", existing.name, name, ctx.dataRoot);
     }
+    const details: McpSaveAudit = { name, transport, renamed: existing.name !== name };
+    if (oauthDropped) details.oauthDropped = true;
+    // Ruling 486(c): what the next sign-in asks for, when this save changed it.
+    if (requestedScope !== undefined && requestedScope !== (existing.requestedScope ?? null)) {
+      details.requestedScope = requestedScope;
+    }
     recordAudit(db, {
       action: "org.mcp.updated",
       actor,
       subjectKind: "org_mcp",
       subjectId: id,
-      details: { name, transport, renamed: existing.name !== name },
+      details,
     });
     if (writeTools !== undefined && !sameNameSet(existing.writeTools, writeTools)) {
       recordAudit(db, {
@@ -1842,8 +1899,9 @@ export async function saveMcpServer(
       `INSERT INTO org_mcp_servers
          (id, name, transport, target, cred_ref, tools_count, up,
           last_checked_at, last_error, first_success_at,
-          tool_names_json, tool_policy_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          tool_names_json, tool_policy_json, oauth_requested_scope,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       // R20-4: a brand-new row records its first success immediately when the
       // save probe already answered up; otherwise NULL (never worked here yet).
     ).run(
@@ -1851,6 +1909,7 @@ export async function saveMcpServer(
       up === 1 ? now : null,
       disc.kind === "up" ? JSON.stringify(disc.toolNames) : null,
       effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
+      transport === "stdio" ? null : (requestedScope ?? null),
       now, now,
     );
     recordAudit(db, {
@@ -1858,7 +1917,7 @@ export async function saveMcpServer(
       actor,
       subjectKind: "org_mcp",
       subjectId: id,
-      details: { name, transport },
+      details: addedAudit(name, transport, requestedScope ?? null),
     });
     if (writeTools?.length) {
       recordAudit(db, {
@@ -1870,6 +1929,13 @@ export async function saveMcpServer(
       });
     }
     publishResourceUpdated("mcp", id);
+  }
+  // Ruling 469: what a bare probe learned about the sign-in, recorded once the
+  // row exists.
+  if (probedBare && disc.kind === "down" && disc.signInChallenge) {
+    recordMcpOAuthChallenge(db, id, disc.signInChallenge);
+  } else if (probedBare && disc.kind === "up") {
+    clearMcpOAuthChallenge(db, id);
   }
 
   if (warmable && transport === "stdio") {
@@ -1919,10 +1985,15 @@ export async function testMcpServer(
   const credNote = opened.unreadable
     ? " · WARNING: its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
     : "";
+  // Ruling 469: a signed-in server is probed with its sign-in; one that needs
+  // a sign-in it does not have says so instead of blaming the endpoint.
+  const oauth = sealed?.cred_ref ? null : mcpOAuthCredential(db, id);
+  const auth = oauth?.state === "signed_in" ? mcpOAuthTokenSource(db, id, existing.target) : undefined;
   const disc =
     existing.transport === "stdio"
       ? await discoverStdioMcpTools(existing.target, { ...options, token })
-      : await discoverHttpMcpTools(existing.target, { ...options, token });
+      : await discoverHttpMcpTools(existing.target, { ...options, token, auth });
+  const probedBare = existing.transport === "HTTP" && !sealed?.cred_ref && !auth;
 
   if (disc.kind === "up") {
     db.prepare(
@@ -1934,18 +2005,32 @@ export async function testMcpServer(
       // R20-4: a passing retest is a first-ever success too — stamp it so a
       // later cold probe of a working server is never mistaken for a first run.
     ).run(disc.tools, now, now, JSON.stringify(disc.toolNames), now, id);
+    if (probedBare) clearMcpOAuthChallenge(db, id);
     const fresh = getMcpServer(db, id)!;
+    const signIn = auth ? mcpSignInPhrase(fresh.oauth) : null;
+    // Ruling 486: what the sign-in may do ("read-only · 194 scopes"), since
+    // "healthy" alone is also true of a grant that refuses every write.
+    const grant = auth ? mcpGrantPhrase(fresh.oauth?.scope) : null;
     return {
       mcp: fresh,
-      toast: `${fresh.name} healthy: ${countLabel(disc.tools, "tool")} · ${disc.latencyMs}ms${credNote}`,
+      toast: `${fresh.name} healthy: ${countLabel(disc.tools, "tool")} · ${disc.latencyMs}ms${signIn ? ` · ${signIn}` : ""}${grant ? ` · ${grant}` : ""}${credNote}`,
     };
   }
+  // An expired sign-in answers the challenge like one never made: the row
+  // keeps saying which it is.
+  const reason =
+    disc.signInChallenge && oauth?.state === "signed_out" ? oauth.reason : disc.reason;
   db.prepare(
     `UPDATE org_mcp_servers
      SET up = 0, tools_count = NULL, last_checked_at = ?, last_error = ?,
          updated_at = ?
      WHERE id = ?`,
-  ).run(now, disc.reason, now, id);
+  ).run(now, reason, now, id);
+  if (probedBare && disc.signInChallenge) recordMcpOAuthChallenge(db, id, disc.signInChallenge);
+  if (isSignInReason(reason)) {
+    const fresh = getMcpServer(db, id)!;
+    return { mcp: fresh, toast: `${fresh.name}: ${reason}` };
+  }
   // R19-18: retesting a command that is mid first-run install hands it to the
   // background runner instead of failing it again — retesting used to restart
   // the same download and kill it at the same point, forever.
@@ -2474,6 +2559,19 @@ export function resolveStoreTarget(
     };
   }
   return null;
+}
+
+/**
+ * Ruling 483: the store target a knowledge base's DIRECTORY names, whether it
+ * has a metadata row or is a folder on disk only. A run knows its knowledge
+ * bases by directory (the grant key its index heading prints), never by row id.
+ */
+export function kbStoreTargetForDir(
+  db: DatabaseSync,
+  dir: string,
+  ctx: OrgSeedContext = {},
+): StoreTarget | null {
+  return resolveStoreTarget(db, "kb", diskId(dir), ctx);
 }
 
 /** Ensures the kb/skills store roots exist (seed + boot safety). */

@@ -8,6 +8,11 @@ import {
   type BackendQuotaRow,
 } from "~/server/runtimes/backend-quota.server";
 import { countConnectedUsers } from "~/server/runtimes/backend-credentials.server";
+import { mcpGatewayStatus, type McpGatewayStatus } from "~/server/mcp-proxy/gateway.server";
+import {
+  agentIsolation,
+  type AgentIsolation,
+} from "~/server/runtimes/agent-isolation.server";
 import { browserRuntimeStatus } from "~/server/tasks/specialist-browser-mcp.server";
 import { getBuildInfo, type BuildInfo } from "./build-info.server";
 import { cachedDataRootSpace, type DiskSpace } from "./disk-space.server";
@@ -101,6 +106,25 @@ export interface HealthSnapshot {
    * not a broken host, so it never degrades health.
    */
   toolchain: Toolchain;
+  /**
+   * Ruling 461: the loopback MCP gateway a run reaches a credentialed org MCP
+   * server through — whether it is listening, on which 127.0.0.1 port, and how
+   * many runs hold a live token. Informational: a gateway that failed to bind
+   * leaves credentialed servers unmountable (each run's prompt says why), which
+   * no restart of the instance's other subsystems would fix, so it does not
+   * degrade health. Appended, by the key-order contract below.
+   */
+  mcpProxy: McpGatewayStatus;
+  /**
+   * Ruling 460: whether agent processes run as their person's own OS user.
+   * `on`: the launcher is installed and the boot probe could not read the
+   * store as another uid. `off`: no launcher (the host dev server, the test
+   * harness) — runs spawn as the server's user, and that is not a fault here.
+   * `degraded`: the launcher exists but the probe READ the store (a bind mount
+   * that does not enforce permissions) or failed — pushed into `degraded`,
+   * with the reason naming what to do.
+   */
+  agentIsolation: AgentIsolation;
 }
 
 /**
@@ -175,6 +199,12 @@ export function healthSnapshot(
 
   const browser = browserRuntimeStatus();
 
+  // Ruling 460: an image whose store does not refuse an agent uid is running
+  // agents that can read the database — a real fault, unlike `off` on a dev
+  // host, where no launcher exists to promise anything.
+  const isolation = agentIsolation();
+  if (isolation.status === "degraded") degraded.push("agentIsolation");
+
   return {
     status: degraded.length > 0 ? "degraded" : "ok",
     degraded,
@@ -200,8 +230,12 @@ export function healthSnapshot(
     maintenance: maintenanceState(),
     build: getBuildInfo(),
     quota: opts.principal ? quota : stripQuotaPrincipals(quota),
-    // LAST, by the key-order contract above. Memoized: the first call (boot's
-    // integrity line, normally) pays the probe once.
+    // Memoized: the first call (boot's integrity line, normally) pays the
+    // probe once.
     toolchain: cachedToolchain(),
+    // Appended by ruling 461, then followed by ruling 460's key (key-order contract above).
+    mcpProxy: mcpGatewayStatus(),
+    // LAST, by the key-order contract above (ruling 460 appended it after ruling 461's mcpProxy).
+    agentIsolation: isolation,
   };
 }

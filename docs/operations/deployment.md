@@ -15,17 +15,35 @@ state on the local filesystem. There is no external database, cache, or queue to
 ## What runs
 
 - One container (see [`Dockerfile`](../../Dockerfile) + [`compose.yml`](../../compose.yml)),
-  built from `node:26-slim` in three stages: `prod-deps` (`npm ci --omit=dev`, keyed on
+  built from `node:26-slim` in four stages: `prod-deps` (`npm ci --omit=dev`, keyed on
   the lockfile only, so a source edit never reinstalls it), `build` (`npm ci` +
-  `npm run build`) and the runtime stage.
+  `npm run build`), `launcher` (gcc compiles `tools/viberr-launch/viberr-launch.c`, keyed
+  on that one file; ruling 460) and the runtime stage.
 - `react-router-serve` on `$PORT` (`3000` in the image), started as
   `node /app/node_modules/@react-router/serve/bin.cjs ./build/server/index.js`, not
   `npm run start`: with node as pid 1 a `docker compose stop` SIGTERM reaches the process
   whose shutdown handler checkpoints the WAL and releases the writer lock. There is no
   `ENTRYPOINT`; compose's `init: true` reaps orphaned children.
 - The app runs as the non-root `node` user (uid 1000). `EXPOSE 3000`.
+- **Every agent process runs as its person's own OS user (ruling 460).** The image adds
+  the group `viberr-agents` (gid 20000, `node` a supplementary member), the setuid launcher
+  `/usr/local/libexec/viberr-launch` (root:node 4750: only root and group `node` can run
+  it), and a root-owned `/etc/gitconfig` with `safe.directory=*` and
+  `core.sharedRepository=group`. At boot the server sets its umask to 0002, re-asserts the
+  store layout, hands each person's runtime home to their agent uid (from 20001) and probes
+  the store as a uid that is not its own; `/resources/health` reports the outcome as
+  `agentIsolation` (`on`, `off` where there is no launcher, `degraded` when the probe could
+  read the store). The numbers are the Dockerfile's global ARGs
+  (`VIBERR_AGENT_UID_FLOOR`/`_MAX`, `VIBERR_AGENT_GID`, `VIBERR_DATA_ROOT`), compiled into
+  the launcher.
 - SQLite projections + app data at `$VIBERR_DATA_ROOT` (`/data` in the image), which
-  **must** be a persistent volume. Compose bind-mounts `./docker-data` there.
+  **must** be a persistent volume on a filesystem that enforces file permissions between
+  users. Compose mounts the named volume `viberr-data` there (ruling 460). The earlier
+  `./docker-data` bind mount does not qualify on Docker Desktop for macOS: VirtioFS let uid
+  65534 read a 0600 file owned by uid 1000, and `ls -l` showed every entry as owned by
+  whoever read it (measured 2026-09-24), so an agent uid could read the projection
+  database. A store still there boots `agentIsolation: degraded` and readiness answers 503;
+  move it once, below ([Moving the store to the named volume](#moving-the-store-to-the-named-volume-ruling-460)).
 - The image also carries `db/`, `scripts/`, `app/` and `tsconfig.json`, so the maintenance
   CLIs (`npm run backup`, `keys`, `store:check`, …) run inside the container through `tsx`.
 
@@ -278,20 +296,50 @@ discovering each absence as an exit-127. For any other command the controller's
 
 ```bash
 cp .env.example .env        # fill in the two required secrets
-mkdir -p docker-data && sudo chown 1000:1000 docker-data   # Linux, rootful daemon — see below
+docker volume create viberr-data   # the store; external, so Compose never owns it (ruling 473)
 docker compose up -d --build
 docker compose logs -f app  # boot integrity log: dirs, migrations, counts, users, build, disk, toolchain
+curl -s localhost:3000/resources/health | grep -o '"agentIsolation":{[^}]*}'   # "status":"on"
 ```
 
-**Create `docker-data/` yourself, owned by uid 1000.** The image does
-`chown node:node /data`, but compose bind-mounts `./docker-data` over that path and a bind
-mount shadows the image's directory entirely — the HOST directory's ownership is what the
-container sees. On Linux with a rootful daemon, a missing bind-mount source is created by
-the daemon as **root**, so the container's `node` user (uid 1000) cannot write it, and the
-app crash-loops at boot with `EACCES` before it can create `state/` or take the writer
-lock. `sudo chown 1000:1000 docker-data` fixes it; the image's own `chown` only ever
-applies when `/data` is NOT bind-mounted (a named volume, say). Rootless Docker and Docker
-Desktop on macOS/Windows map ownership for you and need none of this.
+The store is the named volume `viberr-data` (ruling 460). It is declared `external`
+(ruling 473): Compose never creates it, so `docker compose down -v` can never delete it,
+and an `up` without it fails with "external volume not found" instead of starting on an
+empty store. Create it once, before the first `up` (`docker volume create viberr-data`;
+`npm run deploy` does this itself when it is missing). Docker initialises the empty volume
+from the image's `/data` on that first `up` (owned `node:viberr-agents`, 0750), so there is
+no host directory to create or chown. A volume lives inside Docker, not in the
+repository: read a live instance through the app, `docker compose exec app …` (the
+maintenance CLIs, `ls`, `cat`) or a backup (`npm run backup`, below), never by opening
+files on the host.
+
+### Moving the store to the named volume (ruling 460)
+
+A deployment from before ruling 460 keeps its store in `./docker-data` (a bind mount).
+Move it once, with the app stopped:
+
+```bash
+docker compose stop app
+npm run store:to-volume          # ./docker-data → the volume viberr-data
+docker compose up -d
+curl -s localhost:3000/resources/health | grep -o '"agentIsolation":{[^}]*}'   # "status":"on"
+```
+
+`npm run store:to-volume` (`scripts/store-to-volume.ts`) takes the data-root writer lock on
+`./docker-data` first, so it refuses while the container still runs on it; refuses when the
+volume already holds a store (a one-time move, never a merge); copies everything, drops its
+own lock file and makes the tree the server's; and leaves `./docker-data` as it was — keep
+it until the app is back and healthy. By hand, the same copy is:
+
+```bash
+docker run --rm -v viberr-data:/data -v "$PWD/docker-data":/from:ro node:26-slim \
+  sh -c 'cp -a /from/. /data/ && chown -R 1000:1000 /data'
+```
+
+At its next boot the server re-asserts the layout (`state/` 0700 and the rest) and hands
+each person's runtime home to their agent uid, so nothing else needs doing. The host dev
+server (`npm run dev`) keeps using `./docker-data` as its own store from then on: it no
+longer shares the container's.
 
 **The image fetches its Debian packages over HTTPS.** The runtime stage installs from
 `deb.debian.org` in three `apt-get` layers (`git` + `ca-certificates`, then `make` +
@@ -340,8 +388,9 @@ is the two-second check, and the same URL over `http://` shows the throttle.
 
 ## Persistence, backup & restore
 
-Everything stateful lives under `./docker-data` in the Compose setup, mounted
-at `/data`. Both SDKs keep their resumable state under `runtimes/`:
+Everything stateful lives in the named volume `viberr-data` in the Compose setup, mounted
+at `/data` (ruling 460; `./docker-data` before it). Both SDKs keep their resumable state
+under `runtimes/`:
 
 ```
 projects/       canonical project.md, task.md, goals/*.md (the source of truth — editable);
@@ -349,10 +398,12 @@ projects/       canonical project.md, task.md, goals/*.md (the source of truth �
                 per project: .repo-mirror/ (bare mirror, a cache)
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
 kb/ skills/     knowledge-base and skill files
-runtimes/       claude/ and codex/: raw NDJSON run logs per backend;
+runtimes/       claude/ and codex/: raw NDJSON run logs per backend (0700);
                 users/<userId>/{claude-home,codex-home}/: one person's vendor sign-in file
                 plus their provider sessions (ruling 127), and codex-home/runs/<runId>/
-                while a Codex run is live (ruling 181); uv-cache/ and uv-python/ in the container
+                while a Codex run is live (ruling 181); users/<userId>/home/: that person's
+                agents' $HOME (ruling 460) — all owned by the person's agent uid;
+                uv-cache/, uv-python/ and controller-scratch/ (shared with the agent group)
 audit-exports/  audit-events-<date>.jsonl written before each 90-day purge
 state/          projection.sqlite (users, sessions, projections, audit, PATs, notifications,
                 sealed personal backend keys), writer.lock, shipped-assets.json;
@@ -362,8 +413,14 @@ state/          projection.sqlite (users, sessions, projections, audit, PATs, no
 Boot creates the nine `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profiles`,
 `runtimes`, `runtimes/users`, `kb`, `skills`, `audit-exports`, `state`;
 `app/server/files/file-store-root.server.ts`); the rest appear when first written,
-including each person's own `runtimes/users/<userId>/{claude-home,codex-home}` (mode 0700,
-created by `ensureUserBackendHome` the first time they connect). There is no `auth/`,
+including each person's own `runtimes/users/<userId>/{claude-home,codex-home}` (created by
+`ensureUserBackendHome` the first time they connect, and handed to their agent uid — owner
+the uid, group `node`, 2770 — by the launcher, ruling 460). In the image boot then
+re-asserts the modes: `/data` 0750 in group `viberr-agents`, `state/`, `audit-exports/` and
+`runtimes/claude|codex/` 0700, `runtimes/users/` 0710, `agents/`, `kb/`, `skills/`,
+`projects/` 0755, and each task's `workspace/`, `attachments/`, `.operator-scratch/` 2770 in
+the agent group ([agents-and-runtime.md §8](../domain/agents-and-runtime.md#8-boot-recovery)).
+There is no `auth/`,
 `cache/` or `logs/` directory; application logs are structured JSON on stdout. Full layout
 with retention: [`../architecture/data-model.md`](../architecture/data-model.md#2-data-root-layout).
 
@@ -401,9 +458,10 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   docker compose cp app:/tmp/viberr-backups/. ./backups/
   ```
 
-  With the container down the root is plain files, and `npm run backup -- --out ./backups`
-  from the repo root is fine (`.env`'s `VIBERR_DATA_ROOT` must name the mounted directory,
-  `./docker-data` as in `.env.example`).
+  The store is a named volume (ruling 460), so the host cannot open it: the in-container
+  form above is the one that reads the instance, running or not. `npm run backup` from the
+  repo root backs up whatever `.env`'s `VIBERR_DATA_ROOT` names on the host — the dev
+  server's `./docker-data`, not the container's store.
 
   Read the artefact's own README for what it excludes. Three exclusions matter most:
   `runtimes/` (live agent logins, one set per person under `runtimes/users/` — opt in
@@ -417,9 +475,10 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   copied. Without the key every sealed PAT, MCP credential and personal backend API key in
   the backed-up database is unreadable, so back the key up separately.
 
-  Copying `./docker-data` wholesale, `-wal`/`-shm` sidecars included, also works with the
-  app stopped, but a hot copy of `projection.sqlite` alone silently loses every committed
-  row still living in the WAL — the trap `VACUUM INTO` removes.
+  Copying the volume wholesale (`docker run --rm -v viberr-data:/data:ro -v
+  "$PWD/backups":/to node:26-slim cp -a /data/. /to/`), `-wal`/`-shm` sidecars included,
+  also works with the app stopped, but a hot copy of `projection.sqlite` alone silently
+  loses every committed row still living in the WAL — the trap `VACUUM INTO` removes.
 
 - **Restore** = `npm run restore -- --from <artefact>`. Whole-root restore takes the writer
   lock, requires `--force` if the root is occupied, and *moves* displaced data aside to
@@ -455,8 +514,11 @@ database's rebuilder tables lag the running build (`logBootIntegrity` in
   admit (`projectionCheckGaps`): `task_projections.validation` (F21-1),
   `task_projections.waiting` (ruling 225) and `notifications.kind` (ruling 140). A task
   whose derived value lands on a refused member stops projecting behind a generic
-  `projection rebuild failed`; a notification of a refused kind is dropped by the
-  fail-open insert.
+  `projection rebuild failed`; a notification of a refused kind is refused at its insert.
+  Boot widens `notifications.kind` itself before this check (`widenNotificationKindCheck`,
+  ruling 481: the app-owned table is rebuilt from the baseline's DDL with its rows and
+  indexes), so that entry appears only when the rebuild failed, and its ERROR line says
+  so.
 - `missingColumns`: `task_projections` / `task_events` columns the shipped baseline has and
   this root lacks (`projectionMissingColumns`), which fail EVERY task's projection with
   "no such column".
@@ -472,14 +534,18 @@ COLUMN`s each missing entry of `BASELINE_COLUMNS` — on `agent_runs`
 `dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`,
 `interrupted_reason`, `usage_final`, `no_checkout`, `verdict_withheld` and the eleven
 prompt-cache columns of ruling 369; `controller_conversations.task_key` and `seen_seq`;
-`controller_messages.surface`; `org_mcp_servers.tool_policy_json` and `tool_names_json`;
+`controller_messages.surface`, `reply_to` and `unlinked_history`; `org_mcp_servers.tool_policy_json` and `tool_names_json`;
 `projects.required_reviewers_json`; `task_projections.recommendation_kinds` — creates the
 `BASELINE_TABLES` (`project_github_health`, `user_backend_credentials`) and indexes it
 lacks, and logs `added a baseline column this data root predated`. A column whose DEFAULT
 would be WRONG for the rows that predate it carries a one-time backfill run in the same
 step (`usage_final = 1` on the `finished` runs, whose token columns held the provider's own
 figures; `seen_seq` set to each conversation's newest message so a deploy does not mark
-every old thread unread); a backfill that cannot run is logged as a warn. A failure to
+every old thread unread; `unlinked_history`'s walk linking `reply_to` where the
+controller's FIFO proves it and marking the rest earlier history, so boot recovery does
+not note old messages as unanswered, and a root the first `reply_to` backfill already
+linked is walked again when it gains the column); a backfill that cannot run is
+logged as a warn. A failure to
 ALTER is warned, not fatal, and retried next boot.
 
 A `missingColumns` entry that is NOT in that list (for example
@@ -511,17 +577,17 @@ once the container is down).
 root:
 
 ```bash
-docker compose down                  # one writer per root; never delete state while it runs
-npm run backup -- --out ./backups    # only now, with nothing writing the root; see the cost below
-rm ./docker-data/state/projection.sqlite*   # -wal and -shm too
+docker compose exec -T app npm run backup -- --out /tmp/viberr-backups   # see the cost below
+docker compose cp app:/tmp/viberr-backups/. ./backups/
+docker compose stop app              # one writer per root; never delete state while it runs
+docker compose run --rm --no-deps --entrypoint sh app \
+  -c 'rm /data/state/projection.sqlite*'   # -wal and -shm too
 docker compose up -d                 # migrations re-apply, projections rebuild from projects/
 ```
 
-The backup sits below the `down` on purpose: with nothing writing the root the CLI reads
-the file itself, and the artefact is the database exactly as it will be restored. Taken
-while the container ran it would read a copy of a root still changing under it (ruling
-158). To take one without stopping first, use the in-container form under *Persistence,
-backup & restore*.
+The store is the named volume (ruling 460), so the deletion runs in a one-off container
+on it rather than on a host path. The backup reads a copy of the live root (ruling 158);
+nothing writes between it and the stop but what a live instance writes in those seconds.
 
 **Name the cost before you run it.** The projection *tables* are derived and rebuild from
 `projects/` at boot — but they share the file with rows that exist nowhere else: users and
@@ -608,9 +674,10 @@ Two ways this bites in practice, both to avoid:
   notices and exits. Stop the app first, then reset the store.
 - **Beware the same-port `::1` vs IPv4 split.** A host dev server on `[::1]:5173` and a
   compose container's docker-proxy on `*:5173` both answer `localhost:5173` (macOS resolves
-  `localhost` → `::1` first). Two live servers can look like one app while writing the same
-  bind-mounted `docker-data`. Run exactly one; the writer lock + health holder make it
-  visible which.
+  `localhost` → `::1` first). Two live servers can look like one app. Since ruling 460 they
+  no longer write the same store (the container's is the named volume, the dev server's
+  `./docker-data`), which makes the split worse to notice, not better: you may be looking
+  at the wrong store. Run exactly one per port; the health holder names which.
 
 How the lock is judged (`classifyLock` in `app/server/db/data-root-lock.server.ts`): the
 file records `{ pid, hostname, startedAt, bootId }` plus, on Linux, `procStartedAt` (the
@@ -641,7 +708,16 @@ still has `test-support/`; the final image does not) runs `npm run seed:demo` in
 volume and hands it to uid 1000; the `app` service then boots the final image with
 `hostname: viberr-e2e`, `init: true` and the app port published on a random loopback
 port, which the script reads with `docker compose port app 3000`. The script removes any
-leftover stack, runs `up --build --wait`, waits for `/resources/health`, passes the base
-URL to Playwright as `VIBERR_E2E_BASE_URL`, and tears the stack down with its volume
-afterwards unless `VIBERR_E2E_KEEP=1`. Details:
+leftover stack, runs `up --build --wait`, waits for `/resources/health`, requires
+`agentIsolation.status` to be `on` and runs `scripts/check-agent-isolation.sh` inside the
+app container (ruling 460: as a launched agent uid the server's `/proc/<pid>/environ`, the
+projection database and another person's home are refused, its own home and a shared
+workspace are writable, a workspace git launched with the server's overrides runs nothing
+an agent planted and a branch is fetched out of an agent-only checkout through the
+launcher's `git-upload-pack`, an agent-written checkout the server's own `rm -rf` cannot
+finish is removed by the server's replace as its persons (ruling 485), the launcher relays SIGTERM, SIGUSR2 kills the group grandchild
+included, PDEATHSIG takes the agent down with the server, `--reap` finds a detached process
+by its marker, and every refusal holds), passes the base URL to Playwright as
+`VIBERR_E2E_BASE_URL`, and tears the stack down with its volume afterwards unless
+`VIBERR_E2E_KEEP=1`. Details:
 [testing.md](../development/testing.md#4-end-to-end-suite-playwright).

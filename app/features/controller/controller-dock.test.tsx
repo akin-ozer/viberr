@@ -52,7 +52,7 @@ function taskView(over: Partial<ControllerDockView> = {}): ControllerDockView {
     conversation: null,
     messages: [],
     taskLinks: {},
-    turn: { working: false, runId: null, phase: null, step: null },
+    turn: { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
     threads: [],
     viewerOwnsActive: false,
     ...over,
@@ -596,8 +596,8 @@ describe("the controller dock (ruling 121)", () => {
           conversation: conversationFixture(),
           viewerOwnsActive: true,
           turn: working
-            ? { working: true, runId: "run_1", phase: null, step }
-            : { working: false, runId: null, phase: null, step: null },
+            ? { working: true, runId: "run_1", phase: null, step, answering: null, queued: [] }
+            : { working: false, runId: null, phase: null, step: null, answering: null, queued: [] },
         }),
       working: () =>
         working ? [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step }] : [],
@@ -666,7 +666,7 @@ describe("the controller dock (ruling 121)", () => {
     let started = false;
     const { loads, unseenLoads } = mount({
       path: "/projects/viberr/tasks/VIB-1",
-      view: () => taskView({ turn: { working: started, runId: "run_1", phase: null, step: null } }),
+      view: () => taskView({ turn: { working: started, runId: "run_1", phase: null, step: null, answering: null, queued: [] } }),
       working: () =>
         started ? [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }] : [],
     });
@@ -708,6 +708,7 @@ describe("the controller dock (ruling 121)", () => {
       text: "first",
       runId: null,
       surface: null,
+      replyTo: null,
       createdAt: "2026-09-01T10:00:00.000Z",
     };
     const second: ControllerDockView["messages"][number] = {
@@ -755,7 +756,7 @@ describe("the controller dock (ruling 121)", () => {
         taskView({
           conversation: conversationFixture(),
           messages: [
-            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "VIB-2 waits on VIB-1.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "VIB-2 waits on VIB-1.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
           taskLinks: { "VIB-2": "/projects/viberr/tasks/VIB-2", "VIB-1": "/projects/viberr/tasks/VIB-1" },
           viewerOwnsActive: true,
@@ -883,10 +884,10 @@ describe("the controller dock (ruling 121)", () => {
             lastMessageAt: "2026-09-01T10:00:00.000Z",
           },
           messages: [
-            { id: "m1", conversationId: "cnv_a", seq: 1, author: "user", userId: "u1", text: "What is this?", runId: null, surface: "/projects/viberr/tasks/VIB-1", createdAt: "2026-09-01T10:00:00.000Z" },
-            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, createdAt: "2026-09-01T10:00:05.000Z" },
+            { id: "m1", conversationId: "cnv_a", seq: 1, author: "user", userId: "u1", text: "What is this?", runId: null, surface: "/projects/viberr/tasks/VIB-1", replyTo: null, createdAt: "2026-09-01T10:00:00.000Z" },
+            { id: "m2", conversationId: "cnv_a", seq: 2, author: "controller", userId: null, text: "A **task**.", runId: "run_1", surface: null, replyTo: null, createdAt: "2026-09-01T10:00:05.000Z" },
           ],
-          turn: { working: true, runId: "run_2", phase: null, step: null },
+          turn: { working: true, runId: "run_2", phase: null, step: null, answering: null, queued: [] },
           threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
           viewerOwnsActive: true,
         }),
@@ -897,14 +898,83 @@ describe("the controller dock (ruling 121)", () => {
     fireEvent.click(trigger);
     await screen.findByText("What is this?");
     expect(screen.getByText("task", { selector: "strong" })).toBeTruthy();
-    // Two status regions by design: the panel's working row, and the
-    // visually-hidden announcer beside the trigger that survives a close.
+    // Two status regions by design (ruling 476(d)): the visually-hidden
+    // announcer beside the trigger, which survives a close and says a turn is
+    // working, and the open panel's, which says the thread on screen replied.
+    // The working row itself is visual only.
     expect(
       screen.getAllByRole("status").map((el) => el.textContent).join(" | "),
     ).toContain("Controller is working");
     await waitFor(() => expect(trigger.querySelector(".live-dot")).not.toBeNull());
     // History never wears the entry animation marker.
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
+  });
+
+  /**
+   * Ruling 465 (F40-8): the dock reads a transcript the way the page does —
+   * each reply under the message it answers, "answering now" and the working
+   * row on the answered message, "queued · N ahead" on the ones behind it.
+   */
+  it("ruling 465: renders reply order and the queue from the server's view", async () => {
+    const at = "2026-09-24T20:00:00.000Z";
+    const msg = (id: string, seq: number, author: "user" | "controller", text: string, replyTo: string | null = null) => ({
+      id,
+      conversationId: "cnv_a",
+      seq,
+      author,
+      userId: author === "user" ? "u1" : null,
+      text,
+      runId: author === "user" ? null : `run_${id}`,
+      surface: null,
+      replyTo,
+      createdAt: at,
+    });
+    mount({
+      path: "/projects/viberr/tasks/VIB-1",
+      view: () =>
+        taskView({
+          conversation: {
+            id: "cnv_a",
+            userId: "u1",
+            userLabel: "arda@viberr.dev",
+            projectSlug: "viberr",
+            taskKey: "VIB-1",
+            title: "Dossier",
+            createdAt: at,
+            updatedAt: at,
+            lastMessageAt: at,
+          },
+          messages: [
+            msg("p1", 1, "user", "Part one."),
+            msg("p2", 2, "user", "Part two."),
+            msg("p3", 3, "user", "Part three."),
+            msg("r1", 4, "controller", "Filed part one.", "p1"),
+          ],
+          turn: {
+            working: true,
+            runId: "run_live",
+            phase: null,
+            step: null,
+            answering: "p2",
+            queued: [{ messageId: "p3", ahead: 1 }],
+          },
+          threads: [{ id: "cnv_a", title: "Dossier", lastMessageAt: at, unread: false }],
+          viewerOwnsActive: true,
+        }),
+      working: () => [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" }));
+    await screen.findByText("Part three.");
+    const order = [...document.querySelectorAll(".dock-msgs > .ctl-msg, .dock-msgs > .ctl-working")].map((el) =>
+      el.classList.contains("ctl-working") ? "WORKING" : (el.querySelector(".md-body")?.textContent ?? "").trim(),
+    );
+    // CANARY: map the dock's `messages` in seq order again.
+    expect(order).toEqual(["Part one.", "Filed part one.", "Part two.", "WORKING", "Part three."]);
+    const states = [...document.querySelectorAll(".dock-msgs > .ctl-msg")].map(
+      (el) => el.querySelector("[data-msg-state]")?.textContent ?? null,
+    );
+    // CANARY: drop <MessageState> from the dock's header.
+    expect(states).toEqual([null, null, "answering now", "queued · 1 ahead"]);
   });
 });
 
@@ -1275,5 +1345,89 @@ describe("ruling 459: the dock's deferred half", () => {
       expect(trigger.getAttribute("aria-expanded")).toBe("true");
       expect(dock.hasAttribute("data-sheet-drag")).toBe(false);
     });
+  });
+});
+
+/**
+ * Ruling 476(c) and (d) in the dock: the page's rules, in the panel a person
+ * carries onto every page. Live, the dock's transcript was 400px wide at every
+ * desktop width, so a reply opened at its tail there even on a desktop, and the
+ * announcer beside its button cleared to "" when the reply on screen landed.
+ */
+describe("ruling 476: the dock meets a reply at its first line, and says it arrived", () => {
+  const at = "2026-09-24T23:40:00.000Z";
+  const msg = (id: string, seq: number, author: "user" | "controller", text: string, replyTo: string | null = null) => ({
+    id,
+    conversationId: "cnv_a",
+    seq,
+    author,
+    userId: author === "user" ? "u1" : null,
+    text,
+    runId: author === "user" ? null : `run_${id}`,
+    surface: null,
+    replyTo,
+    createdAt: at,
+  });
+  const idle = { working: false, runId: null, phase: null, step: null, answering: null, queued: [] };
+
+  function body(messages: ReturnType<typeof msg>[], working: boolean) {
+    const turn = working ? { ...idle, working: true, runId: "run_live", answering: "p1" } : idle;
+    return (
+      <MemoryRouter>
+        <DockPanelBody
+          current={taskView({ conversation: conversationFixture(), messages, turn, viewerOwnsActive: true })}
+          turn={turn}
+          unseen={[]}
+          threadsOpen={false}
+          busy={false}
+          disabled={false}
+          text=""
+          onText={() => {}}
+          onSubmit={() => {}}
+          onPick={() => {}}
+          onLeave={() => {}}
+          composerRef={{ current: null }}
+          onMount={() => {}}
+        />
+      </MemoryRouter>
+    );
+  }
+
+  it("(c) scrolls to the first line of a reply that lands, not to the end", () => {
+    // CANARY: restore `el.scrollTop = el.scrollHeight` in the dock's effect.
+    const tops = new Map([["p1", 0], ["r1", 700]]);
+    const box = () => document.querySelector<HTMLElement>(".dock-transcript");
+    const spies = [
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("dock-transcript") ? 3000 : 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("dock-transcript") ? 388 : 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const top = tops.get(this.dataset.messageId ?? "");
+        return DOMRect.fromRect({ x: 0, y: top === undefined ? 0 : top - (box()?.scrollTop ?? 0), width: 388, height: 100 });
+      }),
+    ];
+    try {
+      const { rerender } = render(body([msg("p1", 1, "user", "Is the feed live?")], true));
+      expect(box()!.scrollTop).toBe(3000);
+      rerender(body([msg("p1", 1, "user", "Is the feed live?"), msg("r1", 2, "controller", "Yes. Both feeds answer.", "p1")], false));
+      expect(box()!.scrollTop).toBe(692);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
+  it("(d) the open panel says the thread on screen replied, and its working row is no region", () => {
+    // CANARY: drop the panel's announcer: the only status left is the
+    // button's, which leaves the thread on screen out.
+    const { rerender } = render(body([msg("p1", 1, "user", "Is the feed live?")], true));
+    const region = screen.getByRole("status");
+    expect(region.textContent).toBe("");
+    expect(document.querySelector(".ctl-working")!.hasAttribute("role")).toBe(false);
+    rerender(body([msg("p1", 1, "user", "Is the feed live?"), msg("r1", 2, "controller", "Yes. Both feeds answer.", "p1")], false));
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region.textContent).toBe("Controller replied: Yes.");
   });
 });

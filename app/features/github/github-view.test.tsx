@@ -32,6 +32,7 @@ const violationCredential: ProjectCredentialHealth = {
   masked: "github_pat_••••42af",
   lastValidatedAt: "2026-07-10T00:00:00.000Z",
   validation: null,
+  connectionId: "akin-ozer",
   requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
   scopes: [
     { id: "repo", ok: true, source: "header" },
@@ -73,6 +74,7 @@ const noneCredential: ProjectCredentialHealth = {
   patId: null,
   label: null,
   masked: null,
+  connectionId: undefined,
   scopes: [],
 };
 
@@ -400,7 +402,7 @@ describe("CredentialCard states", () => {
 });
 
 describe("CredentialManageActions (finding #13)", () => {
-  it("unconfigured → only Attach; configured → Rotate + confirmed Remove", () => {
+  it("unconfigured → only Attach; configured → Re-attach + confirmed Remove", () => {
     const onSet = vi.fn();
     const onClear = vi.fn();
     const attach = render(
@@ -426,7 +428,7 @@ describe("CredentialManageActions (finding #13)", () => {
         onClear={onClear}
       />,
     );
-    fireEvent.click(bound.getByText("Rotate credential"));
+    fireEvent.click(bound.getByText("Re-attach connection"));
     expect(onSet).toHaveBeenCalledTimes(2);
     // Ruling 149: the destructive half of this row wears the danger label, the
     // rotate/attach half stays neutral. Canary: drop `danger` from the Remove
@@ -435,7 +437,7 @@ describe("CredentialManageActions (finding #13)", () => {
       Array.from(bound.getByText("Remove credential").closest("button")!.classList),
     ).toContain("danger");
     expect(
-      Array.from(bound.getByText("Rotate credential").closest("button")!.classList),
+      Array.from(bound.getByText("Re-attach connection").closest("button")!.classList),
     ).not.toContain("danger");
     // Remove is gated by the confirm dialog.
     fireEvent.click(bound.getByText("Remove credential"));
@@ -499,6 +501,66 @@ describe("RepositoryPanel", () => {
     // nothing implemented, asserted regardless of the (now deleted) toggle.
     expect(rows[2]!.textContent).toContain("every task uses this repository");
     expect(container.textContent).not.toContain("override");
+  });
+
+  /**
+   * Ruling 468 (F40-12): an existing repository with no commit is said as a
+   * fact Viberr acts on, never left for a person to find at the first run.
+   */
+  it("ruling 468: an empty repository says Viberr will make its first commit", () => {
+    const panel = (empty: boolean) =>
+      render(
+        <RepositoryPanel
+          data={{
+            project: { slug: "web", name: "Website", repo: "akin-ozer/website", defaultBranch: "main" },
+            connection: {
+              status: "connected",
+              repo: "akin-ozer/website",
+              remoteDefaultBranch: "main",
+              private: false,
+              empty,
+            },
+            credential: noneCredential,
+          }}
+          onOpenTask={() => {}}
+          canSeeCredential
+        />,
+      );
+    // CANARY: drop the Contents row and the empty repository reads as any other.
+    const { container } = panel(true);
+    const contents = [...container.querySelectorAll(".kv-row")].find((r) => r.textContent?.startsWith("Contents"));
+    expect(contents?.textContent).toBe(
+      "Contentsempty: Viberr will create the first commit on main before the first task branch",
+    );
+    cleanup();
+    expect(panel(false).container.textContent).not.toContain("first commit");
+  });
+
+  it("R-repo-2: an empty repository behind a token that can only read names the token, not a commit", () => {
+    const { container } = render(
+      <RepositoryPanel
+        data={{
+          project: { slug: "web", name: "Website", repo: "akin-ozer/website", defaultBranch: "main" },
+          connection: {
+            status: "connected",
+            repo: "akin-ozer/website",
+            remoteDefaultBranch: "main",
+            private: false,
+            empty: true,
+            readOnly: true,
+          },
+          credential: noneCredential,
+        }}
+        onOpenTask={() => {}}
+        canSeeCredential
+      />,
+    );
+    // CANARY: drop the read-only wording and the row promises a commit GitHub
+    // will refuse.
+    const contents = [...container.querySelectorAll(".kv-row")].find((r) => r.textContent?.startsWith("Contents"));
+    expect(contents?.textContent).toBe(
+      "Contentsempty, and the token can only read it: Viberr cannot create the first commit on main until the token can push",
+    );
   });
 
   it("says an unset repository in words, not a dash (ruling 148)", () => {
@@ -1012,7 +1074,7 @@ describe("R19-11: the credential card is disclosed only to the roles that may ch
     expect(container.textContent).toContain("Re-check scopes");
     expect(container.textContent).not.toContain("Grant scope");
     expect(container.querySelector(".cred-manage")).not.toBeNull();
-    expect(container.textContent).toContain("Rotate credential");
+    expect(container.textContent).toContain("Re-attach connection");
     // The withheld-note is the viewer's line, not a second permanent fixture.
     expect(container.textContent).not.toContain(
       "Credential details need the Manage the GitHub credential grant",
@@ -1424,12 +1486,12 @@ describe("ruling 368: the GitHub page's requests in flight", () => {
     expect(update.hasAttribute("aria-busy")).toBe(false);
   });
 
-  it("a rotation says it is rotating while Remove only waits", async () => {
+  it("a re-attach says it is re-attaching while Remove only waits", async () => {
     const held = heldAction();
     const { container } = renderHeld(held.action);
-    fireEvent.click(button(container, "Rotate credential"));
+    fireEvent.click(button(container, "Re-attach connection"));
     await waitFor(() =>
-      expect(button(container, "Rotating…").getAttribute("aria-busy")).toBe("true"),
+      expect(button(container, "Re-attaching…").getAttribute("aria-busy")).toBe("true"),
     );
     const remove = button(container, "Remove credential");
     expect(remove.disabled).toBe(true);
@@ -1458,12 +1520,12 @@ describe("ruling 368: CredentialManageActions names the request in flight", () =
     expect(attach.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
   });
 
-  it("a removal in flight: Removing… on Remove, Rotate only waits", () => {
+  it("a removal in flight: Removing… on Remove, Re-attach only waits", () => {
     const c = renderRow(true, "clear-credential");
     const [rotate, remove] = [...c.querySelectorAll<HTMLButtonElement>("button")];
     expect(remove!.textContent).toBe("Removing…");
     expect(remove!.getAttribute("aria-busy")).toBe("true");
-    expect(rotate!.textContent).toBe("Rotate credential");
+    expect(rotate!.textContent).toBe("Re-attach connection");
     expect(rotate!.disabled).toBe(true);
     expect(rotate!.hasAttribute("aria-busy")).toBe(false);
   });
@@ -1474,5 +1536,67 @@ describe("ruling 368: CredentialManageActions names the request in flight", () =
       expect(b.hasAttribute("aria-busy")).toBe(false);
       expect(b.disabled).toBe(false);
     }
+  });
+});
+
+/**
+ * Ruling 480 (F40-45): "Rotate credential" rotated nothing (it binds the
+ * repository owner's connection again) and nothing on the card pointed at the
+ * one control that replaces a token, Instance settings → Update token.
+ */
+describe("ruling 480: the credential row says what re-attach does and where a token is replaced", () => {
+  const renderPage = (instanceAdmin: boolean) => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/github",
+        Component: () => (
+          <ToastProvider>
+            <GithubViewPage
+              data={viewData({ credential: violationCredential })}
+              reconcileCheck={NO_CHECK_ON_RECORD}
+              myRole="maintainer"
+              instanceAdmin={instanceAdmin}
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    return render(<Stub initialEntries={["/projects/viberr-core/github"]} />);
+  };
+
+  // Canary: drop the `Replace token` link from `CredentialManageActions`, or
+  // pass the page's `instanceAdmin` as false, and the link is gone.
+  it("an instance admin gets a link to the bound connection's Update token", () => {
+    const { getByRole, queryByText, container } = renderPage(true);
+    expect(queryByText("Rotate credential")).toBeNull();
+    const reattach = getByRole("button", { name: "Re-attach connection" });
+    expect(reattach.getAttribute("title")).toContain("It does not replace a token");
+    const link = getByRole("link", { name: "Replace token" });
+    expect(link.getAttribute("href")).toBe("/org/settings?tab=connections&update=akin-ozer");
+    expect(container.querySelector("[data-replace-token-note]")).toBeNull();
+  });
+
+  it("a maintainer who cannot open Instance settings reads where a token is replaced", () => {
+    const { queryByRole, container } = renderPage(false);
+    expect(queryByRole("link", { name: "Replace token" })).toBeNull();
+    expect(container.querySelector("[data-replace-token-note]")!.textContent).toBe(
+      "Re-attaching never replaces a token. An instance admin replaces it in Instance settings, under GitHub connections.",
+    );
+  });
+
+  it("an unbound project offers Attach and says nothing about replacing", () => {
+    const { container, getByText } = render(
+      <CredentialManageActions
+        configured={false}
+        canManage
+        inFlight={null}
+        onSet={() => {}}
+        onClear={() => {}}
+        replaceHref="/org/settings?tab=connections&update=akin-ozer"
+      />,
+    );
+    expect(getByText("Attach credential")).toBeTruthy();
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.querySelector("[data-replace-token-note]")).toBeNull();
   });
 });

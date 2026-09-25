@@ -61,6 +61,11 @@ import { toError } from "~/shared/errors";
  *    Profile — this endpoint reports instance facts, not somebody's account.
  *  - `disk: null` (unmeasurable) is NOT degraded — "we could not measure" is
  *    not "there is no space", and `build` identity is informational only.
+ *  - `agentIsolation.status` `degraded` → degraded as `agentIsolation` (ruling
+ *    460): the image's launcher exists but its boot probe could READ the store
+ *    as another uid (a bind mount enforcing no permissions), so agents could
+ *    read the database. `off` is NOT degraded: a host without the launcher (the
+ *    dev server) never promised the isolation.
  *
  * 503 `{ ok: false, status: "down" }` when the database cannot be read — the
  * one condition that means this process cannot serve at all.

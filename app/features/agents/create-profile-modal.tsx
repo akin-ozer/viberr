@@ -121,7 +121,10 @@ const EFFORT_LABEL = new Map<string, string>([
   ["max", "Maximum"],
 ]);
 
-function effortLabel(id: string): string {
+/** An effort tier's display name, as the picker offers it. Exported for the
+ *  profile panel's runtime row (ruling 479(e)), which names the stored tier in
+ *  the same words; the two modules already share one route chunk. */
+export function effortLabel(id: string): string {
   return EFFORT_LABEL.get(id) ?? id;
 }
 
@@ -1519,7 +1522,10 @@ export function CreateProfileModal({
   // AP-07: a template-sourced profile FORKS on save (the deployment stores a
   // full definition snapshot that wins over the org template from then on) —
   // the confirm button says so instead of promising an inheritance that stops.
-  const forksTemplate = editing && initial.source === "template";
+  // Ruling 479(g): only while the copy still follows the template. A copy that
+  // already holds its snapshot (a library deploy, any earlier save) forked
+  // then, and saying so again implied template edits still reached it.
+  const forksTemplate = editing && initial.tracksTemplate;
   const backendLabel = BACKENDS.find((b) => b.id === backend)?.label ?? "";
   const hint = error
     ? error

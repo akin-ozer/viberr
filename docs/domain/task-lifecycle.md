@@ -96,7 +96,10 @@ and seated in the same `task.md` write, before the operator's `create` trigger, 
 first triage run bills the named owner and is refused honestly when they have no
 credential. The seat is written with the same `assign` timeline event a take through
 `setOwner` writes ("Took task ownership by creating the task …" or "Seated <name> as
-owner at creation …"), and `task.created` details carry `ownerUserId` and `seat:
+owner at creation …"); a task a goal chain starts gets that event, and its "Waits on
+other work" note, signed `system:goal-chain` instead ("Started by **goal-N** as link M, on
+<creator>'s authority, with <owner> as owner. …", ruling 477(b)), so Activity does not
+credit a person with the chain's act. `task.created` details carry `ownerUserId` and `seat:
 creator | named | none`; a named owner who is not the creator is notified (§7). The
 reason is the credential principal: every agent run on a task bills the OWNER's own
 Claude and Codex accounts, so a task born unowned could not run the operator it was
@@ -267,7 +270,12 @@ run does not (ruling 216).
   its delivering run last saved files (`files:<deliveredAt>`), so a report or attachment
   deliverable is reviewable like a commit and a later save stales older verdicts. Never
   hand-edit it; the projection re-derives it from `workRevision`, `deliveredAt`,
-  `verdicts`, `engagements`, `noChanges` and `acceptance`.
+  `verdicts`, `engagements`, `noChanges` and `acceptance`. A verdict's `quality` event (and
+  the bell notification carrying its title) is titled from the validation it leaves:
+  "Changes requested"; "Review passed"; "Approval noted, rework still needed" only when
+  another required reviewer requested changes (`failing`, naming them); "Approval noted,
+  waiting on <names>" while required reviewers still owe a verdict (`changed`); otherwise
+  "Approval noted" (ruling 478(g)).
 
 **Nothing moving.** `sweepStrandedTasks` (`stranded-sweep.server.ts`, ruling 330) runs
 after each schedule tick and finds a task untouched for 15 minutes
@@ -430,6 +438,20 @@ writer.
   already in flight is delivered when the run completes: `deliverDeferredMention`
   gathers every human comment addressed to the agent since the busy run started into one
   directive, and a second failure writes no second note (rulings 203, 205).
+- **Review notes are comments to the deliverer** (ruling 484,
+  `review-notes.server.ts`). Two doors write the same comment through `commentToAgent`:
+  the task page's Changes panel (`review-notes`: a person's line notes on the delivered
+  revision's patches) and the reconciler's review relay (a project member's GitHub
+  review of the delivered head, posted as that member, audit label `· via GitHub`,
+  [github-delivery.md §6](github-delivery.md#6-reconciliation-and-freshness)). It opens
+  `@<deliverer handle> Review notes on \`<sha7>\` (PR #N):` (the relay adds "from
+  GitHub (a review by <login>)") and lists one note per item as `` `path:line` ``
+  (`path:start-end` for a range, "(removed line)" for a line of the old file, a bare
+  `` `path` `` for a whole file, "Requested changes" for a review's own body). Every
+  other `@` in a note is escaped, so the deliverer is the one addressee and a note
+  cannot reroute it to the operator or notify a GitHub login. The deliverer resumes on it
+  exactly as on a typed mention, under the same role gate: a contributor's notes post and
+  start nothing, and the toast says so.
 - A comment written by the operator or an agent starts no run for an agent it tags; it is
   stamped with the handles that will read nothing (rulings 214, 262). A directive the
   operator writes to an agent (`audience: "agent"`) notifies no person named inside it
@@ -497,7 +519,9 @@ bound to the review subject (§6). A run whose workspace could not be provisione
 records no verdict (ruling 248). The reason is capped at 2,000 characters
 (`VERDICT_REASON_MAX_CHARS`), and the full report stays on the timeline as a "Review
 verdict" comment that compaction never folds (rulings 292, 317). The standing verdicts
-ride whole in every agent's canonical anchor (ruling 392). A project member's GitHub
+ride whole in every agent's canonical anchor (ruling 392), and so does the project's gate
+record on the revision under review, each gate's outcome, time and log, with the rule
+that an agent never re-runs the gates to report them (ruling 482). A project member's GitHub
 approval on the PR, whose `commit_id` equals the delivered head and whose login maps
 to a member through `users.github_handle`, counts as an approving verdict (ruling 68);
 anything ambiguous fails closed with the reason recorded.
@@ -640,8 +664,9 @@ of the drive and queued only if the drive stopped without moving or dispatching 
 recorded as an adoption: a `github` event and the audit row `github.pr.adopted` (F34-9);
 the reconciler's adoption also notifies the task's watchers, the delivery's does not,
 because the person who asked for it is reading the answer. Rework on a task whose PR is
-already open is delivered the same way: the push moves the PR's head; nobody is ever
-asked to push by hand. The task page offers the same door as "Push `<sha>` to PR #N"
+already open is delivered the same way: the push moves the PR's head, and the PR's
+description is rewritten to describe the new revision unless a person edited it on
+GitHub (ruling 474); nobody is ever asked to push by hand. The task page offers the same door as "Push `<sha>` to PR #N"
 whenever the open PR does not carry the delivered revision (ruling 134(c)), and shows a
 disabled control naming the refusal for a diverged remote. A task whose deliverable is
 not a commit (`deliveredAt` set, no commits) is told that no commits is the right outcome
@@ -653,7 +678,11 @@ delivery ("Transition: KNC-20 returns from Merge to Review: `17e4a8c` changed af
 last verdict, so the reviewers judge it there"; audit `task.transition` with `via:
 delivery`). The redirect option of a branch-conflict packet does the same when it is
 resolved (`rework: true` on the option; `via: packet_redirect`), and the option's detail
-says so before the person decides.
+says so before the person decides. Ruling 475: the operator's `update_branch_from_base`
+hands a conflict to the deployed, repo-write delivering agent itself, and that handoff
+returns the task in its own write (`via: conflict_handoff`, "WEB-2 returns from Merge to
+Review, so the reviewers judge the resolved branch before anyone accepts it"); the
+packet is the fallback when no agent can take the conflict.
 Details in [github-delivery.md](github-delivery.md).
 
 ## 11. Acceptance and the endings
@@ -697,9 +726,16 @@ them.
    recommendation card prints the refusal as an alert and its Apply refuses the click,
    the accept dialog prints it above a disabled confirm, the GitHub card wears the
    "conflicts" pill, and the reconciler withdraws a pending `accept_completion` card the
-   moment `mergeable` flips to conflicting, with a "Conflict:" note on the timeline. The
-   accept dialog also says what CI reports when the checks are not green (failing or
-   pending); checks are not a gate (ruling 304).
+   moment `mergeable` flips to conflicting, with a "Conflict:" note on the timeline, and
+   an open decision packet offering the acceptance too, telling the watchers why and
+   waking the operator (`pr-conflicting`, ruling 475(b)). After every merge Viberr
+   re-reads the project's other open PRs (`recheckOpenReviewPrs`), so a sibling the merge
+   put in conflict flips before anyone presses its Accept. The accept dialog also says
+   what CI reports when the checks are not green (failing or pending); checks are not a
+   gate (ruling 304). Its "Collides" row names every other open PR that changes a path
+   this one changes ("Merging this will likely put WEB-2's PR #3 in conflict on
+   `package.json`. ..."), from the task page's loader and from the board's own cards
+   (ruling 475(b)).
 3a. **The base refresh, once** (ruling 162): after the gate re-check and before the
    merge, the acceptance ceremony brings the branch up to date with the base through the
    same workspace merge `update_branch_from_base` performs (`refreshBranchAsPerson`),
@@ -742,9 +778,11 @@ them.
    appends the same list, each gate reduced to its FIRST sentence ("Bypassed: Review
    skipped; the review gate; VIB-1 is at In Progress, not Review; This task's latest
    review requests changes on the current revision; the open decision "..." withdrawn
-   unanswered"). The remedy half of each refusal ("Move the task through the workflow
-   first") stays in `bypassedGates` only. The force dialog lists the same gates
-   (`AcceptanceAffordance.blockedGates`, ruling 393). Force never bypasses two facts: a
+   unanswered."). The remedy half of each refusal ("Move the task through the workflow
+   first") stays in `bypassedGates` only. A decision the force ANSWERS (ruling 471, step
+   7) is not withdrawn, so `withdrawnPacket` is null and the list does not name it. The
+   force dialog lists the same gates (`AcceptanceAffordance.blockedGates`, ruling 393).
+   Force never bypasses two facts: a
    closed unmerged PR (ruling 37) and an **archived** task (ruling 123) — restore it
    first. Both are `forceIrreducibleRefusal`, and on an archived task the affordance is
    withdrawn rather than disabled. The offer itself appears only once the task has
@@ -773,6 +811,18 @@ them.
    rule: `validation` is derived from the ENGAGED required reviewers alone, so a task
    whose declared reviewer never ran can read `healthy` (another reviewer approved) or
    `changed` while the acceptance box beside it prints the rule's sentence.
+4b. **Project gates** (ruling 482): when `project.md` declares `gates`, every one must
+   have exited 0 in Viberr's own run on the revision under review (`gateRun`, bound to the
+   revision id and sha). A run that is missing, queued or running, made under an earlier
+   gate list, failed, or could not execute refuses with its own sentence ("The project's
+   gates failed on WEB-4's revision `a95c337`: 3/4 exit 0 (`build` exit 1). Rework the
+   branch; …"). ONE pure gate, `projectGatesRefusal` (`app/shared/project-gates.ts`),
+   read by the refusal stack after the verdict gate, by the projection's
+   `validation_block_reason` (the `projects` row carries the list as `gates_json`, and an
+   edit cascades into every task row), by the operator's `notAcceptableReason` and by the
+   force disclosure, which names it among the bypassed gates. Force accept bypasses it.
+   A `verified` revision and a files-only delivery owe no gates. How the run happens is
+   [github-delivery.md §5](github-delivery.md#5-revisions-verdicts-and-acceptance).
 5. **PR head containment** (`acceptancePrHeadCheck`): the PR head must contain the
    delivered commit. A head ahead of the reviewed revision is accepted with a disclosed
    divergence (ruling 42; since ruling 132 the disclosure is the classified drift
@@ -801,9 +851,20 @@ them.
    re-read, so the `completion` event names the head that actually merged and the base
    refresh the ceremony made (ruling 318), and it is dated when it is written, on the
    packet path as on the direct one (ruling 327). The write sets stage → terminal,
-   `waiting: none`, `readiness: ready`, clears `heldAtStage`, the packet (withdrawn with
-   a `task.packet.withdrawn` row) and the recommendations. A full-autonomy **operator**
-   acceptance records `pr.state: accepted` and leaves the merge to a human
+   `waiting: none`, `readiness: ready`, clears `heldAtStage`, the packet and the
+   recommendations. The open packet is ANSWERED when a person's acceptance performs one
+   of its options (ruling 471, `acceptanceAnswerOf` in
+   `app/shared/packet-acceptance-answer.ts`): a plain acceptance answers
+   `accept_completion`; a forced one answers `force_accept`, else `accept_completion`;
+   the recommended option of the kind wins, and a decision already decided (`awaiting`)
+   takes no answer. The answer is the packet door's record: a `task.packet.resolved` row
+   under the person with `optionKind`, `optionTitle`, `packetKind` and `via` (`accept` or
+   `force-accept`), the decision notifications (packet, agent question, approval) marked read, no operator
+   hand-off, and one clause on the completion event ("This acceptance answers the open
+   decision "…" with "…"."). Any other open packet is withdrawn (F32-11): a "Withdrew the
+   open decision" note and a `task.packet.withdrawn` row with `by`. The operator's own
+   full-autonomy acceptance answers nothing, so it always withdraws. A full-autonomy
+   **operator** acceptance records `pr.state: accepted` and leaves the merge to a human
    (`complete-merge` intent, `completeTaskMerge`, after re-running the head check)
    because `merge-pull-request` is always human (ruling 40). After a successful merge
    the `delete-branch-after-merge` guardrail (default on) deletes the remote task

@@ -45,6 +45,9 @@ export default [
   // Ruling 457: the bell popover's list, loaded by the bell on intent (pages
   // carry only its counts).
   route("resources/notifications", "routes/resources.notifications.ts"),
+  // Ruling 481(c): the unread decisions a tab's title counts and a desktop
+  // notification announces, read by the root-mounted attention watcher.
+  route("resources/attention", "routes/resources.attention.ts"),
   route("prefs/theme", "routes/prefs.theme.tsx"),
   // SSE stream (Phase 6) — scoped live updates driving route revalidation.
   route("resources/events", "routes/resources.events.ts"),
@@ -73,6 +76,10 @@ export default [
   // lives on the server and the browser has no other way to see what the vendor
   // printed. Keyed by the session user; it reads nobody else's sign-in.
   route("resources/backend-login", "routes/resources.backend-login.ts"),
+  // Ruling 469: where an MCP server's authorization server sends an org
+  // admin's browser back after an OAuth sign-in started in Instance settings.
+  // A resource route: it seals the tokens and answers a plain page.
+  route("resources/mcp-oauth/callback", "routes/resources.mcp-oauth.callback.ts"),
 
   // R19-19: one task attachment (browser-produced screenshot/PDF). A resource
   // route OUTSIDE the workspace layout — it serves raw bytes, member-only.
@@ -80,6 +87,9 @@ export default [
     "projects/:slug/tasks/:key/attachments/:file",
     "routes/task-attachment.ts",
   ),
+  // Ruling 484: the task page's Changes panel read (the delivered revision's
+  // files and patches), loaded by the panel itself, member-only.
+  route("projects/:slug/tasks/:key/changes", "routes/task-changes.ts"),
 
   // Bare /projects → home (the project list lives at `/`), not a 404 (N5).
   route("projects", "routes/projects.tsx"),

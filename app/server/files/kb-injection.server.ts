@@ -135,7 +135,7 @@ function outlineOf(abs: string, size: number): string[] {
   return out;
 }
 
-interface KbDoc {
+export interface KbDoc {
   /** Store-relative path within the KB folder (forward slashes), for headings. */
   rel: string;
   abs: string;
@@ -143,8 +143,10 @@ interface KbDoc {
 }
 
 /** Recursively collect injectable docs under `dir`, sorted by relative path so
- *  injection order is deterministic (and stable across runs). */
-function collectKbDocs(dir: string): KbDoc[] {
+ *  injection order is deterministic (and stable across runs). Exported for the
+ *  proposal reader (ruling 483), which walks the documents a run is indexed
+ *  with the same symlink and containment rules. */
+export function collectKbDocs(dir: string): KbDoc[] {
   const out: KbDoc[] = [];
   // F10-18: never follow a symlink out of the KB root, and never loop on a
   // symlink cycle. `lstatSync` does not follow symlinks; symlinked entries are
@@ -369,20 +371,21 @@ const RULINGS_BINDING_LINE =
   "you included. Read it — the obligation is not conditional on your finding it " +
   "interesting.";
 
-/** One document out of one knowledge base, or `null` when this KB has no such
- *  document. The caller decides WHICH knowledge bases may be asked for — this
- *  reader does not know a run's grants and must never be handed an
- *  unfiltered name (ruling 283). */
-export function readKbDoc(
+/**
+ * Where one document of one knowledge base lives, or `null` when the KB holds
+ * no such readable document. The reader below and the proposal writer (ruling
+ * 483) share it, so "which file does this path name" has one answer. The path
+ * comes from a model, so it is treated exactly like a request from outside:
+ * normalised, then proven to land inside this KB's folder. The realpath
+ * comparison is what stops `../` and a symlink alike; `kbDirPath` has already
+ * contained the KB NAME the same way.
+ */
+export function resolveKbDocPath(
   kb: string,
   docPath: string,
   dataRoot?: string,
-): { text: string; truncated: boolean; rel: string } | null {
+): { abs: string; rel: string } | null {
   const dir = kbDirPath(kb, dataRoot);
-  // The doc path comes from a model, so it is treated exactly like a request
-  // from outside: normalised, then proven to land inside this KB's folder. The
-  // realpath comparison is what stops `../` and a symlink alike; `kbDirPath`
-  // has already contained the KB NAME the same way.
   const rel = docPath.replace(/\\/g, "/").replace(/^\/+/, "").trim();
   if (!rel || !isInjectableKbDoc(path.basename(rel))) return null;
   const abs = path.resolve(dir, rel);
@@ -406,9 +409,23 @@ export function readKbDoc(
     return null;
   }
   if (!st.isFile()) return null;
-  const raw = readFileSync(real, "utf8");
+  return { abs: real, rel: path.relative(root, real).split(path.sep).join("/") };
+}
+
+/** One document out of one knowledge base, or `null` when this KB has no such
+ *  document. The caller decides WHICH knowledge bases may be asked for — this
+ *  reader does not know a run's grants and must never be handed an
+ *  unfiltered name (ruling 283). */
+export function readKbDoc(
+  kb: string,
+  docPath: string,
+  dataRoot?: string,
+): { text: string; truncated: boolean; rel: string } | null {
+  const doc = resolveKbDocPath(kb, docPath, dataRoot);
+  if (!doc) return null;
+  const raw = readFileSync(doc.abs, "utf8");
   return {
-    rel: path.relative(root, real).split(path.sep).join("/"),
+    rel: doc.rel,
     text: raw.slice(0, KB_DOC_READ_CHARS),
     // Reported, never hidden: a clipped document that reads as complete is how
     // a model states a half-read file as fact.

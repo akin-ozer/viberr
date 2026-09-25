@@ -67,7 +67,7 @@ function open(props: {
  * close. (Same copy class as F19-23, one dialog over.)
  */
 describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", () => {
-  function withPacket(title: string | null, force = false): string {
+  function withPacket(title: string | null, force = false, answersWith: string | null = null): string {
     const { container } = render(
       <AcceptConfirm
         task={detail({ stage: force ? "triage" : "review" })}
@@ -78,6 +78,7 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
         atBoundary={!force}
         blockedReason={force ? "An open blocked decision is holding this task." : null}
         openPacketTitle={title}
+        answersWith={answersWith}
         busy={false}
         onCancel={() => {}}
         onConfirm={() => {}}
@@ -168,6 +169,31 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
 
   it("shows NO Withdraws row when there is no open decision", () => {
     expect(withPacket(null)).not.toContain("Withdraws");
+  });
+
+  /**
+   * Ruling 471, live on WEB-1: the operator's decision recommended the very
+   * acceptance the owner then pressed, and this row told them it "closes
+   * unanswered". When the loader says the acceptance answers the decision
+   * (`answersWith`, the option it answers with), the row says that instead.
+   */
+  it("ruling 471: an acceptance the loader says answers the decision reads Answers, naming the option", () => {
+    // Canary: drop the `answersWith` arm of the open-decision row and both
+    // doors read "Withdraws … closes unanswered" again.
+    const title = "WEB-1 ready to accept: both reviewers approved PR #1";
+    const accept = withPacket(title, false, "Accept WEB-1 and merge PR #1");
+    expect(accept).toContain("Answers");
+    expect(accept).toContain(`the open decision "${title}" with "Accept WEB-1 and merge PR #1"`);
+    expect(accept).not.toContain("Withdraws");
+    expect(accept).not.toContain("closes unanswered");
+    const force = withPacket(title, true, "Force-accept as admin");
+    expect(force).toContain("Answers");
+    expect(force).toContain('with "Force-accept as admin"');
+    expect(force).not.toContain("Withdraws");
+    // Without the loader's answer the same decision is still withdrawn.
+    const withdrawn = withPacket(title, false, null);
+    expect(withdrawn).toContain("Withdraws");
+    expect(withdrawn).not.toContain("Answers");
   });
 });
 
@@ -748,5 +774,148 @@ describe("ruling 304: the accept ceremony states the checks it merges past", () 
     // Nothing reported is NOT "green": no claim either way, no row at all.
     const none = ceremonyText(null);
     expect(none).not.toMatch(/checks (failing|running|unknown|passing)/);
+  });
+});
+
+/**
+ * Ruling 475 (F40-55 (c)): live on akinozer-com the owner accepted WEB-4 while
+ * WEB-2's open PR #3 changed the same `package.json`. Viberr knew (both PRs'
+ * `pr.paths`), and the dialog that authorizes the merge said nothing, so
+ * WEB-2's acceptance was refused a minute later.
+ */
+describe("ruling 475: the ceremony names the open pull requests this merge will likely conflict", () => {
+  const OPEN_PR = { number: 2, state: "review" as const, title: "[WEB-4] work" };
+
+  function collidesRow(props: {
+    collisions: {
+      taskKey: string;
+      prNumber: number;
+      paths: string[];
+      partial: boolean;
+    }[];
+    pr?: AcceptConfirmTask["pr"];
+  }): HTMLElement | null {
+    const { container } = render(
+      <AcceptConfirm
+        task={detail({ pr: props.pr === undefined ? OPEN_PR : props.pr })}
+        workRevisionSha={"a".repeat(40)}
+        defaultBranch="main"
+        ceremony={{ mode: "accept" }}
+        blockedReason={null}
+        mergeCollisions={props.collisions}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    return container.ownerDocument.querySelector<HTMLElement>("[data-merge-collisions]");
+  }
+
+  it("names the one other PR and the shared file, and what happens after the merge", () => {
+    // CANARY: stop rendering `CollidesRow` and the row is gone.
+    const row = collidesRow({
+      collisions: [{ taskKey: "WEB-2", prNumber: 3, paths: ["package.json"], partial: false }],
+    });
+    expect(row?.textContent).toBe(
+      "CollidesMerging this will likely put WEB-2's PR #3 in conflict on package.json. Viberr re-checks it right after the merge, and the operator hands a conflict to the delivering agent.",
+    );
+    expect(row?.querySelector(".mono")?.textContent).toBe("package.json");
+  });
+
+  it("lists several PRs, caps each file list, and says when a list was capped", () => {
+    const row = collidesRow({
+      collisions: [
+        { taskKey: "WEB-2", prNumber: 3, paths: ["package.json"], partial: false },
+        { taskKey: "WEB-5", prNumber: 6, paths: ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"], partial: true },
+      ],
+    });
+    expect(row?.textContent).toContain(
+      "Merging this will likely put 2 open pull requests in conflict: WEB-2's PR #3 on package.json; WEB-5's PR #6 on a.ts, b.ts, c.ts and 2 more files. Viberr re-checks them right after the merge",
+    );
+    expect(row?.textContent).toContain("A changed-file list was capped, so the overlap may be larger.");
+  });
+
+  it("stays silent with no collision, and where nothing merges", () => {
+    expect(collidesRow({ collisions: [] })).toBeNull();
+    cleanup();
+    const merged = collidesRow({
+      collisions: [{ taskKey: "WEB-2", prNumber: 3, paths: ["package.json"], partial: false }],
+      pr: { number: 2, state: "merged", title: "[WEB-4] work" },
+    });
+    expect(merged).toBeNull();
+  });
+});
+
+/**
+ * Ruling 482 (F40-52): the owner accepted two production deploys on agents'
+ * reports of the gate exit codes. The dialog that authorizes the merge prints
+ * Viberr's own run instead, bound to the sha on the Revision row, and a
+ * failing gate refuses the plain acceptance while force states the bypass.
+ */
+describe("ruling 482: the Gates row", () => {
+  const failed = {
+    sha: "a95c337".padEnd(40, "0"),
+    state: "failed" as const,
+    passed: 3,
+    total: 4,
+    line: "Gates on a95c337: 3/4 exit 0 (run by Viberr)",
+    results: [],
+    rows: [
+      { name: "install", command: "pnpm install", outcome: "exit 0", wall: "12 s", ok: true, log: null },
+      { name: "build", command: "pnpm build", outcome: "exit 1", wall: "41 s", ok: false, log: null },
+    ],
+    error: null,
+    finishedAt: null,
+  };
+  const refusal =
+    "The project's gates failed on VIB-151's revision `a95c337`: 3/4 exit 0 (`build` exit 1). Rework the branch; the next delivered revision is gated again. An admin can force-accept, and the bypass is recorded.";
+
+  it("names the run, the failing gate, and disables the plain confirm on the gate's refusal", () => {
+    // CANARY: drop the Gates row from AcceptConfirm.
+    const { container } = render(
+      <AcceptConfirm
+        task={detail()}
+        workRevisionSha={"a95c337".padEnd(40, "0")}
+        defaultBranch="main"
+        ceremony={{ mode: "accept" }}
+        gates={failed}
+        blockedReason={refusal}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const dialog = container.ownerDocument.querySelector("dialog")!;
+    const row = Array.from(dialog.querySelectorAll(".obs")).find(
+      (r) => r.querySelector(".k")?.textContent === "Gates",
+    )!;
+    expect(row.textContent).toContain("gates failed");
+    expect(row.textContent).toContain("Gates on a95c337: 3/4 exit 0 (run by Viberr)");
+    expect(row.textContent).toContain("build");
+    expect(row.textContent).not.toContain("install");
+    expect(screen.getByRole("button", { name: /Accept → Done/ }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("lets force proceed and says what it bypasses", () => {
+    render(
+      <AcceptConfirm
+        task={detail()}
+        workRevisionSha={"a95c337".padEnd(40, "0")}
+        defaultBranch="main"
+        ceremony={{ mode: "force" }}
+        gates={failed}
+        blockedReason={refusal}
+        blockedGates={[refusal]}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Bypassing/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Force-accept VIB-151/ }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("renders no Gates row where the project declares none", () => {
+    expect(open({})).not.toContain("Gates on");
   });
 });

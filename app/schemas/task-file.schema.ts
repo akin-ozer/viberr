@@ -110,7 +110,7 @@ export function isValidDueDate(due: string): boolean {
   );
 }
 
-/** The 11 timeline event types (cross-cutting contracts §1.3). Parsers keep
+/** The 12 timeline event types (cross-cutting contracts §1.3). Parsers keep
  * unknown strings as-is (renderer falls back to comment meta).
  *
  * P13-LV-03: `policy` used to be a grab-bag — a real PAT-scope violation, a
@@ -135,6 +135,11 @@ export const TIMELINE_EVENT_TYPES = [
   // `policy`) and nothing is stuck (not `blocked`), but a supervisor scanning
   // the board/stream must get a cue that context was lost and recovered.
   "continuity",
+  // Ruling 483 (F40-59): a proposed correction to a knowledge base — the
+  // project's rulings or any base a run was given. It asks a person for a
+  // decision (promote or dismiss), so it is neither a review verdict
+  // (`quality`, where ruling 378 filed it) nor a neutral `note`.
+  "proposal",
 ] as const;
 
 /** Stable packet-option kinds (orchestrator ruling 7). Dispatch on these,
@@ -738,11 +743,32 @@ export const prRefSchema = z
       })
       .nullish()
       .catch(null),
+    // Ruling 474 (pass 40, F40-19): the PR body Viberr last wrote, so a
+    // re-delivery can bring a stale body up to date without ever overwriting a
+    // person's edit. `sha256` hashes that body (line endings read as LF,
+    // `prBodySha256` in pr-open.server.ts); `revision` is the delivered
+    // revision it describes (the PR head when the task records none), null
+    // when neither was known; `keptRevision` is the revision at which a
+    // delivery found the body edited on GitHub, left it as written and said so
+    // (one note per revision). Written by `openTaskPr` on create and on every
+    // rewrite, carried across a refresh of the SAME number by every `pr`
+    // writer, never inherited by a different PR. Absent = Viberr never
+    // recorded the body (a PR opened before ruling 474, or one it adopted),
+    // which a delivery treats as Viberr's own.
+    bodyWritten: z
+      .object({
+        sha256: z.string().min(1),
+        revision: z.string().min(1).nullable(),
+        keptRevision: z.string().min(1).nullish(),
+      })
+      .nullish()
+      .catch(null),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
 export type UnpushedRevision = NonNullable<PrRef["unpushedRevision"]>;
 export type PrClosure = NonNullable<PrRef["closure"]>;
+export type PrBodyWritten = NonNullable<PrRef["bodyWritten"]>;
 
 /**
  * Ruling 135: the recorded unpushed-revision fact, when it still describes the
@@ -947,6 +973,11 @@ export const packetOptionSchema = z
     // admin|maintainer re-check in resolvePacket.
     /** Pre-authored timeline text written when this option is chosen. */
     ev: z.string().optional(),
+    /** Ruling 478(e): choosing this option needs the person's typed answer
+     *  (a name, a URL, a value the asking agent cannot know). The card asks
+     *  for it and `resolvePacket` refuses the choice without it. Written by
+     *  an agent question (`ask_human`, the Codex envelope). */
+    reply: z.boolean().optional(),
     /** retry_other_backend — the backend to re-run the failed agent on. */
     backend: z.enum(["codex", "claude"]).optional(),
     /** retry_other_backend — a reviewer retry names its profile (the primary
@@ -1209,6 +1240,61 @@ const reviewVerdictSchema = z
   .loose();
 export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>;
 
+// ------------------------------------------- project gate runs (ruling 482)
+
+/** One project gate's outcome on one revision. */
+const gateResultSchema = z
+  .object({
+    /** The gate's name and command AS RUN, so a gate list edited afterwards
+     *  can be told from the one this evidence is about. */
+    name: z.string().min(1),
+    command: z.string().min(1),
+    /** The process's exit code; null when it never returned one (killed at
+     *  its timeout, or it could not start). */
+    exitCode: z.number().int().nullable(),
+    /** Killed at its timeout. */
+    timedOut: z.boolean().default(false),
+    /** Wall-clock milliseconds from spawn to exit. */
+    wallMs: z.number().int().min(0),
+    /** The combined stdout/stderr, saved as a task attachment (its name),
+     *  or null when it could not be saved. */
+    log: z.string().nullable().default(null),
+  })
+  .loose();
+export type GateResult = z.infer<typeof gateResultSchema>;
+
+/**
+ * Ruling 482 (pass 40, F40-52): the project's gates as Viberr RAN them on one
+ * revision — typed evidence, bound to the revision like a verdict.
+ *
+ * Written by the server alone (`project-gates.server.ts`): queued when a
+ * delivery or a new head asks for it, running while the gates execute (each
+ * result lands as it finishes), `finished` with every result, or `error` when
+ * the run could not execute at all (no checkout, the revision missing from
+ * it, the launch refused) — and then `error` says why. The latest run only;
+ * the timeline keeps one event per finished run.
+ */
+const gateRunSchema = z
+  .object({
+    id: z.string().min(1),
+    /** The `workRevision.id` the gates ran on. A newer revision makes this
+     *  run history for the gate, exactly as it makes a verdict stale. */
+    revisionId: z.string().min(1),
+    /** The full sha checked out for the run. */
+    headSha: z.string().min(1),
+    status: z.enum(["queued", "running", "finished", "error"]),
+    /** What asked: `delivery`, `revision`, `person`, `gates-changed`,
+     *  `restart`. Display only. */
+    reason: z.string().default(""),
+    requestedAt: z.string().min(1),
+    startedAt: z.string().nullable().default(null),
+    finishedAt: z.string().nullable().default(null),
+    error: z.string().nullable().default(null),
+    results: z.array(gateResultSchema).default([]),
+  })
+  .loose();
+export type GateRun = z.infer<typeof gateRunSchema>;
+
 // -------------------------------------------------------- frontmatter
 
 /** Ruling 132: one recorded base refresh (see `baseRefreshes` below). */
@@ -1386,6 +1472,9 @@ const taskFrontmatterFields = {
     })
     .nullable()
     .optional(),
+  /** Ruling 482: the project's gates as Viberr last ran them on this task
+   *  (absent until a run is first asked for). */
+  gateRun: gateRunSchema.optional(),
   github: githubCacheSchema.nullable(),
   /** Chained-goal back-reference (ruling 99): this task is one LINK of a goal
    *  chain. The chain itself is canonical in
@@ -1775,6 +1864,8 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   // gate that re-reads it would refuse forever and the override would be a
   // button that does nothing. The canary found exactly that.
   "headCheckWaiver",
+  // Ruling 482: the server's own gate evidence.
+  "gateRun",
   "github",
   "goalRef",
   "createdAt",
@@ -2194,6 +2285,17 @@ export function parseTaskFrontmatter(
       data,
       "headCheckWaiver",
       taskFrontmatterFields.headCheckWaiver,
+      undefined,
+    ),
+    // Ruling 482: absent means no gate run was ever asked for. A malformed
+    // record falls back to absent with a diagnostic, which reads as "the gates
+    // have not run on this revision" and blocks acceptance until they do: the
+    // fail-closed direction, and the next run rewrites the whole record.
+    gateRun: tolerant(
+      diagnostics,
+      data,
+      "gateRun",
+      taskFrontmatterFields.gateRun,
       undefined,
     ),
     github: tolerant(

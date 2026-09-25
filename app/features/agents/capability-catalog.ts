@@ -14,10 +14,11 @@ import {
  *
  * Grouping + per-capability default modes drive the create/edit-profile
  * modal accordion and the CapabilityMatrixModal row groups. Capabilities a
- * profile holds that are OUTSIDE its kind's toggle set surface in the
- * matrix's "Other actions" group and are preserved untouched by the editor
- * (pass-4 ruling 7 — advisory ids with no runtime consumer get no toggle;
- * `group: null` in the unified catalog).
+ * profile holds that are OUTSIDE its kind's toggle set are preserved untouched
+ * by the editor (pass-4 ruling 7 — advisory ids with no runtime consumer get
+ * no toggle; `group: null` in the unified catalog). The matrix files the
+ * operator's own capabilities under "Operator actions" and the advisory lines
+ * under its collapsed "Advisory only" list, never in the grid (ruling 479(a)).
  */
 
 export type CapMode = "direct" | "recommend" | "human" | "off";
@@ -117,16 +118,14 @@ export const OPERATOR_CAP_DEFAULTS: Readonly<Record<string, CapMode>> =
  * F15-05/F15-06: the profile detail panel used to pour every stored grant into
  * its three capability columns, so the matrix-only advisory ids (`group: null` —
  * "Approve the review", "Read the repository & diff", …) rendered as held
- * authority beside the real ones. The matrix segregates the same ids under
- * "Other actions", and both surfaces read the SAME stored grants through the
- * one server-side interpretation (`capabilitiesToActionLabels`).
+ * authority beside the real ones. Both surfaces read the SAME stored grants
+ * through the one server-side interpretation (`capabilitiesToActionLabels`).
  *
- * The two partitions are not byte-identical: this set is the union over BOTH
- * kinds (an operator-only id counts as governed in the panel), while the
- * matrix's `known` set is the agent editor catalog alone — so an operator
- * capability sits in a panel column but under the matrix's "Other actions".
- * The matrix renders specialists beside the operator, which is the surface that
- * would otherwise mis-file the operator's own governed grants.
+ * Ruling 479(a): the capability matrix partitions by this set too. Its grid is
+ * the agent editor catalog plus an "Operator actions" group (the labels in this
+ * set outside that catalog), and everything outside this set is an advisory
+ * line, listed collapsed under the grid. So the grid, the panel's columns and
+ * the Policy page's counts all count the same capabilities.
  */
 export const GOVERNED_CAP_LABELS: ReadonlySet<string> = new Set(
   UNIFIED_CAP_CATALOG.filter((e) => e.group !== null).map((e) => e.label),
@@ -187,7 +186,18 @@ export interface ResCatalogGroup {
    *  template editor ("KBs displayed by name and stored by dir"); pass 33's
    *  U33-7 found the PROJECT editor was never brought along, so one concept had
    *  two vocabularies depending on which editor you opened. */
-  items: { id: string; def: boolean; label?: string }[];
+  items: { id: string; def: boolean; label?: string; warning?: ResItemWarning }[];
+}
+
+/**
+ * Ruling 479(b): what the registry knows against one MCP server, when a run
+ * would get none of its tools anyway: a sign-in it does not have (ruling 469),
+ * a credential it cannot open, a last check that could not reach it. `note` is
+ * the chip's word, `title` the sentence with the remedy. Absent claims nothing.
+ */
+export interface ResItemWarning {
+  note: string;
+  title: string;
 }
 
 export interface ResourceSelection {

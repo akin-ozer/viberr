@@ -22,6 +22,10 @@ export interface OrgActionSuccess {
   toast?: string;
   tempPassword?: string;
   email?: string;
+  /** `mcp-oauth-start` (ruling 469): the authorization URL the admin opens,
+   *  and the host of the server that asks. */
+  authorizeUrl?: string;
+  issuer?: string;
 }
 
 export type OrgActionData = OrgActionSuccess | { ok: false; error: string };

@@ -162,6 +162,32 @@ describe("Markdown", () => {
   });
 });
 
+describe("ruling 478(f): headings under a page heading (F40-35)", () => {
+  const levels = (root: HTMLElement) =>
+    [...root.querySelectorAll("h1, h2, h3, h4, h5, h6")].map((h) => h.tagName);
+
+  it("renders headings as written by default", () => {
+    const { container } = render(<Markdown text={"# One\n\n## Two"} />);
+    expect(levels(container)).toEqual(["H1", "H2"]);
+  });
+
+  it("puts the text's top heading at the base, keeps the steps below it, and stops at h6", () => {
+    // CANARY: skip the depth rewrite in `remarkHeadingBase`.
+    const { container } = render(
+      <Markdown text={"## Part\n\n### Step\n\n> ## Quoted part\n\n###### Deepest"} headingBase={3} />,
+    );
+    expect(levels(container)).toEqual(["H3", "H4", "H3", "H6"]);
+  });
+
+  it("re-renders when only the base changes (the memo compares it)", () => {
+    // CANARY: drop `headingBase` from `sameMarkdownProps`.
+    const view = render(<Markdown text={"# Title"} />);
+    expect(levels(view.container)).toEqual(["H1"]);
+    view.rerender(<Markdown text={"# Title"} headingBase={3} />);
+    expect(levels(view.container)).toEqual(["H3"]);
+  });
+});
+
 describe("attachment link repair (owner ask 2026-08-20)", () => {
   const BASE = "/projects/p/tasks/T-1/attachments";
   const props = {

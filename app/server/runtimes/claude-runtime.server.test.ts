@@ -19,6 +19,7 @@ import {
   type ClaudeQueryOptions,
 } from "./claude-runtime.server";
 import type { ReapTargets } from "./run-processes.server";
+import { filteredSpawnEnv } from "./runtime-registry.server";
 import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
@@ -1018,25 +1019,24 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
     }
   });
 
-  it("hands the SDK the granted servers verbatim — credentials and the in-process toolkit included", async () => {
-    // The exact shapes `resolveSpecialistMcpServers` builds: an HTTP server with
-    // the decrypted org credential as an Authorization header, a stdio server
-    // with it in MCP_CREDENTIAL, and the in-process `{ type: "sdk" }` toolkit
-    // that carries post_comment / ask_human / report_outcome. Claude is the ONLY
-    // backend that gets either — Codex drops the credential (its config becomes
-    // argv) and has no in-process channel at all, which is what the matrix's
-    // "Org MCP credentials are sent on Claude runs only" and "Post mid-run
-    // comments has no Codex channel" notes describe.
+  it("hands the SDK the granted servers verbatim — a gateway mount's run token and the in-process toolkit included", async () => {
+    // The shapes a run's spec carries after `startRun` bound it to Viberr's
+    // MCP gateway (ruling 461): a credentialed server as a gateway mount with
+    // the RUN's token as its Authorization header (never the credential, which
+    // stays in the gateway), an uncredentialed stdio server, and the
+    // in-process `{ type: "sdk" }` toolkit that carries post_comment /
+    // ask_human / report_outcome. Codex gets the same gateway mount (as
+    // `http_headers`) and has no in-process channel at all, which is what the
+    // matrix's "Post mid-run comments has no Codex channel" note describes.
     const servers = {
       "everything-http": {
         type: "http",
-        url: "https://mcp.example.test/mcp",
-        headers: { Authorization: "Bearer sentinel-org-mcp-credential" },
+        url: "http://127.0.0.1:43111/mcp/everything-http",
+        headers: { Authorization: "Bearer sentinel-run-token" },
       },
       "everything-stdio": {
         command: "npx",
         args: ["-y", "example-mcp"],
-        env: { MCP_CREDENTIAL: "sentinel-org-mcp-credential" },
       },
       viberr_agent: { type: "sdk", instance: {} },
     };
@@ -1461,6 +1461,143 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
     h.exitCli();
     await drain();
     expect(h.reaped).toEqual([{ runIds: ["run_marked"], groupLeader: CLI_PID }]);
+  });
+
+  /**
+   * Ruling 460: a run carrying an agent launch spawns the LAUNCHER, detached,
+   * as the principal's uid — never the CLI as the server's user — with the
+   * SDK's argv untouched and nothing of the server's own secrets in its env.
+   */
+  describe("as the principal's own OS user (ruling 460)", () => {
+    const LAUNCH = {
+      uid: 20001,
+      launcher: "/usr/local/libexec/viberr-launch",
+      launchHome: "/data/runtimes/users/u_ada/claude-home",
+      home: "/data/runtimes/users/u_ada/home",
+    };
+    const SDK_ARGS = ["--output-format", "stream-json", "--verbose", "--input-format", "stream-json"];
+
+    function launchedHarness() {
+      const h = harness();
+      const spawned: { command: string; args: readonly string[]; env: NodeJS.ProcessEnv | undefined; detached: boolean | undefined }[] = [];
+      const deps = {
+        ...h.deps,
+        // What production hands the adapter: the credential-free base env.
+        env: filteredSpawnEnv(),
+        spawnCli: (command: string, args: readonly string[], options: { env?: NodeJS.ProcessEnv; detached?: boolean }) => {
+          spawned.push({ command, args, env: options.env, detached: options.detached });
+          return h.child;
+        },
+      };
+      return { ...h, deps, spawned };
+    }
+
+    const LAUNCHED_SPEC: RunSpec = {
+      ...SPEC,
+      runId: "run_launched",
+      agent: LAUNCH,
+      env: {
+        CLAUDE_CONFIG_DIR: LAUNCH.launchHome,
+        ANTHROPIC_API_KEY: "sk-ant-the-persons-own",
+        HOME: LAUNCH.home,
+        VIBERR_RUN_ID: "run_launched",
+      },
+    };
+
+    it("spawns the launcher with the real binary, the principal's uid and the SDK's argv untouched", async () => {
+      const h = launchedHarness();
+      let processForSdk: ReturnType<NonNullable<ClaudeQueryOptions["spawnClaudeCodeProcess"]>> | undefined;
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          processForSdk = options?.spawnClaudeCodeProcess?.({
+            command: "/opt/claude/claude",
+            args: SDK_ARGS,
+            env: options.env ?? {},
+          });
+          return fakeQuery([SUCCESS]).q;
+        },
+      });
+      adapter.start(LAUNCHED_SPEC, { onLine: () => {}, onExit: () => {} });
+      await drain();
+
+      expect(h.spawned).toHaveLength(1);
+      const [spawn] = h.spawned;
+      expect(spawn?.command).toBe(LAUNCH.launcher);
+      expect(spawn?.args).toEqual(SDK_ARGS);
+      expect(spawn?.detached).toBe(true);
+      expect(spawn?.env?.VIBERR_LAUNCH_EXEC).toBe("/opt/claude/claude");
+      expect(spawn?.env?.VIBERR_LAUNCH_UID).toBe("20001");
+      expect(spawn?.env?.VIBERR_LAUNCH_HOME).toBe(LAUNCH.launchHome);
+      expect(spawn?.env?.HOME).toBe(LAUNCH.home);
+      // The one credential a run may carry is its principal's own (ruling 127);
+      // the server's secrets are in this process's env and must not follow.
+      expect(spawn?.env?.ANTHROPIC_API_KEY).toBe("sk-ant-the-persons-own");
+      expect(process.env.VIBERR_SECRET_ENCRYPTION_KEY).toBeTruthy();
+      expect(spawn?.env?.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
+      expect(spawn?.env?.VIBERR_SESSION_SECRET).toBeUndefined();
+
+      // The SDK's hard kill reaches the agent's group as the launcher's SIGUSR2;
+      // a SIGKILL of the launcher would orphan processes the server cannot signal.
+      processForSdk?.kill("SIGKILL");
+      processForSdk?.kill("SIGTERM");
+      expect(h.signals).toEqual([
+        [-CLI_PID, "SIGUSR2"],
+        [-CLI_PID, "SIGTERM"],
+      ]);
+
+      h.exitCli();
+      await drain();
+      expect(h.reaped).toEqual([
+        { runIds: ["run_launched"], groupLeader: CLI_PID, launched: true },
+      ]);
+    });
+
+    it("resolves a bare command on PATH: the launcher execs absolute paths only", async () => {
+      const h = launchedHarness();
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          options?.spawnClaudeCodeProcess?.({ command: "node", args: ["cli.js"], env: options.env ?? {} });
+          return fakeQuery([SUCCESS]).q;
+        },
+      });
+      adapter.start(LAUNCHED_SPEC, { onLine: () => {}, onExit: () => {} });
+      await drain();
+      const exec = h.spawned[0]?.env?.VIBERR_LAUNCH_EXEC ?? "";
+      expect(path.isAbsolute(exec)).toBe(true);
+      expect(path.basename(exec)).toBe("node");
+      expect(h.spawned[0]?.args).toEqual(["cli.js"]);
+    });
+
+    it("the completion compaction's CLI is launched as the principal too", async () => {
+      const h = launchedHarness();
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          options?.spawnClaudeCodeProcess?.({ command: "/opt/claude/claude", args: SDK_ARGS, env: options.env ?? {} });
+          return fakeQuery([SUCCESS]).q;
+        },
+      });
+      await adapter.compact?.(LAUNCHED_SPEC, "sess-1", { onLine: () => {} });
+      expect(h.spawned[0]?.command).toBe(LAUNCH.launcher);
+      expect(h.spawned[0]?.env?.VIBERR_LAUNCH_UID).toBe("20001");
+    });
+
+    it("without a launch, the CLI itself is spawned, exactly as before", async () => {
+      const h = launchedHarness();
+      const adapter = createClaudeAdapter({
+        ...h.deps,
+        queryFn: ({ options }) => {
+          options?.spawnClaudeCodeProcess?.({ command: "/opt/claude/claude", args: SDK_ARGS, env: options.env ?? {} });
+          return fakeQuery([SUCCESS]).q;
+        },
+      });
+      adapter.start(SPEC, { onLine: () => {}, onExit: () => {} });
+      await drain();
+      expect(h.spawned[0]?.command).toBe("/opt/claude/claude");
+      expect(h.spawned[0]?.env?.VIBERR_LAUNCH_UID).toBeUndefined();
+    });
   });
 
   it("a run the service did not mark still has its group swept, and sweeps by no marker", async () => {

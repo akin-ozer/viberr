@@ -2,7 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
-import { createGitHubAskpassEnv } from "~/server/tasks/git-clone-auth.server";
+import {
+  createGitHubAskpassEnv,
+  githubRepositoryUrl,
+} from "~/server/tasks/git-clone-auth.server";
+import { withServerStage } from "~/server/tasks/repo-mirror.server";
 import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import {
   getPatToken,
@@ -11,10 +15,11 @@ import {
 import {
   PUSH_TIMEOUT_MS,
   commitIdentityArgs,
-  defaultExec,
+  deliveryRunners,
   findWorkspaceRepoDir,
   isNonFastForwardStderr,
   isWorkflowScopeRejection,
+  publishFromWorkspace,
   storeLayoutFilesInTree,
   storeLayoutPrefix,
   changedFilesOnBranch,
@@ -62,6 +67,12 @@ import { errorMessage } from "~/shared/errors";
  *    local branch to the commit it started on. The branch is either forward or
  *    exactly as it was — never half-updated with a merge commit that cannot be
  *    pushed.
+ *
+ * Pass 40 review (R-seams-1): "the server owns the git" no longer means the
+ * server's uid runs it in the workspace. The merge, its abort and every read
+ * run in the workspace as the task's person; GitHub's base and origin's copy
+ * of the branch are fetched with the PAT into a stage the server owns and the
+ * workspace fetches them from there; the push goes out from the stage.
  */
 
 /** A conflict list longer than this is a wall of text in a decision packet. */
@@ -129,13 +140,19 @@ export type UpdateBranchResult =
       base: string;
       files: string[];
       detail?: string;
+      /** Ruling 475: the base tip the merge was attempted against (full sha),
+       *  so "the same conflict" is the same files against the same base
+       *  commit. Absent when it could not be read. */
+      baseSha?: string;
     }
   /**
    * The remote branch holds commits this workspace does not (non-fast-forward)
    * — a HISTORY divergence, never a credential problem (B-GH1/F15-15). The
    * local merge is rolled back and nothing is force-pushed (R18-4).
+   * Ruling 475: `remoteHeadSha` is origin's head that refused the push, as
+   * read before the merge; absent when it could not be read.
    */
-  | { status: "push_conflict"; branch: string; base: string; reason: string }
+  | { status: "push_conflict"; branch: string; base: string; reason: string; remoteHeadSha?: string }
   /**
    * Ruling 159(b), pass 35 review: the workspace tree carries Viberr's own
    * store layout, so this door refuses too. The delivery push is not the only
@@ -178,8 +195,11 @@ export interface UpdateBranchInput {
   taskKey: string;
   dataRoot?: string;
   workdir?: string | null;
-  /** Injected runner (tests). */
+  /** Injected runner (tests): the workspace's git and, unless `serverExec` is
+   *  given too, the server's. */
   exec?: Exec;
+  /** Injected runner for the server's own git in its stage (tests). */
+  serverExec?: Exec;
 }
 
 /** git's answer to fetching a ref the remote does not have. */
@@ -191,24 +211,40 @@ function isMissingRemoteRef(stderr: string): boolean {
  * Ruling 134(c): fetch origin's copy of the task branch and relate it to the
  * workspace head LOCALLY. `ls-remote` alone cannot answer `behind` vs
  * `diverged` (that needs the remote head OBJECT), and a head pushed from
- * another workspace is exactly the case the answer matters for.
+ * another workspace is exactly the case the answer matters for. R-seams-1:
+ * GitHub's copy is fetched with the PAT into the server's `stage`, and the
+ * workspace fetches it from there as its person.
  */
 async function readRemoteBranchState(
-  exec: Exec,
+  runners: { workspace: Exec; server: Exec },
+  stage: string,
+  remoteUrl: string,
   repoDir: string,
   branch: string,
   env: NodeJS.ProcessEnv,
   token: string,
 ): Promise<RemoteBranchState> {
-  const fetchRes = await exec(
+  const exec = runners.workspace;
+  const fetchRes = await runners.server(
     "git",
-    ["-C", repoDir, "fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-    { cwd: repoDir, timeoutMs: FETCH_TIMEOUT_MS, env },
+    [`--git-dir=${stage}`, "fetch", "--no-tags", remoteUrl, `+refs/heads/${branch}:refs/heads/${branch}`],
+    { cwd: stage, timeoutMs: FETCH_TIMEOUT_MS, env },
   );
   if (!fetchRes.ok) {
     if (isMissingRemoteRef(fetchRes.stderr)) return { kind: "absent" };
     const why = redactGitOutput(fetchRes.stderr, { token }) || "the fetch failed";
     return { kind: "unknown", why: fetchRes.timedOut ? "the fetch ran past its time limit" : why };
+  }
+  const intoWorkspace = await exec(
+    "git",
+    ["-C", repoDir, "fetch", "--no-tags", stage, `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+    { cwd: repoDir, timeoutMs: FETCH_TIMEOUT_MS },
+  );
+  if (!intoWorkspace.ok) {
+    return {
+      kind: "unknown",
+      why: redactGitOutput(intoWorkspace.stderr, { token }) || "origin's copy could not be brought into the workspace",
+    };
   }
   const remoteRes = await exec(
     "git",
@@ -283,7 +319,6 @@ export async function updateWorkspaceBranchFromBase(
   input: UpdateBranchInput,
 ): Promise<UpdateBranchResult> {
   const { db, projectSlug, taskKey, dataRoot } = input;
-  const exec = input.exec ?? defaultExec;
   try {
     const ref = { projectSlug, taskKey, dataRoot };
     if (!readTaskFile(ref)) {
@@ -311,6 +346,9 @@ export async function updateWorkspaceBranchFromBase(
           "no workspace git repo (the branch is only writable from the delivering engagement's workspace)",
       };
     }
+    // R-seams-1: `exec` is the workspace's own git, as the task's person.
+    const runners = deliveryRunners(db, { projectSlug, taskKey, dataRoot }, input);
+    const exec = runners.workspace;
 
     const headRes = await exec(
       "git",
@@ -410,269 +448,332 @@ export async function updateWorkspaceBranchFromBase(
     if (!token) return { status: "no_pat", reason: "no project credential" };
 
     const askpass = createGitHubAskpassEnv({ token });
+    // R-seams-1: the project's own GitHub URL, never the `origin` a checkout's
+    // agent-writable config names.
+    const remoteUrl = githubRepositoryUrl(repo);
     try {
-      // 1. Fetch the base. Specialist clones are `--depth 1`, so a merge would
-      //    otherwise run against a truncated history that has no merge base
-      //    with the advanced remote.
-      const shallowRes = await exec(
-        "git",
-        ["-C", repoDir, "rev-parse", "--is-shallow-repository"],
-        { cwd: repoDir, timeoutMs: 5_000 },
-      );
-      const shallow = shallowRes.ok && shallowRes.stdout.trim() === "true";
-      const fetchRes = await exec(
-        "git",
-        [
-          "-C",
-          repoDir,
-          "fetch",
-          ...(shallow ? ["--unshallow"] : []),
-          "origin",
-          // Explicit refspec: the update must read `origin/<base>`, and relying
-          // on git's opportunistic remote-tracking update makes that a version
-          // question.
-          `+refs/heads/${base}:refs/remotes/origin/${base}`,
-        ],
-        { cwd: repoDir, timeoutMs: FETCH_TIMEOUT_MS, env: askpass.env },
-      );
-      if (!fetchRes.ok) {
-        const detail = redactGitOutput(fetchRes.stderr, { token });
-        const fields: GitLogFields = { taskKey, branch, base };
-        if (fetchRes.timedOut) fields.timedOut = true;
-        if (detail) fields.detail = detail;
-        logger.warn("branch update could not fetch the base branch", fields);
-        return updateFailed(
-          fetchRes.timedOut
-            ? `fetching \`${base}\` was cancelled after ${FETCH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
-            : `could not fetch \`${base}\` from origin`,
-          detail,
-        );
-      }
-
-      // 1b. Origin's copy of the TASK branch (ruling 134(c)). A separate fetch:
-      //    a refspec naming a ref origin does not have fails the whole fetch,
-      //    and a never-pushed branch is a normal state here, not a failure.
-      const remote = await readRemoteBranchState(exec, repoDir, branch, askpass.env, token);
-
-      // 2. How far behind? Zero is a real answer, and it is a no-op that says
-      //    so — never a merge commit nobody needed.
-      const behindRes = await exec(
-        "git",
-        ["-C", repoDir, "rev-list", "--count", `HEAD..origin/${base}`],
-        { cwd: repoDir, timeoutMs: 10_000 },
-      );
-      const behind = behindRes.ok
-        ? Number.parseInt(behindRes.stdout.trim(), 10)
-        : Number.NaN;
-      if (!Number.isFinite(behind)) {
-        return updateFailed(
-          `could not compare \`${branch}\` against \`${base}\``,
-          redactGitOutput(behindRes.stderr, { token }),
-        );
-      }
-      if (behind === 0) {
-        return { status: "already_current", branch, base, remote };
-      }
-
-      // 3. The pre-merge commit, so a push that cannot land rolls all the way
-      //    back. Without it the workspace keeps a merge commit the remote never
-      //    got, and the next attempt compounds it.
-      const preRes = await exec(
-        "git",
-        ["-C", repoDir, "rev-parse", "HEAD"],
-        { cwd: repoDir, timeoutMs: 5_000 },
-      );
-      const preSha = preRes.ok ? preRes.stdout.trim() : "";
-      if (!preSha) {
-        return {
-          status: "update_failed",
-          reason: "could not read the branch head before merging",
-        };
-      }
-
-      const identity = await commitIdentityArgs(exec, repoDir);
-      const mergeRes = await exec(
-        "git",
-        [
-          "-C",
-          repoDir,
-          ...identity,
-          "merge",
-          // Ruling 132: every refresh is a real merge commit, so the drift
-          // classifier can tell a base refresh (a two-parent commit recorded in
-          // `baseRefreshes`) from authored work. A fast-forward would leave
-          // nothing to record.
-          "--no-ff",
-          "--no-edit",
-          "-m",
-          `[${taskKey}] merge ${base} into ${branch}`,
-          `origin/${base}`,
-        ],
-        { cwd: repoDir, timeoutMs: MERGE_TIMEOUT_MS },
-      );
-      if (!mergeRes.ok) {
-        const output = `${mergeRes.stdout}\n${mergeRes.stderr}`;
-        // Read the conflicted paths BEFORE aborting — after the abort there is
-        // nothing left to name, and a conflict packet that cannot say WHICH
-        // files conflicted sends the human back to a terminal to find out.
-        const filesRes = await exec(
-          "git",
-          ["-C", repoDir, "diff", "--name-only", "--diff-filter=U"],
-          { cwd: repoDir, timeoutMs: 10_000 },
-        );
-        const files = filesRes.ok
-          ? filesRes.stdout
-              .split("\n")
-              .map((l) => l.trim())
-              .filter(Boolean)
-              .slice(0, MAX_CONFLICT_FILES)
-          : [];
-        if (files.length > 0 || isMergeConflictOutput(output)) {
-          // Abort so the workspace is exactly as the agent left it. A branch
-          // parked in a conflicted merge state would break the delivering
-          // engagement's next run, which is the one actor that can resolve it.
-          const abortRes = await exec(
+      return await withServerStage(
+        { projectSlug, repo, dataRoot },
+        async (stage): Promise<UpdateBranchResult> => {
+          // 1. Fetch the base. Specialist clones are `--depth 1`, so a merge would
+          //    otherwise run against a truncated history that has no merge base
+          //    with the advanced remote.
+          const shallowRes = await exec(
             "git",
-            ["-C", repoDir, "merge", "--abort"],
-            { cwd: repoDir, timeoutMs: 30_000 },
+            ["-C", repoDir, "rev-parse", "--is-shallow-repository"],
+            { cwd: repoDir, timeoutMs: 5_000 },
           );
-          const detail = redactGitOutput(
-            abortRes.ok ? output : `${output}\n${abortRes.stderr}`,
-            { token },
+          const shallow = shallowRes.ok && shallowRes.stdout.trim() === "true";
+          // R-seams-1: GitHub's base into the server's stage (the PAT's only
+          // workplace), then into the workspace's `origin/<base>` as its person.
+          const fetchRes = await runners.server(
+            "git",
+            [`--git-dir=${stage}`, "fetch", "--no-tags", remoteUrl, `+refs/heads/${base}:refs/heads/${base}`],
+            { cwd: stage, timeoutMs: FETCH_TIMEOUT_MS, env: askpass.env },
           );
-          const fields: GitLogFields = { taskKey, branch, base, files };
-          if (!abortRes.ok) fields.abortFailed = true;
-          logger.info("branch update conflicted — merge aborted", fields);
-          const conflict: Extract<UpdateBranchResult, { status: "conflict" }> = {
-            status: "conflict",
+          const baseFetch = fetchRes.ok
+            ? await exec(
+                "git",
+                [
+                  "-C",
+                  repoDir,
+                  "fetch",
+                  ...(shallow ? ["--unshallow"] : []),
+                  "--no-tags",
+                  stage,
+                  // Explicit refspec: the update must read `origin/<base>`, and
+                  // relying on git's opportunistic remote-tracking update makes
+                  // that a version question.
+                  `+refs/heads/${base}:refs/remotes/origin/${base}`,
+                ],
+                { cwd: repoDir, timeoutMs: FETCH_TIMEOUT_MS },
+              )
+            : fetchRes;
+          if (!baseFetch.ok) {
+            const detail = redactGitOutput(baseFetch.stderr, { token });
+            const fields: GitLogFields = { taskKey, branch, base };
+            if (baseFetch.timedOut) fields.timedOut = true;
+            if (detail) fields.detail = detail;
+            logger.warn("branch update could not fetch the base branch", fields);
+            return updateFailed(
+              baseFetch.timedOut
+                ? `fetching \`${base}\` was cancelled after ${FETCH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
+                : `could not fetch \`${base}\` from origin`,
+              detail,
+            );
+          }
+
+          // 1b. Origin's copy of the TASK branch (ruling 134(c)). A separate fetch:
+          //    a refspec naming a ref origin does not have fails the whole fetch,
+          //    and a never-pushed branch is a normal state here, not a failure.
+          const remote = await readRemoteBranchState(
+            runners,
+            stage,
+            remoteUrl,
+            repoDir,
             branch,
-            base,
-            files,
-          };
-          if (detail) conflict.detail = detail;
-          return conflict;
-        }
-        const detail = redactGitOutput(output, { token });
-        const fields: GitLogFields = { taskKey, branch, base };
-        if (mergeRes.timedOut) fields.timedOut = true;
-        if (detail) fields.detail = detail;
-        logger.warn("branch update merge failed", fields);
-        return updateFailed(
-          mergeRes.timedOut
-            ? `merging \`${base}\` was cancelled after ${MERGE_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
-            : `merging \`${base}\` into \`${branch}\` failed`,
-          detail,
-        );
-      }
+            askpass.env,
+            token,
+          );
 
-      // 3b. The merge commit and the base tip, read BEFORE the push (ruling
-      //    132): a merge that cannot be recorded is not published. An unreadable
-      //    sha resets to `preSha` exactly like a failed push.
-      const mergeShaRes = await exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
-        cwd: repoDir,
-        timeoutMs: 5_000,
-      });
-      const baseShaRes = await exec(
-        "git",
-        ["-C", repoDir, "rev-parse", `refs/remotes/origin/${base}`],
-        { cwd: repoDir, timeoutMs: 5_000 },
-      );
-      const mergeSha = mergeShaRes.ok ? mergeShaRes.stdout.trim() : "";
-      const baseSha = baseShaRes.ok ? baseShaRes.stdout.trim() : "";
-      if (!mergeSha || !baseSha || mergeSha === preSha) {
-        await exec("git", ["-C", repoDir, "reset", "--hard", preSha], {
-          cwd: repoDir,
-          timeoutMs: 15_000,
-        });
-        logger.warn("branch update could not read the merge commit; rolled back", {
-          taskKey,
-          branch,
-          base,
-        });
-        return updateFailed(
-          "could not read the merge commit after merging, so the update was rolled back and nothing was pushed",
-          redactGitOutput(`${mergeShaRes.stderr}\n${baseShaRes.stderr}`, { token }),
-        );
-      }
+          // 2. How far behind? Zero is a real answer, and it is a no-op that says
+          //    so — never a merge commit nobody needed.
+          const behindRes = await exec(
+            "git",
+            ["-C", repoDir, "rev-list", "--count", `HEAD..origin/${base}`],
+            { cwd: repoDir, timeoutMs: 10_000 },
+          );
+          const behind = behindRes.ok
+            ? Number.parseInt(behindRes.stdout.trim(), 10)
+            : Number.NaN;
+          if (!Number.isFinite(behind)) {
+            return updateFailed(
+              `could not compare \`${branch}\` against \`${base}\``,
+              redactGitOutput(behindRes.stderr, { token }),
+            );
+          }
+          if (behind === 0) {
+            return { status: "already_current", branch, base, remote };
+          }
 
-      // 4. Publish. A fast-forward on the remote by construction (the merge sits
-      //    on top of the branch head) — anything else means someone else wrote
-      //    to the branch, which is a human decision (R18-4), never a force-push.
-      const pushRes = await exec(
-        "git",
-        ["-C", repoDir, "push", "origin", `HEAD:refs/heads/${branch}`],
-        { cwd: repoDir, timeoutMs: PUSH_TIMEOUT_MS, env: askpass.env },
-      );
-      if (!pushRes.ok) {
-        await exec("git", ["-C", repoDir, "reset", "--hard", preSha], {
-          cwd: repoDir,
-          timeoutMs: 15_000,
-        });
-        if (isNonFastForwardStderr(pushRes.stderr)) {
-          logger.info("branch update push rejected non-fast-forward", {
+          // 3. The pre-merge commit, so a push that cannot land rolls all the way
+          //    back. Without it the workspace keeps a merge commit the remote never
+          //    got, and the next attempt compounds it.
+          const preRes = await exec(
+            "git",
+            ["-C", repoDir, "rev-parse", "HEAD"],
+            { cwd: repoDir, timeoutMs: 5_000 },
+          );
+          const preSha = preRes.ok ? preRes.stdout.trim() : "";
+          if (!preSha) {
+            return {
+              status: "update_failed",
+              reason: "could not read the branch head before merging",
+            };
+          }
+
+          const identity = await commitIdentityArgs(exec, repoDir);
+          const mergeRes = await exec(
+            "git",
+            [
+              "-C",
+              repoDir,
+              ...identity,
+              "merge",
+              // Ruling 132: every refresh is a real merge commit, so the drift
+              // classifier can tell a base refresh (a two-parent commit recorded in
+              // `baseRefreshes`) from authored work. A fast-forward would leave
+              // nothing to record.
+              "--no-ff",
+              "--no-edit",
+              "-m",
+              `[${taskKey}] merge ${base} into ${branch}`,
+              `origin/${base}`,
+            ],
+            { cwd: repoDir, timeoutMs: MERGE_TIMEOUT_MS },
+          );
+          if (!mergeRes.ok) {
+            const output = `${mergeRes.stdout}\n${mergeRes.stderr}`;
+            // Read the conflicted paths BEFORE aborting — after the abort there is
+            // nothing left to name, and a conflict packet that cannot say WHICH
+            // files conflicted sends the human back to a terminal to find out.
+            const filesRes = await exec(
+              "git",
+              ["-C", repoDir, "diff", "--name-only", "--diff-filter=U"],
+              { cwd: repoDir, timeoutMs: 10_000 },
+            );
+            const files = filesRes.ok
+              ? filesRes.stdout
+                  .split("\n")
+                  .map((l) => l.trim())
+                  .filter(Boolean)
+                  .slice(0, MAX_CONFLICT_FILES)
+              : [];
+            if (files.length > 0 || isMergeConflictOutput(output)) {
+              // Abort so the workspace is exactly as the agent left it. A branch
+              // parked in a conflicted merge state would break the delivering
+              // engagement's next run, which is the one actor that can resolve it.
+              const abortRes = await exec(
+                "git",
+                ["-C", repoDir, "merge", "--abort"],
+                { cwd: repoDir, timeoutMs: 30_000 },
+              );
+              const detail = redactGitOutput(
+                abortRes.ok ? output : `${output}\n${abortRes.stderr}`,
+                { token },
+              );
+              const fields: GitLogFields = { taskKey, branch, base, files };
+              if (!abortRes.ok) fields.abortFailed = true;
+              logger.info("branch update conflicted — merge aborted", fields);
+              const conflict: Extract<UpdateBranchResult, { status: "conflict" }> = {
+                status: "conflict",
+                branch,
+                base,
+                files,
+              };
+              if (detail) conflict.detail = detail;
+              // Ruling 475: the base commit this conflict is against, so a
+              // second conflict can be told apart from the one already sent to
+              // the delivering agent. Read after the abort; best-effort.
+              const conflictBaseRes = await exec(
+                "git",
+                ["-C", repoDir, "rev-parse", `refs/remotes/origin/${base}`],
+                { cwd: repoDir, timeoutMs: 5_000 },
+              );
+              const conflictBaseSha = conflictBaseRes.ok ? conflictBaseRes.stdout.trim() : "";
+              if (conflictBaseSha) conflict.baseSha = conflictBaseSha;
+              return conflict;
+            }
+            const detail = redactGitOutput(output, { token });
+            const fields: GitLogFields = { taskKey, branch, base };
+            if (mergeRes.timedOut) fields.timedOut = true;
+            if (detail) fields.detail = detail;
+            logger.warn("branch update merge failed", fields);
+            return updateFailed(
+              mergeRes.timedOut
+                ? `merging \`${base}\` was cancelled after ${MERGE_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
+                : `merging \`${base}\` into \`${branch}\` failed`,
+              detail,
+            );
+          }
+
+          // 3b. The merge commit and the base tip, read BEFORE the push (ruling
+          //    132): a merge that cannot be recorded is not published. An unreadable
+          //    sha resets to `preSha` exactly like a failed push.
+          const mergeShaRes = await exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+            cwd: repoDir,
+            timeoutMs: 5_000,
+          });
+          const baseShaRes = await exec(
+            "git",
+            ["-C", repoDir, "rev-parse", `refs/remotes/origin/${base}`],
+            { cwd: repoDir, timeoutMs: 5_000 },
+          );
+          const mergeSha = mergeShaRes.ok ? mergeShaRes.stdout.trim() : "";
+          const baseSha = baseShaRes.ok ? baseShaRes.stdout.trim() : "";
+          if (!mergeSha || !baseSha || mergeSha === preSha) {
+            await exec("git", ["-C", repoDir, "reset", "--hard", preSha], {
+              cwd: repoDir,
+              timeoutMs: 15_000,
+            });
+            logger.warn("branch update could not read the merge commit; rolled back", {
+              taskKey,
+              branch,
+              base,
+            });
+            return updateFailed(
+              "could not read the merge commit after merging, so the update was rolled back and nothing was pushed",
+              redactGitOutput(`${mergeShaRes.stderr}\n${baseShaRes.stderr}`, { token }),
+            );
+          }
+
+          // 4. Publish. A fast-forward on the remote by construction (the merge sits
+          //    on top of the branch head) — anything else means someone else wrote
+          //    to the branch, which is a human decision (R18-4), never a force-push.
+          //    R-seams-1: the merge commit is read out of the workspace into the
+          //    server's stage (as the person) and pushed from there.
+          const published = await publishFromWorkspace({
+            exec: runners.server,
+            stage,
+            launch: runners.launch,
+            repoDir,
+            branch,
+            sha: mergeSha,
+            remoteUrl,
+            askpassEnv: askpass.env,
+            timeoutMs: PUSH_TIMEOUT_MS,
+          });
+          if (published.phase === "handoff") {
+            await exec("git", ["-C", repoDir, "reset", "--hard", preSha], {
+              cwd: repoDir,
+              timeoutMs: 15_000,
+            });
+            const detail = redactGitOutput(published.result.stderr, { token });
+            const fields: GitLogFields = { taskKey, branch };
+            if (published.result.timedOut) fields.timedOut = true;
+            if (detail) fields.detail = detail;
+            logger.warn("branch update could not read the merge out of the workspace", fields);
+            return updateFailed(
+              "the merge could not be read out of the workspace for the push, so the update was rolled back",
+              detail,
+            );
+          }
+          const pushRes = published.result;
+          if (!pushRes.ok) {
+            await exec("git", ["-C", repoDir, "reset", "--hard", preSha], {
+              cwd: repoDir,
+              timeoutMs: 15_000,
+            });
+            if (isNonFastForwardStderr(pushRes.stderr)) {
+              logger.info("branch update push rejected non-fast-forward", {
+                taskKey,
+                branch,
+              });
+              const pushConflict: Extract<UpdateBranchResult, { status: "push_conflict" }> = {
+                status: "push_conflict",
+                branch,
+                base,
+                reason:
+                  `the remote branch \`${branch}\` holds commits that are not in this ` +
+                  `workspace (non-fast-forward), so the update was rolled back, not forced`,
+              };
+              // Ruling 475: which of origin's heads refused it, when known.
+              if ("headSha" in remote) pushConflict.remoteHeadSha = remote.headSha;
+              return pushConflict;
+            }
+            const detail = redactGitOutput(pushRes.stderr, { token });
+            // Ruling 144(c), the sibling this was never threaded through: GitHub's
+            // refusal of a workflow-file push for a token without the `workflow`
+            // scope is a SCOPE fact, not a generic push failure. The delivery push
+            // classifies it and names the remedy; this one dropped it in the
+            // catch-all bucket, so an operator base-refresh on a branch that
+            // touches `.github/workflows/` failed with "pushing the updated branch
+            // returned non-zero" — every time, forever, with nothing saying the
+            // token simply lacks a scope.
+            if (isWorkflowScopeRejection(pushRes.stderr)) {
+              logger.info("branch update push refused by GitHub: workflow scope", {
+                taskKey,
+                branch,
+              });
+              return updateFailed(
+                "GitHub refused the push because it changes a file under " +
+                  "`.github/workflows/` and the token has no `workflow` scope, so the " +
+                  "update was rolled back. Re-authorize the connection with that scope, " +
+                  "or take the workflow change out of this branch",
+                detail,
+              );
+            }
+            const fields: GitLogFields = { taskKey, branch };
+            if (pushRes.timedOut) fields.timedOut = true;
+            if (detail) fields.detail = detail;
+            logger.warn("branch update push failed", fields);
+            return updateFailed(
+              pushRes.timedOut
+                ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
+                : "pushing the updated branch returned non-zero, so the update was rolled back",
+              detail,
+            );
+          }
+
+          logger.info("brought the task branch up to date with its base", {
             taskKey,
             branch,
+            base,
+            commits: behind,
           });
           return {
-            status: "push_conflict",
+            status: "updated",
             branch,
             base,
-            reason:
-              `the remote branch \`${branch}\` holds commits that are not in this ` +
-              `workspace (non-fast-forward), so the update was rolled back, not forced`,
+            commits: behind,
+            mergeSha,
+            baseSha,
+            onto: preSha,
+            remoteBefore: remote,
+            remote: { kind: "current", headSha: mergeSha },
           };
-        }
-        const detail = redactGitOutput(pushRes.stderr, { token });
-        // Ruling 144(c), the sibling this was never threaded through: GitHub's
-        // refusal of a workflow-file push for a token without the `workflow`
-        // scope is a SCOPE fact, not a generic push failure. The delivery push
-        // classifies it and names the remedy; this one dropped it in the
-        // catch-all bucket, so an operator base-refresh on a branch that
-        // touches `.github/workflows/` failed with "pushing the updated branch
-        // returned non-zero" — every time, forever, with nothing saying the
-        // token simply lacks a scope.
-        if (isWorkflowScopeRejection(pushRes.stderr)) {
-          logger.info("branch update push refused by GitHub: workflow scope", {
-            taskKey,
-            branch,
-          });
-          return updateFailed(
-            "GitHub refused the push because it changes a file under " +
-              "`.github/workflows/` and the token has no `workflow` scope, so the " +
-              "update was rolled back. Re-authorize the connection with that scope, " +
-              "or take the workflow change out of this branch",
-            detail,
-          );
-        }
-        const fields: GitLogFields = { taskKey, branch };
-        if (pushRes.timedOut) fields.timedOut = true;
-        if (detail) fields.detail = detail;
-        logger.warn("branch update push failed", fields);
-        return updateFailed(
-          pushRes.timedOut
-            ? `the push was cancelled after ${PUSH_TIMEOUT_MS / 1000}s because it ran past its time limit rather than failing`
-            : "pushing the updated branch returned non-zero, so the update was rolled back",
-          detail,
-        );
-      }
-
-      logger.info("brought the task branch up to date with its base", {
-        taskKey,
-        branch,
-        base,
-        commits: behind,
-      });
-      return {
-        status: "updated",
-        branch,
-        base,
-        commits: behind,
-        mergeSha,
-        baseSha,
-        onto: preSha,
-        remoteBefore: remote,
-        remote: { kind: "current", headSha: mergeSha },
-      };
+        },
+      );
     } finally {
       askpass.dispose();
     }

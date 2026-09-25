@@ -3,7 +3,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   parsePatValidation,
+  parseRepoScopeProofs,
   type PatValidation,
+  type RepoScopeEvidence,
+  type RepoScopeProof,
+  type ScopeCheck,
 } from "~/schemas/github-pat.schema";
 import {
   recordAudit,
@@ -54,6 +58,9 @@ export interface PatMetadata {
   lastValidatedAt: string | null;
   /** Cached last validator run (tolerant parse; null when absent/invalid). */
   validation: PatValidation | null;
+  /** Ruling 480: what each repository proved about the token (see
+   *  `RepoScopeProof`); empty until one has. */
+  repoScopes: RepoScopeProof[];
 }
 
 /** The metadata columns every PAT read selects, decoded at the sqlite boundary.
@@ -68,11 +75,12 @@ const patRowSchema = z.object({
   created_at: z.string(),
   last_validated_at: z.string().nullable(),
   validation_json: z.string().nullable(),
+  repo_scopes_json: z.string().nullable(),
 });
 type PatRow = z.infer<typeof patRowSchema>;
 
 const PAT_META_COLUMNS = `id, user_id, label, token_suffix, created_at,
-       last_validated_at, validation_json`;
+       last_validated_at, validation_json, repo_scopes_json`;
 
 function mapRow(row: PatRow): PatMetadata {
   return {
@@ -84,6 +92,7 @@ function mapRow(row: PatRow): PatMetadata {
     createdAt: row.created_at,
     lastValidatedAt: row.last_validated_at,
     validation: parsePatValidation(row.validation_json),
+    repoScopes: parseRepoScopeProofs(row.repo_scopes_json),
   };
 }
 
@@ -130,6 +139,7 @@ export function createPat(
     createdAt: now,
     lastValidatedAt: null,
     validation: null,
+    repoScopes: [],
   };
 }
 
@@ -150,7 +160,9 @@ export function getPatMetadata(
  * Swaps the encrypted token on an EXISTING PAT row (Phase 9B org
  * connections: "the old token stays active unless validation passes" —
  * callers validate the replacement BEFORE calling this). Clears the cached
- * validation; callers record the fresh one via `recordPatValidation`.
+ * validation; callers record the fresh one via `recordPatValidation`. A new
+ * token is a new grant, so every repository's proof goes with the old one
+ * (ruling 480).
  */
 export function replacePatToken(
   db: DatabaseSync,
@@ -167,7 +179,8 @@ export function replacePatToken(
   db.prepare(
     `UPDATE github_pats
      SET encrypted_token = ?, token_suffix = ?,
-         validation_json = NULL, last_validated_at = NULL
+         validation_json = NULL, last_validated_at = NULL,
+         repo_scopes_json = NULL
      WHERE id = ?`,
   ).run(sealSecret(trimmed), trimmed.slice(-4), patId);
   recordAudit(db, {
@@ -241,46 +254,178 @@ export function getPatToken(
   return opened.plaintext;
 }
 
-/** Caches a validator run on the PAT row (validation_json + timestamp). */
+// ------------------------------------------------ per-repository evidence
+
+/**
+ * Ruling 480 (F40-43): the required scopes whose evidence is about ONE
+ * repository. A fine-grained token is granted per repository, and the
+ * validator proves these two against the repository it was asked about (the
+ * `permissions` block, the pulls probe), so a verdict on one repository says
+ * nothing about another. A classic token's `x-oauth-scopes` header answers for
+ * every repository at once, which is why a `header` verdict stays token-wide.
+ */
+export const REPO_SCOPED_SCOPES: ReadonlySet<string> = new Set([
+  "repo",
+  "pull_request:write",
+]);
+
+/** GitHub compares repository names without case. */
+function sameRepo(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/** `proofs` with `evidence` recorded for `repo`: a scope's newest verdict
+ *  replaces its older one on that repository, the others stay. */
+function withRepoEvidence(
+  proofs: RepoScopeProof[],
+  repo: string,
+  evidence: RepoScopeEvidence[],
+): RepoScopeProof[] {
+  if (evidence.length === 0) return proofs;
+  const current = proofs.find((p) => sameRepo(p.repo, repo));
+  const answered = new Set(evidence.map((e) => e.id));
+  const kept = (current?.scopes ?? []).filter((s) => !answered.has(s.id));
+  return [
+    ...proofs.filter((p) => p !== current),
+    { repo: current?.repo ?? repo, scopes: [...kept, ...evidence] },
+  ];
+}
+
+/**
+ * What one validator run does to the per-repository proofs. A token GitHub
+ * refuses (revoked, expired) proves nothing any more, so every proof goes. A
+ * run that asked about a repository it could not see (`repo_not_found`,
+ * `org_approval_missing`) ends that repository's proof. A run that probed a
+ * repository records its `probe` verdicts there, a refusal as much as a grant.
+ * A run that asked about NO repository (the connection's save, its Re-check,
+ * the 24-hour re-proof) or never reached GitHub leaves every proof as it was:
+ * a narrower question cannot unprove what a wider one proved, which is the
+ * regression F40-43 found.
+ */
+function repoScopesAfter(
+  proofs: RepoScopeProof[],
+  validation: PatValidation,
+): RepoScopeProof[] {
+  if (validation.status === "revoked" || validation.status === "expired") return [];
+  const repo = validation.repo;
+  if (!repo) return proofs;
+  if (validation.status === "repo_not_found" || validation.status === "org_approval_missing") {
+    return proofs.filter((p) => !sameRepo(p.repo, repo));
+  }
+  return withRepoEvidence(
+    proofs,
+    repo,
+    validation.scopes.flatMap((s) =>
+      REPO_SCOPED_SCOPES.has(s.id) && s.source === "probe"
+        ? [{ ...s, at: validation.checkedAt }]
+        : [],
+    ),
+  );
+}
+
+/** The proofs a row holds now, the ones its cached validation implies
+ *  included (`repoScopeProofsOf`), so a write never drops them. */
+function currentRepoScopes(db: DatabaseSync, patId: string): RepoScopeProof[] {
+  const pat = getPatMetadata(db, patId);
+  return pat ? repoScopeProofsOf(pat) : [];
+}
+
+function proofsJson(proofs: RepoScopeProof[]): string | null {
+  return proofs.length > 0 ? JSON.stringify(proofs) : null;
+}
+
+/**
+ * Caches a validator run on the PAT row (validation_json + timestamp), and
+ * folds what it learned about a repository into that repository's proof
+ * (ruling 480, `repoScopesAfter`).
+ */
 export function recordPatValidation(
   db: DatabaseSync,
   patId: string,
   validation: PatValidation,
 ): void {
+  const proofs = repoScopesAfter(currentRepoScopes(db, patId), validation);
   db.prepare(
     `UPDATE github_pats
-     SET validation_json = ?, last_validated_at = ?
+     SET validation_json = ?, last_validated_at = ?, repo_scopes_json = ?
      WHERE id = ?`,
-  ).run(JSON.stringify(validation), validation.checkedAt, patId);
+  ).run(JSON.stringify(validation), validation.checkedAt, proofsJson(proofs), patId);
 }
 
+/** A write Viberr made to a repository with a token, and what it proves. */
+export type RepoWrite = "branch" | "push" | "initial_commit" | "pull_request" | "merge";
+
+const WRITE_PROOF = {
+  branch: { scopes: ["repo"], note: "a branch Viberr created here" },
+  push: { scopes: ["repo"], note: "a branch Viberr pushed here" },
+  initial_commit: { scopes: ["repo"], note: "the initial commit Viberr made here" },
+  pull_request: { scopes: ["pull_request:write"], note: "a pull request Viberr opened here" },
+  // Merging needs Contents write (the base branch moves) on top of the pull
+  // request itself; F28-U2a already counted it for `pull_request:write`.
+  merge: { scopes: ["repo", "pull_request:write"], note: "a pull request Viberr merged here" },
+} satisfies Record<RepoWrite, { scopes: readonly string[]; note: string }>;
+
 /**
- * F27-U2 / F28-U2: a real, SOLICITED write to GitHub (a task's PR actually
- * opened OR merged) genuinely proves `pull_request:write` — so flip that
- * credential's cached scope from the honest-but-stale "unproven (verified on
- * first use)" to `probe` (proven). Validation deliberately never fires an
- * UNSOLICITED write to prove this scope (that is the opt-in
- * `VIBERR_GITHUB_WRITE_PROBE`); this costs nothing extra because the write the
- * task needed already happened.
+ * F27-U2 / F28-U2, ruling 480: a real, SOLICITED write to GitHub proves the
+ * scopes it needed, on the repository it went to. A branch created, a branch
+ * pushed or the initial commit prove `repo`; a pull request opened proves
+ * `pull_request:write`; a merge proves both. Validation deliberately never
+ * fires an UNSOLICITED write (that is the opt-in `VIBERR_GITHUB_WRITE_PROBE`);
+ * this costs nothing because the write the task needed already happened. It
+ * used to prove `pull_request:write` alone, on the token's newest validation
+ * (whatever repository that asked about, or none), so no push or merge ever
+ * made the card's "repo unproven (verified on first use)" true.
  *
  * F28-U2b: takes the `patId` that ACTUALLY made the call (from the GithubContext
  * that authenticated it), NOT the project's currently-bound credential — a
  * credential rotation racing an in-flight `openTaskPr` must not stamp "proven"
- * onto a PAT that made no GitHub call. No-op when the PAT is gone, no validation
- * is cached, or the scope already reads proven.
+ * onto a PAT that made no GitHub call. No-op when the PAT is gone.
  */
-export function markWriteScopeProven(db: DatabaseSync, patId: string): void {
+export function markWriteScopeProven(
+  db: DatabaseSync,
+  patId: string,
+  repo: string,
+  write: RepoWrite,
+): void {
   const pat = getPatMetadata(db, patId);
-  const validation = pat?.validation ?? null;
-  if (!pat || !validation) return;
-  const scope = validation.scopes.find((s) => s.id === "pull_request:write");
-  if (!scope || (scope.ok && scope.source === "probe")) return;
-  recordPatValidation(db, pat.id, {
-    ...validation,
-    scopes: validation.scopes.map((s) =>
-      s.id === "pull_request:write" ? { ...s, ok: true, source: "probe" } : s,
-    ),
-  });
+  if (!pat || !repo) return;
+  const at = new Date().toISOString();
+  const { scopes, note } = WRITE_PROOF[write];
+  const proofs = withRepoEvidence(
+    repoScopeProofsOf(pat),
+    repo,
+    scopes.map((id) => ({ id, ok: true, source: "probe" as const, note, at })),
+  );
+  db.prepare(`UPDATE github_pats SET repo_scopes_json = ? WHERE id = ?`).run(
+    proofsJson(proofs),
+    pat.id,
+  );
+}
+
+/**
+ * Every repository's proof for a token: the stored ones, plus, for a row
+ * cached before the proofs had their own column, the repository its
+ * validation probed when no stored proof names it. Both the project card and
+ * the connection card read the token's evidence through this.
+ */
+export function repoScopeProofsOf(
+  pat: Pick<PatMetadata, "validation" | "repoScopes">,
+): RepoScopeProof[] {
+  const validation = pat.validation;
+  const repo = validation?.repo ?? null;
+  if (!validation || !repo || pat.repoScopes.some((p) => sameRepo(p.repo, repo))) {
+    return pat.repoScopes;
+  }
+  return repoScopesAfter(pat.repoScopes, validation);
+}
+
+/** The verdicts one repository's proof holds, by scope id. */
+function repoEvidence(
+  proofs: RepoScopeProof[],
+  repo: string | null,
+): Map<string, ScopeCheck> {
+  const proof = repo ? proofs.find((p) => sameRepo(p.repo, repo)) : undefined;
+  return new Map((proof?.scopes ?? []).map((s) => [s.id, s]));
 }
 
 // --------------------------------------------- project credential binding
@@ -338,7 +483,7 @@ export function getProjectCredential(
   const row = db
     .prepare(
       `SELECT p.id, p.user_id, p.label, p.token_suffix, p.created_at,
-              p.last_validated_at, p.validation_json
+              p.last_validated_at, p.validation_json, p.repo_scopes_json
        FROM project_github_credentials b
        JOIN github_pats p ON p.id = b.pat_id
        WHERE b.project_slug = ?`,
@@ -437,8 +582,17 @@ export interface ProjectCredentialHealth {
   masked: string | null;
   lastValidatedAt: string | null;
   validation: PatValidation | null;
+  /** Ruling 480 (F40-45): the Instance-settings connection whose token this
+   *  is, so the card can send an instance admin to that connection's Update
+   *  token (the only place a token is replaced). Absent when no connection
+   *  holds the bound PAT, and on a project with none: an absent key costs the
+   *  settings payload nothing (ruling 457). */
+  connectionId?: string;
   requiredScopes: string[];
-  /** One chip per required scope — feed straight into `.scope-chips`. */
+  /** One chip per required scope — feed straight into `.scope-chips`. Ruling
+   *  480: a repository-scoped scope's chip reads THIS project's repository's
+   *  proof (`repoScopeProofsOf`), never another repository's, and never the
+   *  "assumed" a connection-level Re-check leaves on the token. */
   scopes: ScopeChip[];
   /** Open violations for the project (newest first). */
   openViolations: ReturnType<typeof listScopeViolations>;
@@ -452,9 +606,11 @@ interface CredentialPolicyDisplay {
   requiredScopes: string[];
 }
 
-/** `credential_policy_json` is the projection's own nullable TEXT column. */
+/** `credential_policy_json` and `repo` are the projection's own nullable TEXT
+ *  columns. */
 const credentialPolicyRow = z.object({
   credential_policy_json: z.string().nullable(),
+  repo: z.string().nullable(),
 });
 
 /** The non-secret display policy as project.md's projection stored it. Every
@@ -472,22 +628,62 @@ const credentialPolicyDisplaySchema = z
   })
   .catch({ credentialLabel: "", masked: "", requiredScopes: [] });
 
+/** The project's display policy (null when it declares none) and the
+ *  repository its repository-scoped chips are about (ruling 480). */
+interface ProjectCredentialFacts {
+  policy: CredentialPolicyDisplay | null;
+  repo: string | null;
+}
+
 function readCredentialPolicy(
   db: DatabaseSync,
   projectSlug: string,
-): CredentialPolicyDisplay | null {
+): ProjectCredentialFacts {
   const row = credentialPolicyRow.safeParse(
     db
-      .prepare(`SELECT credential_policy_json FROM projects WHERE slug = ?`)
+      .prepare(`SELECT credential_policy_json, repo FROM projects WHERE slug = ?`)
       .get(projectSlug),
   );
+  const repo = row.success ? row.data.repo?.trim() || null : null;
   const json = row.success ? row.data.credential_policy_json : null;
-  if (!json) return null;
+  if (!json) return { policy: null, repo };
   try {
-    return credentialPolicyDisplaySchema.parse(JSON.parse(json));
+    return { policy: credentialPolicyDisplaySchema.parse(JSON.parse(json)), repo };
   } catch {
-    return null;
+    return { policy: null, repo };
   }
+}
+
+/** `id` is `github_connections`' TEXT primary key. */
+const connectionIdRow = z.object({ id: z.string() });
+
+/** The connection holding a PAT, if one does (ruling 480, F40-45). */
+function connectionIdOf(db: DatabaseSync, patId: string): string | null {
+  const row = connectionIdRow.safeParse(
+    db.prepare(`SELECT id FROM github_connections WHERE pat_id = ?`).get(patId),
+  );
+  return row.success ? row.data.id : null;
+}
+
+/**
+ * One required scope's chip. An open violation wins (the caller checks it
+ * first). A classic token's `header` verdict answers for every repository. A
+ * repository-scoped scope otherwise reads the proof of the PROJECT's
+ * repository (ruling 480): a probe or a write there is proof, and a verdict
+ * the token earned anywhere else (or nowhere, on a connection-level Re-check)
+ * leaves it "assumed", which the card renders as unproven.
+ */
+function scopeChip(
+  id: string,
+  check: ScopeCheck | undefined,
+  proof: ScopeCheck | undefined,
+): ScopeChip {
+  if (REPO_SCOPED_SCOPES.has(id) && check?.source !== "header") {
+    if (proof) return { id, ok: proof.ok, source: "probe" };
+    return check ? { id, ok: true, source: "assumed" } : { id, ok: true, source: "unchecked" };
+  }
+  if (check) return { id, ok: check.ok, source: check.source };
+  return { id, ok: true, source: "unchecked" };
 }
 
 /**
@@ -502,7 +698,7 @@ export function getProjectCredentialHealth(
   projectSlug: string,
 ): ProjectCredentialHealth {
   const pat = getProjectCredential(db, projectSlug);
-  const policy = readCredentialPolicy(db, projectSlug);
+  const { policy, repo } = readCredentialPolicy(db, projectSlug);
   const openViolations = listScopeViolations(db, projectSlug, {
     status: "open",
   });
@@ -522,6 +718,7 @@ export function getProjectCredentialHealth(
   const validated = new Map(
     (pat?.validation?.scopes ?? []).map((s) => [s.id, s]),
   );
+  const proven = repoEvidence(pat ? repoScopeProofsOf(pat) : [], repo);
 
   const scopes: ScopeChip[] = requiredScopes.map((id) => {
     const violation = violationByScope.get(id);
@@ -530,13 +727,11 @@ export function getProjectCredentialHealth(
       if (violation.taskKey) chip.flaggedTaskKey = violation.taskKey;
       return chip;
     }
-    const check = validated.get(id);
-    if (check) return { id, ok: check.ok, source: check.source };
-    return { id, ok: true, source: "unchecked" };
+    return scopeChip(id, validated.get(id), proven.get(id));
   });
 
   if (pat) {
-    return {
+    const health: ProjectCredentialHealth = {
       configured: true,
       source: "pat",
       patId: pat.id,
@@ -549,6 +744,9 @@ export function getProjectCredentialHealth(
       openViolations,
       advisories: credentialAdvisories(pat.validation, openViolations),
     };
+    const connectionId = connectionIdOf(db, pat.id);
+    if (connectionId) health.connectionId = connectionId;
+    return health;
   }
   // No bound PAT → honest "none" state, ALWAYS. A project may still declare a
   // credentialPolicy (its requiredScopes drive the pre-flight scope check), but

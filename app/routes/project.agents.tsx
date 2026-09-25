@@ -271,10 +271,19 @@ export async function action({ request, params }: Route.ActionArgs) {
       };
       if (fingerprint) propagateInput.expectFingerprint = fingerprint;
       const copies = await propagateTemplateResources(db, propagateInput, actor);
-      const name = copies[0]?.name ?? profileId;
+      const copy = copies[0];
+      const name = copy?.name ?? profileId;
+      // Ruling 479(d): ruling 156 says a grant the project added on its own
+      // is dropped "and the reply says so". This reply computed `removed`
+      // and never said it, so a press that took `cloudflare-api` off the
+      // agent owning the Cloudflare task read as a pure addition.
+      const clauses = [`"${name}" now carries the template's grants`];
+      if (copy?.removed.length) clauses.push(`removed ${copy.removed.join(", ")}`);
+      if (copy?.added.length) clauses.push(`added ${copy.added.join(", ")}`);
+      clauses.push("changes apply from the next run");
       const synced: ProfileMutationSuccess = {
         ok: true,
-        toast: `"${name}" now carries the template's grants · changes apply from the next run`,
+        toast: clauses.join(" · "),
         profileId,
       };
       return synced;

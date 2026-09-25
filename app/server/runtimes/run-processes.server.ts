@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { logger } from "~/server/logging/logger.server";
+import { launchesAgents, reapAgentProcesses } from "./agent-isolation.server";
 
 /**
  * Ruling 174: a settled run leaves no live process behind, on either backend.
@@ -23,6 +24,12 @@ import { logger } from "~/server/logging/logger.server";
  * A process that removes the marker from its own environment escapes the
  * sweep. This is cleanup of what a run forgot, not a containment boundary: the
  * container and the server-owned delivery gate are (ruling 93).
+ *
+ * Ruling 460: in the image an agent runs as its person's own uid, so this
+ * server can neither read its environment nor signal it. The sweep then also
+ * goes through the launcher (`--reap`, {@link AgentReap}), which finds and
+ * signals agent processes by the same marker as root, and a launched group's
+ * hard kill is the launcher's SIGUSR2.
  */
 export const RUN_MARKER_ENV = "VIBERR_RUN_ID";
 
@@ -164,13 +171,30 @@ export interface ReapTargets {
   /** A process-group leader whose whole group is signalled as well — the
    *  Claude CLI, which leads its own group. */
   groupLeader?: number | null;
+  /** Ruling 460: the group leader is the agent launcher, which relays what it
+   *  receives to the agent's group; its hard kill is SIGUSR2, not SIGKILL. */
+  launched?: boolean;
 }
+
+/**
+ * Ruling 460: the sweep's reach into processes the server cannot see. An agent
+ * runs as its person's own uid, so `/proc/<pid>/environ` is closed to the
+ * server and `kill` is refused; the launcher (`--reap`) finds and signals them
+ * by marker as root. Resolves how many it signalled.
+ */
+export type AgentReap = (signal: "TERM" | "KILL", runIds: readonly string[]) => Promise<number>;
 
 export interface ReapDeps {
   find?: FindRunProcesses;
   signal?: SignalProcess;
   graceMs?: number;
+  /** Default: the launcher's `--reap` when this server launches agents, else
+   *  none; `null` turns it off. */
+  agentReap?: AgentReap | null;
 }
+
+const launcherReap: AgentReap = async (signal, runIds) =>
+  (await reapAgentProcesses(signal, runIds)).length;
 
 /** The sweep as the adapters and boot recovery call it (injectable). */
 export type ReapRunProcesses = (targets: ReapTargets) => Promise<ReapReport>;
@@ -211,9 +235,12 @@ export async function reapRunProcesses(
   const find = deps.find ?? findRunProcesses;
   const signal = deps.signal ?? realSignal;
   const graceMs = deps.graceMs ?? RUN_REAP_GRACE_MS;
+  const agentReap =
+    deps.agentReap === undefined ? (launchesAgents() ? launcherReap : null) : deps.agentReap;
   const runIds = new Set(targets.runIds);
   const leader = targets.groupLeader ?? null;
   const group = leader !== null && leader > 1 ? -leader : null;
+  const hardKill: NodeJS.Signals = targets.launched ? "SIGUSR2" : "SIGKILL";
 
   const marked = await find(runIds);
   let terminated = 0;
@@ -221,16 +248,18 @@ export async function reapRunProcesses(
   for (const pid of marked.keys()) {
     if (send(signal, pid, "SIGTERM")) terminated += 1;
   }
+  if (agentReap && runIds.size > 0) terminated += await agentReap("TERM", [...runIds]);
   if (terminated === 0) return { terminated: 0, killed: 0 };
 
   await pause(graceMs);
   let killed = 0;
-  if (group !== null && send(signal, group, 0) && send(signal, group, "SIGKILL")) {
+  if (group !== null && send(signal, group, 0) && send(signal, group, hardKill)) {
     killed += 1;
   }
   for (const pid of (await find(runIds)).keys()) {
     if (send(signal, pid, "SIGKILL")) killed += 1;
   }
+  if (agentReap && runIds.size > 0) killed += await agentReap("KILL", [...runIds]);
   logger.info("reaped the processes a settled run left behind", {
     runIds: [...runIds],
     terminated,

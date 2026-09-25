@@ -19,6 +19,7 @@ import {
   type LockHolder,
 } from "./data-root-lock.server";
 import { runMigrations } from "./migration-runner.server";
+import { backfillControllerReplyLinks } from "../controller/controller-reply-links.server";
 import { toError } from "../../shared/errors";
 
 /**
@@ -379,6 +380,9 @@ const BASELINE_COLUMNS: readonly {
      * for existing rows; omitted everywhere the default is the truth.
      */
     backfill?: string;
+    /** The same, when the meaning cannot be one statement (ruling 465's reply
+     *  links replay the writers' order, message by message). */
+    backfillWith?: (db: DatabaseSync) => void;
   }[];
 }[] = [
   {
@@ -466,11 +470,60 @@ const BASELINE_COLUMNS: readonly {
     columns: [
       { name: "tool_policy_json", ddl: "tool_policy_json TEXT" },
       { name: "tool_names_json", ddl: "tool_names_json TEXT" },
+      // Ruling 469: an OAuth sign-in, sealed and public halves. Every MCP read
+      // names `oauth_json` and the gateway and probes name `oauth_ref`. No
+      // backfill: NULL is the truth for every row that predates them (no
+      // connection was signed in with OAuth before they existed).
+      { name: "oauth_ref", ddl: "oauth_ref TEXT" },
+      { name: "oauth_json", ddl: "oauth_json TEXT" },
+      // Ruling 486(c): the scope an admin asks the next sign-in for. The
+      // sign-in and every MCP read name it; NULL (ask for what the resource
+      // advertises) is the truth for every row that predates it.
+      { name: "oauth_requested_scope", ddl: "oauth_requested_scope TEXT" },
     ],
   },
   {
     table: "controller_messages",
-    columns: [{ name: "surface", ddl: "surface TEXT" }],
+    columns: [
+      { name: "surface", ddl: "surface TEXT" },
+      // Ruling 465: the user message a controller row answers. NULL is WRONG
+      // for the replies an older root already holds: boot recovery notes every
+      // user message no reply names, so it would write a restart note under
+      // each old one. Its backfill is `unlinked_history`'s, added right after
+      // it in the same pass: one walk writes both columns.
+      { name: "reply_to", ddl: "reply_to TEXT" },
+      // Ruling 465 (dated 2026-09-25): 1 on an old user message whose answer
+      // the backfill cannot prove (a restart or a failed start lost it, or the
+      // order stopped proving anything): earlier history, not linked, which
+      // recovery never notes. Its backfill links what the writers' order
+      // proves and marks the rest. A root the first backfill already linked
+      // gains this column too, so the walk runs there once more and corrects
+      // the FIFO links that first backfill wrote past a lost message.
+      {
+        name: "unlinked_history",
+        ddl: "unlinked_history INTEGER NOT NULL DEFAULT 0",
+        backfillWith: backfillControllerReplyLinks,
+      },
+    ],
+  },
+  // Ruling 463: which repositories a connection's token reaches. Every
+  // connection reader names it (the Instance settings card, the New project
+  // modal's connection list, the controller's `list_github_connections`), so a
+  // root that predates it would fail all three. No backfill: NULL says "not
+  // read yet", which is exactly true of every connection saved before the
+  // read existed, and the card offers Re-check to read it.
+  {
+    table: "github_connections",
+    columns: [{ name: "reach_json", ddl: "reach_json TEXT" }],
+  },
+  // Ruling 480: what each repository proved about a token. Every PAT read
+  // names it (the project credential card, the connection card, every GitHub
+  // call's context), so a root that predates it would fail all of them. No
+  // backfill: NULL is "nothing stored yet", and `repoScopeProofsOf` still reads
+  // the repository an older row's cached validation probed.
+  {
+    table: "github_pats",
+    columns: [{ name: "repo_scopes_json", ddl: "repo_scopes_json TEXT" }],
   },
   // Ruling 178: the project's resolved required-reviewer rules. The rebuilder
   // names the column on every project write and every task walk reads it, so
@@ -482,6 +535,14 @@ const BASELINE_COLUMNS: readonly {
       {
         name: "required_reviewers_json",
         ddl: "required_reviewers_json TEXT NOT NULL DEFAULT '[]'",
+      },
+      // Ruling 482: the project's declared gates. Named by the rebuilder on
+      // every project write and read by every task walk, like the column
+      // above; its DEFAULT is the truth for every project that predates it
+      // (none declared gates before the key existed).
+      {
+        name: "gates_json",
+        ddl: "gates_json TEXT NOT NULL DEFAULT '[]'",
       },
     ],
   },
@@ -538,6 +599,14 @@ const BASELINE_TABLES: readonly string[] = [
      updated_at TEXT NOT NULL,
      UNIQUE (user_id, backend)
    )`,
+  // Ruling 460: each person's agent uid. A root that predates it would refuse
+  // every run start in the image ("no such table") — the uid is allocated
+  // before the launch.
+  `CREATE TABLE IF NOT EXISTS agent_os_users (
+     user_id TEXT PRIMARY KEY,
+     os_uid INTEGER NOT NULL UNIQUE,
+     created_at TEXT NOT NULL
+  )`,
 ];
 
 /** Indexes the baseline gained after a root applied it. `IF NOT EXISTS` makes
@@ -573,12 +642,14 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
           table,
           column: column.name,
         });
-        if (column.backfill) {
+        const statement = column.backfill;
+        const backfill = statement ? () => db.exec(statement) : column.backfillWith;
+        if (backfill) {
           // Its own try: a backfill that cannot run (an older root whose table
           // lacks a column the statement names) must not skip the columns
           // still to be added for this table.
           try {
-            db.exec(column.backfill);
+            backfill(db);
           } catch (error) {
             logger.warn(
               "a baseline column was added but its backfill did not run — rows that predate the column keep the column default",

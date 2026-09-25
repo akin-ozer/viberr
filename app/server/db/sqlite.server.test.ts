@@ -103,13 +103,25 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
 
       // Ruling 176: an org MCP registry from before the write-tool columns.
       // `listMcpServers` names both on every Settings render and run mount.
+      // Ruling 469: and the OAuth sign-in's sealed and public halves, which
+      // every MCP read (`oauth_json`) and the gateway (`oauth_ref`) name.
+      // Ruling 486: and the scope an admin asks the next sign-in for.
       db.exec(`CREATE TABLE org_mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL)`);
+      ensureBaselineColumns(db);
       ensureBaselineColumns(db);
       // SAFETY: PRAGMA table_info rows always carry a TEXT `name`.
       const mcpColumns = (db.prepare(`PRAGMA table_info(org_mcp_servers)`).all() as {
         name: string;
       }[]).map((c) => c.name);
-      expect(mcpColumns).toEqual(["id", "name", "tool_policy_json", "tool_names_json"]);
+      expect(mcpColumns).toEqual([
+        "id",
+        "name",
+        "tool_policy_json",
+        "tool_names_json",
+        "oauth_ref",
+        "oauth_json",
+        "oauth_requested_scope",
+      ]);
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -328,6 +340,201 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         { id: "c1", seen_seq: 2 },
         { id: "c2", seen_seq: 0 },
       ]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Ruling 480: `repo_scopes_json` holds what each repository proved about a
+   * token. Every PAT read names it, so a root that predates it would fail the
+   * credential card and every GitHub call's context. NULL is "nothing stored
+   * yet", and a second boot adds nothing.
+   */
+  it("adds repo_scopes_json to an older root's PATs, empty, idempotently", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-patproof-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE github_pats (
+           id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT NOT NULL,
+           encrypted_token TEXT NOT NULL, token_suffix TEXT NOT NULL,
+           created_at TEXT NOT NULL, last_validated_at TEXT, validation_json TEXT);
+         INSERT INTO github_pats (id, user_id, label, encrypted_token, token_suffix, created_at)
+           VALUES ('pat_1', 'u_1', 'connection · akin-ozer', 'v1$x', 'k3ui', '2026-09-20');`,
+      );
+      ensureBaselineColumns(db);
+      ensureBaselineColumns(db);
+      // SAFETY: the SELECT names two columns; `repo_scopes_json` is nullable TEXT.
+      const rows = db
+        .prepare(`SELECT id, repo_scopes_json FROM github_pats`)
+        .all() as { id: string; repo_scopes_json: string | null }[];
+      // CANARY: drop the `github_pats` entry from BASELINE_COLUMNS and this
+      // SELECT fails with "no such column".
+      expect(rows).toEqual([{ id: "pat_1", repo_scopes_json: null }]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Ruling 463: `reach_json` says which repositories a connection's token
+   * reaches. Every connection reader names it, so a root that predates it
+   * would fail the Instance settings card, the New project dialog and the
+   * controller's read. NULL is the truth for an existing connection ("not
+   * read yet"), and a second boot adds nothing.
+   */
+  it("adds reach_json to an older root's connections, unread, idempotently", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-connreach-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE github_connections (
+           id TEXT PRIMARY KEY, owner TEXT NOT NULL UNIQUE, pat_id TEXT NOT NULL,
+           is_default INTEGER NOT NULL DEFAULT 0, repos_count INTEGER, expires_at TEXT,
+           created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+         INSERT INTO github_connections (id, owner, pat_id, is_default, repos_count, created_at, updated_at)
+           VALUES ('akin-ozer', 'akin-ozer', 'pat_1', 1, 3, '2026-09-20', '2026-09-20');`,
+      );
+      ensureBaselineColumns(db);
+      ensureBaselineColumns(db);
+      // SAFETY: the SELECT names two columns; `reach_json` is nullable TEXT.
+      const rows = db
+        .prepare(`SELECT id, reach_json FROM github_connections`)
+        .all() as { id: string; reach_json: string | null }[];
+      // CANARY: drop the `github_connections` entry from BASELINE_COLUMNS and
+      // this SELECT fails with "no such column".
+      expect(rows).toEqual([{ id: "akin-ozer", reach_json: null }]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Ruling 465: `reply_to` says which user message a controller row answers.
+   * An older root holds replies already, and boot recovery notes every user
+   * message no reply names, so a NULL would write a restart note under every
+   * old message. The backfill replays the writers' order: a turn's reply
+   * (it carries a run) answers the OLDEST waiting message, a run-less note the
+   * NEWEST (it was written right after the message it refused), the queued-
+   * start failure its head (the rest were dropped, and said so), and a
+   * released project's note nothing.
+   */
+  it("adds reply_to to an older root, linking each old reply the way its writer wrote it", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlreply-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE controller_conversations (
+           id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_label TEXT NOT NULL,
+           project_slug TEXT, task_key TEXT, title TEXT NOT NULL DEFAULT '',
+           created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_message_at TEXT,
+           seen_seq INTEGER NOT NULL DEFAULT 0);
+         CREATE TABLE controller_messages (
+           id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL,
+           author TEXT NOT NULL, user_id TEXT, text TEXT NOT NULL, run_id TEXT,
+           surface TEXT, created_at TEXT NOT NULL, UNIQUE (conversation_id, seq));
+         INSERT INTO controller_conversations (id, user_id, user_label, created_at, updated_at)
+           VALUES ('c1', 'u1', 'a@b.dev', '2026-09-24', '2026-09-24'),
+                  ('c2', 'u1', 'a@b.dev', '2026-09-24', '2026-09-24');
+         INSERT INTO controller_messages (id, conversation_id, seq, author, user_id, text, run_id, created_at) VALUES
+           ('p1', 'c1', 1, 'user', 'u1', 'part 1', NULL, 'x'),
+           ('p2', 'c1', 2, 'user', 'u1', 'part 2', NULL, 'x'),
+           ('p3', 'c1', 3, 'user', 'u1', 'part 3', NULL, 'x'),
+           ('full', 'c1', 4, 'user', 'u1', 'one too many', NULL, 'x'),
+           ('rfull', 'c1', 5, 'controller', NULL, 'I could not take that on: the queue is full.', NULL, 'x'),
+           ('r1', 'c1', 6, 'controller', NULL, 'reply to part 1', 'run_1', 'x'),
+           ('fix', 'c1', 7, 'user', 'u1', 'correction', NULL, 'x'),
+           ('r2', 'c1', 8, 'controller', NULL, 'reply to part 2', 'run_2', 'x'),
+           ('r3', 'c1', 9, 'controller', NULL, 'reply to part 3', 'run_3', 'x'),
+           ('rfix', 'c1', 10, 'controller', NULL, 'reply to the correction', 'run_4', 'x'),
+           ('q1', 'c2', 1, 'user', 'u1', 'a', NULL, 'x'),
+           ('q2', 'c2', 2, 'user', 'u1', 'b', NULL, 'x'),
+           ('q3', 'c2', 3, 'user', 'u1', 'c', NULL, 'x'),
+           ('ra', 'c2', 4, 'controller', NULL, 'answer a', 'run_a', 'x'),
+           ('fail', 'c2', 5, 'controller', NULL, 'I could not start the queued turn, and I dropped the 1 message you sent after it. Say them again to retry.', NULL, 'x'),
+           ('rel', 'c2', 6, 'controller', NULL, 'The project "Web" was deleted, so this conversation is no longer bound to it. Everything above stays on the record.', NULL, 'x');`,
+      );
+      ensureBaselineColumns(db);
+      // SAFETY: both columns are selected by name; `id` is NOT NULL TEXT.
+      const links = Object.fromEntries(
+        (
+          db
+            .prepare(`SELECT id, reply_to FROM controller_messages WHERE author = 'controller'`)
+            .all() as { id: string; reply_to: string | null }[]
+        ).map((r) => [r.id, r.reply_to]),
+      );
+      // CANARY: drop the backfill and every link is null; take the newest for
+      // a run-carrying reply and part 1's reply lands under the correction.
+      expect(links).toEqual({
+        rfull: "full",
+        r1: "p1",
+        r2: "p2",
+        r3: "p3",
+        rfix: "fix",
+        // The failure note answers the head it tried (q2); q3 was dropped and
+        // stays unanswered, as the note itself said.
+        ra: "q1",
+        fail: "q2",
+        rel: null,
+      });
+      // Ruling 465 (2026-09-25): and q3 is earlier history, not linked, so
+      // boot recovery does not write a restart note under it.
+      // SAFETY: the SELECT names one TEXT column.
+      const history = db
+        .prepare(`SELECT id FROM controller_messages WHERE unlinked_history = 1`)
+        .all() as { id: string }[];
+      expect(history.map((r) => r.id)).toEqual(["q3"]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Ruling 465 (2026-09-25): a root the first backfill already linked (the
+   * owner's, deployed 2026-09-24 21:50 UTC) has `reply_to` and lacks
+   * `unlinked_history`. Adding that column runs the corrected walk there once,
+   * which replaces the links the first one shifted past a lost message.
+   */
+  it("walks a root the first reply_to backfill already linked once more, when unlinked_history arrives", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlrelink-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(
+        `CREATE TABLE controller_conversations (
+           id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_label TEXT NOT NULL,
+           project_slug TEXT, task_key TEXT, title TEXT NOT NULL DEFAULT '',
+           created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_message_at TEXT,
+           seen_seq INTEGER NOT NULL DEFAULT 0);
+         CREATE TABLE controller_messages (
+           id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL,
+           author TEXT NOT NULL, user_id TEXT, text TEXT NOT NULL, run_id TEXT,
+           surface TEXT, created_at TEXT NOT NULL, reply_to TEXT, UNIQUE (conversation_id, seq));
+         INSERT INTO controller_conversations (id, user_id, user_label, created_at, updated_at)
+           VALUES ('c1', 'u1', 'a@b.dev', '2026-09-20', '2026-09-20');
+         INSERT INTO controller_messages (id, conversation_id, seq, author, user_id, text, run_id, reply_to, created_at) VALUES
+           ('A', 'c1', 1, 'user', 'u1', 'a', NULL, NULL, '2026-09-20T10:00:00.000Z'),
+           ('B', 'c1', 2, 'user', 'u1', 'b', NULL, NULL, '2026-09-20T10:01:00.000Z'),
+           ('n1', 'c1', 3, 'controller', NULL, 'This turn was interrupted by a server restart before I could answer. Say it again and I will pick it up.', 'run_1', 'A', '2026-09-20T10:30:00.000Z'),
+           ('C', 'c1', 4, 'user', 'u1', 'c', NULL, NULL, '2026-09-20T10:40:00.000Z'),
+           ('rC', 'c1', 5, 'controller', NULL, 'answer c', 'run_3', 'B', '2026-09-20T10:41:00.000Z');`,
+      );
+      ensureBaselineColumns(db);
+      // SAFETY: both columns are selected by name; `id` is NOT NULL TEXT.
+      const links = Object.fromEntries(
+        (
+          db
+            .prepare(`SELECT id, reply_to FROM controller_messages WHERE author = 'controller'`)
+            .all() as { id: string; reply_to: string | null }[]
+        ).map((r) => [r.id, r.reply_to]),
+      );
+      // CANARY: drop `backfillWith` from `unlinked_history` and rC keeps the
+      // first backfill's B.
+      expect(links).toEqual({ n1: "A", rC: "C" });
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

@@ -15,9 +15,16 @@ import { describeRevisionDrift } from "~/shared/revision-drift";
 import { newId } from "~/shared/ids/new-id.server";
 import { taskClosure } from "~/server/tasks/task-closure.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
-import { POLICY_ENGINE_NOTIFY_FROM, taskRef } from "~/server/tasks/task-mutation.server";
+import {
+  POLICY_ENGINE_NOTIFY_FROM,
+  recordAcceptancePacketWithdrawal,
+  taskRef,
+  withdrawAcceptancePacket,
+  type AcceptancePacketWithdrawalSlot,
+} from "~/server/tasks/task-mutation.server";
 import {
   recordAudit,
+  SYSTEM_ACTOR,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import {
@@ -78,6 +85,7 @@ import {
   PR_HUMAN_APPROVAL_KEY,
   type PrHumanApproval,
 } from "./pr-human-approval.server";
+import { relayPrReviews, REVIEW_RELAY_KEY } from "./pr-review-relay.server";
 import { getProject } from "~/server/projections/board-query.server";
 import { logger } from "~/server/logging/logger.server";
 import { latestReconcileSync } from "~/server/provenance/provenance-query.server";
@@ -118,8 +126,9 @@ import { errorMessage } from "~/shared/errors";
  */
 
 /**
- * The operator wake a divergence fires: `autoInvokeOperator` narrowed to the one
- * trigger this module ever passes. Typed here rather than imported so the
+ * The operator wake a divergence fires: `autoInvokeOperator` narrowed to the
+ * triggers this module passes (ruling 475 added `pr-conflicting`, the flip of
+ * an open PR to conflicting). Typed here rather than imported so the
  * task-actions dependency stays the runtime-only dynamic import it already is.
  */
 export type OperatorWake = (
@@ -127,8 +136,17 @@ export type OperatorWake = (
   ctx: { dataRoot?: string },
   projectSlug: string,
   taskKey: string,
-  trigger: "pr-diverged",
+  trigger: "pr-diverged" | "pr-conflicting",
 ) => Promise<void>;
+
+/**
+ * Ruling 475 (F40-55 (a)): after a merge, when the other open review PRs are
+ * read again. GitHub computes mergeability asynchronously, so the first read
+ * after the base moved usually answers "unknown" (and starts the computation);
+ * a PR still unknown is read again after each later delay, and one GitHub has
+ * answered for is left alone.
+ */
+export const SIBLING_RECHECK_DELAYS_MS: readonly number[] = [0, 5_000, 20_000];
 
 export interface GithubActionContext {
   dataRoot?: string;
@@ -157,6 +175,9 @@ export interface GithubActionContext {
    *  human-triggered "Update status" leaves it unset — someone is waiting for
    *  the whole board's truth, not a slice of it. */
   taskBudget?: number;
+  /** Ruling 475: the delays of the post-merge re-check of the project's other
+   *  open review PRs. Tests pass zeros; absent = {@link SIBLING_RECHECK_DELAYS_MS}. */
+  siblingRecheckDelaysMs?: readonly number[];
 }
 
 /** `fetchImpl` is an OPTIONAL key: the context reads it with a truthiness check,
@@ -695,7 +716,6 @@ async function reconcileTaskUnlocked(
       ? unpushed
       : (cachedPr?.unpushedRevision ?? null);
     if (carriedUnpushed) owned.unpushedRevision = carriedUnpushed;
-    if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
     // Ruling 160 (pass 35, F35-11): a PR that just went `closed` without
     // merging was closed by a person. The closure is stamped on the
     // TRANSITION (with the closer's login when GitHub names one), carried
@@ -712,6 +732,19 @@ async function reconcileTaskUnlocked(
               answered: null,
             };
     }
+    // Ruling 474: the body the DELIVERY last wrote is not a fact this pass
+    // reads, so the SAME PR carries it. Dropping it would make the next
+    // delivery take a person's edit for Viberr's own text and overwrite it.
+    if (cachedPr?.bodyWritten) owned.bodyWritten = cachedPr.bodyWritten;
+    // Last, as the parse orders it (the schema's keys, then this loose one),
+    // so an unchanged PR compares equal to its file and writes nothing.
+    if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
+    // Ruling 484: what the review relay already relayed on this PR is not a
+    // fact this pass reads, so the SAME PR carries it (dropping it would relay
+    // every review again). After `humanApproval`, the order the relay's own
+    // write leaves them in.
+    const relayRecord = cachedPr?.[REVIEW_RELAY_KEY];
+    if (relayRecord !== undefined) owned[REVIEW_RELAY_KEY] = relayRecord;
     newPr = owned;
   }
 
@@ -1080,6 +1113,9 @@ async function reconcileTaskUnlocked(
           )
         : [];
     const supersededIds = new Set(supersededRecs.map((r) => r.id));
+    // Ruling 475 (F40-55 (b)): the open decision packet that offers the same
+    // acceptance goes too. Filled inside the lock below.
+    const withdrawnPacket: AcceptancePacketWithdrawalSlot = { title: null };
     // Everything above was decided from a snapshot taken BEFORE several awaited
     // GitHub round trips, and this is a blind whole-key assign. Another writer
     // can land in that window — an acceptance stamping `pr.state: "accepted"`
@@ -1121,6 +1157,12 @@ async function reconcileTaskUnlocked(
             // merge that wins here must not leave the merged PR carrying it.
             if (applied.pr.state !== "closed") delete applied.pr.closure;
           }
+          // Ruling 474: a delivery that rewrote the PR body during this pass's
+          // round trips recorded the body it wrote; the snapshot's older
+          // record must not replace it.
+          if (current.bodyWritten) {
+            applied.pr = { ...applied.pr, bodyWritten: current.bodyWritten };
+          }
         }
       }
       if (supersededIds.size > 0) {
@@ -1129,6 +1171,18 @@ async function reconcileTaskUnlocked(
         );
       }
       Object.assign(parsed.frontmatter, applied);
+      // Ruling 475 (F40-55 (b)): live on WEB-2 the accept packet stood for
+      // 26 minutes after WEB-4's merge had put PR #3 in conflict, still saying
+      // "the PR is mergeable", and the owner found out when Accept was
+      // refused. Ruling 162(d) withdrew only the recommendation cards.
+      if (conflictText && !divergenceText) {
+        withdrawnPacket.title =
+          withdrawAcceptancePacket(
+            parsed,
+            `PR #${newPr!.number} now conflicts with the base branch, so the acceptance it offers would be refused`,
+            POLICY_ENGINE_ACTOR,
+          )?.title ?? null;
+      }
       // Ruling 179: re-checked under the lock — a delivery landing during
       // this pass's round trips replaces the revision itself, and then the
       // moved head is that delivery's, not a stranger's.
@@ -1251,6 +1305,34 @@ async function reconcileTaskUnlocked(
     rebuildPath(db, resolveTaskFilePath(ref), {
       dataRoot: ctx.dataRoot,
     });
+    if (withdrawnPacket.title !== null) {
+      recordAcceptancePacketWithdrawal(db, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        title: withdrawnPacket.title,
+        reason: "pr_conflicting",
+        actor,
+      });
+      // The person the packet asked is told why the question went away, in
+      // the inbox the packet reached, before any click can be refused.
+      if (!ctx.suppressDivergenceNotice && conflictText) {
+        const { notifyTaskWatchers } = await import("~/server/tasks/task-actions.server");
+        notifyTaskWatchers(
+          db,
+          {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            kind: "policy",
+            title: `PR #${newPr!.number} now conflicts with the base: ${fm.key}'s acceptance is withdrawn`,
+            text:
+              `${conflictText} The decision "${withdrawnPacket.title}" was withdrawn, because ` +
+              `the acceptance it offered would be refused. The task's operator is asked to resolve the conflict.`,
+            from: POLICY_ENGINE_NOTIFY_FROM,
+          },
+          { dataRoot: ctx.dataRoot },
+        );
+      }
+    }
     if (authoredDriftVoidsVerdict) {
       // The task returns to the stage where a verdict can be given (ruling
       // 163's rework route, the authored-drift door), notifies the watchers
@@ -1266,6 +1348,16 @@ async function reconcileTaskUnlocked(
         authoredDriftNow.headSha,
         { userId: actor.userId ?? "", label: actor.label ?? "system" },
         { via: "authored-drift" },
+      );
+      // Ruling 482 (F40-52): the external head is what merges now, so the
+      // project's gates run on it like on any delivered revision.
+      const { requestProjectGatesQuietly } = await import(
+        "~/server/tasks/project-gates.server"
+      );
+      await requestProjectGatesQuietly(
+        db,
+        { projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: ctx.dataRoot },
+        "revision",
       );
       if (!ctx.suppressDivergenceNotice && driftVoidText) {
         notifyTaskWatchers(
@@ -1369,6 +1461,49 @@ async function reconcileTaskUnlocked(
         input.taskKey,
         "pr-diverged",
       );
+    } else if (conflictText) {
+      // Ruling 475 (F40-55 (b)): a flip to conflicting is a coordination event
+      // too. It used to write a note no agent reads (toAgent false) and wake
+      // nobody, so the conflict was found by a person's refused Accept. The
+      // same trigger the refused acceptance uses (ruling 332): the operator's
+      // `update_branch_from_base` then hands the conflict to the deliverer.
+      const wake =
+        ctx.wakeOperator ??
+        (await import("~/server/tasks/task-actions.server")).autoInvokeOperator;
+      void wake(
+        db,
+        { dataRoot: ctx.dataRoot },
+        input.projectSlug,
+        input.taskKey,
+        "pr-conflicting",
+      );
+    }
+  }
+
+  // Ruling 484 (pass 40, F40-54): a project member's GitHub review of the
+  // delivered revision reaches the agent that delivered it, once. After this
+  // pass's own write, because the relay records what it relayed on the same
+  // `pr` block that write replaces; inside the task's reconcile lock, so two
+  // passes never relay one review. It never fails the reconcile.
+  if (pr && ownsAPr && pr.reviewEvents && pr.reviewEvents.length > 0) {
+    try {
+      await relayPrReviews(
+        db,
+        {
+          projectSlug: input.projectSlug,
+          taskKey: input.taskKey,
+          prNumber: pr.number,
+          events: pr.reviewEvents,
+        },
+        { client: gh.client, repo: gh.repo },
+        { dataRoot: ctx.dataRoot },
+      );
+    } catch (error) {
+      logger.warn("GitHub review relay failed; the next reconcile retries it", {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        err: errorMessage(error),
+      });
     }
   }
 
@@ -1476,6 +1611,93 @@ export function reconcileTask(
       }
     },
   );
+}
+
+/** Ruling 475: one open review PR the post-merge re-check visits. */
+const openSiblingRows = z.array(z.object({ task_key: z.string() }));
+
+/**
+ * Ruling 475 (F40-55 (a)): re-read every OTHER open review PR of the project
+ * right after Viberr merged one.
+ *
+ * Live on akinozer-com the owner accepted WEB-4 at 00:26:20 and Viberr merged
+ * PR #2. Both PR #2 and WEB-2's PR #3 changed `package.json`, which Viberr
+ * already knew (`pr.paths`, the review queue's ruling-236 chip, the operator's
+ * ruling-413 `collisions`). Nothing re-read PR #3: the reconcile callers were
+ * the five-minute poll, a PR open, a branch update and the branch-delete
+ * confirm. At 00:27:54 the owner pressed Accept on WEB-2's still-open packet
+ * and the acceptance-time refresh refused it.
+ *
+ * Each sibling is reconciled now, which starts GitHub's mergeability
+ * computation and records the answer when it is ready. One whose answer is
+ * still "unknown" is read again after each later delay (GitHub computes it
+ * asynchronously). A PR that now conflicts flips through the ordinary pass:
+ * its acceptance offers are withdrawn and the operator is woken
+ * (`pr-conflicting`). Every PR that shares a path with the merged one is
+ * among the siblings by construction, so nothing is filtered by the overlap:
+ * a path list can be capped or unread, and a conflict is GitHub's to name.
+ *
+ * The sibling list is read before the first await, so a caller that does not
+ * wait still gets it from the database it handed in. Never throws.
+ */
+export async function recheckOpenReviewPrs(
+  db: DatabaseSync,
+  input: { projectSlug: string; mergedTaskKey: string },
+  ctx: GithubActionContext = {},
+): Promise<TaskReconcileResult[]> {
+  let pending: string[];
+  try {
+    pending = openSiblingRows
+      .parse(
+        db
+          .prepare(
+            `SELECT task_key FROM task_projections
+             WHERE project_slug = ? AND task_key <> ? AND archived = 0
+               AND COALESCE(json_extract(pr_json, '$.state'), '') IN ('review', 'accepted')
+             ORDER BY task_key ASC`,
+          )
+          .all(input.projectSlug, input.mergedTaskKey),
+      )
+      .map((row) => row.task_key);
+  } catch (error) {
+    logger.warn("post-merge re-check could not list the open review PRs", {
+      projectSlug: input.projectSlug,
+      err: errorMessage(error),
+    });
+    return [];
+  }
+  const results: TaskReconcileResult[] = [];
+  for (const delay of ctx.siblingRecheckDelaysMs ?? SIBLING_RECHECK_DELAYS_MS) {
+    if (pending.length === 0) break;
+    if (delay > 0) {
+      await new Promise<void>((resolve) => {
+        // Unref'd: a re-check waiting on GitHub never holds a shutdown open.
+        setTimeout(resolve, delay).unref();
+      });
+    }
+    const unknown: string[] = [];
+    for (const taskKey of pending) {
+      const result = await reconcileTask(
+        db,
+        { projectSlug: input.projectSlug, taskKey },
+        SYSTEM_ACTOR,
+        ctx,
+      );
+      results.push(result);
+      // Only an OPEN pull request GitHub has not answered for yet is worth
+      // another read; a settled one, or a pass that failed, is not.
+      if (
+        result.status === "reconciled" &&
+        result.pr !== null &&
+        (result.pr.state === "review" || result.pr.state === "accepted") &&
+        result.pr.mergeable === undefined
+      ) {
+        unknown.push(taskKey);
+      }
+    }
+    pending = unknown;
+  }
+  return results;
 }
 
 export interface ProjectReconcileSummary {
@@ -1896,7 +2118,8 @@ export async function mergeTaskPr(
     // credentials (bypassing viberr's PAT) leaves no violation, so without this
     // the merge — the FIRST real use of the bound PAT — never clears "unproven".
     // Prove it on the credential that made THIS merge call (F28-U2b), by id.
-    markWriteScopeProven(db, gh.patId);
+    // Ruling 480: on this repository, and `repo` too (the base branch moved).
+    markWriteScopeProven(db, gh.patId, gh.repo, "merge");
     // R15-6: post-merge branch cleanup, per project policy (default ON). The
     // merge is done and recorded above — cleanup is housekeeping that must
     // never turn a successful merge into a failed one, so every outcome
@@ -1934,6 +2157,16 @@ export async function mergeTaskPr(
     } catch {
       // The branch survives; the next manual cleanup (or archive) can retry.
     }
+    // Ruling 475 (F40-55 (a)): this merge moved the base under every other
+    // open review PR of the project; read them again now rather than on the
+    // next five-minute poll, or when a person's Accept is refused. Not
+    // awaited: the merge is done, and the person's answer must not wait on
+    // GitHub computing someone else's mergeability.
+    void recheckOpenReviewPrs(
+      db,
+      { projectSlug: input.projectSlug, mergedTaskKey: input.taskKey },
+      ctx,
+    );
     return { status: "merged", prNumber, sha };
   }
 

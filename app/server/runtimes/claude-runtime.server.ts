@@ -1275,7 +1275,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         nativeSkills,
         droppedSkills,
         skillPlugin: nativeSkills.length ? spec.skillPlugin : undefined,
-        spawn: (request) => spawnClaudeCli(request, deps.spawnCli, deps.signalProcess).process,
+        spawn: (request) =>
+          spawnClaudeCli(request, deps.spawnCli, deps.signalProcess, spec.agent ?? null).process,
         phase,
         emitPolicyDenied: () => {},
         abortController: new AbortController(),
@@ -1580,10 +1581,13 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             reapRunProcesses(targets, deps.signalProcess ? { signal: deps.signalProcess } : {}));
         void (async () => {
           await spawned.exited(RUN_REAP_GRACE_MS);
-          await reapProcesses({
+          const targets: ReapTargets = {
             runIds: spec.env?.[RUN_MARKER_ENV] ? [spec.runId] : [],
             groupLeader: spawned.pid,
-          });
+          };
+          // Ruling 460: the group leader is the launcher; its hard kill differs.
+          if (spec.agent) targets.launched = true;
+          await reapProcesses(targets);
         })().catch((error) => {
           logger.warn("claude run reap failed", {
             runId: spec.runId,
@@ -1651,7 +1655,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           droppedSkills,
           skillPlugin,
           spawn: (request) => {
-            cli = spawnClaudeCli(request, deps.spawnCli, deps.signalProcess);
+            // Ruling 460: as the principal's own OS user when the run carries
+            // a launch; the launcher then leads the group signalled below.
+            cli = spawnClaudeCli(request, deps.spawnCli, deps.signalProcess, spec.agent ?? null);
             return cli.process;
           },
           phase,

@@ -4,17 +4,26 @@ import {
 } from "~/server/files/project-rulings.server";
 import { activeFileLeases } from "./file-leases.server";
 import { type ReviewSubject, reviewSubjectSha } from "~/shared/revision-drift";
-import { execFile } from "node:child_process";
 import { closureRefusal, taskClosure } from "./task-closure.server";
 import {
   describeWorkspaceRefresh,
   refreshWorkspaceFromMirror,
   type WorkspaceRefreshInput,
 } from "./workspace-refresh.server";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import {
+  shareDirWithAgents,
+  shareDirWithAgentsOrWarn,
+  type AgentLaunch,
+} from "~/server/runtimes/agent-isolation.server";
+import { removeAgentTree } from "~/server/runtimes/agent-trees.server";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
+import {
+  taskWorkspaceGit,
+  workspaceGitWhenIsolationOff,
+  type WorkspaceGit,
+} from "./workspace-git.server";
 import {
   activeWorkRevision,
   deliveringEngagement,
@@ -140,6 +149,8 @@ import {
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
   unavailableMcpSection,
+  gatewayMcpSection,
+  type McpRunGrant,
   type UnresolvedMcpGrant,
 } from "./specialist-mcp.server";
 import {
@@ -156,6 +167,8 @@ import {
   type CloneCredential,
   githubRemoteSanitizationArgs,
   type CloneFailureLogDetails,
+  WorkspaceFault,
+  workspaceStep,
 } from "./git-clone-auth.server";
 import {
   cloneProgressStep,
@@ -187,9 +200,27 @@ type SkillMountInput = Parameters<typeof mountGrantedSkills>[0];
  * sessions". Mirrors the transition/interrupt project-membership check.
  */
 
-const execFileAsync = promisify(execFile);
-
 // ----------------------------------------------------------------- helpers
+
+/** Pass 40 review (R-seams-1): the task checkout's git as the task's person,
+ *  or null when it cannot run as them (the caller skips its git step). */
+function personGitOrNull(
+  db: DatabaseSync,
+  projectSlug: string,
+  taskKey: string,
+  dataRoot: string | undefined,
+): WorkspaceGit | null {
+  try {
+    return taskWorkspaceGit(db, { projectSlug, taskKey, dataRoot });
+  } catch (error) {
+    logger.warn("the task checkout's git cannot run as its person; its git step is skipped", {
+      projectSlug,
+      taskKey,
+      err: toError(error),
+    });
+    return null;
+  }
+}
 
 /** A deployed specialist resolved from project.md `agents:` for a run. */
 export interface ResolvedSpecialist {
@@ -287,6 +318,10 @@ interface RunMcpMounts {
   unhealthy: string[];
   /** Ruling 176: the mounted servers' marked write tools this run withholds. */
   toolDenials: McpToolDenial[];
+  /** Ruling 461: the mounted servers reached through Viberr's MCP gateway. */
+  proxied: string[];
+  /** Ruling 486: the proxied servers signed in with OAuth, with their grants. */
+  oauthGrants: McpRunGrant[];
 }
 
 /**
@@ -346,7 +381,6 @@ export function runDispatchLine(input: {
 async function mcpServersFor(
   db: DatabaseSync,
   names: string[],
-  backend: RealBackend,
   /** Ruling 176: the run withholds repo write, so marked write tools go. */
   withholdWriteTools: boolean,
 ): Promise<RunMcpMounts> {
@@ -358,7 +392,6 @@ async function mcpServersFor(
   const resolution = await verifyStdioMcpMountsForRun(
     db,
     resolveSpecialistMcpServersDetailed(db, names, { withholdWriteTools }),
-    { backend },
   );
   const { servers, unresolved } = resolution;
   const mounts: RunMcpMounts = {
@@ -367,12 +400,22 @@ async function mcpServersFor(
     unresolved: unresolved.filter((u) => !u.mounted),
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
     toolDenials: resolution.toolDenials,
+    proxied: resolution.proxied,
+    oauthGrants: resolution.oauthGrants,
   };
   // Absent rather than empty: callers read the key's PRESENCE as "this run has
   // MCP mounts at all" before they build the prompt or the run spec.
   if (Object.keys(servers).length) mounts.mcpServers = servers;
   return mounts;
 }
+
+/** Ruling 483: the collaboration note a Claude run with a knowledge base gets. */
+export const KB_CORRECTION_NOTE_CLAUDE =
+  "- `propose_kb_correction` — when your work PROVES a line in one of your knowledge bases wrong (a version you measured, a path, a command, a step), propose the correction against that document with your evidence instead of only reporting the discrepancy. It lands under \"Proposed corrections (not binding)\" in the document, beside the line, for every later run to read, and a person promotes it.";
+
+/** Ruling 483: the same channel on Codex, which mounts no Viberr tools. */
+export const KB_CORRECTION_NOTE_CODEX =
+  "- A line in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to file the correction on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the line, what is true instead and your evidence. The operator files it in the document, beside the line, for every later run to read.";
 
 /**
  * Resolve a deployed SPECIALIST agent (kind !== "operator") from the
@@ -526,6 +569,12 @@ async function freshRunAnchor(
       // Ruling 245(b): resolved, so a run is never warned off a file whose
       // holder has already landed.
       fileLeases: activeFileLeases(projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
+      // Ruling 482: the project's gates as Viberr ran them, so a reviewer
+      // reads the record instead of re-running the gates to report them.
+      gates:
+        readProjectFile(
+          ctx.dataRoot ? { projectSlug, dataRoot: ctx.dataRoot } : { projectSlug },
+        )?.parsed.frontmatter.gates ?? [],
     });
   } catch (error) {
     logger.warn("canonical anchor could not be built for a fresh run", {
@@ -1535,13 +1584,8 @@ async function dispatchAgentRun(
   // Ruling 176: the same denylist that withholds the file tools decides
   // whether the admin's marked MCP write tools go too — one predicate.
   const resolvedMcps: RunMcpMounts = realBackend
-    ? await mcpServersFor(
-        db,
-        mcpNames,
-        backend,
-        repoWriteWithheldFromDenylist(disallowedTools),
-      )
-    : { unresolved: [], unhealthy: [], toolDenials: [] };
+    ? await mcpServersFor(db, mcpNames, repoWriteWithheldFromDenylist(disallowedTools))
+    : { unresolved: [], unhealthy: [], toolDenials: [], proxied: [], oauthGrants: [] };
 
   // Collaboration gates (G3/G4) from the deployment's grants — the SAME
   // resolution the completion pipeline re-derives (agent-outcome.server.ts).
@@ -1702,6 +1746,8 @@ async function dispatchAgentRun(
   const cloneFailure = clone?.failure ?? null;
   const runWorkdir = clone?.dir ?? (realBackend ? supportRoot : null);
   if (runWorkdir && !existsSync(runWorkdir)) {
+    // Ruling 460: the agent runs as its person's own user and writes here.
+    shareDirWithAgents(workspaceRoot);
     mkdirSync(runWorkdir, { recursive: true });
   }
   // C4-opres: the clone above is the MINUTES-long window in which the human can
@@ -1740,6 +1786,7 @@ async function dispatchAgentRun(
     };
     // Omitted on the default store — the mount resolves its own root then.
     if (ctx.dataRoot) mountInput.dataRoot = ctx.dataRoot;
+    mountInput.git = personGitOrNull(db, input.projectSlug, input.taskKey, ctx.dataRoot);
     skillMount = await mountGrantedSkills(mountInput);
     pending.skillPlugin = skillMount.plugin;
   }
@@ -1764,7 +1811,8 @@ async function dispatchAgentRun(
   // the dir must exist BEFORE the run so a plain `cp` into it cannot fail on
   // a missing path (the browser mount creates it too — idempotent).
   if (collab.evidence && realBackend) {
-    mkdirSync(attachmentsDir, { recursive: true });
+    // Ruling 460: shared with the agent group, which writes the drop.
+    shareDirWithAgents(attachmentsDir);
   }
 
   // The agent's run persona: its detailed definition + granted skills + KB docs.
@@ -1789,6 +1837,8 @@ async function dispatchAgentRun(
     unresolvedMcps: resolvedMcps.unresolved,
     unhealthyMcps: resolvedMcps.unhealthy,
     mcpWriteToolsDenied: resolvedMcps.toolDenials,
+    mcpProxied: resolvedMcps.proxied,
+    mcpOAuthGrants: resolvedMcps.oauthGrants,
     // Ruling 159: the agent is handed the ABSOLUTE directory (inside the
     // container `/data/...` is real; on bare metal it is the data root's own
     // absolute path). The store-relative form is a display form for humans.
@@ -1887,6 +1937,7 @@ async function dispatchAgentRun(
       sentence: cloneFailure.sentence,
       credential: cloneFailure.credential,
     };
+    if (cloneFailure.reason === "workspace_fault") promptFailure.workspaceFault = true;
     // F19-6: the agent is told to quote the reason verbatim, so this is the line
     // that carries git's real complaint into its report — and from there into
     // the operator's blocked packet.
@@ -2038,6 +2089,17 @@ async function dispatchAgentRun(
         '- Your ask-human capability on THIS backend is that `question` field: filling it in is how you raise a question for the humans — there is no separate ask_human tool here, so never say ask-human is unavailable. Set `question` when a human decision blocks you; the answer arrives on a later resumed run, not during this one, so note it and finish.',
       );
     }
+  }
+  // Ruling 483 (F40-53): a knowledge-base line this run proves wrong has a
+  // channel now, and the run is told which. Claude files it with the tool the
+  // KB grant mounts; Codex mounts no Viberr tools, so its report carries it
+  // and the operator relays it (its agent-reply turn says so).
+  if (realBackend && kb.length > 0) {
+    collabNotes.push(
+      backend === "claude"
+        ? KB_CORRECTION_NOTE_CLAUDE
+        : KB_CORRECTION_NOTE_CODEX,
+    );
   }
   const prompt = collabNotes.length
     ? `${basePrompt}\n\n## Collaboration\n\n${collabNotes.join("\n")}`
@@ -2729,6 +2791,11 @@ export interface SpecialistPersonaInput {
    *  withholds. Their tools are ENFORCED, so the governance paragraph below
    *  names only the servers without marks. */
   mcpWriteToolsDenied?: McpToolDenial[];
+  /** Ruling 461: the mounted org servers reached through Viberr's MCP gateway
+   *  (those with a stored credential), named in their own sentence. */
+  mcpProxied?: string[];
+  /** Ruling 486: what each OAuth-signed-in proxied server was granted. */
+  mcpOAuthGrants?: McpRunGrant[];
   /** R19-19: browser state — mounted (with the ABSOLUTE attachments dir for
    *  the guardrail text, ruling 159) or granted-but-refused (with the reason).
    *  The section renders only when the server actually mounted, so prompt and
@@ -2914,21 +2981,13 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
           "say so in your report.",
       );
     }
-    // F27-P2: an org MCP server's stored credential is honored on CLAUDE runs
-    // but NEVER forwarded to a Codex process (it would be visible in the process
-    // arguments — specialist-mcp BACKEND SCOPE / F7-MCP1). Admin surfaces disclose
-    // this, but the AGENT was told nothing — so a server that tolerates anonymous
-    // access degraded silently. State it where the agent reads, on Codex runs.
-    if (input.backend === "codex") {
-      parts.push(
-        "\n\n---\n# MCP credentials on this Codex run\n\n" +
-          "A stored credential for an attached org MCP server is NOT forwarded to " +
-          "a Codex process, so a server that normally authenticates is reached " +
-          "UNAUTHENTICATED here. If a tool returns an auth error, or fewer results " +
-          "than you expected, say so in your report rather than treating it as your " +
-          "own error — the same server would authenticate on a Claude run.",
-      );
-    }
+    // Ruling 461: a server with a stored credential is reached through
+    // Viberr's gateway on both backends, so the run is told who holds the
+    // credential and what a 401 means. (F27-P2's "MCP credentials on this
+    // Codex run" section, which told a Codex run it was unauthenticated, went
+    // with the limitation it described.)
+    const gateway = gatewayMcpSection(input.mcpProxied ?? [], input.mcpOAuthGrants ?? []);
+    if (gateway) parts.push(gateway);
   }
   // F32-8 (pass 32): say when there are NONE. Live (VIB-1, VIB-2) a reviewer
   // holding no MCP grant was told by the operator's brief to "re-call qa_echo
@@ -3063,6 +3122,10 @@ export interface PromptCloneFailure {
   credential: CloneCredential;
   /** F19-6: git's own redacted output — the agent must quote it. */
   stderrExcerpt?: string;
+  /** Ruling 485: a local step failed (a tree that could not be replaced, a
+   *  directory that could not be made). The prompt then names no kind of
+   *  access at all: the agent quotes it, and the operator reads the quote. */
+  workspaceFault?: boolean;
 }
 
 /** Everything the fresh-run prompt is composed from (`buildAnalyzePrompt`). */
@@ -3219,14 +3282,21 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
             `- **The workspace has NO checkout, and this is a server-side failure, not something you can fix.** ` +
             `${input.cloneFailure.sentence}\n` +
             `- Do NOT try to clone, fetch, or authenticate to \`${input.repo}\` yourself, and do NOT ask anyone to ` +
-            `provision credentials or place a checkout` +
-            // Ruling 249: both of these are false leads a human would chase,
-            // so name whichever one applies rather than only the first.
-            (input.cloneFailure.credential === "supplied"
-              ? ` — the credential is present and working; repeating that request wastes a human's time on a false lead`
-              : input.cloneFailure.credential === "not_involved"
-                ? ` — this step never reached GitHub, so no credential is involved in it and asking for one sends a human down a false lead`
-                : ``) +
+            // Ruling 485: a fault on the server's disk. Live on WEB-5 the
+            // operator turned a replace that died on an agent's 0700
+            // directory into "attach a GitHub credential"; nothing here
+            // names access of any kind for it to repeat.
+            (input.cloneFailure.workspaceFault
+              ? `grant access or place a checkout — the fault is on the Viberr server's disk, and asking for access sends a human down a false lead`
+              : `provision credentials or place a checkout` +
+                // Ruling 249: both of these are false leads a human would
+                // chase, so name whichever one applies rather than only the
+                // first.
+                (input.cloneFailure.credential === "supplied"
+                  ? ` — the credential is present and working; repeating that request wastes a human's time on a false lead`
+                  : input.cloneFailure.credential === "not_involved"
+                    ? ` — this step never reached GitHub, so no credential is involved in it and asking for one sends a human down a false lead`
+                    : ``)) +
             `. Report that the checkout could not be provisioned, quote the reason above verbatim, and stop. ` +
             `Do not speculate about the cause beyond what that sentence says.\n` +
             // F19-6: without this the reason a human can act on ("GH006:
@@ -3638,7 +3708,6 @@ export async function resolveResumeConfinement(
       resolveSpecialistMcpServersDetailed(db, resolved.mcps, {
         withholdWriteTools: repoWriteWithheldFromDenylist(disallowedTools),
       }),
-      { backend: input.backend },
     );
     const mcpServers = resumeMcps.servers;
     // R18-1 parity: a resumed/@mention reviewer must keep the deliverer's KBs it
@@ -3683,6 +3752,7 @@ export async function resolveResumeConfinement(
       };
       // Omitted on the default store — the mount resolves its own root then.
       if (ctx.dataRoot) mountInput.dataRoot = ctx.dataRoot;
+      mountInput.git = personGitOrNull(db, input.projectSlug, input.taskKey, ctx.dataRoot);
       skillMount = await mountGrantedSkills(mountInput);
     }
     // R19-19: the browser re-mounts on resume from the same grants — a resumed
@@ -3719,6 +3789,8 @@ export async function resolveResumeConfinement(
       unresolvedMcps: resumeMcps.unresolved.filter((u) => !u.mounted),
       unhealthyMcps: resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name),
       mcpWriteToolsDenied: resumeMcps.toolDenials,
+      mcpProxied: resumeMcps.proxied,
+      mcpOAuthGrants: resumeMcps.oauthGrants,
       // Ruling 159: the absolute dir, exactly as the fresh path hands it.
       browser: resumeBrowser.server
         ? {
@@ -3814,7 +3886,7 @@ export async function resolveResumeConfinement(
         input.taskKey,
         ctx.dataRoot,
       );
-      mkdirSync(attachmentsWritableDir, { recursive: true });
+      shareDirWithAgents(attachmentsWritableDir);
     }
     const confinement: ResumeConfinement = {
       disallowedTools,
@@ -3999,11 +4071,14 @@ function defaultBranchForRefresh(input: { projectSlug: string; dataRoot?: string
  * Never throws: a reviewer that cannot be pinned still runs, and the
  * disclosure says the revision is missing.
  *
- * Exported for its test: the behaviour is real git, not a string.
+ * Exported for its test: the behaviour is real git, not a string. Pass 40
+ * review (R-seams-1): the git runs as the task's person (`git`); with no
+ * person to name and isolation on, nothing is pinned and the sentence says so.
  */
 export async function pinSupportCheckout(
   dir: string,
   subject: ReviewSubject | null,
+  git: WorkspaceGit | null = workspaceGitWhenIsolationOff(),
 ): Promise<string | null> {
   const sha = subject?.sha ?? null;
   if (!sha) return null;
@@ -4016,8 +4091,9 @@ export async function pinSupportCheckout(
   const what = subject?.rePinned
     ? `the reviewed revision \`${subject.rePinned.reviewedSha.slice(0, 7)}\` on its refreshed base, at \`${short}\` (${countLabel(subject.rePinned.baseRefresh.merges, "merge commit")}, ${countLabel(subject.rePinned.baseRefresh.commits, "base commit")}, and no authored work since the review \u2014 ruling 238)`
     : `the revision under review \`${short}\``;
+  if (!git) return `${what} could not be checked out; HEAD was left as it is`;
   try {
-    await execFileAsync("git", ["-C", dir, "cat-file", "-e", `${sha}^{commit}`], { timeout: 5_000 });
+    await git.run(["-C", dir, "cat-file", "-e", `${sha}^{commit}`], { timeoutMs: 5_000 });
   } catch {
     logger.warn("support checkout: the revision under review is not in the clone; HEAD was left as it is", {
       dir,
@@ -4026,9 +4102,9 @@ export async function pinSupportCheckout(
     return `${what} is not in this checkout (origin has not been read since it appeared); HEAD was left as it is`;
   }
   try {
-    const head = (await execFileAsync("git", ["-C", dir, "rev-parse", "HEAD"], { timeout: 5_000 })).stdout.trim();
+    const head = (await git.run(["-C", dir, "rev-parse", "HEAD"], { timeoutMs: 5_000 })).stdout.trim();
     if (head === sha) return `checked out at ${what}`;
-    await execFileAsync("git", ["-C", dir, "checkout", "-q", "--detach", sha], { timeout: 30_000 });
+    await git.run(["-C", dir, "checkout", "-q", "--detach", sha], { timeoutMs: 30_000 });
     return `detached at ${what} (the delivering tree stood at \`${head.slice(0, 7)}\`)`;
   } catch (error) {
     logger.warn("support checkout: could not detach at the revision under review", {
@@ -4073,21 +4149,57 @@ async function cloneRepo(
   },
 ): Promise<CloneOutcome> {
   // Ruling 249: `absent` until an arm proves otherwise — the local arm sets
-  // `not_involved` because it never reaches GitHub, the network arm sets
-  // `supplied` when a token was actually handed to git.
+  // `not_involved` because it never reaches GitHub (ruling 485: before its
+  // first step), the network arm sets `supplied` when a token was actually
+  // handed to git, and a workspace fault in either arm is `not_involved`.
   let credential: CloneCredential = "absent";
   // F19-6: hoisted out of the try so the catch can scrub it BY VALUE. The token
   // never reaches argv or the remote URL (askpass env only), so this literal
   // scrub plus the userinfo patterns is the whole redaction surface.
   let token: string | null = null;
+  // Pass 40 review (R-seams-1): every git in the checkout — the supporting
+  // clone of the delivering tree, the origin rewrite, the identity, the
+  // strip, the refresh, the pin — runs as the task's person, never as the
+  // server. Resolved lazily so a refusal lands in the catch below.
+  let workspaceGit: WorkspaceGit | null = null;
+  const personGit = (): WorkspaceGit => {
+    workspaceGit ??= taskWorkspaceGit(db, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      dataRoot: input.dataRoot,
+    });
+    return workspaceGit;
+  };
   const setIdentity = async (dir: string) => {
     if (!input.identity) return;
     try {
-      await execFileAsync("git", ["-C", dir, "config", "user.name", input.identity.name], { timeout: 5_000 });
-      await execFileAsync("git", ["-C", dir, "config", "user.email", input.identity.email], { timeout: 5_000 });
+      await personGit().run(["-C", dir, "config", "user.name", input.identity.name], { timeoutMs: 5_000 });
+      await personGit().run(["-C", dir, "config", "user.email", input.identity.email], { timeoutMs: 5_000 });
     } catch {
       // Non-fatal: the run env's GIT_AUTHOR_*/GIT_COMMITTER_* still stamps the
       // agent's own commits; this only benefits the server-side auto-commit.
+    }
+  };
+  // Ruling 485: every LOCAL step — removing or replacing a tree, making a
+  // directory, cloning the delivering checkout, rewriting its origin,
+  // stripping `.claude` — fails as a workspace fault that names what failed,
+  // the path and the OS error (`workspaceStep`). The catch below then says
+  // `not_involved`: live on WEB-5 a replace that died on an agent's 0700
+  // directory was logged `credential: absent`, and the operator asked the
+  // owner for a credential.
+  const local = workspaceStep;
+  // Ruling 485: a clone that did not finish leaves no tree behind. Removing
+  // one is best effort here — its failure is logged, never thrown over the
+  // clone's own — and the next run's check below removes what is left.
+  const clearUnfinished = async (dir: string, person: AgentLaunch | null) => {
+    if (existsSync(path.join(dir, ".git", "HEAD"))) return;
+    try {
+      await removeAgentTree(dir, person);
+    } catch (error) {
+      logger.warn("an unfinished checkout could not be removed as its person; the next run removes it", {
+        dir,
+        err: toError(error),
+      });
     }
   };
   try {
@@ -4098,6 +4210,10 @@ async function cloneRepo(
       input.dataRoot,
     );
     const dir = supportCheckoutDir(workspaceRoot, name, input.support);
+    // Ruling 485: whom a tree in this workspace is removed as — the task's
+    // person, as its git runs; null is the server's own user (isolation off).
+    // With isolation on and nobody to name, that is the first local fault.
+    const person = await local(`\`${workspaceRoot}\` has no person to work in it as`, () => personGit().launch);
 
     // P8 (pass 25): a SUPPORTING run gets its OWN checkout, but it must still
     // contain the TASK BRANCH to review the delivering agent's work — and that
@@ -4110,21 +4226,46 @@ async function cloneRepo(
     // nothing it writes can reach the delivering tree or the delivered PR.
     if (input.support) {
       const deliveringDir = supportCheckoutDir(workspaceRoot, name);
-      rmSync(dir, { recursive: true, force: true });
-      if (existsSync(path.join(deliveringDir, ".git"))) {
-        // Ruling 249: everything below this line is local. A failure here is
-        // never about a credential, and saying it was sent a human (and an
-        // operator, live on SHOP-5) to re-provision one that already worked.
-        credential = "not_involved";
-        mkdirSync(path.dirname(dir), { recursive: true });
+      const fromDelivering = existsSync(path.join(deliveringDir, ".git"));
+      // Ruling 249, fixed BEFORE any local step (ruling 485): a checkout cloned
+      // from the delivering one never reaches GitHub, so no credential is
+      // involved from the start. It used to be set after the removal below,
+      // so the removal's own failure went out as `credential: absent`.
+      if (fromDelivering) credential = "not_involved";
+      // Ruling 485: the previous review's tree is the agents' — a tool they ran
+      // can leave directories only its uid can enter (wrangler's 0700 temp
+      // dirs, F40-62) — so it is replaced as its person, never by the
+      // server's own recursive remove, which died half-way and left a tree
+      // with no `.git` that every later review tripped over.
+      await local(`\`${dir}\` could not be replaced`, () => removeAgentTree(dir, person));
+      if (fromDelivering) {
+        // Ruling 460: the checkout is edited by agents running as their own
+        // users; what is created below the shared root stays in the agent
+        // group.
+        await local(`\`${path.dirname(dir)}\` could not be created`, () => {
+          shareDirWithAgentsOrWarn(workspaceRoot);
+          mkdirSync(path.dirname(dir), { recursive: true });
+        });
         try {
-          await execFileAsync("git", ["clone", "--local", deliveringDir, dir], {
-            timeout: cloneTimeoutMs(),
-          });
-          await execFileAsync(
-            "git",
-            githubRemoteSanitizationArgs(input.repo, dir),
-            { timeout: 10_000 },
+          // Pass 40 review (R-seams-2): through git's own transport, never
+          // `--local`. Under ruling 460 the delivering checkout's objects are
+          // written by an agent uid, and `--local` HARDLINKS them — the
+          // kernel's `fs.protected_hardlinks` refuses a link to a file the
+          // server neither owns nor can write, so every supporting run after
+          // the first agent commit lost its checkout. `--no-local` also never
+          // trusts that agent-writable directory's layout on disk (git refuses
+          // a symlinked object with `--local` for the same reason).
+          // R-seams-1: and as the task's person, never the server — the
+          // delivering checkout is agent-written, so reading it is theirs.
+          await local(`\`${dir}\` could not be cloned from the delivering checkout \`${deliveringDir}\``, () =>
+            personGit().run(["clone", "--no-local", deliveringDir, dir], {
+              timeoutMs: cloneTimeoutMs(),
+            }),
+          );
+          await local(`the origin of \`${dir}\` could not be rewritten`, () =>
+            personGit().run(githubRemoteSanitizationArgs(input.repo, dir), {
+              timeoutMs: 10_000,
+            }),
           );
           // Ruling 129: the supporting checkout keeps its fetch-only refresh,
           // now through the SAME function the delivering one uses.
@@ -4134,37 +4275,52 @@ async function cloneRepo(
             dir,
             defaultBranch: defaultBranchForRefresh(input),
             fastForward: false,
+            taskKey: input.taskKey,
           };
           if (input.dataRoot) supportRefresh.dataRoot = input.dataRoot;
-          await refreshWorkspaceFromMirror(db, supportRefresh);
+          await local(`\`${dir}\` could not be refreshed`, () => refreshWorkspaceFromMirror(db, supportRefresh));
           await setIdentity(dir);
-          await stripUngovernedRepoCatalog(dir);
-          const pinned = await pinSupportCheckout(dir, input.pinSubject ?? null);
+          await local(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
+            stripUngovernedRepoCatalog(dir, personGit()),
+          );
+          const pinned = await pinSupportCheckout(dir, input.pinSubject ?? null, personGit());
           return pinned ? { dir, refreshed: pinned } : { dir };
         } finally {
-          if (!existsSync(path.join(dir, ".git", "HEAD"))) {
-            rmSync(dir, { recursive: true, force: true });
-          }
+          await clearUnfinished(dir, person);
         }
       }
       // No delivering checkout yet — nothing has been delivered to review. Fall
       // through to a normal mirror clone (default branch) in the isolated dir.
     }
+    // Ruling 485 (3): a checkout with no `.git/HEAD` is no checkout — a clone
+    // killed mid-way, or a tree an older build's server-side remove left
+    // half-removed. Left in place it is read as "already cloned" or blocks the
+    // clone into its path on every run after, so it is removed as its person
+    // here and cloned again below.
+    if (existsSync(dir) && !existsSync(path.join(dir, ".git", "HEAD"))) {
+      logger.warn("a checkout with no .git/HEAD is removed as its person and cloned again", {
+        taskKey: input.taskKey,
+        dir,
+      });
+      await local(`\`${dir}\` has no \`.git/HEAD\` and could not be removed`, () => removeAgentTree(dir, person));
+    }
     if (existsSync(path.join(dir, ".git"))) {
       // Already cloned for this task — scrub URLs produced by older Viberr
       // versions before reuse. `--replace-all` removes every prior origin URL,
       // including a legacy `x-access-token:<PAT>@github.com` value.
-      await execFileAsync(
-        "git",
-        githubRemoteSanitizationArgs(input.repo, dir),
-        { timeout: 10_000 },
+      await local(`the origin of \`${dir}\` could not be rewritten`, () =>
+        personGit().run(githubRemoteSanitizationArgs(input.repo, dir), {
+          timeoutMs: 10_000,
+        }),
       );
       await setIdentity(dir);
       // This is the reuse path, so a run may ALREADY be executing in this
       // workspace. Its skills live in its own plugin beside the checkout
       // (ruling 180), so stripping the repo's `.claude` here takes nothing
       // from it.
-      await stripUngovernedRepoCatalog(dir);
+      await local(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
+        stripUngovernedRepoCatalog(dir, personGit()),
+      );
       // Ruling 129 (pass 34, Q34-5): THIS is the stale-checkout window. A
       // workspace cloned once, from a repository that was still empty, was
       // reused as it stood by every later run — agents hold no credential, so
@@ -4182,6 +4338,7 @@ async function cloneRepo(
         defaultBranch: defaultBranchForRefresh(input),
         fastForward: !input.support,
         taskBranch: input.taskBranch ?? null,
+        taskKey: input.taskKey,
       };
       if (input.dataRoot) refreshInput.dataRoot = input.dataRoot;
       const refresh = await refreshWorkspaceFromMirror(db, refreshInput);
@@ -4196,7 +4353,10 @@ async function cloneRepo(
       }
       return described ? { dir, refreshed: described } : { dir };
     }
-    mkdirSync(path.dirname(dir), { recursive: true });
+    await local(`\`${path.dirname(dir)}\` could not be created`, () => {
+      shareDirWithAgentsOrWarn(workspaceRoot);
+      mkdirSync(path.dirname(dir), { recursive: true });
+    });
 
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
@@ -4210,27 +4370,36 @@ async function cloneRepo(
         repo: input.repo,
         destination: dir,
         token,
+        // Ruling 485: a destination in the clone's way is removed as the
+        // task's person.
+        person,
       };
       if (input.dataRoot) cloneInput.dataRoot = input.dataRoot;
       if (input.onCloneProgress) cloneInput.onCloneProgress = input.onCloneProgress;
       await cloneWorkspaceRepo(cloneInput);
       await setIdentity(dir);
-      await stripUngovernedRepoCatalog(dir);
+      await local(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
+        stripUngovernedRepoCatalog(dir, personGit()),
+      );
       // Ruling 179: a supporting run that reached here (no delivering checkout
       // to clone from) still judges the revision under review when the fresh
       // clone carries it.
-      const freshPin = input.support ? await pinSupportCheckout(dir, input.pinSubject ?? null) : null;
+      const freshPin = input.support
+        ? await pinSupportCheckout(dir, input.pinSubject ?? null, personGit())
+        : null;
       return freshPin ? { dir, refreshed: freshPin } : { dir };
     } finally {
       // A clone killed mid-transfer can leave a partial tree behind. Left in
       // place it is worse than nothing: the next run's `.git` check treats it as
       // "already cloned for this task" and hands the agent a truncated checkout
       // it has no way to recognise as incomplete.
-      if (!existsSync(path.join(dir, ".git", "HEAD"))) {
-        rmSync(dir, { recursive: true, force: true });
-      }
+      await clearUnfinished(dir, person);
     }
   } catch (error) {
+    // Ruling 485: a local step's fault never involved a credential, whichever
+    // arm it happened in — and a network clone's failure keeps the credential
+    // state its arm set.
+    if (error instanceof WorkspaceFault) credential = "not_involved";
     // Repo private with no cred, network down, git missing, or the clone ran
     // past its ceiling. WARN, not info: the run continues without the working
     // tree it was promised, which changes what the agent can do and what its

@@ -91,11 +91,12 @@ describe("ReviewQueuePage", () => {
     ).toBeTruthy();
     // UI-27/UI-49: REWRITTEN. The chip used to be a `<button class="hero-file">`
     // — visually identical to the non-interactive `hero-file` spans elsewhere,
-    // so nothing announced it navigates; it is a real button now. And the
+    // so nothing announced it navigates; it became a real button, and is a
+    // real link now (ruling 477(c)). And the
     // "Review → Done" wording is no longer hardcoded: the page renders the
     // project's RESOLVED stage names (the default prop keeps this fixture's).
     const chip = getByTitle("Review → Done is locked to humans. See Policy");
-    expect(chip.tagName).toBe("BUTTON");
+    expect(chip.tagName).toBe("A");
     expect(chip.classList.contains("btn")).toBe(true);
     expect(chip.textContent).toContain("Review → Done · human only");
     // Panel heads + "X of Y" count pair.
@@ -187,12 +188,33 @@ describe("ReviewQueuePage", () => {
     // refuse, and this surface cannot promise an outcome it does not evaluate.
     expect(container.querySelector(".rq-go")!.textContent).not.toContain("Accept");
     // The name comes from the content: key, title, state, and the action.
-    // Canary: restore the aria-label and this lookup finds no button.
+    // Canary: restore the aria-label and this lookup finds no link.
     expect(
-      getByRole("button", {
+      getByRole("link", {
         name: /VIB-142.*Attach execution workspace to task runtime.*PR #318.*waiting on you.*Review/,
       }),
     ).toBe(rows[0]);
+  });
+
+  // Ruling 477(c) (F40-29, live on akinozer.com): the WEB-4 row was
+  // `<button type="button" class="rq-row">` with a <div> inside, calling
+  // navigate() on click, so the queue could not open rows in new tabs or copy
+  // their addresses and announced a button for a page link.
+  it("rows and the policy chip are links to their pages, not buttons that navigate", () => {
+    // CANARY: render the row as `<button type="button" onClick={…}>` again and
+    // no row is a link, and none carries an address.
+    const { container, getByTitle, queryAllByRole } = renderQueue([rowHuman], [rowAgent]);
+    const rows = [...container.querySelectorAll(".rq-row")];
+    expect(rows.map((r) => r.tagName)).toEqual(["A", "A"]);
+    expect(rows.map((r) => r.getAttribute("href"))).toEqual([
+      "/projects/viberr-core/tasks/VIB-142",
+      "/projects/viberr-core/tasks/VIB-145",
+    ]);
+    // Nothing on the page is a button that goes somewhere.
+    expect(queryAllByRole("button")).toEqual([]);
+    const chip = getByTitle("Review → Done is locked to humans. See Policy");
+    expect(chip.tagName).toBe("A");
+    expect(chip.getAttribute("href")).toBe("/projects/viberr-core/policy");
   });
 
   it("labels a human-waiting row in the working panel 'waiting on a human', never 'agent working'", () => {
@@ -404,7 +426,7 @@ describe("P13-D-9: the queue stops promising human-only Done unconditionally", (
     });
     const chip = getByText("Review → Done · human or operator");
     expect(chip).toBeTruthy();
-    expect(chip.closest("button")!.getAttribute("title")).toContain(
+    expect(chip.closest("a")!.getAttribute("title")).toContain(
       "Atlas runs at full autonomy",
     );
 
@@ -435,7 +457,7 @@ describe("P13-D-9: the queue stops promising human-only Done unconditionally", (
       operatorName: "Atlas",
     });
     const title = getByText("Review → Done · human or operator")
-      .closest("button")!
+      .closest("a")!
       .getAttribute("title")!;
     const note = container.querySelector(".pol-note")!.textContent!;
 

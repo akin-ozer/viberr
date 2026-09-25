@@ -254,6 +254,55 @@ describe("canonicalTaskAnchor", () => {
     expect(anchor.replace(/\s+/g, " ")).toContain("has been superseded by these");
   });
 
+  /**
+   * Ruling 482 (F40-52): on WEB-1 the deliverer, the Site Reviewer and the
+   * Fact Checker each ran the same four gates by hand and reported them in
+   * prose. Every agent now reads what Viberr itself ran on the revision.
+   */
+  it("ruling 482: carries the project's gates as Viberr ran them on the revision under review", () => {
+    const sha = "d".repeat(40);
+    const gates = [
+      { name: "build", command: "pnpm build" },
+      { name: "check", command: "pnpm astro check" },
+    ];
+    const frontmatter = baseTaskFrontmatter("VIB-1", {
+      stage: "review",
+      workRevision: {
+        id: "rev_9",
+        headSha: sha,
+        treeSha: null,
+        branch: "vib-1",
+        createdAt: "2026-09-25T09:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+      gateRun: {
+        id: "gate_1",
+        revisionId: "rev_9",
+        headSha: sha,
+        status: "finished",
+        reason: "delivery",
+        requestedAt: "2026-09-25T10:00:00.000Z",
+        startedAt: "2026-09-25T10:00:01.000Z",
+        finishedAt: "2026-09-25T10:02:00.000Z",
+        error: null,
+        results: [
+          { name: "build", command: "pnpm build", exitCode: 0, timedOut: false, wallMs: 41_000, log: "gate-ddddddd-01-build-20260925T100001Z.log" },
+          { name: "check", command: "pnpm astro check", exitCode: 1, timedOut: false, wallMs: 9_000, log: "gate-ddddddd-02-check-20260925T100042Z.log" },
+        ],
+      },
+    });
+    // CANARY: drop the gates section from canonicalTaskAnchor.
+    const anchor = canonicalTaskAnchor({ parsed: parsed({ frontmatter }), stageName: "Review", gates });
+    expect(anchor).toContain("### Project gates (run by Viberr on the revision under review)");
+    expect(anchor).toContain("Gates on ddddddd: 1/2 exit 0 (run by Viberr)");
+    expect(anchor).toContain("- `check` (`pnpm astro check`): exit 1 in 9 s · log: attachments/gate-ddddddd-02-check-20260925T100042Z.log");
+    expect(anchor).toContain("Do not re-run the gates to report their result");
+    // No gates declared: no section, whatever the file carries.
+    expect(canonicalTaskAnchor({ parsed: parsed({ frontmatter }), stageName: "Review" })).not.toContain(
+      "Project gates",
+    );
+  });
+
   it("ruling 392: a task with no standing verdict gains no section", () => {
     const anchor = canonicalTaskAnchor({ parsed: parsed(), stageName: "In Progress" });
     expect(anchor).not.toContain("Review verdicts that stand right now");

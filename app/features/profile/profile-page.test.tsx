@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub, useFetcher } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { PROFILE_DATA as BASE } from "../../../test-support/profile-data";
+import { MemoryStorage } from "../../../test-support/memory-storage";
 import {
   ProfilePage,
   type ProfileActionData,
@@ -126,17 +127,20 @@ describe("ProfilePage", () => {
     });
   });
 
-  it("renders the 8 notification routing rows with app toggles that post", () => {
+  it("renders the 9 notification routing rows with app toggles that post", () => {
     const { container, getByText, queryByText } = renderProfile();
     expect(getByText("Notification routing")).toBeTruthy();
     const rows = container.querySelectorAll(".pref-row");
-    // 8 routing rows (controller joined, ruling 99; dependencies, ruling 131;
-    // ownership, ruling 140) + 2 appearance rows (theme, timeline default —
-    // ruling 148(c) removed the reduce-motion row).
-    expect(rows).toHaveLength(10);
+    // 9 routing rows (controller joined, ruling 99; dependencies, ruling 131;
+    // ownership, ruling 140; agent questions, ruling 481) + the desktop
+    // notifications row (ruling 481) + 2 appearance rows (theme, timeline
+    // default — ruling 148(c) removed the reduce-motion row).
+    expect(rows).toHaveLength(12);
     const toggles = container.querySelectorAll(".tgl[role='switch']");
-    // The 8 category toggles; nothing else on the page is a switch now.
-    expect(toggles).toHaveLength(8);
+    // The 9 category toggles and the desktop switch; nothing else on the page
+    // is a switch now.
+    expect(toggles).toHaveLength(10);
+    expect(container.querySelector(".tgl[aria-label='Agent questions']")).toBeTruthy();
 
     const packets = container.querySelector(
       ".tgl[aria-label='Decision packets for you']",
@@ -294,10 +298,10 @@ describe("ProfilePage", () => {
     expect(github.querySelector(".cred-warn button.btn")!.textContent).toContain("Connect");
   });
 
-  it("GitHub identity: connected card offers Disconnect", () => {
-    const { container } = renderProfile({
+  it("GitHub identity: connected card offers Disconnect, behind a confirm (ruling 481(b))", () => {
+    const { container, getByRole, getByText } = renderProfile({
       ...BASE,
-      user: { ...BASE.user, githubConnected: true, idp: "github" },
+      user: { ...BASE.user, githubConnected: true, idp: "github", githubHandle: "arda-kaya" },
     });
     expect(container.querySelector(".cred-ok")).toBeTruthy();
     expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(0);
@@ -306,7 +310,16 @@ describe("ProfilePage", () => {
     expect(
       Array.from(container.querySelector(".cred-ok button")!.classList),
     ).toContain("danger");
+    // Ruling 481(b) (F40-49): the press opens the shared confirm; nothing is
+    // posted until it is confirmed. Canary: submit from the button again.
     fireEvent.click(container.querySelector(".cred-ok button")!);
+    expect(lastSubmit).toBeNull();
+    const dialog = getByRole("alertdialog", { name: "Disconnect GitHub?" });
+    expect(dialog.getAttribute("data-screen-label")).toBe("Disconnect GitHub dialog");
+    expect(dialog.textContent).toContain("instead of @arda-kaya");
+    fireEvent.click(
+      getByText("Disconnect GitHub", { selector: ".confirm-actions button.btn.danger" }),
+    );
     expect(lastSubmit).toEqual({ intent: "github-disconnect" });
   });
 
@@ -409,5 +422,89 @@ describe("ruling 368: GitHub Connect in flight", () => {
     expect(connect.textContent).toBe("Connecting…");
     expect(connect.disabled).toBe(true);
     expect(connect.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
+  });
+});
+
+/**
+ * Ruling 481(c) (F40-51): Desktop notifications, the per-browser opt-in. The
+ * browser's permission is asked for ONLY on the switch's press (never on a
+ * render), the switch turns on only once the browser allowed it and showed a
+ * notification, and a denial leaves it off with the reason on the row.
+ *
+ * Canary: call `Notification.requestPermission()` in the row's mount effect
+ * and the "not on render" assertion fails; record the opt-in before the
+ * permission answers and the denied case turns the switch on.
+ */
+describe("ruling 481(c): the Desktop notifications switch", () => {
+  class FakeNotification {
+    static permission: NotificationPermission = "default";
+    static answer: NotificationPermission = "granted";
+    static requests = 0;
+    static shown: { title: string; body: string | undefined }[] = [];
+    static async requestPermission(): Promise<NotificationPermission> {
+      FakeNotification.requests += 1;
+      FakeNotification.permission = FakeNotification.answer;
+      return FakeNotification.answer;
+    }
+    onclick: (() => void) | null = null;
+    constructor(title: string, options?: NotificationOptions) {
+      FakeNotification.shown.push({ title, body: options?.body });
+    }
+    close(): void {}
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  let storage = new MemoryStorage();
+  function installNotifications(permission: NotificationPermission, answer: NotificationPermission) {
+    FakeNotification.permission = permission;
+    FakeNotification.answer = answer;
+    FakeNotification.requests = 0;
+    FakeNotification.shown = [];
+    storage = new MemoryStorage();
+    vi.stubGlobal("Notification", FakeNotification);
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("localStorage", storage);
+  }
+
+  it("asks for the permission only on the press, then turns on and says so", async () => {
+    installNotifications("default", "granted");
+    const { container, findByText } = renderProfile();
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".tgl[aria-label='Desktop notifications']",
+    )!;
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(FakeNotification.requests).toBe(0);
+
+    fireEvent.click(toggle);
+    await findByText("Desktop notifications on");
+    expect(FakeNotification.requests).toBe(1);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(FakeNotification.shown.map((n) => n.title)).toEqual(["Desktop notifications are on"]);
+    expect(storage.getItem("viberr.desktop-notifications")).toBe("on");
+
+    // Off again: no second prompt, the opt-in is gone.
+    fireEvent.click(toggle);
+    await findByText("Desktop notifications off");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(FakeNotification.requests).toBe(1);
+    expect(storage.getItem("viberr.desktop-notifications")).toBeNull();
+  });
+
+  it("a denied permission leaves the switch off and names the site setting", async () => {
+    installNotifications("default", "denied");
+    const { container, getAllByText } = renderProfile();
+    const toggle = container.querySelector<HTMLButtonElement>(
+      ".tgl[aria-label='Desktop notifications']",
+    )!;
+    fireEvent.click(toggle);
+    // The error toast and the row's own note say the same thing.
+    await waitFor(() =>
+      expect(getAllByText(/blocked for Viberr in this browser's site settings/)).toHaveLength(2),
+    );
+    expect(FakeNotification.requests).toBe(1);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(FakeNotification.shown).toEqual([]);
+    expect(storage.getItem("viberr.desktop-notifications")).toBeNull();
   });
 });

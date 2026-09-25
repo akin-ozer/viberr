@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type ReactNode,
 } from "react";
 import { useFetcher } from "react-router";
 import { countLabel } from "~/shared/text/plural";
@@ -877,14 +878,20 @@ export function StoreBrowser({
   resource,
   onClose,
   action = "/org/settings",
+  initialDoc,
 }: {
   title: string;
   subMono: string;
-  metaTail?: string;
+  /** Ruling 480: a node, so a "when" in it renders hydration-safe
+   *  (`RelativeStamp`) rather than as a clock-read string. */
+  metaTail?: ReactNode;
   tree: StoreNode[];
   resource: StoreBrowserResource;
   onClose: () => void;
   action?: string;
+  /** Ruling 483: a document to open on arrival (a store-relative path), for
+   *  the link a knowledge-base proposal carries to the document it stands in. */
+  initialDoc?: string;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(
     () =>
@@ -935,6 +942,20 @@ export function StoreBrowser({
     setDest(path);
     expand(path);
   };
+
+  // Ruling 483: arriving from a proposal's "Open document", the document it
+  // stands in opens once, the way a click on its row would open it. The ref
+  // makes it once: a later render must not reopen a document a person closed.
+  const openedInitial = useRef(false);
+  useEffect(() => {
+    if (!initialDoc || openedInitial.current) return;
+    openedInitial.current = true;
+    const parts = initialDoc.split("/").filter(Boolean);
+    const name = parts.pop();
+    if (!name) return;
+    expand(parts);
+    editor.openExisting(parts, name);
+  }, [initialDoc, editor, expand]);
 
   // ---- GitHub-import feedback: lives here (not in the hook) because a
   // successful import expands the tree state this component owns.
@@ -1221,7 +1242,7 @@ export function StoreBrowser({
         <div className="modal-foot">
           <span className="foot-hint mono">
             {countLabel(nDirs, "folder") + " · " + countLabel(nFiles, "file")}
-            {metaTail ? " · " + metaTail : ""}
+            {metaTail ? <> · {metaTail}</> : null}
           </span>
           <span className="foot-actions">
             <button type="button" className="btn" onClick={close}>

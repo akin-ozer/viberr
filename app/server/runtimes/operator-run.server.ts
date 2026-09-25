@@ -3,7 +3,9 @@ import {
   serverOutcomeSentence,
   type ResolvedPacketOption,
 } from "~/shared/packet-server-outcome";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { shareDirWithAgents, shareDirWithAgentsOrWarn } from "./agent-isolation.server";
+import { removeAgentTree } from "./agent-trees.server";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -31,6 +33,8 @@ import {
   cloneFailureLogDetails,
   cloneFailureSentence,
   type CloneCredential,
+  WorkspaceFault,
+  workspaceStep,
 } from "~/server/tasks/git-clone-auth.server";
 import {
   cloneProgressStep,
@@ -39,8 +43,9 @@ import {
   mirrorIsCold,
   type WorkspaceCloneInput,
 } from "~/server/tasks/repo-mirror.server";
-import { gitErrorText, redactGitOutput } from "~/server/secrets/git-output-redact.server";
 import { stripUngovernedRepoCatalog } from "./skill-mount.server";
+import { initializeUnbornCheckout } from "~/server/tasks/unborn-checkout.server";
+import { taskWorkspaceGit, taskWorkspaceLaunch } from "~/server/tasks/workspace-git.server";
 import {
   RULING_NAMESPACE_NOTE,
   attachedResourcesBlock,
@@ -72,7 +77,7 @@ import {
   operatorSetDependencies,
   operatorSetGoal,
   operatorFlagContextConflict,
-  operatorProposeRuling,
+  operatorProposeKbCorrection,
   operatorLeaseFiles,
   operatorSnapshot,
   operatorTransitionStage,
@@ -101,6 +106,8 @@ import {
   verifyStdioMcpMountsForRun,
   type SpecialistMcpServerConfig,
   unavailableMcpSection,
+  gatewayMcpSection,
+  type McpRunGrant,
   type UnresolvedMcpGrant,
 } from "~/server/tasks/specialist-mcp.server";
 import {
@@ -112,6 +119,7 @@ import {
 import { getProject } from "~/server/projections/board-query.server";
 import { closureRefusal, taskClosure } from "~/server/tasks/task-closure.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
+import { splitKbSource } from "~/server/tasks/kb-proposal-actions.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
 import {
   DEFAULT_GOAL,
@@ -223,6 +231,9 @@ export interface RunOperatorInput {
     /** Ruling 332: a person pressed Accept and the acceptance-time refresh
      *  found the branch in conflict with the base. */
     | "pr-conflicting"
+    /** Ruling 482: the project's gates, run by Viberr on the revision under
+     *  review, did not all exit 0. */
+    | "gates-failed"
     | "scheduled"
     | "manual";
   /** Ruling 141: the schedule occurrence this trigger fires for, so a refusal
@@ -1516,7 +1527,8 @@ function ensureOperatorScratchDir(input: TaskFileRef): string {
     taskDir(input.projectSlug, input.taskKey, input.dataRoot),
     ".operator-scratch",
   );
-  mkdirSync(dir, { recursive: true });
+  // Ruling 460: the operator runs as its principal's own user and writes here.
+  shareDirWithAgents(dir);
   return dir;
 }
 
@@ -1560,21 +1572,59 @@ export async function ensureOperatorRepoCheckout(
   /** F27-U1: 0..1 progress for the cold clone the operator drive often pays
    *  first on a project (see the reservation set up by the caller). */
   onCloneProgress?: (fraction: number) => void,
+  /** Ruling 468: the GitHub transport for the empty-repository bootstrap
+   *  (tests inject one; production uses the global fetch). */
+  options: { fetchImpl?: typeof fetch } = {},
 ): Promise<OperatorWorkspaceView> {
   const target = operatorCheckoutTarget(input);
   if (!target) return { kind: "none" };
   const { repo, dir, relativeDir, defaultBranch } = target;
+  // Ruling 468 (F40-12): a checkout of an EMPTY repository has an unborn
+  // HEAD, and the operator read that as a chore for a person ("push one
+  // initial commit"). Viberr makes the first commit itself (ruling 128's
+  // bootstrap) and moves the checkout onto it, here as before a task branch.
+  const initialize = () =>
+    initializeUnbornCheckout(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey, repo, dir, defaultBranch, dataRoot: input.dataRoot },
+      options,
+    );
   if (existsSync(path.join(dir, ".git", "HEAD"))) {
+    await initialize();
     return { kind: "checkout", repo, dir, relativeDir, defaultBranch };
   }
 
   let token: string | null = null;
   // Ruling 249: the operator's checkout is always a network clone, and the
   // credential is resolved before it — so this arm only ever says supplied or
-  // absent, and both are true when it says them.
+  // absent, and both are true when it says them. Ruling 485: a local step's
+  // fault (the person, the directory, the heal below, the strip) says
+  // `not_involved` in the catch.
   let credential: CloneCredential = "absent";
   try {
-    mkdirSync(path.dirname(dir), { recursive: true });
+    // Ruling 485: a tree in the workspace is removed as the task's person,
+    // as its git runs (null: the server's own user, isolation off).
+    const workspace = { projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: input.dataRoot };
+    const person = await workspaceStep(`\`${path.dirname(dir)}\` has no person to work in it as`, () =>
+      taskWorkspaceLaunch(db, workspace),
+    );
+    // Ruling 460: `workspace/` is shared with the agent group, so what the
+    // clone writes below it stays editable by the agents that run there.
+    await workspaceStep(`\`${path.dirname(dir)}\` could not be created`, () =>
+      shareDirWithAgentsOrWarn(path.dirname(dir)),
+    );
+    // Ruling 485 (3): a checkout with no `.git/HEAD` (a clone killed mid-way,
+    // a tree an older build's server-side remove left half-removed) would
+    // block the clone into its path on every run: removed as its person.
+    if (existsSync(dir)) {
+      logger.warn("a checkout with no .git/HEAD is removed as its person and cloned again", {
+        taskKey: input.taskKey,
+        dir,
+      });
+      await workspaceStep(`\`${dir}\` has no \`.git/HEAD\` and could not be removed`, () =>
+        removeAgentTree(dir, person),
+      );
+    }
     const cred = getProjectCredential(db, input.projectSlug);
     token = cred ? getPatToken(db, cred.id) : null;
     credential = token ? "supplied" : "absent";
@@ -1587,6 +1637,7 @@ export async function ensureOperatorRepoCheckout(
         repo,
         destination: dir,
         token,
+        person,
       };
       if (input.dataRoot) cloneInput.dataRoot = input.dataRoot;
       if (onCloneProgress) cloneInput.onCloneProgress = onCloneProgress;
@@ -1594,22 +1645,36 @@ export async function ensureOperatorRepoCheckout(
     } finally {
       // A clone killed mid-transfer leaves a partial tree that the next run's
       // `.git` check would accept as "already cloned" — worse than nothing.
+      // As the person, and never thrown over the clone's own failure.
       if (!existsSync(path.join(dir, ".git", "HEAD"))) {
-        rmSync(dir, { recursive: true, force: true });
+        try {
+          await removeAgentTree(dir, person);
+        } catch (removal) {
+          logger.warn("an unfinished operator checkout could not be removed as its person; the next run removes it", {
+            dir,
+            err: toError(removal),
+          });
+        }
       }
     }
-    await stripUngovernedRepoCatalog(dir);
+    // Pass 40 review (R-seams-1): the checkout's git as the task's person.
+    await workspaceStep(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
+      stripUngovernedRepoCatalog(dir, taskWorkspaceGit(db, workspace)),
+    );
     logger.info("cloned the task repository for the operator (read-only view)", {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
       repo,
     });
+    await initialize();
     return { kind: "checkout", repo, dir, relativeDir, defaultBranch };
   } catch (error) {
-    const details = cloneFailureLogDetails(error);
+    if (error instanceof WorkspaceFault) credential = "not_involved";
+    const details = cloneFailureLogDetails(error, { token });
     // F19-6: git's own complaint, redacted by value — "git exit 128" alone told
-    // a human with a working credential nothing they could act on.
-    const stderrExcerpt = redactGitOutput(gitErrorText(error), { token });
+    // a human with a working credential nothing they could act on. Ruling 485:
+    // for a workspace fault, the failing program's own words (rm's, git's).
+    const stderrExcerpt = details.detail ?? "";
     const failureFields = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
@@ -2100,12 +2165,14 @@ const OPERATOR_PLAN_TOOLS = [
   // task keys and goal links; `blockedBy: []` clears it) instead of opening a
   // hold packet. The plan mirror of the Claude toolkit's `set_dependencies`.
   "set_dependencies",
-  // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`. Every agent on
-  // the pass-39 instance ran on Codex, so a tool that exists only on the Claude
-  // toolkit would have been unreachable by the operator that actually found the
-  // false ruling. `text` carries the correction, `kbSource` the document to
-  // amend, `repoSource` the evidence.
-  "propose_ruling",
+  // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`, generalized by
+  // ruling 483 into `propose_kb_correction`. Every agent on the pass-39
+  // instance ran on Codex, so a tool that exists only on the Claude toolkit
+  // would have been unreachable by the operator that actually found the false
+  // ruling. `text` carries the correction, `kbSource` the knowledge base and
+  // document (`<kb>/<doc>`, or a bare document of the rulings), `reason` the
+  // settled line it corrects, `repoSource` the evidence.
+  "propose_kb_correction",
   // Ruling 417 (owner): lease shared files to THIS task until it merges. The
   // plan mirror of the Claude toolkit's `lease_files`; `paths` carries the
   // globs and `text` the reason.
@@ -2143,7 +2210,7 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   set_dependencies: ["generate-packets"],
   // F39-1/F39-7: same gate as `flag_context_conflict` — it writes a typed event
   // and a proposal, never a binding rule.
-  propose_ruling: ["append-typed-events"],
+  propose_kb_correction: ["append-typed-events"],
   // Ruling 417: a lease orders DELIVERIES, so it rides delivery authority —
   // resolved via deliverGate below, like `deliver_for_review` itself.
   lease_files: ["deliver-review-pr"],
@@ -2227,10 +2294,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           delivers: { type: ["boolean", "null"], description: "run_agent: true = hand delivery to this profile (owns branch/PR, one per task); false = run as supporting (review). Null derives it from the profile's grants and the task's current deliverer." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_ruling: the correction, or the missing convention (ruling 418), in one or two sentences; for lease_files: why this task holds the paths, which every task the lease refuses is shown; else null." },
-          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
-          kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For propose_ruling: the rulings document to amend, by file name as the rulings knowledge base lists it. Else null." },
-          repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For propose_ruling: the EVIDENCE that proves the ruling wrong or the convention missing \u2014 the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
+          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_kb_correction: the correction, or the missing convention (ruling 418), in one or two sentences; for lease_files: why this task holds the paths, which every task the lease refuses is shown; else null." },
+          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet. For propose_kb_correction: the settled LINE the correction replaces, quoted as the document has it (a distinctive phrase is enough); null only when it adds something the document does not say, such as a missing convention." },
+          kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For propose_kb_correction: the knowledge base and the document to correct as `<knowledge base>/<document>`, each named as the index names it (any knowledge base a run on this task was given, yours or an engaged agent's), or the document alone for the project's rulings knowledge base. Else null." },
+          repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For propose_kb_correction: the EVIDENCE that proves the line wrong or the convention missing \u2014 the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
           blockedBy: {
             type: ["array", "null"],
             items: { type: "string" },
@@ -2604,7 +2671,7 @@ async function startCodexOperatorRun(
   // child processes and org-level writes for a run that will never exist. The
   // same posture `ensureOperatorRepoCheckout` already takes above.
   const mcp = start.principal.ok
-    ? await operatorMcpResolution(db, authority.mcps, "codex")
+    ? await operatorMcpResolution(db, authority.mcps)
     : NO_OPERATOR_MCPS;
   // Pass-24 B-1 (owner ruling): the Codex operator's cwd is a dedicated empty
   // scratch folder, so the directory it works in does NOT contain `task.md` or
@@ -3136,21 +3203,23 @@ async function executeCodexPlan(
             );
           }
           break;
-        case "propose_ruling":
-          // F39-1/F39-7 (pass 39): `kbSource` is the rulings document to amend,
-          // `text` the correction, `repoSource` the evidence that proves it.
-          // Reuses the plan's existing string fields rather than growing the
-          // schema — the two ruling-shaped actions then read alike.
+        case "propose_kb_correction":
+          // F39-1/F39-7 (pass 39), ruling 483: `kbSource` is `<kb>/<doc>` (or
+          // a bare rulings document), `text` the correction, `reason` the line
+          // it corrects, `repoSource` the evidence that proves it. Reuses the
+          // plan's existing string fields rather than growing the schema — the
+          // two knowledge-base-shaped actions then read alike.
           if (a.kbSource && a.text && a.repoSource) {
             record(
               a.tool,
-              await operatorProposeRuling(
+              await operatorProposeKbCorrection(
                 db,
                 ctx,
                 {
                   ...base,
-                  doc: a.kbSource,
-                  text: a.text,
+                  ...splitKbSource(a.kbSource, ctx.dataRoot),
+                  line: a.reason ?? null,
+                  correction: a.text,
                   evidence: a.repoSource,
                 },
                 authority,
@@ -3159,7 +3228,7 @@ async function executeCodexPlan(
           } else {
             skippedMalformed(
               a.tool,
-              "the rulings document, the correction, and the evidence",
+              "the knowledge-base document, the correction, and the evidence",
             );
           }
           break;
@@ -3487,7 +3556,7 @@ async function startRealOperatorRun(
   // rewrite its health row) for a run recorded as "no agent process was
   // started".
   const mcp = start.principal.ok
-    ? await operatorMcpResolution(db, authority.mcps, "claude")
+    ? await operatorMcpResolution(db, authority.mcps)
     : NO_OPERATOR_MCPS;
   const toolkitDeps: Parameters<typeof buildOperatorToolkit>[0] = {
     db,
@@ -3801,6 +3870,11 @@ export interface OperatorMcpResolution {
   /** Ruling 176: the mounted servers' marked write tools. The operator never
    *  writes, so every operator run withholds them. */
   toolDenials: McpToolDenial[];
+  /** Ruling 461: the mounted servers reached through Viberr's MCP gateway. */
+  proxied: string[];
+  /** Ruling 486: the proxied servers signed in with OAuth, with their grants.
+   *  Optional: a prompt-shape fixture mounts none. */
+  oauthGrants?: McpRunGrant[];
 }
 
 /** Resolve the operator's MCP grants once per run (see OperatorMcpResolution).
@@ -3820,12 +3894,10 @@ export interface OperatorMcpResolution {
 async function operatorMcpResolution(
   db: DatabaseSync,
   names: readonly string[],
-  backend: RealBackend,
 ): Promise<OperatorMcpResolution> {
-  const { servers, unresolved, toolDenials } = await verifyStdioMcpMountsForRun(
+  const { servers, unresolved, toolDenials, proxied, oauthGrants } = await verifyStdioMcpMountsForRun(
     db,
     resolveSpecialistMcpServersDetailed(db, names, { withholdWriteTools: true }),
-    { backend },
   );
   return {
     servers,
@@ -3833,6 +3905,8 @@ async function operatorMcpResolution(
     unresolved: unresolved.filter((u) => !u.mounted),
     unhealthy: unresolved.filter((u) => u.mounted).map((u) => u.name),
     toolDenials,
+    proxied,
+    oauthGrants,
   };
 }
 
@@ -3846,6 +3920,7 @@ const NO_OPERATOR_MCPS: OperatorMcpResolution = {
   unresolved: [],
   unhealthy: [],
   toolDenials: [],
+  proxied: [],
 };
 
 /**
@@ -4216,6 +4291,10 @@ export function buildOperatorSystemPrompt(
         "stop and open a decision packet instead.",
     );
   }
+  // Ruling 461: the servers reached through Viberr's gateway, in the sentence
+  // the specialist and controller prompts share.
+  const gateway = gatewayMcpSection(mcp.proxied, mcp.oauthGrants ?? []);
+  if (gateway) dynamic.push(gateway);
   if (toolDenials.length > 0) {
     dynamic.push(
       "\n\n---\n# MCP write tools withheld\n\n" +
@@ -4601,8 +4680,40 @@ function operatorTurnDoctrine(
       "Whenever a `run_agent` puts that question to a reviewer, alone or folded into the review of a fresh rework, set `completeness: true` on it: Viberr then records the verdict that run returns as the complete set, and a later deadlock packet recommends one rework against it instead of the question you already asked (ruling 421). " +
       // Ruling 418 (owner): this is the turn a reviewer's verdict arrives on,
       // and it returns before the stage rules, so the duty is stated here too.
-      "If the objection is a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it, also `propose_ruling` that convention in the rulings document it belongs to, with the verdict as the evidence: one per class, never one per finding. " +
+      "If the objection is a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it, also `propose_kb_correction` that convention in the rulings document it belongs to, with the verdict as the evidence: one per class, never one per finding. " +
+      // Ruling 483 (F40-53): the relay. On Codex an agent has no tool to file
+      // a correction itself; live on WEB-3 one listed "Discrepancies to
+      // reconcile" in its report, and the answer was "I'm not changing them
+      // myself" while the next directives sent agents to the stale lines.
+      "If the report says a line in a knowledge base is wrong (a version, a path, a command, a step it measured) and no proposal for it is on the timeline, `propose_kb_correction` it against that document with the agent's evidence; never leave a correction an agent proved in a comment. " +
       "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
+    );
+  }
+  if (trigger === "gates-failed") {
+    // Ruling 482 (F40-52): Viberr ran the project's gates on the revision under
+    // review and one did not exit 0. The acceptance gate now refuses on it, and
+    // the rework is this operator's to dispatch.
+    const gates = snapshot.gates;
+    const failed = (gates?.failed ?? [])
+      .map(
+        (f) =>
+          `\`${f.name}\` (\`${f.command}\`) ${f.outcome}` +
+          (f.log ? `; its full log is the task attachment \`${f.log}\`` : ""),
+      )
+      .join("; ");
+    return (
+      `Viberr ran the project's gates itself on the revision under review: ${gates?.line ?? "a gate failed"}. ` +
+      (failed ? `Failed: ${failed}. ` : "") +
+      `This is the server's own record, bound to the sha, and ${snapshot.key} cannot be accepted ` +
+      `on this revision until a revision passes every gate. Dispatch the rework: \`run_agent\` the ` +
+      `delivering profile (the engaged deliverer runs at any stage, ruling 133) with the failing ` +
+      `gate, its command and the log's attachment name in the prompt, so it reproduces and fixes ` +
+      `the failure in its workspace. Then deliver the fix with \`deliver_for_review\`; Viberr ` +
+      `gates the new revision on its own. Do NOT ask an agent to re-run the gates to report them, ` +
+      `do not recommend acceptance, and do not treat an agent's claim that the gate passes as the ` +
+      `answer: only Viberr's next run is. If the failure is not the branch's fault (a gate the host ` +
+      `cannot run, a flaky command), say so in ONE comment and open a decision packet naming what a ` +
+      `person must choose (fix the gate list in project Settings, or run the gates again).`
     );
   }
   if (trigger === "pr-conflicting") {
@@ -4611,21 +4722,26 @@ function operatorTurnDoctrine(
     // for the identical condition opens the packet that resolves it. Live on
     // SHOP-12 and SHOP-3 that cost 10h45m and 7h45m, each ended by the owner
     // typing an @operator comment by hand.
+    // Ruling 475 (F40-55 (b)): the reconciler fires the same trigger when an
+    // open PR FLIPS to conflicting (another task's merge moved the base), so
+    // the instruction names both origins and the timeline says which.
     const prNo = snapshot.pr ? `#${snapshot.pr.number}` : "the review PR";
     return (
-      `A person pressed Accept on this task and Viberr refused it: the acceptance-time base ` +
-      `refresh found the branch in CONFLICT with the base, so ${prNo} cannot be merged as it ` +
-      `stands. The conflict note on the timeline names the files.\n\n` +
-      `This is YOURS to resolve, not theirs — they have no checkout, and Viberr's own rule is ` +
+      `${prNo} now CONFLICTS with the base, so it cannot be merged as it stands. Either a person ` +
+      `pressed Accept and the acceptance-time base refresh found the conflict (Viberr refused the ` +
+      `acceptance), or another task's merge moved the base and GitHub reported the conflict. The ` +
+      `conflict note on the timeline names which, and the files.\n\n` +
+      `This is YOURS to resolve, not a person's — they have no checkout, and Viberr's own rule is ` +
       `that the server does the git inside the delivering agent's workspace. Call ` +
       `\`update_branch_from_base\`: at this boundary it is permitted precisely because the PR is ` +
-      `conflicting, and it opens the conflict decision packet whose recommended option has the ` +
-      `deliverer resolve the files in the workspace it already has. If no agent can take it, open ` +
-      `a packet that says so and names what a person must choose. ` +
+      `conflicting. When the task's delivering agent can take the conflict, the tool hands it to ` +
+      `that agent itself and moves the task back to review (ruling 475); when no agent can, it ` +
+      `opens the conflict decision packet that says why. Either way do not open a packet of your ` +
+      `own for it. ` +
       `Do not tell anyone to merge the base in by hand, and never rebase: the pull request has ` +
-      `published those commits. And say in ONE comment that the acceptance was refused and what ` +
-      `is now happening — the person is waiting on a button that will keep refusing until this ` +
-      `is cleared.`
+      `published those commits. If a person's Accept was refused, say in ONE comment that it was ` +
+      `refused and what is now happening — they are waiting on a button that will keep refusing ` +
+      `until this is cleared.`
     );
   }
   if (trigger === "stranded") {
@@ -4757,7 +4873,8 @@ function operatorTurnDoctrine(
       // Ruling 178: this arm returns before the stage rule, so the project's
       // required reviewers are named here too — the review this turn should
       // dispatch is theirs.
-      requiredReviewersRule(snapshot)
+      requiredReviewersRule(snapshot) +
+      projectGatesRule(snapshot)
     );
   }
 
@@ -4830,10 +4947,30 @@ function requiredReviewersRule(snapshot: OperatorTaskSnapshot): string {
   );
 }
 
+/**
+ * Ruling 482 (F40-52): the project's gates are the server's to run, and their
+ * record is in the snapshot. Before this, every directive re-typed the gate
+ * commands from the rulings KB and asked an agent to report their exit codes,
+ * which is exactly the claim a person cannot check. Empty when the project
+ * declares no gates or nothing is delivered.
+ */
+function projectGatesRule(snapshot: OperatorTaskSnapshot): string {
+  const gates = snapshot.gates;
+  if (!gates) return "";
+  return (
+    `Project gates (ruling 482): ${gates.line}. Viberr runs the project's gate commands itself on ` +
+    "every delivered revision, as the task owner, and records each exit code on the task (`gates` in " +
+    "the snapshot). Acceptance is refused until every gate exited 0 on the revision under review. " +
+    "Never ask an agent to run the gates to report them, never quote an agent's report of them as " +
+    "the result, and never offer or perform `accept_completion` while `gates.state` is not `passed`. "
+  );
+}
+
 /** The ordinary stage rule: what THIS stage calls for, from the live snapshot. */
 function stageRule(snapshot: OperatorTaskSnapshot): string {
   return (
     requiredReviewersRule(snapshot) +
+    projectGatesRule(snapshot) +
     `You are at stage "${snapshot.stageName}"` +
     (snapshot.previousStage
       ? `, arrived from "${snapshot.previousStage.name}"`
@@ -4865,7 +5002,7 @@ function stageRule(snapshot: OperatorTaskSnapshot): string {
     // the reviewers blocked on git option injection (AX-19), credentials in
     // status (AX-22) and lost field presence (AX-24), and none became a
     // convention the next task on the same surfaces would read.
-    "- A reviewer blocked on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it: alongside your one coordination action, `propose_ruling` the convention in the rulings document it belongs to, with the verdict as the evidence. It binds nobody until a person or the controller promotes it, and every later run reads it at once. One convention per class, never one per finding; a class the rulings already cover needs nothing.\n" +
+    "- A reviewer blocked on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it: alongside your one coordination action, `propose_kb_correction` the convention in the rulings document it belongs to, with the verdict as the evidence. It binds nobody until a person or the controller promotes it, and every later run reads it at once. One convention per class, never one per finding; a class the rulings already cover needs nothing.\n" +
     "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch, offering `resolve_remote_collision` (clear the stale remote branch and its recorded squatting PR, then re-deliver) or `archive_task`, instead of retrying blindly. Never offer `discard_branch` for a push conflict: it destroys the task's LOCAL commits and its authoring is refused while delivered work stands.\n" +
     "- A directive you sent earlier that never became a run is an UNDELIVERED hand-off — the timeline says so (\"did NOT start a run\"), or `liveRuns` is empty with no report after your prompt. Once the blocker is gone (e.g. the stage moved to one the profile works), re-send the prompt yourself; do not wait for a report that can never come.\n" +
     "Take exactly one such action and stop. NEVER end your turn leaving the task at a pre-work or `auto` stage with nothing done and no packet: either advance the boundary, hand off to a specialist, or `open_decision_packet` when a human must scope or unblock it. A pre-work stage that needs no human input must never be left waiting on a human."

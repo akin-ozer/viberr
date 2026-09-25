@@ -24,7 +24,10 @@ import {
   getHomeOrgSummary,
   listHomeProjectsForUser,
 } from "~/features/home/home-query.server";
-import { createProject } from "~/features/home/project-create.server";
+import {
+  createProject,
+  type CreateProjectInput,
+} from "~/features/home/project-create.server";
 import { HomePage } from "~/features/home/home-page";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
@@ -176,25 +179,29 @@ export async function action({ request }: Route.ActionArgs) {
       // creator is seeded as the new project's admin (project-create.server.ts).
       // Org role is intentionally NOT consulted here; the only guard is the
       // requireAuth at the top of this action.
-      const result = await createProject(
-        db,
-        {
-          name: String(formData.get("name") ?? ""),
-          key: String(formData.get("key") ?? ""),
-          owner: String(formData.get("owner") ?? ""),
-          repoName: String(formData.get("repoName") ?? ""),
-          // P13-AP-04: the "Lightweight · 3 stages" preset was deleted (owner
-          // ruling 2) — the Standard 5-stage board is the only template, so
-          // there is no `template` field to read.
-          policy:
-            formData.get("policy") === "strict"
-              ? "strict"
-              : formData.get("policy") === "auto"
-                ? "auto"
-                : "balanced",
-        },
-        actor,
-      );
+      const input: CreateProjectInput = {
+        name: String(formData.get("name") ?? ""),
+        key: String(formData.get("key") ?? ""),
+        owner: String(formData.get("owner") ?? ""),
+        repoName: String(formData.get("repoName") ?? ""),
+        // P13-AP-04: the "Lightweight · 3 stages" preset was deleted (owner
+        // ruling 2) — the Standard 5-stage board is the only template, so
+        // there is no `template` field to read.
+        policy:
+          formData.get("policy") === "strict"
+            ? "strict"
+            : formData.get("policy") === "auto"
+              ? "auto"
+              : "balanced",
+      };
+      // Ruling 462: the modal's "Create this repository on GitHub if it does
+      // not exist" choice, carrying its visibility; absent (or anything else)
+      // asks for no creation.
+      const createRepository = formData.get("createRepository");
+      if (createRepository === "private" || createRepository === "public") {
+        input.createRepository = { private: createRepository === "private" };
+      }
+      const result = await createProject(db, input, actor);
       return { ok: true as const, ...result };
     }
     return data(

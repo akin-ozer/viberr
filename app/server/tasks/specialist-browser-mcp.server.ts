@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { shareDirWithAgents } from "~/server/runtimes/agent-isolation.server";
 import { createRequire } from "node:module";
 import path from "node:path";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
@@ -193,7 +194,8 @@ export function resolveBrowserMcp(input: {
     );
   }
 
-  mkdirSync(input.attachmentsDir, { recursive: true });
+  // Ruling 460: the browser runs as the run's person and writes its output here.
+  shareDirWithAgents(input.attachmentsDir);
 
   const args = [
     cli,

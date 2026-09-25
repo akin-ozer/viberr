@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { VALIDATION_VALUES, WAITING_VALUES } from "~/schemas/task-file.schema";
 import { NOTIFICATION_KINDS } from "~/shared/mapping/notification.server";
 import { runMigrations } from "./db/migration-runner.server";
+import { withTransaction } from "./db/transaction.server";
 import { seedInitialAdmin } from "./auth/seed-admin.server";
 import {
   getEnv,
@@ -20,8 +21,10 @@ import {
 import { getDb, getProjectionDbPath } from "./db/sqlite.server";
 import { selfHealProjectionDbIfCorrupt } from "./db/self-heal.server";
 import { repairCodexRolloutPaths } from "./runtimes/user-homes.server";
+import { bootAgentIsolation } from "./runtimes/agent-isolation.server";
 import { startEventPublisher } from "./events/event-publisher.server";
 import { armProcessShutdown } from "./events/sse-broker.server";
+import { startMcpGateway } from "./mcp-proxy/gateway.server";
 import {
   DATA_ROOT_SUBDIRS,
   ensureDataRootDirs,
@@ -62,7 +65,10 @@ import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 import { startScheduleRunner } from "./tasks/schedule.server";
 import { startGoalRunner } from "./tasks/goal-actions.server";
 import { recoverControllerConversations } from "./controller/controller-run.server";
+import { backfillGoalConversations } from "./controller/goal-planning-backfill.server";
+import { backfillMcpGrantScopes } from "./org/mcp-oauth.server";
 import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.server";
+import { recoverProjectGates } from "./tasks/project-gates.server";
 import { toError } from "~/shared/errors";
 
 // Survives dev-server HMR module reloads via a well-known symbol.
@@ -186,6 +192,72 @@ function projectionValidationGaps(db: DatabaseSync): string[] {
  */
 function notificationKindGaps(db: DatabaseSync): string[] {
   return checkListGaps(db, "notifications", "kind", NOTIFICATION_KINDS);
+}
+
+/** One `PRAGMA table_info` read → the column names, in table order. */
+function tableColumns(db: DatabaseSync, table: string): string[] {
+  // SAFETY: `PRAGMA table_info` rows always carry a non-null TEXT `name`
+  // column; only `name` is read. `table` is a literal at every call site.
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.map((row) => row.name);
+}
+
+/**
+ * Ruling 481(a): widen a lagging `notifications.kind` CHECK in place, at boot.
+ *
+ * The drift WARN above names the gap and prescribes re-baselining the
+ * projection database, which also destroys the users, sessions, sealed PATs,
+ * audit and notifications nothing can rebuild. For this one table the fix
+ * needs none of that: `notifications` is app-owned, nothing references it, and
+ * the new CHECK admits every value the old one did. So the table is rebuilt
+ * from the shipped baseline's own DDL (read from a throwaway in-memory
+ * migration, as `projectionMissingColumns` does), its rows copied across, and
+ * its indexes recreated, in one transaction (sqlite cannot ALTER a CHECK).
+ * Without it, the day ruling 481 shipped every agent question on a deployed
+ * root would have thrown at the INSERT and reached nobody, which is worse than
+ * the mis-filed row it replaced.
+ *
+ * Returns the kinds it admitted; empty when the CHECK was current (the common
+ * path, which reads one DDL row and changes nothing).
+ */
+export function widenNotificationKindCheck(db: DatabaseSync): string[] {
+  const missing = notificationKindGaps(db);
+  if (missing.length === 0) return [];
+  const expectedDb = new DatabaseSync(":memory:");
+  try {
+    runMigrations(expectedDb);
+    // SAFETY: the baseline creates `notifications`, so its CREATE TABLE row is
+    // present and `sql` is non-null for a table.
+    const table = expectedDb
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notifications'`)
+      .get() as { sql: string };
+    // SAFETY: `sql` is null only for sqlite's own automatic indexes, which the
+    // filter excludes; every remaining row is a CREATE INDEX statement.
+    const indexes = expectedDb
+      .prepare(
+        `SELECT sql FROM sqlite_master
+         WHERE type = 'index' AND tbl_name = 'notifications' AND sql IS NOT NULL`,
+      )
+      .all() as Array<{ sql: string }>;
+    const live = new Set(tableColumns(db, "notifications"));
+    const kept = tableColumns(expectedDb, "notifications")
+      .filter((column) => live.has(column))
+      .join(", ");
+    withTransaction(db, () => {
+      db.exec(
+        table.sql.replace(/^CREATE TABLE notifications\b/, "CREATE TABLE notifications__widened"),
+      );
+      db.exec(
+        `INSERT INTO notifications__widened (${kept}) SELECT ${kept} FROM notifications`,
+      );
+      db.exec(`DROP TABLE notifications`);
+      db.exec(`ALTER TABLE notifications__widened RENAME TO notifications`);
+      for (const index of indexes) db.exec(index.sql);
+    });
+  } finally {
+    expectedDb.close();
+  }
+  return missing;
 }
 
 /**
@@ -705,10 +777,49 @@ export async function bootServer(): Promise<void> {
   }
   const db = getDb();
 
+  // Ruling 481(a): before anything can write a notification. A root whose
+  // `notifications.kind` CHECK predates a kind gets it widened in place, so an
+  // agent question (the kind that ruling added) is never refused at INSERT.
+  try {
+    const admitted = widenNotificationKindCheck(db);
+    if (admitted.length > 0) {
+      logger.info("widened the notifications kind CHECK in place", { admitted });
+    }
+  } catch (error) {
+    // The integrity line below still names the gap and the remedy.
+    logger.error("could not widen the notifications kind CHECK", { err: toError(error) });
+  }
+
+  // Ruling 460: before anything spawns an agent or creates a workspace — the
+  // server's umask, the store layout, every person's home handed to their
+  // agent uid, and the probe that says whether the store enforces any of it
+  // (`/resources/health` → `agentIsolation`). Without a launcher (the host dev
+  // server) it only records `off`. Never throws: a layout it could not set is
+  // logged and the probe reports the outcome.
+  try {
+    bootAgentIsolation(db);
+  } catch (error) {
+    logger.error("agent isolation could not be set up at boot", { err: toError(error) });
+  }
+
   await seedInitialAdmin(db, {
     email: env.VIBERR_SEED_ADMIN_EMAIL,
     password: env.VIBERR_SEED_ADMIN_PASSWORD,
   });
+
+  // Ruling 461: the loopback MCP gateway, before anything can start a run
+  // (recovery, the schedule and goal runners, a request). A run reaches every
+  // org MCP server with a stored credential through it; one that fails to bind
+  // leaves those servers unmountable — each run's prompt then says why — and
+  // health reports `mcpProxy.listening: false`, so boot carries on.
+  try {
+    await startMcpGateway({ port: env.VIBERR_MCP_PROXY_PORT });
+  } catch (error) {
+    logger.error("mcp gateway failed to start — credentialed MCP servers cannot be mounted", {
+      port: env.VIBERR_MCP_PROXY_PORT,
+      err: toError(error),
+    });
+  }
 
   // SSE bridge FIRST (Phase 6): projection emitter → broker, so watcher
   // reprojects and every mutation reach connected clients from the start.
@@ -765,6 +876,28 @@ export async function bootServer(): Promise<void> {
     });
   }
 
+  // Ruling 476(j) (live verification 2026-09-25): a chain written before goals
+  // recorded their conversation learns it from the audit row of its creation
+  // and the controller turn around it, when exactly one conversation matches.
+  // After the rescan (goal rows exist to re-project) and before the watcher.
+  try {
+    await backfillGoalConversations(db);
+  } catch (error) {
+    logger.error("goal planning-conversation backfill failed", {
+      err: toError(error),
+    });
+  }
+
+  // Ruling 486 (live verification 2026-09-25): an OAuth sign-in made before the
+  // public half carried its grant shows it from the sealed half's token scope.
+  try {
+    backfillMcpGrantScopes(db);
+  } catch (error) {
+    logger.error("MCP grant-scope backfill failed", {
+      err: toError(error),
+    });
+  }
+
   // File-native store watcher (dev AND prod) — drives incremental
   // projection rebuilds when project.md / task.md files change on disk.
   startFileWatcher();
@@ -801,6 +934,19 @@ export async function bootServer(): Promise<void> {
   // disk — all awaited internally, and it must never hold up the server coming
   // online.
   void reconcileRestartedWork(db);
+
+  // Ruling 482: a project gate run the previous process left queued or running
+  // has no worker behind it, and the acceptance gate would wait on it forever.
+  // Each is queued again; the runs themselves happen off this path.
+  void (async () => {
+    try {
+      await recoverProjectGates(db);
+    } catch (error) {
+      logger.warn("interrupted project gate runs could not be recovered", {
+        err: toError(error),
+      });
+    }
+  })();
 
   // Start the server-side schedule runner (O-3): fire due scheduled operator
   // re-runs once at boot (catching any that came due while down), then on an

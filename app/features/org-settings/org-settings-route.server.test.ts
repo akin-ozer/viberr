@@ -140,6 +140,20 @@ describe("RBAC", () => {
     await expect(
       postAction(ids.selin, { intent: "kb-reindex", kbId: "kb_seed_arch" }),
     ).rejects.toMatchObject({ status: 403 });
+    // Ruling 463: Re-check spends GitHub calls, so it is behind the same gate.
+    await expect(
+      postAction(ids.selin, { intent: "connection-recheck", connectionId: "akin-ozer" }),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("ruling 463: connection-recheck reaches recheckConnection (a missing connection says so)", async () => {
+    // CANARY: drop the `connection-recheck` case and the route answers
+    // "Unknown action." instead. No connection exists, so nothing calls GitHub.
+    const reply = await postAction(ids.arda, {
+      intent: "connection-recheck",
+      connectionId: "no-such-owner",
+    });
+    expect(reply).toMatchObject({ ok: false, error: "That connection no longer exists." });
   });
 });
 

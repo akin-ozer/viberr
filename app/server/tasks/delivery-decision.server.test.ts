@@ -11,7 +11,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { gitOutSync } from "../../../test-support/git-origin";
+import { gitOutSync, withLocalGithub } from "../../../test-support/git-origin";
 import type {
   Engagement,
   TaskFrontmatter,
@@ -426,7 +426,11 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     gitOutSync(repoDir, ["add", "-A"]);
     gitOutSync(repoDir, ["commit", "-q", "-m", "init"]);
 
-    const remoteDir = path.join(store.dataRoot, "bare-origin.git");
+    // The PROJECT's repository, stood in for on disk: pass 40 review
+    // (R-seams-1) pushes to the project's own URL from the server's stage,
+    // never through the checkout's agent-writable `origin`.
+    const origins = path.join(store.dataRoot, "origins");
+    const remoteDir = path.join(origins, "akin-ozer", "viberr.git");
     mkdirSync(remoteDir, { recursive: true });
     gitOutSync(remoteDir, ["init", "-q", "--bare"]);
     gitOutSync(repoDir, ["remote", "add", "origin", remoteDir]);
@@ -449,16 +453,18 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     gitOutSync(repoDir, ["add", "-A"]);
     gitOutSync(repoDir, ["commit", "-q", "-m", "[VIB-1] deliver"]);
 
-    const outcome = await performDelivery(
-      store.db,
-      {
-        dataRoot: store.dataRoot,
-        // No pushWorkspaceBranch — the real one runs against real git.
-        deps: { openTaskPr: openPrMock, mergeTaskPr: mergeMock },
-      },
-      store.slug,
-      "VIB-1",
-      actorOf(store.users.arda),
+    const outcome = await withLocalGithub(origins, () =>
+      performDelivery(
+        store.db,
+        {
+          dataRoot: store.dataRoot,
+          // No pushWorkspaceBranch — the real one runs against real git.
+          deps: { openTaskPr: openPrMock, mergeTaskPr: mergeMock },
+        },
+        store.slug,
+        "VIB-1",
+        actorOf(store.users.arda),
+      ),
     );
 
     expect(outcome.status).toBe("push_conflict");

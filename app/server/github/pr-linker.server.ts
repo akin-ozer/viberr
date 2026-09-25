@@ -94,6 +94,9 @@ export interface PrFacts {
    *  (terminal PR, or the call failed) means UNKNOWN, so callers keep the
    *  cached value instead of erasing a real approval on a GitHub hiccup. */
   approvals?: PrApproval[];
+  /** Ruling 484: the submitted reviews, for the relay. ABSENT under the same
+   *  rule as `approvals`: not read this pass. */
+  reviewEvents?: PrReviewEvent[];
   /** P14-LV-07: can GitHub merge this PR? ABSENT when the detail fetch failed
    * (unknown → callers keep the cached value) or the PR is terminal. */
   mergeable?: PrMergeable;
@@ -189,6 +192,10 @@ export interface GhReview {
    *  approved. */
   commit_id?: string | null;
   submitted_at?: string | null;
+  /** Ruling 484: the review's id (what its line comments are listed under,
+   *  and what the relay records once it has relayed it) and its body. */
+  id?: number;
+  body?: string | null;
 }
 
 /** {@link GhReview}, as parsed at the boundary. Every field already tolerates
@@ -207,10 +214,51 @@ const ghReviewsSchema = z
           .catch(undefined),
         commit_id: z.string().nullable().optional().catch(undefined),
         submitted_at: z.string().nullable().optional().catch(undefined),
+        id: z.number().int().optional().catch(undefined),
+        body: z.string().nullable().optional().catch(undefined),
       })
       .catch({}),
   )
   .catch([]);
+
+/**
+ * Ruling 484 (pass 40, F40-54): one SUBMITTED review, as the reconciler's
+ * review relay reads it. A CHANGES_REQUESTED review used to become a pill
+ * state and nothing else; its body and its line comments never reached the
+ * agent that delivered the work.
+ */
+export interface PrReviewEvent {
+  id: number;
+  /** GitHub login of the reviewer (mapped to a member by the relay). */
+  login: string;
+  /** Upper-cased: APPROVED, CHANGES_REQUESTED, COMMENTED or DISMISSED. */
+  state: string;
+  /** The commit the review was submitted on. */
+  commitSha: string | null;
+  body: string;
+  at: string | null;
+}
+
+/** The submitted reviews off the SAME `/reviews` payload the pill reads. A
+ *  PENDING review is the reviewer's unsent draft, and an entry with no id or
+ *  no login cannot be listed or attributed, so none of those is kept. */
+export function reviewEventsOf(reviews: readonly GhReview[]): PrReviewEvent[] {
+  const events: PrReviewEvent[] = [];
+  for (const review of reviews) {
+    const state = (review.state ?? "").toUpperCase();
+    const login = review.user?.login;
+    if (state === "" || state === "PENDING" || !login || review.id === undefined) continue;
+    events.push({
+      id: review.id,
+      login,
+      state,
+      commitSha: review.commit_id ?? null,
+      body: review.body ?? "",
+      at: review.submitted_at ?? null,
+    });
+  }
+  return events;
+}
 
 /** R19-B — a reviewer whose LATEST review is an approval, and the commit it
  *  was submitted on. */
@@ -557,6 +605,7 @@ export async function findPrForBranch(
   // the caller keeps the cached value instead of blanking the pill.
   let review: PrReviewState | null | undefined;
   let approvals: PrApproval[] | undefined;
+  let reviewEvents: PrReviewEvent[] | undefined;
   if (state === "review") {
     const reviews = await client.request(
       "GET",
@@ -573,6 +622,8 @@ export async function findPrForBranch(
       // R19-B: same payload, no extra call — the identities + commits behind
       // the pill, so a project member's approval can BE the verdict.
       approvals = deriveApprovals(entries);
+      // Ruling 484: and the reviews themselves, for the relay. Same payload.
+      reviewEvents = reviewEventsOf(entries);
     }
   }
 
@@ -602,6 +653,7 @@ export async function findPrForBranch(
   // keep its cached value instead of erasing it.
   if (review !== undefined) facts.review = review;
   if (approvals !== undefined) facts.approvals = approvals;
+  if (reviewEvents !== undefined) facts.reviewEvents = reviewEvents;
   // P14-LV-07: only an OPEN PR has a meaningful mergeability, and only the
   // detail fetch carries it. A failed detail read — or GitHub still
   // COMPUTING the answer (the first read after a push) — leaves the key

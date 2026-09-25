@@ -20,6 +20,7 @@ import type {
 import type { ActorRender } from "./actor.server";
 import type { DependencyRender } from "~/shared/dependencies";
 import { goalDraftForOption } from "~/shared/packet-goal-draft";
+import { acceptanceAnswerOf } from "~/shared/packet-acceptance-answer";
 
 /** Pass-25: the stored `labels_json` is a JSON string-array (the write path
  *  normalizes it so). Parse it at this read boundary through the schema — a
@@ -67,6 +68,7 @@ import {
   decodeActorRef,
   systemIdToName,
 } from "~/server/files/actor-ref.server";
+import { AGENT_QUESTION_PACKET_KIND } from "~/server/tasks/agent-outcome.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 
@@ -204,6 +206,19 @@ export interface PacketRender {
    *  packet waits. Present exactly when `awaiting` is `goal_edit` and a
    *  decision is recorded; absent otherwise. */
   goalDraft?: string;
+  /** Ruling 471: the title of the option a plain acceptance (Accept, a stage
+   *  move into the terminal stage, an applied acceptance card) ANSWERS this
+   *  decision with. Absent when that acceptance withdraws it (F32-11). Derived
+   *  here by `acceptanceAnswerOf`, the predicate the server's write uses, so
+   *  the accept dialog reads the loader's answer and never guesses. */
+  acceptAnswersWith?: string;
+  /** Ruling 471: the same for a forced acceptance (the Force accept button). */
+  forceAnswersWith?: string;
+  /** Ruling 478(e) (F40-31): the agent a person's answer to this packet goes
+   *  back to, by name: set on an agent's question (`askedBy`), which
+   *  `resolvePacket` routes to the asker rather than to the operator. The
+   *  card names the answer box after it. Absent on every other packet. */
+  answerTo?: string;
 }
 
 /** What a surface renders for readiness: the canonical stored enum plus the
@@ -669,7 +684,9 @@ export function mapOperatorRef(
  * derived value; they no longer re-decide it.
  *
  * The STORED readiness, the acceptance gate and the board attention filter all
- * read `readiness`, never `displayReadiness`, and are untouched.
+ * read `readiness`, never `displayReadiness`, and are untouched. Lift 2's
+ * demand reaches the attention filter through the open packet itself, which
+ * it reads beside `waiting` (ruling 477(a), `board-filters.ts`).
  */
 function deriveDisplayReadiness(
   readiness: Readiness,
@@ -715,6 +732,16 @@ function mapPacket(packet: TaskPacket | null): PacketRender | null {
       ? packet.options[packet.decided.optionIndex]
       : undefined;
   if (chosen) render.goalDraft = goalDraftForOption(chosen);
+  // Ruling 471: which option each direct acceptance answers, set only when it
+  // answers one, so a packet no acceptance answers ships no extra bytes.
+  const accept = acceptanceAnswerOf(packet, "accept");
+  if (accept) render.acceptAnswersWith = accept.option.t;
+  const force = acceptanceAnswerOf(packet, "force");
+  if (force) render.forceAnswersWith = force.option.t;
+  // Ruling 478(e): the same predicate `resolvePacket` routes on.
+  if (packet.kind === AGENT_QUESTION_PACKET_KIND && packet.askedBy?.trim()) {
+    render.answerTo = render.from;
+  }
   return render;
 }
 

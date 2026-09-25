@@ -30,12 +30,15 @@ interface CreateProjectReply {
   slug?: string;
   storePath?: string;
   repoWarning?: string | null;
+  repoNote?: string | null;
   error?: string;
 }
 
 function renderModal(
   props: Partial<Parameters<typeof NewProjectModal>[0]> = {},
-  action: () => Promise<CreateProjectReply> = async () => ({ ok: true }),
+  action: (args: { request: Request }) => Promise<CreateProjectReply> = async () => ({
+    ok: true,
+  }),
 ) {
   const Stub = createRoutesStub([
     {
@@ -127,6 +130,81 @@ describe("N20-11: the repo field says the owner is fixed by the connection", () 
     expect(text).toContain("Enter just the");
     // The fixed owner is named, so a `owner/name` entry is visibly redundant.
     expect(text).toContain("akin-ozer");
+  });
+});
+
+/**
+ * Ruling 462 (F40-5): the modal offers the same choice as the controller's
+ * `create_project`: create the repository on GitHub when it does not exist,
+ * private by default. The intent carries it as one field, and the success
+ * toast says what became of the repository.
+ */
+describe("ruling 462: the modal can ask for the repository to be created", () => {
+  const withConnection = {
+    connections: ["akin-ozer"],
+    connectionHealth: { "akin-ozer": "valid" as const },
+  };
+  /** Fill the name, apply `pick`, press Create; resolves with the posted form. */
+  async function submitWith(pick: (container: HTMLElement) => void) {
+    let posted: FormData | null = null;
+    const view = renderModal(withConnection, async ({ request }) => {
+      posted = await request.formData();
+      return { ok: false, error: "held for the test" };
+    });
+    fireEvent.change(view.container.querySelector("#np-name")!, {
+      target: { value: "Website" },
+    });
+    pick(view.container);
+    fireEvent.click(view.getByText("Create project"));
+    await waitFor(() => expect(posted).not.toBeNull());
+    return { form: posted!, view };
+  }
+  const box = (container: HTMLElement, label: string) =>
+    [...container.querySelectorAll("label")]
+      .find((l) => l.textContent!.includes(label))!
+      .querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+
+  it("is off by default and sends nothing", async () => {
+    // CANARY: default `createRepo` to true and a typo becomes a repository.
+    const { form, view } = await submitWith(() => {});
+    expect(box(view.container, "Create this repository on GitHub").checked).toBe(false);
+    expect(view.container.textContent).not.toContain("Create it as a private repository");
+    expect(form.get("createRepository")).toBeNull();
+  });
+
+  it("checked, it asks for a private repository unless the private box is cleared", async () => {
+    // CANARY: drop the `fd.set("createRepository", …)` line and both reads are null.
+    const privateRun = await submitWith((c) =>
+      fireEvent.click(box(c, "Create this repository on GitHub")),
+    );
+    expect(box(privateRun.view.container, "Create it as a private repository").checked).toBe(true);
+    expect(privateRun.form.get("createRepository")).toBe("private");
+    cleanup();
+
+    const publicRun = await submitWith((c) => {
+      fireEvent.click(box(c, "Create this repository on GitHub"));
+      fireEvent.click(box(c, "Create it as a private repository"));
+    });
+    expect(publicRun.form.get("createRepository")).toBe("public");
+  });
+
+  it("the success toast carries what became of the repository", async () => {
+    const { getByText, container } = renderModal(withConnection, async () => ({
+      ok: true,
+      key: "WEB",
+      slug: "website",
+      storePath: "projects/website",
+      repoWarning: null,
+      repoNote: "Created akin-ozer/website on GitHub (private).",
+    }));
+    fireEvent.change(container.querySelector("#np-name")!, { target: { value: "Website" } });
+    fireEvent.click(box(container, "Create this repository on GitHub"));
+    fireEvent.click(getByText("Create project"));
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        "WEB initialized. Task store created at projects/website. Created akin-ozer/website on GitHub (private).",
+      ),
+    );
   });
 });
 

@@ -257,6 +257,10 @@ function NewProjectRepoField({
   derived,
   effOwner,
   effRepo,
+  createRepo,
+  setCreateRepo,
+  repoPrivate,
+  setRepoPrivate,
 }: {
   repoRef: RefObject<HTMLInputElement | null>;
   invalidField: BlockedField | null;
@@ -266,6 +270,12 @@ function NewProjectRepoField({
   derived: boolean;
   effOwner: string;
   effRepo: string;
+  /** Ruling 462: create the repository on GitHub when it does not exist. */
+  createRepo: boolean;
+  setCreateRepo: (v: boolean) => void;
+  /** Ruling 462: the created repository's visibility, private by default. */
+  repoPrivate: boolean;
+  setRepoPrivate: (v: boolean) => void;
 }) {
   return (
     <div className="field">
@@ -304,6 +314,30 @@ function NewProjectRepoField({
           Owner is fixed by the <b>{effOwner}</b> connection. Enter just the
           repository name.
         </span>
+      )}
+      {/* Ruling 462: the server creates the repository with the connection's
+          token before it writes the project, and a refusal names what the
+          token lacks and creates nothing. Off by default: an existing
+          repository is the usual case, and a typo must not become one. */}
+      {effOwner && (
+        <label className="check-line">
+          <input
+            type="checkbox"
+            checked={createRepo}
+            onChange={(e) => setCreateRepo(e.target.checked)}
+          />
+          Create this repository on GitHub if it does not exist
+        </label>
+      )}
+      {effOwner && createRepo && (
+        <label className="check-line">
+          <input
+            type="checkbox"
+            checked={repoPrivate}
+            onChange={(e) => setRepoPrivate(e.target.checked)}
+          />
+          Create it as a private repository
+        </label>
       )}
     </div>
   );
@@ -490,6 +524,8 @@ export function NewProjectModal({
   const [keyStripped, setKeyStripped] = useState(false);
   const [repo, setRepo] = useState("");
   const [repoTouched, setRepoTouched] = useState(false);
+  const [createRepo, setCreateRepo] = useState(false);
+  const [repoPrivate, setRepoPrivate] = useState(true);
   const [policy, setPolicy] = useState<"strict" | "balanced" | "auto">(
     "balanced",
   );
@@ -507,6 +543,7 @@ export function NewProjectModal({
     slug?: string;
     storePath?: string;
     repoWarning?: string | null;
+    repoNote?: string | null;
     error?: string;
   }>();
   const csrf = useCsrfToken();
@@ -600,10 +637,13 @@ export function NewProjectModal({
   useEffect(() => {
     if (fetcher.data?.ok && !closedRef.current) {
       closedRef.current = true;
+      // Ruling 462: a requested repository says what became of it (created,
+      // or an existing one used as it is) in the same success toast.
       push(
         fetcher.data.key +
           " initialized. Task store created at " +
-          fetcher.data.storePath,
+          fetcher.data.storePath +
+          (fetcher.data.repoNote ? ". " + fetcher.data.repoNote : ""),
       );
       // UI-09: the repo probe's outcome, when it wasn't clean. Creation used to
       // report unqualified success even for a repo GitHub has never heard of.
@@ -638,6 +678,7 @@ export function NewProjectModal({
     fd.set("owner", effOwner);
     fd.set("repoName", effRepo);
     fd.set("policy", policy);
+    if (createRepo) fd.set("createRepository", repoPrivate ? "private" : "public");
     // The list the collision note keeps reading until this request settles.
     setKeysAtSubmit(existingKeys ?? []);
     fetcher.submit(fd, { method: "post" });
@@ -702,6 +743,10 @@ export function NewProjectModal({
           derived={!repoTouched}
           effOwner={effOwner}
           effRepo={effRepo}
+          createRepo={createRepo}
+          setCreateRepo={setCreateRepo}
+          repoPrivate={repoPrivate}
+          setRepoPrivate={setRepoPrivate}
         />
         <NewProjectWorkflowField />
         <NewProjectPolicyField policy={policy} setPolicy={setPolicy} />

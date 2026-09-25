@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -11,7 +12,7 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
+import { createPat, getPatMetadata, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { getProjectGithubContext } from "./github-context.server";
 import { ensureDefaultBranch } from "./repo-bootstrap.server";
 
@@ -92,6 +93,107 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     expect(timeline[0]!.text).toContain("`d2e0fb0`");
     const audit = listAuditEvents(store.db).find((e) => e.action === "github.repo.bootstrapped");
     expect(audit?.details).toMatchObject({ how: "initial_commit", sha: ROOT, defaultBranch: "main" });
+    // Ruling 480 (F40-43): the commit this token just made proves `repo` on this
+    // repository. Canary: drop the bootstrap's `markWriteScopeProven`.
+    const proof = getPatMetadata(store.db, contextFor(store, gh).patId)!.repoScopes;
+    expect(proof).toEqual([
+      {
+        repo: "akin-ozer/viberr",
+        scopes: [
+          expect.objectContaining({ id: "repo", ok: true, source: "probe", note: "the initial commit Viberr made here" }),
+        ],
+      },
+    ]);
+  });
+
+  /**
+   * Ruling 468: two paths now bootstrap (the branch preparation and the
+   * operator's first checkout). A PUT that loses the race is refused by
+   * GitHub; the branch the winner made is the outcome both wanted.
+   */
+  it("ruling 468: a create refused because another call already made the branch answers `exists` and writes nothing", async () => {
+    const store = setup();
+    let reads = 0;
+    const gh = fakeGithubFetch({
+      // Empty on the first read; the winner's branch on the one after the PUT.
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: () => {
+        reads += 1;
+        return reads === 1 ? EMPTY_REF : { body: { object: { sha: ROOT } } };
+      },
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: {
+        status: 422,
+        body: { message: 'Invalid request.\n\n"sha" wasn\'t supplied.' },
+      },
+    });
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug, taskKey: "JC-1" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    // CANARY: drop the re-read after a refused PUT and this is `bootstrap_failed`,
+    // which refuses the push of a task whose base exists.
+    expect(result).toEqual({ status: "exists", defaultBranch: "main" });
+    expect(listAuditEvents(store.db).some((e) => e.action === "github.repo.bootstrapped")).toBe(false);
+    const timeline = readTaskFile({ projectSlug: store.slug, taskKey: "JC-1", dataRoot: store.dataRoot })!
+      .parsed.timeline;
+    expect(timeline.some((e) => e.text.includes("Bootstrapped the repository"))).toBe(false);
+  });
+
+  /** An empty repository whose first commit lands on the first PUT, which
+   *  GitHub answers 502; a second PUT meets the file and is refused. */
+  function landedThenBadGateway(headCommit: (putMessage: string) => { message: string; parents: unknown[] }) {
+    let landed = false;
+    let putMessage = "";
+    return fakeGithubFetch({
+      [`GET ${REPO_PATH}/git/ref/heads/main`]: () =>
+        landed ? { body: { object: { sha: ROOT } } } : EMPTY_REF,
+      [`GET ${REPO_PATH}/branches`]: { body: [] },
+      [`PUT ${REPO_PATH}/contents/README.md`]: (call) => {
+        if (landed) return { status: 422, body: { message: 'Invalid request.\n\n"sha" wasn\'t supplied.' } };
+        landed = true;
+        putMessage = z.object({ message: z.string() }).parse(call.body).message;
+        return { status: 502, body: { message: "Server Error" } };
+      },
+      [`GET ${REPO_PATH}/git/commits/${ROOT}`]: () => ({ body: { sha: ROOT, ...headCommit(putMessage) } }),
+    });
+  }
+
+  it("R-repo-1: a first commit that landed but answered 502 is sent once and recorded as the bootstrap", async () => {
+    // CANARY: let the client retry the PUT and its 422 sends the race arm to
+    // `exists`: Viberr's own first commit gets no audit row and no timeline
+    // line. Skip the head-commit read and it is `exists` too.
+    const store = setup();
+    const gh = landedThenBadGateway((message) => ({ message, parents: [] }));
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug, taskKey: "JC-1" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
+    expect(result).toEqual({ status: "bootstrapped", defaultBranch: "main", how: "initial_commit", sha: ROOT });
+    expect(listAuditEvents(store.db).filter((e) => e.action === "github.repo.bootstrapped")).toHaveLength(1);
+    const timeline = readTaskFile({ projectSlug: store.slug, taskKey: "JC-1", dataRoot: store.dataRoot })!
+      .parsed.timeline;
+    expect(timeline.some((e) => e.text.includes("Bootstrapped the repository"))).toBe(true);
+  });
+
+  it("R-repo-1: after a 502, a branch whose head is not this write's first commit answers `exists` and writes nothing", async () => {
+    const store = setup();
+    const gh = landedThenBadGateway(() => ({ message: "Add a readme by hand", parents: [{ sha: NEWER }] }));
+    const result = await ensureDefaultBranch(
+      store.db,
+      contextFor(store, gh),
+      { projectSlug: store.slug, taskKey: "JC-1" },
+      ACTOR,
+      { dataRoot: store.dataRoot },
+    );
+    expect(result).toEqual({ status: "exists", defaultBranch: "main" });
+    expect(listAuditEvents(store.db).some((e) => e.action === "github.repo.bootstrapped")).toBe(false);
   });
 
   it("a 409 `Git Repository is empty.` on the ref read is a missing ref, not a network failure", async () => {

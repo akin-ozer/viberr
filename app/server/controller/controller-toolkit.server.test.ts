@@ -132,6 +132,12 @@ describe("the tool surface itself encodes the invariants", () => {
         `no tool may carry "${banned}"`,
       ).toEqual([]);
     }
+    // Ruling 464 amends "nothing deletes" by exactly one tool: taking a
+    // specialist's deployment off a project's roster edits that roster (as
+    // `update_stages op: remove` edits a board's stages); it deletes no
+    // project, task, user, template or resource. Any other removal is a new
+    // decision. CANARY: register another `remove_*` tool.
+    expect(names.filter((n) => n.startsWith("remove_"))).toEqual(["remove_agent_deployment"]);
     // The whole surface is enumerated so a new tool is a deliberate decision.
     expect(names.length).toBeGreaterThanOrEqual(25);
     // Ruling 153 (pass 35, G35-1): the wall-clock half of setting a project
@@ -622,6 +628,54 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
+   * Ruling 466 (F40-9, F40-13): an append adds EXACTLY the text sent, and every
+   * size the reply names is UTF-8 bytes. Live, the controller built a KB
+   * document in parts; the tool trimmed each part and forced a blank line
+   * between them, so a table whose rows straddled a part boundary split in
+   * two, and a non-ASCII document was reported 50 bytes short.
+   */
+  it("ruling 466: two appends that split a table are one table, and the reply counts bytes", async () => {
+    const created = await call(ids.orgAdmin, "save_knowledge_base", { name: "append-exact" });
+    const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kb, created).toBeTruthy();
+    const first = "| Karar | Yıl |\n|---|---|\n| Açık ";
+    const second = "kaynak | 2026 |\n| Şeffaflık | 2025 |\n";
+    const one = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb!,
+      name: "append-exact",
+      doc: { path: "rulings.md", content: first, append: true },
+    });
+    const two = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb!,
+      name: "append-exact",
+      doc: { path: "rulings.md", content: second, append: true },
+    });
+    // CANARY: count `content.length` and both replies fall short in bytes.
+    expect(one).toContain(`Appended ${Buffer.byteLength(first)} bytes to rulings.md (created)`);
+    expect(two).toContain(
+      `Appended ${Buffer.byteLength(second)} bytes to rulings.md; it is now ${Buffer.byteLength(first + second)} bytes`,
+    );
+    // SAFETY: `read_knowledge_base_doc` answers the JSON it built, whose
+    // `text`, `bytes` and `version` are its own fields.
+    const read = JSON.parse(
+      await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "rulings.md" }),
+    ) as { text: string; bytes: number; version: string };
+    // CANARY: trim the part or put the "\n\n" separator back and the table
+    // splits (the bytes differ).
+    expect(read.text).toBe(first + second);
+    expect(read.bytes).toBe(Buffer.byteLength(first + second));
+    // A replace names the bytes it destroyed, in bytes (ruling 257).
+    const replaced = await call(ids.orgAdmin, "save_knowledge_base", {
+      id: kb!,
+      name: "append-exact",
+      doc: { path: "rulings.md", content: "ş", replace: true, replaces: read.version },
+    });
+    expect(replaced).toContain(
+      `REPLACED: its previous ${Buffer.byteLength(first + second)} bytes are gone, 2 written.`,
+    );
+  });
+
+  /**
    * F39-4 (pass 39): `get_project` never shapes ADVISORY persona guidance like
    * an authority.
    *
@@ -1086,6 +1140,76 @@ describe("instance scope: org-role gate on every management tool", () => {
     expect(denied).toContain("org admin");
   });
 
+  /**
+   * Ruling 483 (F40-59): an agent's knowledge-base proposal reaches the
+   * controller through `get_project`, and the controller closes it with
+   * `resolve_kb_proposal` when a person asks. Live on WEB-1 the controller had
+   * no read of open proposals and no door that closed one.
+   */
+  it("ruling 483: get_project lists the open proposals and resolve_kb_proposal promotes one, org admins only", async () => {
+    const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const { fileKbProposal } = await import("~/server/org/kb-proposals.server");
+    const admin = { userId: ids.orgAdmin, label: "arda" };
+    const { kb } = await saveKnowledgeBase(
+      app.db,
+      { name: "toolkit-dossier", refresh: "on change" },
+      admin,
+      { dataRoot: app.dataRoot },
+    );
+    const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
+    writeStoreDoc(app.db, target, [], "facts.md", "# Facts\n\n- T-003: wrangler 4.138.0\n", admin);
+    const filed = await fileKbProposal(
+      app.db,
+      {
+        kb: kb.dir,
+        doc: "facts.md",
+        line: "T-003: wrangler 4.138.0",
+        correction: "The measured wrangler is 4.139.0.",
+        evidence: "npx wrangler --version printed 4.139.0",
+        taskKey: "VIB-142",
+        filedBy: "Platform Engineer",
+        actor: admin,
+      },
+      { dataRoot: app.dataRoot },
+    );
+    if (!filed.ok) throw new Error(filed.message);
+
+    // CANARY: drop `openProposals` from get_project and the controller has no
+    // read of what waits.
+    const project = z
+      .object({ openProposals: z.array(z.object({ id: z.string(), kb: z.string(), line: z.string().nullable() })) })
+      .parse(JSON.parse(await call(ids.contributor, "get_project")));
+    expect(project.openProposals).toEqual([
+      expect.objectContaining({ id: filed.proposal.id, kb: kb.dir, line: "T-003: wrangler 4.138.0" }),
+    ]);
+
+    const promote = {
+      id: filed.proposal.id,
+      action: "promote",
+      replaces: "- T-003: wrangler 4.138.0",
+      text: "- T-003: wrangler 4.139.0",
+      reason: "The owner promoted it from the Controller page.",
+    };
+    const denied = await call(ids.contributor, "resolve_kb_proposal", promote);
+    expect(denied).toContain("[denied]");
+    expect(denied).toContain("org admin");
+
+    const done = await call(ids.orgAdmin, "resolve_kb_proposal", promote);
+    expect(done).toContain("[done] Promoted");
+    const body = readFileSync(path.join(app.dataRoot, "kb", kb.dir, "facts.md"), "utf8");
+    expect(body).toBe("# Facts\n\n- T-003: wrangler 4.139.0\n");
+    const after = z
+      .object({ openProposals: z.array(z.unknown()) })
+      .parse(JSON.parse(await call(ids.orgAdmin, "get_project")));
+    expect(after.openProposals).toEqual([]);
+    expect(
+      listAuditEvents(app.db, { action: "org.kb.proposal_promoted" }).some(
+        (e) => e.actorLabel === "arda@viberr.dev · via controller",
+      ),
+    ).toBe(true);
+  });
+
   it("create_project is open to a plain org member (FR5 parity): the gate passed and only the GitHub-connection validation refused", async () => {
     const reply = await call(ids.contributor, "create_project", {
       name: "Member Made",
@@ -1097,6 +1221,361 @@ describe("instance scope: org-role gate on every management tool", () => {
     // No org-role refusal — the failure is the connection requirement.
     expect(reply).not.toContain("org admin");
     expect(reply).toContain("GitHub");
+  });
+
+  /**
+   * Ruling 462 (F40-5): asked to "create everything: the repo and project",
+   * the controller had no way to make the repository. `create_project` takes
+   * `createRepository`, publishes it to the model, and hands it to the one
+   * server function the New project modal also reaches.
+   */
+  it("create_project accepts createRepository and forwards it: the repository is created through the connection's token", async () => {
+    // CANARY: stop copying `args.createRepository` onto the input and no POST
+    // is made; drop the field from the schema and the published check fails.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const { createPat, recordPatValidation } = await import(
+      "~/server/secrets/pat-store.server"
+    );
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const pat = createPat(
+      app.db,
+      { userId: ids.projectAdmin, label: "connection · site-owner", token: "ghp_ctlcreaterepo00000000000000000000" },
+      { userId: ids.projectAdmin, label: "elif" },
+    );
+    recordPatValidation(app.db, pat.id, {
+      status: "valid",
+      checkedAt: new Date().toISOString(),
+      login: "site-owner",
+      tokenKind: "classic",
+      expiresAt: null,
+      repo: null,
+      scopes: [],
+      missingScopes: [],
+      headerScopes: ["repo"],
+      detail: "",
+    });
+    const now = new Date().toISOString();
+    app.db
+      .prepare(
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 0, ?, ?)`,
+      )
+      .run("site-owner", "site-owner", pat.id, now, now);
+    let created = false;
+    const gh = fakeGithubFetch({
+      "GET /repos/site-owner/website": () =>
+        created
+          ? { body: { default_branch: "main", permissions: { push: true } } }
+          : { status: 404, body: { message: "Not Found" } },
+      "POST /user/repos": () => {
+        created = true;
+        return { status: 201, body: { full_name: "site-owner/website" } };
+      },
+    });
+    const user = findUserById(app.db, ids.projectAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot, fetchImpl: gh.fetchImpl },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: null,
+    });
+
+    const schema = z
+      .object({ properties: z.object({ createRepository: z.object({ description: z.string() }) }) })
+      .parse((await publishedSchemas(toolkit.mcpServers.viberr_controller)).get("create_project"));
+    expect(schema.properties.createRepository.description).toContain("does not exist yet");
+
+    const reply = await callToolText(toolkit.tools, "create_project", {
+      name: "Site Website",
+      key: "SITE",
+      owner: "site-owner",
+      repoName: "website",
+      policy: "balanced",
+      createRepository: { private: true, description: "The owner's site" },
+    });
+    expect(reply).toContain("[done] Project Site Website created");
+    expect(reply).toContain("Created site-owner/website on GitHub (private).");
+    const posts = gh.callsTo("POST /user/repos");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body).toEqual({
+      name: "website",
+      private: true,
+      auto_init: true,
+      description: "The owner's site",
+    });
+    // Audited under the person, with the controller disclosed as the instrument.
+    const row = listAuditEvents(app.db, { action: "project.repository.created" })[0]!;
+    expect(row.actorUserId).toBe(ids.projectAdmin);
+    expect(row.actorLabel).toBe(`${user.email} · via controller`);
+    expect(row.details).toEqual({ repo: "site-owner/website", private: true });
+  });
+});
+
+/**
+ * Ruling 463 (F40-6): `create_project` refuses without a GitHub connection for
+ * the repo owner, and none of the controller's tools listed connections. Live,
+ * it wrote "Creating it also needs a GitHub connection for `akin-ozer` in
+ * Instance settings, and I can't see whether that exists from here."
+ */
+describe("ruling 463: list_github_connections", () => {
+  const TOKEN = "github_pat_ctl_reach_0000000000000000000000k3ui";
+
+  it("names every connection's owner and what its token reaches, to a non-admin, with no token material", async () => {
+    // CANARY: drop the `add(` registration and the call answers "no such
+    // tool"; spread the whole record into the reply and the masked suffix and
+    // the PAT id appear; drop `reach` and the reach assertions fail.
+    const { createConnection } = await import("~/server/org/connections.server");
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { getPatValidationRateLimiter } = await import("~/server/auth/rate-limit.server");
+    getPatValidationRateLimiter().reset(ids.orgAdmin);
+    const gh = fakeGithubFetch({
+      "GET /user": { body: { login: "reach-owner" } },
+      "GET /users/reach-owner": { body: {} },
+      "GET /user/repos": {
+        body: [
+          { full_name: "reach-owner/website", private: true, permissions: { push: true } },
+          { full_name: "reach-owner/blog", private: false, permissions: { push: false } },
+        ],
+      },
+    });
+    const saved = await createConnection(
+      app.db,
+      { owner: "reach-owner", token: TOKEN, userId: ids.orgAdmin },
+      { userId: ids.orgAdmin, label: "arda" },
+      { fetchImpl: gh.fetchImpl },
+    );
+    expect(saved.status).toBe("saved");
+
+    // deniz: an org MEMBER with no project at all, the same person the New
+    // project dialog shows these connections to.
+    const reply = await call(ids.nonMember, "list_github_connections", {}, null);
+    expect(reply).not.toContain("[denied]");
+    expect(reply).not.toContain(TOKEN);
+    expect(reply).not.toContain("k3ui");
+    expect(reply).not.toContain("pat_");
+    const listed = z
+      .object({
+        connections: z.array(
+          z.object({
+            owner: z.string(),
+            default: z.boolean(),
+            tokenKind: z.string(),
+            validation: z.string(),
+            reach: z.object({ status: z.string() }).loose(),
+          }).loose(),
+        ),
+      })
+      .parse(JSON.parse(reply));
+    const mine = listed.connections.find((c) => c.owner === "reach-owner")!;
+    expect(mine).toMatchObject({
+      tokenKind: "fine_grained",
+      validation: "valid",
+      missingScopes: [],
+      reach: {
+        status: "read",
+        summary: "2 repositories · 1 private",
+        total: 2,
+        private: 1,
+        capped: false,
+        repos: [
+          { fullName: "reach-owner/website", private: true, canPush: true },
+          { fullName: "reach-owner/blog", private: false, canPush: false },
+        ],
+      },
+    });
+    // A connection saved before the read existed says how it gets one.
+    const unread = listed.connections.find((c) => c.owner !== "reach-owner");
+    if (unread) expect(unread.reach.status).toBe("not_read");
+  });
+
+  it("create_project's description sends the controller to list_github_connections first", async () => {
+    // CANARY: drop the sentence from the description.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.nonMember, email: "deniz@viberr.dev", name: "Deniz" },
+      projectSlug: null,
+    });
+    const create = toolkit.tools.find((t) => t.name === "create_project")!;
+    expect(create.description).toContain("call list_github_connections FIRST");
+  });
+});
+
+/**
+ * Ruling 464 (F40-7): `create_project` wrote the base roster (operator, the
+ * generic Developer with `open-review-pr` on, Reviewer) before the controller
+ * deployed the six specialists it had designed, and the controller had no tool
+ * that removes a deployment: it moved the two generic agents to Opus and asked
+ * the owner to delete them by hand, while the operator could still engage them.
+ */
+describe("ruling 464: the controller chooses a project's roster and can take an agent off", () => {
+  /** A claude specialist template in the store. */
+  function writeTemplate(id: string, name: string) {
+    writeFileSync(
+      path.join(app.dataRoot, "agents", "profiles", `${id}.md`),
+      [
+        "---",
+        `id: ${id}`,
+        "kind: specialist",
+        `name: ${name}`,
+        "role: Implementation",
+        "backends:",
+        "  - claude",
+        "model: sonnet",
+        "stages:",
+        "  - impl",
+        "resources:",
+        "  skills: []",
+        "  mcps: []",
+        "  kb: []",
+        "---",
+        "",
+        `You are the ${name}.`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+  }
+
+  it("create_project publishes `agents` and forwards it: the designed roster is written, no Developer or Reviewer, and the reply lists it", async () => {
+    // CANARY: stop copying `args.agents` onto the input and the base roster
+    // is written; drop the field from the schema and the published check fails.
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const { createPat, recordPatValidation } = await import("~/server/secrets/pat-store.server");
+    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    writeTemplate("roster-builder", "Roster Builder");
+    const pat = createPat(
+      app.db,
+      { userId: ids.projectAdmin, label: "connection · roster-owner", token: "ghp_ctlroster000000000000000000000464" },
+      { userId: ids.projectAdmin, label: "elif" },
+    );
+    recordPatValidation(app.db, pat.id, {
+      status: "valid",
+      checkedAt: new Date().toISOString(),
+      login: "roster-owner",
+      tokenKind: "classic",
+      expiresAt: null,
+      repo: null,
+      scopes: [],
+      missingScopes: [],
+      headerScopes: ["repo"],
+      detail: "",
+    });
+    const now = new Date().toISOString();
+    app.db
+      .prepare(
+        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 0, ?, ?)`,
+      )
+      .run("roster-owner", "roster-owner", pat.id, now, now);
+    const gh = fakeGithubFetch({
+      "GET /repos/roster-owner/shop": { body: { default_branch: "main", permissions: { push: true } } },
+    });
+    const user = findUserById(app.db, ids.projectAdmin)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot, fetchImpl: gh.fetchImpl },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: null,
+    });
+    const schema = z
+      .object({ properties: z.object({ agents: z.object({ description: z.string() }) }) })
+      .parse((await publishedSchemas(toolkit.mcpServers.viberr_controller)).get("create_project"));
+    expect(schema.properties.agents.description).toContain("EXACTLY these deployments");
+
+    const reply = await callToolText(toolkit.tools, "create_project", {
+      name: "Roster Shop",
+      key: "RSH",
+      owner: "roster-owner",
+      repoName: "shop",
+      policy: "balanced",
+      agents: [{ profileId: "roster-builder", model: "opus" }],
+      operator: { model: "opus" },
+    });
+    expect(reply).toContain("[done] Project Roster Shop created");
+    expect(reply).toContain("Deployed: Operator (operator, opus,");
+    expect(reply).toContain("Roster Builder (roster-builder, opus,");
+    expect(reply).not.toContain("developer");
+    const agents = readProjectFile({ projectSlug: "roster-shop", dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.map((a) => a.profileId);
+    expect(agents).toEqual(["operator", "roster-builder"]);
+  });
+
+  it("remove_agent_deployment takes a specialist off under manage-agents, audits the reason, and leaves the template", async () => {
+    // CANARY: skip the removal in deleteAgentProfile and the deployment
+    // stays; drop the reason from its audit details and the row lacks it.
+    writeTemplate("removal-probe", "Removal Probe");
+    expect(await call(ids.projectAdmin, "deploy_agent", { profileId: "removal-probe" })).toContain(
+      "[done] Removal Probe deployed",
+    );
+    const reply = await call(ids.projectAdmin, "remove_agent_deployment", {
+      profileId: "removal-probe",
+      reason: "The owner designed the roster without it.",
+    });
+    expect(reply).toContain("[done] Removal Probe (removal-probe) removed from viberr-core.");
+    expect(reply).toContain("The global template is untouched.");
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const left = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.map((a) => a.profileId);
+    expect(left).not.toContain("removal-probe");
+    // The template is a global one and stays.
+    expect(
+      readFileSync(path.join(app.dataRoot, "agents", "profiles", "removal-probe.md"), "utf8"),
+    ).toContain("Removal Probe");
+    // The Agents page's own audit action, with the instrument and the reason.
+    const row = listAuditEvents(app.db, { action: "project.agent_profile.deleted" })[0]!;
+    expect(row.subjectId).toBe("removal-probe");
+    expect(row.projectSlug).toBe(SLUG);
+    expect(row.actorUserId).toBe(ids.projectAdmin);
+    expect(row.actorLabel).toContain("via controller");
+    expect(row.details).toEqual({
+      name: "Removal Probe",
+      reason: "The owner designed the roster without it.",
+    });
+  });
+
+  it("remove_agent_deployment refuses the operator by name, an engaged profile naming its tasks, and a caller without manage-agents", async () => {
+    // CANARY: drop `refuseOpenEngagements` from the tool's call and the
+    // engaged developer is removed mid-work; gate on membership only and the
+    // maintainer's call succeeds.
+    const operator = await call(ids.projectAdmin, "remove_agent_deployment", {
+      profileId: "operator",
+      reason: "Try it.",
+    });
+    expect(operator).toBe("[denied] The Operator is a system profile and can't be deleted.");
+
+    const { listAgentDeployments } = await import("~/server/projections/agent-deployments.server");
+    const engaged = listAgentDeployments(app.db, SLUG, { dataRoot: app.dataRoot }).filter(
+      (e) => e.profileId === "developer",
+    );
+    expect(engaged.length, "the demo board engages the developer on an open task").toBeGreaterThan(0);
+    const busy = await call(ids.projectAdmin, "remove_agent_deployment", {
+      profileId: "developer",
+      reason: "Replaced by the designed roster.",
+    });
+    expect(busy).toMatch(/^\[error\] Developer is the delivering agent on /);
+    for (const e of engaged) expect(busy).toContain(e.taskKey);
+    expect(busy).toContain("Nothing was removed");
+
+    writeTemplate("gate-probe", "Gate Probe");
+    await call(ids.projectAdmin, "deploy_agent", { profileId: "gate-probe" });
+    const maintainer = await call(ids.maintainer, "remove_agent_deployment", {
+      profileId: "gate-probe",
+      reason: "Not mine to remove.",
+    });
+    expect(maintainer).toMatch(/^\[denied\]/);
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const agents = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
+      .parsed.frontmatter.agents.map((a) => a.profileId);
+    expect(agents).toEqual(expect.arrayContaining(["operator", "developer", "gate-probe"]));
+    // A non-member learns nothing about the project either.
+    expect(
+      await call(ids.nonMember, "remove_agent_deployment", { profileId: "gate-probe", reason: "x" }),
+    ).toBe(`[denied] No project "${SLUG}" is visible to you.`);
   });
 });
 
@@ -2201,6 +2680,8 @@ describe("task anchoring (ruling 121)", () => {
     });
     const names = toolkit.tools.map((t) => t.name);
     expect(names).toContain("update_task");
+    // Ruling 464: `remove_agent_deployment` edits a project's roster and is the
+    // one amendment to "no tool deletes an entity"; it removes no task.
     expect(names.some((n) => /delete|remove_task|merge|accept|force|resolve_packet/.test(n))).toBe(false);
   });
 });
@@ -2320,6 +2801,11 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     expect(def.description).not.toContain("No removal exists here");
     expect(def.description).toContain("Agents page");
     expect(def.description).toContain("Operator is a system profile");
+    // Ruling 464: the toolkit now holds the removal itself, and the sentence
+    // names it instead of sending the person to do it by hand. CANARY:
+    // restore "This toolkit does not remove a deployment".
+    expect(def.description).toContain("remove_agent_deployment takes a deployment off again");
+    expect(def.description).not.toContain("This toolkit does not remove a deployment");
   });
 
   it("ruling 264: deploy_agent reports the delivery the template actually carries", async () => {
@@ -3003,6 +3489,147 @@ describe("update_agent_deployment carries the record it read (B5)", () => {
         { dataRoot: app.dataRoot },
       ),
     ).rejects.toThrow("This profile changed while the editor was open.");
+  });
+});
+
+/**
+ * Ruling 467 (pass 40, F40-11): the controller can bring a deployed agent's
+ * persona in line. `update_agent_deployment` took no persona and propagation
+ * rewrote only grants, so live the controller had to ask the owner to edit two
+ * deployed copies by hand while the rulings KB contradicted the persona every
+ * run of them read.
+ */
+describe("update_agent_deployment sets a deployment's persona (ruling 467)", () => {
+  async function listJson<T>(toolName: string): Promise<T[]> {
+    // SAFETY: every list tool answers through the toolkit's `json()` over an
+    // array of the object literal its `.map` builds.
+    return JSON.parse(await call(ids.orgAdmin, toolName)) as T[];
+  }
+  async function personaOf(profileId: string): Promise<string | undefined> {
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    return readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.agents.find(
+      (a) => a.profileId === profileId,
+    )?.definition?.persona;
+  }
+
+  it("writes the whole persona under manage-agents, names the change, audits it, and refuses an empty one", async () => {
+    const first = "You are the Developer.\nNo email until the rulings name one.\nKeep the build green.";
+    const second = "You are the Developer.\nThe site's email is hello@akin.dev.\nKeep the build green.";
+    expect(
+      await call(ids.projectAdmin, "update_agent_deployment", { profileId: "developer", persona: first }),
+    ).toContain("[done]");
+    // SAFETY: the fingerprint the Agents page editor would have read before
+    // the next write, for the B5 half below.
+    const { deploymentFingerprint, updateAgentProfile } = await import(
+      "~/features/agents/agent-profile-actions.server"
+    );
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const staleFingerprint = deploymentFingerprint(
+      readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.agents.find(
+        (a) => a.profileId === "developer",
+      )!,
+    );
+
+    const reply = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      persona: second,
+    });
+    // CANARY: drop `persona` from the form the tool builds and the copy keeps
+    // the first text (and the reply says no field changed).
+    expect(await personaOf("developer")).toBe(second);
+    expect(reply).toContain(
+      `persona ${first.length} → ${second.length} characters; line 2 of 3 changed: first "No email until the rulings name one." → "The site's email is hello@akin.dev."`,
+    );
+    // Audited as the Agents page audits a persona edit, with the instrument.
+    const row = listAuditEvents(app.db, { action: "project.agent_profile.updated" })[0]!;
+    expect(row.details).toMatchObject({ personaChanged: true, personaChars: second.length });
+    expect(row.actorLabel).toContain("via controller");
+
+    // The same B5 fingerprint check: a save composed before this write is refused.
+    await expect(
+      updateAgentProfile(
+        app.db,
+        {
+          projectSlug: SLUG,
+          profileId: "developer",
+          form: {
+            name: "Developer",
+            role: "Implementation",
+            backend: "claude",
+            stages: ["impl"],
+            persona: "A stale editor's text.",
+            fingerprint: staleFingerprint,
+          },
+        },
+        { userId: ids.projectAdmin, label: "elif@viberr.dev" },
+        { dataRoot: app.dataRoot },
+      ),
+    ).rejects.toThrow("This profile changed while the editor was open.");
+    expect(await personaOf("developer")).toBe(second);
+
+    // manage-agents: a contributor is refused and nothing moves.
+    const contributor = await call(ids.contributor, "update_agent_deployment", {
+      profileId: "developer",
+      persona: "A contributor's persona.",
+    });
+    expect(contributor.startsWith("[error]") || contributor.startsWith("[denied]")).toBe(true);
+    expect(await personaOf("developer")).toBe(second);
+
+    // CANARY: drop the empty check and "   " reads as "keep", answering [done].
+    const empty = await call(ids.projectAdmin, "update_agent_deployment", {
+      profileId: "developer",
+      persona: "   ",
+    });
+    expect(empty).toContain("An empty persona is refused");
+    expect(empty).toContain("Nothing was written");
+    expect(await personaOf("developer")).toBe(second);
+  });
+
+  it("save_global_agent with propagate rewrites the older copies' persona when the call changed it, and names each", async () => {
+    const ID = "persona-propagate-probe";
+    const base = {
+      name: "Persona Propagate Probe",
+      backend: "claude",
+      summary: "Probes whether propagate carries a persona.",
+      stages: ["impl"],
+    };
+    expect(
+      await call(ids.orgAdmin, "save_global_agent", { ...base, persona: "The colophon waits for Akin's wording." }),
+    ).toContain("[done]");
+    expect(await call(ids.projectAdmin, "deploy_agent", { profileId: ID })).toContain("[done]");
+    expect(await personaOf(ID)).toBe("The colophon waits for Akin's wording.");
+
+    const overturned = "The colophon reads: built with AI, reviewed by Akin.";
+    const saved = await call(ids.orgAdmin, "save_global_agent", {
+      ...base,
+      id: ID,
+      persona: overturned,
+      propagate: true,
+    });
+    // CANARY: skip `propagateTemplatePersona` and the copy keeps the old text
+    // while the reply says it still runs the older persona.
+    expect(await personaOf(ID)).toBe(overturned);
+    expect(saved).toContain(`Persona rewritten on 1 project copy: ${SLUG} (`);
+    expect(saved).not.toContain("still runs the older persona");
+    const listed = await listJson<{ id: string; copiesWithOlderText: string[] }>("list_global_agents");
+    expect(listed.find((r) => r.id === ID)?.copiesWithOlderText).toEqual([]);
+    const row = listAuditEvents(app.db, { action: "project.agent_profile.updated" })[0]!;
+    expect(row).toMatchObject({ projectSlug: SLUG, subjectId: ID });
+    expect(row.details).toMatchObject({ personaChanged: true, source: "org-template", templateId: ID });
+
+    // A save that does NOT change the persona rewrites no copy, so a project's
+    // own edit survives a grants propagation.
+    await call(ids.projectAdmin, "update_agent_deployment", { profileId: ID, persona: "This project's own text." });
+    const unchanged = await call(ids.orgAdmin, "save_global_agent", {
+      ...base,
+      id: ID,
+      persona: overturned,
+      propagate: true,
+    });
+    // CANARY: propagate on every save and the project's own text is gone.
+    expect(await personaOf(ID)).toBe("This project's own text.");
+    expect(unchanged).toContain("still runs the older persona");
+    expect(unchanged).toContain("update_agent_deployment with persona");
   });
 });
 
@@ -3700,6 +4327,63 @@ describe("set_required_reviewers (ruling 178)", () => {
 });
 
 /**
+ * Ruling 482 (pass 40, F40-52): the controller promotes a measured gate set
+ * into the project's gates, where Viberr runs them, instead of writing the
+ * commands into the rulings knowledge base as prose every directive re-types.
+ */
+describe("set_project_gates (ruling 482)", () => {
+  async function gatesInFile() {
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    return readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.gates;
+  }
+  afterAll(async () => {
+    await call(ids.projectAdmin, "set_project_gates", { gates: [] });
+  });
+
+  it("round-trips the list into project.md, get_project lists it, [] clears it, and a maintainer is refused", async () => {
+    // CANARY: rename (or remove) the set_project_gates tool.
+    const reply = await call(ids.projectAdmin, "set_project_gates", {
+      gates: [
+        { name: "install", command: "pnpm install --frozen-lockfile" },
+        { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+      ],
+    });
+    expect(reply).toContain("[done] Gates saved: install, build.");
+    expect(await gatesInFile()).toEqual([
+      { name: "install", command: "pnpm install --frozen-lockfile" },
+      { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+    ]);
+    // SAFETY: `get_project` answers `json(...)` of an object literal that
+    // always carries `gates`; compared structurally below.
+    const project = JSON.parse(await call(ids.projectAdmin, "get_project")) as { gates: unknown };
+    expect(project.gates).toEqual([
+      { name: "install", command: "pnpm install --frozen-lockfile" },
+      { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+    ]);
+    expect(
+      await call(ids.projectAdmin, "set_project_gates", {
+        gates: [
+          { name: "install", command: "pnpm install --frozen-lockfile" },
+          { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+        ],
+      }),
+    ).toContain("[noop]");
+    expect(await call(ids.maintainer, "set_project_gates", { gates: [] })).toContain("[denied]");
+    expect(
+      await call(ids.projectAdmin, "set_project_gates", { gates: [{ name: "", command: "x" }] }),
+    ).toContain("[error] Gate 1 has no name. Nothing was written.");
+    expect(await call(ids.projectAdmin, "set_project_gates", { gates: [] })).toBe(
+      "[done] Gates cleared: acceptance no longer waits on them.",
+    );
+    expect(await gatesInFile()).toBeUndefined();
+    const { listAuditLog } = await import("~/server/projections/activity-feed.server");
+    const row = listAuditLog(app.db, SLUG, { limit: 20 }).find((r) => r.text.includes("gates to"));
+    expect(row?.kind).toBe("change");
+    expect(row?.text).toContain("(via the controller) set the project's gates to **install**, **build**.");
+  });
+});
+
+/**
  * Ruling 188 (pass 37): a controller read returns what the equivalent HUMAN
  * surface renders. Three reads returned less-resolved data than the UI with no
  * marker saying so, and live in pass 37 each one changed what the controller
@@ -3790,6 +4474,116 @@ describe("ruling 188: the controller reads what the human surfaces render", () =
     expect(reply).toContain("create_directory");
     expect(reply).toContain("withheld from every run without execute-code-or-write-repo");
     expect(reply).toContain("ruling 176");
+  });
+});
+
+/**
+ * Ruling 469: the controller reads where an OAuth connection's sign-in stands
+ * and never a token, and it is told signing in is an org admin's act in
+ * Instance settings, which it cannot perform.
+ */
+describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", () => {
+  it("save_mcp_server says the admin signs the server in; list_mcp_servers reports the sign-in without a token", async () => {
+    const { startOAuthMcpServer, signInWithOAuth } = await import("../../../test-support/mcp-oauth-server");
+    const { resetMcpOAuthForTests } = await import("~/server/org/mcp-oauth.server");
+    const oauth = await startOAuthMcpServer();
+    try {
+      const reply = await call(ids.orgAdminOutsider, "save_mcp_server", {
+        name: "oauth-probe",
+        transport: "HTTP",
+        target: oauth.url,
+        writeTools: [],
+      });
+      expect(reply).toContain("needs sign-in: this server asks for an OAuth sign-in");
+      expect(reply).toContain(
+        "An org admin signs it in from its editor in Instance settings → Agent resources (Sign in); the controller cannot.",
+      );
+      expect(reply).not.toContain("the admin adds it in Instance settings");
+      // SAFETY: `list_mcp_servers` answers the JSON array of the row shape the
+      // toolkit maps; the row is asserted to exist below.
+      const listed = async () =>
+        (JSON.parse(await call(ids.orgAdminOutsider, "list_mcp_servers")) as {
+          id: string;
+          name: string;
+          signIn: { status: string; renews: boolean } | null;
+          signInNote: string | null;
+        }[]).find((m) => m.name === "oauth-probe")!;
+      expect((await listed()).signIn).toMatchObject({ status: "needs_sign_in" });
+
+      await signInWithOAuth(app.db, (await listed()).id);
+      const signedIn = await listed();
+      expect(signedIn.signIn).toMatchObject({ status: "signed_in", renews: true });
+      expect(signedIn.signInNote).toMatch(
+        /^Signed in \(expires in 60 minutes, renews itself\) with OAuth at 127\.0\.0\.1:\d+\. Viberr holds the tokens;/,
+      );
+      const text = await call(ids.orgAdminOutsider, "list_mcp_servers");
+      for (const secret of oauth.issuedSecrets()) expect(text).not.toContain(secret);
+    } finally {
+      resetMcpOAuthForTests();
+      await oauth.close();
+    }
+  });
+
+  it("ruling 486: list_mcp_servers and test_mcp_server report the grant; save_mcp_server records Requested scopes", async () => {
+    // CANARY: map `signIn` without `grant`, and the controller reads
+    // "signed_in" over 194 read-only scopes, as it did live (F40-63).
+    const { startOAuthMcpServer, signInWithOAuth } = await import("../../../test-support/mcp-oauth-server");
+    const { CLOUDFLARE_READ_ONLY_GRANT } = await import("../../../test-support/cloudflare-read-only-grant");
+    const { resetMcpOAuthForTests } = await import("~/server/org/mcp-oauth.server");
+    const oauth = await startOAuthMcpServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
+    try {
+      await call(ids.orgAdminOutsider, "save_mcp_server", {
+        name: "grant-probe",
+        transport: "HTTP",
+        target: oauth.url,
+        writeTools: [],
+        requestedScopes: "workers-scripts.write zone.read",
+      });
+      // SAFETY: `list_mcp_servers` answers the JSON array of the row shape the
+      // toolkit maps; the row is asserted to exist below.
+      const listed = async () =>
+        (JSON.parse(await call(ids.orgAdminOutsider, "list_mcp_servers")) as {
+          id: string;
+          name: string;
+          signIn: { status: string; grant: unknown } | null;
+          signInNote: string | null;
+          requestedScopes: string | null;
+        }[]).find((m) => m.name === "grant-probe")!;
+      expect((await listed()).requestedScopes).toBe("workers-scripts.write zone.read");
+
+      await signInWithOAuth(app.db, (await listed()).id);
+      const signedIn = await listed();
+      expect(signedIn.signIn?.grant).toEqual({
+        scopes: 194,
+        writes: 0,
+        readOnly: true,
+        summary: "read-only · 194 scopes",
+        writeScopes: [],
+      });
+      expect(signedIn.signInNote).toContain("Its grant is read-only (194 scopes)");
+      // The whole list is not dumped into the controller's context.
+      expect(JSON.stringify(signedIn)).not.toContain("workers-ci.read");
+      expect(oauth.authorizeRequests.at(-1)?.get("scope")).toBe("workers-scripts.write zone.read");
+
+      const tested = await call(ids.orgAdminOutsider, "test_mcp_server", { id: signedIn.id });
+      expect(tested).toMatch(/signed in \(expires in 60 minutes, renews itself\) · read-only · 194 scopes$/);
+    } finally {
+      resetMcpOAuthForTests();
+      await oauth.close();
+    }
+  });
+
+  it("save_mcp_server's description names the sign-in as the admin's", async () => {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    const save = toolkit.tools.find((t) => t.name === "save_mcp_server");
+    expect(save?.description).toContain("signed in by an org admin from its editor in Instance settings");
+    expect(save?.description).toContain("which you cannot do");
   });
 });
 

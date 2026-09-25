@@ -46,6 +46,7 @@ import {
   dismissRecommendation,
   forceAcceptCompletion,
   manualDeliverForReview,
+  runProjectGatesByHand,
   refreshAndReview,
   releaseOwner,
   requestPacketMaintainerDecision,
@@ -60,6 +61,10 @@ import {
   userName,
 } from "~/server/tasks/task-actions.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
+import {
+  panelReviewNotesText,
+  parsePanelReviewNotes,
+} from "~/server/tasks/review-notes.server";
 import { splitDependencyText } from "~/shared/dependencies";
 import { activeWorkRevision, coercePriority } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -83,6 +88,8 @@ import {
   latestTaskReconcileAt,
 } from "~/server/provenance/provenance-query.server";
 import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
+import { taskMergeCollisions } from "~/server/projections/pr-collisions.server";
+import type { PrOverlap } from "~/shared/pr-overlaps";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { withLiveRun } from "~/shared/mapping/task.server";
@@ -146,7 +153,7 @@ import { errorMessage, toError } from "~/shared/errors";
  * Action intents (all CSRF-checked; RBAC inside the phase-3 mutations;
  * TOAST COPY IS THE VERBATIM SPEC §5 CONTRACT — it lives here so every
  * caller shows identical strings):
- *   comment · resolve-packet · owner-take · owner-assign · owner-release ·
+ *   comment · review-notes · resolve-packet · owner-take · owner-assign · owner-release ·
  *   transition · accept-completion · archive-task · restore-task ·
  *   run-interrupt · run-agent · release-agent · run-operator ·
  *   schedule-action · cancel-schedule
@@ -413,6 +420,20 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     }
   }
 
+  // Ruling 475 (F40-55 (c)): the other open PRs this task's merge would likely
+  // put in conflict, for the accept dialog. Guarded like the disclosures
+  // above: a read that fails must not 500 the task page over a sentence.
+  let mergeCollisions: PrOverlap[] = [];
+  try {
+    mergeCollisions = taskMergeCollisions(db, params.slug, detail);
+  } catch (error) {
+    logger.warn("ruling 475 merge-collision disclosure failed", {
+      projectSlug: params.slug,
+      taskKey: params.key,
+      error: toError(error),
+    });
+  }
+
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
   // the task's own owner — mirror of manualDeliverForReview's server gate.
   const myProjectRole =
@@ -512,6 +533,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // last compare, so the accept dialog can say which of its two cases this
     // click is. Null: never compared.
     baseBehindBy: createReconcileBehindByLookup(db)(detail.filePath),
+    /** Ruling 475: the open PRs sharing a changed path with this one. */
+    mergeCollisions,
     // F19-22: the line above is the last pass that CHANGED something — DG-3
     // deliberately withholds the provenance row when a poller tick finds
     // nothing new (github-reconciler.server.ts), so it drifts to "1h ago" on a
@@ -551,6 +574,37 @@ function acceptanceAck(formData: FormData) {
   // Same field read as every other intent in this action: an absent field
   // becomes "", which the parser reads as "no disclosure" rather than a value.
   return parseAcceptanceDisclosure((field) => String(formData.get(field) ?? ""));
+}
+
+/**
+ * The toast a comment's result earns, for the `comment` intent and ruling
+ * 484's `review-notes` (whose `posted` names the notes). Name the agent when one
+ * is picking the comment up; note when a mention was recorded but the run was
+ * not triggered (RBAC); an @operator mention that was REFUSED (packet open /
+ * task Done) must NOT read as "picking it up" (the run never started): point
+ * the human at the action that unblocks it (BUG-2); A8 (pass 23): a
+ * SPECIALIST run that FAILED to start after the comment posted says so with its
+ * reason, so the commenter knows the comment landed and only the run didn't
+ * (was a bare error toast that read as total failure); else the original
+ * routed/plain copy (verbatim spec contract).
+ */
+function commentToast(
+  result: Awaited<ReturnType<typeof commentToAgent>>,
+  posted: string,
+): string {
+  return result.triggered && result.agent
+    ? `${posted} · @${result.agent.name} is picking it up`
+    : result.operatorRefused === "open-packet"
+      ? `${posted} · resolve the open decision to continue`
+      : result.operatorRefused === "closed"
+        ? `${posted} · reopen the task to run the operator`
+        : result.runNotStarted && result.agent
+          ? `${posted} · @${result.agent.name}'s run did not start: ${result.runNotStarted}`
+          : result.runtimeDenied && result.agent
+            ? `${posted} · your role can't trigger agent runs`
+            : result.toAgent
+              ? `${posted} · routed to mentioned agent`
+              : posted;
 }
 
 /** Optional `backend` form field → a run backend override (D4 retry). Ignores
@@ -627,30 +681,6 @@ export async function action({ request, params }: Route.ActionArgs) {
           { projectSlug, taskKey, text: String(formData.get("text") ?? "") },
           actor,
         );
-        // Toast copy: name the agent when one is picking the comment up;
-        // note when a mention was recorded but the run was not triggered (RBAC);
-        // an @operator mention that was REFUSED (packet open / task Done) must
-        //   NOT read as "picking it up" — the run never started; point the human
-        //   at the action that unblocks it (BUG-2);
-        // A8 (pass 23): a SPECIALIST run that FAILED to start after the comment
-        //   posted says so with its reason, so the commenter knows the comment
-        //   landed and only the run didn't (was a bare error toast that read as
-        //   total failure);
-        // else the original routed/plain copy (verbatim spec contract).
-        const toast =
-          result.triggered && result.agent
-            ? `Comment posted · @${result.agent.name} is picking it up`
-            : result.operatorRefused === "open-packet"
-              ? "Comment posted · resolve the open decision to continue"
-              : result.operatorRefused === "closed"
-                ? "Comment posted · reopen the task to run the operator"
-                : result.runNotStarted && result.agent
-                  ? `Comment posted · @${result.agent.name}'s run did not start: ${result.runNotStarted}`
-                  : result.runtimeDenied && result.agent
-                    ? "Comment posted · your role can't trigger agent runs"
-                    : result.toAgent
-                      ? "Comment posted · routed to mentioned agent"
-                      : "Comment posted";
         return {
           ok: true as const,
           intent,
@@ -660,7 +690,34 @@ export async function action({ request, params }: Route.ActionArgs) {
           // BUG 3: the grouped Agent-logs entry to auto-select + stream so the
           // user sees the mentioned agent's live output without hunting for it.
           logThreadId: result.logThreadId,
-          toast,
+          toast: commentToast(result, "Comment posted"),
+        };
+      }
+      case "review-notes": {
+        // Ruling 484 (F40-54): the Changes panel's line notes, posted as ONE
+        // comment addressed `@<deliverer>` that quotes each note's file:line,
+        // through the comment door, so the deliverer resumes on it exactly as
+        // it would for the same words typed in the composer. Bound to the
+        // revision the person read (`headSha`): a newer delivery refuses.
+        const notes = parsePanelReviewNotes(formData.get("notes"));
+        const text = panelReviewNotesText(
+          {},
+          {
+            projectSlug,
+            taskKey,
+            headSha: String(formData.get("headSha") ?? ""),
+            notes,
+          },
+        );
+        const result = await commentToAgent(db, { projectSlug, taskKey, text }, actor);
+        return {
+          ok: true as const,
+          intent,
+          toAgent: result.toAgent,
+          agent: result.agent?.name ?? null,
+          triggered: result.triggered,
+          logThreadId: result.logThreadId,
+          toast: commentToast(result, notes.length === 1 ? "Note sent" : `${notes.length} notes sent`),
         };
       }
       case "update-goal": {
@@ -920,6 +977,16 @@ export async function action({ request, params }: Route.ActionArgs) {
               },
               { status: 409 },
             );
+      }
+      case "run-gates": {
+        // Ruling 482: run the project's gates on the revision under review
+        // again. Same tier as a manual delivery (maintainer+ or the owner),
+        // enforced and audited inside runProjectGatesByHand; queued, never run
+        // on this request.
+        const outcome = await runProjectGatesByHand(db, { projectSlug, taskKey }, actor);
+        return outcome.status === "not_owed"
+          ? data({ ok: false as const, error: outcome.message }, { status: 409 })
+          : { ok: true as const, intent, toast: outcome.message };
       }
       case "attach-file": {
         // F39-6: the human writer the attachments panel never had. Multipart,
@@ -1470,6 +1537,8 @@ export default function TaskDetailRoute({
       attachmentsTotal={loaderData.attachmentsTotal}
       attachmentProducers={loaderData.attachmentProducers}
       attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
+      // Ruling 484: the Changes panel's read, beside the page it posts notes to.
+      changesUrl={`/projects/${params.slug}/tasks/${loaderData.task.key}/changes`}
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}
@@ -1508,6 +1577,7 @@ export default function TaskDetailRoute({
       githubHost={loaderData.githubHost}
       githubReconciledAt={loaderData.githubReconciledAt}
       baseBehindBy={loaderData.baseBehindBy}
+      mergeCollisions={loaderData.mergeCollisions}
       githubCheckedAt={loaderData.githubCheckedAt}
       workRevisionSha={loaderData.workRevisionSha}
       noChanges={loaderData.noChanges}

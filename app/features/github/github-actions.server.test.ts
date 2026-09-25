@@ -9,7 +9,10 @@ import {
   getConnection,
   getDefaultConnection,
 } from "~/server/org/connections.server";
-import { getProjectCredential } from "~/server/secrets/pat-store.server";
+import {
+  getProjectCredential,
+  setProjectCredential,
+} from "~/server/secrets/pat-store.server";
 import { runReconcile, runSetCredential } from "./github-actions.server";
 import { latestProjectReconcileAt } from "~/server/provenance/provenance-query.server";
 
@@ -300,5 +303,77 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
     expect(outcome.toast).toContain(REPO);
     expect(outcome.toast).toContain("404");
     expect(getProjectCredential(store.db, store.slug)).toBeNull();
+  });
+});
+
+/**
+ * Ruling 480 (F40-45): "Rotate credential" rotated nothing. On a one-connection
+ * instance it bound the same PAT again and toasted "Credential rotated to
+ * akin-ozer's connection. Sync uses it now", while the token that ran was byte
+ * for byte the one before. The toast now says which happened.
+ */
+describe("ruling 480: re-attaching says what it did, never 'rotated'", () => {
+  const CLASSIC = (owner: string) =>
+    fakeGithubFetch({
+      "GET /user": { body: { login: owner }, headers: { "x-oauth-scopes": "repo" } },
+      [`GET /users/${owner}`]: { body: { public_repos: 2 } },
+      [`GET /repos/${REPO}`]: { body: { full_name: REPO, permissions: { push: true } } },
+    });
+
+  // Canary: restore the `wasBound` toast ("Credential rotated to …") and the
+  // first case reads "rotated"; compare nothing and the second reads
+  // "reattached".
+  it("the same connection bound again: re-attached, the token unchanged, and where a token IS replaced", async () => {
+    const store = setupProjectedStore(ctx);
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    await createConnection(
+      store.db,
+      { owner: "akin-ozer", token: "ghp_akinozer_token_k3ui", userId: actor.userId },
+      actor,
+      { fetchImpl: CLASSIC("akin-ozer").fetchImpl },
+    );
+    const opts = { dataRoot: store.dataRoot, fetchImpl: CLASSIC("akin-ozer").fetchImpl };
+    expect((await runSetCredential(store.db, store.slug, actor, opts)).result).toBe("attached");
+    const before = getProjectCredential(store.db, store.slug)!.id;
+
+    const again = await runSetCredential(store.db, store.slug, actor, opts);
+    expect(again.result).toBe("reattached");
+    expect(again.toast).toBe(
+      "Re-attached akin-ozer's connection and re-checked it. The token is unchanged: replace it with Update token in Instance settings, under GitHub connections",
+    );
+    expect(again.toast).not.toMatch(/rotat/i);
+    expect(getProjectCredential(store.db, store.slug)!.id).toBe(before);
+  });
+
+  it("another connection's token bound: switched", async () => {
+    const store = setupProjectedStore(ctx);
+    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
+    await createConnection(
+      store.db,
+      { owner: "hepapi", token: "ghp_hepapi_token_1111", userId: actor.userId },
+      actor,
+      { fetchImpl: CLASSIC("hepapi").fetchImpl },
+    );
+    await createConnection(
+      store.db,
+      { owner: "akin-ozer", token: "ghp_akinozer_token_2222", userId: actor.userId },
+      actor,
+      { fetchImpl: CLASSIC("akin-ozer").fetchImpl },
+    );
+    // Bound to hepapi's token before the repository's owner had a connection.
+    setProjectCredential(
+      store.db,
+      { projectSlug: store.slug, patId: getConnection(store.db, "hepapi")!.patId },
+      actor,
+    );
+    const outcome = await runSetCredential(store.db, store.slug, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl: CLASSIC("akin-ozer").fetchImpl,
+    });
+    expect(outcome.result).toBe("switched");
+    expect(outcome.toast).toBe("Switched to akin-ozer's connection. Sync uses its token now");
+    expect(getProjectCredential(store.db, store.slug)!.id).toBe(
+      getConnection(store.db, "akin-ozer")!.patId,
+    );
   });
 });

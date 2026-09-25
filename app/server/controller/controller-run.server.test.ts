@@ -1,4 +1,6 @@
+import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
+import type { RunMcpServerDeclaration } from "~/server/runtimes/adapter.server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   setupAppTest,
@@ -461,13 +463,67 @@ describe("the turn carries the context read (ruling 121)", () => {
       userId: user.id,
       text: "earlier question",
     });
-    const prompt = buildTurnPrompt(app.db, conversation, "now this", "CONTEXT BLOCK");
+    const now = appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "user",
+      userId: user.id,
+      text: "now this",
+    });
+    const prompt = buildTurnPrompt(app.db, conversation, now, "CONTEXT BLOCK");
     expect(prompt.indexOf("CONTEXT BLOCK")).toBe(0);
     expect(prompt.indexOf("CONTEXT BLOCK")).toBeLessThan(prompt.indexOf("Recent exchange"));
     expect(prompt.indexOf("Recent exchange")).toBeLessThan(prompt.indexOf(`${user.email} says:\n\nnow this`));
     // Without a context read the prompt is exactly what it was.
-    const bare = buildTurnPrompt(app.db, conversation, "now this");
+    const bare = buildTurnPrompt(app.db, conversation, now);
     expect(bare.startsWith("Recent exchange")).toBe(true);
+  });
+
+  /**
+   * Ruling 465 (F40-10): a turn reads the conversation only up to the message
+   * it answers. Live, the turn answering dossier part 3 saw the owner's queued
+   * correction as a 600-character stub and said it "never reached me … please
+   * resend it" while it was simply next in the queue.
+   */
+  it("ruling 465: the digest stops at the answered message and counts the queue behind it", async () => {
+    const { buildTurnPrompt } = await import("./controller-run.server");
+    const { createConversation, appendMessage } = await import("./controller-conversations.server");
+    const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
+    const say = (text: string) =>
+      appendMessage(app.db, { conversationId: conversation.id, author: "user", userId: user.id, text });
+    const part1 = say("Dossier part 1.");
+    const part2 = say("Dossier part 2.");
+    const correction = say("CORRECTION-04: the founding year is 2019.");
+    // Part 1's reply lands AFTER both later messages were queued.
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "controller",
+      text: "Part 1 is filed.",
+      replyTo: part1.id,
+    });
+    // A refusal the correction got: it belongs to a LATER message.
+    appendMessage(app.db, {
+      conversationId: conversation.id,
+      author: "controller",
+      text: "REFUSED-LATER",
+      replyTo: correction.id,
+    });
+
+    const prompt = buildTurnPrompt(app.db, conversation, part2, null, null, 1);
+    // CANARY: read the newest rows unbounded again (`recentMessages`) and the
+    // queued correction and its refusal are in this turn's prompt.
+    expect(prompt).not.toContain("CORRECTION-04");
+    expect(prompt).not.toContain("REFUSED-LATER");
+    // The reply to an EARLIER message is in, under that message, even though
+    // it landed after part 2 was queued.
+    expect(prompt).toContain("Person: Dossier part 1.\n\nController: Part 1 is filed.\n\nPerson: Dossier part 2.");
+    // CANARY: drop the queue line and the model is left to guess where the
+    // correction went.
+    expect(prompt).toContain(
+      `1 more message from ${user.email} is queued behind this one; each is answered in its own turn, in order — do not treat them as lost.`,
+    );
+    expect(prompt.endsWith(`${user.email} says:\n\nDossier part 2.`)).toBe(true);
+    // Nothing queued, nothing said.
+    expect(buildTurnPrompt(app.db, conversation, correction)).not.toContain("queued behind");
   });
 
   /**
@@ -482,7 +538,13 @@ describe("the turn carries the context read (ruling 121)", () => {
     const { createConversation } = await import("./controller-conversations.server");
     const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
     // CANARY: drop the `runtime` line and the turn never says which model it is.
-    const prompt = buildTurnPrompt(app.db, conversation, "now this", "CONTEXT BLOCK", "opus[1m]");
+    const prompt = buildTurnPrompt(
+      app.db,
+      conversation,
+      { id: "cmsg_none", seq: 1, text: "now this" },
+      "CONTEXT BLOCK",
+      "opus[1m]",
+    );
     expect(prompt).toContain("You run on model `opus[1m]` this turn.");
     expect(prompt.indexOf("CONTEXT BLOCK")).toBe(0);
     expect(prompt.indexOf("You run on model")).toBeLessThan(prompt.indexOf(`${user.email} says:`));
@@ -597,6 +659,82 @@ describe("the turn carries the context read (ruling 121)", () => {
       "anchored to task `VIB-142` in project `viberr-core`",
     );
     expect(Object.keys(spec!.mcpServers ?? {})).toContain("viberr_controller");
+  });
+
+  /**
+   * Ruling 461: the controller's granted org servers resolve the same way a
+   * specialist's do, so a credentialed one reaches the turn as a gateway mount
+   * carrying the turn's own token, the credential never in the turn's config,
+   * and the prompt says who holds it.
+   */
+  it("ruling 461: a turn mounts a granted credentialed server through Viberr's gateway", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { lastRunSpec, drainRunCompletions } = await import("../../../test-support/fake-runtime");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { resolveControllerConfig, saveControllerConfig } = await import("./controller-profile.server");
+    const { sealSecret } = await import("~/server/secrets/secret-box.server");
+    const { seedDefaultAgentAssets } = await import("~/server/seed/default-assets.server");
+    seedDefaultAgentAssets(app.dataRoot);
+    const { mcpGatewayMountUrl, mcpGatewayStatus, startMcpGateway, stopMcpGateway } = await import(
+      "~/server/mcp-proxy/gateway.server"
+    );
+    const secret = "cf-token-controller-sentinel";
+    const now = new Date().toISOString();
+    app.db
+      .prepare(
+        `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run("mcp_cf_ctl", "cf-controller", "HTTP", "https://mcp.example.test/mcp", sealSecret(secret), now, now);
+    const actor = { userId: user.id, label: user.email };
+    const stored = resolveControllerConfig(app.dataRoot);
+    const section = { effort: "", definition: "", skills: [], kb: [], model: stored.model ?? "" };
+    const unlockMcps = { skills: true, kb: true, mcps: false, instructions: true };
+    saveControllerConfig(app.db, { ...section, mcps: ["cf-controller"] }, actor, {
+      dataRoot: app.dataRoot,
+      locks: unlockMcps,
+    });
+    await startMcpGateway({ port: 0 });
+    await connectFakeBackend(app.db, user.id, "claude");
+    try {
+      const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "provision the zone",
+        user: { ...user, orgRole: "admin" },
+        dataRoot: app.dataRoot,
+      });
+      const spec = lastRunSpec();
+      // CANARY: resolve the controller's grants past the gateway and the
+      // mount is the upstream URL with the credential again.
+      expect(spec?.mcpServers?.["cf-controller"]).toEqual({
+        type: "http",
+        url: mcpGatewayMountUrl("cf-controller"),
+        headers: { Authorization: expect.stringMatching(/^Bearer \S{43}$/) },
+      });
+      // The other two mounts are live in-process servers (not serializable);
+      // this one, the prompt and the environment are the rest of the turn.
+      expect(JSON.stringify(spec?.mcpServers?.["cf-controller"])).not.toContain(secret);
+      expect(joinedPrompt(spec?.systemPrompt ?? "")).not.toContain(secret);
+      expect(JSON.stringify(spec?.env ?? {})).not.toContain(secret);
+      expect(joinedPrompt(spec?.systemPrompt ?? "")).toContain(
+        "cf-controller is mounted through Viberr's MCP gateway: the credential is held by Viberr",
+      );
+      // The fake turn has ended, and its token with it.
+      await drainRunCompletions();
+      expect(mcpGatewayStatus().liveTokens).toBe(0);
+    } finally {
+      await disconnectFakeBackend(app.db, user.id, "claude");
+      await stopMcpGateway();
+      saveControllerConfig(app.db, { ...section, mcps: stored.mcps }, actor, {
+        dataRoot: app.dataRoot,
+        locks: unlockMcps,
+      });
+      app.db.prepare(`DELETE FROM org_mcp_servers WHERE id = 'mcp_cf_ctl'`).run();
+    }
   });
 
   /**
@@ -931,5 +1069,71 @@ describe("ruling 370: the controller prefix", () => {
     const tail = built.prefix.dynamic.join("");
     expect(tail).toContain("MCP servers that did NOT mount this turn");
     expect(tail.indexOf("alpha (not registered)")).toBeLessThan(tail.indexOf("zulu (probe failed)"));
+  });
+});
+
+/**
+ * Ruling 476(h) (F40-61): a chain records the conversation that planned it.
+ * Live, goal-1 was planned in a 16-message instance thread, and the project's
+ * Controller page said "No conversations yet" beside it: the goal file named
+ * its creator and nothing else, so nothing could link back.
+ */
+/** A run's mount that is an in-process SDK server, which a client can call. */
+function inProcess(
+  server: RunMcpServerDeclaration | undefined,
+): server is McpSdkServerConfigWithInstance {
+  return server !== undefined && "instance" in server && "type" in server && server.type === "sdk";
+}
+
+describe("ruling 476(h): a goal a turn creates records the conversation it was planned in", () => {
+  it("the turn's own create_goal writes its conversation into the chain's file", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { lastRunSpec } = await import("../../../test-support/fake-runtime");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    await connectFakeBackend(app.db, user.id, "claude");
+    // An INSTANCE thread, planning a chain on a board: the live shape.
+    const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
+    try {
+      await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "plan the launch on viberr-core",
+        user: { ...user, orgRole: "admin" },
+        dataRoot: app.dataRoot,
+      });
+    } finally {
+      await disconnectFakeBackend(app.db, user.id, "claude");
+    }
+    // The tool the turn was really handed, called the way the model calls it.
+    const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
+    if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "ruling-476", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+    const reply = JSON.stringify(
+      (
+        await client.callTool({
+          name: "create_goal",
+          arguments: {
+            projectSlug: "viberr-core",
+            title: "Planned from the instance",
+            links: [{ title: "Only link", goal: "Do the one thing. Done when it exists." }],
+          },
+        })
+      ).content,
+    );
+    expect(reply).toContain("[done]");
+    const goalId = /goal-\d+/.exec(reply)?.[0];
+    expect(goalId, "the reply names the goal it created").toBeTruthy();
+    const { getGoalView } = await import("~/server/tasks/goal-actions.server");
+    // CANARY: drop `conversationId: conversation.id` from the turn's mounts,
+    // or the toolkit's hand-off to `createGoal`, and the chain names no thread.
+    expect(getGoalView("viberr-core", goalId!, { dataRoot: app.dataRoot })?.conversationId).toBe(conversation.id);
+    await client.close();
   });
 });

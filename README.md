@@ -73,10 +73,11 @@ set `VIBERR_SEED_ADMIN_EMAIL` / `VIBERR_SEED_ADMIN_PASSWORD` in `.env` before se
 The admin is created only while the users table is EMPTY — after that, manage users
 in-app (Instance settings → Users & access).
 
-`.env.example` sets `VIBERR_DATA_ROOT=./docker-data`, the directory the Docker setup
-mounts at `/data`, so `npm run dev` and the container share one store (unset, the root
-defaults to `./data`). One app process per data root: the writer lock refuses a second
-one, and refuses a seed while the app runs.
+`.env.example` sets `VIBERR_DATA_ROOT=./docker-data`, the store `npm run dev` uses (unset,
+the root defaults to `./data`). The container's store is the named volume `viberr-data`
+(ruling 460), so the two no longer share one; `npm run store:to-volume` moves an older
+`./docker-data` store into the volume once. One app process per data root: the writer lock
+refuses a second one, and refuses a seed while the app runs.
 
 The seed is a **clean sheet** — no demo/mock board data. It ships only the product
 baseline: the built-in agent catalog (Operator, Developer, Reviewer profile templates),
@@ -141,9 +142,9 @@ page](https://code.claude.com/docs/en/legal-and-compliance) requires a platform 
 Claude Code to have each end user authenticate with their own credentials, billed to them,
 and forbids apps from collecting or storing Claude.ai credentials. So a hosted sign-in is
 run by the vendor's own binary and the credential it writes stays in that person's runtime
-home on this server, at `docker-data/runtimes/users/<userId>/claude-home/` or
-`.../codex-home/` (a directory Viberr creates mode 0700, and nothing else about that
-file). A pasted key is sealed with `VIBERR_SECRET_ENCRYPTION_KEY`
+home on this server, at `/data/runtimes/users/<userId>/claude-home/` or
+`.../codex-home/` in the store (a directory Viberr creates and hands to that person's own
+agent user, ruling 460, and nothing else about that file). A pasted key is sealed with `VIBERR_SECRET_ENCRYPTION_KEY`
 in the database, is never shown again (only its last 4 characters), and reaches only the
 child process of a run that person's account is paying for; the run sink redacts it from
 every persisted log line.
@@ -180,7 +181,10 @@ Branch/PR traceability uses **user-provided GitHub tokens, encrypted at rest**
    that repository, permissions: **Contents: Read and write** (branches),
    **Pull requests: Read and write** (PR link/status/merge), **Metadata: Read-only**
    (implied). A classic token with `repo` also works and validates more precisely; the
-   required scope set is exactly `repo` + `pull_request:write`.
+   required scope set is exactly `repo` + `pull_request:write`. To let Viberr create a
+   project's repository for you (ruling 462), a fine-grained token also needs
+   **Administration: Read and write** with access to All repositories; without it,
+   create the repository on GitHub first.
 2. In Viberr: **Instance settings → GitHub connections** → add the connection (the token
    is validated before anything is saved; validation never writes to your repository),
    then attach the repo in **Project settings → Repository & credentials**.
@@ -226,8 +230,10 @@ host) and speaks **plain HTTP** — for anything beyond localhost, front it with
 TLS-terminating reverse proxy, set `BETTER_AUTH_URL` to the public https origin and
 `VIBERR_TRUST_PROXY=1`. Skipping the proxy gives you a silent login loop, not an
 insecure-but-working app; the deployment guide explains why. All state lives in the
-volume mounted at `/data` (`./docker-data` by default), including each person's connected
-agent accounts under `runtimes/users/`. Back it up with `npm run backup` (a raw copy of
+volume mounted at `/data` (the named volume `viberr-data`), including each person's
+connected agent accounts under `runtimes/users/`. Every agent process runs as its person's
+own OS user and cannot read the server's secrets, the database or anyone else's sign-in
+(ruling 460); `/resources/health` reports it as `agentIsolation`. Back it up with `npm run backup` (a raw copy of
 the live SQLite file misses rows still in the WAL; inside the container pass an absolute
 `--out` outside `/data` and copy the artefact out, as the deployment guide shows) and
 keep `VIBERR_SECRET_ENCRYPTION_KEY` with the backup; the default backup leaves
@@ -289,6 +295,7 @@ e2e/               # playwright specs + the auth setup
 test-support/      # vitest setup and harnesses: db/store/app, fake runtime, fake GitHub
                    # and local git origin, fake vendor binaries, demo fixture
 tools/oxlint/      # the vendored anti-slop lint plugin + its pinned manifest
+tools/viberr-launch/ # the setuid agent launcher the image compiles (ruling 460)
 docs/              # the code-verified documentation set (start at docs/README.md)
 planning/          # PRD, original architecture and UX canon + pass ledgers
 design/            # HTML mock, design system, PRD mirror (pinned by test)

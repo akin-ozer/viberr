@@ -14,7 +14,7 @@ import { newId } from "~/shared/ids/new-id.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
   recordBackendLogin,
-  vendorSpawnEnv,
+  vendorCommand,
   type BackendBinaries,
   type BackendCredentialActor,
   type LoginMethod,
@@ -52,6 +52,9 @@ import type { RealBackend } from "./runtime-registry.server";
  *    variable, with the other vendor's home variable deleted first (an ambient
  *    `CODEX_HOME` must not make a `claude auth login` act on a directory nobody
  *    chose).
+ *  - It runs as the person's own OS user (ruling 460, `vendorCommand`): in the
+ *    image the binary is started through the agent launcher, like their runs,
+ *    so the sign-in it writes into their home is theirs.
  *
  * Sessions live in a process-global map keyed by (user, backend): one live
  * sign-in per person per backend, a new one replacing (and killing) the old.
@@ -428,8 +431,11 @@ interface LoginSession {
   expiresAt: string;
   error: string | null;
   child: ChildProcess | null;
+  /** What is spawned: the vendor binary, or the agent launcher standing in
+   *  for it (ruling 460, `launched`). */
   binary: string;
   env: Record<string, string>;
+  launched: boolean;
   db: DatabaseSync;
   actor: BackendCredentialActor;
   /** Running stdout+stderr text, ANSI stripped, capped. Read for the URL, the
@@ -607,8 +613,11 @@ function terminateChild(session: LoginSession): void {
   const child = session.child;
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
+  // Ruling 460: a launched vendor process is another user's; the launcher's
+  // hard kill (SIGUSR2) reaches it, a SIGKILL of the launcher would not.
+  const hardKill = session.launched ? "SIGUSR2" : "SIGKILL";
   const hard = setTimeout(() => {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    if (child.exitCode === null && child.signalCode === null) child.kill(hardKill);
   }, KILL_ESCALATION_MS);
   hard.unref?.();
   session.killTimer = hard;
@@ -810,7 +819,12 @@ export function startBackendLogin(
     store.delete(key);
   }
 
-  const env = vendorSpawnEnv(actor.userId, backend, deps.dataRoot);
+  // Ruling 460: the vendor binary runs as the person's own OS user, through the
+  // launcher when this server launches agents, so the sign-in it writes into
+  // their home is theirs. `binary` becomes the launcher then; the status
+  // confirmation below reuses the same pair.
+  const command = vendorCommand(db, actor.userId, backend, binary, deps.dataRoot);
+  const env = command.env;
 
   const timeoutMs = deps.timeoutMs ?? LOGIN_TIMEOUT_MS[backend];
   const args =
@@ -831,8 +845,9 @@ export function startBackendLogin(
     expiresAt: new Date(nowDate.getTime() + timeoutMs).toISOString(),
     error: null,
     child: null,
-    binary,
+    binary: command.file,
     env,
+    launched: command.launched,
     db,
     actor,
     output: "",

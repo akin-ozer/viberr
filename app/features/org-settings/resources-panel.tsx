@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useRevalidator } from "react-router";
+import { useRevalidator, useSearchParams } from "react-router";
 import { StoreBrowser } from "~/features/kb-browser/store-browser";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
@@ -9,10 +9,17 @@ import { Icon } from "~/ui/icon";
 import { useToast } from "~/ui/toast";
 import { ConfirmDelete } from "./confirm-delete";
 import { useOrgAction } from "./use-org-action";
-import { useBusyRow, rel, updatedLabel } from "./resource-helpers";
+import { useBusyRow } from "./resource-helpers";
 import { KBModal, McpModal, SkillModal } from "./resource-modals";
 import { AgentModal } from "./agent-template-modal";
-import { AgentPanel, KbPanel, McpPanel, SkillPanel } from "./resource-rows";
+import {
+  AgentPanel,
+  KbPanel,
+  McpPanel,
+  RelativeStamp,
+  SkillPanel,
+  UpdatedStamp,
+} from "./resource-rows";
 
 /**
  * Agent resources tab (org-settings spec §4.3/§4.4): four CRUD panels —
@@ -90,7 +97,17 @@ export function ResourcesPanel({
   stages: StageDef[];
 }) {
   const [modal, setModal] = useState<ResourceModal | null>(null);
-  const [browsing, setBrowsing] = useState<{ kind: "kb" | "skill"; id: string } | null>(null);
+  // Ruling 483: `?kb=<dir>&doc=<path>` arrives from a knowledge-base proposal's
+  // "Open document" and opens that base's browser on that document.
+  const [searchParams] = useSearchParams();
+  const linkedKb = kbs.find((k) => k.dir === searchParams.get("kb")) ?? null;
+  const [browsing, setBrowsing] = useState<{ kind: "kb" | "skill"; id: string } | null>(
+    () => (linkedKb ? { kind: "kb", id: linkedKb.id } : null),
+  );
+  const linkedDoc =
+    linkedKb && browsing?.kind === "kb" && browsing.id === linkedKb.id
+      ? (searchParams.get("doc") ?? undefined)
+      : undefined;
   const [confirm, setConfirm] = useState<ResourceConfirm | null>(null);
   // A files-mode skill create hands straight off to the store browser: the
   // action only returns a toast, so we wait for the revalidated skills list
@@ -260,7 +277,10 @@ export function ResourcesPanel({
       {modal && modal.kind === "mcp" && (
         <McpModal
           key={modal.item?.id ?? "new"}
-          initial={modal.item}
+          // Ruling 469: the row as the page holds it NOW, so a sign-in that
+          // lands in the other tab (the callback publishes, this page
+          // revalidates) reads "signed in" in the open editor.
+          initial={modal.item ? (mcps.find((m) => m.id === modal.item?.id) ?? modal.item) : null}
           usedBy={modal.item ? usedBy("mcps", modal.item.name) : 0}
           onClose={() => setModal(null)}
         />
@@ -289,17 +309,22 @@ export function ResourcesPanel({
         <StoreBrowser
           title={browsingKb.name}
           subMono={browsingKb.uri + "/ · read live"}
-          metaTail={"re-scanned " + rel(browsingKb.lastIndexedAt)}
+          metaTail={
+            <>
+              re-scanned <RelativeStamp iso={browsingKb.lastIndexedAt} />
+            </>
+          }
           tree={browsingKb.tree}
           resource={{ kind: "kb", id: browsingKb.id }}
           onClose={() => setBrowsing(null)}
+          {...(linkedDoc ? { initialDoc: linkedDoc } : {})}
         />
       )}
       {browsingSkill && (
         <StoreBrowser
           title={browsingSkill.name}
           subMono={browsingSkill.uri + "/ · SKILL.md + supporting files"}
-          metaTail={updatedLabel(browsingSkill.updatedAt)}
+          metaTail={<UpdatedStamp iso={browsingSkill.updatedAt} />}
           tree={browsingSkill.tree}
           resource={{ kind: "skill", id: browsingSkill.id }}
           onClose={() => setBrowsing(null)}
