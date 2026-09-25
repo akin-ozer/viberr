@@ -6,15 +6,25 @@ import {
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
+  type TestStore,
 } from "../../../test-support/test-store";
-import { fakeGithubFetch } from "../../../test-support/fake-github";
+import {
+  fakeGithubFetch,
+  type FakeGithub,
+  type FakeResponder,
+} from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import type { PrClosure, TaskFrontmatter } from "~/schemas/task-file.schema";
+import type {
+  PrBodyWritten,
+  PrClosure,
+  PrRef,
+  TaskFrontmatter,
+} from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { findOpenScopeViolation } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import { composePrBody, openTaskPr } from "./pr-open.server";
+import { composePrBody, openTaskPr, prBodySha256 } from "./pr-open.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
 process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
@@ -1267,7 +1277,9 @@ describe("openTaskPr", () => {
       taskKey: "VIB-201",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
-    expect(Object.keys(fm.pr!)).toEqual(["number", "state", "title"]);
+    // Ruling 474: the one thing a fresh PR does start with is the record of
+    // the body it was opened with.
+    expect(Object.keys(fm.pr!)).toEqual(["number", "state", "title", "bodyWritten"]);
     expect(fm.pr).toMatchObject({ number: 51, state: "review" });
   });
 
@@ -1350,6 +1362,294 @@ describe("ruling 135: writePrToTask and the PR head", () => {
     const res = await openTaskPr(store.db, { projectSlug: store.slug, taskKey: "VIB-201" }, { ...ACTOR, userId: store.users.arda.id }, { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl });
     expect(res).toMatchObject({ status: "ok", prNumber: 43, created: true });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    expect(fm.pr).toEqual({ number: 43, state: "review", title: "[VIB-201] t" });
+    // Ruling 474: it records the body it was opened with (no revision: the
+    // task delivered none and GitHub named no head), and nothing it did not.
+    const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
+    expect(fm.pr).toEqual({
+      number: 43,
+      state: "review",
+      title: "[VIB-201] t",
+      bodyWritten: { sha256: prBodySha256(sent.body), revision: null },
+    });
+  });
+});
+
+describe("ruling 474: a reused PR's body follows the delivery it describes", () => {
+  // The live shape (akin-ozer/website PR #2, WEB-4): opened on revision
+  // 7cf1edc with 3 commits and +814/−15; the rework pushed cc9aa30, 5 commits,
+  // +823/−15, to the same PR, and the body went on describing the first one.
+  const FIRST_SHA = "7cf1edc" + "1".repeat(33);
+  const REWORK_SHA = "cc9aa30" + "2".repeat(33);
+  const PR_PATH = `${REPO_PATH}/pulls/2`;
+  const PR_TITLE = "[VIB-201] Attach execution workspace to task runtime";
+  const FIRST_BODY = composePrBody({
+    taskKey: "VIB-201",
+    projectSlug: "core",
+    title: "Attach execution workspace to task runtime",
+    goal: "Wire the runtime workspace to the canonical task so runs anchor on it.",
+    appOrigin: "https://viberr.example",
+    changeSummary: "10 file(s) changed (+814/-15).",
+    evidence: [
+      `10 file(s) changed on \`${BRANCH}\` · +814 · −15`,
+      "3 commit(s) delivered, revision 7cf1edc",
+    ],
+  });
+  /** What the service PATCHes: the fake records the request body as `unknown`. */
+  const patchRequest = z.object({ body: z.string() });
+  const recordedFirst: PrBodyWritten = { sha256: prBodySha256(FIRST_BODY), revision: FIRST_SHA };
+
+  function reworkRevision(): TaskFrontmatter["workRevision"] {
+    return {
+      id: "rev_2",
+      headSha: REWORK_SHA,
+      treeSha: null,
+      branch: BRANCH,
+      createdAt: "2026-09-25T08:00:00.000Z",
+      sourceProfileId: "developer",
+    };
+  }
+
+  /** The task owns PR #2 and has since delivered the rework revision. */
+  function setupReusedPr(bodyWritten: PrBodyWritten | null) {
+    const pr: PrRef = { number: 2, state: "review", title: PR_TITLE, headSha: FIRST_SHA };
+    if (bodyWritten) pr.bodyWritten = bodyWritten;
+    return setupWithBranch("VIB-201", { pr, workRevision: reworkRevision() });
+  }
+
+  /** The slice of GitHub's pull payload the reuse path reads. */
+  interface FakePull {
+    number: number;
+    html_url: string;
+    title: string;
+    state: string;
+    merged: boolean;
+    head: { sha: string };
+    body?: string | null;
+  }
+
+  /** GitHub after the rework push. It holds `body` (null = empty; undefined =
+   *  a payload with no `body` field) and a successful PATCH replaces it, so a
+   *  second delivery reads what the first one wrote. */
+  function reworkGithub(opts: { body: string | null | undefined; patch?: FakeResponder }) {
+    let held = opts.body;
+    const pull = () => {
+      const payload: FakePull = {
+        number: 2,
+        html_url: "https://github.com/akin-ozer/viberr/pull/2",
+        title: PR_TITLE,
+        state: "open",
+        merged: false,
+        head: { sha: REWORK_SHA },
+      };
+      if (held !== undefined) payload.body = held;
+      return payload;
+    };
+    return fakeGithubFetch({
+      [`GET ${PR_PATH}`]: () => ({ body: pull() }),
+      [`GET ${REPO_PATH}/pulls`]: () => ({ body: [pull()] }),
+      [`GET ${REPO_PATH}/compare/main...${BRANCH}`]: {
+        body: {
+          total_commits: 5,
+          files: [
+            { additions: 800, deletions: 10 },
+            { additions: 23, deletions: 5 },
+          ],
+        },
+      },
+      [`PATCH ${PR_PATH}`]:
+        opts.patch ??
+        ((call) => {
+          held = patchRequest.parse(call.body).body;
+          return { body: pull() };
+        }),
+      [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
+    });
+  }
+
+  function deliver(store: TestStore, gh: FakeGithub) {
+    return openTaskPr(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-201" },
+      { ...ACTOR, userId: store.users.arda.id },
+      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl, appOrigin: "https://viberr.example" },
+    );
+  }
+
+  function readParsed(store: TestStore) {
+    return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!
+      .parsed;
+  }
+
+  function sentBodies(gh: FakeGithub): string[] {
+    return gh.callsTo(`PATCH ${PR_PATH}`).map((call) => patchRequest.parse(call.body).body);
+  }
+
+  // Canary: drop the `refreshReusedPrBody` call on the cached-PR arm and no
+  // PATCH goes out; the body keeps "3 commit(s) delivered, revision 7cf1edc".
+  it("a re-delivery on a moved head PATCHes the body with the new commit count, revision and stats", async () => {
+    const store = setupReusedPr(recordedFirst);
+    const gh = reworkGithub({ body: FIRST_BODY });
+    expect(await deliver(store, gh)).toMatchObject({ status: "ok", prNumber: 2, created: false });
+
+    const sent = sentBodies(gh);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("5 commit(s) delivered, revision cc9aa30");
+    expect(sent[0]).toContain("2 file(s) changed (+823/-15).");
+    expect(sent[0]).toContain(`2 file(s) changed on \`${BRANCH}\` · +823 · −15`);
+    expect(sent[0]).not.toContain("7cf1edc");
+    expect(sent[0]).not.toContain("3 commit(s)");
+    // Otherwise it is the body a fresh PR would carry: same link, goal, footer.
+    expect(sent[0]).toContain("[VIB-201 · Attach execution workspace to task runtime](https://viberr.example/");
+    expect(sent[0]).toContain("## Goal\nWire the runtime workspace to the canonical task so runs anchor on it.");
+    expect(sent[0]).toContain("_Opened by Viberr for task VIB-201.");
+
+    expect(readParsed(store).frontmatter.pr?.bodyWritten).toEqual({
+      sha256: prBodySha256(sent[0]!),
+      revision: REWORK_SHA,
+    });
+    const audit = listAuditEvents(store.db, { action: "github.pr.body_updated" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toEqual({ prNumber: 2, fromRevision: FIRST_SHA, toRevision: REWORK_SHA });
+  });
+
+  // Canary: drop the `written.revision === toRevision` return and the second
+  // delivery PATCHes the same body again.
+  it("an unchanged head sends no PATCH", async () => {
+    const store = setupReusedPr(recordedFirst);
+    const gh = reworkGithub({ body: FIRST_BODY });
+    await deliver(store, gh);
+    expect(sentBodies(gh)).toHaveLength(1);
+    const timelineBefore = readParsed(store).timeline.length;
+
+    // The same head delivered again (a push that answered `up_to_date`).
+    expect(await deliver(store, gh)).toMatchObject({ status: "ok", created: false });
+    expect(sentBodies(gh)).toHaveLength(1);
+    expect(gh.callsTo(`GET ${REPO_PATH}/compare/main...${BRANCH}`)).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "github.pr.body_updated" })).toHaveLength(1);
+    expect(listAuditEvents(store.db, { action: "github.pr.body_update_failed" })).toHaveLength(0);
+    expect(readParsed(store).timeline).toHaveLength(timelineBefore);
+  });
+
+  // Canary: drop the hash comparison and the reviewer's note is overwritten
+  // by a PATCH. Canary (once): drop the `keptRevision` check and the second
+  // delivery writes a second note.
+  it("a person-edited body (hash mismatch) sends no PATCH and writes the note, once", async () => {
+    const store = setupReusedPr(recordedFirst);
+    const edited = `${FIRST_BODY}\n\nReviewer note: the hero spacing follows the Figma frame, not the old grid.`;
+    const gh = reworkGithub({ body: edited });
+    expect(await deliver(store, gh)).toMatchObject({ status: "ok", created: false });
+
+    expect(gh.callsTo(`PATCH ${PR_PATH}`)).toHaveLength(0);
+    const note = readParsed(store).timeline[0]!;
+    expect(note).toMatchObject({ type: "github", actor: { kind: "system", systemId: "delivery" } });
+    expect(note.text).toBe(
+      "The description of **PR #2** was edited on GitHub, so Viberr left it as the person wrote it. " +
+        "It was written for revision `7cf1edc`; the PR now carries revision `cc9aa30` " +
+        "(5 commit(s), 2 file(s) changed, +823/−15).",
+    );
+    // The record still names the body Viberr wrote, so a later delivery still
+    // recognises the edit; it also says the edit was reported for cc9aa30.
+    expect(readParsed(store).frontmatter.pr?.bodyWritten).toEqual({
+      ...recordedFirst,
+      keptRevision: REWORK_SHA,
+    });
+
+    await deliver(store, gh);
+    expect(gh.callsTo(`PATCH ${PR_PATH}`)).toHaveLength(0);
+    expect(
+      readParsed(store).timeline.filter((e) => e.text.includes("was edited on GitHub")),
+    ).toHaveLength(1);
+  });
+
+  // Canary: read line endings as written in `prBodySha256` and the saved-
+  // unchanged description counts as a person's edit, so nothing is sent.
+  it("a description saved unchanged in GitHub's editor (CRLF) is still Viberr's and is rewritten", async () => {
+    const store = setupReusedPr(recordedFirst);
+    const gh = reworkGithub({ body: FIRST_BODY.replace(/\n/g, "\r\n") });
+    await deliver(store, gh);
+    expect(sentBodies(gh)).toHaveLength(1);
+    expect(sentBodies(gh)[0]).toContain("5 commit(s) delivered, revision cc9aa30");
+  });
+
+  // Canary: drop the `recordPrBodyUpdateFailed` call on a refused PATCH and
+  // no note or row is written. Canary: drop `retryServerError: false` and the
+  // PATCH goes out twice.
+  it("a failed PATCH leaves the delivery successful and writes the note and audit row", async () => {
+    const store = setupReusedPr(recordedFirst);
+    const gh = reworkGithub({
+      body: FIRST_BODY,
+      patch: { status: 502, body: { message: "Bad Gateway" } },
+    });
+    expect(await deliver(store, gh)).toMatchObject({ status: "ok", prNumber: 2, created: false });
+
+    // Once: a 5xx on this write is never retried.
+    expect(gh.callsTo(`PATCH ${PR_PATH}`)).toHaveLength(1);
+    const parsed = readParsed(store);
+    expect(parsed.timeline[0]).toMatchObject({
+      type: "github",
+      actor: { kind: "system", systemId: "delivery" },
+      text:
+        "The description of **PR #2** still describes revision `7cf1edc`; updating it to revision " +
+        "`cc9aa30` failed: GitHub answered 502 (Bad Gateway). The delivery itself went through, and " +
+        "the next delivery tries the description again.",
+    });
+    const failed = listAuditEvents(store.db, { action: "github.pr.body_update_failed" });
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.details).toEqual({
+      prNumber: 2,
+      fromRevision: FIRST_SHA,
+      toRevision: REWORK_SHA,
+      reason: "GitHub answered 502 (Bad Gateway)",
+    });
+    expect(listAuditEvents(store.db, { action: "github.pr.body_updated" })).toHaveLength(0);
+    // The record still describes the body GitHub holds, so the next delivery
+    // tries again.
+    expect(parsed.frontmatter.pr?.bodyWritten).toEqual(recordedFirst);
+  });
+
+  // Canary: skip a PR with no record (`if (!written) return;`) and the legacy
+  // body keeps its stale numbers.
+  it("a legacy PR with no recorded hash is rewritten", async () => {
+    const store = setupReusedPr(null);
+    const gh = reworkGithub({ body: FIRST_BODY });
+    await deliver(store, gh);
+
+    const sent = sentBodies(gh);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("5 commit(s) delivered, revision cc9aa30");
+    expect(readParsed(store).frontmatter.pr?.bodyWritten).toEqual({
+      sha256: prBodySha256(sent[0]!),
+      revision: REWORK_SHA,
+    });
+    expect(listAuditEvents(store.db, { action: "github.pr.body_updated" })[0]!.details).toEqual({
+      prNumber: 2,
+      fromRevision: null,
+      toRevision: REWORK_SHA,
+    });
+  });
+
+  // Canary: drop the `refreshReusedPrBody` call on the head-listing arm and a
+  // PR found there keeps its old body.
+  it("a PR found on the branch and adopted is described too", async () => {
+    // No cached PR: the head listing finds #2 on the delivered revision.
+    const store = setupWithBranch("VIB-201", { workRevision: reworkRevision() });
+    const gh = reworkGithub({ body: FIRST_BODY });
+    expect(await deliver(store, gh)).toMatchObject({ status: "ok", prNumber: 2, created: false });
+    expect(gh.callsTo(`GET ${REPO_PATH}/pulls`)).toHaveLength(1);
+    expect(sentBodies(gh)).toHaveLength(1);
+    expect(sentBodies(gh)[0]).toContain("5 commit(s) delivered, revision cc9aa30");
+  });
+
+  // Canary: drop the `pr.body === undefined` arm and an unreadable
+  // description is taken for a person's edit (the "left it" note instead).
+  it("a recorded body GitHub did not send is never assumed unedited: no PATCH, and the note says why", async () => {
+    const store = setupReusedPr(recordedFirst);
+    const gh = reworkGithub({ body: undefined });
+    expect(await deliver(store, gh)).toMatchObject({ status: "ok", created: false });
+    expect(gh.callsTo(`PATCH ${PR_PATH}`)).toHaveLength(0);
+    expect(readParsed(store).timeline[0]!.text).toContain(
+      "still describes revision `7cf1edc`; updating it to revision `cc9aa30` failed: GitHub's answer did not include the current description",
+    );
+    expect(listAuditEvents(store.db, { action: "github.pr.body_update_failed" })).toHaveLength(1);
   });
 });

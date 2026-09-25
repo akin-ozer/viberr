@@ -640,8 +640,9 @@ of the drive and queued only if the drive stopped without moving or dispatching 
 recorded as an adoption: a `github` event and the audit row `github.pr.adopted` (F34-9);
 the reconciler's adoption also notifies the task's watchers, the delivery's does not,
 because the person who asked for it is reading the answer. Rework on a task whose PR is
-already open is delivered the same way: the push moves the PR's head; nobody is ever
-asked to push by hand. The task page offers the same door as "Push `<sha>` to PR #N"
+already open is delivered the same way: the push moves the PR's head, and the PR's
+description is rewritten to describe the new revision unless a person edited it on
+GitHub (ruling 474); nobody is ever asked to push by hand. The task page offers the same door as "Push `<sha>` to PR #N"
 whenever the open PR does not carry the delivered revision (ruling 134(c)), and shows a
 disabled control naming the refusal for a diverged remote. A task whose deliverable is
 not a commit (`deliveredAt` set, no commits) is told that no commits is the right outcome

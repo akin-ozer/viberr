@@ -672,6 +672,71 @@ describe("governed actions record audit rows (table-driven)", () => {
           );
         },
       },
+      ...(["updated", "update_failed"] as const).map(
+        (outcome): CoverageRow => ({
+          // Ruling 474: a re-delivery brings the reused PR's body up to date,
+          // and a PATCH GitHub refuses is recorded too.
+          name: `openTaskPr (a reused PR's body, ${outcome === "updated" ? "rewritten" : "refused"})`,
+          action: `github.pr.body_${outcome}`,
+          taskKey: "VIB-74",
+          run: async () => {
+            const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+            const { createPat, setProjectCredential } = await import(
+              "~/server/secrets/pat-store.server"
+            );
+            const { openTaskPr } = await import("~/server/github/pr-open.server");
+            const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
+            const pat = createPat(
+              store.db,
+              {
+                userId: store.users.arda.id,
+                label: "bot",
+                token: `ghp_coverage0000000000000000000474${outcome === "updated" ? "0" : "1"}`,
+              },
+              patActor,
+            );
+            setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+            writeTask(store.dataRoot, store.slug, {
+              frontmatter: baseTaskFrontmatter("VIB-74", {
+                stage: "review",
+                branch: "vib-74-work",
+                pr: { number: 74, state: "review", title: "[VIB-74] work" },
+                workRevision: {
+                  id: "rev_74",
+                  headSha: "f".repeat(40),
+                  treeSha: null,
+                  branch: "vib-74-work",
+                  createdAt: "2026-09-25T08:00:00.000Z",
+                  sourceProfileId: "developer",
+                },
+              }),
+            });
+            rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+            const github = fakeGithubFetch({
+              "GET /repos/akin-ozer/viberr/pulls/74": {
+                body: {
+                  number: 74,
+                  html_url: "https://github.com/akin-ozer/viberr/pull/74",
+                  title: "[VIB-74] work",
+                  state: "open",
+                  head: { sha: "f".repeat(40) },
+                  body: "An older description.",
+                },
+              },
+              "PATCH /repos/akin-ozer/viberr/pulls/74":
+                outcome === "updated"
+                  ? { body: { number: 74 } }
+                  : { status: 422, body: { message: "Validation Failed" } },
+            });
+            await openTaskPr(
+              store.db,
+              { projectSlug: store.slug, taskKey: "VIB-74" },
+              actorArda(),
+              { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl },
+            );
+          },
+        }),
+      ),
       {
         // Ruling 136: one row per collision ceremony with its typed outcome.
         // No credential here, so the ceremony refuses (`no_context`) and is

@@ -1304,6 +1304,39 @@ describe("reconcileTask", () => {
     expect(fm.pr?.state).toBe("accepted");
   });
 
+  // Ruling 474: a delivery that rewrites the PR body during a pass's GitHub
+  // round trips records the body it wrote; the pass's older snapshot must not
+  // put the previous record back (the next delivery would read Viberr's own
+  // rewrite as a person's edit). Canary: drop the carry under the lock.
+  it("ruling 474: a body record a delivery writes mid-pass survives the pass", async () => {
+    const { store, actor } = setup();
+    const ref = { projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot };
+    const before = { sha256: "a".repeat(64), revision: "oldhead" };
+    const rewritten = { sha256: "b".repeat(64), revision: "headsha318" };
+    await updateTaskFile(ref, (parsed) => {
+      if (parsed.frontmatter.pr) parsed.frontmatter.pr.bodyWritten = before;
+    });
+    const inner = fakeGithubFetch(happyRoutes()).fetchImpl;
+    let delivered = false;
+    const fetchImpl: typeof inner = async (input, init) => {
+      if (!delivered) {
+        delivered = true;
+        await updateTaskFile(ref, (parsed) => {
+          if (parsed.frontmatter.pr) parsed.frontmatter.pr.bodyWritten = rewritten;
+        });
+      }
+      return inner(input, init);
+    };
+    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-301" }, actor, {
+      dataRoot: store.dataRoot,
+      fetchImpl,
+    });
+    const pr = readTaskFile(ref)!.parsed.frontmatter.pr;
+    // The pass did write (it learned the checks), and kept the newer record.
+    expect(pr?.checks).toBeTruthy();
+    expect(pr?.bodyWritten).toEqual(rewritten);
+  });
+
   it("advances 'accepted' → 'merged' once GitHub reports the PR merged", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
@@ -3117,6 +3150,39 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
       { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(dismissed).fetchImpl },
     );
     expect(readPrHumanApproval(readPr(store))).toBeNull();
+  });
+
+  // Ruling 474: `pr.bodyWritten` is the delivery's record of the PR body it
+  // wrote, and no pass reads anything that could replace it. Canary: drop the
+  // carry and the first pass erases it, so the next delivery would take a
+  // person's edit for Viberr's own text. Canary: set the approval before the
+  // carried key again and the second pass rewrites a file nothing changed.
+  it("ruling 474: the delivery's body record rides every pass, and an unchanged PR still writes nothing", async () => {
+    const { store, actor } = setupDelivered();
+    const ref = { projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot };
+    const bodyWritten = { sha256: "a".repeat(64), revision: "headsha318" };
+    await updateTaskFile(ref, (parsed) => {
+      if (parsed.frontmatter.pr) parsed.frontmatter.pr.bodyWritten = bodyWritten;
+    });
+    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
+    const routes = happyRoutes();
+    routes[REVIEWS] = {
+      body: [{ user: { login: "muratdev" }, state: "APPROVED", commit_id: "headsha318" }],
+    };
+    const pass = () =>
+      reconcileTask(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-301" },
+        actor,
+        { dataRoot: store.dataRoot, fetchImpl: fakeGithubFetch(routes).fetchImpl },
+      );
+    await pass();
+    expect(readPr(store)?.bodyWritten).toEqual(bodyWritten);
+    expect(readPrHumanApproval(readPr(store))).toMatchObject({ status: "counted" });
+
+    const before = readTaskFile(ref)!.content;
+    expect(await pass()).toMatchObject({ status: "reconciled", changed: false });
+    expect(readTaskFile(ref)!.content).toBe(before);
   });
 });
 

@@ -695,7 +695,6 @@ async function reconcileTaskUnlocked(
       ? unpushed
       : (cachedPr?.unpushedRevision ?? null);
     if (carriedUnpushed) owned.unpushedRevision = carriedUnpushed;
-    if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
     // Ruling 160 (pass 35, F35-11): a PR that just went `closed` without
     // merging was closed by a person. The closure is stamped on the
     // TRANSITION (with the closer's login when GitHub names one), carried
@@ -712,6 +711,13 @@ async function reconcileTaskUnlocked(
               answered: null,
             };
     }
+    // Ruling 474: the body the DELIVERY last wrote is not a fact this pass
+    // reads, so the SAME PR carries it. Dropping it would make the next
+    // delivery take a person's edit for Viberr's own text and overwrite it.
+    if (cachedPr?.bodyWritten) owned.bodyWritten = cachedPr.bodyWritten;
+    // Last, as the parse orders it (the schema's keys, then this loose one),
+    // so an unchanged PR compares equal to its file and writes nothing.
+    if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
     newPr = owned;
   }
 
@@ -1120,6 +1126,12 @@ async function reconcileTaskUnlocked(
             // Ruling 160: a closure travels with `closed` alone. A concurrent
             // merge that wins here must not leave the merged PR carrying it.
             if (applied.pr.state !== "closed") delete applied.pr.closure;
+          }
+          // Ruling 474: a delivery that rewrote the PR body during this pass's
+          // round trips recorded the body it wrote; the snapshot's older
+          // record must not replace it.
+          if (current.bodyWritten) {
+            applied.pr = { ...applied.pr, bodyWritten: current.bodyWritten };
           }
         }
       }

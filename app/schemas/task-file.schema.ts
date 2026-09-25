@@ -738,11 +738,32 @@ export const prRefSchema = z
       })
       .nullish()
       .catch(null),
+    // Ruling 474 (pass 40, F40-19): the PR body Viberr last wrote, so a
+    // re-delivery can bring a stale body up to date without ever overwriting a
+    // person's edit. `sha256` hashes that body (line endings read as LF,
+    // `prBodySha256` in pr-open.server.ts); `revision` is the delivered
+    // revision it describes (the PR head when the task records none), null
+    // when neither was known; `keptRevision` is the revision at which a
+    // delivery found the body edited on GitHub, left it as written and said so
+    // (one note per revision). Written by `openTaskPr` on create and on every
+    // rewrite, carried across a refresh of the SAME number by every `pr`
+    // writer, never inherited by a different PR. Absent = Viberr never
+    // recorded the body (a PR opened before ruling 474, or one it adopted),
+    // which a delivery treats as Viberr's own.
+    bodyWritten: z
+      .object({
+        sha256: z.string().min(1),
+        revision: z.string().min(1).nullable(),
+        keptRevision: z.string().min(1).nullish(),
+      })
+      .nullish()
+      .catch(null),
   })
   .loose();
 export type PrRef = z.infer<typeof prRefSchema>;
 export type UnpushedRevision = NonNullable<PrRef["unpushedRevision"]>;
 export type PrClosure = NonNullable<PrRef["closure"]>;
+export type PrBodyWritten = NonNullable<PrRef["bodyWritten"]>;
 
 /**
  * Ruling 135: the recorded unpushed-revision fact, when it still describes the
