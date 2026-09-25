@@ -17,6 +17,7 @@ import {
   SCHEDULE_TOOL_DESCRIPTION,
 } from "./operator-toolkit.server";
 import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
+import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import { operatorPlanSchemaFor, operatorPlanToolsFor } from "~/server/runtimes/operator-run.server";
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -344,6 +345,17 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("transition_stage")).toContain("Merge means mergeable");
     expect(desc("update_branch_from_base")).toContain("Never call it once the task stands at the acceptance stage");
     expect(desc("update_branch_from_base")).toContain("the acceptance ceremony brings the branch up to date once and merges in the same step");
+  });
+
+  it("ruling 492 (review): accept_completion says it waits for the answer to the operator's own follow-up option", () => {
+    // The tool refuses while the open decision offers a create_task whose new
+    // task waits on this one, because accepting would withdraw it unanswered.
+    // Canary: drop the sentence from the accept_completion description.
+    const defs = build(withPolicy(uniform("direct"))).tools;
+    const desc = (name: string) => defs.find((t) => t.name === name)!.description;
+    expect(desc("accept_completion")).toContain(
+      "It also refuses while your open decision offers a `create_task` whose new task waits on this one (ruling 492)",
+    );
   });
 
   it("nothing granted: Claude builds no governed tool; the Codex plan enum falls back and never advertises delivery", () => {
@@ -1044,6 +1056,79 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     const codexOption =
       operatorPlanSchemaFor(auth).properties.actions.items.properties.packetOptions.items.properties;
     expect(Object.keys(codexOption).sort()).toEqual(Object.keys(claudeOption).sort());
+  });
+
+  /**
+   * Ruling 492 (F40-69): a done signal is something the task can show before
+   * acceptance. Live on WEB-16 the operator's own `create_task` option
+   * drafted "Done when, after the merge and the Workers Builds deploy, a
+   * read-only post-merge read … shows the new field's value". Acceptance
+   * closes a task (a person's also merges its PR; the operator's own leaves
+   * the merge pending), so nothing after the merge happens inside it, and the
+   * owner rewrote the goal by hand. Every goal field the operator writes
+   * through said only "deliverable plus acceptance criteria".
+   */
+  it("ruling 492: every door the operator writes a goal through carries DONE_SIGNAL_RULE, on both backends", async () => {
+    // CANARY: drop `DONE_SIGNAL_RULE` from any one door and its assertion
+    // fails naming it.
+    const auth = authority([]);
+    const toolkit = buildOperatorToolkit({
+      db: ctxDb.makeDb(),
+      ctx: { dataRoot: ctxDb.makeTempDir() },
+      projectSlug: "p",
+      taskKey: "P-1",
+      authority: auth,
+    });
+    const published = await publishedSchemas(toolkit.mcpServers.viberr);
+    // Each door's published description, "" when it has none, so a door that
+    // lost its text fails by name instead of in the parse.
+    const described = z.object({ description: z.string() });
+    const setGoal = z
+      .object({ properties: z.object({ goal: described }) })
+      .transform((schema) => schema.properties.goal.description)
+      .catch("");
+    const goalDraft = z
+      .object({
+        properties: z.object({
+          options: z.object({ items: z.object({ properties: z.object({ goalDraft: described }) }) }),
+        }),
+      })
+      .transform((schema) => schema.properties.options.items.properties.goalDraft.description)
+      .catch("");
+    const newTaskGoal = z
+      .object({
+        properties: z.object({
+          options: z.object({
+            items: z.object({
+              properties: z.object({
+                newTask: z.object({ properties: z.object({ goal: described }) }),
+              }),
+            }),
+          }),
+        }),
+      })
+      .transform((schema) => schema.properties.options.items.properties.newTask.properties.goal.description)
+      .catch("");
+    const packet = published.get("open_decision_packet");
+    // The Codex operator answers with a plan instead; its `set_goal` drafts
+    // the goal in the action's `text`.
+    const plan = operatorPlanSchemaFor(auth).properties.actions.items.properties;
+    const doors: [string, string][] = [
+      ["set_goal.goal", setGoal.parse(published.get("set_goal"))],
+      ["open_decision_packet options[].goalDraft", goalDraft.parse(packet)],
+      ["open_decision_packet options[].newTask.goal", newTaskGoal.parse(packet)],
+      ["Codex plan text (set_goal)", plan.text.description],
+      ["Codex plan packetOptions[].goalDraft", plan.packetOptions.items.properties.goalDraft.description],
+      [
+        "Codex plan packetOptions[].newTask.goal",
+        plan.packetOptions.items.properties.newTask.properties.goal.description,
+      ],
+    ];
+    for (const [door, description] of doors) {
+      expect(description, `${door} does not carry DONE_SIGNAL_RULE`).toContain(DONE_SIGNAL_RULE);
+    }
+    // The plan's `text` serves every verb, so it says which one the rule is for.
+    expect(plan.text.description).toContain("for set_goal: the drafted goal");
   });
 
   /**

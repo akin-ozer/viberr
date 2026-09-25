@@ -431,7 +431,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `read_default_branch_file` | anchored default-branch read (§4) | always, when the run has a checkout |
 | `post_comment` | `operatorPostComment` (guardrails applied, §7; narration stored verbatim, ruling 104) | `append-typed-events` |
 | `relay_to_task` | `operatorRelayToTask` → `relayToTask` (ruling 488: posts `text` on ANOTHER task of this project as the operator's comment headed "From <this task> (operator):", audits `task.relayed {from, to}`, wakes that task's operator with the `relayed` trigger and writes "Relayed to <task>: <first line>…" on this task; refuses another project (`denied`), this task, a missing task and a closed one, Done or archived (`noop`)) | `append-typed-events` |
-| `set_goal` | `operatorSetGoal` (fills only an unspecified goal; refuses to overwrite a specified one) | `append-typed-events` |
+| `set_goal` | `operatorSetGoal` (fills only an unspecified goal; refuses to overwrite a specified one). Its `goal` field is described with `DONE_SIGNAL_RULE`, as are `goalDraft` and `newTask.goal` (§6) and, in the Codex plan, the `text` that carries `set_goal`'s goal (ruling 492) | `append-typed-events` |
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 56) | `append-typed-events` |
 | `propose_kb_correction` | `operatorProposeKbCorrection` → `proposeKbCorrection` (rulings 378 and 483: files one non-binding, dated, task-stamped entry, `- **[<task>, <day>, Operator]** <correction>` with `Line:` and `Evidence:`, under `## Proposed corrections (not binding)` in a document of any knowledge base a run on the task was given, the operator's own or an engaged agent's; `kb` omitted means the project's rulings; the quoted `line` must stand in the settled text; edits no settled line; the same open correction of the same line is a `noop`; refuses a knowledge base no run on the task was given, a project with no rulings KB when `kb` is omitted, and a document the knowledge base does not hold; writes a `proposal` event titled "Proposed ruling change" or "Proposed knowledge-base correction", audit `task.kb_proposal.filed`, and a `quality` notification to the task's watchers; ruling 418 widens its use to a convention review shows is MISSING, and ruling 483 to relaying a correction an agent's report proved) | `append-typed-events` |
 | `open_decision_packet` | `operatorOpenPacketDisclosed` → `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 84; refuses while a packet is open) | `generate-packets` |
@@ -521,7 +521,13 @@ Details that matter:
   through `applyAcceptanceWrite`; anything else files an `accept_completion` card.
   The operator **cannot merge**: it records `pr.state: accepted` (merge pending) and a
   human completes the merge (`complete-merge` intent). A racing human acceptance wins
-  the lock and the operator's audit row is skipped.
+  the lock and the operator's audit row is skipped. Ruling 492: after the refusal stack
+  and before either branch, `followUpOptionRefusal` refuses (`noop`) while the open
+  decision, not yet decided, offers a `create_task` whose `newTask.blockedBy` names this
+  task. An acceptance withdraws the decision it does not answer, and the operator's own
+  answers none, so accepting would bury the follow-up read the doctrine had it offer; the
+  card is not filed either, the fold into the acceptance stage included. Every other open
+  decision is withdrawn as before.
 - **Delivery.** `deliver_for_review` runs `performDelivery`, with NO cached-state
   short-circuit (ruling 134): rework on a task whose PR is already open is pushed to
   that PR and the tool result names what moved ("pushed `<sha>` to the open review PR
@@ -624,7 +630,11 @@ goal text, capped and refused by name on any other kind), `toStage` on `move_sta
 `blockedBy` on `block_on_dependencies`, `dueAt` + `profileId` on `wait_for_window`,
 `profileId` on `question_reviewer`, `newTask` on `create_task`, `backend` (and
 `profileId`) on `retry_other_backend`, `deleteBranch` on `archive_task`. Both the Claude
-tool and the Codex plan schema carry every payload (rulings 270, 433).
+tool and the Codex plan schema carry every payload (rulings 270, 433). The two payloads
+that are goals, `goalDraft` and `newTask.goal`, are described on both with
+`DONE_SIGNAL_RULE` (`app/server/tasks/done-signal.server.ts`, ruling 492): a done signal is
+something the task can show before acceptance, and a proof only the merged or deployed code
+can show is a follow-up read task.
 
 Who opens packets: the operator's own decision (`operatorOpenPacket`, either
 backend); an agent's `ask_human` (kind `Agent question`, `custom` option only); Viberr's
@@ -682,7 +692,7 @@ Resolution effects by option kind (`resolvePacket`):
 | `accept_unverified_head` | Re-reads the PR head check live; when it still cannot be verified, records a `headCheckWaiver` for that one (PR, delivered revision, live head) triple, honoured only while all three match (ruling 226). Requires `accept-completion`. |
 | `block_on_dependencies` | Writes the option's `blockedBy` as the task's wait through `setTaskDependencies`, so Viberr holds the task and releases it when every entry is done (ruling 230). |
 | `question_reviewer` | Starts THAT reviewer with `REVIEW_DEADLOCK_QUESTION` (name everything it would still block on, no new verdict), `waiting: agent`, the stage unmoved (ruling 237); on a held task the question is queued on the task and put the moment the wait clears (ruling 241). |
-| `create_task` | Creates `newTask` through `createTask` under the RESOLVING person's authority and names the new key on both timelines; when `newTask.blocks` names this task, this task then waits on the new one (rulings 269, 287, 322). A created task starts from the base branch, which the authoring guidance says (`CREATE_TASK_BASE_NOTE`, ruling 441). |
+| `create_task` | Creates `newTask` through `createTask` under the RESOLVING person's authority and names the new key on both timelines; when `newTask.blocks` names this task, this task then waits on the new one (rulings 269, 287, 322). A created task starts from the base branch, which the authoring guidance says (`CREATE_TASK_BASE_NOTE`, ruling 441). It is also how a post-merge proof gets its task (ruling 492): acceptance closes the task and nothing after it happens inside the task, so before the operator puts a task up for acceptance, its doctrine has it read the goal and the delivering agent's report, and when either names a proof only the merged or deployed code can show and no task owns that read (`read_board` lists none, no link in `goalChain` plans one), raise a `create_task` option for the read, `newTask.blockedBy` naming this task and `newTask.goal` confirming the change is merged and deployed before it reads (the read is released when this task reaches Done, which under the operator's own full-autonomy acceptance comes before the merge). The read is the new task's own done signal. The operator then waits for a person's answer before it puts the task up for acceptance, because an acceptance withdraws the option unanswered, and its `accept_completion` refuses while the option is open (§5). |
 | `deliver_for_review` | After the resolution write, runs the task page's own delivery door (`manualDeliverForReview` → `performDelivery`, the core behind the operator's `deliver_for_review` tool) under the resolving person's authority: the push, the PR, the `github.delivery.manual` row and every refusal's own timeline event. A delivery that reached the PR lifts the stall's `blocked` readiness; a supervised task also gets the delivery's "Move to <review>" card. Exactly one hand-off: a full-autonomy delivery that moved the head re-queues the operator itself, otherwise `packet-resolved` carries the typed `serverOutcome` (`delivered`, `current`, `failed`). The `run-agents` tier (or the owner) and ruling 240's hold are checked before the write, so a refusal leaves the packet open. Authoring refuses it unless the task's head is committed and not delivered (ruling 489). Process-only: not appended to the goal. |
 
 An option TITLE is a promise the resolution keeps (ruling 164). `operatorOpenPacket`
@@ -719,7 +729,8 @@ record is the packet door's: the packet cleared, a `task.packet.resolved` row un
 person with `optionKind`, `optionTitle`, `packetKind` and `via` (`accept` or
 `force-accept`), the packet notifications marked read, and no operator hand-off. A
 decision offering neither kind is withdrawn by the acceptance (F32-11). The operator's own
-full-autonomy acceptance answers nothing and withdraws as before.
+full-autonomy acceptance answers nothing and withdraws as before, except that it is refused
+while the decision offers a `create_task` whose new task waits on this one (ruling 492, §5).
 
 ## 7. Guardrails on what the operator writes
 

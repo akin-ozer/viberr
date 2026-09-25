@@ -48,6 +48,7 @@ import {
   updateBranchGate,
 } from "~/server/github/update-branch-operator.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
+import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import {
   resolveSpecialistMcpServers,
@@ -583,7 +584,10 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         "set_goal",
         "Draft or refine the task GOAL when it is still unspecified (the triage-gate placeholder). Use it to write the scope/acceptance criteria you have determined — e.g. after a human accepts your offer to draft the scope, or when the task title gives enough signal to specify it yourself at triage. It fills only an UNSPECIFIED goal; it will refuse to overwrite an already-specified goal (open an edit_goal packet to propose a change to a real goal). Downstream agents re-anchor on the new goal.",
         {
-          goal: z.string().describe("The full drafted goal / scope + acceptance criteria."),
+          // Ruling 492: every door that writes a goal says what a done signal can be.
+          goal: z
+            .string()
+            .describe("The full drafted goal / scope + acceptance criteria. " + DONE_SIGNAL_RULE),
           reason: z.string().optional().describe("One line on why this scope — shown on the timeline."),
         },
         async (args) => {
@@ -754,7 +758,8 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .string()
                   .optional()
                   .describe(
-                    "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Refused on any other kind.",
+                    "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Refused on any other kind. " +
+                      DONE_SIGNAL_RULE,
                   ),
                 blockedBy: z
                   .array(z.string())
@@ -774,7 +779,8 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                     goal: z
                       .string()
                       .describe(
-                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria) — it is the contract whoever works it is held to.",
+                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria) — it is the contract whoever works it is held to. " +
+                          DONE_SIGNAL_RULE,
                       ),
                     blockedBy: z
                       .array(z.string())
@@ -1132,7 +1138,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "accept_completion",
-        "Accept the task's completion. Under FULL autonomy this moves the task to Done and records the review PR as accepted, merge pending — you do NOT merge it yourself and a merge does not happen when you accept, whether or not GitHub is reachable (a real merge is a human-only action). A human merges the accepted PR afterward; never tell anyone the PR was merged. Under supervised autonomy it posts an actionable 'accept completion → move to Done' recommendation card for a maintainer to apply — the maintainer's acceptance is what merges the review PR when GitHub is reachable, otherwise it is left 'merge pending'. Only call this once the work has reached the review boundary and the review is clean. A task with NOTHING to deliver (get_task `noChanges: true` — no branch, no PR) is accepted the same way and completes with no changes: nothing is merged, and the server re-checks the remote branch state before closing. Never call deliver_for_review for such a task, and never open a decision packet asking a human how to close it out. A pull request the acceptance gate would refuse cannot be recommended for acceptance: while get_task shows `notAcceptableReason`, this tool refuses with that sentence; call `update_branch_from_base`, which routes the conflict (ruling 475), or deliver the unpushed revision instead.",
+        "Accept the task's completion. Under FULL autonomy this moves the task to Done and records the review PR as accepted, merge pending — you do NOT merge it yourself and a merge does not happen when you accept, whether or not GitHub is reachable (a real merge is a human-only action). A human merges the accepted PR afterward; never tell anyone the PR was merged. Under supervised autonomy it posts an actionable 'accept completion → move to Done' recommendation card for a maintainer to apply — the maintainer's acceptance is what merges the review PR when GitHub is reachable, otherwise it is left 'merge pending'. Only call this once the work has reached the review boundary and the review is clean. A task with NOTHING to deliver (get_task `noChanges: true` — no branch, no PR) is accepted the same way and completes with no changes: nothing is merged, and the server re-checks the remote branch state before closing. Never call deliver_for_review for such a task, and never open a decision packet asking a human how to close it out. A pull request the acceptance gate would refuse cannot be recommended for acceptance: while get_task shows `notAcceptableReason`, this tool refuses with that sentence; call `update_branch_from_base`, which routes the conflict (ruling 475), or deliver the unpushed revision instead. It also refuses while your open decision offers a `create_task` whose new task waits on this one (ruling 492): accepting would withdraw that decision unanswered, so wait for a person to answer it.",
         {},
         async () =>
           resultText(await operatorAcceptCompletion(db, ctx, base, authority)),

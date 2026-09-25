@@ -39,7 +39,11 @@ import {
   type OfferWithdrawalSlot,
   type OfferWithdrawalCause,
 } from "./task-mutation.server";
-import { joinDependencyEntries, type DependencyRender } from "~/shared/dependencies";
+import {
+  canonicalDependencyRef,
+  joinDependencyEntries,
+  type DependencyRender,
+} from "~/shared/dependencies";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import type {
@@ -5208,6 +5212,41 @@ function completionCapabilityRefusal(
 }
 
 /**
+ * Ruling 492 (review, 2026-09-26): the refusal for an operator acceptance that
+ * would bury the follow-up it just offered, or null.
+ *
+ * The doctrine has the operator raise a post-merge proof's read as a
+ * `create_task` option before it puts the task up for acceptance, and an
+ * acceptance withdraws the open decision it does not answer (F32-11; the
+ * operator's own answers none, ruling 471(b)). The first wording ended "Never
+ * hold this task back for that proof", so an operator that opened the option
+ * and called `accept_completion` in the same turn withdrew it unanswered and
+ * the read task was never created. Under supervised autonomy its acceptance
+ * card stood beside the option, and a person who applied the card first lost
+ * the read the same way. Only prompt text stood in the way.
+ *
+ * Refused while the open decision, not yet decided, offers a `create_task`
+ * whose new task waits on this one (`newTask.blockedBy` names it, in the
+ * canonical spelling the packet schema stores). Every other open decision is
+ * withdrawn by the acceptance as before, and a person's own acceptance is
+ * never refused here: its dialog names the decision it withdraws.
+ */
+function followUpOptionRefusal(packet: TaskPacket | null, taskKey: string): string | null {
+  if (!packet || packet.awaiting) return null;
+  const key = canonicalDependencyRef(taskKey) ?? taskKey;
+  const followUp = packet.options.find(
+    (o) => o.kind === "create_task" && (o.newTask?.blockedBy ?? []).includes(key),
+  )?.newTask;
+  if (!followUp) return null;
+  return (
+    `The open decision "${packet.title}" offers to create "${followUp.title}", which waits ` +
+    `on ${taskKey}. Accepting now would withdraw that decision unanswered, so the follow-up ` +
+    `would never be created (ruling 492). Wait for a person to answer it; you are re-invoked ` +
+    `when they do. Withdraw it with resolve_decision_packet first only if it is moot.`
+  );
+}
+
+/**
  * Accept completion and move the task to Done. This is the ONE deliberate
  * exception to the human-only-Done invariant: it performs the move ONLY under
  * FULL autonomy (governed additionally by completion-for-acceptance). Under
@@ -5287,6 +5326,17 @@ export async function operatorAcceptCompletion(
       const remedy = reworkRemedySentence(ctx, input.projectSlug, file.parsed.frontmatter, stages);
       return { outcome: "noop", message: remedy ? `${refusal} ${remedy}` : refusal };
     }
+  }
+  // Ruling 492 (review): checked before BOTH branches, so neither a
+  // full-autonomy acceptance nor a card a person could apply first withdraws
+  // the follow-up read the operator offered. Read fresh: the no-change probe
+  // above may have waited on GitHub.
+  {
+    const refusal = followUpOptionRefusal(
+      readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed.packet ?? null,
+      input.taskKey,
+    );
+    if (refusal) return { outcome: "noop", message: refusal };
   }
 
   // Supervised, or `completion-for-acceptance: recommend` → recommend only: post
