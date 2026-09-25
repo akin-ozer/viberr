@@ -852,7 +852,9 @@ a link's inherited wait on `goal-N link M` is validated against the store, which
 hold the goal until the file exists), re-projects, and runs `reconcileGoal`, which starts
 every link whose wait is already satisfied under the creator's re-proven authority. A
 start that fails parks the goal in `attention` by name instead of throwing. Audit
-`goal.created {title, links, firstTask}`; the reply names every link started ("2 started
+`goal.created {title, links, firstTask}`, which the project's Activity audit column reads
+as "<person> created goal **goal-N** (<title>) with N links." (ruling 477(b)); the reply
+names every link started ("2 started
 now (link 1 is KNC-3, link 3 is KNC-4)") or says every link waits on something.
 
 ### 7.3 Advancing
@@ -875,7 +877,7 @@ goal file's lock:
 - a failed link with `onFailure: pause` parks the chain in `attention` and notifies the
   creator; with `continue` it marks every failed link `skipped` and moves on;
 - when every link is `done` or `skipped` and the chain is not in `attention`, the goal
-  completes (audit `goal.completed`, notification to the creator);
+  completes (audit `goal.completed {title}`, notification to the creator);
 - otherwise, on an active chain, EVERY pending link with no task is judged
   (`linkWaitState`): a wait on a sibling is answered from the frontmatter being written (a
   `skipped` sibling settles it like `done`), anything else through the projection. `ready`
@@ -888,7 +890,11 @@ silent deny); lost authority parks the chain in `attention` and notifies the cre
 start (`startLinkTask`) holds a per-link lock (`goal-start:<slug>:<goal>:<link>`), re-checks
 that the chain is active and the link still pending before `createTask` and again under the
 goal-file lock after it, and creates the task under the actor
-`{ userId: createdBy, label: "<label> · goal chain" }`. The first start that throws parks
+`{ userId: createdBy, label: "<label> · goal chain" }`. The task's creation events (the
+owner seat and any "Waits on other work" note) are signed `system:goal-chain`, not by the
+creator, and the seat reads "Started by **goal-N** as link M, on <creator>'s authority,
+with <owner> as owner. …" (ruling 477(b)); a retry's reads the same with the retrying
+person's authority. The first start that throws parks
 the chain and leaves the rest for a later pass. Each start notifies the creator ("Link N
 started as KEY"). Ruling 131(c): the link's declared `blockedBy` is copied into
 `createTask` and validated there, so the task is born held (readiness floored at
@@ -909,7 +915,11 @@ held.
 
 `updateGoal` is gated by `requireGoalAuthority`: the creator (project mutable and any
 membership) **or** a member holding `run-agents`. Every op except `rename` refuses on a
-`completed` or `cancelled` chain. Audit `goal.updated {op, message}`.
+`completed` or `cancelled` chain. Audit `goal.updated {op, message, title, index?,
+reason?, from?, to?, unchanged?}` (the chain's title after the op, the link an op touched,
+a person's reason, a rename's two titles, `unchanged` for an op that changed nothing; an
+`adopt_task` row carries the adopted task's key), from which the Activity audit column
+writes one sentence per op (ruling 477(b)).
 
 - `rename` — the chain's title and/or description, on any chain including a settled one
   (ruling 267); neither steers work, and the timeline says link tasks keep the old name in

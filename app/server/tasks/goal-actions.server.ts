@@ -15,7 +15,7 @@ import {
   type ParsedGoalFile,
   goalLinkSchema,
 } from "~/schemas/goal-file.schema";
-import { recordAudit } from "~/server/audit/audit-recorder.server";
+import { recordAudit, type AuditDetails } from "~/server/audit/audit-recorder.server";
 import {
   resolveProjectAuthority,
   type AuthorityProject,
@@ -576,6 +576,11 @@ export async function updateGoal(
   // below is not re-entrant, and the task writer mirrors the list back onto
   // this very file, so the forward runs AFTER the lock is released.
   const forward: LinkWaitForward = { wait: null, adopted: null };
+  // Ruling 477(b) (F40-28): what the `goal.updated` row records beyond `op` and
+  // `message`, so the project's Activity audit column can say what changed in
+  // a sentence: the link an op touched, the reason a person gave, a rename's
+  // two titles, and whether the op changed nothing at all.
+  const facts: AuditDetails = {};
 
   const parsed = await updateGoalFile(
     goalRef(ctx, input.projectSlug, input.goalId),
@@ -615,6 +620,8 @@ export async function updateGoal(
           let titleMoved = false;
           if (title !== undefined && title !== fm.title) {
             parts.push(`renamed from "${fm.title}" to "${title}"`);
+            facts.from = fm.title;
+            facts.to = title;
             fm.title = title;
             titleMoved = true;
           }
@@ -624,6 +631,7 @@ export async function updateGoal(
           }
           if (parts.length === 0) {
             message = `Goal ${fm.id} is unchanged.`;
+            facts.unchanged = true;
             return;
           }
           message = `Goal ${fm.id} ${parts.join(" and ")}.`;
@@ -644,6 +652,7 @@ export async function updateGoal(
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           if (fm.status === "paused") {
             message = `Goal ${fm.id} is already paused.`;
+            facts.unchanged = true;
             return;
           }
           fm.status = "paused";
@@ -654,6 +663,7 @@ export async function updateGoal(
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           if (fm.status === "active") {
             message = `Goal ${fm.id} is already active.`;
+            facts.unchanged = true;
             return;
           }
           fm.status = "active";
@@ -664,6 +674,7 @@ export async function updateGoal(
         case "cancel": {
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           fm.status = "cancelled";
+          facts.reason = op.reason?.trim() || undefined;
           message = `Goal ${fm.id} cancelled. Its record stays readable.`;
           return `Cancelled by ${by}${op.reason ? `: ${op.reason}` : ""}.`;
         }
@@ -681,6 +692,8 @@ export async function updateGoal(
           }
           link.status = "skipped";
           link.note = op.reason?.trim() || link.note;
+          facts.index = op.index;
+          facts.reason = op.reason?.trim() || undefined;
           if (fm.status === "attention") fm.status = "active";
           advanceAfter = true;
           message = `Link ${op.index} skipped.`;
@@ -696,6 +709,7 @@ export async function updateGoal(
             );
           }
           retryLinkIndex = op.index;
+          facts.index = op.index;
           if (fm.status === "attention") fm.status = "active";
           message = `Link ${op.index} queued for retry.`;
           return `Link ${op.index} (${link.title}) retried by ${by}.`;
@@ -704,6 +718,7 @@ export async function updateGoal(
           if (terminal) throw AppError.conflict(`Goal ${fm.id} is ${fm.status}.`);
           const link = fm.links.find((l) => l.index === op.index);
           if (!link) throw AppError.validation(`No link ${op.index}.`);
+          facts.index = op.index;
           if (link.status === "active" && link.taskKey) {
             // Ruling 155 (F35-3): the task carries the wait; its title and
             // goal are settled the moment work started. `blockedBy` alone is
@@ -813,6 +828,7 @@ export async function updateGoal(
           });
           refuseLinkCycles(fm.id, fm.links);
           advanceAfter = true;
+          facts.index = nextIndex;
           message = `Link ${fm.links.length} added.`;
           return `Link ${fm.links.length} (${title}) added by ${by}.`;
         }
@@ -871,6 +887,7 @@ export async function updateGoal(
             goalId: fm.id,
             linkIndex: op.index,
           };
+          facts.index = op.index;
           message = `Link ${op.index} is now carried by ${op.taskKey}.`;
           return `Link ${op.index} (${link.title}) adopted existing task ${op.taskKey}, by ${by}.`;
         }
@@ -901,6 +918,7 @@ export async function updateGoal(
           fm.links = fm.links
             .filter((l) => l.index !== op.index)
             .map((l, i) => ({ ...l, index: i + 1 }));
+          facts.index = op.index;
           message = `Link removed; the chain now has ${countLabel(fm.links.length, "link")}.`;
           return `Pending link ${op.index} (${link.title}) removed by ${by}.`;
         }
@@ -950,7 +968,10 @@ export async function updateGoal(
     subjectKind: "goal",
     subjectId: input.goalId,
     projectSlug: input.projectSlug,
-    details: { op: op.op, message },
+    // Ruling 477(b): an adoption names the task it bound, so the Activity row
+    // carries its chip and the audit panel's task filter finds it.
+    taskKey: forward.adopted?.taskKey,
+    details: { op: op.op, message, title: parsed.frontmatter.title, ...facts },
   });
 
   // A retry creates the fresh link task under the PRESENT caller's authority.
@@ -1464,6 +1485,8 @@ export async function reconcileGoal(
       subjectKind: "goal",
       subjectId: goalId,
       projectSlug,
+      // Ruling 477(b): the Activity audit column names the chain it closed.
+      details: { title: fm?.title },
     });
   }
 

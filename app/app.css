@@ -3684,9 +3684,9 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* Cap the pill cluster so a six-pill row cannot squeeze the task title into a
    four-line sliver — the title is the row's primary content. */
 .rq-meta { display: flex; align-items: center; gap: .5rem; flex: 0 1 auto; max-width: 52%; flex-wrap: wrap; justify-content: flex-end; }
-/* R15-11: the row's named primary action. The row itself is the button, so
-   this is a label inside it, not a nested control — it says where the click
-   goes without promising an outcome the task page may refuse (R15-1). */
+/* R15-11: the row's named primary action. The row itself is the link (ruling
+   477(c)), so this is a label inside it, not a nested control — it says where
+   the click goes without promising an outcome the task page may refuse (R15-1). */
 .rq-go {
   display: inline-flex; align-items: center; gap: .125rem;
   font-size: .75rem; font-weight: 700; color: var(--muted);
@@ -5561,8 +5561,12 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell), body:has(.ctl-wra
 
 /* Neutralize anchor defaults on link-shaped controls. */
 a.card, a.nav-item, a.menu-item, a.project-switch, a.home-brand,
-a.org-tile, a.btn { text-decoration: none; }
-a.card, a.project-switch, a.home-brand { color: inherit; }
+a.org-tile, a.btn, a.rq-row, a.keybtn { text-decoration: none; }
+a.card, a.project-switch, a.home-brand, a.rq-row { color: inherit; }
+/* Ruling 477(c): the review-queue row and the Activity task key are links now.
+   A <button> is inline-block by default and an <a> is inline, and an inline box
+   takes no transform, so the key keeps the button's box for its press scale. */
+a.keybtn { display: inline-block; }
 /* List-view rows: the key and title are links to the task page, but they are
    CONTENT — UA link-blue + underline on every row read as a 1998 index page.
    Emphasis stays with the title's own weight; hover restores the underline

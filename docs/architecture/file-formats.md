@@ -752,7 +752,7 @@ Notes:
 | Agent | `agent:<backend>/<profileId>` e.g. `agent:codex/developer`, optionally with a role snapshot `agent:codex/developer (Implementation)` | `{ kind:"agent", backend, name, role }` — the second segment is the **profile id**, never a role slug; `name` is the deployed agent's own name, falling back to the backend label "Codex" or "Claude" (ruling 92) |
 | Operator | `operator` | `{ kind:"agent", name:"Operator" }` (NO backend, NO role) |
 | Controller | `controller` | `{ kind:"agent", name:"Controller" }` (ruling 99 — instance machinery, same backend-less shape) |
-| System | `system:<id>` e.g. `system:policy-engine` | `{ kind:"system", name:"Policy engine" }` |
+| System | `system:<id>` e.g. `system:policy-engine`; `system:goal-chain` signs the creation events of a task a goal chain starts (ruling 477(b)) | `{ kind:"system", name:"Policy engine" }` |
 
 Any other string decodes as an unknown actor: it is re-encoded verbatim and renders as
 `{ kind:"system", name:"Unknown actor" }`, so an event is never dropped over its author. The

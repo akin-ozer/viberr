@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
+import type { UpdateGoalOp } from "./goal-actions.server";
 import {
   setupAppTest,
   type AppTestContext,
@@ -2573,5 +2574,175 @@ describe("ruling 398(c): a link may wait on any sibling except in a cycle", () =
       { title: "The common root", goal: "root." },
     ]);
     expect(view.links.map((l) => l.taskKey !== null)).toEqual([false, false, false, true]);
+  });
+});
+
+/**
+ * Ruling 477(b) (F40-28, live on akinozer.com). The project's Activity
+ * page promised "human decisions, agent events, and policy changes", yet no
+ * goal row ever reached its audit column (the whitelist had no `goal.*`
+ * action), and its stream's Humans filter credited the owner with "Took task
+ * ownership by creating the task" for three tasks the chain started in the
+ * second WEB-1 was accepted.
+ */
+describe("ruling 477: the chain signs what it starts, and its decisions reach Activity", () => {
+  const nameOf = (userId: string) =>
+    z.object({ name: z.string() }).parse(
+      app.db.prepare(`SELECT name FROM users WHERE id = ?`).get(userId),
+    ).name;
+
+  it("(b) a chain-started task's creation events are the chain's, on the creator's authority, and the Humans filter drops them", async () => {
+    // CANARY: drop `actor: chain` from createTask's chain seat (and the wait
+    // note's `chain ??`), and both rows are the creator's own again.
+    const { createGoal, getGoalView, reconcileGoal } = await import("./goal-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const { listActivityStream } = await import("~/server/projections/activity-feed.server");
+    const { matchesActorFilter } = await import("~/features/activity/feed-helpers");
+    const ctx = { dataRoot: app.dataRoot };
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Signed by the chain",
+        links: [
+          { title: "First", goal: "One. Done when merged." },
+          { title: "Second", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
+        ],
+      },
+      actorWith(contributorId, "selin@viberr.dev"),
+      ctx,
+    );
+    await closeTaskToDone(chain.activeTaskKey!);
+    await reconcileGoal(app.db, SLUG, chain.goalId, ctx);
+    const minted = getGoalView(SLUG, chain.goalId, ctx)!.links[1]!.taskKey!;
+    const task = readTaskFile({ projectSlug: SLUG, taskKey: minted, dataRoot: app.dataRoot })!.parsed;
+    const selin = nameOf(contributorId);
+
+    // The seat is unchanged: the creator owns it and runs bill them.
+    expect(task.frontmatter.ownerUserId).toBe(contributorId);
+    const seat = task.timeline.find((e) => e.type === "assign")!;
+    expect(seat.actor).toEqual({ kind: "system", systemId: "goal-chain" });
+    expect(seat.text).toContain(
+      `Started by **${chain.goalId}** as link 2, on ${selin}'s authority, with ${selin} as owner.`,
+    );
+    expect(seat.text).not.toContain("Took task ownership by creating the task");
+    const wait = task.timeline.find((e) => e.title === "Waits on other work")!;
+    expect(wait.actor).toEqual({ kind: "system", systemId: "goal-chain" });
+
+    // On the Activity stream both rows are the goal chain's, so "Humans" drops them.
+    const rows = listActivityStream(app.db, SLUG, { filters: { task: minted } });
+    const creation = rows.filter(
+      (r) => r.type === "assign" || r.text.startsWith("**Waits on other work.**"),
+    );
+    expect(creation).toHaveLength(2);
+    for (const row of creation) {
+      expect(row.actor).toEqual({ kind: "system", name: "Goal chain" });
+      expect(matchesActorFilter(row, "human")).toBe(false);
+      expect(matchesActorFilter(row, "system")).toBe(true);
+    }
+  });
+
+  it("(b) a task a person creates by hand is still theirs", async () => {
+    const { createTask } = await import("./task-actions.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const made = await createTask(
+      app.db,
+      { projectSlug: SLUG, title: "Made by a person" },
+      actorWith(contributorId, "selin@viberr.dev"),
+      { dataRoot: app.dataRoot },
+    );
+    const seat = readTaskFile({ projectSlug: SLUG, taskKey: made.key, dataRoot: app.dataRoot })!
+      .parsed.timeline.find((e) => e.type === "assign")!;
+    expect(seat.actor).toMatchObject({ kind: "human", userId: contributorId });
+    expect(seat.text).toContain("Took task ownership by creating the task.");
+  });
+
+  it("(b) defining, redirecting and completing a chain read as sentences in the project's audit column", async () => {
+    // CANARIES: leave `goal.*` out of AUDIT_ACTION_KINDS and none of these rows
+    // exist; drop `...facts` from the `goal.updated` row and the skip no
+    // longer names its link or reason, the rename its titles, and the second
+    // pause reads as a pause.
+    const { createGoal, getGoalView, reconcileGoal, updateGoal } = await import("./goal-actions.server");
+    const { listAuditLog } = await import("~/server/projections/activity-feed.server");
+    const { encodeControllerInstrument } = await import("~/shared/mapping/actor.server");
+    const ctx = { dataRoot: app.dataRoot };
+    const actor = actorWith(contributorId, "selin@viberr.dev");
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Chain on the record",
+        links: [
+          { title: "Build", goal: "One. Done when merged." },
+          { title: "Ship", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
+          { title: "Tell", goal: "Three. Done when merged.", blockedBy: ["link 2"] },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const id = chain.goalId;
+    const run = (action: UpdateGoalOp, by = actor) =>
+      updateGoal(app.db, { projectSlug: SLUG, goalId: id, action }, by, ctx);
+    await run({ op: "pause" }, actorWith(contributorId, encodeControllerInstrument("selin@viberr.dev")));
+    await run({ op: "pause" });
+    await run({ op: "resume" });
+    await run({ op: "skip_link", index: 3, reason: "Nobody to tell yet." });
+    await run({ op: "rename", title: "Chain, renamed" });
+    await closeTaskToDone(chain.activeTaskKey!);
+    await reconcileGoal(app.db, SLUG, id, ctx);
+    await closeTaskToDone(getGoalView(SLUG, id, ctx)!.links[1]!.taskKey!);
+    await reconcileGoal(app.db, SLUG, id, ctx);
+    expect(getGoalView(SLUG, id, ctx)!.status).toBe("completed");
+
+    const selin = nameOf(contributorId);
+    const rows = listAuditLog(app.db, SLUG, { limit: 60, filters: { q: `**${id}**` } })
+      .filter((r) => r.text.includes(`**${id}**`))
+      .reverse();
+    expect(rows.map((r) => r.text)).toEqual([
+      `${selin} created goal **${id}** (Chain on the record) with 3 links.`,
+      `${selin} (via the controller) paused goal **${id}** (Chain on the record).`,
+      `${selin} changed nothing on goal **${id}** (Chain on the record).`,
+      `${selin} resumed goal **${id}** (Chain on the record).`,
+      `${selin} skipped link 3 of goal **${id}** (Chain on the record): Nobody to tell yet.`,
+      `${selin} renamed goal **${id}** from **Chain on the record** to **Chain, renamed**.`,
+      `Goal **${id}** (Chain, renamed) completed: every link is settled.`,
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual([
+      "change", "change", "change", "change", "change", "change", "audit",
+    ]);
+  });
+
+  it("(b) an adoption carries the adopted task's chip", async () => {
+    const { createGoal, updateGoal } = await import("./goal-actions.server");
+    const { createTask } = await import("./task-actions.server");
+    const { listAuditLog } = await import("~/server/projections/activity-feed.server");
+    const ctx = { dataRoot: app.dataRoot };
+    const actor = actorWith(contributorId, "selin@viberr.dev");
+    const chain = await createGoal(
+      app.db,
+      {
+        projectSlug: SLUG,
+        title: "Adopting chain",
+        links: [
+          { title: "One", goal: "One. Done when merged." },
+          { title: "Two", goal: "Two. Done when merged.", blockedBy: ["link 1"] },
+        ],
+      },
+      actor,
+      ctx,
+    );
+    const made = await createTask(app.db, { projectSlug: SLUG, title: "Made ahead of the chain" }, actor, ctx);
+    await updateGoal(
+      app.db,
+      { projectSlug: SLUG, goalId: chain.goalId, action: { op: "adopt_task", index: 2, taskKey: made.key } },
+      actor,
+      ctx,
+    );
+    const row = listAuditLog(app.db, SLUG, { limit: 5, filters: { task: made.key } })[0]!;
+    expect(row.taskKey).toBe(made.key);
+    expect(row.text).toBe(
+      `${nameOf(contributorId)} bound link 2 of goal **${chain.goalId}** (Adopting chain) to an existing task on`,
+    );
   });
 });

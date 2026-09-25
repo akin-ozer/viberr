@@ -759,12 +759,37 @@ export async function createTask(
     frontmatter,
     goal: input.goal?.trim() || DEFAULT_GOAL,
   };
+  // Ruling 477(b) (F40-28): a goal chain starting its link is the chain's act,
+  // done on a person's authority, not that person's own. Live, the Activity
+  // stream's Humans filter credited the owner with three "Took task ownership
+  // by creating the task" rows (and three "Waits on other work" notes) in the
+  // second WEB-1 was accepted, for WEB-2..4 the chain made. The creation's
+  // events are signed by the chain and name the person whose authority it ran
+  // on; the seat, the `task.created` audit row and its actor are unchanged.
+  const chainLink = input.goalRef ?? null;
+  const chain: FileActorRef | null = chainLink
+    ? { kind: "system", systemId: "goal-chain" }
+    : null;
   // The same `assign` event a take through `setOwner` writes, so the timeline
   // reads the same however the seat was filled (ruling 127).
   // Ruling 255: ONE creation is one instant. Every event this write puts on the
   // timeline carries the frontmatter's own `now`, so the file's order is the
   // deliberate arrangement and not a race between two `new Date()` calls.
-  if (creator && seat === "named" && namedOwner) {
+  if (creator && chain && chainLink) {
+    const authority = userName(db, creator.userId);
+    const owner = seat === "named" && namedOwner ? namedOwner.name : authority;
+    createInput.timeline = [
+      {
+        ...ownerAssignEvent(
+          db,
+          creator,
+          `Started by **${chainLink.goalId}** as link ${chainLink.linkIndex}, on ${authority}'s authority, with ${owner} as owner. Agent runs on this task use the owner's own Claude and Codex accounts, and the owner is its human reviewer and acceptance authority.`,
+          now,
+        ),
+        actor: chain,
+      },
+    ];
+  } else if (creator && seat === "named" && namedOwner) {
     createInput.timeline = [
       ownerAssignEvent(
         db,
@@ -789,7 +814,8 @@ export async function createTask(
     const waitNote: TaskFileEvent = {
       occurredAt: now,
       type: "note",
-      actor: creator ? humanActorRef(db, creator) : { kind: "operator" },
+      // Ruling 477(b): a chain's link declared this wait, so the chain signs it.
+      actor: chain ?? (creator ? humanActorRef(db, creator) : { kind: "operator" }),
       title: "Waits on other work",
       // Ruling 356(b): the note names a done entry as done, like every other
       // hold sentence — 4 of 56 creation notes on the instance had named a task

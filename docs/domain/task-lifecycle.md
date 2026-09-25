@@ -96,7 +96,10 @@ and seated in the same `task.md` write, before the operator's `create` trigger, 
 first triage run bills the named owner and is refused honestly when they have no
 credential. The seat is written with the same `assign` timeline event a take through
 `setOwner` writes ("Took task ownership by creating the task …" or "Seated <name> as
-owner at creation …"), and `task.created` details carry `ownerUserId` and `seat:
+owner at creation …"); a task a goal chain starts gets that event, and its "Waits on
+other work" note, signed `system:goal-chain` instead ("Started by **goal-N** as link M, on
+<creator>'s authority, with <owner> as owner. …", ruling 477(b)), so Activity does not
+credit a person with the chain's act. `task.created` details carry `ownerUserId` and `seat:
 creator | named | none`; a named owner who is not the creator is notified (§7). The
 reason is the credential principal: every agent run on a task bills the OWNER's own
 Claude and Codex accounts, so a task born unowned could not run the operator it was

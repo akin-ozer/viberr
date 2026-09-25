@@ -886,6 +886,32 @@ describe("R16-2: the attention chip says what it selects", () => {
     await waitFor(() => expect(queryByText("Perfectly fine")).toBeNull());
     expect(queryByText("Waiting on an answer")).toBeTruthy();
   });
+
+  // Ruling 477(a) (F40-27): live, `?filter=risk` read "0 of 4 tasks · 1
+  // waiting on a human in this project" above lanes saying every task was
+  // hidden, because WEB-3's question left its stored readiness `ready`.
+  it("keeps a ready card holding an open question visible, so the head and the lanes agree", () => {
+    const { container, queryByText } = renderBoard(
+      [
+        task({
+          key: "WEB-3",
+          title: "Connect Workers Builds",
+          readiness: "ready",
+          displayReadiness: "input_required",
+          waiting: "human",
+          waitingOnMe: true,
+          packet: { type: "input", title: "Connect Workers Builds" },
+        }),
+        task({ key: "WEB-2", title: "Perfectly fine", readiness: "ready" }),
+      ],
+      { search: "filter=risk" },
+    );
+    expect(container.querySelector('[data-board-card="WEB-3"]')).toBeTruthy();
+    expect(queryByText("Perfectly fine")).toBeNull();
+    expect(container.querySelector(".board-head .sub")!.textContent).toBe(
+      "1 of 2 tasks · 1 waiting on a human in this project",
+    );
+  });
 });
 
 describe("the new-task dialog does not accuse an untouched form", () => {
