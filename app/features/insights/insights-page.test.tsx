@@ -763,6 +763,46 @@ describe("ruling 130(d): whose account, and the hour", () => {
     expect(getByText(/resets (.+ · )?\d{1,2}:\d{2}/)).toBeTruthy();
   });
 
+  /**
+   * Ruling 481(d) (F40-50): a reading whose own window has reset is history.
+   * The row keeps it, in the past tense, with no percentage and no bar; it
+   * used to read "92% of five hour · resets 03:30" hours after 03:30.
+   *
+   * Canary: drop `lapsed` from the `pct` line (the bar fills to 92% and the
+   * percentage returns), or from the reset clause (present tense returns).
+   */
+  it("a reading whose window has reset draws no bar and says 'reset' (ruling 481)", async () => {
+    const { getByText, queryByText } = renderPage({
+      ...FULL,
+      backendQuota: [
+        {
+          backend: "claude",
+          reading: {
+            status: "allowed_warning",
+            rateLimitType: "five_hour",
+            utilization: 0.92,
+            resetsAt: Date.parse("2026-08-23T03:30:00.000Z") / 1000,
+            isUsingOverage: false,
+            observedAt: "2026-08-23T03:01:00.000Z",
+            credentialUserId: null,
+            credentialLabel: null,
+          },
+          credentialRefused: null,
+          exhausted: null,
+          readingWindowReset: true,
+        },
+        { backend: "codex", reading: null, credentialRefused: null, exhausted: null },
+      ],
+    });
+    expect(getByText(/five hour · window reset, no reading since/)).toBeTruthy();
+    expect(queryByText(/92%/)).toBeNull();
+    const row = getByText(/five hour · window reset/).closest(".bar-row")!;
+    expect(row.querySelector<HTMLElement>(".bar-fill")!.style.width).toBe("0%");
+    await waitFor(() => expect(row.querySelector(".bar-cost")!.textContent).toMatch(/^reset /));
+    // The old window's warning warns about nothing now.
+    expect(row.textContent).not.toContain("warning");
+  });
+
   it("a refused credential row names the account", () => {
     const { getByText } = renderPage({
       ...FULL,

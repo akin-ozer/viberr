@@ -154,6 +154,34 @@ export interface BackendQuotaRow {
    * no reset at all, once it is older than `UNDATED_EXHAUSTION_TTL_MS`.
    */
   exhausted: BackendQuotaExhaustion | null;
+  /**
+   * Ruling 481(d) (F40-50): the window `reading` describes has reset since it
+   * was read (`readingWindowReset`). The reading is kept, as history, but no
+   * surface presents its utilization as current: Profile and Insights word it
+   * in the past tense and draw no bar. Optional so row fixtures that predate
+   * it stay valid (absent reads as false); `latestBackendRateLimits` always
+   * sets it.
+   */
+  readingWindowReset?: boolean;
+}
+
+/**
+ * Ruling 481(d) (F40-50): has the window this reading was read in reset?
+ *
+ * Only an exhaustion used to age against its reset (`exhaustionExpired`); a
+ * reading was returned untouched, so on an idle instance Profile said "The
+ * window resets 03:30" and Insights drew "92% of five hour · resets 03:30"
+ * hours after that window closed, which reads as a nearly spent window about
+ * to reset. A reading's `resetsAt` is the provider's own epoch, so no grace
+ * applies. A reading that named no reset, or a clock we could not read,
+ * answers "no": nothing is aged on a guess.
+ */
+export function readingWindowReset(
+  reading: Pick<BackendRateLimitReading, "resetsAt"> | null,
+  nowMs: number,
+): boolean {
+  if (!reading || reading.resetsAt == null || !Number.isFinite(nowMs)) return false;
+  return reading.resetsAt * 1000 <= nowMs;
 }
 
 /**
@@ -588,7 +616,10 @@ function exhaustionExpired(
  * continuing to show it would be a claim the evidence no longer supports. A
  * prose-derived instant gets `QUOTA_RESET_GRACE_MS` first (its timezone is
  * unknown), and a record that named no instant at all expires on age
- * (`UNDATED_EXHAUSTION_TTL_MS`) rather than waiting for a completed run.
+ * (`UNDATED_EXHAUSTION_TTL_MS`) rather than waiting for a completed run. The
+ * same instant marks a reading whose own window has reset
+ * (`readingWindowReset`, ruling 481(d)): the one home Profile and Insights
+ * both read, so neither presents a closed window as current.
  */
 export function latestBackendRateLimits(
   db: DatabaseSync,
@@ -613,6 +644,7 @@ export function latestBackendRateLimits(
       reading,
       credentialRefused,
       exhausted: expired ? null : stored,
+      readingWindowReset: readingWindowReset(reading, nowMs),
     };
   });
 }

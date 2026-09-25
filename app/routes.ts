@@ -45,6 +45,9 @@ export default [
   // Ruling 457: the bell popover's list, loaded by the bell on intent (pages
   // carry only its counts).
   route("resources/notifications", "routes/resources.notifications.ts"),
+  // Ruling 481(c): the unread decisions a tab's title counts and a desktop
+  // notification announces, read by the root-mounted attention watcher.
+  route("resources/attention", "routes/resources.attention.ts"),
   route("prefs/theme", "routes/prefs.theme.tsx"),
   // SSE stream (Phase 6) — scoped live updates driving route revalidation.
   route("resources/events", "routes/resources.events.ts"),

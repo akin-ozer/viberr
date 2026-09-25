@@ -67,7 +67,7 @@ and governed AI delivery through a familiar board/task surface.
 
 ## 6. Deliberate boundaries and known gaps
 
-- **No mailer.** Notifications are in-app only; admins hand over one-time passwords shown at creation.
+- **No mailer.** Notifications are in-app only; admins hand over one-time passwords shown at creation. An open tab still says when a decision waits (ruling 481(c)): its title carries the count of unread decisions, and a browser the person opted in on Profile shows a system notification for a new one while no Viberr tab is in front of them. Nothing leaves the browser: no push service, no service worker, no outbound webhook.
 - **No shared agent credential.** A task with no owner runs no agents, and a person who has not connected a backend cannot be billed for one (ruling 127).
 - **Codex runs are not OS-sandboxed.** Every Codex run is `danger-full-access`; Viberr's own boundaries are the boundary, so capabilities the Codex runtime cannot enforce (repo write among them) are advisory there and labelled so (ruling 185).
 - **Chromium only.** The declared browser matrix is Chromium; Safari and Firefox were struck on 2026-08-31 because nothing exercised them (ruling 103).

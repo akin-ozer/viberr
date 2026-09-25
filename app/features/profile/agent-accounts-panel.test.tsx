@@ -352,7 +352,7 @@ describe("AgentAccountsPanel", () => {
   });
 
   it("connected: names the method, dates the connection and offers Disconnect", () => {
-    const { container, getByText } = renderPanel([
+    const { container, getByText, getByRole } = renderPanel([
       backend("claude", {
         health: {
           ...HEALTH_NONE,
@@ -396,7 +396,25 @@ describe("AgentAccountsPanel", () => {
     const disconnect = container.querySelectorAll(".cred-manage button")[0]!;
     expect(disconnect.textContent).toContain("Disconnect");
     expect(Array.from(disconnect.classList)).toContain("danger");
+    // Ruling 481(b) (F40-49): the press asks first. It used to post the
+    // disconnect (the vendor logout and the credential's deletion) at once.
+    // Canary: submit from the button's onClick again and `lastSubmit` is set
+    // before the dialog exists.
     fireEvent.click(disconnect);
+    expect(lastSubmit).toBeNull();
+    const dialog = getByRole("alertdialog", { name: "Disconnect Claude?" });
+    expect(dialog.getAttribute("data-screen-label")).toBe("Disconnect agent account dialog");
+    expect(dialog.textContent).toContain(
+      "Tasks you own and your controller conversations can't start a Claude run until you connect again.",
+    );
+    // Cancel leaves the account connected.
+    fireEvent.click(getByText("Cancel", { selector: ".confirm-actions button" }));
+    expect(lastSubmit).toBeNull();
+
+    fireEvent.click(disconnect);
+    fireEvent.click(
+      getByText("Disconnect Claude", { selector: ".confirm-actions button.btn.danger" }),
+    );
     expect(lastSubmit).toEqual({
       intent: "backend-disconnect",
       backend: "claude",
@@ -831,6 +849,7 @@ describe("ruling 294: copy the sign-in link", () => {
           resetsAt: "2026-09-17T10:00:00.000Z",
           isUsingOverage: true,
           observedAt: "2026-09-15T18:02:00.000Z",
+          windowReset: false,
         },
       }),
     ]);
@@ -858,11 +877,44 @@ describe("ruling 294: copy the sign-in link", () => {
           resetsAt: null,
           isUsingOverage: false,
           observedAt: "2026-09-15T18:02:00.000Z",
+          windowReset: false,
         },
       }),
     ]);
     expect(getByText("window usage not reported")).toBeTruthy();
     expect(queryByText(/0%/)).toBeNull();
+  });
+
+  /**
+   * Ruling 481(d) (F40-50): once the reading's own window has reset, the card
+   * stops presenting it as current. It used to keep "92% of five hour" and
+   * "The window resets 03:30" in the present tense hours after 03:30.
+   *
+   * Canary: drop the `windowReset` branch in `usageText` (the percentage comes
+   * back) or in the note (the present tense comes back).
+   */
+  it("words a reading whose window has reset in the past tense, with no percentage (ruling 481)", () => {
+    const { getByText, queryByText, container } = renderPanel([
+      backend("claude", {
+        health: CONNECTED_CLAUDE,
+        usage: {
+          status: "allowed_warning",
+          rateLimitType: "five_hour",
+          utilization: 0.92,
+          resetsAt: "2026-09-25T00:30:00.000Z",
+          isUsingOverage: false,
+          observedAt: "2026-09-25T00:01:00.000Z",
+          windowReset: true,
+        },
+      }),
+    ]);
+    const pill = getByText("five hour window reset");
+    expect(pill.closest(".pill")!.classList.contains("risk")).toBe(false);
+    expect(queryByText(/92%/)).toBeNull();
+    const note = container.querySelector('[data-usage="five_hour"]')!;
+    expect(note.textContent).toContain("That window reset");
+    expect(note.textContent).toContain("no Claude run has reported a reading since");
+    expect(note.textContent).not.toContain("The window resets");
   });
 
   it("renders no usage at all when the card carries none", () => {

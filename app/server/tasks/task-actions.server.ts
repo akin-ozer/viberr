@@ -4408,7 +4408,9 @@ export async function recordAgentCompletion(
       const askNotice: TaskWatcherNotice = {
         projectSlug,
         taskKey,
-        kind: "approval",
+        // Ruling 481(a) (F40-48): the same `question` kind the Claude door
+        // writes (agent-toolkit.server.ts), with its own pill and toggle.
+        kind: "question",
         title: `${roleDisplay} asks: ${question!.title.trim()}`,
         text: question!.body ?? "An engaged agent needs a human decision.",
         // Ruling 361: the asker by name; the Operator only when the operator asked.

@@ -25,16 +25,18 @@ export interface NotificationSplit {
   needsTotal: number;
 }
 
-/** "Waiting on you" holds only LIVE pending decisions (F7-NOTIF1): a packet/
- * approval row whose decision was since resolved falls through to the
- * ordinary stream — never deleted, never auto-read. */
+/** "Waiting on you" holds only LIVE pending decisions (F7-NOTIF1): a decision
+ * row (packet, agent question, approval) whose decision was since resolved
+ * falls through to the ordinary stream — never deleted, never auto-read. */
 export function splitNotifications(
   items: NotificationPageItem[],
   f: NotificationFilter,
 ): NotificationSplit {
   const match = (n: NotificationPageItem) => (f === "unread" ? n.unread : true);
-  const needsYou = (n: NotificationPageItem) =>
-    (n.kind === "packet" || n.kind === "approval") && n.waitingOnYou;
+  // The server decides which kinds can wait on you (`listNotifications` sets
+  // `waitingOnYou` only on `DECISION_NOTIFICATION_KINDS`, ruling 481(a)); a
+  // second copy of that set here missed the agent question.
+  const needsYou = (n: NotificationPageItem) => n.waitingOnYou;
   // R8-3: exactly one "Waiting on you" card per task — a task needs one human
   // action, so a superseded packet's leftover notification (or a stale approval
   // beside a newer packet) must NOT show as a second pending decision. Items are

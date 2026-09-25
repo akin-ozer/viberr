@@ -16,6 +16,11 @@ import type { ActorRender } from "./actor.server";
  */
 export const NOTIFICATION_KINDS = [
   "packet",
+  // Ruling 481(a) (F40-48): an agent's question to a person (`ask_human`, or
+  // the Codex outcome envelope's question). It used to be written as an
+  // `approval`, so it wore the stage-transition arrow and pill and was
+  // silenced by the "Approval requests" toggle, whose copy never named it.
+  "question",
   "approval",
   "mention",
   "quality",
@@ -34,6 +39,25 @@ export const NOTIFICATION_KINDS = [
   "ownership",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+/**
+ * The kinds that ask the reader for a decision: an operator packet, an agent's
+ * question and a recommendation to approve. The one home of the set: "Waiting
+ * on you" (`listNotifications`), the live reconciliation below, the
+ * resolution side-effect (`markTaskPacketApprovalRead`) and the count a tab's
+ * title carries (ruling 481, `attentionSnapshot`) all read it.
+ */
+export const DECISION_NOTIFICATION_KINDS = [
+  "packet",
+  "question",
+  "approval",
+] as const satisfies readonly NotificationKind[];
+
+const DECISION_KIND_SET: ReadonlySet<NotificationKind> = new Set(DECISION_NOTIFICATION_KINDS);
+
+export function isDecisionKind(kind: NotificationKind): boolean {
+  return DECISION_KIND_SET.has(kind);
+}
 
 /** A type alias, not an interface, so a `SELECT`-row assertion is checked
  *  against SQLite's own output types instead of being laundered through
@@ -69,7 +93,7 @@ export interface NotificationRecord {
   kind: NotificationKind;
   /** Packet kind only: input | blocked. */
   ptype: "input" | "blocked" | null;
-  /** Packet + approval kinds only. */
+  /** The decision kinds only (packet, question, approval). */
   title: string | null;
   text: string;
   from: ActorRender | null;
@@ -80,19 +104,21 @@ export interface NotificationRecord {
   occurredAt: string;
   unread: boolean;
   readAt: string | null;
-  /** F7-NOTIF1: this packet/approval notification's decision is STILL pending
-   * on the live task record — the only state that belongs in "Waiting on you".
-   * Always false for non-decision kinds; recomputed at read time (a resolved
-   * packet / applied recommendation / Done task drops out with no row write). */
+  /** F7-NOTIF1: this decision notification's (packet, question, approval)
+   * decision is STILL pending on the live task record — the only state that
+   * belongs in "Waiting on you". Always false for non-decision kinds;
+   * recomputed at read time (a resolved packet / applied recommendation / Done
+   * task drops out with no row write). */
   waitingOnYou: boolean;
 }
 
 /**
  * Live "waiting on you" reconciliation (F7-NOTIF1): a decision notification
  * waits only while the projected task still carries that KIND of pending
- * decision (packet → open packet; approval → any pending recommendation) AND
- * the task is not in its terminal stage. A task that doesn't resolve locally
- * (deleted, or a foreign soft ref) has no live decision to wait on.
+ * decision (packet or question → open packet; approval → any pending
+ * recommendation) AND the task is not in its terminal stage. A task that
+ * doesn't resolve locally (deleted, or a foreign soft ref) has no live decision
+ * to wait on.
  */
 /** The one field the terminal-stage check reads out of a stored stage list. */
 interface StageIdOnly {
@@ -100,7 +126,7 @@ interface StageIdOnly {
 }
 
 function liveWaitingOnYou(row: NotificationRow): boolean {
-  if (row.kind !== "packet" && row.kind !== "approval") return false;
+  if (!isDecisionKind(row.kind)) return false;
   if (row.task_stage == null) return false; // no local task row → nothing pending
   // SAFETY: `projects.stages_json` has ONE writer — the projection rebuilder
   // stores the project file's parsed `stages` list — and `isTerminalStage` only
@@ -109,9 +135,11 @@ function liveWaitingOnYou(row: NotificationRow): boolean {
     ? (JSON.parse(row.project_stages_json) as StageIdOnly[])
     : [];
   if (isTerminalStage(row.task_stage, stages)) return false; // Done → resolved
-  return row.kind === "packet"
-    ? row.task_has_packet === 1
-    : (row.task_recommendation_count ?? 0) > 0;
+  // A question is a packet on the task (`openAgentQuestionPacket`), so it
+  // waits while the task carries one, exactly like an operator packet.
+  return row.kind === "approval"
+    ? (row.task_recommendation_count ?? 0) > 0
+    : row.task_has_packet === 1;
 }
 
 export function mapNotificationRow(row: NotificationRow): NotificationRecord {

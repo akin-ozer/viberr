@@ -14,6 +14,7 @@ import { insertUser } from "~/server/auth/user-store.server";
 import { patchRun, upsertRun } from "~/server/runtimes/run-store.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
+import { setNotifRoutingPref } from "~/features/profile/profile-actions.server";
 import {
   buildAgentToolkit,
   postAgentComment,
@@ -156,13 +157,66 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     );
 
     const note = listNotifications(store.db, store.users.arda.id).find(
-      (n) => n.kind === "approval" && n.taskKey === "VIB-9",
+      (n) => n.kind === "question" && n.taskKey === "VIB-9",
     );
     expect(note, "the owner must hear about a question put to them").toBeTruthy();
     // CANARY: drop the `notice.from` and this is { kind: "agent", name:
     // "Operator" } — the default every un-attributed notice falls back to.
     expect(note!.from).toMatchObject({ kind: "agent", name: "Security review" });
     expect(note!.from).not.toMatchObject({ name: "Operator" });
+  });
+
+  /**
+   * Ruling 481(a) (F40-48): the question is filed as what it is. As `approval`
+   * it wore the stage arrow and the "approval" pill, and "Approval requests"
+   * off (a person quieting stage traffic) meant no bell row and no "Waiting on
+   * you" row for any agent question, with nothing on that toggle saying so.
+   *
+   * Canary: write `kind: "approval"` in `openAgentQuestionPacket` again and
+   * the owner with approvals silenced gets nothing.
+   */
+  it("files an agent's question as a `question` that waits on the owner and ignores the approvals toggle (ruling 481)", async () => {
+    const store = setupTestStore(ctx);
+    const owner = store.users.arda.id;
+    setNotifRoutingPref(store.db, owner, "approvals", false);
+    for (const key of ["VIB-9", "VIB-8"]) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "impl", ownerUserId: owner }),
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await openAgentQuestionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-9",
+        actorRef: AGENT_REF,
+        title: "Connect the Worker to Workers Builds",
+        body: "Only the owner can press Connect.",
+      },
+    );
+
+    const mine = listNotifications(store.db, owner).filter((n) => n.taskKey === "VIB-9");
+    expect(mine.map((n) => n.kind)).toEqual(["question"]);
+    expect(mine[0]!.title).toBe("Security review asks: Connect the Worker to Workers Builds");
+    expect(mine[0]!.waitingOnYou).toBe(true);
+
+    // Its own toggle is the one that silences it.
+    setNotifRoutingPref(store.db, owner, "questions", false);
+    const opened = await openAgentQuestionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-8",
+        actorRef: AGENT_REF,
+        title: "Another question",
+      },
+    );
+    expect(opened).toBe(true);
+    expect(listNotifications(store.db, owner).filter((n) => n.taskKey === "VIB-8")).toEqual([]);
   });
 
   it("ruling 137: an agent's question withdraws the standing acceptance offers on the record", async () => {

@@ -21,6 +21,7 @@ import { setNotifRoutingPref } from "~/features/profile/profile-actions.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import {
+  attentionSnapshot,
   bellCounts,
   countUnreadNotifications,
   createNotification,
@@ -198,6 +199,60 @@ describe("notifications", () => {
     expect(rows.find((r) => r.id === "ap")?.read_at).not.toBeNull();
     expect(rows.find((r) => r.id === "m")?.read_at).toBeNull();
     expect(rows.find((r) => r.id === "othertask")?.read_at).toBeNull();
+  });
+
+  /**
+   * Ruling 481(a): an agent's question is a packet on the task, so the packet's
+   * resolution clears its `question` row too. Otherwise an answered question
+   * stayed unread in every watcher's bell and tab title.
+   *
+   * Canary: put the default back to `["packet", "approval"]` and the question
+   * row stays unread.
+   */
+  /**
+   * Ruling 481(c) (F40-51): what a tab nobody is looking at reads. It counts
+   * the viewer's UNREAD decisions (packet, agent question, approval) that lead
+   * somewhere, and words the newest for a desktop notification with the
+   * bell's own destination.
+   *
+   * Canary: drop `question` from `DECISION_NOTIFICATION_KINDS`, or the orphan
+   * condition, and the count is wrong.
+   */
+  it("attentionSnapshot counts the unread decisions and words the newest (ruling 481)", () => {
+    const db = ctx.makeDb();
+    db.prepare(
+      `INSERT INTO projects (slug, name, task_prefix, stages_json, workflow_json, source_path, content_hash, parsed_at)
+       VALUES ('akinozer-com', 'akinozer.com', 'WEB', '[]', '[]', 'projects/akinozer-com/project.md', 'h', '2026-09-25T00:00:00Z')`,
+    ).run();
+    const at = (m: number) => `2026-09-25T03:${String(m).padStart(2, "0")}:00.000Z`;
+    const base = { userId: "u_1", projectSlug: "akinozer-com" };
+    createNotification(db, { ...base, id: "q", kind: "question", taskKey: "WEB-3", occurredAt: at(8), title: "Platform Engineer asks: Connect Workers Builds", text: "Only **the owner** can press `Connect`." });
+    createNotification(db, { ...base, id: "p", kind: "packet", ptype: "input", taskKey: "WEB-2", occurredAt: at(5), title: "Decision needed: merge PR #3?", text: "Both reviewers approved." });
+    createNotification(db, { ...base, id: "a", kind: "approval", taskKey: "WEB-4", occurredAt: at(4), title: "Operator recommends: Move to Review", text: "Delivered." });
+    // Not counted: read, not a decision, another person's, a deleted project.
+    createNotification(db, { ...base, id: "read", kind: "packet", taskKey: "WEB-5", occurredAt: at(9), text: "t", readAt: at(9) });
+    createNotification(db, { ...base, id: "m", kind: "mention", taskKey: "WEB-3", occurredAt: at(9), text: "t" });
+    createNotification(db, { ...base, id: "theirs", userId: "u_2", kind: "question", taskKey: "WEB-3", text: "t" });
+    createNotification(db, { id: "orphan", userId: "u_1", kind: "question", projectSlug: "gone", taskKey: "GON-1", text: "t" });
+
+    const snapshot = attentionSnapshot(db, "u_1");
+    expect(snapshot.waiting).toBe(3);
+    expect(snapshot.items.map((i) => i.id)).toEqual(["q", "p", "a"]);
+    expect(snapshot.items[0]).toEqual({
+      id: "q",
+      title: "Platform Engineer asks: Connect Workers Builds",
+      body: "WEB-3 · akinozer.com\nOnly the owner can press Connect.",
+      href: "/projects/akinozer-com/tasks/WEB-3",
+    });
+    expect(attentionSnapshot(db, "u_nobody")).toEqual({ waiting: 0, items: [] });
+  });
+
+  it("markTaskPacketApprovalRead clears an agent question with the packet (ruling 481)", () => {
+    const db = ctx.makeDb();
+    createNotification(db, { id: "q", userId: "u_1", kind: "question", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
+    expect(markTaskPacketApprovalRead(db, "viberr-core", "VIB-142")).toBe(1);
+    const row = db.prepare(`SELECT read_at FROM notifications WHERE id = 'q'`).get();
+    expect(row?.read_at).not.toBeNull();
   });
 });
 

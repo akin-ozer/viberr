@@ -6,12 +6,16 @@ import {
   type ActorRender,
 } from "~/shared/mapping/actor.server";
 import {
+  DECISION_NOTIFICATION_KINDS,
+  isDecisionKind,
   mapNotificationRow,
   type NotificationKind,
   type NotificationRecord,
   type NotificationRow,
 } from "~/shared/mapping/notification.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { plainText } from "~/features/notifications/notification-meta";
+import type { AttentionSnapshot } from "~/features/notifications/desktop-alerts";
 import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 
@@ -230,7 +234,7 @@ export function listNotifications(
     const scoped: NotificationListItem = {
       ...record,
       waitingOnYou:
-        (record.kind === "packet" || record.kind === "approval") &&
+        isDecisionKind(record.kind) &&
         record.projectSlug != null &&
         record.taskKey != null &&
         mine.has(`${record.projectSlug}::${record.taskKey}`),
@@ -320,6 +324,70 @@ export function countUnreadNotifications(
   return bellCounts(db, userId).unread;
 }
 
+/** How many of the newest unread decisions a snapshot carries. A tab reads it
+ *  about once a minute at most, so more than this arriving between two reads
+ *  is a burst the bell and the title count still show. */
+export const ATTENTION_ITEM_CAP = 10;
+
+/** A desktop notification body is a line or two on every platform. */
+const ATTENTION_BODY_MAX = 180;
+
+/**
+ * Ruling 481(c) (F40-51): what reaches a tab nobody is looking at. `waiting`
+ * is the count of unread decision rows (`DECISION_NOTIFICATION_KINDS`: an
+ * operator packet, an agent's question, a recommendation to approve) that lead
+ * somewhere, under the bell's own orphan rule (F18-1), and it is the number
+ * the tab's title carries. `items` are the newest of those rows, already
+ * worded for a desktop notification (`attention-watcher.tsx`, opt-in on
+ * Profile), each with the destination the bell would open.
+ */
+export function attentionSnapshot(db: DatabaseSync, userId: string): AttentionSnapshot {
+  const kinds = DECISION_NOTIFICATION_KINDS.map(() => "?").join(", ");
+  const live = `n.user_id = ? AND n.read_at IS NULL AND n.kind IN (${kinds})
+                AND (n.project_slug IS NULL OR p.slug IS NOT NULL)`;
+  // SAFETY: an un-grouped aggregate always returns exactly one row, and
+  // `count(*)` is never NULL.
+  const counted = db
+    .prepare(
+      `SELECT count(*) AS c FROM notifications n
+       LEFT JOIN projects p ON p.slug = n.project_slug
+       WHERE ${live}`,
+    )
+    .get(userId, ...DECISION_NOTIFICATION_KINDS) as { c: number };
+  // SAFETY: `n.*` columns as `NotificationRow` declares them (the same table
+  // `listNotifications` reads), plus the joined project name, which the LEFT
+  // JOIN leaves null for an org-wide row.
+  const rows = db
+    .prepare(
+      `SELECT n.id, n.kind, n.title, n.text, n.project_slug, n.task_key,
+              p.name AS project_name
+       FROM notifications n
+       LEFT JOIN projects p ON p.slug = n.project_slug
+       WHERE ${live}
+       ORDER BY n.occurred_at DESC, n.rowid DESC
+       LIMIT ?`,
+    )
+    .all(userId, ...DECISION_NOTIFICATION_KINDS, ATTENTION_ITEM_CAP) as Array<
+    Pick<NotificationRow, "id" | "kind" | "title" | "text" | "project_slug" | "task_key"> & {
+      project_name: string | null;
+    }
+  >;
+  return {
+    waiting: Number(counted.c),
+    items: rows.map((row) => {
+      const where = [row.task_key, row.project_name].filter(Boolean).join(" · ");
+      const text = plainText(row.text).replace(/\s+/g, " ").trim();
+      const body = where ? `${where}\n${text}` : text;
+      return {
+        id: row.id,
+        title: row.title ?? "A decision waits on you",
+        body: body.length > ATTENTION_BODY_MAX ? `${body.slice(0, ATTENTION_BODY_MAX - 1)}…` : body,
+        href: notificationHref({ projectSlug: row.project_slug, taskKey: row.task_key }),
+      };
+    }),
+  };
+}
+
 /** Targeted `notification.read` — other tabs of the same user revalidate so
  * their bell badge drops (E12: mark-read used to emit nothing). */
 function emitNotificationRead(userId: string): void {
@@ -365,14 +433,16 @@ export function markAllNotificationsRead(
 
 /**
  * Packet/approval resolution side-effect (contracts §1.2): marks that
- * task's packet + approval notifications read for EVERY user, idempotently.
- * Emits `notification.read` per affected user (their badges drop live).
+ * task's decision notifications (packet, question, approval) read for EVERY
+ * user, idempotently. Emits `notification.read` per affected user (their
+ * badges drop live). Ruling 481(a): an agent's question is a packet on the
+ * task, so resolving the packet clears its `question` row too.
  */
 export function markTaskPacketApprovalRead(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-  kinds: NotificationKind[] = ["packet", "approval"],
+  kinds: readonly NotificationKind[] = DECISION_NOTIFICATION_KINDS,
 ): number {
   if (kinds.length === 0) return 0;
   const placeholders = kinds.map(() => "?").join(", ");

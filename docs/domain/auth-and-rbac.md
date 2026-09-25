@@ -445,6 +445,11 @@ attachments) is out of it too (ruling 407). A delivered revision with no PR stay
 on purpose; an unpushed delivery is exactly the untraceable one the number exists to
 show.
 
+A reading whose own window has reset (`readingWindowReset`, ruling 481(d)) keeps its
+row in the past tense with no bar and no percentage: "<window> · window reset, no reading
+since", "reset <time>", and the old window's warning and overage words dropped. It used to
+read "92% of five hour · resets 03:30" hours after 03:30 on an idle instance.
+
 The backend quota panel names whose account a refusal or an exhaustion was recorded on
 (`credentialLabel`, ruling 130(d)). That is org-admin information: it names a person's
 provider account state, so it reaches this page, the signed-in `instance_health` read and
@@ -459,16 +464,28 @@ The page renders inside a `PageOverlay` in two columns. Left: the Profile card
 the change-password modal, ruling 148(b)), notification routing and appearance. Right:
 "Your access", **Agent accounts** (below) and GitHub identity.
 
-- **Notification routing**: eight in-app opt-out toggles (`NOTIF_PREF_CATEGORIES`:
-  packets, approvals, mentions, policy, quality, controller, dependencies, ownership),
-  each mapped from one notification kind and enforced inside `createNotification`: an
-  off category means the row is never written.
+- **Notification routing**: nine in-app opt-out toggles (`NOTIF_PREF_CATEGORIES`:
+  packets, questions, approvals, mentions, policy, quality, controller, dependencies,
+  ownership), each mapped from one notification kind and enforced inside
+  `createNotification`: an off category means the row is never written. Each toggle's
+  description names what its writers send (ruling 481(a)): "Decision packets for you" is
+  the operator's packets (a blocked task, a question about scope, a completion report);
+  "Agent questions" is an agent's `ask_human` or Codex outcome-envelope question, kind
+  `question`, which used to be filed as an `approval` and was silenced by the approvals
+  toggle; "Approval requests" is the operator's recommendations and a delivery's recorded
+  next step. Below them, **Desktop notifications** is a per-browser opt-in (ruling
+  481(c)): the switch is the only place the browser's permission is requested, it turns
+  on once the browser allowed it and showed one notification, and a denial or an
+  unsupported browser leaves it off with the reason on the row. The opt-in lives in that
+  browser's storage, not in `user_prefs`, because the permission it rests on is the
+  browser's.
 - **Appearance & workspace**: theme `light | dark | system`, persisted to `users.theme`
   and the `viberr_theme` cookie; the timeline's default filter. There is no in-app
   reduce-motion setting (ruling 148(c)); the OS preference is the one signal.
 - **Your access**: a read-only table rendered from the same RBAC rows.
 - **GitHub identity**: disconnect flips `idp` back to `local` (audit
-  `identity.github.disconnected`), refused without a password. On a deployment without
+  `identity.github.disconnected`), refused without a password. The Disconnect asks first,
+  on the shared `ConfirmDialog` ("Disconnect GitHub?", ruling 481(b)). On a deployment without
   GitHub sign-in the card shows an admin-linked handle as `@handle · linked by an org
   admin` and says what the link does (ruling 154); the person cannot set their own handle
   because the verdict path counts approvals by it.
@@ -516,7 +533,11 @@ Two routes in, both the vendor's own:
   Platform API key with a FREE `GET /v1/models` probe before sealing it; a ChatGPT
   workspace access token has no free probe and is stored `verified_at = null` with the
   card saying so. `backend-disconnect` runs the vendor's own logout, removes the
-  credential file and drops the row (transcripts stay).
+  credential file and drops the row (transcripts stay). The card's Disconnect asks first
+  (ruling 481(b)): the shared `ConfirmDialog`, "Disconnect Claude?" (or Codex), whose body
+  says tasks the person owns and their controller conversations can't start a run on
+  that backend until they connect again, confirmed by "Disconnect Claude". One tap used
+  to sign the vendor session out with no undo short of a fresh sign-in.
 
 **The last refusal Viberr observed** (ruling 130(d)). A connected card also reads the
 quota store (`latestBackendRateLimits`) and shows, ONLY when the record's
@@ -542,7 +563,11 @@ a utilization reading (`rate_limit_event`) shows a "Usage" row: the percentage o
 named window, clamped, "not reported" rather than 0% when the provider sent none, with
 the reading's age and a note that it is the last figure a run reported, not a live probe.
 The same principal check applies, and the reading retires with the account like the
-refusal does. Codex reports no readings, so a Codex card shows none.
+refusal does. Codex reports no readings, so a Codex card shows none. Once the reading's
+own `resetsAt` has passed (`readingWindowReset`, computed in `latestBackendRateLimits`,
+the one home Insights reads too; ruling 481(d)) the pill drops the percentage and reads
+"<window> window reset", and the note says "That window reset <time>, and no Claude run
+has reported a reading since." instead of "The window resets <time>."
 
 Viberr never implements the vendors' OAuth, never reads, copies or stores a Claude.ai or
 ChatGPT **session** token, and offers no setup-token field: Anthropic's Claude Code

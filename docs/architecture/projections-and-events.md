@@ -252,6 +252,11 @@ received and dropped every line, and the task's own page revalidated root, layou
 task on its run's lines at most once per 2 s (`RUN_LINE_REVALIDATE_MS`) to move the Live
 run strip; the strip now reads the facts every console tail read returns (below).
 
+A data event reaches `onLiveFrame` too, once per id, after the ledger has recorded it
+(ruling 481(c)). Its one listener is the root's `AttentionWatcher`, which re-reads
+`/resources/attention` on `notification.created` and `notification.read` to keep the
+tab's title count and, when opted in, announce a new decision as a desktop notification.
+
 **The broker** (`sse-broker.server.ts`, behind the route `resources.events.ts`): one
 connection per stream on `/resources/events` (401 JSON when signed out, since an
 `EventSource` cannot render a login page; 400 for a malformed scope), scopes

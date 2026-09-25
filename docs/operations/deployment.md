@@ -514,8 +514,11 @@ database's rebuilder tables lag the running build (`logBootIntegrity` in
   admit (`projectionCheckGaps`): `task_projections.validation` (F21-1),
   `task_projections.waiting` (ruling 225) and `notifications.kind` (ruling 140). A task
   whose derived value lands on a refused member stops projecting behind a generic
-  `projection rebuild failed`; a notification of a refused kind is dropped by the
-  fail-open insert.
+  `projection rebuild failed`; a notification of a refused kind is refused at its insert.
+  Boot widens `notifications.kind` itself before this check (`widenNotificationKindCheck`,
+  ruling 481: the app-owned table is rebuilt from the baseline's DDL with its rows and
+  indexes), so that entry appears only when the rebuild failed, and its ERROR line says
+  so.
 - `missingColumns`: `task_projections` / `task_events` columns the shipped baseline has and
   this root lacks (`projectionMissingColumns`), which fail EVERY task's projection with
   "no such column".

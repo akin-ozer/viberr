@@ -1550,7 +1550,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // `notifications`; the rows were written by `createNotification` above.
     const rows = store.db
       .prepare(
-        `SELECT title, actor_json FROM notifications WHERE kind = 'approval' AND task_key = 'VIB-1'`,
+        // Ruling 481(a): the Codex door files the question as `question` too.
+        `SELECT title, actor_json FROM notifications WHERE kind = 'question' AND task_key = 'VIB-1'`,
       )
       .all() as { title: string | null; actor_json: string }[];
     expect(rows.length).toBeGreaterThan(0);

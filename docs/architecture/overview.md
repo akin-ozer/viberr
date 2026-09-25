@@ -156,7 +156,9 @@ for governed state.
 6. Self-heal the projection DB if `PRAGMA quick_check` reports corruption (salvage the
    non-rebuildable tables into a fresh file, move the corrupt one aside).
 7. Open SQLite, apply migrations, ensure the single-flight indexes, backfill the
-   baseline columns an older root lacks (`ensureBaselineColumns`).
+   baseline columns an older root lacks (`ensureBaselineColumns`), and widen a
+   `notifications.kind` CHECK that predates a kind by rebuilding that table in place, rows
+   and indexes kept (`widenNotificationKindCheck`, ruling 481).
 8. Bootstrap admin on an empty `users` table (`VIBERR_SEED_ADMIN_EMAIL`, default
    `admin@viberr.dev`; a random one-time password is logged once unless
    `VIBERR_SEED_ADMIN_PASSWORD` is set).
@@ -183,9 +185,9 @@ for governed state.
     (`recoverControllerConversations`).
 17. Log one `boot integrity check` line (dirs, migrations, counts, users, build, disk,
     toolchain per ruling 182) and a `projection schema drift` WARN when a live CHECK
-    (`task_projections.validation`, `task_projections.waiting`, `notifications.kind`) does
-    not admit a value the code declares, or `task_projections` / `task_events` lacks a
-    baseline column.
+    (`task_projections.validation`, `task_projections.waiting`, and `notifications.kind`
+    when step 7 could not widen it) does not admit a value the code declares, or
+    `task_projections` / `task_events` lacks a baseline column.
 18. Log `viberr server booted`.
 
 Hard exits: invalid env, a held writer lock, a migration failure, an uncaught exception
