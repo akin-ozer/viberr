@@ -37,11 +37,15 @@ import {
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
 import { stageOutcome } from "./agent-outcome.server";
+import type { runOperator } from "~/server/runtimes/operator-run.server";
+import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
+import type { openTaskPr } from "~/server/github/pr-open.server";
 import {
   acceptanceRefusalFor,
   applyAgentCompletionEffects,
   classifyReviewerVerdict,
   markWaitingAgent,
+  resolvePacket,
 } from "./task-actions.server";
 import {
   assignReviewer,
@@ -1370,6 +1374,254 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // The operator was re-invoked (a react at a fresh depth), not parked.
     await waitFor(() => operatorRuns() > before);
     expect(operatorRuns()).toBe(before + 1);
+  });
+
+  /**
+   * Ruling 489 (pass 40, F40-68): a reply that MOVED the task's head is a
+   * boundary for the depth count, like an approve (ruling 362).
+   *
+   * Live on WEB-8 the Site Engineer reported its rework done: the new head
+   * 178dc22 merged main in and fixed every reviewer finding, and Viberr's gates
+   * passed 6/6 on it a second later. The chain had spent its four hops, so the
+   * completion opened "Work stalled: pick a recovery path" — three options,
+   * each re-dispatching the work that had just finished, and nothing on the
+   * packet about the report or the head it left undelivered.
+   */
+  describe("ruling 489: progress resets the react depth, and the capped packet says where the work stands", () => {
+    const operatorRuns = () =>
+      // SAFETY: COUNT(*) over this store's own table is always an integer.
+      (
+        store.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM agent_runs WHERE project_slug = ? AND kind = 'operator'`,
+          )
+          .get(store.slug) as { n: number }
+      ).n;
+    const OLD_HEAD = "a".repeat(40);
+    const NEW_HEAD = "b".repeat(40);
+    const PR_7 = {
+      number: 7,
+      state: "review" as const,
+      title: "[VIB-1] Task VIB-1",
+      headSha: OLD_HEAD,
+    };
+    /** The delivering developer's completion, at the depth cap. */
+    async function completeDeveloperAtCap(runId: string): Promise<void> {
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          backend: "claude",
+          profileId: "dev",
+          role: "Implementation",
+          delivers: true,
+          workdir: null,
+          agentHandle: "dev",
+          // OPERATOR_REACT_DEPTH_CAP: the chain has spent its four hops.
+          operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 4 },
+        },
+        { id: runId, state: "finished" },
+      );
+      await new Promise((r) => setTimeout(r, 80));
+    }
+
+    it("a reply at the cap that committed a new head opens no stuck packet — the operator reacts from a fresh depth", async () => {
+      deployOperator();
+      writeReviewTask({ stage: "impl", validation: "changed", pr: PR_7 });
+      const runId = await finishedRunWith(
+        "Rework done: merged main in and fixed all four findings.",
+      );
+      // What the workspace reconcile writes when a delivering run leaves a new
+      // tree behind: a fresh revision from the checkout's head, stamped when it
+      // is minted. The reconcile needs a git checkout this fixture does not
+      // have (`repo: null`), so its write is made here, after the run's row
+      // was created, exactly as the reconcile's lands.
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (f) => {
+          f.frontmatter.workRevision = {
+            id: "rev_2",
+            headSha: NEW_HEAD,
+            treeSha: "u".repeat(40),
+            branch: "vib-1-work",
+            createdAt: new Date().toISOString(),
+            sourceProfileId: "dev",
+            kind: "delivered",
+          };
+        },
+      );
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const before = operatorRuns();
+      const log = vi.spyOn(logger, "info");
+      log.mockClear();
+
+      await completeDeveloperAtCap(runId);
+
+      // CANARY: drop the ruling-489 reset and "Work stalled: pick a recovery
+      // path" opens here over the rework that just landed, and no operator
+      // turn follows it.
+      expect(taskFile().parsed.packet).toBeNull();
+      expect(
+        log.mock.calls.some(([msg]) => String(msg).includes("moved the task's head")),
+      ).toBe(true);
+      await waitFor(() => operatorRuns() > before);
+      expect(operatorRuns()).toBe(before + 1);
+    });
+
+    it("a reply at the cap that left the head where it was still opens the stuck packet, as before", async () => {
+      deployOperator();
+      // The revision under review was minted long before this hop, and PR #7
+      // carries it: nothing moved and nothing is owed a delivery.
+      writeReviewTask({ stage: "impl", validation: "changed", pr: PR_7 });
+      const runId = await finishedRunWith("Still chasing the flaky test; nothing committed yet.");
+      const before = operatorRuns();
+
+      await completeDeveloperAtCap(runId);
+
+      // CANARY: count any revision on record as this hop's (drop the `since`
+      // comparison in `headMovedSince`) and the chain runs on with no packet —
+      // a loop that gets nowhere is no longer capped.
+      const packet = taskFile().parsed.packet;
+      expect(packet?.title).toBe("Work stalled: pick a recovery path");
+      expect(packet!.body).toContain("4-cycle depth cap without reaching a boundary");
+      expect(operatorRuns()).toBe(before);
+      // The head is named, and it is delivered, so the general options stand.
+      // CANARY: read every head as undelivered in `taskHeadState` and a
+      // delivery is recommended over a head PR #7 already carries.
+      expect(packet!.body).toContain("The task's head is `aaaaaaa`, delivered: PR #7 carries it.");
+      expect(packet!.options.map((o) => [o.kind, o.rec])).toEqual([
+        ["redirect", true],
+        ["request_edit", false],
+        ["hold_runtime_debug", false],
+      ]);
+    });
+
+    it("the capped packet quotes the report, names the head and the gates, recommends delivering an undelivered head, and confirming it delivers", async () => {
+      deployOperator();
+      const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...pf.parsed.frontmatter,
+        gates: [{ name: "test", command: "npm test" }],
+      });
+      // An earlier hop's rework committed NEW_HEAD, the gates passed on it,
+      // and nothing delivered it: PR #7 still carries the old head.
+      writeReviewTask({
+        stage: "impl",
+        validation: "changed",
+        workRevision: {
+          ...workRev("rev_2"),
+          headSha: NEW_HEAD,
+          treeSha: "u".repeat(40),
+          createdAt: "2026-07-05T00:00:00.000Z",
+        },
+        pr: PR_7,
+        gateRun: {
+          id: "gate_1",
+          revisionId: "rev_2",
+          headSha: NEW_HEAD,
+          status: "finished",
+          reason: "revision",
+          requestedAt: "2026-07-05T00:00:01.000Z",
+          startedAt: "2026-07-05T00:00:01.000Z",
+          finishedAt: "2026-07-05T00:00:03.000Z",
+          error: null,
+          results: [
+            { name: "test", command: "npm test", exitCode: 0, timedOut: false, wallMs: 1200, log: null },
+          ],
+        },
+      });
+      const runId = await finishedRunWith(
+        "## Rework committed as bbbbbbb: merged main in and fixed the four findings.\n\n" +
+          "The details follow, finding by finding.",
+      );
+
+      await completeDeveloperAtCap(runId);
+
+      const packet = taskFile().parsed.packet;
+      expect(packet?.title).toBe("Work stalled: pick a recovery path");
+      // CANARY: stop passing the standings to the packet and none of these
+      // three sentences is on it — the WEB-8 body, which said nothing of the
+      // report and nothing of the head.
+      expect(packet!.body).toContain(
+        "The last report, from @dev: “Rework committed as bbbbbbb: merged main in and fixed the four findings.”",
+      );
+      expect(packet!.body).not.toContain("finding by finding");
+      expect(packet!.body).toContain(
+        "The task's head is `bbbbbbb`, committed and NOT delivered: PR #7 still carries `aaaaaaa`.",
+      );
+      expect(packet!.body).toContain("Gates on bbbbbbb: 1/1 exit 0 (run by Viberr).");
+      // CANARY: drop the delivery option and the general three come back
+      // alone, redirect recommended — every one of them redoing finished work.
+      expect(packet!.options.map((o) => [o.kind, o.rec])).toEqual([
+        ["deliver_for_review", true],
+        ["redirect", false],
+        ["request_edit", false],
+        ["hold_runtime_debug", false],
+      ]);
+      expect(packet!.options[0]!.t).toBe("Deliver bbbbbbb for review");
+
+      // Confirming it performs the delivery, through the delivery's own seams.
+      const push = vi.fn<typeof pushWorkspaceBranch>(async () => ({
+        status: "pushed",
+        branch: "vib-1-work",
+        commits: 1,
+        headSha: NEW_HEAD,
+        remoteHeadBefore: OLD_HEAD,
+        workflowFiles: [],
+      }));
+      const openPr = vi.fn<typeof openTaskPr>(async () => ({
+        status: "ok",
+        prNumber: 7,
+        created: false,
+        url: "http://x/pull/7",
+      }));
+      const runOp = vi.fn<typeof runOperator>(async () => ({
+        runId: null,
+        queued: true,
+        backend: "claude" as const,
+        autonomy: "supervised" as const,
+      }));
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+        actorOf(store.users.arda),
+        {
+          dataRoot: store.dataRoot,
+          deps: { pushWorkspaceBranch: push, openTaskPr: openPr, runOperator: runOp },
+        },
+      );
+
+      // CANARY: drop the resolution's delivery arm and the packet clears with
+      // nothing pushed.
+      expect(push).toHaveBeenCalledTimes(1);
+      expect(openPr).toHaveBeenCalledTimes(1);
+      const after = taskFile();
+      expect(after.parsed.packet).toBeNull();
+      expect(after.parsed.frontmatter.workRevision?.pushedAt).toBeTruthy();
+      expect(after.parsed.frontmatter.pr?.headSha).toBe(NEW_HEAD);
+      expect(
+        listAuditEvents(store.db, { action: "github.delivery.manual" }).map(
+          (e) => e.details?.status,
+        ),
+      ).toEqual(["delivered"]);
+      // One hand-off, carrying Viberr's own record of what the option did.
+      await waitFor(() => runOp.mock.calls.length > 0);
+      expect(runOp).toHaveBeenCalledTimes(1);
+      expect(runOp.mock.calls[0]![1]).toMatchObject({
+        trigger: "packet-resolved",
+        resolvedOption: {
+          kind: "deliver_for_review",
+          serverOutcome: {
+            kind: "deliver_for_review",
+            outcome: "delivered",
+            prNumber: 7,
+            headSha: NEW_HEAD,
+          },
+        },
+      });
+    });
   });
 
   it("records a required reviewer's verdict from the ENGAGEMENT snapshot even if its LIVE grant was removed (adversarial-review: no stuck task)", async () => {

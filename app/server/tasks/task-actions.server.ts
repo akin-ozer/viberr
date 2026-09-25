@@ -19,9 +19,16 @@ import { endSentence } from "~/shared/text/sentence";
 import { countLabel } from "~/shared/text/plural";
 import type {
   CollisionServerOutcome,
+  DeliveryServerOutcome,
   ResolvedPacketOption,
 } from "~/shared/packet-server-outcome";
 import type { RelayPayload } from "./task-relay.server";
+// Ruling 489: where a react chain's work stands, read from the server's record.
+import {
+  deliverHeadOption,
+  headMovedSince,
+  stuckLoopStandings,
+} from "./react-progress.server";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -3268,6 +3275,27 @@ type StuckLoopEscalation =
  *  fallback can be driven directly. Production callers use the private one. */
 export { openStuckLoopPacket as openStuckLoopPacketForTest };
 
+/**
+ * The general recovery options every stall packet can offer: re-prompt the
+ * specialist with a corrected directive (recommended when nothing better is
+ * known), or send it back for another attempt. `openStuckLoopPacket` appends
+ * the hold. Ruling 489's depth-capped packet keeps them, unrecommended, beside
+ * the delivery it recommends.
+ */
+const STOCK_STALL_OPTIONS: readonly OperatorPacketOptionInput[] = [
+  {
+    kind: "redirect",
+    title: "Redirect with sharper guidance",
+    detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
+    recommended: true,
+  },
+  {
+    kind: "request_edit",
+    title: "Send back for another attempt",
+    detail: "Ask the same specialist to try again from its last report.",
+  },
+];
+
 async function openStuckLoopPacket(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -3295,6 +3323,10 @@ async function openStuckLoopPacket(
     /** Ruling 315: the account-level cause, when this failure is one. Packets
      *  sharing it are resolved together — see `taskPacketSchema.cause`. */
     cause?: string;
+    /** Ruling 489: where the work stands (the last report, the head and its
+     *  delivery state, the last gate result), written into the body after the
+     *  reason. The depth-capped react loop supplies it. */
+    standings?: string;
   },
 ): Promise<StuckLoopEscalation> {
   try {
@@ -3314,20 +3346,7 @@ async function openStuckLoopPacket(
     };
     const options: OperatorPacketOptionInput[] = input.options
       ? [...input.options, hold]
-      : [
-          {
-            kind: "redirect",
-            title: "Redirect with sharper guidance",
-            detail: "Re-engage the operator to re-prompt the specialist with a corrected directive.",
-            recommended: true,
-          },
-          {
-            kind: "request_edit",
-            title: "Send back for another attempt",
-            detail: "Ask the same specialist to try again from its last report.",
-          },
-          hold,
-        ];
+      : [...STOCK_STALL_OPTIONS, hold];
     const observations: NonNullable<OperatorOpenPacketInput["observations"]> = [
       { k: "Agent", v: `@${input.agentHandle}` },
       { k: "Signal", v: input.reason },
@@ -3341,7 +3360,8 @@ async function openStuckLoopPacket(
       packetType: "blocked",
       title: `Work stalled: pick a recovery path`,
       body:
-        `${input.reason}${input.remedy ? ` ${input.remedy}` : ""} ` +
+        `${input.reason}${input.remedy ? ` ${input.remedy}` : ""}` +
+        `${input.standings ? ` ${input.standings}` : ""} ` +
         "Coordination is paused until a human chooses how to proceed.",
       observations,
       options,
@@ -3389,21 +3409,7 @@ async function openStuckLoopPacket(
               `${endSentence(result.message)} The general recovery options are offered instead.`,
           },
         ],
-        options: [
-          {
-            kind: "redirect",
-            title: "Redirect with sharper guidance",
-            detail:
-              "Re-engage the operator to re-prompt the specialist with a corrected directive.",
-            recommended: true,
-          },
-          {
-            kind: "request_edit",
-            title: "Send back for another attempt",
-            detail: "Ask the same specialist to try again from its last report.",
-          },
-          hold,
-        ],
+        options: [...STOCK_STALL_OPTIONS, hold],
       };
       result = await operatorOpenPacket(db, ctx, fallback, authority);
     }
@@ -5881,6 +5887,41 @@ export async function applyAgentCompletionEffects(
     });
     currentDepth = 0;
   }
+  // Ruling 489 (pass 40, F40-68): a reply that MOVED the task's head is a
+  // boundary too, so the count starts over at it as it does at an approve.
+  //
+  // Live on WEB-8 the Site Engineer reported its rework done: the new head
+  // 178dc22 merged main in, fixed every reviewer finding, and Viberr's gates
+  // passed 6/6 on it a second later. The chain had spent its four hops on the
+  // ruling-475 conflict hand-off, the owner's rework decision and the rework,
+  // so the completion opened "Work stalled: pick a recovery path", whose
+  // options all re-dispatched the work that had just finished. Neither
+  // boundary this loop knew applied: it was not an approve (362), and the task
+  // was not acceptable (258), because the head was not even delivered yet.
+  //
+  // The signal is the one the server writes: the workspace reconcile above
+  // mints a new work revision when the run left a new tree, and a delivery
+  // push stamps `pushedAt`, each at the moment it happens, so either landing
+  // after this run's row was created is this hop's progress. A reply that
+  // leaves the head where it was still counts every hop, so a loop that gets
+  // nowhere is still capped.
+  if (finished.state === "finished" && currentDepth > 0) {
+    const hopStartedAt = thisRunRow?.created_at ?? thisRunStartedAt;
+    const afterReply = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    const moved = afterReply
+      ? headMovedSince(afterReply.parsed.frontmatter.workRevision, hopStartedAt)
+      : null;
+    if (moved) {
+      logger.info("react depth reset — this reply moved the task's head, a boundary; the chain continues", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        depthBefore: currentDepth,
+        headSha: moved.sha,
+        how: moved.how,
+      });
+      currentDepth = 0;
+    }
+  }
   const shouldReact = operatorShouldReactToReply(
     finished.state,
     stripCcLine(replyForCompare),
@@ -5958,14 +5999,38 @@ export async function applyAgentCompletionEffects(
       });
     }
     if ((noProgress || depthCapped) && !acceptableNow) {
-      await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, {
+      const stuck: Parameters<typeof openStuckLoopPacket>[2] = {
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         agentHandle: input.agentHandle,
         reason: noProgress
           ? "The agent repeated its previous report verbatim, with no forward progress."
           : `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`,
-      });
+      };
+      // Ruling 489: the capped packet says where the work stands — the report
+      // that hit the cap, the head and whether it is delivered, the last gate
+      // result — and, over a committed head nobody delivered, recommends the
+      // one step left. On WEB-8 its body carried nothing of the report, and
+      // delivering 178dc22 for review appeared nowhere on it.
+      if (depthCapped) {
+        const standingFile = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+        if (standingFile) {
+          const standings = stuckLoopStandings({
+            fm: standingFile.parsed.frontmatter,
+            gates: loadProjectContext(ctx, input.projectSlug).gates,
+            replyText: stripCcLine(replyText),
+            agentHandle: input.agentHandle,
+          });
+          stuck.standings = standings.text;
+          if (standings.deliver) {
+            stuck.options = [
+              deliverHeadOption(standings.deliver),
+              ...STOCK_STALL_OPTIONS.map((o) => ({ ...o, recommended: false })),
+            ];
+          }
+        }
+      }
+      await openStuckLoopPacket(db, { ...ctx, operatorAuthorized: true }, stuck);
     }
     // ALWAYS flip waiting off `agent` when the chain terminates (adversarial-
     // review HIGH #1). markWaitingAgent set it at run start; openStuckLoopPacket
@@ -9902,6 +9967,9 @@ export const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
   // task's job, which is exactly the accumulation ruling 189 exists to stop.
   // The two timeline lines name the new key; that is the join.
   "create_task",
+  // Ruling 489: "deliver the committed head" decides what happens next to
+  // work that already exists; it changes nothing about what the work is.
+  "deliver_for_review",
 ]);
 
 // ------------------------------------------------------------ resolvePacket
@@ -10676,6 +10744,38 @@ export async function resolvePacket(
       clearPacket = true;
       break;
     }
+    case "deliver_for_review": {
+      // Ruling 489 (pass 40, F40-68): the delivery runs AFTER the resolution
+      // write, below, through the task page's own delivery door. Its authority
+      // (`run-agents`, or the task's owner) and ruling 240's hold are read
+      // here, before the packet is spent, so a refusal leaves the decision
+      // open rather than answered with nothing done.
+      if (!isOwner) {
+        requireAction(db, project, actor, "run-agents", "deliver the branch & open the review PR");
+      }
+      {
+        const heldFor = existing.parsed.frontmatter.blockedBy;
+        if (heldFor.length > 0) {
+          throw AppError.conflict(
+            `${holdRefusalFor(db, input.projectSlug, input.taskKey, heldFor, "delivering it for review")} The packet stays open; choose again once the wait clears.`,
+          );
+        }
+      }
+      // F33-2: the decision event states the decision; the delivery's own
+      // events and the outcome carry what happened.
+      event = {
+        occurredAt: now,
+        type: "transition",
+        actor: human,
+        title: null,
+        text: option.ev ?? `**Decision:** ${option.t}.`,
+        toAgent: false,
+        evidence: null,
+      };
+      mutate = () => {};
+      clearPacket = true;
+      break;
+    }
     case "force_accept": {
       // Ruling 164 (pass 35, F35-14): an option's title is a promise the
       // resolution keeps. KNC-3's "Force-accept as admin without a fresh
@@ -11272,6 +11372,7 @@ export async function resolvePacket(
     "retry_other_backend", // starts a specialist run above; its completion re-invokes
     "discard_branch", // cleanup only, no coordination change
     "resolve_remote_collision", // the re-delivery's own machinery owns the follow-up
+    "deliver_for_review", // ruling 489: the same, with one hand-off after the delivery
     // Ruling 164 (pass 35, F35-14): the task is Done (the acceptance below),
     // and the move re-invokes the operator at the stage it lands on
     // (`transitionStage`), so a second hand-off here would pay for a duplicate
@@ -11847,6 +11948,58 @@ export async function resolvePacket(
     // otherwise the operator is handed the decision with Viberr's own record
     // of what the ceremony did, in its own field.
     if (!operatorRequeued) {
+      const decisionNote = customDirective || input.note?.trim();
+      const handoff: ResolvedPacketOption = { kind: option.kind, title: option.t, serverOutcome };
+      if (decisionNote) handoff.note = decisionNote;
+      void autoInvokeOperator(
+        db,
+        ctx,
+        input.projectSlug,
+        input.taskKey,
+        "packet-resolved",
+        { resolvedOption: handoff },
+      );
+    }
+  }
+
+  // Ruling 489 (pass 40, F40-68): the decision IS the delivery. It runs the
+  // task page's own door (`manualDeliverForReview` → `performDelivery`, the
+  // core behind the operator's `deliver_for_review` tool), so the push, the PR,
+  // the audit row and every refusal's timeline event are the ones a delivery
+  // always writes. Then exactly one hand-off, as the collision ceremony above:
+  // a full-autonomy delivery that moved the head re-queues the operator itself;
+  // otherwise the operator is handed the decision with Viberr's record of it,
+  // and a supervised task also gets the delivery's "Move to <review>" card.
+  if (option.kind === "deliver_for_review") {
+    const delivery = await manualDeliverForReview(
+      db,
+      { projectSlug: input.projectSlug, taskKey: input.taskKey },
+      actor,
+      ctx,
+    );
+    const serverOutcome: DeliveryServerOutcome =
+      delivery.status === "delivered"
+        ? {
+            kind: "deliver_for_review",
+            outcome: delivery.pushStatus === "up_to_date" && !delivery.moved ? "current" : "delivered",
+            prNumber: delivery.prNumber,
+          }
+        : { kind: "deliver_for_review", outcome: "failed", reason: delivery.message };
+    if (delivery.status === "delivered") {
+      if (delivery.headSha) serverOutcome.headSha = delivery.headSha;
+      // The stall packet held readiness at `blocked`; a delivery that reached
+      // the pull request falsifies the stall, so lift it (the collision
+      // ceremony's rule). A failed delivery keeps it, beside its own event.
+      await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
+        if (parsed.frontmatter.readiness === "blocked") parsed.frontmatter.readiness = "ready";
+      });
+      reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+      const { resolveOperatorAuthority } = await import("./operator-actions.server");
+      if (resolveOperatorAuthority(ctx, input.projectSlug).autonomy !== "full") {
+        await recordDeliveredNextStep(db, ctx, input.projectSlug, input.taskKey, delivery.prNumber);
+      }
+    }
+    if (!(delivery.status === "delivered" && delivery.operatorRequeued)) {
       const decisionNote = customDirective || input.note?.trim();
       const handoff: ResolvedPacketOption = { kind: option.kind, title: option.t, serverOutcome };
       if (decisionNote) handoff.note = decisionNote;

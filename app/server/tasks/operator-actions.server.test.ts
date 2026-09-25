@@ -5574,6 +5574,75 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet?.options[0]?.kind).toBe("resolve_remote_collision");
   });
 
+  /**
+   * Ruling 489 (F40-68): `deliver_for_review` promises a delivery, so it is
+   * authored only over a head that has one owed. Over a head PR #15 already
+   * carries, the confirm would push nothing and answer with a noop after the
+   * decision was spent: ruling 244's false premise.
+   */
+  it("ruling 489: refuses deliver_for_review unless the task's head is committed and undelivered", async () => {
+    packetsRoster();
+    seedTask("review");
+    const offer = () =>
+      operatorOpenPacket(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          packetType: "input",
+          title: "Deliver the rework?",
+          options: [
+            { kind: "deliver_for_review", title: "Deliver bbbbbbb for review", recommended: true },
+            { kind: "hold_runtime_debug", title: "Hold" },
+          ],
+        },
+        authority("full"),
+      );
+    const setHead = async (headSha: string) => {
+      await updateTaskFile(
+        { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
+        (parsed) => {
+          parsed.frontmatter.branch = "vib-1";
+          parsed.frontmatter.workRevision = {
+            id: `rev_${headSha.slice(0, 1)}`,
+            headSha,
+            treeSha: null,
+            branch: "vib-1",
+            createdAt: "2026-09-25T13:55:00.000Z",
+            sourceProfileId: "dev",
+            kind: "delivered",
+          };
+          parsed.frontmatter.pr = {
+            number: 15,
+            state: "review",
+            title: "VIB-1",
+            headSha: "a".repeat(40),
+          };
+        },
+      );
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    };
+
+    // No committed head at all.
+    const none = await offer();
+    expect(none.outcome).toBe("noop");
+    expect(none.message).toContain("has no committed head on record");
+    // A head PR #15 already carries. CANARY: delete the ruling 489 arm and
+    // this packet opens, promising a push the resolution would not make.
+    await setHead("a".repeat(40));
+    const delivered = await offer();
+    expect(delivered.outcome).toBe("noop");
+    expect(delivered.message).toContain("`aaaaaaa` is already delivered (PR #15 carries it)");
+    expect(task().packet).toBeNull();
+
+    // A committed head nothing delivered: the one case the option is for.
+    await setHead("b".repeat(40));
+    const owed = await offer();
+    expect(owed.outcome).not.toBe("noop");
+    expect(task().packet?.options[0]?.kind).toBe("deliver_for_review");
+  });
+
   it("ruling 237: refuses a question_reviewer that names no reviewer, or names one this task does not have", async () => {
     // The option's whole promise is "ask THIS agent". Unchecked, the resolution
     // would dispatch nobody, or dispatch the deliverer with a prompt telling it
