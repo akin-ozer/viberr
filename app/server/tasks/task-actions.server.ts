@@ -21,6 +21,7 @@ import type {
   CollisionServerOutcome,
   ResolvedPacketOption,
 } from "~/shared/packet-server-outcome";
+import type { RelayPayload } from "./task-relay.server";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -1359,6 +1360,9 @@ export interface AutoInvokeOptions {
   resolvedOption?: ResolvedPacketOption;
   /** Ruling 131(e): dependencies-released trigger — what was waited on. */
   dependencyRelease?: DependencyReleasePayload;
+  /** Ruling 488: relayed trigger — the task it came from, who sent it and
+   *  the text, so the turn instruction carries what arrived. */
+  relay?: RelayPayload;
 }
 
 /** Best-effort operator handoff; dynamically imported to avoid a module cycle.
@@ -1490,10 +1494,13 @@ export async function autoInvokeOperator(
     | "pr-conflicting"
     // Ruling 482: the project's gates failed on the revision under review.
     // Only the operator dispatches the rework, so the result is handed here.
-    | "gates-failed",
+    | "gates-failed"
+    // Ruling 488: work on another task of this project relayed text here.
+    // The operator reads it the way it reads a person's @operator comment.
+    | "relayed",
   options: AutoInvokeOptions = {},
 ): Promise<void> {
-  const { transitionDepth, transition, resolvedOption, dependencyRelease } = options;
+  const { transitionDepth, transition, resolvedOption, dependencyRelease, relay } = options;
   try {
     const { resolveOperatorAuthority } = await import("./operator-actions.server");
     const authority = resolveOperatorAuthority(ctx, projectSlug);
@@ -1515,6 +1522,7 @@ export async function autoInvokeOperator(
     }
     if (resolvedOption) runInput.resolvedOption = resolvedOption;
     if (dependencyRelease) runInput.dependencyRelease = dependencyRelease;
+    if (relay) runInput.relay = relay;
     await runOperator(db, runInput);
   } catch (error) {
     logger.error("auto operator invocation failed", {
@@ -5007,14 +5015,15 @@ export async function applyAgentCompletionEffects(
   // profile's name, the exact posture the run layer had just withheld.
   let grants: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[] =
     withheldAgentGrants();
+  /** Ruling 488: the deployed profile's name, the author a relay names; null
+   *  for a vanished profile, whose relays are withheld like its grants. */
+  let deployedName: string | null = null;
   if (input.profileId) {
     try {
       const { resolveDeployedSpecialist } = await import("./specialist-run.server");
-      grants = resolveDeployedSpecialist(
-        ctx,
-        input.projectSlug,
-        input.profileId,
-      ).capabilities;
+      const deployed = resolveDeployedSpecialist(ctx, input.projectSlug, input.profileId);
+      grants = deployed.capabilities;
+      deployedName = deployed.name;
     } catch {
       // undeployed — everything stays withheld
     }
@@ -5283,6 +5292,26 @@ export async function applyAgentCompletionEffects(
     if (recorded.escalated) raisedDeadlockPacket = true;
     approvedThisReply = verdict === "approve";
     await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
+    // Ruling 488 (F40-67): the report's relays, posted through the operator's
+    // relay door with this agent as the author, after the report itself and
+    // before the operator reacts, so its snapshot already reads "Relayed to …".
+    if (outcome?.relay?.length) {
+      const { postOutcomeRelays } = await import("./task-relay.server");
+      const role = agentRoleDisplay(actorRef);
+      await postOutcomeRelays(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        author: deployedName
+          ? {
+              actorRef,
+              name: deployedName,
+              auditActor: { userId: null, label: encodeActorRef(actorRef) },
+              notifyFrom: { kind: "agent", backend: input.backend, name: deployedName, role },
+            }
+          : null,
+        entries: outcome.relay,
+      });
+    }
     // C5 (pass 23): a verdict-GRANTED reviewer finished but produced NO readable
     // verdict (no envelope, no classifiable prose). Validation is left unchanged
     // — fail-safe, correct — but the human saw a completed review run with no

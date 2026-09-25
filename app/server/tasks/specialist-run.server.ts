@@ -418,6 +418,19 @@ export const KB_CORRECTION_NOTE_CODEX =
   "- A line in one of your knowledge bases that your work PROVES wrong (a version you measured, a path, a command, a step): there is no tool to file the correction on this backend, so end your report with a section headed `Knowledge-base correction` naming the knowledge base, the document, the line, what is true instead and your evidence. The operator files it in the document, beside the line, for every later run to read.";
 
 /**
+ * Ruling 488 (F40-67): the relay, named where a specialist reads its channels.
+ * Live on WEB-9 a goal said to post the deployed CPU numbers on WEB-8, and the
+ * Platform Engineer, with no way to, wrote them into attachments "for WEB-8"
+ * that a person then pasted over by hand.
+ */
+export const RELAY_NOTE_CLAUDE =
+  "- `report_outcome`'s `relay` — when your goal or directive says to post something on ANOTHER task in this project (results it depends on, numbers it needs), put it there as `{taskKey, text}`, at most two. Viberr posts each on that task after you finish, as your comment headed with this task's key, wakes that task's operator, and records the relay here. Never write it to an attachment or a report for a person to copy over.";
+
+/** Ruling 488: the same channel on Codex, the envelope's `relay` field. */
+export const RELAY_NOTE_CODEX =
+  "- `relay` in that JSON — when your goal or directive says to post something on ANOTHER task in this project (results it depends on, numbers it needs), put it there as `{taskKey, text}`, at most two, and null otherwise. Viberr posts each on that task after you finish, as your comment headed with this task's key, wakes that task's operator, and records the relay here. Never write it to an attachment or a report for a person to copy over.";
+
+/**
  * Resolve a deployed SPECIALIST agent (kind !== "operator") from the
  * project's `agents:` deployments by profile id. The effective profile merges
  * the org template file with the deployment's loose `definition` (the same
@@ -2057,6 +2070,8 @@ async function dispatchAgentRun(
         "- `report_outcome` — at the end of your work, report `evidence`: short REFERENCES to what you checked or produced (a suite, a file, a check), never raw output, with a one-paragraph summary. You do NOT judge the work; there is no verdict on this tool for you.",
       );
     }
+    // Ruling 488 (F40-67): the relay rides whichever `report_outcome` mounted.
+    if (collab.verdict || collab.evidence) collabNotes.push(RELAY_NOTE_CLAUDE);
   } else if (
     backend === "codex" &&
     realBackend &&
@@ -2074,8 +2089,11 @@ async function dispatchAgentRun(
         (collab.evidence
           ? ', "evidence": [{"label", "add", "del"}] (short REFERENCES to what you checked — a suite, a file, a check — never raw output)'
           : "") +
+        // Ruling 488: every envelope carries the relay field.
+        ', "relay": [{"taskKey", "text"}] (only when you must post something on another task)' +
         "}.",
     );
+    collabNotes.push(RELAY_NOTE_CODEX);
     if (collab.ask) {
       // F20-32: on Codex the ask-human capability IS this `question` field —
       // there is no callable `ask_human` tool on this backend (the in-process

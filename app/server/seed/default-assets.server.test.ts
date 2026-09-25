@@ -187,6 +187,48 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(doctrine).not.toContain("nothing done and no packet");
   });
 
+  /**
+   * Ruling 488 (F40-67): text meant for another task is relayed, never handed
+   * to a person to post there. Live on WEB-9 the acceptance packet asked the
+   * owner to confirm two attachments had been pasted onto WEB-8 by hand.
+   */
+  it("ruling 488: the doctrine and the specialist handbook relay text between tasks and never hand it to a person, and their outgoing hashes are recorded", async () => {
+    // Canaries: drop the doctrine's paragraph, the app skill's tool line or
+    // the Developer's reporting bullet; remove any of the three hashes.
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
+    expect(shippedCopyIsUnedited(OPERATOR_REL, "474502b29f913396ec86de5f2fd8088d7a0a221a12342e5972ea815cc8d1fa0c", {})).toBe(true);
+    expect(
+      shippedCopyIsUnedited(
+        path.join("skills", "viberr-app-expertise", "SKILL.md"),
+        "a0e0896423dc9a9344d814181c90346c65a6068f84b7512d4820d6994cbf3bc7",
+        {},
+      ),
+    ).toBe(true);
+    expect(
+      shippedCopyIsUnedited(
+        path.join("skills", "developer-expertise", "SKILL.md"),
+        "6c22506cf4bb40c40011d2c0afefbdd7f59d0bd891a8ecdf3df0c1ec00a5392a",
+        {},
+      ),
+    ).toBe(true);
+    const doctrine = shipped();
+    expect(doctrine).toContain("post it there with `relay_to_task`");
+    expect(doctrine).toContain(
+      "Never hand text to a person to copy, paste or post between tasks, never ask for an attachment to be carried over, and never ask a person to confirm a relay landed",
+    );
+    const asset = (file: string) =>
+      readFileSync(path.join(REPO_ROOT, "app/server/seed/assets", file), "utf8");
+    expect(asset("viberr-app-expertise.skill.md")).toContain(
+      "- `relay_to_task` posts on ANOTHER task in this project (ruling 488)",
+    );
+    expect(asset("developer-expertise.skill.md")).toContain(
+      "put it in the `relay` entries of your reported outcome",
+    );
+    expect(asset("developer-expertise.skill.md")).toContain(
+      "Never write it to an attachment or into your report for a person to copy over.",
+    );
+  });
+
   it("pass 34 A13: the operator doctrine shipped before `set_dependencies` is a recorded prior hash, so a live store upgrades in place", async () => {
     // Canary: remove the outgoing hash from PRIOR_SHIPPED_HASHES.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");

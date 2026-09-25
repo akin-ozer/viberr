@@ -452,6 +452,26 @@ writer.
   cannot reroute it to the operator or notify a GitHub login. The deliverer resumes on it
   exactly as on a typed mention, under the same role gate: a contributor's notes post and
   start nothing, and the toast says so.
+- **Work on one task reaches another task of the same project** (ruling 488,
+  `task-relay.server.ts`). The operator's `relay_to_task` and a specialist's `relay`
+  entries (posted at completion, at most two per report) both go through `relayToTask`.
+  On the TARGET it writes a `comment` by the relaying actor (the operator, or the agent's
+  own ref), headed `**From <source> (<operator | agent name>):**` above the text, marked
+  `toAgent` so compaction keeps the hand-off; @mentions in the text notify as on any
+  comment; the audit row is `task.relayed {from, to}` on the target; and the target's
+  operator is woken with the `relayed` trigger, the way an `@operator` comment wakes it.
+  On the SOURCE it writes one `note` by the same actor: `Relayed to <target>: <first
+  line>…` (the first non-blank line without heading marks, cut at 120 characters, the
+  ellipsis when more follows). That line is how the source's operator sees in its
+  snapshot that the relay went out. Refused with nothing written: an empty text, the
+  source itself, a key that is not a task here (`noop`), a task of another project
+  (`denied`, naming the project), a closed target, Done or archived (`noop` with the
+  closure sentence, ruling 177: its operator starts no run, so a relay would reach
+  nobody; reopening it is a person's stage move), and an archived project. There is no
+  length cap, as there is none on a comment, and no operator guardrail applies: the
+  meaningful-comment drop and the evidence trim would cut exactly what a relay carries.
+  A specialist entry past the cap, refused by the door, or from a profile no longer
+  deployed is named in one `note` titled "Not relayed" on the source task.
 - A comment written by the operator or an agent starts no run for an agent it tags; it is
   stamped with the handles that will read nothing (rulings 214, 262). A directive the
   operator writes to an agent (`audience: "agent"`) notifies no person named inside it
@@ -940,7 +960,10 @@ violations and refusals; neutral system remarks are `note`; `continuity` marks a
 resumed session whose provider transcript was gone, or a large session deliberately set
 aside for a fresh one. A `note` titled "Recommendation withdrawn" records an acceptance
 offer that no longer holds and why (ruling 137); it is a system remark, never a `policy`
-event. The projection serves a bounded newest-first slice and the page asks for older
+event. A `note` reading "Relayed to <task>: <first line>…" records text this task posted
+on another task of the project, written by whoever relayed it; a `note` titled "Not
+relayed" names a specialist's relay that did not go out and why (ruling 488, §7). The
+projection serves a bounded newest-first slice and the page asks for older
 events on demand (NFR5).
 
 The compaction guardrail folds old routine comments into one "Compacted" marker once the

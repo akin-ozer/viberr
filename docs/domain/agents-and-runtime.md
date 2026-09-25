@@ -576,7 +576,10 @@ Codex, which sends no `rate_limit_event`. A reading observed after an exhaustion
   unavailable | service unavailable | server error`.
 - Structured output: when a specialist has a verdict, ask or evidence grant, the run
   carries `outputSchema = AGENT_OUTCOME_JSON_SCHEMA` and the envelope replaces the tool
-  calls a Claude specialist would make. The Codex operator returns a plan the server
+  calls a Claude specialist would make. Its `relay` field (ruling 488, required and
+  nullable like the rest) is the Codex half of `report_outcome`'s: every entry is parsed
+  and kept, a garbled one costs only itself, and the cap of two is applied where the
+  entries are posted, with the rest named, because an envelope is the agent's last word. The Codex operator returns a plan the server
   executes ([operator.md §5](operator.md#5-tools-and-the-governed-actions-behind-them)).
 - A knowledge-base correction (ruling 483): a Codex specialist with a knowledge base has
   no `propose_kb_correction` tool, so its prompt's Collaboration section
@@ -1204,11 +1207,18 @@ and get the outcome envelope instead (§2.5).
 |---|---|---|
 | `post_comment` | `comment-on-task` | timeline comment, audit `task.agent.commented`; a comment that tags an agent says it reached nobody (ruling 252) |
 | `ask_human {title, body?, options?: [{title, detail?, reply?}]}` | `ask-human` | opens an "Agent question" input packet with `askedBy = profileId`, audit `task.agent.packet_opened`, the owner's notification under the agent's name (ruling 222), filed as kind `question` with its own "Agent questions" toggle, pill and hand glyph (ruling 481(a); the Codex outcome envelope's question writes the same kind); more than 4 options is refused by the schema with nothing written, never trimmed (ruling 298); refused while a packet is open. Only the option whose title ends "(Recommended)" is recommended; an unmarked list recommends nothing and the card preselects nothing. `reply: true` marks an option that needs the person's typed answer, which the card and `resolvePacket` require (ruling 478(e)); the Codex envelope's `question.options[]` carries the same `reply`. An answer that sends work back (`request_edit`, `redirect`, `custom`) resumes this agent (ruling 33), unless the chosen option or the person's note names another deployed agent or the operator, in which case it goes to the operator with a note saying why (ruling 447, `answerNamesAnotherActor`) |
-| `report_outcome {summary, verdict?, evidence?}` | `report-validation-verdict` (the `verdict` field) or `attach-evidence-references` (the `evidence` field); built when either is granted | staged ONCE under the run's `outcome_key`, consumed once at completion; a second call changes nothing, is answered `[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.` and audits `task.agent.outcome_duplicate` {`runId`, `outcomeKey`, `count`} |
+| `report_outcome {summary, verdict?, evidence?, relay?}` | `report-validation-verdict` (the `verdict` field) or `attach-evidence-references` (the `evidence` field); built when either is granted; `relay` rides every variant | staged ONCE under the run's `outcome_key`, consumed once at completion; a second call changes nothing, is answered `[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.` and audits `task.agent.outcome_duplicate` {`runId`, `outcomeKey`, `count`}. `relay: [{taskKey, text}]` (ruling 488) is text for OTHER tasks of the same project, at most `RELAY_MAX_ENTRIES` (2); a third entry is refused by the schema by name, nothing staged, so the agent re-reports in the same run. The completion posts each entry (§4.4) |
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 48 000 chars), audit `task.agent.github_read` |
 | `read_board {taskKey?}` | none; built only when another tool already was | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal) or the list; archived tasks included (ruling 281, `board-read.server.ts`) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
 | `propose_kb_correction {kb, doc, line?, correction, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | files one non-binding entry under `## Proposed corrections (not binding)` in that document (`proposeKbCorrection`, ruling 483): only against a knowledge base this run was given, the quoted `line` must stand in the settled text, the same open correction is a `[noop]`; a `proposal` timeline event under the agent's own name, audit `task.kb_proposal.filed`, a `quality` notification from the agent |
+
+A specialist has no post tool of its own for another task (ruling 488): its reach there is
+the `relay` entries of the outcome it already reports, posted by the completion through the
+operator's relay door (`relayToTask`). The prompt's Collaboration section names it wherever
+the outcome channel exists (`RELAY_NOTE_CLAUDE` beside `report_outcome`, `RELAY_NOTE_CODEX`
+beside the envelope): put what the goal says belongs on another task there, never in an
+attachment or a report for a person to copy over.
 
 The outcome is the first envelope a run reports. The already-staged check reads the
 in-process map and the persisted row, so an envelope staged before a restart still stands
@@ -1292,6 +1302,15 @@ write grant.
    scanned for a stray `projects/<slug>/tasks/<KEY>/attachments` folder an older prompt
    caused; when one exists a `policy` line by `system:delivery` names the folder, the
    files it holds ("NOT posted on this task") and the real attachments dir.
+   Relays (ruling 488): the envelope's `relay` entries are posted next, after the reply and
+   before the operator reacts, so its snapshot already reads the source line.
+   `postOutcomeRelays` posts the first two through `relayToTask` with the agent as the
+   author (the deployed profile's name in the header, the agent's actor ref on both
+   tasks, the audit row labelled with the agent); an entry past the cap, an entry the door
+   refuses (another project, this task, a missing or closed task) and every entry of a
+   profile that is no longer deployed are named in ONE `note` titled "Not relayed" on
+   this task, by `system:policy-engine`, which says the operator can post it with
+   `relay_to_task` and that nobody copies it by hand.
 5. A comment a busy agent refused while this run was live (from its row's `created_at`)
    is redelivered now, before the error and closed-task branches, and a delivery that
    cannot start withdraws the promise on the record (rulings 203, 211(a,b)).

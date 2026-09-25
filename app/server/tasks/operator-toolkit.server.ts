@@ -33,6 +33,7 @@ import {
   operatorCancelSchedule,
   operatorScheduleRun,
   operatorPostComment,
+  operatorRelayToTask,
   operatorSetDependencies,
   operatorSetGoal,
   operatorSnapshot,
@@ -97,6 +98,18 @@ export const SCHEDULE_TOOL_DESCRIPTION =
   "Use it whenever the task has to wait for a moment in time: a deployed cron run to read, a provider window to reopen, a deploy to land. That wait is scheduled, never asked: do not ask a person to schedule it or to route it through the controller, and do not ask anyone to confirm it. " +
   "A hold that a pending schedule explains needs NO decision packet: write one timeline note naming the schedule and end your turn. The entry is the record, get_task lists it under `schedules`, and Viberr does not treat the task as stranded while it is pending. " +
   "It is the run you could start now, with a date on it: an agent you could not dispatch now (not deployed, held by a dependency, not eligible at the task's stage) cannot be scheduled either. It fires on the profile deployed when it fires, and the reply names the schedule id.";
+
+/**
+ * Ruling 488 (F40-67): the operator's `relay_to_task`. Exported so a test pins
+ * the doctrine it carries: text meant for another task is relayed, never
+ * handed to a person to post by hand.
+ */
+export const RELAY_TOOL_DESCRIPTION =
+  "Post on ANOTHER task in this project (ruling 488): results a goal or a person told this task to post there, numbers another task depends on, a finding its owner must see. " +
+  "It lands on that task's timeline as your comment, headed \"From <this task> (operator):\", its operator is woken with it the way an @operator comment wakes it, and this task's timeline gets one line, \"Relayed to <task>: <first line>\". " +
+  "Use it instead of handing text to a person: never ask anyone to copy, paste or post text between tasks, and never ask a person to confirm a relay landed, since the line on this task is the record. " +
+  "An agent's report whose `relay` entries were posted already says so on this timeline (\"Relayed to …\"), so do not relay the same text again. " +
+  "Refused: a task in another project, this task itself, a task that does not exist (check with read_board), and a closed task (Done or archived), whose operator starts no run.";
 
 /** What the run mounts, keyed by server name: the in-process `viberr`
  *  governance server, plus whichever org MCP grants resolved. */
@@ -539,6 +552,31 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           ),
       ),
       "post_comment",
+    );
+    // Ruling 488 (F40-67): the comment's reach, one task over. Same grant.
+    add(
+      tool(
+        "relay_to_task",
+        RELAY_TOOL_DESCRIPTION,
+        {
+          taskKey: z
+            .string()
+            .describe("The other task's key in this project, e.g. WEB-8."),
+          text: z
+            .string()
+            .describe("What to post there (markdown allowed), whole: it is what that task reads."),
+        },
+        async (args: { taskKey: string; text: string }) =>
+          resultText(
+            await operatorRelayToTask(
+              db,
+              ctx,
+              { ...base, toTaskKey: args.taskKey, text: prose(args.text) },
+              authority,
+            ),
+          ),
+      ),
+      "relay_to_task",
     );
     add(
       tool(

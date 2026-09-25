@@ -94,6 +94,7 @@ from the workflow graph, never a stored preset).
 | `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict (ruling 332), or the reconciler's flip of an open PR to conflicting (ruling 475(b)); the instruction names both origins |
 | `gates-failed` | rework | Viberr's own run of the project's gates on the revision under review finished with a gate that did not exit 0 (ruling 482). The turn names each failing gate, its command and its log's attachment name, tells the operator to `run_agent` the deliverer with them and deliver the fix, and forbids asking an agent to re-run the gates to report them |
 | `stranded` | decide what happens next | the stranded-task sweep (§3.1, ruling 330) |
+| `relayed` | read what arrived | another task of the project relayed text here (ruling 488): the operator's `relay_to_task` there, or a specialist's `relay` entry posted at its completion. The payload (`relay`) carries the source task, the author's name, the text and the relayed comment's stamp; the turn quotes the text (cut at `AGENT_REPORT_CAP_TOOLLESS`, with the stamp for the rest), says it is data, says to act on it when it delivers what the task waited for, and forbids asking a person to copy it or confirm it arrived. It goes first, ahead of the held doctrine, the way a person's comment does. Not refused by an open packet or a dependency hold |
 | `scheduled` | re-check | the schedule runner; the turn says who set it ("a human set earlier", or "you set earlier yourself" for the operator's own entry, `scheduledByOperator`, ruling 487) |
 | `manual` | coordinate | the Run-operator control, an `@operator` comment, boot recovery, the controller's `run_agent_on_task` |
 
@@ -157,7 +158,8 @@ stranded backstops treat a non-empty `blockedBy` as a recorded hold and never nu
 `runOperator` entry through provider completion and, for Codex, plan execution. Queued
 triggers coalesce per kind: machine triggers keep only the latest (the deeper
 `transitionDepth` and a `strandedResume` mark survive the overwrite), while
-reason-carrying triggers (a human `@operator` comment, a scheduled re-check) queue FIFO
+reason-carrying triggers (a human `@operator` comment, a scheduled re-check, a relay from
+another task, ruling 488) queue FIFO
 up to 8 (`MAX_PENDING_CARRIED_TRIGGERS`; an overflow drop is noted on the task) and drain
 oldest-first ahead of the machine slot. Consecutive comments from the same author merge
 into one turn. A restart-orphaned run is finalized (`interrupted`, reason `restart`) and
@@ -265,6 +267,13 @@ locked write, offering `question_reviewer` among its options (ruling 237); when 
 packet is open at that instant the escalation is skipped and raised again when that one is
 answered (ruling 328).
 
+**Text for another task** (ruling 488). The non-negotiable rules carry it whatever the
+persona says: text meant for ANOTHER task of the project is posted there with
+`relay_to_task`, an agent's `relay` entries are posted for it, and nobody is handed text
+to copy between tasks or asked to confirm a relay landed. The `agent-reply` instruction
+says a "Relayed to …" line means the agent's relay already went out, and to relay the
+work itself otherwise.
+
 **Knowledge the work proved wrong.** The `agent-reply` instruction carries two duties
 about knowledge bases. A reviewer's objection to a defect CLASS the rulings have no
 convention for is proposed as that convention (ruling 418). And a report that says a
@@ -346,14 +355,16 @@ in-process MCP server `viberr` (loaded up front, `alwaysLoad`), its granted org 
 with marked write tools withheld (ruling 176), and the deny list
 `OPERATOR_READ_ONLY_DENIED_TOOLS` (`Bash`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`).
 On Codex it runs in a scratch working directory with the task store and checkout read-only
-and returns a structured plan over fifteen verbs (`post_comment`, `open_packet`,
+and returns a structured plan over sixteen verbs (`post_comment`, `open_packet`,
 `resolve_packet`, `set_goal`, `run_agent`, `transition_stage`, `deliver_for_review`,
 `update_branch_from_base`, `accept_completion`, `flag_context_conflict`,
 `set_dependencies`, `propose_kb_correction`, `lease_files`, `schedule_task_action`,
-`cancel_task_schedule`), the schema narrowed to what its policy allows
+`cancel_task_schedule`, `relay_to_task`), the schema narrowed to what its policy allows
 (`operatorPlanToolsFor`; the two schedule verbs only on a `direct` dispatch grant, and never
 in the all-denied fallback) and its packet options carrying every payload the
-Claude tool does (ruling 433). The server executes the plan after the run
+Claude tool does (ruling 433). `relay_to_task` takes the target in the plan's `taskKey`
+field (required and nullable, ruling 488) and the text in `text`, and like `post_comment`
+it still posts after a step of the plan opened a packet. The server executes the plan after the run
 (`runtime.operator.plan_executed` is the idempotency marker boot recovery reads). Once a
 step leaves the task holding a packet it did not hold when the plan began, the remaining
 acting steps are not carried out and a note lists them (ruling 430); a step whose outcome
@@ -363,7 +374,7 @@ refusals the plan collected before it (`withEarlierRefusals`, ruling 446).
 ## 5. Tools and the governed actions behind them
 
 A withheld capability means the tool is **not built**; the model cannot reach it. The
-`viberr` server holds up to 21 tools.
+`viberr` server holds up to 22 tools.
 
 | Tool (`viberr`) | Action | Capability |
 |---|---|---|
@@ -374,6 +385,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `read_knowledge_doc` | one document of a KB attached to the operator (ruling 283) | always, when it holds a KB |
 | `read_default_branch_file` | anchored default-branch read (§4) | always, when the run has a checkout |
 | `post_comment` | `operatorPostComment` (guardrails applied, §7; narration stored verbatim, ruling 104) | `append-typed-events` |
+| `relay_to_task` | `operatorRelayToTask` → `relayToTask` (ruling 488: posts `text` on ANOTHER task of this project as the operator's comment headed "From <this task> (operator):", audits `task.relayed {from, to}`, wakes that task's operator with the `relayed` trigger and writes "Relayed to <task>: <first line>…" on this task; refuses another project (`denied`), this task, a missing task and a closed one, Done or archived (`noop`)) | `append-typed-events` |
 | `set_goal` | `operatorSetGoal` (fills only an unspecified goal; refuses to overwrite a specified one) | `append-typed-events` |
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 56) | `append-typed-events` |
 | `propose_kb_correction` | `operatorProposeKbCorrection` → `proposeKbCorrection` (rulings 378 and 483: files one non-binding, dated, task-stamped entry, `- **[<task>, <day>, Operator]** <correction>` with `Line:` and `Evidence:`, under `## Proposed corrections (not binding)` in a document of any knowledge base a run on the task was given, the operator's own or an engaged agent's; `kb` omitted means the project's rulings; the quoted `line` must stand in the settled text; edits no settled line; the same open correction of the same line is a `noop`; refuses a knowledge base no run on the task was given, a project with no rulings KB when `kb` is omitted, and a document the knowledge base does not hold; writes a `proposal` event titled "Proposed ruling change" or "Proposed knowledge-base correction", audit `task.kb_proposal.filed`, and a `quality` notification to the task's watchers; ruling 418 widens its use to a convention review shows is MISSING, and ruling 483 to relaying a correction an agent's report proved) | `append-typed-events` |
@@ -482,6 +494,28 @@ Details that matter:
   points at the closed-PR recovery packet (open one when none covers the PR; never
   deliver again, never ask an agent to push); a person's answer to that packet, or a
   reopen on GitHub, is what lets the next `deliver_for_review` open a fresh PR.
+- **Relays** (ruling 488, F40-67). Live on WEB-9 a goal told the task to post its
+  deployed CPU numbers on WEB-8; nothing that worked a task could write on another one,
+  the acceptance packet asked the owner to confirm two attachments had been pasted over,
+  and a person pasted 5,117 characters by hand. `relay_to_task(taskKey, text)` is the
+  comment's reach one task over, on the comment's grant: `relayToTask`
+  (`task-relay.server.ts`) writes the target's comment as the operator with the source
+  named in its header, marked `toAgent` so compaction keeps it, fans out the text's
+  @mentions, audits `task.relayed {from, to}` on the target, writes the source's one line
+  ("Relayed to WEB-8: <first line>…", which is how this operator's snapshot shows the relay
+  went out) and wakes the target's operator fire-and-forget through `autoInvokeOperator`
+  with the `relayed` trigger (§3). The reply says whether an operator is deployed there to
+  pick it up. A closed target (Done or archived) is refused rather than allowed: its
+  operator refuses every trigger (ruling 177), so the relay would wake nobody and read as
+  delivered to finished work; reopening it is a person's stage move. The text takes a
+  comment's limits: no length cap (there is none on a comment) and none of the operator's
+  comment guardrails, whose chatter drop and evidence trim would cut what a relay carries.
+  A specialist relays through its outcome's `relay` entries instead, posted by the same
+  door at its completion ([agents-and-runtime.md §4.4](agents-and-runtime.md#44-completion)).
+  The doctrine, the non-negotiable rules, the fallback persona, the app skill's Tools list
+  and the `agent-reply` turn all say it: text meant for another task is relayed, a
+  "Relayed to …" line means an agent's relay already went out, and nobody is asked to copy
+  text between tasks or to confirm that a relay landed.
 - **Leases** (rulings 417, 426). `lease_files(paths, reason)` leases globs to the
   operator's OWN task, checked inside the project file's lock: a path another active task
   already holds is refused by name (the holder keeps it), and so is a path another active

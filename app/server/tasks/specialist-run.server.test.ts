@@ -97,6 +97,8 @@ import {
   resolveResumeConfinement,
   KB_CORRECTION_NOTE_CLAUDE,
   KB_CORRECTION_NOTE_CODEX,
+  RELAY_NOTE_CLAUDE,
+  RELAY_NOTE_CODEX,
   type DispatchHeldError,
 } from "./specialist-run.server";
 import { execFile } from "node:child_process";
@@ -2277,6 +2279,49 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       expect(spec.prompt, backend).not.toContain(
         backend === "codex" ? KB_CORRECTION_NOTE_CLAUDE : KB_CORRECTION_NOTE_CODEX,
       );
+    }
+  });
+
+  /**
+   * Ruling 488 (F40-67): a run is told how to post on another task, per
+   * backend. Live on WEB-9 the Platform Engineer wrote its results for WEB-8
+   * into attachments a person pasted over by hand.
+   */
+  it("ruling 488: a run with an outcome channel is told its relay, per backend", async () => {
+    for (const backend of ["codex", "claude"] as const) {
+      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...file.parsed.frontmatter,
+        repo: null,
+        agents: [
+          {
+            // Evidence granted, so both backends carry the outcome channel
+            // the relay rides.
+            profileId: "dev",
+            capabilities: [{ capabilityId: "attach-evidence-references", mode: "direct" }],
+            extras: [],
+            definition: {
+              kind: "specialist",
+              name: "dev",
+              role: "developer",
+              backends: [backend],
+              model: backend === "codex" ? "gpt-5-codex" : "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      const spec = specs.at(-1)!;
+      // CANARY: drop either note and the run has a channel nobody named.
+      expect(spec.prompt, backend).toContain(backend === "codex" ? RELAY_NOTE_CODEX : RELAY_NOTE_CLAUDE);
+      expect(spec.prompt, backend).not.toContain(backend === "codex" ? RELAY_NOTE_CLAUDE : RELAY_NOTE_CODEX);
     }
   });
 

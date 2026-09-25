@@ -453,6 +453,44 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
+   * Ruling 488 (F40-67): a specialist reaches another task through the report
+   * it already makes. `relay` rides every variant of `report_outcome`, holds
+   * at most two entries (a third is refused by name, so the agent re-reports
+   * inside the same run), and is staged with the outcome for the completion
+   * pipeline to post.
+   */
+  it("ruling 488: report_outcome stages up to two relay entries and refuses a third by name", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    // Evidence only: the WEB-9 Platform Engineer's shape, no verdict grant.
+    const server = mountFor({ comment: false, ask: false, verdict: false, evidence: true });
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+    const toolText = z
+      .object({ content: z.array(z.object({ text: z.string() })) })
+      .transform((r) => r.content.map((c) => c.text).join("\n"));
+
+    const three = ["VIB-8", "VIB-9", "VIB-10"].map((taskKey) => ({ taskKey, text: `For ${taskKey}.` }));
+    // CANARY: drop `.max(RELAY_MAX_ENTRIES)` and this stages all three.
+    expect(
+      toolText.parse(await client.callTool({ name: "report_outcome", arguments: { summary: "Done.", relay: three } })),
+    ).toMatch(/too big|at most|maximum|expected array to have/i);
+
+    // CANARY: drop the `relay` field from the tool (the call is refused as an
+    // unknown key), or stop copying it onto the staged outcome.
+    const ok = toolText.parse(
+      await client.callTool({ name: "report_outcome", arguments: { summary: "Done.", relay: three.slice(0, 2) } }),
+    );
+    expect(ok).toContain("2 relay(s) to VIB-8, VIB-9, posted there when you finish");
+    expect(takeStagedOutcome(lastStore.db, "ok_max_options")!.relay).toEqual([
+      { taskKey: "VIB-8", text: "For VIB-8." },
+      { taskKey: "VIB-9", text: "For VIB-9." },
+    ]);
+  });
+
+  /**
    * Ruling 478(e) (F40-31, F40-57): `ask_human` lets the agent say a choice
    * needs a typed answer, and tells it an unmarked list recommends nothing.
    */
