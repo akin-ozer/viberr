@@ -34,6 +34,7 @@ import {
   ToolListChangedNotificationSchema,
   type CallToolResult,
   type JSONRPCMessage,
+  type ListToolsResult,
   type RequestMeta,
   type ServerCapabilities,
   type ServerNotification,
@@ -51,8 +52,9 @@ import type { RunSpec } from "~/server/runtimes/adapter.server";
 import { mcpWriteToolDenyReason } from "~/server/tasks/specialist-tool-policy";
 import type { HttpMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
 import { errorMessage, toError } from "~/shared/errors";
-import { mcpReadOnlyRefusal } from "~/shared/mcp-oauth";
+import { mcpReadOnlyRefusal, type McpOAuthView } from "~/shared/mcp-oauth";
 import type { McpToolDenial } from "~/shared/mcp-tools";
+import { MCP_GRANT_TOOL, MCP_GRANT_TOOL_NAME, mcpGrantToolResult } from "./grant-tool.server";
 import { connectStdioUpstream } from "./upstream-stdio.server";
 import {
   connectHttpUpstream,
@@ -97,6 +99,10 @@ import {
  *    arguments or result) and a call to a marked write tool is audited. An
  *    upstream authorization refusal on an OAuth connection whose grant holds
  *    no write gains one sentence naming the grant and the remedy (ruling 486).
+ *  - On an OAuth-signed-in connection the gateway adds one tool of its own,
+ *    `viberr_connection_grant`, and answers it itself: the granted scopes,
+ *    writes and reads listed apart, and the sign-in's expiry (ruling 486,
+ *    F40-66, `grant-tool.server.ts`).
  *
  * State lives on `globalThis`, like the run service's, so a dev-server module
  * reload keeps the listener and the live tokens instead of opening a second port.
@@ -926,6 +932,20 @@ function toolRefusedAuthority(result: CallToolResult): boolean {
 }
 
 /**
+ * `server`'s OAuth sign-in as its registry row reads now (ruling 469's public
+ * half, which holds no token), or null when it is not an OAuth connection. A
+ * registry that cannot be read is logged and reads as null.
+ */
+function oauthViewOf(grant: RunGrant, server: string): McpOAuthView | null {
+  try {
+    return listMcpServers(grant.db).find((entry) => entry.name === server)?.oauth ?? null;
+  } catch (error) {
+    logger.warn("mcp gateway could not read a server's grant", { mcp: server, err: toError(error) });
+    return null;
+  }
+}
+
+/**
  * Ruling 486(d): the sentence an authorization refusal gains when `server` is
  * signed in with OAuth and its grant holds no write — read from the row now,
  * so a sign-in again with write scopes stops it at once. Before, the run read
@@ -934,12 +954,7 @@ function toolRefusedAuthority(result: CallToolResult): boolean {
  * remedy without seeing why (F40-63).
  */
 function readOnlyGrantNote(grant: RunGrant, server: string): string | null {
-  try {
-    return mcpReadOnlyRefusal(listMcpServers(grant.db).find((entry) => entry.name === server)?.oauth);
-  } catch (error) {
-    logger.warn("mcp gateway could not read a server's grant", { mcp: server, err: toError(error) });
-    return null;
-  }
+  return mcpReadOnlyRefusal(oauthViewOf(grant, server));
 }
 
 /** A named upstream error, with ruling 486's sentence after the upstream's
@@ -979,6 +994,9 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
   const upstreamCaps = opened.getServerCapabilities() ?? {};
   const capabilities: ServerCapabilities = {};
   if (upstreamCaps.tools) capabilities.tools = upstreamCaps.tools.listChanged ? { listChanged: true } : {};
+  // Ruling 486 (F40-66): an OAuth-signed-in connection offers the gateway's
+  // grant tool, so it has tools even when its server offers none.
+  if (!capabilities.tools && oauthViewOf(grant, server)?.status === "signed_in") capabilities.tools = {};
   if (upstreamCaps.resources) {
     capabilities.resources = upstreamCaps.resources.listChanged ? { listChanged: true } : {};
   }
@@ -995,18 +1013,40 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
 
   if (capabilities.tools) {
     mcp.setRequestHandler(ListToolsRequestSchema, async (request, extra) => {
-      const result = await forward(grant, upstream, (client) =>
-        client.request({ method: "tools/list", params: request.params }, ListToolsResultSchema, {
-          signal: extra.signal,
-          timeout: listMs,
-        }),
-      );
+      const result: ListToolsResult = upstreamCaps.tools
+        ? await forward(grant, upstream, (client) =>
+            client.request({ method: "tools/list", params: request.params }, ListToolsResultSchema, {
+              signal: extra.signal,
+              timeout: listMs,
+            }),
+          )
+        : { tools: [] };
+      // Ruling 486 (F40-66): a connection signed in with OAuth now offers the
+      // gateway's grant tool, once (on the first page), in place of any
+      // upstream tool of that name.
+      const grantTool = oauthViewOf(grant, server)?.status === "signed_in";
       // Ruling 176: a withheld write tool is not offered at all.
-      return { ...result, tools: result.tools.filter((tool) => !withheld.has(tool.name)) };
+      const tools = result.tools.filter(
+        (tool) => !withheld.has(tool.name) && !(grantTool && tool.name === MCP_GRANT_TOOL_NAME),
+      );
+      if (grantTool && request.params?.cursor === undefined) tools.push(MCP_GRANT_TOOL);
+      return { ...result, tools };
     });
     mcp.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       assertCallsOpen(grant, server, "tools/call");
       const tool = request.params.name;
+      // Ruling 486 (F40-66): on an OAuth connection the grant tool is answered
+      // here, from the row's public half: never forwarded, never withheld,
+      // never audited as a write.
+      const signIn = tool === MCP_GRANT_TOOL_NAME ? oauthViewOf(grant, server) : null;
+      if (signIn) {
+        logger.info("mcp gateway answered its grant tool", {
+          runId: grant.runId,
+          mcp: server,
+          status: signIn.status,
+        });
+        return mcpGrantToolResult(server, signIn);
+      }
       const started = Date.now();
       const marked = upstream.writeTools.has(tool);
       let outcome: "ok" | "tool_error" | "withheld" | "error" = "error";

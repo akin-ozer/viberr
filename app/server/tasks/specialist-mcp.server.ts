@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "~/server/logging/logger.server";
 import { mcpGatewayMountUrl } from "~/server/mcp-proxy/gateway.server";
+import { MCP_GRANT_TOOL_NAME } from "~/server/mcp-proxy/grant-tool.server";
 import { mcpGrantPhrase, summarizeMcpGrant, type McpOAuthView } from "~/shared/mcp-oauth";
 import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import type { McpToolDenial } from "~/shared/mcp-tools";
@@ -192,19 +193,27 @@ export interface McpRunGrant {
 /**
  * Ruling 486: one line per OAuth-signed-in server, naming its grant. A
  * read-only grant says what a write will meet and whose act the remedy is.
+ * A known grant points at the gateway's grant tool (F40-66): the line carries
+ * only the summary, so an agent that needs one scope asks the tool instead of
+ * a person.
  */
 function grantLine(grant: McpRunGrant): string {
   const phrase = mcpGrantPhrase(grant.scope);
   if (!phrase) {
     return `- ${grant.name}: signed in with OAuth; the server did not say which scopes it granted.`;
   }
+  const lookup = `Call its \`${MCP_GRANT_TOOL_NAME}\` tool to see exactly which scopes are granted`;
   if (summarizeMcpGrant(grant.scope)?.writes.length) {
-    return `- ${grant.name}: signed in with OAuth, granted ${phrase}.`;
+    return (
+      `- ${grant.name}: signed in with OAuth, granted ${phrase}. ${lookup} before you assume ` +
+      "a write will be refused or accepted."
+    );
   }
   return (
     `- ${grant.name}: signed in with OAuth, granted ${phrase}. The server refuses any call ` +
     "that writes, so do not attempt one; if the task needs a write, report that an org admin " +
-    "must sign it in again with write scopes in Instance settings → Agent resources."
+    `must sign it in again with write scopes in Instance settings → Agent resources. ${lookup} ` +
+    "before you assume a read will be refused or accepted."
   );
 }
 
