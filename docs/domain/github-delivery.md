@@ -326,7 +326,28 @@ steps below, with the hold sentence on the timeline (ruling 240).
    and the work is safe, deliver again in a few minutes (ruling 334); `auth_failed`
    points at the credential; only the two "nothing configured" statuses say to fix the
    repository/credential settings. Audit `github.pr.opened` on creation; `pr: {number,
-   state: review, title, headSha}` is written to the task.
+   state: review, title, headSha, bodyWritten}` is written to the task, `bodyWritten`
+   being the hash of the body just sent and the revision it describes.
+
+   A REUSED PR's body follows the delivery (ruling 474). When the revision the body was
+   written for (`pr.bodyWritten.revision`: the delivered revision, else the PR head) is
+   not the one delivered now, the body is recomposed from the current task with the
+   create path's inputs (the live compare, the delivered revision, the current goal)
+   and sent as one `PATCH /pulls/{n}` that is never retried on a 5xx; the record moves
+   to the new body and the audit row is `github.pr.body_updated {prNumber, fromRevision,
+   toRevision}`. An unchanged revision sends nothing. Before rewriting, the description
+   GitHub holds is hashed (`prBodySha256`, CRLF read as LF) against
+   `pr.bodyWritten.sha256`: a mismatch is a person's edit, which is never overwritten.
+   The timeline says so once per revision (a `github` note by `system:delivery`: the
+   description was left as the person wrote it, the revision it was written for, and the
+   revision, commits, files and +/− the PR now carries). A PR with no record (opened
+   before ruling 474, or adopted) counts as Viberr's and is rewritten. A `PATCH` that
+   fails, or a recorded description GitHub's answer did not include, never fails the
+   delivery: a `github` note says which revision the description still describes and
+   why, the audit row is `github.pr.body_update_failed` with the same fields plus
+   `reason`, and the next delivery tries again. The reconciler never reads the body; it
+   carries `bodyWritten` for the same PR, including one a delivery wrote during its
+   pass.
 5. **Afterwards**: `noChanges` is cleared, a stale push-conflict packet is withdrawn,
    `workRevision.pushedAt` is stamped on the revision whose head the push published
    (ruling 161; also a head that reaches the revision only through Viberr's own base

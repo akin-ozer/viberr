@@ -378,6 +378,14 @@ pr:                               # GitHub projection mirrored into the file
       at: 2026-09-06T19:40:02Z    # person resolves a packet while the PR is closed
       byUserId: u_arda            # (null until then). Until answered, delivery
                                   # refuses `closed_by_human`; dropped on reopen
+  bodyWritten:                    # ruling 474: the PR body Viberr last wrote, set
+    sha256: 03a8caef…             # on create and on every rewrite: its hash (CRLF
+    revision: 60049586…           # read as LF) and the revision it describes (the
+    keptRevision: 60049586…       # PR head when the task records none, else null);
+                                  # keptRevision: the revision a person's edit was
+                                  # found and kept at (one note each). Absent = never
+                                  # recorded, and a delivery treats the body as its
+                                  # own. Carried for the same PR, never inherited
 github:                           # more GitHub cache: commits + change stats
   commits: [{ sha: a91f7c2, msg: "[VIB-142] …", pushed: true }]
   changed: { files: 9, add: 412, del: 87 }
