@@ -890,7 +890,9 @@ them.
    hand-off, and one clause on the completion event ("This acceptance answers the open
    decision "…" with "…"."). Any other open packet is withdrawn (F32-11): a "Withdrew the
    open decision" note and a `task.packet.withdrawn` row with `by`. The operator's own
-   full-autonomy acceptance answers nothing, so it always withdraws. A full-autonomy
+   full-autonomy acceptance answers nothing, so it always withdraws; it is refused instead
+   while that decision offers a `create_task` whose new task waits on this one (ruling
+   492). A full-autonomy
    **operator** acceptance records `pr.state: accepted` and leaves the merge to a human
    (`complete-merge` intent, `completeTaskMerge`, after re-running the head check)
    because `merge-pull-request` is always human (ruling 40). After a successful merge
@@ -903,21 +905,28 @@ reconcile, held dependents are swept (ruling 131(e): a task whose every `blocked
 entry is now done is released), and the board renders "accepted" (or "merged").
 
 **A post-merge proof is a follow-up read task** (ruling 492, the owner's F40-64 decision).
-A person's acceptance merges the PR and moves the task to Done in the same write (a
-full-autonomy operator's acceptance moves it to Done and leaves the merge to a person), and
-no stage sits after the merge boundary, so nothing that happens after the merge happens
-inside the task. A task's done signal is therefore something it can show before
-acceptance: its gates, its reviewers' verdicts, a measurement made on the branch or
-locally. A proof only the merged or deployed code can show (a production deploy, a cron
-run on the merged code, a live page, a production log) belongs to a follow-up read task
-whose `blockedBy` names this one, raised before or at this task's acceptance: it is held
-until this task is done, then released by the sweep above (after a person's acceptance,
-the merge has landed by then).
+Acceptance moves the task to Done and no stage sits after it, so nothing that happens after
+the merge happens inside the task. A person's acceptance merges the PR first when GitHub
+can merge it (step 7); a full-autonomy operator's acceptance, and a person's that left the
+merge pending, leave `pr.state: accepted` and the merge to a person. A task's done
+signal is therefore something it can show before acceptance: its gates, its reviewers'
+verdicts, a measurement made on the branch or locally. A proof only the merged or deployed
+code can show (a production deploy, a cron run on the merged code, a live page, a
+production log) belongs to a follow-up read task whose `blockedBy` names this one,
+created before this task is accepted. The sweep above releases it when this task reaches
+Done, which can be before the merge and before the deploy, because a `blockedBy` entry
+is done at Done whatever the PR's state; so the read's goal has it confirm the change is
+merged and deployed before it reads.
 Every door that writes a goal says so, from one constant (`DONE_SIGNAL_RULE`,
 `app/server/tasks/done-signal.server.ts`): the controller's four
 ([controller-and-goals.md §7.2](controller-and-goals.md#72-defining)) and the operator's,
 which also raises the read's `create_task` option itself
-([operator.md §6](operator.md#6-decision-packets)). Nothing refuses a goal for its words.
+([operator.md §6](operator.md#6-decision-packets)). An acceptance withdraws an open
+decision it does not answer (step 7), so the operator puts the task up for acceptance only
+once a person has answered that option, and its own acceptance refuses while the open
+decision offers a `create_task` whose new task waits on this one (`followUpOptionRefusal`).
+A person's acceptance is not refused: its dialog names the decision it withdraws. Nothing
+refuses a goal for its words.
 
 **The review queue's membership** (`review-queue.server.ts`, U35-5) has two halves with
 two rules. "Waiting on your acceptance" is about the boundary: a non-archived task

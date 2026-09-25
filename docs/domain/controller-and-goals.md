@@ -925,14 +925,18 @@ with N links." (ruling 477(b)); the reply names every link started ("2 started
 now (link 1 is KNC-3, link 3 is KNC-4)") or says every link waits on something.
 
 **A link's done signal is one its task can show before acceptance** (ruling 492).
-Acceptance merges a task's PR and moves it to Done in one write
-([task-lifecycle.md §11](task-lifecycle.md#11-acceptance-and-the-endings)), so a link whose
-outcome needs a proof only the merged or deployed code can show (a production deploy, a
-cron run on the merged code, a live page, a production log) is split in two: the delivery
-link, whose done signal is its gates, its reviewers' verdicts or a measurement made on the
-branch, and a read link whose `blockedBy` names it (goal-1 links 12 and 13 on
-akinozer-com). A task created outside a chain gets the same pair: the delivery task and a
-read task whose `blockedBy` names its key. The controller's four goal doors
+Acceptance moves a task to Done and nothing after it happens inside the task; a person's
+acceptance also merges the PR when GitHub can, and a full-autonomy operator's leaves the
+merge to a person ([task-lifecycle.md §11](task-lifecycle.md#11-acceptance-and-the-endings)).
+So a link whose outcome needs a proof only the merged or deployed code can show (a
+production deploy, a cron run on the merged code, a live page, a production log) is split
+in two: the delivery link, whose done signal is its gates, its reviewers' verdicts or a
+measurement made on the branch, and a read link whose `blockedBy` names it (goal-1 links
+12 and 13 on akinozer-com). The chain starts the read link when the delivery link's task
+reaches Done, which can be before the merge and before the deploy, so the read link's goal
+confirms the change is merged and deployed before it reads. A task created outside a chain
+gets the same pair: the delivery task and a read task whose `blockedBy` names its key,
+created before the delivery task is accepted. The controller's four goal doors
 (`create_task.goal`, `update_task.goal`, `create_goal.links[].goal` and `update_goal.goal`,
 the field `add_link` and `edit_link` write) carry the rule in the goal field's description,
 from one constant (`DONE_SIGNAL_RULE`, `app/server/tasks/done-signal.server.ts`), and the
