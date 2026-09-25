@@ -1426,13 +1426,13 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // Dynamic-dispatch rework: engage_agent + prompt_agent collapsed into ONE
     // run_agent, so the fallback list shrank from 10 to 8; ruling 131 added
     // `set_dependencies` (in-Viberr, no outside effect), so it was 9; ruling
-    // 378 added `propose_ruling`, also in-Viberr and also destroying nothing,
-    // so it is 10.
+    // 378 added `propose_ruling` (ruling 483 renamed it `propose_kb_correction`),
+    // also in-Viberr and also destroying nothing, so it is 10.
     // Ruling 417's `lease_files` rides the delivery gate, so it is withheld
     // with delivery and the count stays 10.
     expect(tools).toHaveLength(10);
     expect(tools).toContain("set_dependencies");
-    expect(tools).toContain("propose_ruling");
+    expect(tools).toContain("propose_kb_correction");
     expect(tools).not.toContain("deliver_for_review");
     expect(tools).not.toContain("lease_files");
     expect(tools).toContain("flag_context_conflict");
@@ -1806,14 +1806,24 @@ describe("pr-diverged turn instruction (both backends)", () => {
     // later manual/scheduled turn, says nothing about the rulings learning.
     const reply = "Verdict: request-changes\n\ngit args are passed without --.";
     const onVerdict = buildCodexOperatorPrompt(snapshot({}), "agent-reply", undefined, reply);
-    expect(onVerdict).toContain("also `propose_ruling` that convention");
+    expect(onVerdict).toContain("also `propose_kb_correction` that convention");
     expect(onVerdict).toContain("one per class, never one per finding");
     // Ruling 410's round-two duty is on this turn too, not only in the skill.
     // CANARY: drop that sentence and the only instruction on the turn a second
     // objection lands on is "move back and rework", the loop 410 ended.
     expect(onVerdict).toContain("At the SECOND consecutive objection from the same reviewer");
     const later = buildCodexOperatorPrompt(snapshot({}), "manual");
-    expect(later).toContain("`propose_ruling` the convention in the rulings document it belongs to");
+    expect(later).toContain("`propose_kb_correction` the convention in the rulings document it belongs to");
+  });
+
+  it("ruling 483: the turn an agent's report lands on relays a knowledge-base line it proved wrong", () => {
+    // CANARY: drop the relay sentence and a Codex agent's correction, which it
+    // has no tool to file, stays in its report as it did on WEB-3.
+    const reply = "## Knowledge-base correction\n\nakin-dossier 06-platform-facts.md T-003 says 4.138.0; measured 4.139.0.";
+    const turn = buildCodexOperatorPrompt(snapshot({}), "agent-reply", undefined, reply);
+    expect(turn).toContain(
+      "If the report says a line in a knowledge base is wrong (a version, a path, a command, a step it measured) and no proposal for it is on the timeline, `propose_kb_correction` it",
+    );
   });
 
   it("ruling 431: the live lease list is explained on every turn it is present, collisions or not", () => {
@@ -3718,6 +3728,84 @@ describe("pending trigger queue", () => {
           reason: "Rewriting the sandbox lifetime; AX-21 waits on it.",
         },
       ]);
+    });
+  });
+
+  it("ruling 483: a Codex plan's propose_kb_correction files `<kb>/<doc>` against an engaged agent's knowledge base, beside the line in `reason`", async () => {
+    const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const admin = { userId: store3.users.arda.id, label: "arda" };
+    const { kb } = await saveKnowledgeBase(
+      store3.db,
+      { name: "akin-dossier", refresh: "on change" },
+      admin,
+      { dataRoot: store3.dataRoot },
+    );
+    const target = resolveStoreTarget(store3.db, "kb", kb.id, { dataRoot: store3.dataRoot })!;
+    writeStoreDoc(store3.db, target, [], "06-platform-facts.md", "# Facts\n\n- T-013: output in dist/server/\n", admin);
+    const project = readProjectFile({ projectSlug: store3.slug, dataRoot: store3.dataRoot })!;
+    writeProject(store3.dataRoot, {
+      ...project.parsed.frontmatter,
+      agents: [
+        ...project.parsed.frontmatter.agents,
+        {
+          profileId: "platform",
+          capabilities: [],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "Platform Engineer",
+            role: "Platform",
+            backends: ["codex"],
+            model: defaultModelFor("codex"),
+            resources: { skills: [], mcps: [], kb: [kb.dir] },
+          },
+        },
+      ],
+    });
+    await updateTaskFile(
+      { projectSlug: store3.slug, taskKey: "VIB-1", dataRoot: store3.dataRoot },
+      (parsed) => {
+        parsed.frontmatter.engagements = [
+          { profileId: "platform", backend: "codex", role: "Platform", delivers: true, verdictCapable: false },
+        ];
+      },
+    );
+    rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
+    await drive({ trigger: "manual" });
+    adapter3.finish(
+      store3,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "propose_kb_correction",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: "The build writes dist/worker and dist/client, not dist/server.",
+            reason: "T-013: output in dist/server/",
+            packetOptions: null,
+            kbSource: `${kb.dir}/06-platform-facts.md`,
+            repoSource: "`ls dist` after `npm run build` listed client and worker.",
+            blockedBy: null,
+            paths: null,
+            completeness: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+    // CANARY: read `kbSource` as a rulings document again (no split) and the
+    // project, which names no rulings knowledge base, refuses it.
+    await eventually(() => {
+      const body = readFileSync(
+        path.join(store3.dataRoot, "kb", kb.dir, "06-platform-facts.md"),
+        "utf8",
+      );
+      expect(body).toContain("  Line: T-013: output in dist/server/");
+      expect(body).toContain("The build writes dist/worker and dist/client, not dist/server.");
     });
   });
 

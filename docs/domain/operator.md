@@ -261,6 +261,15 @@ locked write, offering `question_reviewer` among its options (ruling 237); when 
 packet is open at that instant the escalation is skipped and raised again when that one is
 answered (ruling 328).
 
+**Knowledge the work proved wrong.** The `agent-reply` instruction carries two duties
+about knowledge bases. A reviewer's objection to a defect CLASS the rulings have no
+convention for is proposed as that convention (ruling 418). And a report that says a
+line in a knowledge base is wrong (a version, a path, a command, a step it measured),
+with no proposal for it on the timeline, is relayed with `propose_kb_correction` against
+that document and the agent's evidence (ruling 483): a Codex agent has no tool to file
+one itself, and its prompt tells it to end its report with a `Knowledge-base correction`
+section for exactly this.
+
 `get_task` returns the `OperatorTaskSnapshot` (JSON-embedded in the Codex prompt):
 
 - **The task**: key, title, goal, priority, labels, due date, stage and stage name,
@@ -334,7 +343,7 @@ On Codex it runs in a scratch working directory with the task store and checkout
 and returns a structured plan over thirteen verbs (`post_comment`, `open_packet`,
 `resolve_packet`, `set_goal`, `run_agent`, `transition_stage`, `deliver_for_review`,
 `update_branch_from_base`, `accept_completion`, `flag_context_conflict`,
-`set_dependencies`, `propose_ruling`, `lease_files`), the schema narrowed to what its
+`set_dependencies`, `propose_kb_correction`, `lease_files`), the schema narrowed to what its
 policy allows (`operatorPlanToolsFor`) and its packet options carrying every payload the
 Claude tool does (ruling 433). The server executes the plan after the run
 (`runtime.operator.plan_executed` is the idempotency marker boot recovery reads). Once a
@@ -359,7 +368,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `post_comment` | `operatorPostComment` (guardrails applied, §7; narration stored verbatim, ruling 104) | `append-typed-events` |
 | `set_goal` | `operatorSetGoal` (fills only an unspecified goal; refuses to overwrite a specified one) | `append-typed-events` |
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 56) | `append-typed-events` |
-| `propose_ruling` | `operatorProposeRuling` (ruling 378: appends one non-binding, dated, task-stamped entry under `## Proposed (not binding)` in a document of the project's rulings KB, with the evidence; edits no settled line; refuses when the project names no rulings KB or the document is not one it holds; ruling 418 widens its use to a convention review shows is MISSING) | `append-typed-events` |
+| `propose_kb_correction` | `operatorProposeKbCorrection` → `proposeKbCorrection` (rulings 378 and 483: files one non-binding, dated, task-stamped entry, `- **[<task>, <day>, Operator]** <correction>` with `Line:` and `Evidence:`, under `## Proposed corrections (not binding)` in a document of any knowledge base a run on the task was given, the operator's own or an engaged agent's; `kb` omitted means the project's rulings; the quoted `line` must stand in the settled text; edits no settled line; the same open correction of the same line is a `noop`; refuses a knowledge base no run on the task was given, a project with no rulings KB when `kb` is omitted, and a document the knowledge base does not hold; writes a `proposal` event titled "Proposed ruling change" or "Proposed knowledge-base correction", audit `task.kb_proposal.filed`, and a `quality` notification to the task's watchers; ruling 418 widens its use to a convention review shows is MISSING, and ruling 483 to relaying a correction an agent's report proved) | `append-typed-events` |
 | `open_decision_packet` | `operatorOpenPacketDisclosed` → `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 84; refuses while a packet is open) | `generate-packets` |
 | `resolve_decision_packet` | `operatorResolvePacket` (withdraws only a packet the operator raised: `from: operator` and no `askedBy`, `packetIsOperators`) | `generate-packets` |
 | `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`) | `generate-packets` (the wait is the hold packet's replacement) |

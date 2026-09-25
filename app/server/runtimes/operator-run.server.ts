@@ -75,7 +75,7 @@ import {
   operatorSetDependencies,
   operatorSetGoal,
   operatorFlagContextConflict,
-  operatorProposeRuling,
+  operatorProposeKbCorrection,
   operatorLeaseFiles,
   operatorSnapshot,
   operatorTransitionStage,
@@ -116,6 +116,7 @@ import {
 import { getProject } from "~/server/projections/board-query.server";
 import { closureRefusal, taskClosure } from "~/server/tasks/task-closure.server";
 import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
+import { splitKbSource } from "~/server/tasks/kb-proposal-actions.server";
 import { fullReplyTextForRun } from "~/server/tasks/agent-reply.server";
 import {
   DEFAULT_GOAL,
@@ -2133,12 +2134,14 @@ const OPERATOR_PLAN_TOOLS = [
   // task keys and goal links; `blockedBy: []` clears it) instead of opening a
   // hold packet. The plan mirror of the Claude toolkit's `set_dependencies`.
   "set_dependencies",
-  // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`. Every agent on
-  // the pass-39 instance ran on Codex, so a tool that exists only on the Claude
-  // toolkit would have been unreachable by the operator that actually found the
-  // false ruling. `text` carries the correction, `kbSource` the document to
-  // amend, `repoSource` the evidence.
-  "propose_ruling",
+  // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`, generalized by
+  // ruling 483 into `propose_kb_correction`. Every agent on the pass-39
+  // instance ran on Codex, so a tool that exists only on the Claude toolkit
+  // would have been unreachable by the operator that actually found the false
+  // ruling. `text` carries the correction, `kbSource` the knowledge base and
+  // document (`<kb>/<doc>`, or a bare document of the rulings), `reason` the
+  // settled line it corrects, `repoSource` the evidence.
+  "propose_kb_correction",
   // Ruling 417 (owner): lease shared files to THIS task until it merges. The
   // plan mirror of the Claude toolkit's `lease_files`; `paths` carries the
   // globs and `text` the reason.
@@ -2176,7 +2179,7 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   set_dependencies: ["generate-packets"],
   // F39-1/F39-7: same gate as `flag_context_conflict` — it writes a typed event
   // and a proposal, never a binding rule.
-  propose_ruling: ["append-typed-events"],
+  propose_kb_correction: ["append-typed-events"],
   // Ruling 417: a lease orders DELIVERIES, so it rides delivery authority —
   // resolved via deliverGate below, like `deliver_for_review` itself.
   lease_files: ["deliver-review-pr"],
@@ -2260,10 +2263,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           delivers: { type: ["boolean", "null"], description: "run_agent: true = hand delivery to this profile (owns branch/PR, one per task); false = run as supporting (review). Null derives it from the profile's grants and the task's current deliverer." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_ruling: the correction, or the missing convention (ruling 418), in one or two sentences; for lease_files: why this task holds the paths, which every task the lease refuses is shown; else null." },
-          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet." },
-          kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For propose_ruling: the rulings document to amend, by file name as the rulings knowledge base lists it. Else null." },
-          repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For propose_ruling: the EVIDENCE that proves the ruling wrong or the convention missing \u2014 the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
+          text: { type: ["string", "null"], description: "For post_comment: the comment text — narration the HUMANS read, which starts no agent, so an @name in it reaches nobody; put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for propose_kb_correction: the correction, or the missing convention (ruling 418), in one or two sentences; for lease_files: why this task holds the paths, which every task the lease refuses is shown; else null." },
+          reason: { type: ["string", "null"], description: "Short why — recommendation-card reasoning, or the packet body for open_packet. For propose_kb_correction: the settled LINE the correction replaces, quoted as the document has it (a distinctive phrase is enough); null only when it adds something the document does not say, such as a missing convention." },
+          kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For propose_kb_correction: the knowledge base and the document to correct as `<knowledge base>/<document>`, each named as the index names it (any knowledge base a run on this task was given, yours or an engaged agent's), or the document alone for the project's rulings knowledge base. Else null." },
+          repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For propose_kb_correction: the EVIDENCE that proves the line wrong or the convention missing \u2014 the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
           blockedBy: {
             type: ["array", "null"],
             items: { type: "string" },
@@ -3169,21 +3172,23 @@ async function executeCodexPlan(
             );
           }
           break;
-        case "propose_ruling":
-          // F39-1/F39-7 (pass 39): `kbSource` is the rulings document to amend,
-          // `text` the correction, `repoSource` the evidence that proves it.
-          // Reuses the plan's existing string fields rather than growing the
-          // schema — the two ruling-shaped actions then read alike.
+        case "propose_kb_correction":
+          // F39-1/F39-7 (pass 39), ruling 483: `kbSource` is `<kb>/<doc>` (or
+          // a bare rulings document), `text` the correction, `reason` the line
+          // it corrects, `repoSource` the evidence that proves it. Reuses the
+          // plan's existing string fields rather than growing the schema — the
+          // two knowledge-base-shaped actions then read alike.
           if (a.kbSource && a.text && a.repoSource) {
             record(
               a.tool,
-              await operatorProposeRuling(
+              await operatorProposeKbCorrection(
                 db,
                 ctx,
                 {
                   ...base,
-                  doc: a.kbSource,
-                  text: a.text,
+                  ...splitKbSource(a.kbSource, ctx.dataRoot),
+                  line: a.reason ?? null,
+                  correction: a.text,
                   evidence: a.repoSource,
                 },
                 authority,
@@ -3192,7 +3197,7 @@ async function executeCodexPlan(
           } else {
             skippedMalformed(
               a.tool,
-              "the rulings document, the correction, and the evidence",
+              "the knowledge-base document, the correction, and the evidence",
             );
           }
           break;
@@ -4640,7 +4645,12 @@ function operatorTurnDoctrine(
       "Whenever a `run_agent` puts that question to a reviewer, alone or folded into the review of a fresh rework, set `completeness: true` on it: Viberr then records the verdict that run returns as the complete set, and a later deadlock packet recommends one rework against it instead of the question you already asked (ruling 421). " +
       // Ruling 418 (owner): this is the turn a reviewer's verdict arrives on,
       // and it returns before the stage rules, so the duty is stated here too.
-      "If the objection is a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it, also `propose_ruling` that convention in the rulings document it belongs to, with the verdict as the evidence: one per class, never one per finding. " +
+      "If the objection is a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it, also `propose_kb_correction` that convention in the rulings document it belongs to, with the verdict as the evidence: one per class, never one per finding. " +
+      // Ruling 483 (F40-53): the relay. On Codex an agent has no tool to file
+      // a correction itself; live on WEB-3 one listed "Discrepancies to
+      // reconcile" in its report, and the answer was "I'm not changing them
+      // myself" while the next directives sent agents to the stale lines.
+      "If the report says a line in a knowledge base is wrong (a version, a path, a command, a step it measured) and no proposal for it is on the timeline, `propose_kb_correction` it against that document with the agent's evidence; never leave a correction an agent proved in a comment. " +
       "Re-prompt the same profile only when its work is incomplete, never merely to repeat the report."
     );
   }
@@ -4957,7 +4967,7 @@ function stageRule(snapshot: OperatorTaskSnapshot): string {
     // the reviewers blocked on git option injection (AX-19), credentials in
     // status (AX-22) and lost field presence (AX-24), and none became a
     // convention the next task on the same surfaces would read.
-    "- A reviewer blocked on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it: alongside your one coordination action, `propose_ruling` the convention in the rulings document it belongs to, with the verdict as the evidence. It binds nobody until a person or the controller promotes it, and every later run reads it at once. One convention per class, never one per finding; a class the rulings already cover needs nothing.\n" +
+    "- A reviewer blocked on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings knowledge base has no convention for it: alongside your one coordination action, `propose_kb_correction` the convention in the rulings document it belongs to, with the verdict as the evidence. It binds nobody until a person or the controller promotes it, and every later run reads it at once. One convention per class, never one per finding; a class the rulings already cover needs nothing.\n" +
     "- DELIVERY (push the branch + open the review PR) is YOUR decision, made with `deliver_for_review` — it is no longer a stage side-effect, and a stage named \"Review\" delivers nothing by itself. Deliver when the deliverer's work is committed and plausible for review. Weigh the REMAINING stages: a later stage (e.g. QA) need not gate delivery for this task — offer or perform early delivery when so. When unsure whether the branch should be pushed, `open_decision_packet` and ask. The tool result is honest: a `push_conflict` means the remote branch diverged (a history problem, never a credential problem) and NO PR was opened — open a decision packet naming the branch, offering `resolve_remote_collision` (clear the stale remote branch and its recorded squatting PR, then re-deliver) or `archive_task`, instead of retrying blindly. Never offer `discard_branch` for a push conflict: it destroys the task's LOCAL commits and its authoring is refused while delivered work stands.\n" +
     "- A directive you sent earlier that never became a run is an UNDELIVERED hand-off — the timeline says so (\"did NOT start a run\"), or `liveRuns` is empty with no report after your prompt. Once the blocker is gone (e.g. the stage moved to one the profile works), re-send the prompt yourself; do not wait for a report that can never come.\n" +
     "Take exactly one such action and stop. NEVER end your turn leaving the task at a pre-work or `auto` stage with nothing done and no packet: either advance the boundary, hand off to a specialist, or `open_decision_packet` when a human must scope or unblock it. A pre-work stage that needs no human input must never be left waiting on a human."

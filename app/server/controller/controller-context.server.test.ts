@@ -609,6 +609,77 @@ describe("gatherControllerContext", () => {
     expect(after.text).not.toContain("instance-standing-rules");
   });
 
+  /**
+   * Ruling 483 (F40-59): a knowledge-base proposal an agent filed comes back
+   * to the controller's next turn, because the controller runs only when a
+   * person talks to it and live on WEB-1 nothing else brought two back.
+   */
+  it("ruling 483: the project's open knowledge-base proposals ride in its scopes, and leave when resolved", async () => {
+    const { gatherControllerContext } = await import("./controller-context.server");
+    const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
+    const { writeStoreDoc } = await import("~/server/org/store-files.server");
+    const { fileKbProposal, resolveKbProposal } = await import("~/server/org/kb-proposals.server");
+    const admin = { userId: arda.id, label: "arda" };
+    const { kb } = await saveKnowledgeBase(
+      app.db,
+      { name: "ctx-dossier", refresh: "on change" },
+      admin,
+      { dataRoot: app.dataRoot },
+    );
+    const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
+    writeStoreDoc(app.db, target, [], "facts.md", "# Facts\n\n- T-003: wrangler 4.138.0\n", admin);
+    const filed = await fileKbProposal(
+      app.db,
+      {
+        kb: kb.dir,
+        doc: "facts.md",
+        line: "T-003: wrangler 4.138.0",
+        correction: "The measured wrangler is 4.139.0.",
+        evidence: "npx wrangler --version",
+        taskKey: "VIB-142",
+        filedBy: "Platform Engineer",
+        actor: admin,
+      },
+      { dataRoot: app.dataRoot },
+    );
+    if (!filed.ok) throw new Error(filed.message);
+    // CANARY: drop the proposals line from the block and neither bound scope
+    // knows the proposal waits.
+    for (const scope of [
+      { projectSlug: SLUG, taskKey: null },
+      { projectSlug: SLUG, taskKey: "VIB-142" },
+    ]) {
+      const read = gatherControllerContext(app.db, { ...scope, user: arda, dataRoot: app.dataRoot });
+      expect(read.text, JSON.stringify(scope)).toContain("Open knowledge-base proposals on this project (1)");
+      expect(read.text, JSON.stringify(scope)).toContain(filed.proposal.id);
+      expect(read.text, JSON.stringify(scope)).toContain('corrects "T-003: wrangler 4.138.0"');
+      expect(read.text, JSON.stringify(scope)).toContain("resolve_kb_proposal");
+    }
+    // The instance scope counts it under the project that filed it.
+    const instance = gatherControllerContext(app.db, {
+      projectSlug: null,
+      taskKey: null,
+      user: arda,
+      dataRoot: app.dataRoot,
+    });
+    expect(instance.text).toContain(`- ${SLUG}: 1 open proposal`);
+
+    await resolveKbProposal(
+      app.db,
+      { id: filed.proposal.id, action: "dismiss", reason: "Owner declined." },
+      admin,
+      { dataRoot: app.dataRoot },
+    );
+    const after = gatherControllerContext(app.db, {
+      projectSlug: SLUG,
+      taskKey: null,
+      user: arda,
+      dataRoot: app.dataRoot,
+    });
+    expect(after.text).not.toContain(filed.proposal.id);
+    expect(after.text).not.toContain("Open knowledge-base proposals");
+  });
+
   it("never exceeds the block budget", async () => {
     const { gatherControllerContext, CONTEXT_BLOCK_CHARS } = await import(
       "./controller-context.server"

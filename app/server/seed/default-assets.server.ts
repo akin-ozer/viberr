@@ -202,10 +202,15 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
-    // Ruling 482 (pass 40, F40-52): before "Bringing up a new project" named
-    // `set_project_gates` and the rulings paragraph stopped listing "the gate
-    // commands" as prose to write there. Every directive re-typed them and
-    // agents reported their exit codes, the claim a person could not check.
+    // Rulings 482 and 483 (pass 40, F40-52, F40-59): before "Bringing up a new
+    // project" named `set_project_gates` and the rulings paragraph stopped
+    // listing "the gate commands" as prose to write there (every directive
+    // re-typed them and agents reported their exit codes, the claim a person
+    // could not check), and before "Keeping a project's rulings current" named
+    // `resolve_kb_proposal`, the open proposals in its turn context and
+    // `get_project`, and the Promote and Dismiss buttons that ask it (two WEB-1
+    // proposals sat unpromoted while the next packet asked the owner to act on
+    // a "not binding" setting).
     "7418f3499b14e1c8ce8a0cc46d6efdec850370712f1ec56728c1130302fcb948",
     // Ruling 464 (pass 40, F40-7): before "Bringing up a new project" said to
     // pass the designed roster as `agents`, and before "No deletes" named
@@ -322,6 +327,12 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d3c186ee40962eff069c577e026843e4ce3c97fed269b99384e5bdad2fd9e108",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    // Ruling 483 (pass 40, F40-53): before `propose_ruling` became
+    // `propose_kb_correction`, which reaches any knowledge base a run on the
+    // task was given and relays a correction an agent proved. Live on WEB-3 the
+    // operator answered "I'm not changing them myself" while the dossier and
+    // runbook kept sending agents to stale lines.
+    "20acdfcb363f22622c38a48ca0f5963a5a09399aa76f87cccace59c15a2c2509",
     // Pass 35 S15: before the acceptance-stage clause on update_branch_from_base.
     "92e91052fbe1e5f3bd9898e450172de9ea87b125d52e330536b0e1d5ff2cd9ff",
     "2350a2f50e425868056d9866d885b70078b183e9934b925f1469ea0e7cc5f989",

@@ -35,6 +35,7 @@ import {
   type AgentOutcomeQuestion,
 } from "./agent-outcome.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
+import { proposeKbCorrection } from "./kb-proposal-actions.server";
 import {
   notifyMentionedUsers,
   withAmbiguityDisclosure,
@@ -111,6 +112,10 @@ const prose = normalizeEscapedNewlines;
 
 const REPORT_OUTCOME_DESCRIPTION =
   "Report your structured OUTCOME for this task: verdict ('approve' or 'request_changes') plus a one-paragraph justification. Call it exactly once, at the END of your review, right before your final report. It is recorded together with your final report when you finish.";
+
+/** Ruling 483: the specialist's half of `propose_kb_correction`. */
+export const KB_CORRECTION_SPECIALIST_DESCRIPTION =
+  "Propose a correction to a line of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Quote the line and bring the evidence. It is filed under \"Proposed corrections (not binding)\" in that document, so every run that reads the document reads it beside the line, and a person, or the controller when a person asks it, promotes or dismisses it. It changes no settled line and binds nobody, so keep working from what you proved and say so in your report. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run.";
 
 /** U11: the same tool for a profile granted evidence but NOT the verdict — it
  *  has no judgment to report, so the description must not ask for one. */
@@ -718,6 +723,78 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
               err: toError(error),
             });
             return textResult("[error] That knowledge-base document could not be read.");
+          }
+        },
+      ),
+    );
+  }
+
+  // Ruling 483 (F40-53): an agent that PROVES a line of one of its knowledge
+  // bases wrong could only say so in a comment. Live on WEB-3 the Platform
+  // Engineer wrote "the knowledge-base runbook is read-only to me, so I carried
+  // it into the repo", an hour after the Site Engineer found the same stale
+  // dossier fact, and the next directives still sent agents to the old lines.
+  // Gated like `read_knowledge_doc`, on the grant itself: an agent may propose
+  // against exactly the knowledge bases it was given, and a proposal binds
+  // nobody until a person promotes it. Mounted after `read_board`, so a
+  // knowledge base alone never widens U11's collaboration gate.
+  if (kb.length > 0) {
+    tools.push(
+      tool(
+        "propose_kb_correction",
+        KB_CORRECTION_SPECIALIST_DESCRIPTION,
+        {
+          kb: z
+            .string()
+            .describe("The knowledge base the line is in, by the name its index heading gives it."),
+          doc: z
+            .string()
+            .describe("The document's path inside that knowledge base, as the index lists it."),
+          line: z
+            .string()
+            .optional()
+            .describe(
+              "The line the correction replaces, quoted as the document has it (a distinctive phrase is enough). Omit only when the correction adds something the document does not say.",
+            ),
+          correction: z
+            .string()
+            .describe("What is true instead, in one or two sentences."),
+          evidence: z
+            .string()
+            .describe(
+              "What proves it: the command you ran and its output, the file and line you read, the check that failed.",
+            ),
+        },
+        async (args) => {
+          try {
+            const role =
+              actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
+            const result = await proposeKbCorrection(db, ctx, {
+              projectSlug,
+              taskKey,
+              kb: prose(args.kb),
+              doc: prose(args.doc),
+              line: args.line ? prose(args.line) : null,
+              correction: prose(args.correction),
+              evidence: prose(args.evidence),
+              actorRef,
+              filedBy: role,
+              auditActor: { userId: null, label: encodeActorRef(actorRef) },
+              // Ruling 361: the agent that proposed it, by name.
+              from:
+                actorRef.kind === "agent"
+                  ? { kind: "agent", backend: actorRef.backend, name: role, role }
+                  : OPERATOR_NOTIFY_FROM,
+              allowedKbs: kb,
+            });
+            return textResult(`[${result.outcome}] ${result.message}`);
+          } catch (error) {
+            logger.warn("agent propose_kb_correction failed", {
+              taskKey,
+              kb: args.kb,
+              err: toError(error),
+            });
+            return textResult("[error] The correction could not be proposed.");
           }
         },
       ),

@@ -667,10 +667,13 @@ Packet notes:
   diagnostic is recorded when it happens; that diagnostic reports the damage,
   it does not undo it.
 - Heading line: `### <UTC ISO> · <type> · <actor-ref>` — separator is
-  `<space>·<space>` (U+00B7). `type` is one of the 11 contract types in
+  `<space>·<space>` (U+00B7). `type` is one of the 12 contract types in
   `TIMELINE_EVENT_TYPES` (`comment completion github policy note quality transition blocked
-  agent assign continuity`); unknown types are kept (info diagnostic) and render as plain
-  comments. `continuity` marks a runtime-continuity RESET — a resumed session whose provider
+  agent assign continuity proposal`); unknown types are kept (info diagnostic) and render as plain
+  comments. `proposal` is a proposed knowledge-base correction (ruling 483), titled
+  "Proposed ruling change" or "Proposed knowledge-base correction"; it asks a person to
+  decide, so it is neither a review verdict (`quality`, where ruling 378 filed it) nor a
+  neutral `note`. `continuity` marks a runtime-continuity RESET — a resumed session whose provider
   transcript was gone, so the agent re-anchored on `task.md` in a fresh one. It is
   warning-toned on purpose: nothing was violated (not `policy`) and nothing is stuck (not
   `blocked`), but a supervisor scanning the board must get a cue that context was lost and
@@ -875,7 +878,41 @@ re-attach them.)
 | `agents/definitions/{operator,controller}.md` | boot (`seedDefaultAgentAssets`) | frontmatter `id`, `name`, `backend` + the doctrine body. The controller's body is the instructions its settings edit (locked by default, ruling 108); a save keeps the frontmatter head. |
 | `agents/controller-requests.md` | the controller's `request_resource_grant` tool (ruling 390); Instance settings lists the open ones | frontmatter `requests:`, newest first, each `{ id, kind (skills \| kb \| mcps), name, reason, askedAt, askedByUserId, askedByLabel, status (open \| granted \| declined \| withdrawn), closedAt, closedByLabel }`, parsed per row, + a one-line header body. One open request per (`kind`, `name`). A request leaves `open` through `closeResourceRequest`: `granted` when a Controller-tab save (`saveControllerConfig`) leaves the resource in the controller's resolved grants, `declined` from the tab's Decline button. Either stamps `closedAt` and `closedByLabel` (the admin's email), and the closed row stays as history. Nothing in the app writes `withdrawn`. |
 | `skills/<name>/SKILL.md` | the org skill writers and the store browser | markdown; every writer judges the body with `assertSkillBodyWellFormed` (ruling 183). A mounted copy gets normalized frontmatter. |
-| `kb/<dir>/**` | the KB store browser, uploads, GitHub import | any documents; agents read the live folder at run time |
+| `kb/<dir>/**` | the KB store browser, uploads, GitHub import; a proposal filed from a task (ruling 483) | any documents; agents read the live folder at run time. A document may end in a proposals section (§7) |
 | `state/shipped-assets.json` | boot | JSON map of store-relative asset path → SHA-256 of the bytes last shipped |
 | `audit-exports/audit-events-<YYYY-MM-DD>.jsonl` | the audit purge | one `audit_events` row per line, exactly as the table stores it, appended per purge day |
 | `runtimes/<backend>/<runId>.jsonl` | the run sink | one raw provider envelope per line; the truth `run_log_lines` projects |
+
+## 7. A knowledge-base document's proposals section (ruling 483)
+
+An agent that proves a line of a knowledge-base document wrong files the correction in
+that document (`fileKbProposal`, `app/server/org/kb-proposals.server.ts`). The section is
+the record: an entry is open while it stands under the heading, and nothing else lists
+proposals.
+
+```markdown
+## Proposed corrections (not binding)
+
+Raised by agents from evidence on a task. **Nothing here is binding.** A person, or the controller when a person asks it, promotes an entry into the settled text above or dismisses it.
+
+- **[WEB-3, 2026-09-24, Platform Engineer]** The build writes dist/worker and dist/client.
+  Line: T-013: output in dist/server/
+  Evidence: `ls dist` after `npm run build` listed client and worker.
+```
+
+- The heading is `KB_PROPOSALS_HEADING`, created at the END of the document the first
+  time; later entries are filed at the end of the section, in order. The reader also
+  takes ruling 378's `## Proposed (not binding)` as the section, and the next filing
+  renames it. A heading inside a fenced block is not the section; the section ends at
+  the next `#` or `##` heading.
+- An entry is a list item opening with a bold `[<task key>, <YYYY-MM-DD>, <filer>]`
+  stamp (ruling 378's entries have no filer), then the correction; its other lines are
+  indented two spaces: `Line:` (the settled line it corrects, absent when it adds
+  something) and `Evidence:`. Blank lines inside a value are dropped, since they would
+  end the list item.
+- An entry's id is `kp-` and the first ten hex characters of the SHA-256 of
+  `<kb>\n<doc>\n<entry text>`: stable while nobody edits that entry.
+- The settled text is the document without this section. A filed `line` must stand in
+  it (compared without case, emphasis, quotes or runs of whitespace), and a promotion's
+  `replaces` must stand in it exactly once. Promoting or dismissing the last entry
+  removes the heading and the intro with it.

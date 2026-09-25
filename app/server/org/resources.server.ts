@@ -2492,6 +2492,19 @@ export function resolveStoreTarget(
   return null;
 }
 
+/**
+ * Ruling 483: the store target a knowledge base's DIRECTORY names, whether it
+ * has a metadata row or is a folder on disk only. A run knows its knowledge
+ * bases by directory (the grant key its index heading prints), never by row id.
+ */
+export function kbStoreTargetForDir(
+  db: DatabaseSync,
+  dir: string,
+  ctx: OrgSeedContext = {},
+): StoreTarget | null {
+  return resolveStoreTarget(db, "kb", diskId(dir), ctx);
+}
+
 /** Ensures the kb/skills store roots exist (seed + boot safety). */
 export function ensureOrgStoreDirs(ctx: OrgSeedContext = {}): void {
   mkdirSync(kbRootDir(ctx.dataRoot), { recursive: true });

@@ -2529,3 +2529,52 @@ describe("McpModal — write tools (ruling 176)", () => {
     expect(lastForm).not.toHaveProperty("writeTools");
   });
 });
+
+/**
+ * Ruling 483 (F40-59): a knowledge-base proposal links to the document it
+ * stands in. `?kb=<dir>&doc=<path>` opens that base's browser and reads that
+ * document, the way a click on its row would.
+ */
+describe("ResourcesPanel: the link a knowledge-base proposal carries (ruling 483)", () => {
+  it("opens the named knowledge base on the named document", async () => {
+    const reads: Record<string, string>[] = [];
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        Component: () => (
+          <ToastProvider>
+            <ResourcesPanel kbs={KBS} mcps={[]} skills={[]} gagents={[]} stages={STAGES} />
+          </ToastProvider>
+        ),
+        action: async ({ request }) => {
+          const fd = await request.formData();
+          const form: Record<string, string> = {};
+          for (const [k, v] of fd.entries()) {
+            const field = textField.safeParse(v);
+            if (field.success) form[k] = field.data;
+          }
+          reads.push(form);
+          return { ok: true, text: "# ADR 001\nSETTLED", truncated: false };
+        },
+      },
+    ]);
+    const params = new URLSearchParams({
+      tab: "resources",
+      kb: "architecture-notes",
+      doc: "decisions/adr-001.md",
+    });
+    render(<Stub initialEntries={[`/org/settings?${params.toString()}`]} />);
+    // CANARY: drop the `kb` search-param read and the panel opens on the list,
+    // with no browser and no document.
+    await waitFor(() =>
+      expect(reads).toContainEqual(
+        expect.objectContaining({
+          intent: "store-read-doc",
+          kind: "kb",
+          id: "kb1",
+          path: JSON.stringify(["decisions", "adr-001.md"]),
+        }),
+      ),
+    );
+  });
+});

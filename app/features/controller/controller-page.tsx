@@ -56,6 +56,7 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { controllerExamples } from "./controller-examples";
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 import { CONNECT_TO_SEND, NotConnectedNote } from "./not-connected";
+import { ProposalsPanel } from "./proposals-panel";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
 
 /**
@@ -264,6 +265,28 @@ export function ControllerPage({
             buries the list above it nor stretches the page beside it. */}
         <aside className="ctl-side">
           <ConversationList view={view} />
+          {/* Ruling 483 (F40-59): what the board's agents proposed about its
+              knowledge, where the owner looks, before the chains. */}
+          {view.proposals !== null && projectSlug && (
+            <ProposalsPanel
+              proposals={view.proposals}
+              projectSlug={projectSlug}
+              canResolve={view.viewerIsOrgAdmin}
+              available={view.available}
+              sending={send.state !== "idle"}
+              onAsk={(text) =>
+                send.submit(
+                  sendForm(
+                    csrf,
+                    text,
+                    `${location.pathname}${location.search}`,
+                    view.conversation?.id ?? null,
+                  ),
+                  { method: "post" },
+                )
+              }
+            />
+          )}
           {view.goals !== null && (
             <GoalsPanel
               goals={view.goals}

@@ -98,6 +98,7 @@ const VIEW: ControllerSurfaceView = {
   runtime: [run],
   canInterruptTurn: true,
   goals: [],
+  proposals: [],
   viewerOwnsActive: true,
   showingAll: false,
   viewerIsOrgAdmin: true,

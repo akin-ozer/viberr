@@ -67,6 +67,8 @@
 
 **Knowledge base (KB)** — a folder under `kb/<dir>/` whose text documents a granted run receives as an INDEX of document names and headings, reading the bodies it wants with `read_knowledge_doc` (ruling 283). Grants reference the **directory**, never the display name. Repo-documented conventions outrank KB guidance (ruling 56). See also **Rulings knowledge base**.
 
+**Knowledge-base proposal** — a correction an agent on a task proved and filed, not binding, under "## Proposed corrections (not binding)" in the knowledge-base document it corrects, with the line it corrects and the evidence (ruling 483; format in [file-formats.md §7](../architecture/file-formats.md)). Any knowledge base a run on the task was given: a Claude specialist files it with `propose_kb_correction`, the operator with its own, which also relays a Codex agent's reported correction. The document is the record; an id is `kp-` plus ten hex characters. It reaches the task's timeline as a `proposal` event, the watchers as a notification, the controller's turn context and `get_project`, and the project Controller page's Proposals panel, where an org admin's Promote or Dismiss asks the controller to close it with `resolve_kb_proposal`. Audited `task.kb_proposal.filed`, `org.kb.proposal_promoted`, `org.kb.proposal_dismissed`.
+
 **MCP server** — an org-registered Model Context Protocol server (`HTTP` or `stdio`) a profile may be granted. Granting a server is the whole authorization for its tools (ruling 39), except its **write tools** (ruling 176). Names in `RESERVED_MCP_NAMES` (`viberr`, `viberr_agent`, `viberr_browser`, `viberr_controller`, `viberr_ops` and their hyphen forms) belong to Viberr's in-process servers.
 
 **Operator** — the per-task coordination agent (`kind: operator`, one deployment per project). It triages, dispatches agents, opens packets, recommends or performs transitions, leases files to its task, proposes rulings, and decides delivery. It never writes code.
@@ -99,7 +101,7 @@
 
 **Ruling** — a numbered owner decision recorded in [decisions.md](../architecture/decisions.md). Code comments cite them as "ruling N"; superseded rulings are kept and marked, never deleted.
 
-**Rulings knowledge base** — the ONE knowledge base a project names as its settled rulings (`project.md` `rulingsKb`, set through the controller; ruling 239). Every run on the project reads it, whatever its profile's grants. The operator may append a proposed correction under "## Proposed (not binding)" with `propose_ruling` (ruling 378) and may propose the conventions review shows are missing (ruling 418); a human promotes a proposal. Audited `project.rulings_kb.updated` and `task.operator.ruling_proposed`.
+**Rulings knowledge base** — the ONE knowledge base a project names as its settled rulings (`project.md` `rulingsKb`, set through the controller; ruling 239). Every run on the project reads it, whatever its profile's grants. The operator may file a proposed correction to it (ruling 378, now `propose_kb_correction`, ruling 483) and may propose the conventions review shows are missing (ruling 418); a person promotes a proposal. See **Knowledge-base proposal**. Audited `project.rulings_kb.updated`.
 
 **Run** — one execution of an agent through a backend: `agent_runs` row + raw NDJSON transcript. `kind` is a delivery axis (`operator | primary | reviewer | controller`; `primary` and `reviewer` are **slot-model names**); `state` is `queued | running | finished | error | interrupted`. An `interrupted` run names who stopped it (`interrupted_by`, a person) or why (`interrupted_reason: restart`, boot recovery); a restart is never an error. `credential_kind` records how the principal's account was connected (`login | api_key | access_token`).
 
@@ -121,7 +123,7 @@
 
 **Stage roles** — `entry` (the first stage), `terminal` (the last), `review` (the stage with an edge into terminal) and `work` (the stage with an edge into review), derived from the per-project stage list and workflow graph (`resolveStageRoles`). Stage ids are never hard-coded.
 
-**Timeline event** — a `### <ISO> · <type> · <actor>` block in `task.md`, `type` one of the 11 `TIMELINE_EVENT_TYPES` (`comment`, `completion`, `github`, `policy`, `note`, `quality`, `transition`, `blocked`, `agent`, `assign`, `continuity`). `policy` is reserved for genuine violations and refusals; neutral system remarks are `note`.
+**Timeline event** — a `### <ISO> · <type> · <actor>` block in `task.md`, `type` one of the 12 `TIMELINE_EVENT_TYPES` (`comment`, `completion`, `github`, `policy`, `note`, `quality`, `transition`, `blocked`, `agent`, `assign`, `continuity`, `proposal`). `policy` is reserved for genuine violations and refusals; neutral system remarks are `note`; a proposed knowledge-base correction is `proposal`, labelled "Proposal" (ruling 483).
 
 **Validation** — the derived review-state cache in `task.md`: `healthy | changed | failing | none | bypassed` (`VALIDATION_VALUES`, `deriveValidation`; `bypassed` only for a force-accepted task). Never hand-edit it.
 

@@ -23,7 +23,7 @@ import {
   operatorDeliverForReview,
   operatorDispatchAgent,
   operatorFlagContextConflict,
-  operatorProposeRuling,
+  operatorProposeKbCorrection,
   operatorLeaseFiles,
   CREATE_TASK_BASE_NOTE,
   OPERATOR_TIMELINE_DEFAULT,
@@ -72,6 +72,17 @@ import {
  * DENY list (`claude-runtime.server.ts`) plus the fact that no repo-write tool
  * is built here at all.
  */
+
+/**
+ * Ruling 483: the operator's `propose_kb_correction`, which ruling 378 built as
+ * `propose_ruling` for the project's rulings alone. Exported so the Codex
+ * plan's field descriptions can be checked against the same duties.
+ */
+export const KB_CORRECTION_TOOL_DESCRIPTION =
+  "Propose a correction to a KNOWLEDGE BASE when work on this task has PROVEN a line of it wrong or unachievable: the project's settled rulings (omit `kb`), or any knowledge base a run on this task was given, yours or an engaged agent's (a dossier's platform fact, a runbook step). Use it when your own answer to a human would otherwise be \"this needs a ruling change before X\" or \"the knowledge base is out of date\": a gate command the host cannot run, a convention a review has settled differently, a version or path an agent measured, an environment fact agents keep re-deriving. " +
+  "When an agent's report says a knowledge-base line is wrong and no proposal for it is on the timeline, file it for them with their evidence: an agent on Codex has no tool to file one itself. " +
+  "Quote the settled `line` it corrects. The proposal is filed under a \"Proposed corrections (not binding)\" heading in that document, so every run that reads the document reads it beside the line, and the index every run is handed names the section; it never edits or removes a settled line, and it is NOT binding until a person or the controller promotes it. Bring evidence: the command and its output, or the run and verdict that showed it. This records a proposal, it does not unblock the task — if work is blocked on the decision, open a decision packet as well. " +
+  "It is also how a MISSING convention gets written (ruling 418): when a reviewer blocks on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings say nothing about it, propose the convention in the rulings document it belongs to, with no `line` and with the verdict as the evidence, alongside the rework you dispatch. One convention per class, never one per finding.";
 
 /** What the run mounts, keyed by server name: the in-process `viberr`
  *  governance server, plus whichever org MCP grants resolved. */
@@ -569,24 +580,37 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       ),
       "flag_context_conflict",
     );
-    // F39-1/F39-7 (pass 39): the sibling of flag_context_conflict for the case
-    // where the KB is not merely disagreeing with the repo but WRONG, and the
-    // operator can prove it. Nothing else in the delivery loop can write the
-    // rulings, so a false ruling used to keep shipping as binding truth.
+    // F39-1/F39-7 (pass 39), generalized by ruling 483 (F40-53): the sibling of
+    // flag_context_conflict for the case where a knowledge base is not merely
+    // disagreeing with the repo but WRONG, and the operator can prove it.
+    // Nothing else in the delivery loop can write a knowledge base, so a false
+    // fact used to keep shipping as truth to every run that read it.
     add(
       tool(
-        "propose_ruling",
-        "Propose a change to the project's SETTLED rulings knowledge base, when work on this task has PROVEN one of its rules wrong or unachievable. Use it when your own answer to a human would otherwise be \"this needs a ruling change before X\": a gate command the host cannot run, a convention a review has settled differently, an environment fact agents keep re-deriving. The proposal is appended under a \"Proposed (not binding)\" heading in the named document, so it is read with the rule it contradicts by every run on this project; it never edits or removes a settled line, and it is NOT binding until a human or the controller promotes it. Bring evidence: the command and its output, or the run and verdict that showed it. This records a proposal, it does not unblock the task \u2014 if work is blocked on the decision, open a decision packet as well. It is also how a MISSING convention gets written (ruling 418): when a reviewer blocks on a defect CLASS other tasks on this project will meet (an argument passed on unguarded, a secret reaching output or status, input the code trusts, an API meaning the contract never states) and the rulings say nothing about it, propose the convention in the document it belongs to with the verdict as the evidence, alongside the rework you dispatch. One convention per class, never one per finding.",
+        "propose_kb_correction",
+        KB_CORRECTION_TOOL_DESCRIPTION,
         {
+          kb: z
+            .string()
+            .optional()
+            .describe(
+              "The knowledge base the line is in, by the name its index heading gives it. Omit for the project's rulings knowledge base. Any knowledge base a run on this task was given is allowed, yours or an engaged agent's.",
+            ),
           doc: z
             .string()
             .describe(
-              "The document to amend, by file name as the rulings knowledge base lists it, e.g. 'environment-and-gates.md'.",
+              "The document to correct, by its path as that knowledge base's index lists it, e.g. 'environment-and-gates.md'.",
             ),
-          text: z
+          line: z
+            .string()
+            .optional()
+            .describe(
+              "The settled line the correction replaces, quoted as the document has it (a distinctive phrase of it is enough). Omit only when the correction ADDS something the document does not say, such as a missing convention.",
+            ),
+          correction: z
             .string()
             .describe(
-              "What should change, in one or two sentences. State the correction, not the complaint.",
+              "What should be true instead, in one or two sentences. State the correction, not the complaint.",
             ),
           evidence: z
             .string()
@@ -596,20 +620,22 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         },
         async (args) =>
           resultText(
-            await operatorProposeRuling(
+            await operatorProposeKbCorrection(
               db,
               ctx,
               {
                 ...base,
+                kb: args.kb ? prose(args.kb) : null,
                 doc: prose(args.doc),
-                text: prose(args.text),
+                line: args.line ? prose(args.line) : null,
+                correction: prose(args.correction),
                 evidence: prose(args.evidence),
               },
               authority,
             ),
           ),
       ),
-      "propose_ruling",
+      "propose_kb_correction",
     );
   }
 

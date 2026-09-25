@@ -562,6 +562,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     // a silently shorter list agreeing with itself.
     expect(mounted).toEqual([
       "github_read",
+      "propose_kb_correction",
       "read_board",
       "read_knowledge_doc",
       "report_outcome",
@@ -820,7 +821,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
      * is the KB grant, not U11's collaboration grants — an agent granted a
      * knowledge base and nothing else still has to be able to read it.
      */
-    it("ruling 283: a KB grant alone mounts read_knowledge_doc, and nothing else", () => {
+    it("ruling 283 and 483: a KB grant alone mounts read_knowledge_doc and propose_kb_correction, and nothing else", () => {
       const store = setupTestStore(ctx);
       writeTask(store.dataRoot, store.slug, {
         frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
@@ -844,7 +845,86 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       });
       expect(built).not.toBeNull();
       const names = mountedTools.parse(built!.mcpServers.viberr_agent);
-      expect(Object.keys(names)).toEqual(["read_knowledge_doc"]);
+      // Ruling 483 mounts after `read_board`, so a knowledge base alone still
+      // widens nothing on U11's collaboration gate.
+      expect(Object.keys(names)).toEqual(["read_knowledge_doc", "propose_kb_correction"]);
+    });
+
+    /**
+     * Ruling 483 (F40-53): an agent that PROVES a line of one of its knowledge
+     * bases wrong files the correction in the document. Live on WEB-3 the
+     * Platform Engineer wrote "the knowledge-base runbook is read-only to me",
+     * an hour after the Site Engineer found the same stale dossier fact.
+     */
+    it("ruling 483: propose_kb_correction files against the agent's own knowledge base, and only its own", async () => {
+      const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
+      const { writeStoreDoc } = await import("~/server/org/store-files.server");
+      const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+      const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const admin = { userId: store.users.arda.id, label: "arda" };
+      const { kb } = await saveKnowledgeBase(
+        store.db,
+        { name: "akin-dossier", refresh: "on change" },
+        admin,
+        { dataRoot: store.dataRoot },
+      );
+      const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
+      writeStoreDoc(store.db, target, [], "06-platform-facts.md", "# Facts\n\n- T-003: wrangler 4.138.0\n", admin);
+      const built = buildAgentToolkit({
+        db: store.db,
+        ctx: { dataRoot: store.dataRoot },
+        projectSlug: store.slug,
+        taskKey: "VIB-3",
+        actorRef: AGENT_REF,
+        outcomeKey: "oc_kb_propose",
+        collab: { comment: false, ask: false, verdict: false, evidence: false, githubRead: false },
+        kb: [kb.dir],
+      })!;
+      const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+      await built.mcpServers.viberr_agent.instance.connect(serverEnd);
+      const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+      await client.connect(clientEnd);
+      const textResult = z
+        .object({ content: z.array(z.object({ text: z.string() })) })
+        .transform((r) => r.content.map((c) => c.text).join("\n"));
+
+      const filed = textResult.parse(
+        await client.callTool({
+          name: "propose_kb_correction",
+          arguments: {
+            kb: kb.dir,
+            doc: "06-platform-facts.md",
+            line: "T-003: wrangler 4.138.0",
+            correction: "The measured wrangler is 4.139.0.",
+            evidence: "`npx wrangler --version` printed 4.139.0.",
+          },
+        }),
+      );
+      // CANARY: drop the tool and the agent can only say so in a comment.
+      expect(filed).toMatch(/^\[done\] Proposed as kp-[0-9a-f]{10}/);
+      const { readFileSync } = await import("node:fs");
+      const path = await import("node:path");
+      const body = readFileSync(path.join(store.dataRoot, "kb", kb.dir, "06-platform-facts.md"), "utf8");
+      expect(body).toContain("- T-003: wrangler 4.138.0");
+      expect(body).toContain(", Security review]** The measured wrangler is 4.139.0.");
+      const top = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!
+        .parsed.timeline[0]!;
+      expect(top.type).toBe("proposal");
+      expect(top.actor).toMatchObject({ kind: "agent", profileId: "security-reviewer" });
+
+      // A knowledge base this run was not given is not its to amend.
+      const refused = textResult.parse(
+        await client.callTool({
+          name: "propose_kb_correction",
+          arguments: { kb: "someone-elses", doc: "x.md", correction: "y", evidence: "z" },
+        }),
+      );
+      expect(refused).toContain("[noop] No knowledge base `someone-elses` was given to a run on this task");
     });
   });
 
