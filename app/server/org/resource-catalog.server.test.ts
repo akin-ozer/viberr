@@ -104,6 +104,44 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
     expect(offered).not.toContain("linked-kb");
   });
 
+  /**
+   * Ruling 479(b) (F40-37): live, `cloudflare-api` needed an OAuth sign-in, so
+   * every run dropped it, while the Agents page painted its chip like its
+   * healthy neighbours. The catalog carries the registry's word against a
+   * server, in the run resolver's order. Canary: drop `mcpRunWarning`'s oauth
+   * branch and the first expectation reads undefined.
+   */
+  it("carries why a run gets none of a server's tools: sign-in, credential, reachability", () => {
+    const store = setupTestStore(ctx);
+    const now = new Date().toISOString();
+    const insert = store.db.prepare(
+      `INSERT INTO org_mcp_servers (id, name, transport, target, cred_ref, oauth_json, up, created_at, updated_at)
+       VALUES (?, ?, 'HTTP', 'https://mcp.example/mcp', ?, ?, ?, ?, ?)`,
+    );
+    insert.run("m1", "cloudflare-api", null, JSON.stringify({ status: "needs_sign_in" }), 0, now, now);
+    insert.run("m2", "expired-api", null, JSON.stringify({ status: "expired" }), 1, now, now);
+    insert.run("m3", "legacy-cred", "plaintext-token", null, 1, now, now);
+    insert.run("m4", "down-mcp", null, null, 0, now, now);
+    insert.run("m5", "cloudflare-docs", null, null, 1, now, now);
+    insert.run("m6", "signed-in", null, JSON.stringify({ status: "signed_in" }), 1, now, now);
+
+    const items = buildResourceCatalog(store.db, store.dataRoot).find((g) => g.key === "mcps")!.items;
+    const warning = (id: string) => items.find((i) => i.id === id)?.warning;
+    // A sign-in outranks the failed probe it also carries: the run drops it first.
+    expect(warning("cloudflare-api")).toEqual({
+      note: "needs sign-in",
+      title:
+        "Runs do not mount cloudflare-api until an org admin signs it in (Instance settings → Agent resources).",
+    });
+    expect(warning("expired-api")?.note).toBe("sign-in expired");
+    expect(warning("expired-api")?.title).toContain("signs it in again");
+    expect(warning("legacy-cred")?.note).toBe("credential unreadable");
+    expect(warning("down-mcp")?.note).toBe("unreachable");
+    // Healthy rows claim nothing, and carry no key at all.
+    expect(items.find((i) => i.id === "cloudflare-docs")).toEqual({ id: "cloudflare-docs", def: false });
+    expect(warning("signed-in")).toBeUndefined();
+  });
+
   it("handles a store with no resources without throwing", () => {
     const dataRoot = ctx.makeTempDir();
     const store = setupTestStore(ctx);

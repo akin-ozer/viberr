@@ -179,6 +179,9 @@ function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
     extras: [],
     resources: { skills: ["repo-write"], mcps: ["github"], kb: [] },
     source: "template",
+    // Ruling 479(g): the default fixture still follows its template (no
+    // snapshot yet); the already-forked case sets this false.
+    tracksTemplate: true,
     ...patch,
   };
 }
@@ -385,6 +388,9 @@ describe("ProfileDetail", () => {
       getByText("Differs from the template: k8s-notes is granted here, not on the template."),
     ).toBeTruthy();
     fireEvent.click(getByText("Use the template's grants"));
+    // Ruling 479(d): the press asks first; the confirm is what submits.
+    expect(onSync).not.toHaveBeenCalled();
+    fireEvent.click(getByText("Replace grants"));
     expect(onSync).toHaveBeenCalledTimes(1);
     cleanup();
 
@@ -456,6 +462,9 @@ describe("ProfileDetail", () => {
       <Stub initialEntries={["/projects/viberr-core/agents?profile=developer"]} />,
     );
     fireEvent.click(getByText("Use the template's grants"));
+    // Ruling 479(d): nothing is posted until the confirm is pressed.
+    expect(posted).toBeNull();
+    fireEvent.click(getByText("Replace grants"));
     await waitFor(() =>
       expect(posted).toMatchObject({
         intent: "sync-profile-resources",
@@ -1024,12 +1033,16 @@ describe("LiveRoster", () => {
       mkDeployment({ taskKey: "VIB-1", engagement: "operator", profileId: "operator", role: "Operator", backend: null, status: "coordinating" }),
     ];
     const onOpen = vi.fn();
-    const { container } = render(<LiveRoster deployments={rows} onOpen={onOpen} />);
+    const { container } = render(
+      <LiveRoster deployments={rows} onOpen={onOpen} operatorBackend="codex" />,
+    );
     const rendered = Array.from(container.querySelectorAll(".live-row"));
     expect(rendered).toHaveLength(3);
     // F10-20: the "Profile" column shows the profile IDENTITY (operator → "Operator").
     expect(rendered[0]!.querySelector(".live-name")!.textContent).toBe("Operator");
-    expect(rendered[0]!.querySelector(".live-be")!.textContent).toBe("orchestration");
+    // Ruling 479(e): the operator's row names the backend its run starts on,
+    // not "orchestration". CANARY: restore the literal and this reads it.
+    expect(rendered[0]!.querySelector(".live-be")!.textContent).toBe("Codex");
     expect(rendered[1]!.querySelector(".live-be")!.textContent).toBe("Codex");
     expect(rendered[2]!.querySelector(".live-be")!.textContent).toBe("Claude");
     // Engagement is human-facing, not the internal primary/reviewer literals.
@@ -1041,7 +1054,9 @@ describe("LiveRoster", () => {
   });
 
   it("renders the added empty state when nothing is engaged", () => {
-    const { getByText } = render(<LiveRoster deployments={[]} onOpen={() => {}} />);
+    const { getByText } = render(
+      <LiveRoster deployments={[]} onOpen={() => {}} operatorBackend="claude" />,
+    );
     // D8: the empty state now orients the reader; the label is its opening.
     expect(getByText(/No agents are currently engaged/)).toBeTruthy();
   });
@@ -1060,6 +1075,7 @@ describe("LiveRoster", () => {
         deployments={rows}
         onOpen={() => {}}
         nameById={{ "docs-writer": "Docs Writer" }}
+        operatorBackend="claude"
       />,
     );
     const cells = Array.from(container.querySelectorAll(".live-name"));
@@ -1075,7 +1091,7 @@ describe("LiveRoster", () => {
 });
 
 describe("CapabilityMatrixModal", () => {
-  it("renders catalog groups + Other actions, and closes on Escape (ruling 16)", () => {
+  it("renders catalog groups + Operator actions, and closes on Escape (ruling 16)", () => {
     const onClose = vi.fn();
     const profiles = [
       mkProfile({
@@ -1113,9 +1129,9 @@ describe("CapabilityMatrixModal", () => {
     // "Human-only" appears both as a group header and as the mode
     // legend label (CAP_META.forbidden), so match at least one.
     expect(getAllByText("Human-only").length).toBeGreaterThan(0);
-    // Off-catalog actions (operator coordination + the pruned advisory review
-    // caps a seed profile still carries) land in "Other actions".
-    expect(getByText("Other actions")).toBeTruthy();
+    // The operator's own capabilities, outside the agent catalog, are their
+    // own group (ruling 479(a); advisory lines never reach the grid).
+    expect(getByText("Operator actions")).toBeTruthy();
     // Ruling 98: the exact rendered label, pinned against the shipped
     // vocabulary (the one dispatch verb).
     expect(DISPATCH_AGENTS_LABEL).toBe("Select & run agents");
@@ -2075,7 +2091,8 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
 
   it("a project-created profile has nothing to fork and says so plainly", () => {
     const { getByText, queryByText } = renderModal({
-      initial: mkProfile({ source: "project", name: "Migrations" }),
+      // A project-created profile has no template to follow (ruling 479(g)).
+      initial: mkProfile({ source: "project", name: "Migrations", tracksTemplate: false }),
     });
     expect(
       getByText("Update this project's copy. Changes apply from the next run."),
@@ -2722,6 +2739,7 @@ describe("C10: deployment status renders through the shared pill mapper", () => 
       <LiveRoster
         deployments={[mkDeployment({ status: "waiting on human" })]}
         onOpen={() => {}}
+        operatorBackend="claude"
       />,
     );
     expect(container.textContent).toContain("waiting on a human");
@@ -3297,5 +3315,302 @@ describe("CreateProfileModal fingerprint (B5)", () => {
     fireEvent.click(getByText("Save changes"));
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0]![0].fingerprint).toBe("fp-opened-on");
+  });
+});
+
+/**
+ * Ruling 479 (pass 40, the Agents page and the global profile editor). Each
+ * case names its finding and the canary that turns it red.
+ */
+describe("ruling 479: the Agents page says what the runtime does", () => {
+  const detailProps = {
+    stages: STAGES,
+    workflow: WORKFLOW,
+    insts: [],
+    projectName: "akinozer.com",
+    canManage: true,
+    onOpen: () => {},
+    onDelete: () => {},
+    onEdit: () => {},
+  };
+
+  /**
+   * (a) F40-36: live, the matrix read "Approve the review: Off" for both
+   * required reviewers and "Move the task to Review: Acts directly" for every
+   * builder, and its "Acts directly" cells counted 16 where the Policy card
+   * said 9. Canary: file every label outside the agent catalog back into one
+   * grid group (the old `extras` loop) and the advisory rows reappear as rows.
+   */
+  it("(a) the matrix grid holds only enforced capabilities; advisory lines sit collapsed under it", () => {
+    const verdict = capabilityById("report-validation-verdict")!.label;
+    const profiles = [
+      mkProfile({
+        id: "operator",
+        kind: "operator",
+        name: "Operator",
+        actions: {
+          direct: [DISPATCH_AGENTS_LABEL],
+          recommend: [],
+          forbidden: ["Change project policy"],
+          off: [],
+        },
+      }),
+      mkProfile({
+        id: "site-reviewer",
+        name: "Site Reviewer",
+        actions: {
+          direct: [verdict, "Move the task to Review", "Read the repository & diff"],
+          recommend: [],
+          forbidden: ["Merge a pull request"],
+          off: ["Approve the review", "Request changes"],
+        },
+      }),
+      mkProfile({
+        id: "site-engineer",
+        name: "Site Engineer",
+        actions: {
+          direct: ["Commit & push to the branch", "Move the task to Review"],
+          recommend: [],
+          forbidden: [],
+          off: ["Approve the review"],
+        },
+      }),
+    ];
+    const { container } = render(
+      <CapabilityMatrixModal profiles={profiles} projectName="akinozer.com" onClose={() => {}} />,
+    );
+    const rows = [...container.querySelectorAll("td.rowlabel")].map(
+      (td) => td.firstChild?.textContent ?? "",
+    );
+    // The operator's own capability is a grid row, in its own group.
+    expect(rows).toContain(DISPATCH_AGENTS_LABEL);
+    expect(container.textContent).toContain("Operator actions");
+    for (const advisory of [
+      "Approve the review",
+      "Request changes",
+      "Move the task to Review",
+      "Read the repository & diff",
+    ]) {
+      expect(rows).not.toContain(advisory);
+    }
+    // The grid now counts what the Policy card counts: governed direct labels
+    // only (Operator 1, Site Reviewer 1, Site Engineer 1).
+    expect(container.querySelectorAll("tbody .mx-cell.direct")).toHaveLength(3);
+    // The advisory lines a profile HOLDS, collapsed, with who holds them and at
+    // which stored mode; a stored `off` is no line (the panel's rule).
+    const advisory = container.querySelector("details.cap-advisory")!;
+    expect(advisory.hasAttribute("open")).toBe(false);
+    expect(advisory.querySelector("summary")!.textContent).toContain(
+      "Advisory only · 2 lines the runtime does not read",
+    );
+    const lines = [...advisory.querySelectorAll("li")].map((li) => li.textContent);
+    expect(lines).toEqual([
+      "Move the task to Review (acts directly: Site Reviewer, Site Engineer)",
+      "Read the repository & diff (acts directly: Site Reviewer)",
+    ]);
+    expect(advisory.textContent).toContain(verdict);
+    expect(advisory.textContent).not.toContain("Approve the review");
+  });
+
+  /**
+   * (b) F40-37: live, `cloudflare-api` needed a sign-in, every run dropped it,
+   * and the Platform Engineer's chip read like its healthy neighbours. Canary:
+   * drop `warnings={warningsOf("mcps")}` from the MCP `ResGroup`.
+   */
+  it("(b) a granted MCP server that needs a sign-in is marked, with the remedy in its text", () => {
+    const { container } = render(
+      <ProfileDetail
+        {...detailProps}
+        a={mkProfile({
+          resources: { skills: [], mcps: ["cloudflare-api", "cloudflare-docs"], kb: [] },
+        })}
+        resourceCatalog={[
+          { group: "Skills", key: "skills", mono: true, items: [] },
+          {
+            group: "MCP servers",
+            key: "mcps",
+            mono: true,
+            items: [
+              {
+                id: "cloudflare-api",
+                def: false,
+                warning: {
+                  note: "needs sign-in",
+                  title:
+                    "Runs do not mount cloudflare-api until an org admin signs it in (Instance settings → Agent resources).",
+                },
+              },
+              { id: "cloudflare-docs", def: false },
+            ],
+          },
+          { group: "Knowledge bases", key: "kb", mono: true, items: [] },
+        ]}
+      />,
+    );
+    // Marked the way a missing grant is (the same class), with its own note.
+    const flagged = container.querySelectorAll(".res-chip.missing");
+    expect(flagged).toHaveLength(1);
+    const chip = flagged[0]!;
+    expect(chip.querySelector(".res-chip-note")!.textContent).toBe("needs sign-in");
+    expect(chip.getAttribute("title")).toContain("until an org admin signs it in");
+    // The remedy reaches a screen reader as text, not only as a title.
+    expect(chip.querySelector(".vh")!.textContent).toContain("Instance settings");
+    const healthy = [...container.querySelectorAll(".res-chip")].find((c) =>
+      c.textContent?.startsWith("cloudflare-docs"),
+    )!;
+    expect(healthy.className).toBe("res-chip");
+  });
+
+  /**
+   * (d) F40-39: the button replaced the copy's grants in one click and the
+   * toast never said what went. Canary: have the button call
+   * `onSyncResources(a)` directly again.
+   */
+  it("(d) 'Use the template's grants' names what it removes and adds before it submits", () => {
+    const onSync = vi.fn();
+    const { getByText, container } = render(
+      <ProfileDetail
+        {...detailProps}
+        a={mkProfile({
+          name: "Platform Engineer",
+          templateDrift: {
+            missing: { skills: [], mcps: [], kb: [] },
+            extra: { skills: [], mcps: ["cloudflare-api"], kb: [] },
+            templateResources: { skills: [], mcps: ["cloudflare-docs"], kb: [] },
+          },
+        })}
+        canSyncTemplate
+        onSyncResources={onSync}
+      />,
+    );
+    fireEvent.click(getByText("Use the template's grants"));
+    expect(onSync).not.toHaveBeenCalled();
+    const dialog = container.querySelector('[role="alertdialog"]')!;
+    expect(dialog.getAttribute("data-screen-label")).toBe("Template grants dialog");
+    expect(dialog.getAttribute("aria-label")).toBe(
+      "Replace Platform Engineer's grants with the template's?",
+    );
+    expect(dialog.textContent).toContain("Removes MCP server cloudflare-api · adds nothing.");
+    fireEvent.click(getByText("Replace grants"));
+    expect(onSync).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * (e) F40-40: no profile showed its effort and the Operator showed no model.
+   * Canary: drop the effort from the cell, or restore the operator's
+   * Autonomy-instead-of-Model branch.
+   */
+  it("(e) every kind shows model and effort; the operator keeps Autonomy as its own cell", () => {
+    const specialist = render(
+      <ProfileDetail
+        {...detailProps}
+        a={mkProfile({ backends: ["claude"], modelLabel: "Claude Opus", modelKnown: true, effort: "max" })}
+      />,
+    );
+    expect(specialist.getByText("Model · effort")).toBeTruthy();
+    expect(specialist.getByText("Claude Opus · Maximum")).toBeTruthy();
+    cleanup();
+
+    const operator = render(
+      <ProfileDetail
+        {...detailProps}
+        a={mkProfile({
+          id: "operator",
+          kind: "operator",
+          name: "Operator",
+          backends: ["claude"],
+          modelLabel: "Claude Opus",
+          modelKnown: true,
+          effort: "high",
+          autonomy: "supervised",
+        })}
+      />,
+    );
+    expect(operator.getByText("Claude Opus · High")).toBeTruthy();
+    expect(operator.getByText("Autonomy")).toBeTruthy();
+    expect(operator.getByText("Supervised")).toBeTruthy();
+    cleanup();
+
+    // An unset effort is the backend's own default, and says so.
+    const unset = render(
+      <ProfileDetail
+        {...detailProps}
+        a={mkProfile({ backends: ["claude"], modelLabel: "Claude Sonnet", modelKnown: true, effort: "" })}
+      />,
+    );
+    expect(unset.getByText("Claude Sonnet · default effort")).toBeTruthy();
+  });
+
+  /**
+   * (e) F40-40, the Live half: the page hands the Live roster the operator
+   * profile's own backend. Canary: pass a constant instead of the operator's.
+   */
+  it("(e) the Live tab names the operator's backend from its profile", () => {
+    const Stub = createRoutesStub([
+      {
+        path: "/projects/:slug/agents",
+        Component: () => (
+          <ToastProvider>
+            <AgentsPage
+              profiles={[
+                mkProfile({ id: "operator", kind: "operator", name: "Operator", backends: ["codex"] }),
+              ]}
+              deployments={[
+                mkDeployment({
+                  engagement: "operator",
+                  profileId: "operator",
+                  role: "Operator",
+                  backend: null,
+                  status: "on call",
+                }),
+              ]}
+              stages={STAGES}
+              workflow={WORKFLOW}
+              projectSlug="akinozer-com"
+              projectName="akinozer.com"
+              myRole="admin"
+            />
+          </ToastProvider>
+        ),
+      },
+    ]);
+    const { container } = render(
+      <Stub initialEntries={["/projects/akinozer-com/agents?tab=live"]} />,
+    );
+    expect(container.querySelector(".live-row .live-be")!.textContent).toBe("Codex");
+  });
+
+  /**
+   * (f) F40-41: the chips told eligible from not only by ink and a strike.
+   * Canary: delete the visually hidden state text.
+   */
+  it("(f) each stage chip carries its eligibility as text", () => {
+    const { container } = render(
+      <ProfileDetail {...detailProps} a={mkProfile({ stages: ["ready", "impl"] })} />,
+    );
+    const chips = [...container.querySelectorAll(".stage-chips .stage-chip")];
+    expect(chips.map((c) => c.textContent)).toEqual([
+      "Triage, not eligible",
+      "Ready, eligible",
+      "In Progress, eligible",
+      "Review, not eligible",
+      "Done, not eligible",
+    ]);
+    for (const chip of chips) expect(chip.querySelector(".vh")).not.toBeNull();
+  });
+
+  /**
+   * (g) F40-42: every profile on akinozer.com already held its snapshot, and
+   * the editor still said saving would fork it. Canary: key `forksTemplate` on
+   * `source === "template"` again.
+   */
+  it("(g) a copy that already holds its snapshot is told a save updates it, not that it forks", () => {
+    const { getByText, queryByText } = renderModal({
+      initial: mkProfile({ source: "template", tracksTemplate: false, backends: ["codex"] }),
+    });
+    expect(
+      getByText("Update this project's copy. Changes apply from the next run."),
+    ).toBeTruthy();
+    expect(queryByText(/forks/)).toBeNull();
   });
 });

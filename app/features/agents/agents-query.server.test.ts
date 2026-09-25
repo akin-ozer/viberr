@@ -645,6 +645,49 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
     expect(equal.templateDrift).toBeNull();
   });
 
+  /**
+   * Ruling 479(g) (F40-42): the editor said "Saving forks this profile" for
+   * every template-sourced profile, while on akinozer.com all seven
+   * deployments already carried a full snapshot that no template edit
+   * reaches. Canary: return `template !== null` from `tracksTemplateLive`.
+   */
+  it("ruling 479(g): only a copy that still resolves template fields live tracks the template", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    // The seeded shape: no definition, everything resolves live.
+    expect(view(developer(), dataRoot).tracksTemplate).toBe(true);
+    // A snapshot that sets only autonomy or only grants still follows the
+    // template for name, persona, stages and the rest.
+    expect(
+      view(developer({ resources: { skills: [], mcps: [], kb: [] } }), dataRoot).tracksTemplate,
+    ).toBe(true);
+    // What a library deploy and every save write: the full snapshot. A save
+    // here forks nothing; the fork already happened.
+    const snapshot: AgentDeploymentDefinition = {
+      kind: "specialist",
+      name: "Developer",
+      role: "Implementation",
+      icon: "branch",
+      backends: ["claude"],
+      model: "sonnet",
+      effort: "high",
+      scope: "Added from the global library to Viberr Core",
+      desc: "Implements the change.",
+      stages: ["ready", "impl"],
+      spanAll: false,
+      resources: { skills: [], mcps: [], kb: [] },
+    };
+    expect(view(developer(snapshot), dataRoot).tracksTemplate).toBe(false);
+    // No template at all: a project-created profile has nothing to track.
+    const projectMade: AgentDeployment = {
+      profileId: "migrations",
+      capabilities: [],
+      extras: [],
+      definition: snapshot,
+    };
+    expect(view(projectMade, dataRoot).tracksTemplate).toBe(false);
+  });
+
   it("a snapshot that only echoes the template's own identity is not customized", () => {
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);

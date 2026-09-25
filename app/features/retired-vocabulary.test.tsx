@@ -194,7 +194,9 @@ const BARE_SPECIALIST = /\bspecialists?\b/i;
 
 describe("U12: the Agents page's rendered 'specialist' nouns", () => {
   it("the live-roster empty state names agent profiles, not specialists", () => {
-    const html = renderToString(<LiveRoster deployments={[]} onOpen={() => {}} />);
+    const html = renderToString(
+      <LiveRoster deployments={[]} onOpen={() => {}} operatorBackend="claude" />,
+    );
     // Non-vacuity: this really is the empty state, and it still orients (D8).
     expect(html).toContain("No agents are currently engaged");
     expect(html).toContain("Open a task and run the operator to engage one");
@@ -331,6 +333,7 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
     extras: [],
     resources: { skills: [], mcps: [], kb: [] },
     source: "template",
+    tracksTemplate: true,
     ...patch,
   });
 

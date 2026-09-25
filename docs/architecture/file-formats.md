@@ -205,7 +205,8 @@ Notes:
   time (ruling 156): it changes only through the project editor,
   `update_agent_deployment`, the org resource-rename rewriter, or a propagation
   from the template (`save_global_agent { propagate }`, the org modal's box, the
-  Agents page's "Use the template's grants"), and a run mounts the copy.
+  Agents page's "Use the template's grants", the operator's template included, ruling
+  479(c)), and a run mounts the copy.
   `definition.persona` is a snapshot the same way: the project editor,
   `update_agent_deployment`'s `persona` and a template save that changes the persona
   with `propagate` rewrite it (ruling 467).

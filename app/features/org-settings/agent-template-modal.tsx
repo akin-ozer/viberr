@@ -6,7 +6,7 @@ import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
 import { countLabel } from "~/shared/text/plural";
 import { MiniModal } from "./mini-modal";
-import { useModalAction } from "./resource-helpers";
+import { STAGE_OUTSIDE_DEFAULT, useModalAction } from "./resource-helpers";
 
 /**
  * The global agent-TEMPLATE editor for the Agent-resources tab, with its
@@ -151,6 +151,13 @@ export function AgentModal({
     workStages[0]?.id;
   const [selStages, setSelStages] = useState<string[]>(
     initial ? initial.stages : defaultStage ? [defaultStage] : [],
+  );
+  // Ruling 479(h): a stored stage the chips below do not offer (a project's own
+  // `build`, carried into the template) had no chip, so it could be neither
+  // seen nor removed and every save kept it. Held from the open, so a chip
+  // pressed off stays on screen to be pressed back on.
+  const [storedOnlyStages] = useState<string[]>(() =>
+    initial ? initial.stages.filter((id) => !workStages.some((s) => s.id === id)) : [],
   );
   const [selSkills, setSelSkills] = useState<string[]>(
     initial ? match(initial.skills, skillNames) : [],
@@ -370,6 +377,29 @@ export function AgentModal({
               {s.name}
             </button>
           ))}
+          {storedOnlyStages.map((id) => {
+            const known = stages.find((s) => s.id === id);
+            const on = selStageSet.has(id);
+            return (
+              <button
+                type="button"
+                key={id}
+                className={"pick-chip" + (known ? "" : " mono") + (on ? " on" : "")}
+                aria-pressed={on}
+                title={`This profile names the stage “${id}”, which the default workflow does not offer. A project whose board has a stage with this id, or one in the same role, reads it. Press to ${on ? "remove" : "keep"} it.`}
+                onClick={() => toggle(selStages, setSelStages, id)}
+              >
+                <span className="sdot" data-stage-color={known?.color}></span>
+                {known ? known.name : id}
+                {!known && (
+                  <>
+                    {" "}
+                    <span className="res-chip-note">{STAGE_OUTSIDE_DEFAULT}</span>
+                  </>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
       <div className="field">

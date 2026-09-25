@@ -787,6 +787,45 @@ describe("ResourcesPanel", () => {
   });
 
   /**
+   * Ruling 479(h) (F40-46): live, Design Engineer and Content Writer carried
+   * akinozer.com's own `build` stage. The row printed the bare id, and the
+   * editor offered only the default workflow's chips, so Content Writer opened
+   * with nothing pressed and `build` could be neither seen nor removed while
+   * every save kept it. Canary: drop the `storedOnlyStages` chips.
+   */
+  it("ruling 479(h): a stored stage the default workflow lacks is named on the row and is a removable chip", async () => {
+    const outside: GagentView[] = [
+      { ...GAGENTS[1]!, id: "design-engineer", name: "Design Engineer", stages: ["ready", "build"] },
+    ];
+    const { getByText, getByLabelText, getByRole } = renderPanel(
+      <ResourcesPanel
+        kbs={KBS}
+        mcps={MCPS}
+        skills={SKILLS}
+        gagents={outside}
+        templateGrants={TEMPLATE_GRANTS}
+        stages={STAGES}
+      />,
+    );
+    expect(getByText(/Claude · Ready · build \(not in the default workflow\) · /)).toBeTruthy();
+    fireEvent.click(getByLabelText("Edit Design Engineer"));
+    const chip = getByRole("button", { name: "build not in the default workflow" });
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    expect(chip.getAttribute("title")).toContain("the default workflow does not offer");
+    // Removable, and still on screen to be pressed back on before the save.
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(getByText("Save changes"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({
+        intent: "agent-save",
+        profileId: "design-engineer",
+        stages: JSON.stringify(["ready"]),
+      }),
+    );
+  });
+
+  /**
    * Ruling 156 (pass 35, F35-7): a project's deployment is its own COPY of the
    * grants, so an org edit never reached it. The modal offers the propagation
    * as a box, unchecked by default, and the save carries the decision. Canary:
