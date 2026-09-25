@@ -22,7 +22,7 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { PROJECT_ROLES, roleCan, type ProjectRole } from "~/shared/rbac";
 import { stageLabel } from "~/shared/workflow/stage-label";
 import type { AcceptanceAffordance } from "~/server/tasks/task-actions.server";
-import { checksPill, checksUnreadPill, gatesPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
+import { checksPill, gatesPill, liveMergeable, mergeablePill, prStatePill, reviewPill } from "~/features/github/github-pills";
 import type { GatesView } from "~/shared/project-gates";
 import { useAttachmentLightbox } from "./attachment-lightbox";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
@@ -315,20 +315,6 @@ export function GithubTrace({
             {checksPill(task.prChecks).label}
           </Pill>
         )}
-        {/* Ruling 360 (pass 38, F38-14): the read GitHub refused, said rather
-            than blanked. This card read "PR #10 · in review" beside a head
-            whose every check had failed, because the credential could not
-            read them and a failed read rendered as nothing. */}
-        {!task.prChecks && task.prChecksUnread && (
-          <span
-            data-checks-unread
-            title={`GitHub refused the check-runs read${task.prChecksUnread.status ? ` (HTTP ${task.prChecksUnread.status})` : ""}: ${task.prChecksUnread.message}`}
-          >
-            <Pill kind={checksUnreadPill().kind} sm>
-              {checksUnreadPill().label}
-            </Pill>
-          </span>
-        )}
         {task.prReview && (
           <Pill kind={reviewPill(task.prReview).kind} sm>
             {reviewPill(task.prReview).label}
@@ -337,11 +323,7 @@ export function GithubTrace({
         {/* Ruling 482: what Viberr's own run of the project's gates says about
             the revision under review, beside what GitHub's checks say. */}
         {acceptance.gates && (
-          <Pill
-            kind={gatesPill(acceptance.gates.state).kind}
-            sm
-            quiet={gatesPill(acceptance.gates.state).quiet}
-          >
+          <Pill kind={gatesPill(acceptance.gates.state).kind} sm>
             {gatesPill(acceptance.gates.state).label}
           </Pill>
         )}

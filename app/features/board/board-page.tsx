@@ -1132,8 +1132,6 @@ function AcceptOnBoardConfirm({
         // Ruling 304: the board summary carries the checks too, so the same
         // dialog says the same thing from either door.
         prChecks: task.prChecks ?? null,
-        // Ruling 360: and the refused read, when that is what the summary holds.
-        prChecksUnread: task.prChecksUnread ?? null,
       }}
       workRevisionSha={task.workRevisionSha ?? null}
       mergeCollisions={mergeCollisions}

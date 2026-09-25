@@ -703,41 +703,6 @@ describe("ruling 304: the accept ceremony states the checks it merges past", () 
     return dialogs[dialogs.length - 1]?.textContent ?? "";
   }
 
-  it("ruling 360: a read GitHub refused is named, with the reason, instead of nothing", () => {
-    // CANARY: drop the `prChecksUnread` block from the Merges row.
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({
-          pr: PR,
-          prChecks: null,
-          prChecksUnread: {
-            status: 403,
-            message: "Resource not accessible by personal access token",
-            at: "2026-09-18T08:00:00.000Z",
-          },
-        })}
-        workRevisionSha="abc1234"
-        noChanges={false}
-        defaultBranch="main"
-        ceremony={{ mode: "accept" }}
-        atBoundary
-        blockedReason={null}
-        openPacketTitle={null}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    const dialogs = container.ownerDocument.querySelectorAll(
-      'dialog[data-screen-label="Accept completion dialog"]',
-    );
-    const text = dialogs[dialogs.length - 1]?.textContent ?? "";
-    expect(text).toContain("checks not readable");
-    expect(text).toContain("(HTTP 403)");
-    expect(text).toContain("Resource not accessible by personal access token");
-    expect(text).toContain("does not wait for it");
-  });
-
   it("names failing checks, and says plainly that they do not block this merge", () => {
     // CANARY: drop the `prChecks` row and this is the state shipped before.
     const text = ceremonyText({

@@ -96,7 +96,7 @@ describe("checksPill / reviewPill (P13-D-28)", () => {
     // a run with one red check is not "2 running".
     expect(checksPill(checks({ total: 3, failing: 1, pending: 1 })).kind).toBe("blocked");
     expect(checksPill(checks({ total: 3, pending: 2 })).kind).toBe("input");
-    expect(checksPill(checks({ total: 3 })).kind).toBe("ready");
+    expect(checksPill(checks({ total: 3 })).kind).toBe("done");
   });
 
   it("counts the relevant checks, not the total, when something is wrong", () => {
@@ -150,9 +150,6 @@ describe("the quiet tier marks the settled facts, never the states that want a p
     expect(prStatePill("merged").quiet).toBe(true);
     expect(reviewPill("approved").quiet).toBe(true);
     expect(connectionPill({ status: "connected" }).quiet).toBe(true);
-    expect(
-      checksPill({ total: 3, passing: 3, failing: 0, pending: 0, state: "passing" }).quiet,
-    ).toBe(true);
   });
   it("demands keep their fill", () => {
     for (const view of [

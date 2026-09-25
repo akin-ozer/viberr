@@ -35,7 +35,6 @@ function summary(packet: TaskSummary["packet"]): TaskSummary & { quiet: boolean 
     repo: null,
     pr: null,
     prChecks: null,
-    prChecksUnread: null,
     prReview: null,
     workRevisionSha: null,
     commits: [],

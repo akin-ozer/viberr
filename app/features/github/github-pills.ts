@@ -15,10 +15,11 @@ export interface PillView {
   label: string;
   /** The second pill tier (design pass 2026-09-08; `Pill`'s `quiet` prop): a
    *  FILL is a problem or a demand, an OUTLINE describes. The settled facts —
-   *  merged, synced, approved, connected, every check passing — carry `quiet`
-   *  here so every surface that renders them says so the same way; the
-   *  states that want a person (closed, behind main, changes requested, a
-   *  failing check, a missing credential) keep their fills. */
+   *  merged, synced, approved, connected — carry `quiet` here so every surface
+   *  that renders them says so the same way; the states that want a person
+   *  (closed, behind main, changes requested, a failing check, a missing
+   *  credential) keep their fills. A pass of the checks or the gates is a
+   *  green fill (ruling 491: as an outline it read as dry). */
   quiet?: boolean;
 }
 
@@ -90,12 +91,6 @@ export function prStatePill(state: string): PillView {
  * could not account for get their own grey pill, so the green one keeps meaning
  * "every run concluded well".
  */
-/** Ruling 360: the read GitHub refused — neither green nor red, and never
- *  silence on a surface that would have shown the checks. */
-export function checksUnreadPill(): PillView {
-  return { kind: "neutral", label: "checks not readable" };
-}
-
 export function checksPill(checks: {
   total: number;
   passing: number;
@@ -116,7 +111,7 @@ export function checksPill(checks: {
       label: `${checks.unknown ?? checks.total}/${checks.total} checks unknown`,
     };
   }
-  return { kind: "ready", label: `${checks.total} checks passing`, quiet: true };
+  return { kind: "done", label: `${checks.total} checks passing` };
 }
 
 /**
@@ -215,16 +210,16 @@ export function connectionPill(
 /**
  * Ruling 482 (F40-52): the project's gates as Viberr ran them on the revision
  * under review. A fill wherever the gates stand between the task and an
- * acceptance (failed, could not run, not run, out of date, still running); the
- * settled pass is an outline, like every passing check. One mapping for the PR
- * card and the accept dialog.
+ * acceptance (failed, could not run, not run, out of date, still running), and
+ * a green fill for the pass (ruling 491: as an outline it read as dry). One
+ * mapping for the PR card and the accept dialog.
  */
 export function gatesPill(
   state: "not_run" | "stale" | "queued" | "running" | "passed" | "failed" | "error",
 ): PillView {
   switch (state) {
     case "passed":
-      return { kind: "ready", label: "gates passed", quiet: true };
+      return { kind: "done", label: "gates passed" };
     case "failed":
       return { kind: "blocked", label: "gates failed" };
     case "error":

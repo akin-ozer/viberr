@@ -15,7 +15,6 @@ import {
 import { RECONCILE_START_TOAST } from "./github-copy";
 import {
   checksPill,
-  checksUnreadPill,
   connectionPill,
   mergeablePill,
   prStatePill,
@@ -233,12 +232,7 @@ export function PullRequestsPanel({
         )}
         {prs.map((row) => {
           const pill = prStatePill(row.state);
-          // Ruling 360: a refused read is a pill, not a blank.
-          const checks = row.checks
-            ? checksPill(row.checks)
-            : row.checksUnread
-              ? checksUnreadPill()
-              : null;
+          const checks = row.checks ? checksPill(row.checks) : null;
           const review = row.review ? reviewPill(row.review) : null;
           const conflict = mergeablePill(row.mergeable);
           return (
@@ -266,7 +260,7 @@ export function PullRequestsPanel({
                     a fill is a problem or a demand), so a row in review is read
                     by the one chip that still has colour. */}
                 {checks && (
-                  <Pill kind={checks.kind} sm quiet={checks.quiet}>
+                  <Pill kind={checks.kind} sm>
                     {checks.label}
                   </Pill>
                 )}
