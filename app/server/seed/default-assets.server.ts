@@ -202,6 +202,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "589e93e91662e060ee303ba78802f582d541275de328a8bc237926578c983f54",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 482 (pass 40, F40-52): before "Bringing up a new project" named
+    // `set_project_gates` and the rulings paragraph stopped listing "the gate
+    // commands" as prose to write there. Every directive re-typed them and
+    // agents reported their exit codes, the claim a person could not check.
+    "7418f3499b14e1c8ce8a0cc46d6efdec850370712f1ec56728c1130302fcb948",
     // Ruling 464 (pass 40, F40-7): before "Bringing up a new project" said to
     // pass the designed roster as `agents`, and before "No deletes" named
     // `remove_agent_deployment`. The controller deployed its six specialists

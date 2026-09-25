@@ -1802,6 +1802,77 @@ describe("GithubTrace — branch collision framing (F31-1)", () => {
   });
 });
 
+/**
+ * Ruling 482 (F40-52): the PR card says what Viberr's own run of the project's
+ * gates found on the revision under review, with each gate's log, and offers
+ * the run again to the people who may deliver.
+ */
+describe("GithubTrace — project gates (ruling 482)", () => {
+  const GATES: NonNullable<AcceptanceAffordance["gates"]> = {
+    sha: "a95c337".padEnd(40, "0"),
+    state: "failed",
+    passed: 3,
+    total: 4,
+    line: "Gates on a95c337: 3/4 exit 0 (run by Viberr)",
+    results: [],
+    rows: [
+      { name: "install", command: "pnpm install", outcome: "exit 0", wall: "12 s", ok: true, log: "gate-a95c337-01-install-20260925T101500Z.log" },
+      { name: "build", command: "pnpm build", outcome: "exit 1", wall: "41 s", ok: false, log: "gate-a95c337-02-build-20260925T101512Z.log" },
+    ],
+    error: null,
+    finishedAt: "2026-09-25T10:16:00.000Z",
+  };
+
+  it("prints the server's line, each gate's outcome and a link to its log, and runs them again on a click", () => {
+    // CANARY: drop `<GatesRow>` from GithubTrace.
+    const onRunGates = vi.fn();
+    const { container, getByRole, getByText } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask()}
+          acceptance={{ ...traceAcceptance(), gates: GATES }}
+          onRunGates={onRunGates}
+          attachmentsBase="/projects/viberr-core/tasks/VIB-151/attachments"
+        />
+      </MemoryRouter>,
+    );
+    expect(getByText("Gates on a95c337: 3/4 exit 0 (run by Viberr)")).toBeTruthy();
+    expect(container.querySelector(".gh-bar")?.textContent).toContain("gates failed");
+    const results = getByRole("list", { name: "Gate results" });
+    expect(results.textContent).toContain("build");
+    expect(results.textContent).toContain("exit 1");
+    expect(results.querySelector("li.bad")?.textContent).toContain("build");
+    const log = getByRole("link", { name: "build log" });
+    expect(log.getAttribute("href")).toBe(
+      "/projects/viberr-core/tasks/VIB-151/attachments/gate-a95c337-02-build-20260925T101512Z.log",
+    );
+    fireEvent.click(getByRole("button", { name: /Run gates again/ }));
+    expect(onRunGates).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no run while one is in flight, and no control without the delivery tier", () => {
+    const running = { ...GATES, state: "running" as const, line: "Gates on a95c337: running, 1 of 4 done (run by Viberr)" };
+    const { getByRole, rerender, queryByRole } = render(
+      <MemoryRouter>
+        <GithubTrace
+          githubHost={GH_HOST}
+          task={traceTask()}
+          acceptance={{ ...traceAcceptance(), gates: running }}
+          onRunGates={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(getByRole("button", { name: /Run gates again/ }).hasAttribute("disabled")).toBe(true);
+    rerender(
+      <MemoryRouter>
+        <GithubTrace githubHost={GH_HOST} task={traceTask()} acceptance={{ ...traceAcceptance(), gates: running }} />
+      </MemoryRouter>,
+    );
+    expect(queryByRole("button", { name: /Run gates/ })).toBeNull();
+  });
+});
+
 describe("GithubTrace — admin force-accept (DG-2)", () => {
   it("renders the Force-accept button when blocked AND onForceAccept is provided", () => {
     // C1: the block REASON no longer renders here — it has one owner, the

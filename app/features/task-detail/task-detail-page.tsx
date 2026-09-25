@@ -419,6 +419,19 @@ export function TaskDetailPage({
     deliverFetcher.submit(fd, { method: "post" });
   };
 
+  // Ruling 482: run the project's gates on the revision under review again,
+  // from the PR card. Same tier as the manual delivery above.
+  const gatesFetcher = useFetcher<ActionResult>();
+  useActionFeedback(gatesFetcher);
+  const gatesBusy = gatesFetcher.state !== "idle";
+  const onRunGates = () => {
+    if (gatesBusy) return;
+    const fd = new FormData();
+    fd.set("_csrf", csrf);
+    fd.set("intent", "run-gates");
+    gatesFetcher.submit(fd, { method: "post" });
+  };
+
   // The run-log console's store (ruling 457): it follows the task's runs
   // line by line on the layout's live stream, fills a thread the payload did
   // not carry, and keeps its lines OUTSIDE this page's state, so a console
@@ -875,9 +888,11 @@ export function TaskDetailPage({
           {...(onForceAccept
             ? { onForceAccept: () => setConfirmAccept({ mode: "force" }) }
             : {})}
-          {...(canDeliver && !taskClosed ? { onDeliver } : {})}
+          {...(canDeliver && !taskClosed ? { onDeliver, onRunGates } : {})}
           delivering={deliverBusy}
           runIntent={runIntent}
+          runningGates={gatesBusy}
+          attachmentsBase={attachmentsBase}
         />
         <CurrentStatePanel
           task={task}
@@ -1094,6 +1109,8 @@ export function TaskDetailPage({
           // R19-B: the human GitHub approval carrying the verdict gate, rendered
           // on the verdict row (null when an agent verdict cleared it).
           verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
+          // Ruling 482: Viberr's own gate run on the revision this accepts.
+          gates={acceptance.gates ?? null}
           ceremony={
             "label" in confirmAccept
               ? {

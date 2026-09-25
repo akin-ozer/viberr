@@ -60,6 +60,10 @@ CREATE TABLE projects (
   credential_policy_json TEXT,
   guardrails_json TEXT NOT NULL DEFAULT '[]',
   required_reviewers_json TEXT NOT NULL DEFAULT '[]',
+  -- Ruling 482: the project's declared gates (project.md `gates`), so a task's
+  -- projected acceptance block can say the gates have not passed without a
+  -- file read. '[]' when the project declares none.
+  gates_json TEXT NOT NULL DEFAULT '[]',
   source_path TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   parsed_at TEXT NOT NULL

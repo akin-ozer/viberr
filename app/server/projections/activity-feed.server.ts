@@ -249,6 +249,9 @@ const AUDIT_ACTION_KINDS = {
   // Ruling 178: the required-reviewer rule (Settings → Required reviewers,
   // or the controller's set_required_reviewers) — acceptance policy.
   "project.required_reviewers.updated": "change",
+  // Ruling 482: the project's gates (Settings → Gates, or the controller's
+  // set_project_gates) — what acceptance waits on, like the rule above.
+  "project.gates.updated": "change",
   "project.member.role_changed": "change",
   "project.member.invited": "change",
   "project.member.removed": "change",
@@ -295,6 +298,10 @@ const AUDIT_ACTION_KINDS = {
   // decision in front of a person. On the feed because the alternative is that
   // "why did this task sit for a day" is only answerable by opening the task.
   "task.review.deadlock": "audit",
+  // Ruling 482: Viberr's own run of the project's gates on a revision, and a
+  // person asking for one. The run is the evidence an acceptance stands on.
+  "task.gates.run": "audit",
+  "task.gates.requested": "audit",
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
@@ -397,6 +404,13 @@ const auditDetailsSchema = z.object({
   index: z.number().optional().catch(undefined),
   reason: detailText,
   unchanged: z.boolean().optional().catch(undefined),
+
+  // Ruling 482: the gate list as written, and one gate run's outcome.
+  gates: z.array(z.object({ name: z.string().catch("?") })).catch([]),
+  headSha: detailText,
+  status: detailText,
+  passed: z.number().optional().catch(undefined),
+  total: z.number().optional().catch(undefined),
 });
 
 /** The decoded details one audit sentence reads. */
@@ -571,6 +585,19 @@ function auditText(
       const live = d.liveHeadSha ? ` (head \`${d.liveHeadSha.slice(0, 7)}\`)` : "";
       return `Acceptance refused: ${reviewed} is not on ${pr}${live}, so the merge would not have carried the reviewed work, on`;
     }
+    case "project.gates.updated": {
+      // Ruling 482: the whole list as it now stands; a clear says so.
+      if (d.gates.length === 0) return `${actor} cleared the project's gates.`;
+      return `${actor} set the project's gates to ${d.gates.map((g) => `**${g.name}**`).join(", ")}.`;
+    }
+    case "task.gates.run": {
+      // Ruling 482. The actor is the server; the row says what its run found.
+      const sha = d.headSha ? `\`${d.headSha.slice(0, 7)}\`` : "the revision under review";
+      if (d.status === "error") return `Viberr could not run the project's gates on ${sha} on`;
+      return `Viberr ran the project's gates on ${sha}: ${d.passed ?? 0}/${d.total ?? 0} exit 0, on`;
+    }
+    case "task.gates.requested":
+      return `${actor} asked Viberr to run the project's gates again on`;
     case "task.review.deadlock": {
       // Ruling 237. The actor is the policy engine, so this says what happened,
       // not who did it. The reviewer is named by profile id, which is what the

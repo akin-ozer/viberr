@@ -4257,6 +4257,63 @@ describe("set_required_reviewers (ruling 178)", () => {
 });
 
 /**
+ * Ruling 482 (pass 40, F40-52): the controller promotes a measured gate set
+ * into the project's gates, where Viberr runs them, instead of writing the
+ * commands into the rulings knowledge base as prose every directive re-types.
+ */
+describe("set_project_gates (ruling 482)", () => {
+  async function gatesInFile() {
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    return readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.gates;
+  }
+  afterAll(async () => {
+    await call(ids.projectAdmin, "set_project_gates", { gates: [] });
+  });
+
+  it("round-trips the list into project.md, get_project lists it, [] clears it, and a maintainer is refused", async () => {
+    // CANARY: rename (or remove) the set_project_gates tool.
+    const reply = await call(ids.projectAdmin, "set_project_gates", {
+      gates: [
+        { name: "install", command: "pnpm install --frozen-lockfile" },
+        { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+      ],
+    });
+    expect(reply).toContain("[done] Gates saved: install, build.");
+    expect(await gatesInFile()).toEqual([
+      { name: "install", command: "pnpm install --frozen-lockfile" },
+      { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+    ]);
+    // SAFETY: `get_project` answers `json(...)` of an object literal that
+    // always carries `gates`; compared structurally below.
+    const project = JSON.parse(await call(ids.projectAdmin, "get_project")) as { gates: unknown };
+    expect(project.gates).toEqual([
+      { name: "install", command: "pnpm install --frozen-lockfile" },
+      { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+    ]);
+    expect(
+      await call(ids.projectAdmin, "set_project_gates", {
+        gates: [
+          { name: "install", command: "pnpm install --frozen-lockfile" },
+          { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+        ],
+      }),
+    ).toContain("[noop]");
+    expect(await call(ids.maintainer, "set_project_gates", { gates: [] })).toContain("[denied]");
+    expect(
+      await call(ids.projectAdmin, "set_project_gates", { gates: [{ name: "", command: "x" }] }),
+    ).toContain("[error] Gate 1 has no name. Nothing was written.");
+    expect(await call(ids.projectAdmin, "set_project_gates", { gates: [] })).toBe(
+      "[done] Gates cleared: acceptance no longer waits on them.",
+    );
+    expect(await gatesInFile()).toBeUndefined();
+    const { listAuditLog } = await import("~/server/projections/activity-feed.server");
+    const row = listAuditLog(app.db, SLUG, { limit: 20 }).find((r) => r.text.includes("gates to"));
+    expect(row?.kind).toBe("change");
+    expect(row?.text).toContain("(via the controller) set the project's gates to **install**, **build**.");
+  });
+});
+
+/**
  * Ruling 188 (pass 37): a controller read returns what the equivalent HUMAN
  * surface renders. Three reads returned less-resolved data than the UI with no
  * marker saying so, and live in pass 37 each one changed what the controller

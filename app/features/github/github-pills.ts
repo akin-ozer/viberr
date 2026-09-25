@@ -211,3 +211,31 @@ export function connectionPill(
       return { kind: "neutral", label: "unknown" };
   }
 }
+
+/**
+ * Ruling 482 (F40-52): the project's gates as Viberr ran them on the revision
+ * under review. A fill wherever the gates stand between the task and an
+ * acceptance (failed, could not run, not run, out of date, still running); the
+ * settled pass is an outline, like every passing check. One mapping for the PR
+ * card and the accept dialog.
+ */
+export function gatesPill(
+  state: "not_run" | "stale" | "queued" | "running" | "passed" | "failed" | "error",
+): PillView {
+  switch (state) {
+    case "passed":
+      return { kind: "ready", label: "gates passed", quiet: true };
+    case "failed":
+      return { kind: "blocked", label: "gates failed" };
+    case "error":
+      return { kind: "blocked", label: "gates could not run" };
+    case "queued":
+      return { kind: "input", label: "gates queued" };
+    case "running":
+      return { kind: "input", label: "gates running" };
+    case "stale":
+      return { kind: "risk", label: "gates out of date" };
+    case "not_run":
+      return { kind: "risk", label: "gates not run" };
+  }
+}

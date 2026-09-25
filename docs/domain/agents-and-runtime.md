@@ -96,7 +96,11 @@ no other account to fall back to.
   hands the vendor home back again (owner the uid, group `node`, files gaining group read
   and write), because a vendor writes its sign-in 0600 and the server copies, re-points or
   backs it up. Without a launcher (the host dev server, the test harness) nothing of this
-  applies and runs spawn as the server's user; health says `agentIsolation: off`.
+  applies and runs spawn as the server's user; health says `agentIsolation: off`. The
+  project's gates (ruling 482) are agent processes in this sense: each `sh -c` command,
+  the clone it runs in and its clean-up go through the launcher as the task owner's uid
+  (`agentGitLaunchFor`, no vendor home), with `filteredSpawnEnv()` and the agent `$HOME`;
+  a task with no owner records a gate error and runs nothing as the server.
 - **Every Codex run gets a private `CODEX_HOME` (ruling 181).** The Codex CLI extracts
   its exec helpers (`codex-linux-sandbox`, `codex-execve-wrapper`, `apply_patch`) into
   ONE directory per home, `$CODEX_HOME/tmp/arg0/codex-arg0XXXXXX/`, and every new

@@ -6015,6 +6015,9 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/policy/policy-page.tsx: x → loader (spins)",
         // Ruling 463: a GitHub connection's Re-check.
         "features/org-settings/connections-panel.tsx: refresh → loader (spins)",
+        // Ruling 482: the PR card's Run gates, an in-flight starter like the
+        // ones above.
+        "features/task-detail/task-side-panels.tsx: refresh → loader (spins)",
       ].sort(),
     );
     // The cell centres both marks, whatever their box.

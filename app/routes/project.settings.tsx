@@ -27,6 +27,7 @@ import {
   setProjectArchived,
   inviteMember,
   parseFileLeasesField,
+  parseProjectGatesField,
   parseRequiredReviewerRulesField,
   removeMember,
   removeStage,
@@ -35,6 +36,7 @@ import {
   repairProjectRepo,
   setBranchCleanup,
   setProjectFileLeases,
+  setProjectGates,
   setRequiredReviewers,
   updateProjectIdentity,
 } from "~/features/project-settings/settings-actions.server";
@@ -225,6 +227,16 @@ export async function action({ request, params }: Route.ActionArgs) {
         const result = await setProjectFileLeases(
           db,
           { projectSlug: slug, leases: parseFileLeasesField(field("leases")) },
+          actor,
+        );
+        return { ok: true as const, toast: result.toast };
+      }
+      // Ruling 482: the gate table, posted whole through the writer the
+      // controller's `set_project_gates` calls.
+      case "set-project-gates": {
+        const result = await setProjectGates(
+          db,
+          { projectSlug: slug, gates: parseProjectGatesField(field("gates")) },
           actor,
         );
         return { ok: true as const, toast: result.toast };

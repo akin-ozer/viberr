@@ -43,6 +43,14 @@ import { MiniModal } from "~/features/org-settings/mini-modal";
 import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
 import type { FileLeaseView, SettingsViewData } from "./settings-query.server";
+import {
+  GATE_COMMAND_MAX_CHARS,
+  GATE_DEFAULT_TIMEOUT_SECONDS,
+  GATE_MAX_TIMEOUT_SECONDS,
+  GATE_NAME_MAX_CHARS,
+  PROJECT_GATES_MAX,
+  type ProjectGate,
+} from "~/schemas/project-file.schema";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 import { isTerminalStage, stageLockReason, stageName } from "~/shared/workflow/stage-roles";
 import {
@@ -1500,6 +1508,196 @@ export function FileLeasesPanel({
   );
 }
 
+// ------------------------------------------------------------------- gates
+
+/** One gate row as the form holds it; the timeout is typed as text so an
+ *  empty field reads as "the default" rather than as 0. */
+interface GateDraft {
+  name: string;
+  command: string;
+  timeout: string;
+}
+
+const gateDraftOf = (gates: readonly ProjectGate[]): GateDraft[] =>
+  gates.map((g) => ({
+    name: g.name,
+    command: g.command,
+    timeout: g.timeoutSeconds === undefined ? "" : String(g.timeoutSeconds),
+  }));
+
+/** The rows as the writer receives them. A timeout field that is empty reads
+ *  as the default; anything else is sent as typed and the writer refuses a
+ *  value that is not a whole number of seconds, by name. */
+function gatesOfDraft(rows: readonly GateDraft[]) {
+  return rows.map((r) => {
+    const timeout = r.timeout.trim();
+    return {
+      name: r.name.trim(),
+      command: r.command.trim(),
+      timeoutSeconds: timeout === "" ? null : Number(timeout),
+    };
+  });
+}
+
+/**
+ * Ruling 482 (F40-52): the commands Viberr itself runs on every delivered
+ * revision.
+ *
+ * On akinozer-com the gate list lived in the rulings knowledge base as prose,
+ * WEB-1's measured set sat under "Proposed (not binding)", every directive
+ * re-typed it, and the owner accepted two production deploys on agents'
+ * reports of the exit codes. A gate declared here is run by the server, as the
+ * task owner, in a checkout of the exact revision, and a plain acceptance
+ * waits until every one exited 0 there. Saved WHOLE through one intent, the
+ * writer the controller's `set_project_gates` calls. A role without
+ * `edit-policy` reads the list as text.
+ */
+export function ProjectGatesPanel({
+  gates,
+  canManage,
+  busy,
+  onSave,
+}: {
+  gates: ProjectGate[];
+  canManage: boolean;
+  busy: boolean;
+  onSave: (gates: { name: string; command: string; timeoutSeconds: number | null }[]) => void;
+}) {
+  const [draft, setDraft] = useState<GateDraft[]>(() => gateDraftOf(gates));
+  const changed =
+    JSON.stringify(gatesOfDraft(draft)) !== JSON.stringify(gatesOfDraft(gateDraftOf(gates)));
+  const add = () => setDraft((rows) => [...rows, { name: "", command: "", timeout: "" }]);
+  const update = (i: number, patch: Partial<GateDraft>) =>
+    setDraft((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
+  const remove = (i: number) => setDraft((rows) => rows.filter((_, j) => j !== i));
+  return (
+    <div className="panel" data-panel="project-gates">
+      <div className="panel-head">
+        <Icon name="check" />
+        <h2>Gates</h2>
+        <span className="right sub fine">{countLabel(gates.length, "gate")}</span>
+      </div>
+      {!canManage && (
+        <div className="pol-note">
+          <Icon name="lock" />
+          <span>
+            Read-only. Changing the gates needs the{" "}
+            <strong>Edit workflow &amp; policy</strong> grant (project admin).
+          </span>
+        </div>
+      )}
+      {canManage ? (
+        <div className="guard-list">
+          {draft.map((row, i) => (
+            <div className="guard-row lease-row gate-row" key={i} data-gate-row={i}>
+              <label className="guard-ctl">
+                Name
+                <input
+                  type="text"
+                  aria-label={`Gate ${i + 1} name`}
+                  placeholder="build"
+                  maxLength={GATE_NAME_MAX_CHARS}
+                  value={row.name}
+                  disabled={busy}
+                  onChange={(e) => update(i, { name: e.target.value })}
+                />
+              </label>
+              <label className="guard-ctl grow cmd">
+                Command
+                <input
+                  type="text"
+                  aria-label={`Gate ${i + 1} command`}
+                  placeholder="pnpm build"
+                  maxLength={GATE_COMMAND_MAX_CHARS}
+                  value={row.command}
+                  disabled={busy}
+                  onChange={(e) => update(i, { command: e.target.value })}
+                />
+              </label>
+              <label className="guard-ctl">
+                Timeout (s)
+                <input
+                  type="number"
+                  aria-label={`Gate ${i + 1} timeout in seconds`}
+                  placeholder={String(GATE_DEFAULT_TIMEOUT_SECONDS)}
+                  min={1}
+                  max={GATE_MAX_TIMEOUT_SECONDS}
+                  step={1}
+                  value={row.timeout}
+                  disabled={busy}
+                  onChange={(e) => update(i, { timeout: e.target.value })}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn ghost sm"
+                aria-label={`Remove gate ${i + 1}${row.name.trim() ? ` (${row.name.trim()})` : ""}`}
+                disabled={busy}
+                onClick={() => remove(i)}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          {draft.length === 0 && (
+            <p className="empty sm">
+              No gates. Acceptance waits only on the reviewers&rsquo; verdicts.
+            </p>
+          )}
+        </div>
+      ) : gates.length === 0 ? (
+        <p className="empty sm">No gates declared.</p>
+      ) : (
+        <div className="guard-list">
+          {gates.map((g) => (
+            <div className="guard-row" key={g.name}>
+              <div className="guard-main">
+                <span className="guard-name">{g.name}</span>
+                <span className="guard-desc">
+                  <code>{g.command}</code> · stopped after{" "}
+                  {g.timeoutSeconds ?? GATE_DEFAULT_TIMEOUT_SECONDS} s
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {canManage && (
+        <div className="rr-actions">
+          <button
+            type="button"
+            className="btn ghost sm"
+            disabled={busy || draft.length >= PROJECT_GATES_MAX}
+            onClick={add}
+          >
+            <Icon name="plus" />
+            Add gate
+          </button>
+          <button
+            type="button"
+            className="btn primary sm"
+            disabled={!changed || busy}
+            aria-busy={busy || undefined}
+            onClick={() => onSave(gatesOfDraft(draft))}
+          >
+            Save
+          </button>
+        </div>
+      )}
+      <div className="pol-note after last">
+        <Icon name="shield" />
+        <span>
+          Viberr runs each command with <code>sh -c</code>, in order, in a fresh
+          checkout of every delivered revision, as the task owner, with no
+          credentials. It records each exit code, time and log on the task. A
+          task is accepted only once every gate exited 0 on its revision; an
+          admin&rsquo;s force accept is recorded as a bypass.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ members
 
 /** Which invite field a refused submit named. */
@@ -2418,6 +2616,7 @@ export function SettingsPage({
   const dangerFetcher = useFetcher<ActionResult>();
   const reviewerFetcher = useFetcher<ActionResult>();
   const leaseFetcher = useFetcher<ActionResult>();
+  const gateFetcher = useFetcher<ActionResult>();
   useActionToast(identityFetcher);
   useActionToast(stageFetcher);
   useActionToast(memberFetcher);
@@ -2425,6 +2624,7 @@ export function SettingsPage({
   useActionToast(credFetcher);
   useActionToast(dangerFetcher);
   useActionToast(reviewerFetcher);
+  useActionToast(gateFetcher);
 
   // E3: every panel gate names the RbacAction its OWN server mutation checks,
   // never a shared `myRole === "admin"` literal. Project identity, the stage
@@ -2560,6 +2760,24 @@ export function SettingsPage({
                     intent: "set-file-leases",
                     _csrf: csrf,
                     leases: JSON.stringify(leases),
+                  },
+                  { method: "post" },
+                )
+              }
+            />
+            {/* Ruling 482: the gates decide what acceptance waits on, as the
+                reviewer rules above do, so they stack in the same column. */}
+            <ProjectGatesPanel
+              key={`gates:${JSON.stringify(data.gates ?? [])}`}
+              gates={data.gates ?? []}
+              canManage={canEditPolicy}
+              busy={gateFetcher.state !== "idle"}
+              onSave={(gates) =>
+                gateFetcher.submit(
+                  {
+                    intent: "set-project-gates",
+                    _csrf: csrf,
+                    gates: JSON.stringify(gates),
                   },
                   { method: "post" },
                 )

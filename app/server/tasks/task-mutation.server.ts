@@ -23,6 +23,7 @@ import type { ActorRender } from "~/shared/mapping/actor.server";
 import type { NotificationKind } from "~/shared/mapping/notification.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import type { ProjectRole } from "~/shared/rbac";
+import type { ProjectGate } from "~/schemas/project-file.schema";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import {
   resolveRequiredReviewers,
@@ -177,6 +178,9 @@ export interface ProjectContext {
   /** Ruling 178: the project's declared required reviewers, resolved to the
    *  names the acceptance gate prints. Empty when the project declares none. */
   requiredReviewers: RequiredReviewerView[];
+  /** Ruling 482: the gates Viberr runs on every delivered revision; the
+   *  acceptance gate refuses until they pass on the revision under review. */
+  gates: ProjectGate[];
 }
 
 export function loadProjectContext(
@@ -200,6 +204,7 @@ export function loadProjectContext(
     memberRoles: new Map(fm.members.map((m) => [m.userId, m.role])),
     archived: fm.archived === true,
     requiredReviewers: resolveRequiredReviewers(fm, ctx.dataRoot),
+    gates: fm.gates ?? [],
   };
 }
 

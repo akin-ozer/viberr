@@ -8,6 +8,7 @@ import {
   DangerZone,
   FileLeasesPanel,
   MembersPanel,
+  ProjectGatesPanel,
   ProjectPanel,
   RepoPanel,
   RequiredReviewersPanel,
@@ -1410,6 +1411,7 @@ describe("SettingsPage — each panel gates on the action its own server guard c
     fileLeases: [],
     leaseCandidates: [],
     reviewerCandidates: [{ id: "reviewer", name: "Code Reviewer" }],
+    gates: [],
   };
 
   /** Always an admin — the ROLE is held constant on purpose, so what the page
@@ -1568,6 +1570,7 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     fileLeases: [],
     leaseCandidates: [],
     reviewerCandidates: [{ id: "reviewer", name: "Code Reviewer" }],
+    gates: [],
   };
 
   function renderPageAs(myRole: ProjectRole) {
@@ -1611,6 +1614,8 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
       // Ruling 396: likewise. A viewer still needs to know who owns a file
       // before it touches one, and the write controls are the part withheld.
       "File leases",
+      // Ruling 482: likewise. What acceptance waits on is readable to all.
+      "Gates",
       "Members",
       "Repository & credentials",
     ]);
@@ -2039,5 +2044,58 @@ describe("ruling 368: Settings' requests in flight", () => {
     expect(del.textContent).toBe("Delete project");
     expect(del.disabled).toBe(true);
     expect(del.hasAttribute("aria-busy")).toBe(false);
+  });
+});
+
+/**
+ * Ruling 482 (F40-52): the gates Viberr runs on every delivered revision, on
+ * a page a person can open. On akinozer-com the list was prose in a knowledge
+ * base and a measured set sat "Proposed (not binding)" with nowhere to go.
+ */
+describe("ProjectGatesPanel (ruling 482)", () => {
+  it("reads the list to a role without the policy grant", () => {
+    const { container } = render(
+      <ProjectGatesPanel
+        gates={[{ name: "build", command: "pnpm build", timeoutSeconds: 900 }]}
+        canManage={false}
+        busy={false}
+        onSave={() => {}}
+      />,
+    );
+    const panel = container.querySelector('[data-panel="project-gates"]')!;
+    expect(panel.textContent).toContain("build");
+    expect(panel.textContent).toContain("pnpm build");
+    expect(panel.textContent).toContain("stopped after 900 s");
+    expect(panel.textContent).toContain("Read-only");
+    expect(panel.querySelector("input")).toBeNull();
+  });
+
+  it("saves the whole list in order, an empty timeout meaning the default", () => {
+    // CANARY: have the Save button send `draft` untrimmed, or drop the
+    // timeout conversion in gatesOfDraft.
+    const saved: { name: string; command: string; timeoutSeconds: number | null }[][] = [];
+    const { getByLabelText, getByText, getByRole } = render(
+      <ProjectGatesPanel
+        gates={[{ name: "install", command: "pnpm install" }]}
+        canManage
+        busy={false}
+        onSave={(g) => saved.push(g)}
+      />,
+    );
+    expect(getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(getByText("Add gate"));
+    fireEvent.change(getByLabelText("Gate 2 name"), { target: { value: " build " } });
+    fireEvent.change(getByLabelText("Gate 2 command"), { target: { value: " pnpm build " } });
+    fireEvent.change(getByLabelText("Gate 2 timeout in seconds"), { target: { value: "900" } });
+    fireEvent.click(getByRole("button", { name: "Save" }));
+    expect(saved).toEqual([
+      [
+        { name: "install", command: "pnpm install", timeoutSeconds: null },
+        { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+      ],
+    ]);
+    fireEvent.click(getByRole("button", { name: "Remove gate 1 (install)" }));
+    fireEvent.click(getByRole("button", { name: "Save" }));
+    expect(saved[1]).toEqual([{ name: "build", command: "pnpm build", timeoutSeconds: 900 }]);
   });
 });

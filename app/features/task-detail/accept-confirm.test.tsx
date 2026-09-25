@@ -845,3 +845,77 @@ describe("ruling 475: the ceremony names the open pull requests this merge will 
     expect(merged).toBeNull();
   });
 });
+
+/**
+ * Ruling 482 (F40-52): the owner accepted two production deploys on agents'
+ * reports of the gate exit codes. The dialog that authorizes the merge prints
+ * Viberr's own run instead, bound to the sha on the Revision row, and a
+ * failing gate refuses the plain acceptance while force states the bypass.
+ */
+describe("ruling 482: the Gates row", () => {
+  const failed = {
+    sha: "a95c337".padEnd(40, "0"),
+    state: "failed" as const,
+    passed: 3,
+    total: 4,
+    line: "Gates on a95c337: 3/4 exit 0 (run by Viberr)",
+    results: [],
+    rows: [
+      { name: "install", command: "pnpm install", outcome: "exit 0", wall: "12 s", ok: true, log: null },
+      { name: "build", command: "pnpm build", outcome: "exit 1", wall: "41 s", ok: false, log: null },
+    ],
+    error: null,
+    finishedAt: null,
+  };
+  const refusal =
+    "The project's gates failed on VIB-151's revision `a95c337`: 3/4 exit 0 (`build` exit 1). Rework the branch; the next delivered revision is gated again. An admin can force-accept, and the bypass is recorded.";
+
+  it("names the run, the failing gate, and disables the plain confirm on the gate's refusal", () => {
+    // CANARY: drop the Gates row from AcceptConfirm.
+    const { container } = render(
+      <AcceptConfirm
+        task={detail()}
+        workRevisionSha={"a95c337".padEnd(40, "0")}
+        defaultBranch="main"
+        ceremony={{ mode: "accept" }}
+        gates={failed}
+        blockedReason={refusal}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const dialog = container.ownerDocument.querySelector("dialog")!;
+    const row = Array.from(dialog.querySelectorAll(".obs")).find(
+      (r) => r.querySelector(".k")?.textContent === "Gates",
+    )!;
+    expect(row.textContent).toContain("gates failed");
+    expect(row.textContent).toContain("Gates on a95c337: 3/4 exit 0 (run by Viberr)");
+    expect(row.textContent).toContain("build");
+    expect(row.textContent).not.toContain("install");
+    expect(screen.getByRole("button", { name: /Accept → Done/ }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("lets force proceed and says what it bypasses", () => {
+    render(
+      <AcceptConfirm
+        task={detail()}
+        workRevisionSha={"a95c337".padEnd(40, "0")}
+        defaultBranch="main"
+        ceremony={{ mode: "force" }}
+        gates={failed}
+        blockedReason={refusal}
+        blockedGates={[refusal]}
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Bypassing/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Force-accept VIB-151/ }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("renders no Gates row where the project declares none", () => {
+    expect(open({})).not.toContain("Gates on");
+  });
+});

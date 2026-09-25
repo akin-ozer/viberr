@@ -19,6 +19,8 @@ import {
   type Waiting,
 } from "~/schemas/task-file.schema";
 import { verdictGateReason } from "~/server/github/pr-human-approval.server";
+import { projectGatesRefusal } from "~/shared/project-gates";
+import type { ProjectGate } from "~/schemas/project-file.schema";
 import {
   requiredReviewerRefusals,
   resolveRequiredReviewers,
@@ -199,6 +201,8 @@ interface ProjectContextRow {
    *  the one acceptance gate `acceptanceBlockReason` deliberately leaves out. */
   workflow_json: string;
   required_reviewers_json: string;
+  /** Ruling 482: the project's declared gates, for the acceptance block. */
+  gates_json: string;
 }
 
 /** Everything a task's projection reads from its project. */
@@ -223,14 +227,14 @@ function projectContextForTasks(
   db: DatabaseSync,
   slug: string,
 ): TaskProjectContext | null {
-  // SAFETY: the SELECT names exactly ProjectContextRow's five members plus
-  // `member_ids`; 0001_baseline declares `slug`, `stages_json`, `workflow_json`
-  // and `required_reviewers_json` NOT NULL and `repo` nullable, which is how the
-  // row types them, and `json_group_array` over the NOT NULL
+  // SAFETY: the SELECT names exactly ProjectContextRow's six members plus
+  // `member_ids`; 0001_baseline declares `slug`, `stages_json`, `workflow_json`,
+  // `required_reviewers_json` and `gates_json` NOT NULL and `repo` nullable,
+  // which is how the row types them, and `json_group_array` over the NOT NULL
   // `project_members.user_id` always yields a JSON array of strings.
   const row = db
     .prepare(
-      `SELECT slug, repo, stages_json, workflow_json, required_reviewers_json,
+      `SELECT slug, repo, stages_json, workflow_json, required_reviewers_json, gates_json,
               (SELECT json_group_array(user_id) FROM project_members
                 WHERE project_slug = projects.slug) AS member_ids
          FROM projects WHERE slug = ?`,
@@ -246,6 +250,7 @@ function projectContextForTasks(
       stages_json: row.stages_json,
       workflow_json: row.workflow_json,
       required_reviewers_json: row.required_reviewers_json,
+      gates_json: row.gates_json,
     },
     memberIds: new Set(members),
     digest: JSON.stringify([
@@ -253,6 +258,8 @@ function projectContextForTasks(
       row.stages_json,
       row.workflow_json,
       row.required_reviewers_json,
+      // Ruling 482: a gate edit changes every task's acceptance block.
+      row.gates_json,
       members,
     ]),
   };
@@ -323,9 +330,9 @@ function rebuildProjectFileNow(
     `INSERT INTO projects
        (slug, name, archived, repo, default_branch, task_prefix, description,
         stages_json, workflow_json, agent_policy_json, credential_policy_json,
-        guardrails_json, required_reviewers_json, source_path, content_hash,
-        parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        guardrails_json, required_reviewers_json, gates_json, source_path,
+        content_hash, parsed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(slug) DO UPDATE SET
        name = excluded.name, archived = excluded.archived, repo = excluded.repo,
        default_branch = excluded.default_branch,
@@ -335,6 +342,7 @@ function rebuildProjectFileNow(
        credential_policy_json = excluded.credential_policy_json,
        guardrails_json = excluded.guardrails_json,
        required_reviewers_json = excluded.required_reviewers_json,
+       gates_json = excluded.gates_json,
        source_path = excluded.source_path, content_hash = excluded.content_hash,
        parsed_at = excluded.parsed_at`,
   ).run(
@@ -355,6 +363,8 @@ function rebuildProjectFileNow(
     // tasks derive from, which cascades into every task (below), so the queue
     // refreshes.
     JSON.stringify(resolveRequiredReviewers(fm, options.dataRoot)),
+    // Ruling 482: the declared gates, as project.md holds them.
+    JSON.stringify(fm.gates ?? []),
     sourcePath,
     // F28-D3: sentinel hash; the real content_hash is the LAST write below, so a
     // crash between here and the project_members / diagnostics rewrite leaves it
@@ -531,6 +541,8 @@ function acceptanceBlockReason(
     blockedPacket: boolean;
     /** Ruling 178: the project's resolved rules, from the projected row. */
     requiredReviewers: readonly RequiredReviewerView[];
+    /** Ruling 482: the project's declared gates, from the projected row. */
+    gates: readonly ProjectGate[];
   },
 ): string | null {
   return (
@@ -552,6 +564,9 @@ function acceptanceBlockReason(
     // the same position it holds in `acceptanceRefusalReasons`.
     requiredReviewerRefusals(ctx.requiredReviewers, fm)[0] ??
     verdictGateReason(fm, ctx.validation, fm.key) ??
+    // Ruling 482: the project's gates on the revision under review — the same
+    // position it holds in `acceptanceRefusalReasons`.
+    projectGatesRefusal(ctx.gates, fm, fm.key) ??
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
     // accepting would bury it. Same sentence the writers refuse with.
     (ctx.blockedPacket
@@ -669,6 +684,11 @@ function rebuildTaskFileNow(
   const requiredReviewers: RequiredReviewerView[] = project
     ? (JSON.parse(project.required_reviewers_json) as RequiredReviewerView[])
     : [];
+  // SAFETY: same single writer — `JSON.stringify(fm.gates ?? [])`, rows the
+  // project-file schema parsed.
+  const projectGates: ProjectGate[] = project
+    ? (JSON.parse(project.gates_json) as ProjectGate[])
+    : [];
   const allDiagnostics = [
     ...diagnostics,
     ...referenceDiagnostics({ stage: fm.stage, knownStageIds: stageIds }),
@@ -696,6 +716,7 @@ function rebuildTaskFileNow(
     validation: derivedValidation,
     blockedPacket,
     requiredReviewers,
+    gates: projectGates,
   });
 
   // Ruling 225 (F37-45): a task resting on a CLOCK is not waiting on a person.

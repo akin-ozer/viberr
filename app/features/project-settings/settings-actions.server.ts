@@ -67,7 +67,15 @@ import {
   resolveRequiredReviewers,
   type RequiredReviewerView,
 } from "~/server/tasks/required-reviewers.server";
-import type { RequiredReviewerRule } from "~/schemas/project-file.schema";
+import {
+  GATE_COMMAND_MAX_CHARS,
+  GATE_DEFAULT_TIMEOUT_SECONDS,
+  GATE_MAX_TIMEOUT_SECONDS,
+  GATE_NAME_MAX_CHARS,
+  PROJECT_GATES_MAX,
+  type ProjectGate,
+  type RequiredReviewerRule,
+} from "~/schemas/project-file.schema";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { countLabel } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
@@ -621,6 +629,150 @@ export async function setProjectFileLeases(
     leases: cleaned,
     changed: true,
   };
+}
+
+// ------------------------------------------------------------------- gates
+
+const PROJECT_GATES_AUDIT_ACTION = "project.gates.updated";
+
+/** One gate as a writer receives it, before validation. */
+export interface ProjectGateInput {
+  name: string;
+  command: string;
+  timeoutSeconds?: number | null | undefined;
+}
+
+/**
+ * Ruling 482: the gate table, posted whole as one JSON field. The shape only;
+ * `setProjectGates` checks every fact, so the form and the controller's
+ * `set_project_gates` are refused for the same reasons in the same words.
+ */
+const projectGatesFieldSchema = z.array(
+  z.object({
+    name: z.string(),
+    command: z.string(),
+    timeoutSeconds: z.number().nullable().optional(),
+  }),
+);
+
+export function parseProjectGatesField(raw: string): ProjectGateInput[] {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw || "[]");
+  } catch {
+    throw AppError.validation("The gate list could not be read. Reload the page and try again.");
+  }
+  const parsed = projectGatesFieldSchema.safeParse(decoded);
+  if (!parsed.success) {
+    throw AppError.validation("The gate list could not be read. Reload the page and try again.");
+  }
+  return parsed.data;
+}
+
+/** Check a submitted gate list and return it cleaned, or refuse by name with
+ *  nothing written. */
+function validateProjectGates(gates: readonly ProjectGateInput[]): ProjectGate[] {
+  if (gates.length > PROJECT_GATES_MAX) {
+    throw AppError.validation(
+      `A project declares at most ${PROJECT_GATES_MAX} gates; this list has ${gates.length}. Nothing was written.`,
+    );
+  }
+  const seen = new Set<string>();
+  const out: ProjectGate[] = [];
+  for (const [i, gate] of gates.entries()) {
+    const name = gate.name.trim();
+    const command = gate.command.trim();
+    const which = name ? `Gate "${name}"` : `Gate ${i + 1}`;
+    if (!name) throw AppError.validation(`${which} has no name. Nothing was written.`);
+    if (name.length > GATE_NAME_MAX_CHARS || /[\r\n]/.test(name)) {
+      throw AppError.validation(
+        `${which}: a gate name is one line of at most ${GATE_NAME_MAX_CHARS} characters. Nothing was written.`,
+      );
+    }
+    if (seen.has(name.toLowerCase())) {
+      throw AppError.validation(`Two gates are named "${name}". Each gate needs its own name. Nothing was written.`);
+    }
+    seen.add(name.toLowerCase());
+    if (!command) throw AppError.validation(`${which} has no command. Nothing was written.`);
+    if (command.length > GATE_COMMAND_MAX_CHARS || command.includes("\u0000")) {
+      throw AppError.validation(
+        `${which}: a command is at most ${GATE_COMMAND_MAX_CHARS} characters of text. Nothing was written.`,
+      );
+    }
+    const row: ProjectGate = { name, command };
+    const timeout = gate.timeoutSeconds ?? null;
+    if (timeout !== null) {
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > GATE_MAX_TIMEOUT_SECONDS) {
+        throw AppError.validation(
+          `${which}: a timeout is a whole number of seconds from 1 to ${GATE_MAX_TIMEOUT_SECONDS}. Nothing was written.`,
+        );
+      }
+      if (timeout !== GATE_DEFAULT_TIMEOUT_SECONDS) row.timeoutSeconds = timeout;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * Ruling 482 (pass 40, F40-52): replace the project's GATES — the commands
+ * Viberr itself runs in a checkout of every delivered revision — with the
+ * whole list, `[]` clearing it. `edit-policy`, like every other rule about
+ * what acceptance waits on. A changed list re-projects every task (their
+ * acceptance block reads it) and queues the gates on each open task with a
+ * delivered revision, so a promoted gate set becomes evidence on the tasks
+ * already in review. An unchanged list writes and audits nothing.
+ */
+export async function setProjectGates(
+  db: DatabaseSync,
+  input: { projectSlug: string; gates: readonly ProjectGateInput[] },
+  actor: SettingsActor,
+  ctx: SettingsMutationContext = {},
+): Promise<{ toast: string; gates: ProjectGate[]; changed: boolean; queued: number }> {
+  requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project policy");
+  const gates = validateProjectGates(input.gates);
+  const key = (list: readonly ProjectGate[]) =>
+    JSON.stringify(list.map((g) => [g.name, g.command, g.timeoutSeconds ?? GATE_DEFAULT_TIMEOUT_SECONDS]));
+  let changed = false;
+  await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
+    changed = key(parsed.frontmatter.gates ?? []) !== key(gates);
+    if (!changed) return;
+    if (gates.length === 0) delete parsed.frontmatter.gates;
+    else parsed.frontmatter.gates = gates;
+  });
+  const named = gates.map((g) => g.name).join(", ");
+  if (!changed) {
+    return {
+      toast: gates.length === 0 ? "This project already declares no gates" : `Gates unchanged: ${named}`,
+      gates,
+      changed: false,
+      queued: 0,
+    };
+  }
+  reprojectProject(db, ctx, input.projectSlug);
+  recordAudit(db, {
+    action: PROJECT_GATES_AUDIT_ACTION,
+    actor: { userId: actor.userId, label: actor.label },
+    subjectKind: "project",
+    subjectId: input.projectSlug,
+    projectSlug: input.projectSlug,
+    details: {
+      count: gates.length,
+      gates: gates.map((g) => ({
+        name: g.name,
+        command: g.command,
+        timeoutSeconds: g.timeoutSeconds ?? GATE_DEFAULT_TIMEOUT_SECONDS,
+      })),
+    },
+  });
+  const { requestGatesForOpenTasks } = await import("~/server/tasks/project-gates.server");
+  const queued = gates.length === 0 ? 0 : await requestGatesForOpenTasks(db, input.projectSlug, ctx.dataRoot);
+  const toast =
+    gates.length === 0
+      ? "Gates cleared: acceptance no longer waits on them"
+      : `Gates saved: ${named}. Viberr runs them on every delivered revision` +
+        (queued > 0 ? `, and queued them on ${countLabel(queued, "open task")}` : "");
+  return { toast, gates, changed: true, queued };
 }
 
 // -------------------------------------------------------------- repo repair
