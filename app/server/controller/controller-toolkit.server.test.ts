@@ -16,6 +16,7 @@ import {
   ADVISORY_CAPABILITY_NOTE,
   capabilityIsAdvisory,
 } from "~/shared/capabilities";
+import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 
 /**
  * Ruling 99 — the controller's permission matrix, driven arm by arm.
@@ -208,6 +209,67 @@ describe("the tool surface itself encodes the invariants", () => {
     for (const text of [described, fields]) {
       expect(text).toContain("Link N started as KEY");
       expect(text).not.toMatch(/activeTaskKey names|names it in activeTaskKey/);
+    }
+  });
+});
+
+/**
+ * Ruling 492 (F40-69): a done signal is something the task can show before
+ * acceptance, and every door that writes a goal says so.
+ *
+ * Acceptance merges the task's PR and moves it to Done in one write, so a goal
+ * whose done signal only the merged or deployed code can show can never be met
+ * inside its task. On akinozer-com the controller wrote two such goals (goal-1
+ * links 9 and 11, carried by WEB-12 and WEB-7), and each needed a person or an
+ * extra packet before it could finish. Its four goal doors said only
+ * "deliverable plus the done signal", and `update_goal`'s goal field, which
+ * `add_link` and `edit_link` write through, said nothing at all.
+ */
+describe("ruling 492: every controller door that writes a goal carries the done-signal rule", () => {
+  // The published description of a door's goal field, "" when the field has
+  // none, so a door that lost its text fails by name instead of in the parse.
+  const topGoal = z
+    .object({ properties: z.object({ goal: z.object({ description: z.string() }) }) })
+    .transform((schema) => schema.properties.goal.description)
+    .catch("");
+  const linkGoal = z
+    .object({
+      properties: z.object({
+        links: z.object({
+          items: z.object({
+            properties: z.object({ goal: z.object({ description: z.string() }) }),
+          }),
+        }),
+      }),
+    })
+    .transform((schema) => schema.properties.links.items.properties.goal.description)
+    .catch("");
+
+  it("create_task, update_task, create_goal's links and update_goal publish DONE_SIGNAL_RULE on their goal field", async () => {
+    // CANARY: drop `DONE_SIGNAL_RULE` from any one door and its assertion
+    // fails naming it. Empty the rule and the three lines below fail first,
+    // since every door would then "contain" it.
+    expect(DONE_SIGNAL_RULE).toContain("a done signal is something the task can show BEFORE acceptance");
+    expect(DONE_SIGNAL_RULE).toContain("that proof goes in a follow-up read task that waits on this one");
+    expect(DONE_SIGNAL_RULE).toContain("split in two: the delivery link, and a read link");
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
+      projectSlug: SLUG,
+    });
+    // The copy a model is handed: the JSON Schema read through a real MCP
+    // client (ruling 296).
+    const published = await publishedSchemas(toolkit.mcpServers.viberr_controller);
+    const doors: [string, string][] = [
+      ["create_task.goal", topGoal.parse(published.get("create_task"))],
+      ["update_task.goal", topGoal.parse(published.get("update_task"))],
+      ["create_goal.links[].goal", linkGoal.parse(published.get("create_goal"))],
+      ["update_goal.goal", topGoal.parse(published.get("update_goal"))],
+    ];
+    for (const [door, description] of doors) {
+      expect(description, `${door} does not carry DONE_SIGNAL_RULE`).toContain(DONE_SIGNAL_RULE);
     }
   });
 });

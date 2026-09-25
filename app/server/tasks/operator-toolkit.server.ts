@@ -48,6 +48,7 @@ import {
   updateBranchGate,
 } from "~/server/github/update-branch-operator.server";
 import { PACKET_OPTION_KINDS } from "~/schemas/task-file.schema";
+import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import {
   resolveSpecialistMcpServers,
@@ -583,7 +584,10 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         "set_goal",
         "Draft or refine the task GOAL when it is still unspecified (the triage-gate placeholder). Use it to write the scope/acceptance criteria you have determined — e.g. after a human accepts your offer to draft the scope, or when the task title gives enough signal to specify it yourself at triage. It fills only an UNSPECIFIED goal; it will refuse to overwrite an already-specified goal (open an edit_goal packet to propose a change to a real goal). Downstream agents re-anchor on the new goal.",
         {
-          goal: z.string().describe("The full drafted goal / scope + acceptance criteria."),
+          // Ruling 492: every door that writes a goal says what a done signal can be.
+          goal: z
+            .string()
+            .describe("The full drafted goal / scope + acceptance criteria. " + DONE_SIGNAL_RULE),
           reason: z.string().optional().describe("One line on why this scope — shown on the timeline."),
         },
         async (args) => {
@@ -754,7 +758,8 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .string()
                   .optional()
                   .describe(
-                    "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Refused on any other kind.",
+                    "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria) — it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Refused on any other kind. " +
+                      DONE_SIGNAL_RULE,
                   ),
                 blockedBy: z
                   .array(z.string())
@@ -774,7 +779,8 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                     goal: z
                       .string()
                       .describe(
-                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria) — it is the contract whoever works it is held to.",
+                        "The new task's goal, written AS a goal (deliverable plus acceptance criteria) — it is the contract whoever works it is held to. " +
+                          DONE_SIGNAL_RULE,
                       ),
                     blockedBy: z
                       .array(z.string())
