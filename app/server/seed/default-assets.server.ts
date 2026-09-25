@@ -241,6 +241,12 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 488 (pass 40, F40-67): before the doctrine said text meant for
+    // another task is posted there with `relay_to_task` (an agent's with its
+    // `relay` entries), and never handed to a person to copy over or confirm.
+    // Live on WEB-9 the acceptance packet asked the owner to confirm two
+    // attachments had been pasted onto WEB-8 by hand.
+    "474502b29f913396ec86de5f2fd8088d7a0a221a12342e5972ea815cc8d1fa0c",
     // Ruling 487 (pass 40, F40-65): before a wait on a clock was scheduled
     // with `schedule_task_action` and a hold a pending schedule explains
     // needed no packet. "Never leave a pre-work or `auto` stage with nothing
@@ -334,6 +340,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d3c186ee40962eff069c577e026843e4ce3c97fed269b99384e5bdad2fd9e108",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    // Ruling 488 (pass 40, F40-67): before the Tools list named
+    // `relay_to_task`, the way text moves between tasks of a project.
+    "a0e0896423dc9a9344d814181c90346c65a6068f84b7512d4820d6994cbf3bc7",
     // Ruling 483 (pass 40, F40-53): before `propose_ruling` became
     // `propose_kb_correction`, which reaches any knowledge base a run on the
     // task was given and relays a correction an agent proved. Live on WEB-3 the
@@ -366,6 +375,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "2eaebf8040fe4a8047dc7f78f39482549b15cafeeb2ad18d127264a15113ecc8",
   ],
   [path.join("skills", "developer-expertise", "SKILL.md")]: [
+    // Ruling 488 (pass 40, F40-67): before the reporting rules said what
+    // belongs on another task goes in the outcome's `relay` entries, never in
+    // an attachment or a report for a person to copy over.
+    "6c22506cf4bb40c40011d2c0afefbdd7f59d0bd891a8ecdf3df0c1ec00a5392a",
     // Seeded-prompt sweep (2026-09-23): before the Developer stopped being told
     // to open the review PR (the server does, on `deliver_for_review`), to work
     // only at the implementation stage (ruling 133), and to prefix commits with

@@ -13,6 +13,7 @@ import { saveMcpServer } from "~/server/org/resources.server";
 import {
   buildOperatorToolkit,
   OPERATOR_TOOLKIT_INSTRUCTIONS,
+  RELAY_TOOL_DESCRIPTION,
   SCHEDULE_TOOL_DESCRIPTION,
 } from "./operator-toolkit.server";
 import { CREATE_TASK_BASE_NOTE, type OperatorAuthority } from "./operator-actions.server";
@@ -259,6 +260,19 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(build(withheld).allowedTools).not.toContain("mcp__viberr__set_dependencies");
     expect(build(withheld).allowedTools).toContain("mcp__viberr__post_comment");
     expect(operatorPlanToolsFor(withheld)).not.toContain("set_dependencies");
+  });
+
+  it("ruling 488: relay_to_task is built with the comment grant and carries the no-hand-copy doctrine", () => {
+    // Canaries: build it outside the `append-typed-events` block (the withheld
+    // case still builds it); drop the no-hand-copy sentence.
+    const granted = build(withPolicy(uniform("direct")));
+    expect(granted.allowedTools).toContain("mcp__viberr__relay_to_task");
+    const withheld = build(withPolicy({ ...uniform("direct"), "append-typed-events": "off" }));
+    expect(withheld.allowedTools).not.toContain("mcp__viberr__relay_to_task");
+    expect(granted.tools.find((t) => t.name === "relay_to_task")!.description).toBe(RELAY_TOOL_DESCRIPTION);
+    expect(RELAY_TOOL_DESCRIPTION).toContain(
+      "never ask anyone to copy, paste or post text between tasks, and never ask a person to confirm a relay landed",
+    );
   });
 
   it("ruling 487: the schedule tools are built on a DIRECT dispatch grant, and schedule_task_action carries the doctrine", () => {

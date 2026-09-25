@@ -11,6 +11,7 @@ import {
 } from "~/schemas/task-file.schema";
 import { encodeActorRef } from "~/server/files/actor-ref.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { RELAY_MAX_ENTRIES, type RelayEntry } from "./task-relay.server";
 
 /**
  * The uniform agent OUTCOME ENVELOPE (generic-agents G4): one structured shape
@@ -75,7 +76,24 @@ export interface AgentOutcome {
    *  `attach-evidence-references` grant at the tool layer; already normalized
    *  (`normalizeEvidenceRows`) before it is staged. */
   evidence?: EvidenceRow[];
+  /** Ruling 488: text to post on OTHER tasks of the same project, at most
+   *  {@link RELAY_MAX_ENTRIES}. The completion pipeline posts each through
+   *  the relay door with this agent as the author. Kept whole here: the cap
+   *  is applied (and anything past it named) where the entries are posted. */
+  relay?: RelayEntry[];
 }
+
+/**
+ * Ruling 488 (F40-67): what an agent is told about `relay`, on both
+ * transports (`report_outcome`'s schema and the Codex envelope's).
+ */
+export const RELAY_FIELD_NOTE =
+  `Text to post on OTHER tasks in this project, at most ${RELAY_MAX_ENTRIES} entries: ` +
+  "when your goal or directive says to post something on another task (results it depends on, " +
+  "numbers it needs), put it here as {taskKey, text}. Viberr posts each on that task after you " +
+  "finish, as your comment headed with this task's key, wakes that task's operator, and records " +
+  "the relay on this task. Never write it to an attachment or a report for a person to copy there. " +
+  "Refused: a task in another project, this task, a missing or closed task.";
 
 /**
  * JSON schema for the Codex `outputSchema` transport. MUST satisfy OpenAI's
@@ -90,8 +108,25 @@ export interface AgentOutcome {
 export const AGENT_OUTCOME_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "verdict", "question", "evidence"],
+  required: ["summary", "verdict", "question", "evidence", "relay"],
   properties: {
+    // Ruling 488: Codex's channel for a relay, as `report_outcome` is Claude's.
+    // The cap is stated, not declared: the completion pipeline posts the first
+    // entries and names the rest, because an envelope is the agent's last word
+    // and there is nobody left to refuse it to.
+    relay: {
+      type: ["array", "null"],
+      description: `${RELAY_FIELD_NOTE} null otherwise.`,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["taskKey", "text"],
+        properties: {
+          taskKey: { type: "string" },
+          text: { type: "string" },
+        },
+      },
+    },
     // P13-D-26: Codex's channel for evidence references. The Claude side gets
     // this through the `report_outcome` toolkit tool, which Codex has no
     // equivalent of — leaving it out of the envelope would have made
@@ -214,6 +249,17 @@ const codexEnvelopeSchema = z.object({
     .transform((rows) => rows.filter((row) => row !== null))
     .optional()
     .catch(undefined),
+  // Ruling 488: a garbled entry costs that entry, never the report.
+  relay: z
+    .array(
+      z
+        .object({ taskKey: envelopeProse, text: envelopeProse })
+        .nullable()
+        .catch(null),
+    )
+    .transform((entries) => entries.filter((entry) => entry !== null))
+    .optional()
+    .catch(undefined),
 });
 
 /**
@@ -267,6 +313,10 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
     const rows = normalizeEvidenceRows(envelope.evidence);
     if (rows) outcome.evidence = rows;
   }
+  // Ruling 488: every entry the agent wrote; the cap is the poster's.
+  if (envelope.relay !== undefined && envelope.relay.length > 0) {
+    outcome.relay = envelope.relay.map((r) => ({ taskKey: r.taskKey.trim(), text: r.text }));
+  }
   // An envelope with NOTHING usable is not an envelope. Evidence alone does not
   // qualify — rows with no report are a citation attached to nothing, and
   // treating them as an envelope would swallow the agent's prose reply.
@@ -318,6 +368,8 @@ const stagedOutcomeSchema = z.object({
   evidence: z
     .array(z.object({ label: z.string(), add: z.string(), del: z.string() }))
     .optional(),
+  // Ruling 488: a restart between the run and its completion keeps the relay.
+  relay: z.array(z.object({ taskKey: z.string(), text: z.string() })).optional(),
 });
 
 const runIdRowSchema = z.object({ id: z.string() });

@@ -26,6 +26,7 @@ import { logger } from "~/server/logging/logger.server";
 import {
   ASK_HUMAN_RECOMMEND_NOTE,
   ASK_HUMAN_REPLY_NOTE,
+  RELAY_FIELD_NOTE,
   buildAgentQuestionPacket,
   runIdForOutcomeKey,
   stageOutcome,
@@ -36,6 +37,7 @@ import {
 } from "./agent-outcome.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import { proposeKbCorrection } from "./kb-proposal-actions.server";
+import { RELAY_MAX_ENTRIES, type RelayEntry } from "./task-relay.server";
 import {
   notifyMentionedUsers,
   withAmbiguityDisclosure,
@@ -129,6 +131,8 @@ interface ReportedOutcome {
   verdict?: "approve" | "request_changes";
   summary?: string;
   evidence?: { label: string; add?: string; del?: string }[];
+  /** Ruling 488: declared on every variant of the tool. */
+  relay?: RelayEntry[];
 }
 
 /** F4: cap the JSON a single `github_read` hands back, so a large tree/blob or a
@@ -479,6 +483,22 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         .string()
         .optional()
         .describe("One-paragraph justification (markdown allowed)."),
+      // Ruling 488 (F40-67): the specialist's reach onto another task of the
+      // project, through the reporting path it already has rather than a
+      // post tool of its own. Live on WEB-9 the Platform Engineer wrote its
+      // results for WEB-8 into two attachments and a person pasted them over.
+      // More than the cap is refused here, by name, so the agent re-reports
+      // inside the same run (ruling 298's rule for a live channel).
+      relay: z
+        .array(
+          z.strictObject({
+            taskKey: z.string().describe("The other task's key in this project, e.g. WEB-8."),
+            text: z.string().describe("What to post there (markdown allowed), whole: it is what that task reads."),
+          }),
+        )
+        .max(RELAY_MAX_ENTRIES)
+        .optional()
+        .describe(RELAY_FIELD_NOTE),
     };
     const verdictField = z
       .enum(["approve", "request_changes"])
@@ -522,6 +542,9 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
       if (collab.verdict && args.verdict) outcome.verdict = args.verdict;
       if (args.summary) outcome.summary = prose(args.summary);
       if (evidence) outcome.evidence = evidence;
+      if (args.relay?.length) {
+        outcome.relay = args.relay.map((r) => ({ taskKey: r.taskKey.trim(), text: prose(r.text) }));
+      }
       const result = stageOutcome(db, outcomeKey, outcome);
       if (!result.staged) {
         // Option D PR 4(b): the first envelope stands. Audited so a person can
@@ -547,6 +570,9 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
       const staged = [
         outcome.verdict ? `Verdict '${outcome.verdict}'` : null,
         evidence ? `${evidence.length} evidence reference(s)` : null,
+        outcome.relay
+          ? `${outcome.relay.length} relay(s) to ${outcome.relay.map((r) => r.taskKey).join(", ")}, posted there when you finish`
+          : null,
       ].filter((part): part is string => part !== null);
       return textResult(
         `[staged] ${staged.length ? staged.join(" with ") : "Your outcome"} will be recorded with your final report. Finish with your full findings.`,

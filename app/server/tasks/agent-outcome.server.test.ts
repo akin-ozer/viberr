@@ -321,6 +321,59 @@ describe("evidence is a BOTH-backend channel (P13-D-26)", () => {
   });
 });
 
+/**
+ * Ruling 488 (F40-67): `relay` is the Codex envelope's channel onto another
+ * task, as `report_outcome`'s field is Claude's. The envelope is the agent's
+ * last word, so every entry is kept here and the cap is applied, with the rest
+ * named, where the entries are posted.
+ */
+describe("relay is a BOTH-backend channel (ruling 488)", () => {
+  const ctx = createTestDbContext();
+  afterEach(ctx.cleanup);
+
+  it("declares relay in the envelope, strict-schema conformant, and parses its entries", () => {
+    // CANARIES: drop `relay` from AGENT_OUTCOME_JSON_SCHEMA; drop the parser's
+    // copy onto the outcome.
+    expect(assertStrictSchema(AGENT_OUTCOME_JSON_SCHEMA)).toEqual([]);
+    expect(AGENT_OUTCOME_JSON_SCHEMA.required).toContain("relay");
+    const o = parseAgentOutcomeJson(
+      JSON.stringify({
+        summary: "Read both cron runs.",
+        verdict: null,
+        question: null,
+        evidence: null,
+        relay: [
+          { taskKey: " WEB-8 ", text: "CPU 5 ms and 6 ms of 10." },
+          { taskKey: "WEB-3", text: "Second." },
+          { taskKey: "WEB-4", text: "Third." },
+          { taskKey: "", text: "No task." },
+        ],
+      }),
+    );
+    expect(o?.relay).toEqual([
+      { taskKey: "WEB-8", text: "CPU 5 ms and 6 ms of 10." },
+      { taskKey: "WEB-3", text: "Second." },
+      { taskKey: "WEB-4", text: "Third." },
+    ]);
+  });
+
+  it("a staged relay survives a restart", () => {
+    // CANARY: drop `relay` from the staged row's schema (it parses away).
+    const db = ctx.makeDb();
+    db.prepare(
+      `INSERT INTO staged_outcomes (outcome_key, outcome_json, created_at) VALUES (?, ?, ?)`,
+    ).run(
+      "oc_relay_restart",
+      JSON.stringify({ summary: "Done.", relay: [{ taskKey: "WEB-8", text: "Numbers." }] }),
+      new Date().toISOString(),
+    );
+    expect(takeStagedOutcome(db, "oc_relay_restart")).toEqual({
+      summary: "Done.",
+      relay: [{ taskKey: "WEB-8", text: "Numbers." }],
+    });
+  });
+});
+
 describe("staged outcomes — restart persistence (P11-28)", () => {
   const ctx = createTestDbContext();
   afterEach(ctx.cleanup);

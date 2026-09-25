@@ -1431,8 +1431,11 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // Ruling 417's `lease_files` rides the delivery gate, so it is withheld
     // with delivery and the count stays 10. Ruling 487's two schedule verbs
     // ride a DIRECT dispatch grant, which this operator does not hold, so they
-    // are withheld too and it is still 10.
-    expect(tools).toHaveLength(10);
+    // are withheld too and it is still 10. Ruling 488's `relay_to_task` is a
+    // comment on another task of the project, in-Viberr like `post_comment`,
+    // so it joins the fallback and it is 11.
+    expect(tools).toHaveLength(11);
+    expect(tools).toContain("relay_to_task");
     expect(tools).not.toContain("schedule_task_action");
     expect(tools).toContain("set_dependencies");
     expect(tools).toContain("propose_kb_correction");
@@ -1453,6 +1456,19 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     const item = schema.properties.actions.items;
     expect(item.properties.paths.type).toEqual(["array", "null"]);
     expect(item.required).toContain("paths");
+  });
+
+  it("ruling 488: relay_to_task is offered with the comment grant, and the plan carries its task key", () => {
+    // CANARY: drop the verb from OPERATOR_PLAN_TOOLS (a Codex operator can
+    // never relay), or map it to a grant it does not ride.
+    expect(operatorPlanToolsFor(authority({ "append-typed-events": "direct" }))).toContain("relay_to_task");
+    expect(
+      operatorPlanToolsFor(authority({ "append-typed-events": "off", "generate-packets": "direct" })),
+    ).not.toContain("relay_to_task");
+    const item = operatorPlanSchemaFor(authority({ "append-typed-events": "direct" })).properties.actions.items;
+    expect(item.properties.taskKey.type).toEqual(["string", "null"]);
+    expect(item.properties.taskKey.description).toContain("never ask a person to copy text between tasks");
+    expect(item.required).toContain("taskKey");
   });
 
   it("ruling 487: the schedule verbs are offered on a DIRECT dispatch grant only, and the plan carries their fields", () => {
@@ -4217,6 +4233,96 @@ describe("pending trigger queue", () => {
       expect(operatorRuns()).toHaveLength(2);
       expect(adapter3.pending?.spec.prompt).toContain("re-invoked ONCE");
     });
+  });
+
+  it("ruling 488: a queued relay survives a later machine trigger, and its turn quotes what arrived", async () => {
+    // CANARY: route a relay back into the newest-wins `latest` slot (drop
+    // `|| input.relay` from the carried test): the transition below
+    // overwrites it and the relayed numbers never reach a turn.
+    await drive({ trigger: "manual" });
+    expect(adapter3.pending).not.toBeNull();
+
+    await drive({
+      trigger: "relayed",
+      relay: {
+        fromTaskKey: "VIB-9",
+        by: "Platform Engineer",
+        text: "Deployed cron CPU: 5 ms and 6 ms of 10.",
+        occurredAt: "2026-09-25T12:56:00.000Z",
+      },
+    });
+    await drive({
+      trigger: "transition",
+      transitionFromName: "Ready",
+      transitionToName: "In Progress",
+    });
+
+    adapter3.finish(store3, emptyPlan, "finished");
+
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(2);
+      expect(adapter3.pending?.spec.prompt).toContain(
+        'VIB-9 relayed this to you (ruling 488): the Platform Engineer there posted it on this task\'s timeline as a comment headed "From VIB-9 (Platform Engineer)", at 2026-09-25T12:56:00.000Z.',
+      );
+    });
+    expect(adapter3.pending?.spec.prompt).toContain("Deployed cron CPU: 5 ms and 6 ms of 10.");
+    expect(adapter3.pending?.spec.prompt).toContain("never ask a person to copy it here or to confirm it arrived");
+
+    adapter3.finish(store3, emptyPlan, "finished");
+    await eventually(() => {
+      expect(operatorRuns()).toHaveLength(3);
+      expect(adapter3.pending?.spec.prompt).toContain('moved this task from "Ready" to "In Progress"');
+    });
+  });
+
+  it("ruling 488: a Codex plan's relay_to_task posts on the other task as the operator", async () => {
+    // CANARY: drop the executor's `relay_to_task` case (the step is skipped
+    // and VIB-2 gets nothing).
+    writeTask(store3.dataRoot, store3.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store3.users.arda.id }),
+    });
+    rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
+    await drive({ trigger: "manual" });
+    adapter3.finish(
+      store3,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "relay_to_task",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: "Deployed cron CPU: 5 ms and 6 ms of 10.",
+            reason: null,
+            packetOptions: null,
+            kbSource: null,
+            repoSource: null,
+            blockedBy: null,
+            paths: null,
+            completeness: null,
+            dueAt: null,
+            delayMinutes: null,
+            scheduleId: null,
+            taskKey: "VIB-2",
+          },
+        ],
+      }),
+      "finished",
+    );
+    const vib2 = () =>
+      readTaskFile({ projectSlug: store3.slug, taskKey: "VIB-2", dataRoot: store3.dataRoot })!.parsed.timeline;
+    await eventually(() => {
+      expect(vib2().some((e) => e.type === "comment")).toBe(true);
+    });
+    expect(vib2().find((e) => e.type === "comment")).toMatchObject({
+      actor: { kind: "operator" },
+      text: "**From VIB-1 (operator):**\n\nDeployed cron CPU: 5 ms and 6 ms of 10.",
+    });
+    const vib1 = readTaskFile({ projectSlug: store3.slug, taskKey: "VIB-1", dataRoot: store3.dataRoot })!.parsed
+      .timeline;
+    expect(vib1.some((e) => e.text === "Relayed to VIB-2: Deployed cron CPU: 5 ms and 6 ms of 10.")).toBe(true);
   });
 
   it("B-OP2: a queued @operator question survives a later machine trigger", async () => {

@@ -39,6 +39,7 @@ The operator does not read your logs. It reads the **comment you post to the tim
 - **How you validated it:** which checks/tests you ran and their result.
 - **Assumptions:** anything ambiguous you decided, so a human can correct it.
 - **What is open:** blockers, follow-ups, or "nothing, ready to advance."
+- **What belongs on another task:** when the goal or directive says to post something on another task in this project, put it in the `relay` entries of your reported outcome (`{taskKey, text}`, at most two). Viberr posts each there after you finish, under your name, and wakes that task's operator. Never write it to an attachment or into your report for a person to copy over.
 
 Keep it short and factual. No status chatter ("working on it"), no restating the whole task, no filler. A good report reads like: *"Done: added `GET /healthz` in cmd/serve, version read from build metadata, test `TestHealthz` added and the suite passes. Committed on `vib-12` as `3f2a9c1`. No blockers, ready for review."*
 
