@@ -65,6 +65,7 @@ import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 import { startScheduleRunner } from "./tasks/schedule.server";
 import { startGoalRunner } from "./tasks/goal-actions.server";
 import { recoverControllerConversations } from "./controller/controller-run.server";
+import { backfillGoalConversations } from "./controller/goal-planning-backfill.server";
 import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.server";
 import { recoverProjectGates } from "./tasks/project-gates.server";
 import { toError } from "~/shared/errors";
@@ -870,6 +871,18 @@ export async function bootServer(): Promise<void> {
     ensureBaseAgentsDeployed(db);
   } catch (error) {
     logger.error("built-in agent backfill failed", {
+      err: toError(error),
+    });
+  }
+
+  // Ruling 476(j) (live verification 2026-09-25): a chain written before goals
+  // recorded their conversation learns it from the audit row of its creation
+  // and the controller turn around it, when exactly one conversation matches.
+  // After the rescan (goal rows exist to re-project) and before the watcher.
+  try {
+    await backfillGoalConversations(db);
+  } catch (error) {
+    logger.error("goal planning-conversation backfill failed", {
       err: toError(error),
     });
   }

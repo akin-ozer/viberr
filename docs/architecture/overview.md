@@ -169,7 +169,9 @@ for governed state.
     only when no file failed); otherwise a reconciling **rescan** (hash short-circuit, not
     the drop-all rebuild) for edits made while the process was down.
 11. `ensureBaseAgentsDeployed` (the operator everywhere; Developer/Reviewer only into
-    projects with no specialist deployment at all).
+    projects with no specialist deployment at all), then `backfillGoalConversations`
+    (ruling 476(j)): a controller-made chain with no `conversationId` gets the one
+    conversation whose controller turn covers its `goal.created` audit row, or stays null.
 12. Start the file watcher and the KB watcher.
 13. Store maintenance: clear MCP warm-ups a restart interrupted, one retention pass (no
     workspace reclaim), arm the maintenance scheduler.

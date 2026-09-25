@@ -3537,6 +3537,20 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".md-body a")).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
+  it("ruling 476(i): markdown prose may break any long token, and code blocks and tables keep their scrollers", () => {
+    // Measured live after the 476(a) fix: "Added/Changed/Deprecated/Removed/
+    // Fixed/Security." in a list item scrolled /controller's transcript at
+    // 375px 433px in 315, and the dock's 442 in 388.
+    // CANARY: drop the prose rule, or the reset on code blocks and tables.
+    const wrap = (selector: string) =>
+      RULES.filter((r) => r.at.length === 0 && r.selector.split(",").map((s) => s.trim()).includes(selector))
+        .flatMap((r) => r.decls.get("overflow-wrap") ?? [])
+        .at(-1);
+    const prose = [".md-body p", ".md-body li", ".md-body blockquote", ".md-body h1", ".md-body h2", ".md-body h3", ".md-body h4", ".md-body h5", ".md-body h6"];
+    for (const selector of prose) expect(wrap(selector), selector).toBe("anywhere");
+    for (const scroller of [".md-body pre", ".md-table-wrap"]) expect(wrap(scroller), scroller).toBe("normal");
+  });
+
   it("ruling 476(e): in one column the thread switcher takes a row of its own", () => {
     // Measured at 375px (F40-25): 97px beside New and Home, reading "Hi. I'm s".
     // CANARY: restore `flex: 1 1 0` on the picker, or drop the row's wrap.

@@ -163,7 +163,8 @@ Intents behind `project.task.tsx` are explained in
   "answering now" or "queued · N ahead" from the server's lease, never from what the page
   sent; "… is working" sits under the answered message (ruling 465). Both transcripts show
   a reply that lands from its first line, never pulling a reader who scrolled up to
-  history, and a link's URL wraps inside them (ruling 476(a), (c)); the open panel has its
+  history, and a link's URL or any other long token in prose wraps inside them (ruling
+  476(a), (c), (i)); the open panel has its
   own always-mounted status region that says "<name> replied: <first sentence>" for the
   thread on screen, and the working row is no live region (ruling 476(d)). Root ships only the button, the panel's frame and header; the panel's body
   loads on the first open, preloaded on hover or focus (ruling 457). The dock's data
