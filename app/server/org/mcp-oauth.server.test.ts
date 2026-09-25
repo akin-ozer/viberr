@@ -21,6 +21,7 @@ import { gatewayMcpSection, resolveSpecialistMcpServersDetailed } from "~/server
 import { CLOUDFLARE_READ_ONLY_GRANT } from "../../../test-support/cloudflare-read-only-grant";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
 import {
+  backfillMcpGrantScopes,
   completeMcpOAuthSignIn,
   mcpOAuthTokenSource,
   resetMcpOAuthForTests,
@@ -601,6 +602,33 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     await signOutMcpOAuth(db, MCP_ID, ADMIN.actor);
     expect(oauthJson()).toMatchObject({ status: "needs_sign_in", scope: null });
     expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBeNull();
+  });
+
+  it("a sign-in stored before ruling 486 learns its grant at boot from the sealed token scope, once", async () => {
+    // Live 2026-09-25: the owner's cloudflare-api sign-in predates the public
+    // scope, so every surface would name no grant until a refresh repeated it.
+    await startServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
+    await signIn();
+    const { scope: _dropped, ...before486 } = JSON.parse(rawRow().oauth_json ?? "{}") as Record<string, unknown>;
+    db.prepare(`UPDATE org_mcp_servers SET oauth_json = ? WHERE id = ?`).run(JSON.stringify(before486), MCP_ID);
+    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBeNull();
+    // CANARY: skip the write, and the row keeps naming no grant.
+    expect(backfillMcpGrantScopes(db)).toEqual(["cloudflare-api"]);
+    expect(oauthJson()).toMatchObject({ status: "signed_in", scope: CLOUDFLARE_READ_ONLY_GRANT });
+    // Idempotent: a row that names its grant is left alone.
+    expect(backfillMcpGrantScopes(db)).toEqual([]);
+  });
+
+  it("the grant backfill leaves a signed-out row and a token reply that named no scope as they are", async () => {
+    await startServer({ grantedScope: null });
+    await signIn();
+    const { scope: _none, ...noScope } = JSON.parse(rawRow().oauth_json ?? "{}") as Record<string, unknown>;
+    db.prepare(`UPDATE org_mcp_servers SET oauth_json = ? WHERE id = ?`).run(JSON.stringify(noScope), MCP_ID);
+    // The sealed tokens name no scope, so there is nothing true to copy.
+    expect(backfillMcpGrantScopes(db)).toEqual([]);
+    await signOutMcpOAuth(db, MCP_ID, ADMIN.actor);
+    expect(backfillMcpGrantScopes(db)).toEqual([]);
+    expect(oauthJson()).toMatchObject({ status: "needs_sign_in", scope: null });
   });
 
   it("an expired sign-in holds no grant", async () => {

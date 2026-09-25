@@ -332,6 +332,41 @@ export function mcpOAuthCredential(db: DatabaseSync, id: string): McpOAuthCreden
 }
 
 /**
+ * Ruling 486 (live verification 2026-09-25): a sign-in completed before the
+ * public half carried its grant keeps the granted scope only in the sealed
+ * half (`tokens.scope`), so every surface would name no grant until a refresh
+ * happened to repeat it. At boot, copy that scope into the public half of each
+ * signed-in row that lacks one. Idempotent: a row whose public half already
+ * names a scope, or whose sealed half names none, is left as it is. Returns the
+ * names of the connections it filled in.
+ */
+export function backfillMcpGrantScopes(db: DatabaseSync): string[] {
+  // SAFETY: `ROW_SQL` selects exactly the columns `OAuthRow` declares (see
+  // `rowById`).
+  const rows = db
+    .prepare(`${ROW_SQL} WHERE oauth_ref IS NOT NULL AND oauth_json IS NOT NULL`)
+    .all() as OAuthRow[];
+  const filled: string[] = [];
+  for (const row of rows) {
+    const pub = readPublic(row.oauth_json);
+    if (!pub || pub.status !== "signed_in" || pub.scope) continue;
+    const opened = openOAuth(db, row);
+    if (opened.state !== "ok") continue;
+    const scope = opened.sealed.tokens?.scope ?? null;
+    if (!scope) continue;
+    db.prepare(`UPDATE org_mcp_servers SET oauth_json = ? WHERE id = ?`).run(
+      JSON.stringify({ ...pub, scope }),
+      row.id,
+    );
+    filled.push(row.name);
+  }
+  if (filled.length > 0) {
+    logger.info("recorded the granted scope of MCP sign-ins made before ruling 486", { mcp: filled });
+  }
+  return filled;
+}
+
+/**
  * A probe with no credential met the MCP authorization challenge: the row now
  * reads "needs sign-in" (an expired sign-in keeps saying so), and the sign-in
  * will start from the metadata URL the challenge named.

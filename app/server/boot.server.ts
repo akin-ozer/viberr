@@ -66,6 +66,7 @@ import { startScheduleRunner } from "./tasks/schedule.server";
 import { startGoalRunner } from "./tasks/goal-actions.server";
 import { recoverControllerConversations } from "./controller/controller-run.server";
 import { backfillGoalConversations } from "./controller/goal-planning-backfill.server";
+import { backfillMcpGrantScopes } from "./org/mcp-oauth.server";
 import { reclaimTerminalTaskWorkspaces } from "./tasks/workspace-retention.server";
 import { recoverProjectGates } from "./tasks/project-gates.server";
 import { toError } from "~/shared/errors";
@@ -883,6 +884,16 @@ export async function bootServer(): Promise<void> {
     await backfillGoalConversations(db);
   } catch (error) {
     logger.error("goal planning-conversation backfill failed", {
+      err: toError(error),
+    });
+  }
+
+  // Ruling 486 (live verification 2026-09-25): an OAuth sign-in made before the
+  // public half carried its grant shows it from the sealed half's token scope.
+  try {
+    backfillMcpGrantScopes(db);
+  } catch (error) {
+    logger.error("MCP grant-scope backfill failed", {
       err: toError(error),
     });
   }
