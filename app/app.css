@@ -6605,6 +6605,12 @@ a.card:active, .pj-new:active { transform: scale(.99); }
    describes it. It used to live in a panel a full viewport below, with the
    conversation in between, reached by a button that read as navigation. */
 .runbar-console {
+  /* The whole row of the body's wrapping flex. Sized by its content it was as
+     wide as its toolbar, since the log lines are contained (`.console >
+     .log-line` below) and add no width: the terminal stopped two-thirds of
+     the way across the card (owner ask 2026-09-25). */
+  flex: 1 0 100%;
+  min-width: 0;
   margin-top: .75rem;
   border-top: 1px solid color-mix(in srgb, var(--fg), transparent 88%);
   padding-top: .75rem;
