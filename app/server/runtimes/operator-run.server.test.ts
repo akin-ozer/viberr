@@ -1429,8 +1429,11 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // 378 added `propose_ruling` (ruling 483 renamed it `propose_kb_correction`),
     // also in-Viberr and also destroying nothing, so it is 10.
     // Ruling 417's `lease_files` rides the delivery gate, so it is withheld
-    // with delivery and the count stays 10.
+    // with delivery and the count stays 10. Ruling 487's two schedule verbs
+    // ride a DIRECT dispatch grant, which this operator does not hold, so they
+    // are withheld too and it is still 10.
     expect(tools).toHaveLength(10);
+    expect(tools).not.toContain("schedule_task_action");
     expect(tools).toContain("set_dependencies");
     expect(tools).toContain("propose_kb_correction");
     expect(tools).not.toContain("deliver_for_review");
@@ -1450,6 +1453,32 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     const item = schema.properties.actions.items;
     expect(item.properties.paths.type).toEqual(["array", "null"]);
     expect(item.required).toContain("paths");
+  });
+
+  it("ruling 487: the schedule verbs are offered on a DIRECT dispatch grant only, and the plan carries their fields", () => {
+    // CANARY: drop the two verbs from OPERATOR_PLAN_TOOLS (a Codex operator can
+    // never schedule), or gate them on `dispatchGate !== "deny"` (the recommend
+    // operator is offered a run that starts with nobody present).
+    for (const tools of [
+      operatorPlanToolsFor(authority({ "dispatch-agents": "direct" })),
+      // Absent resolves to the catalog default, `direct` (ruling 98(b)).
+      operatorPlanToolsFor(authority({ "generate-packets": "direct" })),
+    ]) {
+      expect(tools).toContain("schedule_task_action");
+      expect(tools).toContain("cancel_task_schedule");
+    }
+    for (const tools of [
+      operatorPlanToolsFor(authority({ "dispatch-agents": "recommend", "generate-packets": "direct" })),
+      operatorPlanToolsFor(authority({ "dispatch-agents": "off", "generate-packets": "direct" })),
+    ]) {
+      expect(tools).not.toContain("schedule_task_action");
+      expect(tools).not.toContain("cancel_task_schedule");
+    }
+    const item = operatorPlanSchemaFor(authority({ "dispatch-agents": "direct" })).properties.actions.items;
+    expect(item.properties.dueAt.type).toEqual(["string", "null"]);
+    expect(item.properties.delayMinutes.type).toEqual(["number", "null"]);
+    expect(item.properties.scheduleId.type).toEqual(["string", "null"]);
+    expect(item.required).toEqual(expect.arrayContaining(["dueAt", "delayMinutes", "scheduleId"]));
   });
 
   it("F39-68: the plan's create_task says a created task starts from the base branch", () => {
@@ -2187,6 +2216,17 @@ describe("stranded auto-stage resume", () => {
     expect(operatorLeftTaskStranded({ ...base, stage: "impl", blockedBy: ["JC-3"] }, wf, true)).toBe(false);
   });
 
+  it("ruling 487: a pending schedule is a recorded wait, so the backstop does not call the task stranded", () => {
+    // Canary: delete the pending-schedule early return.
+    const wf = [{ from: "triage", to: "ready", boundary: "auto" }];
+    const base = { archived: false, stage: "triage", packet: null, recommendations: [], blockedBy: [] };
+    const { operatorLeftTaskStranded } = operatorPrompts;
+    expect(operatorLeftTaskStranded({ ...base, schedules: [{ status: "pending" }] }, wf)).toBe(false);
+    expect(operatorLeftTaskStranded({ ...base, schedules: [{ status: "pending" }] }, wf, true)).toBe(false);
+    // Only a PENDING one: a fired or cancelled entry will move nothing.
+    expect(operatorLeftTaskStranded({ ...base, schedules: [{ status: "fired" }, { status: "cancelled" }] }, wf)).toBe(true);
+  });
+
   it("goal-drafting is labeled SETUP in the turn instruction — the live stranding's exact misreading", () => {
     const prompt = operatorPrompts.buildOperatorTurnPrompt(
       {
@@ -2660,6 +2700,69 @@ describe("stranded auto-stage resume", () => {
      * time. This pass's signature shape, in the pause that is supposed to tell
      * a human what happened.
      */
+    /**
+     * Ruling 487 (F40-65): the settle-time backstop read a task holding on a
+     * pending schedule as stranded, and its nudge told the operator to "record
+     * the hold" with a packet. Live on WEB-9 that was a packet asking the owner
+     * to confirm a hold the 11:25Z schedule already explained.
+     */
+    it("ruling 487: a drive that ends at an auto stage holding on a pending schedule is not nudged", async () => {
+      // Canary: stop passing the task's `schedules` to the predicate in
+      // `maybeResumeStrandedOperator` (the resume fires).
+      writeTask(store2.dataRoot, store2.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-7", {
+          title: "read the cron run",
+          stage: "triage",
+          readiness: "ready",
+          waiting: "human",
+          ownerUserId: store2.users.arda.id,
+          schedules: [
+            {
+              id: "sch_cron",
+              action: "run-operator",
+              dueAt: new Date(Date.now() + 3_600_000).toISOString(),
+              profileId: null,
+              prompt: "Read the 12:17Z cron run.",
+              createdBy: "operator",
+              createdByLabel: "operator",
+              createdAt: new Date().toISOString(),
+              status: "pending",
+              firedAt: null,
+              claimedAt: null,
+              retries: 0,
+            },
+          ],
+        }),
+        goal: "Read the cron run's output.",
+      });
+      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
+      store2.db
+        .prepare(
+          `INSERT INTO agent_runs
+             (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
+              turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
+              created_at, updated_at, agent_profile_id)
+           VALUES ('run_cron', 'VIB-7', ?, 't_run_cron', 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
+                   1, 0, 0, 0, 1, ?, ?, 'operator')`,
+        )
+        .run(store2.slug, "2026-09-25T10:40:00.000Z", "2026-09-25T10:40:00.000Z");
+      const before = operatorRuns().length;
+      const resumed = await maybeResumeStrandedOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-7",
+        dataRoot: store2.dataRoot,
+        runId: "run_cron",
+        stageAtStart: "triage",
+      });
+      expect(resumed).toBe(false);
+      expect(operatorRuns()).toHaveLength(before);
+      // Not a stall and not a deliberate hold either: nothing is recorded.
+      expect(
+        readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-7", dataRoot: store2.dataRoot })!.parsed
+          .frontmatter.heldAtStage,
+      ).toBeNull();
+    });
+
     it("ruling 399: a plan Viberr REFUSED is not a deliberate hold", async () => {
       const finishedRun = (id: string, taskKey: string) => {
         store2.db
@@ -3610,6 +3713,79 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     expect(prompt).toContain("SCHEDULED re-check");
     expect(prompt).toContain("no stated reason");
   });
+
+  /**
+   * Ruling 487 (F40-65). Live on WEB-9 the operator opened "Build holds for
+   * the scheduled 11:25Z Platform Engineer run. Confirm the hold?", whose body
+   * said it existed only so the stage was "not left idle with nothing
+   * recorded": the idle-stage nudge's own words, which sent every hold to a
+   * packet. A wait on a clock is scheduled; the packet stays for a hold a
+   * person directed (ruling 131(f)).
+   */
+  it("ruling 487: the idle-stage nudge schedules a wait on a clock and keeps the packet for a hold a person directed", () => {
+    // Canary: restore the nudge's old sentence.
+    const idle = snap({ goal: "Publish the notes feed at /notes.xml." });
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(idle, "transition", undefined, undefined, undefined, undefined, undefined, undefined, true),
+      operatorPrompts.buildCodexOperatorPrompt(idle, "transition", undefined, undefined, undefined, undefined, undefined, undefined, true),
+    ]) {
+      expect(prompt).toContain("auto-advance stage idle");
+      expect(prompt).toContain(
+        "when the task must wait for a moment in time (a deployed cron run, a provider window reopening, a deploy landing), `schedule_task_action` the run that picks it up then and write one note naming the schedule: a pending schedule is the record, it needs no packet, and nobody is asked to confirm it.",
+      );
+      expect(prompt).toContain("Only if the goal or a human directive tells you to HOLD this stage for a reason no clock ends");
+    }
+  });
+
+  it("ruling 487: the stage rule's tail names the schedule as a way out and says a wait on a time is never a packet", () => {
+    // Canary: restore "with nothing done and no packet: either advance the
+    // boundary, hand off to a specialist, or `open_decision_packet`".
+    const prompt = operatorPrompts.buildOperatorTurnPrompt(
+      snap({ goal: "Publish the notes feed at /notes.xml." }),
+      "manual",
+    );
+    expect(prompt).toContain("with nothing done, no packet and no pending schedule");
+    expect(prompt).toContain("`schedule_task_action` the run a clock is waiting for (a cron run, a window reopening)");
+    expect(prompt).toContain("a wait on a time is never a packet (ruling 487)");
+  });
+
+  it("ruling 487: the runs already scheduled are named on every trigger, with whose each is", () => {
+    // Canary: return "" from `pendingSchedulesInstruction`.
+    const scheduled = snap({
+      stage: "impl",
+      stageName: "In Progress",
+      goal: "Publish the notes feed at /notes.xml.",
+      schedules: [
+        {
+          id: "sch_mine",
+          action: "run-agent",
+          dueAt: "2026-09-25T12:25:00.000Z",
+          profileId: "platform",
+          prompt: "Read the 12:17Z cron run.",
+          by: "operator",
+          yours: true,
+        },
+        {
+          id: "sch_arda",
+          action: "run-operator",
+          dueAt: "2026-09-26T09:00:00.000Z",
+          profileId: null,
+          prompt: "",
+          by: "Arda",
+          yours: false,
+        },
+      ],
+    });
+    const named =
+      "Already scheduled on this task: `sch_mine`, a platform run at 2026-09-25T12:25:00.000Z (scheduled by you); " +
+      "`sch_arda`, your own re-run at 2026-09-26T09:00:00.000Z (scheduled by Arda). When the task is holding for one " +
+      "of these, the hold needs no decision packet and no question to anyone: write one note naming the schedule, then end your turn.";
+    for (const trigger of ["manual", "agent-reply", "packet-resolved", "scheduled"] as const) {
+      expect(operatorPrompts.buildOperatorTurnPrompt(scheduled, trigger), trigger).toContain(named);
+    }
+    expect(operatorPrompts.buildCodexOperatorPrompt(scheduled, "manual")).toContain(named);
+    expect(operatorPrompts.buildOperatorTurnPrompt(snap(), "manual")).not.toContain("Already scheduled");
+  });
 });
 
 /* -------- queued triggers: a human's question is never overwritten (B-OP2) -------- */
@@ -3728,6 +3904,80 @@ describe("pending trigger queue", () => {
           reason: "Rewriting the sandbox lifetime; AX-21 waits on it.",
         },
       ]);
+    });
+  });
+
+  it("ruling 487: a Codex plan schedules its own re-run and cancels one it scheduled, as the operator", async () => {
+    // CANARY: drop the executor's `schedule_task_action` case (the step is
+    // skipped and nothing is scheduled), or its `cancel_task_schedule` case.
+    const step = (over: {
+      tool: "schedule_task_action" | "cancel_task_schedule";
+      dueAt?: string;
+      delayMinutes?: number;
+      text?: string;
+      scheduleId?: string;
+    }) => ({
+      profileId: null,
+      delivers: null,
+      toStageId: null,
+      packetType: null,
+      text: null,
+      reason: null,
+      packetOptions: null,
+      kbSource: null,
+      repoSource: null,
+      blockedBy: null,
+      paths: null,
+      completeness: null,
+      dueAt: null,
+      delayMinutes: null,
+      scheduleId: null,
+      ...over,
+    });
+    const dueAt = new Date(Date.now() + 2 * 3_600_000).toISOString();
+    await drive({ trigger: "manual" });
+    adapter3.finish(
+      store3,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          step({ tool: "schedule_task_action", dueAt, text: "Read the 12:17Z cron run." }),
+          step({ tool: "schedule_task_action", delayMinutes: 30 }),
+        ],
+      }),
+      "finished",
+    );
+    const schedulesOf = () =>
+      readTaskFile({ projectSlug: store3.slug, taskKey: "VIB-1", dataRoot: store3.dataRoot })!.parsed
+        .frontmatter.schedules;
+    await eventually(() => {
+      expect(schedulesOf()).toHaveLength(2);
+    });
+    expect(schedulesOf()[0]).toMatchObject({
+      action: "run-operator",
+      dueAt,
+      prompt: "Read the 12:17Z cron run.",
+      createdBy: "operator",
+      status: "pending",
+    });
+    const second = schedulesOf()[1]!.id;
+
+    // The next turn cancels the second one. It may queue behind the first
+    // drive's settle, so wait for its run to be the pending one.
+    await drive({ trigger: "manual" });
+    await eventually(() => {
+      expect(adapter3.pending).not.toBeNull();
+    });
+    adapter3.finish(
+      store3,
+      JSON.stringify({
+        reasoning: "",
+        actions: [step({ tool: "cancel_task_schedule", scheduleId: second })],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      expect(schedulesOf().map((s) => s.status)).toEqual(["pending", "cancelled"]);
     });
   });
 

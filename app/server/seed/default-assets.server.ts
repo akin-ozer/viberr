@@ -241,6 +241,13 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 487 (pass 40, F40-65): before a wait on a clock was scheduled
+    // with `schedule_task_action` and a hold a pending schedule explains
+    // needed no packet. "Never leave a pre-work or `auto` stage with nothing
+    // done and no packet" sent every hold to one, and live on WEB-9 the
+    // operator asked the owner to route a 12:25Z run through the controller
+    // and opened a packet only to record the wait.
+    "0386467b19815de69f8a814134081b78813e2d99414c7ab45b563da84bf26786",
     // Ruling 475 (pass 40, F40-20): before a conflict went to the delivering
     // agent. The doctrine said "A CONFLICT is not yours to settle" and a
     // blocking packet went to a person, who could only confirm the packet's

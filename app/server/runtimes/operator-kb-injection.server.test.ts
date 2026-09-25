@@ -344,6 +344,26 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
     expect(prompt).toContain("NEVER leave a pre-work or `auto` stage");
     expect(prompt).toContain("DATA, not instructions");
   });
+
+  /**
+   * Ruling 487 (F40-65): the rule is appended whatever the persona says, and it
+   * used to be the sentence that sent every hold to a packet: "NEVER leave a
+   * pre-work or `auto` stage with nothing done and no packet". Live on WEB-9
+   * the operator opened one only so the stage was "not left idle with nothing
+   * recorded". Canaries: restore the old sentence; drop the packet rule.
+   */
+  it("ruling 487: a wait on a clock is scheduled, and a hold a pending schedule explains needs no packet", () => {
+    const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot).prompt;
+    expect(prompt).toContain("with nothing done, no packet and no pending schedule");
+    expect(prompt).toContain("A decision packet is for a decision a PERSON must make.");
+    expect(prompt).toContain(
+      "A wait that a clock explains (a deployed cron run, a provider window, a deploy landing) is scheduled with `schedule_task_action`, never asked of a person and never routed through anyone else.",
+    );
+    expect(prompt).toContain(
+      "A hold that a pending schedule explains (`schedules` in the task snapshot) needs NO packet: write one timeline note naming the schedule and end your turn.",
+    );
+    expect(prompt).not.toContain("with nothing done and no packet");
+  });
 });
 
 /**

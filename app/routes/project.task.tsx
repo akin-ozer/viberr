@@ -123,6 +123,8 @@ import {
 } from "~/server/auth/project-authority.server";
 import {
   cancelScheduledAction,
+  SCHEDULE_BOUNDS_SENTENCE,
+  SCHEDULE_MAX_MINUTES,
   scheduleTaskAction,
 } from "~/server/tasks/schedule.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
@@ -1431,8 +1433,8 @@ export async function action({ request, params }: Route.ActionArgs) {
         // a validation refusal instead of a crash. 28 days is the ceiling: a
         // schedule further out than the retention story is a note, not a plan.
         const rawMinutes = Number(formData.get("delayMinutes"));
-        if (!Number.isFinite(rawMinutes) || rawMinutes < 1 || rawMinutes > 40_320) {
-          throw AppError.validation("Schedule between 1 minute and 28 days out.");
+        if (!Number.isFinite(rawMinutes) || rawMinutes < 1 || rawMinutes > SCHEDULE_MAX_MINUTES) {
+          throw AppError.validation(SCHEDULE_BOUNDS_SENTENCE);
         }
         const minutes = Math.round(rawMinutes);
         const schedPrompt = String(formData.get("prompt") ?? "");

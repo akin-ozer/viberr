@@ -1331,7 +1331,12 @@ profileId?, prompt? })` (future only, not on a closed task, i.e. terminal stage 
 archived (ruling 177), profile must be deployed; audit
 `task.schedule.created`/`cancelled`), reached from the task page's run controls and,
 ruling 153 (pass 35), the controller's `schedule_task_action` / `cancel_task_schedule`
-under the same `run-agents` tier and bounds. `startScheduleRunner` fires at boot and every
+under the same `run-agents` tier and bounds, and, ruling 487, the operator's own tools of
+the same names for the task it runs on, gated like its immediate dispatch (a `direct`
+`dispatch-agents` grant; an agent it could not dispatch now is refused). An entry written
+under the operator's authority reads `createdBy: "operator"`, and at fire time its
+`run-agent` arm passes no `directiveFrom` or triggerer (no person asked for it and none is
+tagged), and its `run-operator` arm passes `scheduledByOperator`. `startScheduleRunner` fires at boot and every
 60 s: it claims in the file (lease = clone timeout + 5 min, 3 retries), skips moot
 schedules with an outcome (`skipped-done`, `skipped-archived`), leaves a `run-agent`
 occurrence pending for the tick while the same profile has a live run on the task, fails a
