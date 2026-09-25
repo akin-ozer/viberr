@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router";
+import { Link } from "react-router";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { Pill, ValidationPill } from "~/ui/pill";
@@ -11,8 +11,9 @@ import type { PrOverlap } from "~/shared/pr-overlaps";
 /**
  * Review queue — the human acceptance boundary as a read-only triage list.
  *
- * Zero mutations here: rows navigate to task detail (where packet
- * resolution lives, Phase 5), the policy chip navigates to Policy. The split is
+ * Zero mutations here: rows link to task detail (where packet
+ * resolution lives, Phase 5), the policy chip links to Policy (ruling 477(c):
+ * real links, so a row opens in a new tab and says where it goes). The split is
  * member-scoped by acceptance authority (R8-3): "your acceptance" lists only the
  * human-waiting tasks THIS viewer can accept; a human-waiting task someone else
  * must accept lands in "Still in review" (never the false "agent working").
@@ -94,12 +95,13 @@ function OverlapChip({ overlaps }: { overlaps: PrOverlap[] }) {
 
 function RQRow({
   t,
-  onOpen,
+  href,
   ready,
   waitingOnMe,
 }: {
   t: ReviewRowView;
-  onOpen: (key: string) => void;
+  /** The task page this row opens. */
+  href: string;
   ready?: boolean;
   /** writ-3: the board's `waitingOnMe` for this task (an open decision this
    *  viewer owns, or acceptance this viewer can give). */
@@ -107,10 +109,15 @@ function RQRow({
 }) {
   const sub = reviewRowSub(t);
   return (
-    <button
-      type="button"
+    <Link
       className="rq-row"
-      onClick={() => onOpen(t.key)}
+      to={href}
+      // Ruling 477(c) (F40-29): a LINK, because the row goes to a page. It was
+      // a <button> calling navigate(), so the queue built for triaging many
+      // tasks at once could not Cmd- or middle-click rows into tabs or copy a
+      // row's address, a screen reader announced "button" for page navigation,
+      // and `.rq-main` held <div>s inside a <button>. The board card, the list
+      // view and the Goals panel already link to the same pages.
       // R15-11: the queue's whole job is deciding, yet the row was an unlabeled
       // clickable region — the surface read as actionless. It stays a triage
       // list (a decision belongs with its evidence: the diff, the verdict, the
@@ -124,10 +131,13 @@ function RQRow({
       // the content and still carries the visible "Review".
     >
       <span className="rq-key">{t.key}</span>
-      <span className="rq-main">
+      {/* A link's content model is its parent's (flow), so the two lines stay
+          blocks; they sat in a <span> inside a <button> before, which allows
+          neither. */}
+      <div className="rq-main">
         <div className="ttl">{t.title}</div>
         <div className="sub">{sub}</div>
-      </span>
+      </div>
       <span className="rq-meta">
         {/* UXA-2: this queue carried its OWN pr-state colour map, so a
             closed-unmerged (rejected) PR rendered neutral grey here while the
@@ -251,7 +261,7 @@ function RQRow({
         Review
         <Icon name="chevron" />
       </span>
-    </button>
+    </Link>
   );
 }
 
@@ -282,10 +292,7 @@ export function ReviewQueuePage({
    *  the other way. */
   acceptance?: { operatorCanAccept: boolean; operatorName: string };
 }) {
-  const navigate = useNavigate();
-  const onOpen = (key: string) =>
-    navigate(`/projects/${projectSlug}/tasks/${key}`);
-  const onPolicy = () => navigate(`/projects/${projectSlug}/policy`);
+  const taskHref = (key: string) => `/projects/${projectSlug}/tasks/${key}`;
   const { operatorCanAccept, operatorName } = acceptance;
 
   return (
@@ -304,7 +311,8 @@ export function ReviewQueuePage({
         <div className="board-tools">
           {/* UI-27 residual: this was a <button> wearing `hero-file`, visually
               identical to the non-interactive `hero-file` spans elsewhere — no
-              affordance that it navigates. It reads as the link it is now. */}
+              affordance that it navigates. It reads as the link it is now.
+              Ruling 477(c): and it IS one, like the rows below. */}
           {/* P13-D-9: the chip claimed "human only" on EVERY project. On a
               full-autonomy project whose operator ALSO holds an explicit
               `completion-for-acceptance: direct` grant, that operator closes
@@ -312,10 +320,9 @@ export function ReviewQueuePage({
               Policy and the create modal already disclose. (The grant is
               `promotable: false`: no preset and no autonomy change ever confers
               it; an admin sets it deliberately.) */}
-          <button
-            type="button"
+          <Link
             className="btn ghost sm"
-            onClick={onPolicy}
+            to={`/projects/${projectSlug}/policy`}
             title={
               operatorCanAccept
                 ? `${operatorName} runs at full autonomy and separately holds ${ACCEPTANCE_CAP_LABEL} set to Direct, so it can move a task to ${stageNames.terminal} itself. Every other actor at this boundary is a human. See Policy.`
@@ -327,7 +334,7 @@ export function ReviewQueuePage({
               {stageNames.review} → {stageNames.terminal} ·{" "}
               {operatorCanAccept ? "human or operator" : "human only"}
             </span>
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -345,7 +352,7 @@ export function ReviewQueuePage({
           {ready.length ? (
             <div className="rq-list">
               {ready.map((t) => (
-                <RQRow key={t.key} t={t} onOpen={onOpen} ready />
+                <RQRow key={t.key} t={t} href={taskHref(t.key)} ready />
               ))}
             </div>
           ) : (
@@ -399,7 +406,7 @@ export function ReviewQueuePage({
                 <RQRow
                   key={t.key}
                   t={t}
-                  onOpen={onOpen}
+                  href={taskHref(t.key)}
                   waitingOnMe={waitingOnMe?.has(t.key)}
                 />
               ))}

@@ -298,6 +298,14 @@ const AUDIT_ACTION_KINDS = {
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
+  // Ruling 477(b) (F40-28): a goal chain is the automation that starts, strands
+  // and closes a project's work, and the page promises "human decisions … and
+  // policy changes". Defining a chain and redirecting it (pause, resume,
+  // cancel, skip, retry, edit, add, remove, adopt, rename) are a person's
+  // decisions; the runner closing one is its own record.
+  "goal.created": "change",
+  "goal.updated": "change",
+  "goal.completed": "audit",
 } satisfies Record<string, AuditLogKind>;
 
 /** The whitelist above as the lookup `listAuditLog` reads: `action` arrives as
@@ -381,7 +389,18 @@ const auditDetailsSchema = z.object({
   // Ruling 462: the repository created with the project, and its visibility.
   repo: detailText,
   private: z.boolean().optional().catch(undefined),
+  // Ruling 477(b): a goal row's chain title, its link count at creation, the
+  // op a redirect ran, the link it touched, the reason given, and whether it
+  // changed nothing (`from`/`to` above carry a rename's two titles).
+  title: detailText,
+  links: z.number().optional().catch(undefined),
+  index: z.number().optional().catch(undefined),
+  reason: detailText,
+  unchanged: z.boolean().optional().catch(undefined),
 });
+
+/** The decoded details one audit sentence reads. */
+type AuditDetailsRead = z.infer<typeof auditDetailsSchema>;
 
 /** A blob that is not an object at all — never written by `recordAudit`, but
  * the column is free text — reads as "nothing recorded", like an absent one. */
@@ -578,6 +597,18 @@ function auditText(
       const memberRole = d.memberRole;
       return `${actor} used the org-admin override to ${what} (project role: ${memberRole ?? "not a member"}).`;
     }
+    // Ruling 477(b) (F40-28): the goal-chain rows.
+    case "goal.created": {
+      const goal = `goal ${goalLabel(row, d)}`;
+      return d.links === undefined
+        ? `${actor} created ${goal}.`
+        : `${actor} created ${goal} with ${countLabel(d.links, "link")}.`;
+    }
+    case "goal.updated":
+      return goalUpdatedText(row, actor, d);
+    case "goal.completed":
+      // The runner's own record names no actor, like the policy engine's rows.
+      return `Goal ${goalLabel(row, d)} completed: every link is settled.`;
     // P13-D-8: a refused attempt. Reads as a blocked action, like the merge
     // refusal above.
     case "project.authority.denied": {
@@ -592,6 +623,49 @@ function auditText(
     default:
       // Whitelisted-but-untemplated (future additions): honest fallback.
       return `${actor}: ${row.action.replace(/[._]/g, " ")}.`;
+  }
+}
+
+/** Ruling 477(b): a goal row names its chain by id, with the title the row
+ *  recorded (a row written before the writer recorded one has none). */
+function goalLabel(row: AuditRow, d: AuditDetailsRead): string {
+  return `**${row.subject_id ?? "?"}**${d.title ? ` (${d.title})` : ""}`;
+}
+
+/**
+ * Ruling 477(b) (F40-28): a `goal.updated` row reads as what the person did to
+ * the chain, op by op, from the facts the writer records beside `op`.
+ */
+function goalUpdatedText(row: AuditRow, actor: string, d: AuditDetailsRead): string {
+  const goal = `goal ${goalLabel(row, d)}`;
+  if (d.unchanged) return `${actor} changed nothing on ${goal}.`;
+  const link = d.index === undefined ? "a link" : `link ${d.index}`;
+  const because = d.reason ? `: ${d.reason.replace(/\.$/, "")}` : "";
+  switch (d.op) {
+    case "pause":
+      return `${actor} paused ${goal}.`;
+    case "resume":
+      return `${actor} resumed ${goal}.`;
+    case "cancel":
+      return `${actor} cancelled ${goal}${because}.`;
+    case "skip_link":
+      return `${actor} skipped ${link} of ${goal}${because}.`;
+    case "retry_link":
+      return `${actor} retried ${link} of ${goal}.`;
+    case "edit_link":
+      return `${actor} edited ${link} of ${goal}.`;
+    case "add_link":
+      return `${actor} added ${link} to ${goal}.`;
+    case "remove_pending_link":
+      return `${actor} removed pending ${link} from ${goal}.`;
+    case "adopt_task":
+      return `${actor} bound ${link} of ${goal} to an existing task on`;
+    case "rename":
+      return d.from && d.to
+        ? `${actor} renamed goal **${row.subject_id ?? "?"}** from **${d.from}** to **${d.to}**.`
+        : `${actor} rewrote the description of ${goal}.`;
+    default:
+      return `${actor} updated ${goal}.`;
   }
 }
 

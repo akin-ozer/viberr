@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AuditActorOption } from "~/server/projections/activity-feed.server";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { Icon, type IconName } from "~/ui/icon";
 import { useHydrated } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
@@ -257,13 +257,13 @@ function AuditRow({
   entry,
   sub,
   timeLabel,
-  onOpen,
+  taskHref,
 }: {
   entry: AuditLogEntryView;
   /** One of the rows a compacted summary stands for, revealed in place. */
   sub?: boolean;
   timeLabel: (iso: string) => string;
-  onOpen: (key: string) => void;
+  taskHref: (key: string) => string;
 }) {
   const m = PEV_META[entry.kind] ?? PEV_META.change!;
   const resolved = entry.status === "resolved";
@@ -282,13 +282,9 @@ function AuditRow({
         {entry.taskKey && (
           <>
             {" "}
-            <button
-              type="button"
-              className="keybtn"
-              onClick={() => onOpen(entry.taskKey!)}
-            >
+            <Link className="keybtn" to={taskHref(entry.taskKey)}>
               {entry.taskKey}
-            </button>
+            </Link>
           </>
         )}
         {entry.kind === "violation" && (
@@ -324,11 +320,11 @@ function AuditRow({
 function CompactedSessions({
   entries,
   timeLabel,
-  onOpen,
+  taskHref,
 }: {
   entries: AuditLogEntryView[];
   timeLabel: (iso: string) => string;
-  onOpen: (key: string) => void;
+  taskHref: (key: string) => string;
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -360,7 +356,7 @@ function CompactedSessions({
             entry={entry}
             sub
             timeLabel={timeLabel}
-            onOpen={onOpen}
+            taskHref={taskHref}
           />
         ))}
     </>
@@ -373,7 +369,7 @@ function AuditLogs({
   filtered,
   utc,
   actorOptions,
-  onOpen,
+  taskHref,
   onShowOlder,
 }: {
   entries: AuditLogEntryView[];
@@ -385,7 +381,8 @@ function AuditLogs({
   /** Everyone who ever wrote an audit row, for the actor filter — the stored
    *  label as the value, a display name as the label (E32-8). */
   actorOptions: AuditActorOption[];
-  onOpen: (key: string) => void;
+  /** The task page a row's key links to (ruling 477(c)). */
+  taskHref: (key: string) => string;
   onShowOlder: () => void;
 }) {
   const timeLabel = utc ? auditTimeLabelUTC : auditTimeLabel;
@@ -432,14 +429,14 @@ function AuditLogs({
               key={row.key}
               entries={row.entries}
               timeLabel={timeLabel}
-              onOpen={onOpen}
+              taskHref={taskHref}
             />
           ) : (
             <AuditRow
               key={row.entry.id}
               entry={row.entry}
               timeLabel={timeLabel}
-              onOpen={onOpen}
+              taskHref={taskHref}
             />
           ),
         )}
@@ -676,7 +673,6 @@ export function ActivityPage({
   /** The audit panel's actor options (stored label → display name). */
   auditActors: AuditActorOption[];
 }) {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [f, setF] = useState<ActorFilter>("all");
   // Interface review 2026-09-24 (writ-7): the loader filters server-side, so
@@ -690,8 +686,10 @@ export function ActivityPage({
   // timezone-AGNOSTIC UTC forms (absolute days, UTC clocks); an effect then
   // swaps in the viewer-local forms (the app/ui/local-time.tsx pattern).
   const local = useHydrated();
-  const onOpen = (key: string) =>
-    navigate(`/projects/${projectSlug}/tasks/${key}`);
+  // Ruling 477(c) (F40-29): every task key on this page is a LINK to the task.
+  // They were <button>s calling navigate(), so a key could not be opened in a
+  // new tab or copied, and assistive tech announced a button for navigation.
+  const taskHref = (key: string) => `/projects/${projectSlug}/tasks/${key}`;
 
   // "Show older" raises the loader limit via URL state (task-detail
   // `?events=` pattern; survives revalidation, no client accumulation).
@@ -802,13 +800,9 @@ export function ActivityPage({
                         </>
                       )}
                       <ActivityText text={r.text} />{" "}
-                      <button
-                        type="button"
-                        className="keybtn"
-                        onClick={() => onOpen(r.taskKey)}
-                      >
+                      <Link className="keybtn" to={taskHref(r.taskKey)}>
                         {r.taskKey}
-                      </button>
+                      </Link>
                     </span>
                     <span className="pev-t">
                       {(local ? formatClock : formatClockUTC)(r.occurredAt)}
@@ -853,7 +847,7 @@ export function ActivityPage({
             filtered={auditFiltered}
             utc={!local}
             actorOptions={auditActors}
-            onOpen={onOpen}
+            taskHref={taskHref}
             onShowOlder={() =>
               showOlder("audit", Math.min(audit.length + AUDIT_STEP, AUDIT_MAX))
             }

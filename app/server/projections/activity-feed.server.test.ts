@@ -810,3 +810,57 @@ describe("ruling 235: the refused-acceptance audit row", () => {
     expect(row!.text).not.toContain("head unpushed");
   });
 });
+
+/**
+ * Ruling 477(b) (F40-28): the goal-chain rows. The org audit store held
+ * `goal.created` and `goal.updated` for goal-1 on akinozer.com while the
+ * project's audit column ("58 of 58 entries") showed neither: the whitelist
+ * had no `goal.*` action. Every op a redirect can run has its own sentence,
+ * and a row written before the writer recorded a title or a link still reads.
+ */
+describe("ruling 477(b): goal-chain rows on the audit column", () => {
+  it("names every redirect op, the controller instrument, and the runner's completion", () => {
+    // CANARY: leave `goal.updated` out of AUDIT_ACTION_KINDS and every row but
+    // the creation and the completion vanishes.
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    const goalRow = (action: string, details: Record<string, string | number | boolean>, label = arda.email) =>
+      recordAudit(store.db, {
+        action,
+        actor: action === "goal.completed" ? { userId: null, label: "goal-runner" } : { userId: arda.id, label },
+        subjectKind: "goal",
+        subjectId: "goal-4",
+        projectSlug: store.slug,
+        details,
+      });
+    goalRow("goal.created", { title: "Launch", links: 1, firstTask: "VIB-9" });
+    goalRow("goal.created", {});
+    goalRow("goal.updated", { op: "cancel", title: "Launch", reason: "Superseded by goal-5." });
+    goalRow("goal.updated", { op: "add_link", title: "Launch", index: 4 });
+    goalRow("goal.updated", { op: "remove_pending_link", title: "Launch", index: 2 });
+    goalRow("goal.updated", { op: "retry_link", title: "Launch", index: 3 });
+    goalRow("goal.updated", { op: "edit_link", title: "Launch", index: 1 }, encodeControllerInstrument(arda.email));
+    goalRow("goal.updated", { op: "rename", title: "Launch" });
+    goalRow("goal.updated", { op: "resume", title: "Launch", unchanged: true });
+    goalRow("goal.completed", {});
+    const rows = listAuditLog(store.db, store.slug, { limit: 20 }).reverse();
+    expect(rows.map((r) => r.text)).toEqual([
+      `${arda.name} created goal **goal-4** (Launch) with 1 link.`,
+      `${arda.name} created goal **goal-4**.`,
+      `${arda.name} cancelled goal **goal-4** (Launch): Superseded by goal-5.`,
+      `${arda.name} added link 4 to goal **goal-4** (Launch).`,
+      `${arda.name} removed pending link 2 from goal **goal-4** (Launch).`,
+      `${arda.name} retried link 3 of goal **goal-4** (Launch).`,
+      `${arda.name} (via the controller) edited link 1 of goal **goal-4** (Launch).`,
+      `${arda.name} rewrote the description of goal **goal-4** (Launch).`,
+      `${arda.name} changed nothing on goal **goal-4** (Launch).`,
+      "Goal **goal-4** completed: every link is settled.",
+    ]);
+    // The kind filter finds them: a person's chain decisions are changes, the
+    // runner's completion an audit note.
+    expect(countAuditLog(store.db, store.slug, { kind: "change" })).toBe(9);
+    expect(listAuditLog(store.db, store.slug, { filters: { kind: "audit" } }).map((r) => r.text)).toEqual([
+      "Goal **goal-4** completed: every link is settled.",
+    ]);
+  });
+});

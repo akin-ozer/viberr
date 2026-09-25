@@ -678,7 +678,9 @@ export function mapOperatorRef(
  * derived value; they no longer re-decide it.
  *
  * The STORED readiness, the acceptance gate and the board attention filter all
- * read `readiness`, never `displayReadiness`, and are untouched.
+ * read `readiness`, never `displayReadiness`, and are untouched. Lift 2's
+ * demand reaches the attention filter through the open packet itself, which
+ * it reads beside `waiting` (ruling 477(a), `board-filters.ts`).
  */
 function deriveDisplayReadiness(
   readiness: Readiness,
