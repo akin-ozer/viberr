@@ -181,7 +181,7 @@ describe("gatherControllerContext", () => {
     expect(read.text.length).toBeLessThan(TASK_FILE_CONTEXT_CHARS + 4_000);
   });
 
-  it("board scope: stages with counts, members, the open-task table and chains", async () => {
+  it("board scope: stages with counts, members, the open-task table and the open epics", async () => {
     const { gatherControllerContext } = await import("./controller-context.server");
     const read = gatherControllerContext(app.db, {
       projectSlug: SLUG,
@@ -195,7 +195,9 @@ describe("gatherControllerContext", () => {
     expect(read.text).toMatch(/members: .*\(admin\)/);
     expect(read.text).toMatch(/open tasks: \d+ \(\d+ waiting on a human/);
     expect(read.text).toContain("- VIB-142 · Attach execution workspace to task runtime · stage Review");
-    expect(read.text).toMatch(/goal chains: /);
+    // Ruling 503: the open epics stand where the goal chains stood.
+    expect(read.text).toMatch(/open epics: /);
+    expect(read.text).not.toMatch(/goal chains: /);
     expect(read.text).not.toContain("### task.md");
   });
 

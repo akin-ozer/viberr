@@ -61,6 +61,8 @@ import {
   userName,
 } from "~/server/tasks/task-actions.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
+import { setTasksEpic } from "~/server/tasks/epic-actions.server";
+import { listEpicChips } from "~/server/projections/epic-query.server";
 import {
   panelReviewNotesText,
   parsePanelReviewNotes,
@@ -158,7 +160,7 @@ import { errorMessage, toError } from "~/shared/errors";
  *   comment · review-notes · resolve-packet · owner-take · owner-assign · owner-release ·
  *   transition · accept-completion · archive-task · restore-task ·
  *   run-interrupt · run-agent · release-agent · run-operator ·
- *   schedule-action · cancel-schedule
+ *   schedule-action · cancel-schedule · set-task-epic (ruling 503)
  */
 
 /**
@@ -468,6 +470,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // The project's existing label vocabulary, for the Details panel's label
     // autocomplete — same source the board's New-task modal draws from.
     labelSuggestions: listProjectLabels(db, params.slug),
+    // Ruling 503: the project's epics as chips (one statement), for the
+    // hero's Epic field and the Details panel's Epic menu.
+    epics: listEpicChips(db, params.slug),
     attachments,
     attachmentsTotal,
     // Who saved each attachment and when, from the events that claim names —
@@ -766,6 +771,18 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           toast: edited.length === 1 ? `${edited[0]} updated` : "Task metadata updated",
         };
+      }
+      case "set-task-epic": {
+        // Ruling 503: the Details panel's Epic menu. An empty field takes the
+        // task out of its epic; `setTasksEpic` checks the grant
+        // (`edit-task-meta`), the epic and the task before it writes.
+        const epicId = String(formData.get("epic") ?? "").trim();
+        const result = await setTasksEpic(
+          db,
+          { projectSlug, taskKeys: [taskKey], epicId: epicId || null },
+          actor,
+        );
+        return { ok: true as const, intent, toast: result.message };
       }
       case "set-task-dependencies": {
         // Ruling 131: the Details panel's own form. The FULL list is submitted
@@ -1548,6 +1565,7 @@ export default function TaskDetailRoute({
       key={loaderData.task.key}
       task={loaderData.task}
       labelSuggestions={loaderData.labelSuggestions}
+      epics={loaderData.epics}
       attachments={loaderData.attachments}
       attachmentsTotal={loaderData.attachmentsTotal}
       attachmentProducers={loaderData.attachmentProducers}

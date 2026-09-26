@@ -98,7 +98,7 @@ export function HomeTopBar({
             className="kbd"
             aria-haspopup="dialog"
             aria-label="Search everything"
-            title="Search tasks, branches, agents and projects"
+            title="Search tasks, epics, branches, agents and projects"
             onClick={onOpenPalette}
             suppressHydrationWarning
           >

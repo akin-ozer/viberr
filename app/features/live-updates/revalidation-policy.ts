@@ -70,7 +70,7 @@ import {
 
 /** What a loader's answer can depend on, as the triggers that change it. */
 export type Fact =
-  /** Project, task, goal, policy and org resource data (most events). */
+  /** Project, task, epic, policy and org resource data (most events). */
   | "domain"
   /** A run's lifecycle (`run.state-changed`). */
   | "run"
@@ -123,6 +123,10 @@ export const REVALIDATION_RULES = {
   "routes/notifications": { params: [], search: [], reads: ["domain", "bell"] },
   "routes/project": { params: ["slug"], search: [], reads: SHELL },
   "routes/project.board": { params: ["slug"], search: [], reads: PAGE },
+  // Ruling 503: the Open / Closed / All switch is the page's own; the loader
+  // reads every epic.
+  "routes/project.epics": { params: ["slug"], search: [], reads: PAGE },
+  "routes/project.epic": { params: ["slug", "epicId"], search: [], reads: PAGE },
   "routes/project.review": { params: ["slug"], search: [], reads: PAGE },
   "routes/project.controller": {
     params: ["slug"],

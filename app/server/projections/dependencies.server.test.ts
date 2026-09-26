@@ -18,16 +18,13 @@ import {
 
 /**
  * Ruling 131 (pass 34): every `blockedBy` entry resolves at READ time from the
- * projections — a task key to its own state, a goal link to its task's state
- * once the chain created it, else to the link's status.
+ * projections, a task key to its own state. Ruling 503 retired the second
+ * spelling, a goal link, with the goal chains.
  *
- * Canary: map a `skipped` link to `open` (or an archived task to `open`) and
- * the settled/dead cases below fail.
+ * Canary: map an archived task to `open` and the dead cases below fail.
  */
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
-
-const ACTOR = (store: TestStore) => ({ userId: store.users.arda.id, label: store.users.arda.email });
 
 function seed(store: TestStore) {
   writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
@@ -36,7 +33,7 @@ function seed(store: TestStore) {
     frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl", archived: true }),
   });
   writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter("VIB-4", { stage: "impl", blockedBy: ["VIB-1", "goal-1 link 2"] }),
+    frontmatter: baseTaskFrontmatter("VIB-4", { stage: "impl", blockedBy: ["VIB-1", "VIB-2"] }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
@@ -59,66 +56,37 @@ describe("resolveDependencies (ruling 131)", () => {
     expect(resolveDependencies(store.db, store.slug, ["nope"])[0]?.state).toBe("missing");
   });
 
-  it("resolves goal links through the chain: the link's task once created, else its status; a skipped link counts as done", async () => {
+  it("ruling 503: a goal-link spelling handed to the resolver reads missing, never open", () => {
+    // The chains are gone, so nothing can answer `goal-1 link 2`. The file
+    // schema already drops the spelling with a diagnostic; a caller that still
+    // passes it must see a wait that can never clear, not a live one.
+    // CANARY: resolve an unparseable ref to `open`.
     const store = setupTestStore(ctx);
     seed(store);
-    const { createGoal, updateGoal } = await import("~/server/tasks/goal-actions.server");
-    const created = await createGoal(
-      store.db,
-      {
-        projectSlug: store.slug,
-        title: "Foundation",
-        links: [
-          { title: "one", goal: "first" },
-          // Ruling 398: a link with no declared wait starts at once, so a test
-          // about a link with NO TASK YET has to say what it waits for.
-          { title: "two", goal: "second", blockedBy: ["link 1"] },
-          { title: "three", goal: "third", blockedBy: ["link 2"] },
-        ],
-      },
-      ACTOR(store),
-      { dataRoot: store.dataRoot },
-    );
-    expect(created.goalId).toBe("goal-1");
-    // Link 1 has a task (open); link 2 is pending; link 3 will be skipped.
-    await updateGoal(
-      store.db,
-      { projectSlug: store.slug, goalId: "goal-1", action: { op: "skip_link", index: 3 } },
-      ACTOR(store),
-      { dataRoot: store.dataRoot },
-    );
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const entries = resolveDependencies(store.db, store.slug, [
-      "goal-1 link 1",
-      "goal-1 link 2",
-      "goal-1 link 3",
-      "goal-1 link 9",
-      "goal-7 link 1",
+    expect(resolveDependencies(store.db, store.slug, ["goal-1 link 2"])).toEqual([
+      { ref: "goal-1 link 2", label: "goal-1 link 2", state: "missing", taskKey: null },
     ]);
-    expect(entries[0]!.state).toBe("open");
-    expect(entries[0]!.taskKey).toBe(created.activeTaskKey);
-    expect(entries[0]!.label).toBe(`goal-1 link 1 (${created.activeTaskKey})`);
-    expect(entries[1]).toMatchObject({ state: "open", taskKey: null, goalId: "goal-1" });
-    expect(entries[2]).toMatchObject({ state: "done", taskKey: null });
-    expect(entries[3]).toMatchObject({ state: "missing", goalId: "goal-1" });
-    expect(entries[4]).toMatchObject({ state: "missing", goalId: "goal-7" });
+  });
 
-    // A hand-moved link task: the task's OWN state wins over the stored link status.
+  it("a hand-moved task's own state is what its dependents read", async () => {
+    const store = setupTestStore(ctx);
+    seed(store);
+    expect(resolveDependencies(store.db, store.slug, ["VIB-1"])[0]?.state).toBe("open");
     await updateTaskFile(
-      { projectSlug: store.slug, taskKey: created.activeTaskKey!, dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
         parsed.frontmatter.stage = "done";
       },
     );
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    expect(resolveDependencies(store.db, store.slug, ["goal-1 link 1"])[0]?.state).toBe("done");
+    expect(resolveDependencies(store.db, store.slug, ["VIB-1"])[0]?.state).toBe("done");
   });
 
   it("listHeldTasks names every non-archived task with a non-empty list, verbatim from the projection", () => {
     const store = setupTestStore(ctx);
     seed(store);
     expect(listHeldTasks(store.db, store.slug)).toEqual([
-      { taskKey: "VIB-4", blockedBy: ["VIB-1", "goal-1 link 2"] },
+      { taskKey: "VIB-4", blockedBy: ["VIB-1", "VIB-2"] },
     ]);
   });
 });
@@ -133,8 +101,7 @@ describe("resolveDependencies (ruling 131)", () => {
  */
 describe("tasksReleasedBy (ruling 300)", () => {
   function chain(store: TestStore) {
-    // A → B → C, plus D which also waits on something that can never clear,
-    // plus E which waits on A and on a goal link that has no task yet.
+    // A → B → C, plus D which also waits on something that can never clear.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }),
     });
@@ -149,12 +116,6 @@ describe("tasksReleasedBy (ruling 300)", () => {
     });
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-4", { stage: "impl", blockedBy: ["VIB-1", "VIB-9"] }),
-    });
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-5", {
-        stage: "impl",
-        blockedBy: ["VIB-1", "goal-1 link 2"],
-      }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
   }
@@ -194,40 +155,6 @@ describe("tasksReleasedBy (ruling 300)", () => {
     // queue by. CANARY: drop the dead-wait filter.
     const freed = tasksReleasedBy(store.db, store.slug, "VIB-1");
     expect([...freed.direct, ...freed.downstream]).not.toContain("VIB-4");
-  });
-
-  it("never counts a task still waiting on a goal link that has no task yet", async () => {
-    const store = setupTestStore(ctx);
-    chain(store);
-    // A link that is genuinely OPEN and has no task: `state: "open"`,
-    // `taskKey: null`. It is a real wait, and no task key completing satisfies
-    // it, so it must survive the walk rather than being dropped as unmatched.
-    const { createGoal } = await import("~/server/tasks/goal-actions.server");
-    const created = await createGoal(
-      store.db,
-      {
-        projectSlug: store.slug,
-        title: "Foundation",
-        links: [
-          { title: "one", goal: "first" },
-          // Ruling 398: a link with no declared wait starts at once, so a test
-          // about a link with NO TASK YET has to say what it waits for.
-          { title: "two", goal: "second", blockedBy: ["link 1"] },
-        ],
-      },
-      ACTOR(store),
-      { dataRoot: store.dataRoot },
-    );
-    expect(created.goalId).toBe("goal-1");
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    expect(
-      resolveDependencies(store.db, store.slug, ["goal-1 link 2"])[0],
-    ).toMatchObject({ state: "open", taskKey: null });
-
-    // CANARY: `.map((e) => e.taskKey).filter(Boolean)` drops it, VIB-5's set
-    // empties on VIB-1 alone, and a task that is still waiting is counted as
-    // released.
-    expect(tasksReleasedBy(store.db, store.slug, "VIB-1")).not.toContain("VIB-5");
   });
 
   it("a task nothing waits on releases nothing, and says so as an empty list", () => {

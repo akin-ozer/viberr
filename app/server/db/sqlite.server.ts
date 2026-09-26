@@ -560,6 +560,11 @@ const BASELINE_COLUMNS: readonly {
         name: "recommendation_kinds",
         ddl: "recommendation_kinds TEXT NOT NULL DEFAULT ''",
       },
+      // Ruling 503: the epic a task belongs to. The rebuilder names it on
+      // EVERY task write, like the column above. No backfill: NULL says "in no
+      // epic", which is true of every row until the goal-to-epic conversion
+      // (or a person) puts a task in one, and both reproject what they write.
+      { name: "epic_id", ddl: "epic_id TEXT" },
     ],
   },
   {
@@ -617,6 +622,30 @@ const BASELINE_TABLES: readonly string[] = [
      os_uid INTEGER NOT NULL UNIQUE,
      created_at TEXT NOT NULL
   )`,
+  // Ruling 503: the epic rows. The rebuilder writes them on every epic file,
+  // and the board, the task page and the Epics pages read them, so a root that
+  // predates it would fail all of them. Same DDL as the baseline.
+  `CREATE TABLE IF NOT EXISTS epic_projections (
+     project_slug TEXT NOT NULL,
+     epic_id TEXT NOT NULL,
+     epic_number INTEGER NOT NULL,
+     title TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('planned', 'in_progress', 'paused', 'done', 'cancelled')),
+     color TEXT NOT NULL,
+     lead_user_id TEXT,
+     start_date TEXT,
+     target_date TEXT,
+     description TEXT NOT NULL DEFAULT '',
+     created_by TEXT NOT NULL,
+     created_by_label TEXT NOT NULL,
+     conversation_id TEXT,
+     created_at TEXT,
+     updated_at TEXT,
+     source_path TEXT NOT NULL,
+     content_hash TEXT NOT NULL,
+     parsed_at TEXT NOT NULL,
+     PRIMARY KEY (project_slug, epic_id)
+   )`,
 ];
 
 /** Indexes the baseline gained after a root applied it. `IF NOT EXISTS` makes
@@ -631,6 +660,14 @@ const BASELINE_INDEXES: readonly string[] = [
      ON audit_events (project_slug, task_key, action, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_provenance__path_action
      ON provenance (source_path, action)`,
+  // Ruling 503: an epic's tasks and its progress. Follows the `epic_id`
+  // column above. Partial, so only a read that names an epic can use it: a
+  // whole index on (project_slug, epic_id) is an equal-cost choice for every
+  // `WHERE project_slug = ?` read, and taking it moved the order those reads
+  // return their rows in (the dependency sweep released in insertion order
+  // instead of key order).
+  `CREATE INDEX IF NOT EXISTS idx_task_projections__epic
+     ON task_projections (project_slug, epic_id) WHERE epic_id IS NOT NULL`,
 ];
 
 export function ensureBaselineColumns(db: DatabaseSync): void {

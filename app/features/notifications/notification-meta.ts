@@ -41,9 +41,13 @@ export function ntfMeta(n: {
   if (n.kind === "approval") return { icon: "arrow", cls: "act-transition" };
   if (n.kind === "mention") return { icon: "message", cls: "act-comment" };
   if (n.kind === "quality") return { icon: "flag", cls: "act-quality" };
-  // Ruling 99: goal-chain progress — the comment palette (the controller is
-  // conversational), with the cpu glyph naming the sender.
+  // Ruling 99: goal-chain progress an inbox kept from before ruling 503 — the
+  // comment palette (the controller is conversational), with the cpu glyph
+  // naming the sender.
   if (n.kind === "controller") return { icon: "cpu", cls: "act-comment" };
+  // Ruling 503: an epic's membership or status moved — forward motion, on the
+  // transition palette, with the stacked glyph the Epics rail item wears.
+  if (n.kind === "epic") return { icon: "epic", cls: "act-transition" };
   // Ruling 131: a released wait is forward motion — the transition palette
   // with the lock glyph the board's wait chip wears.
   if (n.kind === "dependency") return { icon: "lock", cls: "act-transition" };

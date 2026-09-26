@@ -27,4 +27,4 @@ capabilities: []
 extras: []
 ---
 
-The instance's conversational manager, one per instance. People ask it questions and ask it to act; what it answers and applies is bounded by each asking person's own permission level, checked live in both scopes (org role for instance actions, project role for board actions). It briefs, triggers and steers operators and agents, defines and advances chained goals, and never replaces per-task coordination. Only org admins change this profile, its resources or its prompt.
+The instance's conversational manager, one per instance. People ask it questions and ask it to act; what it answers and applies is bounded by each asking person's own permission level, checked live in both scopes (org role for instance actions, project role for board actions). It briefs, triggers and steers operators and agents, plans epics and their tasks, and never replaces per-task coordination. Only org admins change this profile, its resources or its prompt.

@@ -8,6 +8,7 @@ import { ToastProvider } from "~/ui/toast";
 import { toISODate } from "~/ui/calendar";
 import { CurrentStatePanel } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
+import type { EpicOption } from "~/ui/epic-chip";
 
 /**
  * Pass-19 gap 10 — the task page showed stage, readiness, validation, owner and
@@ -270,17 +271,17 @@ describe("ruling 131: the Current-state Waiting-on row names the other work", ()
     const { container } = renderPanel({
       waiting: "none",
       blockedBy: [
-        { ref: "goal-1 link 2", label: "goal-1 link 2", state: "open", taskKey: null, goalId: "goal-1" },
-        { ref: "JC-3", label: "JC-3", state: "done", taskKey: "JC-3", goalId: null },
+        { ref: "JC-2", label: "JC-2", state: "open", taskKey: "JC-2" },
+        { ref: "JC-3", label: "JC-3", state: "done", taskKey: "JC-3" },
       ],
     });
     // Ruling 356: JC-3 is done in the fixture, and reads as done (CANARY:
     // print the bare labels again).
-    expect(kv(container, "Waiting on")).toBe("Other work: goal-1 link 2 and JC-3 (done)");
+    expect(kv(container, "Waiting on")).toBe("Other work: JC-2 and JC-3 (done)");
     const row = [...container.querySelectorAll(".kv-row")].find((r) => r.querySelector(".k")?.textContent === "Waiting on")!;
-    expect(row.querySelector(".v span")?.getAttribute("title")).toBe("goal-1 link 2 · open · JC-3 · done");
+    expect(row.querySelector(".v span")?.getAttribute("title")).toBe("JC-2 · open · JC-3 · done");
     // A human still owed something wins over the wait.
-    const { container: human } = renderPanel({ waiting: "human", blockedBy: [{ ref: "JC-3", label: "JC-3", state: "open", taskKey: "JC-3", goalId: null }] });
+    const { container: human } = renderPanel({ waiting: "human", blockedBy: [{ ref: "JC-3", label: "JC-3", state: "open", taskKey: "JC-3" }] });
     expect(kv(human, "Waiting on")).toBe("a human");
     const { container: none } = renderPanel({ waiting: "none" });
     expect(kv(none, "Waiting on")).toBe("Nothing");
@@ -315,14 +316,14 @@ const trigger = (view: { getByRole: ReturnType<typeof render>["getByRole"] }, la
 
 describe("ruling 131: the Details panel's Blocked by row and its own form", () => {
   const entries = [
-    { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "done" as const, taskKey: "JC-3", goalId: "goal-1" },
-    { ref: "JC-6", label: "JC-6", state: "failed" as const, taskKey: "JC-6", goalId: null },
-    { ref: "JC-7", label: "JC-7", state: "open" as const, taskKey: "JC-7", goalId: null },
+    { ref: "JC-3", label: "JC-3", state: "done" as const, taskKey: "JC-3" },
+    { ref: "JC-6", label: "JC-6", state: "failed" as const, taskKey: "JC-6" },
+    { ref: "JC-7", label: "JC-7", state: "open" as const, taskKey: "JC-7" },
   ];
 
   it("reads the wait as a kv row with each entry's state, and its status ring", () => {
     const { container } = renderCapturing({ blockedBy: entries }, false);
-    expect(kv(container, "Blocked by")).toBe("goal-1 link 2 (JC-3) · doneJC-6 · archivedJC-7");
+    expect(kv(container, "Blocked by")).toBe("JC-3 · doneJC-6 · archivedJC-7");
     // Ruling 501: each entry is a chip carrying its state for the sheet's ring.
     // CANARY: drop `data-wait-state` and the done and dead rings lose their tone.
     const chips = [...container.querySelectorAll(".wait-chip")];
@@ -341,11 +342,11 @@ describe("ruling 131: the Details panel's Blocked by row and its own form", () =
     expect(form).toBeTruthy();
     const input = form.querySelector<HTMLInputElement>('input[name="blockedBy"]')!;
     // Prefilled with the CANONICAL refs, not the display labels.
-    expect(input.value).toBe("goal-1 link 2, JC-6, JC-7");
-    fireEvent.change(input, { target: { value: "JC-7, goal-2 link 1" } });
+    expect(input.value).toBe("JC-3, JC-6, JC-7");
+    fireEvent.change(input, { target: { value: "JC-7, JC-12" } });
     fireEvent.click(form.querySelector('button[type="submit"]')!);
     await waitFor(() => expect(view.posted).toHaveLength(1));
-    expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "JC-7, goal-2 link 1" });
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "JC-7, JC-12" });
     expect(view.posted[0]!.priority).toBeUndefined();
     // A saved wait closes its editor.
     await waitFor(() => expect(view.container.querySelector("form[data-dependency-form]")).toBeNull());
@@ -386,7 +387,7 @@ describe("TaskDetailsPanel", () => {
   it("names the queued question under the wait, by the reviewer's NAME", () => {
     const { container } = renderDetails(
       {
-        blockedBy: [{ ref: "VIB-9", label: "VIB-9", state: "open", taskKey: "VIB-9", goalId: null }],
+        blockedBy: [{ ref: "VIB-9", label: "VIB-9", state: "open", taskKey: "VIB-9" }],
         reviewers: [
           {
             kind: "agent",
@@ -415,14 +416,109 @@ describe("TaskDetailsPanel", () => {
     expect(container.querySelector("[data-queued-questions]")).toBeNull();
   });
 
-  it("shows 'Normal / None / None' for a bare task, quietly", () => {
+  it("shows 'Normal / None / None / None' for a bare task, quietly", () => {
     const { container } = renderDetails({}, false);
     expect(kv(container, "Priority")).toContain("Normal");
     expect(kv(container, "Labels")).toContain("None");
+    expect(kv(container, "Epic")).toBe("None");
     expect(kv(container, "Due date")).toContain("None");
     // Ruling 501: an empty value is the quiet line, never the bold fact the
     // owner's screenshot showed four times. CANARY: print them bare in `.v`.
-    expect(container.querySelectorAll(".kv-row .prop-empty")).toHaveLength(4);
+    // Ruling 503's Epic row is the fifth.
+    expect(container.querySelectorAll(".kv-row .prop-empty")).toHaveLength(5);
+  });
+});
+
+/**
+ * Ruling 503(e): the Details panel's Epic row. A viewer reads the epic as a
+ * chip that opens its page; an editor gets a menu of "No epic" and the open
+ * epics (the current one kept even when closed), and a pick posts the one
+ * field.
+ */
+describe("ruling 503(e): the Details panel's Epic row", () => {
+  const EPICS: EpicOption[] = [
+    { id: "epic-1", title: "Checkout revamp", color: "teal", status: "in_progress" },
+    { id: "epic-2", title: "Search", color: "violet", status: "done" },
+    { id: "epic-3", title: "Onboarding", color: "amber", status: "planned" },
+  ];
+
+  function renderEpicRow(epicId: string | null, canEdit: boolean, epics: EpicOption[] = EPICS) {
+    const task = detail({ epicId });
+    const posted: Record<string, string>[] = [];
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => (
+          <ToastProvider>
+            <TaskDetailsPanel task={task} canEdit={canEdit} epics={epics} />
+          </ToastProvider>
+        ),
+        action: async ({ request }) => {
+          const fd = await request.formData();
+          posted.push(Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)])));
+          return { ok: true };
+        },
+      },
+    ]);
+    return { ...render(<Stub initialEntries={["/"]} />), posted };
+  }
+
+  it("a viewer reads the epic as a chip linking to its page", () => {
+    // CANARY: render the viewer's chip without `to`.
+    const { container } = renderEpicRow("epic-1", false);
+    const row = [...container.querySelectorAll(".kv-row")].find((r) => r.querySelector(".k")?.textContent === "Epic")!;
+    const chip = row.querySelector<HTMLAnchorElement>("a.epic-chip")!;
+    expect(chip.getAttribute("href")).toBe("/projects/viberr-core/epics/epic-1");
+    expect(chip.textContent).toBe("Epic Checkout revamp");
+    expect(row.querySelector("button")).toBeNull();
+  });
+
+  it("an editor's button is named once: the row's label, then the epic", () => {
+    // CANARY: drop `inLabelledControl` from the editor's chip, and the button
+    // reads "Epic Epic Checkout revamp" (the row's label, then the chip's own
+    // spoken prefix). Found by the browser pass: the e2e spec asked for it.
+    const view = renderEpicRow("epic-1", true);
+    expect(view.getByRole("button", { name: "Epic Checkout revamp" })).toBeTruthy();
+  });
+
+  it("an editor's menu offers No epic first, then the open epics and the current closed one", async () => {
+    // CANARY: offer every epic, closed ones included, or drop the current one when it is closed.
+    const view = renderEpicRow("epic-2", true);
+    fireEvent.click(trigger(view, "Epic"));
+    const items = await waitFor(() => {
+      const found = [...view.container.querySelectorAll<HTMLButtonElement>('.epic-menu [role="menuitemradio"]')];
+      expect(found.length).toBeGreaterThan(0);
+      return found;
+    });
+    expect(items.map((b) => b.textContent)).toEqual([
+      "No epic",
+      "Checkout revamp",
+      "Search · Done",
+      "Onboarding",
+    ]);
+    expect(items.filter((b) => b.getAttribute("aria-checked") === "true").map((b) => b.dataset.epic)).toEqual(["epic-2"]);
+    fireEvent.click(items[1]!);
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-epic", epic: "epic-1" });
+  });
+
+  it("No epic posts an empty epic, and a task in none invites Add to epic", async () => {
+    const view = renderEpicRow("epic-1", true);
+    fireEvent.click(trigger(view, "Epic"));
+    const none = await view.findByRole("menuitemradio", { name: "No epic" });
+    fireEvent.click(none);
+    await waitFor(() => expect(view.posted).toHaveLength(1));
+    expect(view.posted[0]).toMatchObject({ intent: "set-task-epic", epic: "" });
+    cleanup();
+    const bare = renderEpicRow(null, true);
+    expect(kv(bare.container, "Epic")).toBe("Add to epic");
+  });
+
+  it("a project with no open epic offers no menu, only the text", () => {
+    const closed: EpicOption[] = [{ id: "epic-2", title: "Search", color: "violet", status: "done" }];
+    const view = renderEpicRow(null, true, closed);
+    expect(view.queryByRole("button", { name: /^Epic / })).toBeNull();
+    expect(kv(view.container, "Epic")).toBe("None");
   });
 });
 

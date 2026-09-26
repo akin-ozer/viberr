@@ -19,7 +19,8 @@ review PRs, and humans govern through policy, comments, decision packets and
 explicit acceptance. Above the per-task operators sits one instance-wide
 **controller**: a conversational agent every signed-in user can address, from its
 own page or from a dock on every page, which acts strictly within that user's own
-permissions and can define **chained goals** the server carries forward. Every agent
+permissions and can plan work into **epics**, the named bodies of work that tasks join
+and leave one at a time, as in Jira and Linear. Every agent
 run bills one person's own Claude or Codex account: the task owner's, or the asker's
 for a controller turn.
 
@@ -46,7 +47,7 @@ and governed AI delivery through a familiar board/task surface.
 
 ## 4. The operating model
 
-1. **Files are truth.** Projects, tasks and goals are markdown under a data root that humans and agents may edit directly. SQLite holds projections for fast reads plus app-management data (users, sessions, secrets, audit, notifications, run history).
+1. **Files are truth.** Projects, tasks and epics are markdown under a data root that humans and agents may edit directly. SQLite holds projections for fast reads plus app-management data (users, sessions, secrets, audit, notifications, run history).
 2. **A task moves through per-project stages** under governed boundaries: `auto` (operator may cross), `approval` (human approves the operator's request), `human` (human decides). The move into the terminal stage is always human, with one disclosed exception: a full-autonomy operator holding an explicit `completion-for-acceptance: direct` grant may accept, leaving the merge pending for a human.
 3. **The operator coordinates, specialists execute.** The operator triages the goal, dispatches deployed agents (delivering or supporting posture derives from the agent's own grants), opens decision packets when a human must decide, recommends or performs transitions, and decides when to deliver. Specialists never push or open PRs; the server does.
 4. **Humans and agents are governed separately.** Project roles (`admin | maintainer | contributor | viewer`) gate human actions through one RBAC table. Agent capabilities (`direct | recommend | human | off`) gate agent actions, enforced at run time on both backends where the runtime can, and disclosed as advisory where it cannot.
@@ -62,7 +63,8 @@ and governed AI delivery through a familiar board/task surface.
 - Claude and Codex backends via the official SDKs, each person connecting their own account (hosted sign-in or a pasted key) on Profile → Agent accounts; per-run isolated workspaces cut from a per-project mirror; governed skills, knowledge bases (delivered as an index) and MCP mounting, with admin-marked MCP write tools; a project rulings knowledge base every run reads and the operator may propose changes to; a governed headless browser; a read-only GitHub API tool; file attachments as evidence, by agents and people; an instance spending cap per Claude run; prompt-cache measurement and end-of-run session compaction.
 - One GitHub repository per project (bootstrapped when empty); task-key branches; server-side delivery and PR opening; reconciliation every 5 minutes; PR adoption and branch-collision safety; base refreshes that keep the reviewed revision; branch cleanup; human approval on the PR counting as a verdict.
 - Board, review queue (with collision chips between open PRs), task detail (packet, execution profile, live run strip with its console, timeline), agents, policy, GitHub, activity, settings, org settings (connections, users, SSO, resources, controller, audit), notifications, profile, ⌘K palette, insights.
-- The instance controller with a governed toolkit, a built-in read-only diagnostics MCP, and a dock on every signed-in page; chained goals.
+- The instance controller with a governed toolkit, a built-in read-only diagnostics MCP, and a dock on every signed-in page.
+- Epics (ruling 503): a project's Epics page and one page per epic (description, status, lead, dates, progress bar, tasks, history), task membership edited from the task page, the epic page, the board's New task and the controller, and an epic filter on the board.
 - Operations: single-writer lock, self-healing projection DB, boot recovery of stranded work, retention and disk-pressure maintenance, backup/restore, key rotation, audit export (download, S3, and export-before-purge).
 
 ## 6. Deliberate boundaries and known gaps

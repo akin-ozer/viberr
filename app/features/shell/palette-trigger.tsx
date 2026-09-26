@@ -20,7 +20,7 @@ export function PaletteTrigger({ onOpen }: { onOpen: () => void }) {
       type="button"
       className="top-search"
       aria-haspopup="dialog"
-      aria-label="Search tasks, branches, agents, projects"
+      aria-label="Search tasks, epics, branches, agents, projects"
       onClick={onOpen}
     >
       <Icon name="search" />

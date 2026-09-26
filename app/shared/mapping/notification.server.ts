@@ -25,9 +25,12 @@ export const NOTIFICATION_KINDS = [
   "mention",
   "quality",
   "policy",
-  // Ruling 99: chained-goal progress addressed to the goal's creator. A
-  // conversation reply is never a row: it reaches its open surfaces through
-  // the owner-routed `controller.updated` revalidation.
+  // Ruling 99: chained-goal progress addressed to the goal's creator. Nothing
+  // has written one since ruling 503 turned goal chains into epics (their
+  // notices are `epic` rows now); the kind stays so the rows an upgraded inbox
+  // already holds still read, and the CHECK still admits them. A conversation
+  // reply is never a row: it reaches its open surfaces through the
+  // owner-routed `controller.updated` revalidation.
   "controller",
   // Ruling 131 (pass 34): the work a task waited on reached Done and the task
   // was released, or a dependency can never complete (its task was archived).
@@ -37,6 +40,10 @@ export const NOTIFICATION_KINDS = [
   // an admin release. Under ruling 127 the seat is the credential principal
   // and the acceptance authority, so it is never a silent write.
   "ownership",
+  // Ruling 503: a task joined or left an epic the reader leads (or created,
+  // while nobody leads it), they were made its lead, someone else closed or
+  // reopened it, or every task in it is done.
+  "epic",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

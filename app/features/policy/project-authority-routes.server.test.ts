@@ -126,6 +126,19 @@ const ACTION_ROUTES: GatedRoute[] = [
     path: `/projects/${SLUG}/controller`,
     params: { slug: SLUG },
   },
+  // Ruling 503: the project's epics, and one epic.
+  {
+    name: "epics",
+    mod: "project.epics",
+    path: `/projects/${SLUG}/epics`,
+    params: { slug: SLUG },
+  },
+  {
+    name: "epic",
+    mod: "project.epic",
+    path: `/projects/${SLUG}/epics/epic-1`,
+    params: { slug: SLUG, epicId: "epic-1" },
+  },
 ];
 
 /** The argument set React Router hands a project-scoped action. */
@@ -148,6 +161,8 @@ type ProjectActionAnswer = Awaited<
   | ReturnType<typeof import("~/routes/project.github").action>
   | ReturnType<typeof import("~/routes/project.settings").action>
   | ReturnType<typeof import("~/routes/project.controller").action>
+  | ReturnType<typeof import("~/routes/project.epics").action>
+  | ReturnType<typeof import("~/routes/project.epic").action>
 >;
 
 interface ProjectActionModule {
@@ -356,6 +371,8 @@ describe("every project-scoped route carries a membership gate", () => {
     "project.agents.tsx",
     "project.board.tsx",
     "project.controller.tsx",
+    "project.epic.tsx",
+    "project.epics.tsx",
     "project.github.tsx",
     "project.policy.tsx",
     "project.review.tsx",
@@ -370,6 +387,9 @@ describe("every project-scoped route carries a membership gate", () => {
   /** Ruling 457 (BOARD-6): the layout and the board read the project through
    *  ONE gated read, `readWorkspace` (routes/project-workspace.server.ts). */
   const WORKSPACE_READ = "readWorkspace(request, db, params.slug, user)";
+  /** The loaders gated by that read: the layout, the board, and since ruling
+   *  503 the two epic pages, which draw from the same members and stages. */
+  const WORKSPACE_LOADERS = ["project.tsx", "project.board.tsx", "project.epics.tsx", "project.epic.tsx"];
 
   /**
    * The BODY of one exported entry point, not the whole module.
@@ -453,7 +473,7 @@ describe("every project-scoped route carries a membership gate", () => {
     expect(readBody.split("throw data(`No project at projects/${slug}.`, { status: 404 });")).toHaveLength(3);
     expect(readBody.indexOf("status: 404")).toBeLessThan(readBody.indexOf("getReviewQueue("));
     for (const f of withLoader) {
-      if (f === "project.tsx" || f === "project.board.tsx") {
+      if (WORKSPACE_LOADERS.includes(f)) {
         expect(body(f, "loader")).toContain(WORKSPACE_READ);
         continue;
       }

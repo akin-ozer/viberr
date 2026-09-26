@@ -1114,7 +1114,9 @@ describe("ruling 370: the controller prefix", () => {
  * Ruling 476(h) (F40-61): a chain records the conversation that planned it.
  * Live, goal-1 was planned in a 16-message instance thread, and the project's
  * Controller page said "No conversations yet" beside it: the goal file named
- * its creator and nothing else, so nothing could link back.
+ * its creator and nothing else, so nothing could link back. Ruling 503 kept
+ * the rule for the epic that replaced the chain: its file names the thread,
+ * and its page links to it.
  */
 /** A run's mount that is an in-process SDK server, which a client can call. */
 function inProcess(
@@ -1123,8 +1125,8 @@ function inProcess(
   return server !== undefined && "instance" in server && "type" in server && server.type === "sdk";
 }
 
-describe("ruling 476(h): a goal a turn creates records the conversation it was planned in", () => {
-  it("the turn's own create_goal writes its conversation into the chain's file", async () => {
+describe("ruling 476(h): an epic a turn creates records the conversation it was planned in", () => {
+  it("the turn's own create_epic writes its conversation into the epic's file", async () => {
     const { connectFakeBackend, disconnectFakeBackend } = await import(
       "../../../test-support/backend-credentials"
     );
@@ -1132,7 +1134,7 @@ describe("ruling 476(h): a goal a turn creates records the conversation it was p
     const { runControllerTurn } = await import("./controller-run.server");
     const { createConversation } = await import("./controller-conversations.server");
     await connectFakeBackend(app.db, user.id, "claude");
-    // An INSTANCE thread, planning a chain on a board: the live shape.
+    // An INSTANCE thread, planning an epic on a board: the live shape.
     const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
     try {
       await runControllerTurn(app.db, {
@@ -1156,22 +1158,24 @@ describe("ruling 476(h): a goal a turn creates records the conversation it was p
     const reply = JSON.stringify(
       (
         await client.callTool({
-          name: "create_goal",
+          name: "create_epic",
           arguments: {
             projectSlug: "viberr-core",
             title: "Planned from the instance",
-            links: [{ title: "Only link", goal: "Do the one thing. Done when it exists." }],
           },
         })
       ).content,
     );
     expect(reply).toContain("[done]");
-    const goalId = /goal-\d+/.exec(reply)?.[0];
-    expect(goalId, "the reply names the goal it created").toBeTruthy();
-    const { getGoalView } = await import("~/server/tasks/goal-actions.server");
+    const epicId = /epic-\d+/.exec(reply)?.[0];
+    expect(epicId, "the reply names the epic it created").toBeTruthy();
+    const { readEpicFile } = await import("~/server/files/epic-writer.server");
     // CANARY: drop `conversationId: conversation.id` from the turn's mounts,
-    // or the toolkit's hand-off to `createGoal`, and the chain names no thread.
-    expect(getGoalView("viberr-core", goalId!, { dataRoot: app.dataRoot })?.conversationId).toBe(conversation.id);
+    // or the toolkit's hand-off to `createEpic`, and the epic names no thread.
+    expect(
+      readEpicFile({ projectSlug: "viberr-core", epicId: epicId!, dataRoot: app.dataRoot })?.parsed.frontmatter
+        .conversationId,
+    ).toBe(conversation.id);
     await client.close();
   });
 });

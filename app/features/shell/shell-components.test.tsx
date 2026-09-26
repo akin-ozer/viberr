@@ -529,7 +529,7 @@ describe("P13-D-37: current location is programmatic, not just visual", () => {
 describe("Topbar: palette trigger + rail toggle", () => {
   it("is a button that opens the palette, not an input that filtered the board", () => {
     const { container, getByLabelText } = topbarAt("/projects/viberr-core/board");
-    const trigger = getByLabelText("Search tasks, branches, agents, projects");
+    const trigger = getByLabelText("Search tasks, epics, branches, agents, projects");
     expect(trigger.tagName).toBe("BUTTON");
     expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
     // The old input lived here and wrote ?q= on every keystroke.
@@ -711,7 +711,7 @@ describe("ruling 145: the standalone-page header", () => {
 
   it("carries the same search, bell and account menu as the workspace", () => {
     const { getByLabelText, getByText, opens } = headerFor("Insights");
-    fireEvent.click(getByLabelText("Search tasks, branches, agents, projects"));
+    fireEvent.click(getByLabelText("Search tasks, epics, branches, agents, projects"));
     expect(opens(), "the palette trigger reports to the layout").toBe(1);
     // The bell badge and the account menu were simply absent on these pages:
     // a notification arriving while you were in settings had nowhere to show.

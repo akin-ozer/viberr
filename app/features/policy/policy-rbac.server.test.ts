@@ -44,6 +44,7 @@ import {
   setProjectArchived,
 } from "~/features/project-settings/settings-actions.server";
 import { createAgentProfile } from "~/features/agents/agent-profile-actions.server";
+import { createEpic } from "~/server/tasks/epic-actions.server";
 import {
   setMemberRole,
   setTransitionBoundary,
@@ -438,6 +439,21 @@ function matrixDrivers() {
               taskKey: "VIB-1",
               priority: "high",
             },
+            actor,
+            { dataRoot: store.dataRoot },
+          );
+        },
+      },
+    ],
+    // Ruling 503: an epic is planning, the tier that creates the tasks it
+    // groups.
+    "manage-epics": [
+      {
+        label: "createEpic",
+        run: async (actor) => {
+          await createEpic(
+            store.db,
+            { projectSlug: store.slug, title: `Matrix epic for ${actor.label}` },
             actor,
             { dataRoot: store.dataRoot },
           );
@@ -1785,6 +1801,7 @@ describe("the matrix itself is pinned, not just the call sites", () => {
     "update-goal": ["admin", "maintainer"],
     "edit-task-meta": ["admin", "maintainer", "contributor"],
     "attach-file": ["admin", "maintainer", "contributor"],
+    "manage-epics": ["admin", "maintainer", "contributor"],
     "run-agents": ["admin", "maintainer"],
     "reorder-board": ["admin", "maintainer"],
     "reconcile-github": ["admin", "maintainer"],

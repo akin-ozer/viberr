@@ -42,7 +42,7 @@ app/routes/      thin: guard (auth, CSRF, intent) → server call → route-shap
 app/features/    per-surface components + *.server.ts query/action modules
 app/ui/          primitives; imports nothing from features/ or server/
 app/lib/         the better-auth instance
-app/schemas/     zod contracts shared by both halves (task-file, project-file, goal-file, sse-event, github-pat, file-diagnostics)
+app/schemas/     zod contracts shared by both halves (task-file, project-file, epic-file, sse-event, github-pat, file-diagnostics)
 app/shared/      cross-surface code (rbac, capabilities, workflow, dependencies, run failure, dates, freshness, ids); client-safe except mapping/*.server.ts and ids/new-id.server.ts
 app/server/      everything server-only, *.server.ts
 ```
@@ -123,7 +123,7 @@ creation runs inside a 30 s watchdog (`withActionWatchdog`) that fails with a ty
 an async hang.
 
 **Out-of-band edits.** chokidar over `<dataRoot>/projects` (dotfiles, `*.tmp` and
-everything below a task dir except `task.md` ignored; goal files included) →
+everything below a task dir except `task.md` ignored; epic files included) →
 `rebuildPath` → the same SSE event as an in-app write. Details in
 [projections-and-events.md](projections-and-events.md).
 
@@ -169,9 +169,11 @@ for governed state.
     only when no file failed); otherwise a reconciling **rescan** (hash short-circuit, not
     the drop-all rebuild) for edits made while the process was down.
 11. `ensureBaseAgentsDeployed` (the operator everywhere; Developer/Reviewer only into
-    projects with no specialist deployment at all), then `backfillGoalConversations`
-    (ruling 476(j)): a controller-made chain with no `conversationId` gets the one
-    conversation whose controller turn covers its `goal.created` audit row, or stays null.
+    projects with no specialist deployment at all), then `convertGoalsToEpics` (ruling
+    503): every chained-goal file still in a project's `goals/` becomes the epic with its
+    number, its tasks join it, its unstarted links become held tasks in it, and every
+    goal-link wait is respelled by task key; the goal file is then filed under
+    `goals/converted/`, so this runs once.
 12. Start the file watcher and the KB watcher.
 13. Store maintenance: clear MCP warm-ups a restart interrupted, one retention pass (no
     workspace reclaim), arm the maintenance scheduler.
@@ -182,7 +184,7 @@ for governed state.
     agent replies, recover stranded Codex operator plans, settle waits no run backs
     (`settleAbandonedWaits`, rulings 213 and 215), then reclaim terminal-task workspaces
     only when no run is active.
-16. Start the schedule runner, the GitHub reconcile poller and the goal runner; give
+16. Start the schedule runner, the GitHub reconcile poller and the dependency runner; give
     controller conversations the restart interrupted an "interrupted" note
     (`recoverControllerConversations`).
 17. Log one `boot integrity check` line (dirs, migrations, counts, users, build, disk,
@@ -205,7 +207,7 @@ gone or replaced. Everything else is best-effort and logged.
 | SSE heartbeat + re-authorization | 25 s per connection | `events/sse-broker.server.ts` |
 | Data-root lock guard | 20 s, fail-closed | `db/data-root-lock.server.ts` |
 | Schedule runner + stranded-task sweep | boot + 60 s; the sweep (ruling 330) runs after the schedules on each interval tick | `tasks/schedule.server.ts`, `tasks/stranded-sweep.server.ts` |
-| Goal runner + dependency release | boot + 60 s; each tick reconciles goal chains, then releases held tasks whose waits are done (ruling 131) | `tasks/goal-actions.server.ts` |
+| Dependency release | boot + 60 s; each tick releases held tasks whose waits are done (ruling 131(e); the minute tick ruling 99's goal runner gave it, kept by ruling 503) | `tasks/dependencies.server.ts` (`startDependencyRunner`) |
 | GitHub reconcile poller | boot + 5 min; alert after 3 consecutive failures | `github/reconcile-poller.server.ts` |
 | Maintenance pass (retention, transcripts, workspaces) | boot + 6 h (`VIBERR_MAINTENANCE_INTERVAL_SECONDS`); the workspace reclaim skips while any run is queued or running | `ops/maintenance.server.ts` |
 | Disk-pressure check | 5 min (`VIBERR_DISK_CHECK_INTERVAL_SECONDS`); extra pass at most every 30 min | `ops/maintenance.server.ts` |
@@ -233,10 +235,10 @@ left alive is swept by run id at the next boot.
 ## 7. The storage model in one paragraph
 
 Canonical: `projects/<slug>/project.md`, `projects/<slug>/tasks/<KEY>/task.md`,
-`projects/<slug>/goals/<id>.md`, `agents/profiles/<id>.md`, `agents/definitions/<id>.md`,
+`projects/<slug>/epics/<id>.md`, `agents/profiles/<id>.md`, `agents/definitions/<id>.md`,
 `agents/controller-requests.md` (ruling 390), plus `kb/` and `skills/` folders. Derived
 and rebuildable: `projects`, `project_members`, `task_projections`, `task_events`,
-`goal_projections`, `diagnostics`. App-owned primary rows that live only in SQLite: users
+`epic_projections`, `diagnostics`. App-owned primary rows that live only in SQLite: users
 and the better-auth tables, audit, notifications, prefs, instance settings, sealed GitHub
 PATs and project credentials, each person's backend credentials, project GitHub health,
 GitHub connections, scope violations, OAuth providers and the Google domain allowlist,

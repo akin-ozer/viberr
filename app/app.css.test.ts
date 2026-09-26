@@ -3472,33 +3472,12 @@ describe("app.css controller layout (ruling 419)", () => {
     );
   });
 
-  it("ruling 425(b): a wait list's entries line up in columns, and stack in the narrow rail", () => {
-    // Measured in a production preview: at 1440 wide the rail gives the list
-    // 258px, and a third column truncated every title after four words; at
-    // 375 it showed "ax log…". CANARY: drop the container query.
-    expect(ruleBody(CODE, ".ctl-link-waits")).toMatch(/container-type:\s*inline-size/);
-    expect(ruleBody(CODE, ".ctl-link-waits li")).toMatch(/grid-template-columns:\s*subgrid/);
-    const narrow = [...CODE.matchAll(/@container \(max-width: 30rem\)\s*\{([\s\S]*?)\n\}/g)].find((m) =>
-      m[1]!.includes(".ctl-wait-title"),
-    );
-    expect(narrow, "the narrow-list container query must exist").toBeTruthy();
-    expect(narrow![1]).toMatch(/\.ctl-wait-title\s*\{[^}]*grid-column:\s*1 \/ -1[^}]*white-space:\s*normal/);
-  });
-
   it("U39-11: a console tool chip wraps rather than pushing its detail past a phone's edge", () => {
     // Measured at 375px: `mcp__viberr_controller__write_knowledge_doc` is one
     // unbreakable run, and the console scrolled sideways (285px of 271).
     // CANARY: drop `flex-wrap: wrap` from `.log-chip`.
     expect(ruleBody(CODE, ".log-chip")).toMatch(/flex-wrap:\s*wrap/);
     expect(ruleBody(CODE, ".log-chip .lc-name")).toMatch(/overflow-wrap:\s*anywhere/);
-  });
-
-  it("ruling 425(c): a link's title wraps beside its pill, which stays on the title's first line", () => {
-    // Measured live at 1440: with a 12rem basis the title dropped under "held
-    // AX-6" whole; centred alignment then floated the pill mid-block.
-    // CANARY: restore `align-items: center`.
-    expect(ruleBody(CODE, ".ctl-link-title")).toMatch(/flex:\s*1 1 8rem/);
-    expect(ruleBody(CODE, ".ctl-links li")).toMatch(/align-items:\s*baseline/);
   });
 
   it("U39-17: a long sha in a stream notice may break rather than push the page sideways", () => {
@@ -3581,18 +3560,10 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(coarse![1]).toMatch(/\.kbd-hint\s*\{\s*display:\s*none;\s*\}/);
   });
 
-  it("U39-27: on a touch screen the goal chains' controls are tall enough for a finger", () => {
-    // Measured at 375px: 15-16px tall. CANARY: drop the padding rule.
+  it("U39-27: on a touch screen the rail's small links are tall enough for a finger", () => {
+    // Measured at 375px: 15-16px tall. CANARY: drop the padding rule. (The
+    // goal chains' own controls it also listed left with them, ruling 503.)
     const coarse = CODE.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/)![1];
-    for (const selector of [
-      ".ctl-link-waits > summary",
-      ".ctl-link-waits li > a.mono",
-      ".ctl-links .ctl-link-task",
-      ".ctl-goal-more .linkish",
-      ".ctl-all-toggle .linkish",
-    ]) {
-      expect(coarse, selector).toContain(selector);
-    }
     expect(coarse).toMatch(/\.ctl-all-toggle \.linkish\s*\{\s*padding-block:\s*\.3rem;\s*\}/);
   });
 });
@@ -5712,9 +5683,9 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     const { base, answer } = order(".ico.disc-chev");
     expect(answer).toBeGreaterThan(base);
     // The advisory's shield keeps its 13px and its colour; the caret takes the
-    // summary's, so it follows the hover.
+    // summary's, so it follows the hover. (The goal chains' own caret colour
+    // left with the Goals panel, ruling 503.)
     expect(own(plain, ".cap-advisory > summary > .ico:not(.disc-chev)").get("width")).toBe("13px");
-    expect(own(plain, ".ctl-goal-line .disc-chev").get("color")).toBe("var(--muted)");
     // Every <summary> in the app carries the chevron, once.
     const summaries: string[] = [];
     const bare: string[] = [];
@@ -5730,8 +5701,10 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     // 479(a) the capability matrix's "Advisory only" list, and since ruling 484
     // a changed file in the task's Changes panel, and since ruling 486 the
     // scopes an MCP server's OAuth sign-in was granted, and since ruling 498 a
-    // knowledge-base correction's evidence.
-    expect(summaries).toHaveLength(9);
+    // knowledge-base correction's evidence. Ruling 503 took the goal chains'
+    // three (a chain, a link's waits, "About this chain") and added an epic's
+    // archived tasks.
+    expect(summaries).toHaveLength(7);
     expect(bare).toEqual([]);
   });
 
@@ -6051,6 +6024,8 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/task-detail/changes-panel.tsx: refresh → loader (spins)",
         "features/task-detail/changes-panel.tsx: file → loader (spins)",
         "features/task-detail/changes-panel.tsx: send → loader (spins)",
+        // Ruling 503: an epic task row's Remove.
+        "features/epics/epic-page.tsx: x → loader (spins)",
       ].sort(),
     );
     // The cell centres both marks, whatever their box.
@@ -6523,7 +6498,8 @@ describe("app.css ruling 501: the Details panel's properties", () => {
 
   it("rings a wait's entry by its state, and paints one that can never complete as a problem", () => {
     expect(decl(plain, '.wait-chip[data-wait-state="done"] .ico', "color")).toBe("var(--success-dark)");
-    const dead = '.wait-chip:is([data-wait-state="failed"], [data-wait-state="missing"], [data-wait-state="cancelled"])';
+    // Ruling 503 retired the `cancelled` state with the goal links it named.
+    const dead = '.wait-chip:is([data-wait-state="failed"], [data-wait-state="missing"])';
     expect(RULES.some((r) => r.selector.includes(dead) && r.decls.get("color") === "var(--danger)")).toBe(true);
     // The retired editor's rules are gone with it.
     expect(RULES.flatMap(parts).filter((s) => /meta-edit|meta-field|meta-label|meta-chips/.test(s))).toEqual([]);

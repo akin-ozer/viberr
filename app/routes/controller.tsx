@@ -125,11 +125,7 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function ControllerRoute({ loaderData }: Route.ComponentProps) {
   return (
-    <ControllerPage
-      view={loaderData.view}
-      projectSlug={null}
-      canRedirectGoals={false}
-    />
+    <ControllerPage view={loaderData.view} projectSlug={null} />
   );
 }
 

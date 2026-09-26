@@ -117,17 +117,19 @@ has its own operator agent that coordinates specialists through the workflow.
 - Knowledge bases, skills and MCP connections are org resources granted to
   agent profiles. Deleting and renaming them is done by admins in Instance
   settings → Agent resources.
-- Goals decompose one outcome into links, each of which becomes a task. The
-  server starts every link whose declared wait (\`blockedBy\`) is satisfied, so
-  position in the list holds nothing back; a sequence is a chain of waits.
+- Epics group the tasks of one outcome inside a project, like a Jira epic or a
+  Linear project (ruling 503). Tasks join and leave one at a time, and an
+  epic's progress is counted from its tasks. An epic holds nothing back: order
+  is what each task waits on (\`blockedBy\`), and Viberr releases a task when
+  every task it names is done.
 
 ## House rules for you
 
 - The asking person's own permissions are the ceiling; the server enforces them
   on every tool call, and a refusal is the correct answer to relay.
 - Ground every claim in a tool read from the same turn.
-- Never fabricate progress: task stages, run states and chain links come from
-  reads, not from optimism.
+- Never fabricate progress: task stages, run states and an epic's progress
+  come from reads, not from optimism.
 `;
 
 
@@ -186,6 +188,10 @@ interface PriorShippedHashes {
 
 export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "controller.md")]: [
+    // Ruling 503 (owner, 2026-09-26): before goal chains became epics. The
+    // doctrine named `get_goal`, goal links as waits and a chained-goals
+    // paragraph (links started by the server, the Goals panel).
+    "70e659083faffa3b93564e77c5f9d0034bb5e60b1393b0cf84e415227ee0ace7",
     // Pass 34 A14: before the blockedBy sentences (ruling 131).
     "e600925f824e5ec43ca962c56304e5099ae76a1ad41dff8bc94a431666756712",
     // ruling 121 outgoing: named the non-existent `list_projects`, claimed a
@@ -206,6 +212,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 503 (owner, 2026-09-26): before "Chained goals" became "Epics"
+    // and the done-signal rule's last sentence named a read TASK in the
+    // delivery task's epic instead of a read link.
+    "b260db092146f736deaee68c5d328bf581e442c9368204c2725fcf466e7aee51",
     // Ruling 498 (owner, 2026-09-26): before "Keeping a project's rulings
     // current" said agents' corrections are written straight into the document
     // and named `undo_kb_correction` and `kbCorrections`, with proposals only
@@ -257,6 +267,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 503 (owner, 2026-09-26): before goal links left `set_dependencies`
+    // and the done-signal paragraph read the task's `epic` instead of
+    // `goalChain`.
+    "919af42febe8d3a50cdae2fdc52c873a5d63c435e5ed73ed53068e2dc4248f67",
     // Ruling 494's review: the doctrine as ruling 494 first shipped it, with
     // its `baseBehindBy` sentences between `update_branch_from_base`'s own
     // sentences and the "Never call it" that pointed back to the tool, so
@@ -360,6 +374,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // it now defers to the per-backend workspace section for exact paths.
     "7e42028407b0f59873086d97229d60e5e9237f39cb1b7dc480675c8a78d1b82c",
   ],
+  // Ruling 503 (owner, 2026-09-26): the controller profile's first recorded
+  // version, whose description said it "defines and advances chained goals".
+  [path.join("agents", "profiles", "controller.md")]: [
+    "8d89f1bedb4a339b7541961051b69647539c092bd72bb0ceb6e265162e233e55",
+  ],
   [path.join("agents", "profiles", "operator.md")]: [
     "339ad23dd69f63e57bf52d110b263a2da4ae683bdbf5b020039eaf075115dec4",
     "36120600048af6ca9c1d54b8d7354a960364073e4f744be76dbffb218440891a",
@@ -372,6 +391,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d3c186ee40962eff069c577e026843e4ce3c97fed269b99384e5bdad2fd9e108",
   ],
   [path.join("skills", "viberr-app-expertise", "SKILL.md")]: [
+    // Ruling 503 (owner, 2026-09-26): before the `goalChain` bullet became the
+    // task's `epic` and the Tools list named `set_epic`.
+    "c267649f85bac274e0be3299f01ad59f0758d9ff43285054af8a7f630a3cc2f6",
     // Ruling 498 (owner, 2026-09-26): before `propose_kb_correction` became
     // `correct_knowledge_doc`, which writes the correction into the document
     // (the exact passage it replaces, the text in its place) instead of filing
@@ -447,6 +469,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a3072990165c8cd4a67d3227d032825bdcb9f33ab82ab7752edf0d6afee9d08b",
     // PR #321's "Instance settings → Agent resources" version.
     "3237777fc90a1082f0e01b72f843ec6b68d70639628a55403ed7d2b5f61baa27",
+    // Ruling 503 (owner, 2026-09-26): before "Goals decompose one outcome into
+    // links" became the epics bullet.
+    "2568ef5c92b776804b9beb20d40686071e04ea790fa78c9faef70e4708c9cdd5",
   ],
   [path.join("agents", "profiles", "developer.md")]: [
     "bf84fe28d0f2d21172f415f4c49ceb2aaf10bc824d14bc01d82e391d90bbde19",

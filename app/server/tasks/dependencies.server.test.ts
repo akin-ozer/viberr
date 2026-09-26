@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
@@ -11,7 +10,6 @@ import {
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { createGoalFile, readGoalFile } from "~/server/files/goal-writer.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
@@ -20,7 +18,6 @@ import { writeProject } from "../../../test-support/test-store";
 import { setPref } from "~/server/prefs/user-prefs.server";
 import { NOTIFS_PREF_KEY } from "~/features/profile/profile-query.server";
 import { setTaskArchived, transitionStage } from "./task-actions.server";
-import { goalRunnerTick } from "./goal-actions.server";
 import type { StartAgentRunInput, StartAgentRunResult } from "./specialist-run.server";
 import {
   announceRelease,
@@ -31,6 +28,8 @@ import {
   releaseDueDependents,
   releaseTask,
   setTaskDependencies,
+  startDependencyRunner,
+  stopDependencyRunnerForTests,
   validateDependencyRefs,
 } from "./dependencies.server";
 
@@ -52,42 +51,6 @@ async function seed(store: TestStore): Promise<void> {
   for (const [key, over] of seeds) {
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter(key, over) });
   }
-  // goal-1: link 1 carries VIB-5, link 2 has no task yet; goal-2 link 1
-  // DECLARES a wait on goal-1 link 2 (the sibling-chain shape ruling 131(c)
-  // exists for).
-  const goal = (id: string, links: { index: number; taskKey: string | null; blockedBy: string[] }[]) =>
-    createGoalFile(
-      { projectSlug: store.slug, goalId: id, dataRoot: store.dataRoot },
-      {
-        frontmatter: {
-          id,
-          title: id,
-          status: "active",
-          createdBy: store.users.arda.id,
-          createdByLabel: store.users.arda.email,
-          conversationId: null,
-          onFailure: "pause",
-          links: links.map((l) => ({
-            index: l.index,
-            title: `link ${l.index}`,
-            goal: "g",
-            taskKey: l.taskKey,
-            status: l.taskKey ? "active" : "pending",
-            note: null,
-            redeclared: false,
-            blockedBy: l.blockedBy,
-          })),
-          createdAt: null,
-          updatedAt: null,
-        },
-        description: "",
-      },
-    );
-  await goal("goal-1", [
-    { index: 1, taskKey: "VIB-5", blockedBy: [] },
-    { index: 2, taskKey: null, blockedBy: [] },
-  ]);
-  await goal("goal-2", [{ index: 1, taskKey: null, blockedBy: ["goal-1 link 2"] }]);
   // An operator is deployed so a release has someone to re-invoke
   // (`autoInvokeOperator` returns early without one).
   const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -113,7 +76,7 @@ const file = (store: TestStore, key: string) =>
   readTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot })!.parsed;
 
 describe("validateDependencyRefs", () => {
-  it("refuses unparseable, self, unknown, archived, out-of-range and cyclic references, each by name", async () => {
+  it("refuses unparseable, self, unknown, archived and cyclic references, each by name", async () => {
     // Canary: remove the cycle walk (`cyclePath`) and the last two refusals
     // pass validation.
     const store = setupTestStore(ctx);
@@ -121,25 +84,18 @@ describe("validateDependencyRefs", () => {
     const validate = (self: Parameters<typeof validateDependencyRefs>[1]["self"], entries: string[]) =>
       validateDependencyRefs(store.db, { projectSlug: store.slug, self, entries });
     const self = { kind: "task" as const, task: "VIB-1" };
-    expect(() => validate(self, ["nonsense words"])).toThrow(/"nonsense words" is not a task key or a goal link/);
+    expect(() => validate(self, ["nonsense words"])).toThrow(/"nonsense words" is not a task key/);
+    // Ruling 503: the goal-link spelling went with the chains.
+    expect(() => validate(self, ["goal-1 link 2"])).toThrow(/"goal-1 link 2" is not a task key/);
     expect(() => validate(self, ["VIB-1"])).toThrow(/VIB-1: a task cannot wait on itself/);
     expect(() => validate(self, ["VIB-999"])).toThrow(/VIB-999 is not a task in this project/);
     expect(() => validate(self, ["VIB-3"])).toThrow(/VIB-3 is archived/);
-    expect(() => validate(self, ["goal-9 link 1"])).toThrow(/goal-9 is not a goal in this project/);
-    expect(() => validate(self, ["goal-1 link 7"])).toThrow(/goal-1 has no link 7 \(it has 2\)/);
     // VIB-4 waits on VIB-5; VIB-5 waiting on VIB-4 closes the cycle.
     expect(() => validate({ kind: "task", task: "VIB-5" }, ["VIB-4"])).toThrow(
       /Waiting on VIB-4 would close a cycle: VIB-5 waits on VIB-4 waits on VIB-5/,
     );
-    // goal-1 link 1 IS VIB-5, so the same cycle through the link spelling.
-    expect(() => validate({ kind: "task", task: "VIB-4" }, ["goal-1 link 1", "VIB-4"])).toThrow(/cannot wait on itself/);
-    // A DECLARED edge: goal-2 link 1 waits on goal-1 link 2 (no task yet);
-    // goal-1 link 2 waiting on goal-2 link 1 would close a cycle.
-    expect(() => validate({ kind: "goal", goal: "goal-1", link: 2 }, ["goal-2 link 1"])).toThrow(
-      /would close a cycle: goal-1 link 2 waits on goal-2 link 1 waits on goal-1 link 2/,
-    );
     // Canonical spellings, de-duplicated, blanks dropped.
-    expect(validate(self, [" VIB-2 ", "goal-1 link 2", "", "vib-2", "Goal-1 Link 2"])).toEqual(["VIB-2", "goal-1 link 2"]);
+    expect(validate(self, [" VIB-2 ", "VIB-05", "", "vib-2", "vib-5"])).toEqual(["VIB-2", "VIB-5"]);
   });
 });
 
@@ -150,28 +106,28 @@ describe("setTaskDependencies", () => {
     await seed(store);
     const result = await setTaskDependencies(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["goal-1 link 2", "VIB-5"] },
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-4", "VIB-5"] },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(result).toMatchObject({ changed: true, blockedBy: ["goal-1 link 2", "VIB-5"], added: ["goal-1 link 2", "VIB-5"], removed: [] });
+    expect(result).toMatchObject({ changed: true, blockedBy: ["VIB-4", "VIB-5"], added: ["VIB-4", "VIB-5"], removed: [] });
     const parsed = file(store, "VIB-1");
-    expect(parsed.frontmatter.blockedBy).toEqual(["goal-1 link 2", "VIB-5"]);
+    expect(parsed.frontmatter.blockedBy).toEqual(["VIB-4", "VIB-5"]);
     expect(parsed.frontmatter.waiting).toBe("none");
     expect(parsed.timeline[0]).toMatchObject({ type: "note", title: "Dependencies updated" });
-    expect(parsed.timeline[0]!.text).toContain("Waits on goal-1 link 2, VIB-5 (added goal-1 link 2, VIB-5)");
+    expect(parsed.timeline[0]!.text).toContain("Waits on VIB-4, VIB-5 (added VIB-4, VIB-5)");
     expect(result.task.readiness).toBe("blocked");
     expect(result.task.blockedBy.map((e) => [e.ref, e.state])).toEqual([
-      ["goal-1 link 2", "open"],
+      ["VIB-4", "open"],
       ["VIB-5", "open"],
     ]);
     const rows = listAuditEvents(store.db).filter((e) => e.action === "task.dependencies.updated");
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.details).toMatchObject({ blockedBy: ["goal-1 link 2", "VIB-5"], added: ["goal-1 link 2", "VIB-5"], removed: [] });
+    expect(rows[0]!.details).toMatchObject({ blockedBy: ["VIB-4", "VIB-5"], added: ["VIB-4", "VIB-5"], removed: [] });
 
     const again = await setTaskDependencies(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["goal-1 link 2", "vib-5"] },
+      { projectSlug: store.slug, taskKey: "VIB-1", blockedBy: ["VIB-4", "vib-5"] },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
@@ -202,11 +158,11 @@ describe("setTaskDependencies", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const kept = await setTaskDependencies(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-4", blockedBy: ["VIB-5", "goal-1 link 2"] },
+      { projectSlug: store.slug, taskKey: "VIB-4", blockedBy: ["VIB-5", "VIB-1"] },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(kept.blockedBy).toEqual(["VIB-5", "goal-1 link 2"]);
+    expect(kept.blockedBy).toEqual(["VIB-5", "VIB-1"]);
   });
 
   it("keeps waiting when a packet or a running agent still owes something; refuses an archived task and a viewer", async () => {
@@ -493,24 +449,11 @@ describe("the release engine", () => {
     expect(listAuditEvents(store.db).filter((e) => e.action === "task.dependencies.released" && e.taskKey === "VIB-10")).toHaveLength(1);
   });
 
-  it("a skipped goal link counts as done; an archived dependency is noted ONCE, notifies once, sets waiting: human and never releases", async () => {
+  it("a done dependency releases; an archived dependency is noted ONCE, notifies once, sets waiting: human and never releases", async () => {
     const store = setupTestStore(ctx);
     await seed(store);
-    // goal-3: link 1 skipped, no task.
-    await createGoalFile(
-      { projectSlug: store.slug, goalId: "goal-3", dataRoot: store.dataRoot },
-      {
-        frontmatter: {
-          id: "goal-3", title: "goal-3", status: "active", createdBy: store.users.arda.id, createdByLabel: "arda", conversationId: null,
-          onFailure: "continue",
-          links: [{ index: 1, title: "l1", goal: "g", taskKey: null, status: "skipped", note: null, redeclared: false, blockedBy: [] }],
-          createdAt: null, updatedAt: null,
-        },
-        description: "",
-      },
-    );
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-11", { stage: "impl", waiting: "none", blockedBy: ["goal-3 link 1"] }),
+      frontmatter: baseTaskFrontmatter("VIB-11", { stage: "impl", waiting: "none", blockedBy: ["VIB-2"] }),
     });
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-12", { stage: "impl", waiting: "none", blockedBy: ["VIB-5"], ownerUserId: store.users.arda.id }),
@@ -544,7 +487,8 @@ describe("the release engine", () => {
   it("the release is convergent, and the runner's tick releases what the hooks never saw", async () => {
     // Canaries: remove the `blockedBy = []` write in `clearDependencies` (a
     // second `releaseTask` releases again); drop `releaseDueDependents` from
-    // `goalRunnerTick` (the hand-edited task stays held).
+    // the dependency runner's tick (the hand-edited task stays held). Ruling
+    // 503 moved the tick from the goal runner, which it outlived.
     const store = setupTestStore(ctx);
     await seed(store);
     writeTask(store.dataRoot, store.slug, {
@@ -567,7 +511,16 @@ describe("the release engine", () => {
       frontmatter: baseTaskFrontmatter("VIB-15", { stage: "impl", waiting: "none", blockedBy: ["VIB-2"] }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    expect((await goalRunnerTick(store.db, ctxWith)).released).toBe(1);
+    const runOperator = runOperatorStub();
+    stopDependencyRunnerForTests();
+    startDependencyRunner(store.db, { dataRoot: store.dataRoot, deps: { runOperator } });
+    try {
+      // The first tick runs at start. The re-invoke is the release's last
+      // step, so waiting on it means the whole release has landed.
+      await eventually(() => expect(runOperator.mock.calls.some((c) => c[1].taskKey === "VIB-15")).toBe(true));
+    } finally {
+      stopDependencyRunnerForTests();
+    }
     expect(file(store, "VIB-15").frontmatter.blockedBy).toEqual([]);
   });
 
@@ -677,10 +630,11 @@ describe("the release engine speaks only for a task that is actually waiting", (
  * Pass 34 review: a wait that can NEVER complete used to be noticed only when
  * a dependency TASK was archived — the one door that called the notice. A
  * cancelled goal, a removed link or a lost task left the dependent held and
- * silent forever.
+ * silent forever. Ruling 503 retired the goal links; a task that is gone is
+ * the case left.
  */
 describe("the sweep notices a dead wait whatever killed it", () => {
-  it("a reference to a link that no longer exists is noted by the ordinary sweep", async () => {
+  it("a reference to a task that no longer exists is noted by the ordinary sweep", async () => {
     // Canary: call `noteDeadDependency` only from the archive hook again —
     // nothing ever tells the owner this task can never move.
     const store = setupTestStore(ctx);
@@ -690,7 +644,7 @@ describe("the sweep notices a dead wait whatever killed it", () => {
         stage: "impl",
         waiting: "none",
         readiness: "blocked",
-        blockedBy: ["goal-1 link 9"],
+        blockedBy: ["VIB-99"],
         ownerUserId: store.users.arda.id,
       }),
     });
@@ -704,7 +658,7 @@ describe("the sweep notices a dead wait whatever killed it", () => {
     expect(dead).toHaveLength(1);
     expect(dead[0]!.text).toContain("can never complete");
     expect(parsed.frontmatter.waiting).toBe("human");
-    expect(parsed.frontmatter.blockedBy).toEqual(["goal-1 link 9"]);
+    expect(parsed.frontmatter.blockedBy).toEqual(["VIB-99"]);
     // Idempotent: a second sweep writes nothing more.
     await releaseDependents(store.db, ctxWith, store.slug);
     expect(
@@ -713,73 +667,6 @@ describe("the sweep notices a dead wait whatever killed it", () => {
   });
 });
 
-
-/**
- * F37-63: a pending link on a CANCELLED goal is dead and nothing noticed.
- *
- * Every mechanism lined up to miss it. `case "cancel"` sets only
- * `fm.status = "cancelled"` and leaves the links exactly as they were; the
- * resolver read `link.status` alone and mapped `pending` to `open`;
- * `deadDependencies` filtered `failed`/`missing`; and every goal-side remedy
- * that could rescue it (`skip_link`, `edit_link`, `retry_link`,
- * `remove_pending_link`) refuses with "Goal X is cancelled". Meanwhile
- * `releaseDependents`' own comment claimed the sweep "notices a wait that can
- * NEVER complete, whatever killed it … a cancelled goal, a removed link or a
- * lost task". It did not notice this one.
- */
-describe("F37-63: a pending link on a cancelled goal is a dead wait", () => {
-  it("is noted, notified and left on a human, like every other dead wait", async () => {
-    const store = setupTestStore(ctx);
-    await seed(store);
-    // goal-1 link 2 has no task yet. Cancel the chain it belongs to.
-    const { updateGoal } = await import("./goal-actions.server");
-    await updateGoal(
-      store.db,
-      { projectSlug: store.slug, goalId: "goal-1", action: { op: "cancel" } },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-13", {
-        stage: "impl",
-        waiting: "none",
-        readiness: "blocked",
-        blockedBy: ["goal-1 link 2"],
-        ownerUserId: store.users.arda.id,
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const runOperator = runOperatorStub();
-    const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator } };
-
-    // CANARY: drop the `goalTerminal` arm from the resolver and this task is
-    // held forever in silence — the sweep sees `open`, writes nothing, and the
-    // minute tick re-confirms it for as long as the instance runs.
-    expect(await releaseDependents(store.db, ctxWith, store.slug)).not.toContain("VIB-13");
-    const parsed = file(store, "VIB-13");
-    const dead = parsed.timeline.filter((e) => e.title === "Waiting on work that cannot complete");
-    expect(dead).toHaveLength(1);
-    expect(dead[0]!.text).toContain("can never complete");
-    expect(parsed.frontmatter.waiting).toBe("human");
-    // The entry keeps its own cause, which is what the note points the reader
-    // at ("What KILLED the entry is on the entry itself, rendered as its
-    // state"). CANARY: fold `cancelled` into `failed` and the surface says
-    // "archived", which is a different cause and a false one.
-    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
-    const entries = resolveDependencies(store.db, store.slug, ["goal-1 link 2"]);
-    expect(entries[0]!.state).toBe("cancelled");
-  });
-
-  it("a live chain's pending link is still just open", async () => {
-    // The gate keys on the GOAL's status, so an ordinary wait must not become
-    // dead. CANARY: treat every taskless pending link as cancelled.
-    const store = setupTestStore(ctx);
-    await seed(store);
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const { resolveDependencies } = await import("~/server/projections/dependencies.server");
-    expect(resolveDependencies(store.db, store.slug, ["goal-1 link 2"])[0]!.state).toBe("open");
-  });
-});
 
 describe("the archive hook and the convergent sweep state the same fact once", () => {
   it("two archived dependencies produce two notes, not a third from the sweep", async () => {
@@ -839,111 +726,6 @@ describe("the archive hook and the convergent sweep state the same fact once", (
     await releaseDependents(store.db, ctxWith, store.slug);
     await noteDeadDependency(store.db, ctxWith, store.slug, null);
     expect(notes(), "the sweep must not restate what the hooks said").toHaveLength(2);
-  });
-});
-
-/**
- * Ruling 155 (pass 35, F35-3; amends 131(c)): once a link has started a task,
- * the task's list is the wait and the goal file's `links[].blockedBy` follows
- * it on every change, so the Goals panel and a retried link read the list
- * the task last held.
- */
-describe("ruling 155: an active link's wait mirrors its task's list", () => {
-  it("a person clearing the task's list clears the link's declared wait and the goal timeline names the task; a new list mirrors too; the engine's release mirrors under its own name", async () => {
-    // Canary: remove the `mirrorLinkWait` calls from `setTaskDependencies`
-    // and `releaseTask`; goal-3 link 1 keeps reading ["goal-1 link 2"].
-    const store = setupTestStore(ctx);
-    await seed(store);
-    // goal-3 link 1 is ACTIVE, carried by VIB-7, and still records the wait
-    // the task was born with (KNC-3's shape on 2026-09-06).
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-7", {
-        stage: "impl",
-        waiting: "none",
-        blockedBy: ["goal-1 link 2"],
-        goalRef: { goalId: "goal-3", linkIndex: 1 },
-      }),
-    });
-    await createGoalFile(
-      { projectSlug: store.slug, goalId: "goal-3", dataRoot: store.dataRoot },
-      {
-        frontmatter: {
-          id: "goal-3",
-          title: "goal-3",
-          status: "active",
-          createdBy: store.users.arda.id,
-          createdByLabel: store.users.arda.email,
-          conversationId: null,
-          onFailure: "pause",
-          links: [
-            { index: 1, title: "Log view", goal: "g", taskKey: "VIB-7", status: "active", note: null, redeclared: false, blockedBy: ["goal-1 link 2"] },
-            { index: 2, title: "Filters", goal: "g", taskKey: null, status: "pending", note: null, redeclared: false, blockedBy: [] },
-          ],
-          createdAt: null,
-          updatedAt: null,
-        },
-        description: "",
-      },
-    );
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const goal = () => readGoalFile({ projectSlug: store.slug, goalId: "goal-3", dataRoot: store.dataRoot })!.parsed;
-    const projected = () => {
-      // SAFETY: `links_json` is TEXT NOT NULL on `goal_projections`.
-      const row = store.db
-        .prepare(`SELECT links_json FROM goal_projections WHERE project_slug = ? AND goal_id = ?`)
-        .get(store.slug, "goal-3") as { links_json: string };
-      return z.array(z.object({ blockedBy: z.array(z.string()) }).loose()).parse(JSON.parse(row.links_json));
-    };
-    expect(goal().frontmatter.links[0]!.blockedBy).toEqual(["goal-1 link 2"]);
-    const ctxWith = { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } };
-
-    // A person empties the task's list: the release, and the mirror.
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: [] }, actorOf(store.users.arda), ctxWith);
-    expect(file(store, "VIB-7").frontmatter.blockedBy).toEqual([]);
-    expect(goal().frontmatter.links[0]!.blockedBy).toEqual([]);
-    expect(goal().timeline[0]!.text).toBe(
-      `Link 1 (Log view) now waits on nothing: VIB-7's list was changed by ${store.users.arda.name}.`,
-    );
-    // The panel reads the projection, which the mirror rebuilt.
-    expect(projected()[0]!.blockedBy).toEqual([]);
-    // Link 2 (pending, no task) is not touched.
-    expect(goal().frontmatter.links[1]!.blockedBy).toEqual([]);
-
-    // A new list on the task lands on the link too.
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: ["VIB-5"] }, actorOf(store.users.arda), ctxWith);
-    expect(goal().frontmatter.links[0]!.blockedBy).toEqual(["VIB-5"]);
-    expect(goal().timeline[0]!.text).toMatch(/^Link 1 \(Log view\) now waits on VIB-5: VIB-7's list was changed by /);
-
-    // VIB-5 finishes: the engine releases VIB-7 and the link follows, under
-    // the engine's own name. (F39-63: a wait is added while its entry is open.)
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-5", { stage: "done", waiting: "none" }) });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    expect(await releaseTask(store.db, ctxWith, store.slug, "VIB-7")).toBe(true);
-    expect(file(store, "VIB-7").frontmatter.blockedBy).toEqual([]);
-    expect(goal().frontmatter.links[0]!.blockedBy).toEqual([]);
-    expect(goal().timeline[0]!.text).toBe("Link 1 (Log view) now waits on nothing: VIB-7's list was changed by Viberr (release).");
-    expect(projected()[0]!.blockedBy).toEqual([]);
-
-    // Convergent: the same list again writes no second timeline line.
-    const lines = goal().timeline.length;
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-7", blockedBy: [] }, actorOf(store.users.arda), ctxWith);
-    expect(goal().timeline.length).toBe(lines);
-  });
-
-  it("a task outside a chain, and a link no longer carried by the task, leave every goal file alone", async () => {
-    const store = setupTestStore(ctx);
-    await seed(store);
-    // VIB-8 names goal-2 link 1 as its position, but that link is PENDING with
-    // no task: the record is not this task's to write.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-8", { stage: "impl", waiting: "none", blockedBy: ["VIB-5"], goalRef: { goalId: "goal-2", linkIndex: 1 } }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const goal2 = () => readGoalFile({ projectSlug: store.slug, goalId: "goal-2", dataRoot: store.dataRoot })!;
-    const before = goal2().raw;
-    await setTaskDependencies(store.db, { projectSlug: store.slug, taskKey: "VIB-8", blockedBy: [] }, actorOf(store.users.arda), { dataRoot: store.dataRoot, deps: { runOperator: runOperatorStub() } });
-    expect(goal2().raw).toBe(before);
-    expect(goal2().parsed.frontmatter.links[0]!.blockedBy).toEqual(["goal-1 link 2"]);
   });
 });
 

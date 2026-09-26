@@ -1,7 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { z } from "zod";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import { isAtAcceptanceBoundary } from "~/shared/mapping/task.server";
 import {
@@ -36,19 +35,19 @@ import {
   recordProjectionFault,
 } from "./store-health.server";
 import {
+  epicFilePath,
   getDataRoot,
-  goalFilePath,
   projectFilePath,
   projectsDir,
   storeRelativePath,
   taskFilePath,
 } from "~/server/files/file-store-root.server";
-import { currentLinkIndex } from "~/schemas/goal-file.schema";
+import { epicNumber } from "~/schemas/epic-file.schema";
 import {
-  diagnoseGoalFileContent,
-  listGoalIds,
-  parseGoalFileContent,
-} from "~/server/files/goal-writer.server";
+  diagnoseEpicFileContent,
+  listEpicIds,
+  parseEpicFileContent,
+} from "~/server/files/epic-writer.server";
 import { recordProvenance } from "~/server/provenance/provenance-recorder.server";
 import { parseProjectFileContent } from "~/server/files/project-file.server";
 import { sha256Hex } from "~/server/files/content-hash.server";
@@ -99,12 +98,12 @@ export type RebuildAction =
 
 export interface RebuildFileResult {
   action: RebuildAction;
-  kind: "project" | "task" | "goal" | "other";
+  kind: "project" | "task" | "epic" | "other";
   projectSlug?: string;
   taskKey?: string;
-  goalId?: string;
+  epicId?: string;
   /**
-   * Projects only, on `projected`: whether a field the project's TASK and goal
+   * Projects only, on `projected`: whether a field the project's TASK
    * projections derive from changed (see `projectContextForTasks`), i.e.
    * whether they must be re-projected. False for a write that only moved
    * `nextTaskNumber`, a file lease or the description.
@@ -868,10 +867,10 @@ function rebuildTaskFileNow(
         reviewers_json, operator_json, branch, repo, pr_json, github_json,
         work_revision_sha, goal, packet_json, recommendation_count, recommendation_kinds,
         schedules_json, event_count, comment_count,
-        goal_id, goal_link_index,
+        epic_id,
         diagnostic_count, created_at, updated_at, board_rank, source_path,
         content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_slug, task_key) DO UPDATE SET
        title = excluded.title, stage = excluded.stage,
        readiness = excluded.readiness, stored_readiness = excluded.stored_readiness,
@@ -898,8 +897,7 @@ function rebuildTaskFileNow(
        schedules_json = excluded.schedules_json,
        event_count = excluded.event_count,
        comment_count = excluded.comment_count,
-       goal_id = excluded.goal_id,
-       goal_link_index = excluded.goal_link_index,
+       epic_id = excluded.epic_id,
        diagnostic_count = excluded.diagnostic_count,
        created_at = excluded.created_at, updated_at = excluded.updated_at,
        board_rank = excluded.board_rank,
@@ -955,10 +953,9 @@ function rebuildTaskFileNow(
     JSON.stringify(fm.schedules),
     parsed.timeline.length,
     commentCount,
-    // Ruling 99: the chained-goal back-reference, for the board chip and the
-    // goal-advance hook.
-    fm.goalRef?.goalId ?? null,
-    fm.goalRef?.linkIndex ?? null,
+    // Ruling 503: the epic the task belongs to, for the board's epic filter,
+    // the Epics pages and the epic's progress.
+    fm.epic,
     allDiagnostics.length,
     fm.createdAt,
     fm.updatedAt,
@@ -1221,87 +1218,84 @@ function syncTaskEvents(
   }
 }
 
-// ---------------------------------------------------------------- goals
+// ---------------------------------------------------------------- epics
 
 /**
- * Ruling 99: project one chained-goal file into `goal_projections`.
+ * Ruling 503: project one epic file into `epic_projections`.
  *
- * Link statuses are RECONCILED here, not copied: for every link that names a
- * task, the link's effective status derives from the task's projected row
- * (terminal stage → done; archived → failed), with the stored value keeping
- * `skipped` and covering tasks the projection cannot see. The goal-advance
- * machinery writes the canonical statuses; this keeps the READ honest when a
- * task moved out-of-band between advances.
+ * The row is the file and nothing else: an epic's tasks are the task rows
+ * whose `epic_id` names it, and its progress is counted from them at read
+ * time, so nothing here depends on the order tasks and epics are projected in.
  */
-export function rebuildGoalFile(
+export function rebuildEpicFile(
   db: DatabaseSync,
   slug: string,
-  goalId: string,
+  epicId: string,
   options: RebuildOptions = {},
 ): RebuildFileResult {
-  return inOneTransaction(db, () => rebuildGoalFileNow(db, slug, goalId, options));
+  return inOneTransaction(db, () => rebuildEpicFileNow(db, slug, epicId, options));
 }
 
-function rebuildGoalFileNow(
+function rebuildEpicFileNow(
   db: DatabaseSync,
   slug: string,
-  goalId: string,
+  epicId: string,
   options: RebuildOptions,
 ): RebuildFileResult {
-  const absPath = goalFilePath(slug, goalId, options.dataRoot);
+  const absPath = epicFilePath(slug, epicId, options.dataRoot);
   const sourcePath = storeRelativePath(absPath, options.dataRoot);
 
   if (!existsSync(absPath)) {
     const existed = db
       .prepare(
-        `SELECT goal_id FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
+        `SELECT epic_id FROM epic_projections WHERE project_slug = ? AND epic_id = ?`,
       )
-      .get(slug, goalId);
-    if (!existed) return { action: "ignored", kind: "goal" };
-    // The third removal branch, which never got what the other two have: the
-    // project and task branches both drop `diagnostics` for the source path
-    // before the projection row (F28-D3 — dependents first, the probe's own
-    // target last, so an interrupted removal finishes on the next rebuild).
-    // Without it a deleted BROKEN goal file left its hard-stop rows behind and
-    // the store kept reporting a goal that no longer exists as untrusted, with
-    // no file left to fix and no later rebuild that would revisit it.
+      .get(slug, epicId);
+    if (!existed) return { action: "ignored", kind: "epic" };
+    // Dependents first, the probe's own target last (F28-D3), so an
+    // interrupted removal finishes on the next rebuild; and the diagnostics of
+    // a deleted BROKEN file go with it, as they do for projects and tasks.
     db.prepare(`DELETE FROM diagnostics WHERE source_path = ?`).run(sourcePath);
     recordProvenance(db, {
       sourcePath,
       contentHash: null,
       action: "removed",
-      details: { kind: "goal", projectSlug: slug, goalId },
+      details: { kind: "epic", projectSlug: slug, epicId },
     });
     db.prepare(
-      `DELETE FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
-    ).run(slug, goalId);
+      `DELETE FROM epic_projections WHERE project_slug = ? AND epic_id = ?`,
+    ).run(slug, epicId);
     emitProjectionEvent({
-      type: "goal.updated",
+      type: "epic.updated",
       projectSlug: slug,
-      goalId,
+      epicId,
       occurredAt: nowIso(),
     });
-    return { action: "removed", kind: "goal", projectSlug: slug, goalId };
+    return { action: "removed", kind: "epic", projectSlug: slug, epicId };
   }
 
   const content = readFileSync(absPath, "utf8");
   const contentHash = sha256Hex(content);
   if (!options.force) {
-    // SAFETY: `content_hash` is a single NOT NULL column on `goal_projections`;
+    // SAFETY: `content_hash` is a single NOT NULL column on `epic_projections`;
     // an absent row yields undefined.
     const row = db
       .prepare(
-        `SELECT content_hash FROM goal_projections WHERE project_slug = ? AND goal_id = ?`,
+        `SELECT content_hash FROM epic_projections WHERE project_slug = ? AND epic_id = ?`,
       )
-      .get(slug, goalId) as { content_hash: string } | undefined;
+      .get(slug, epicId) as { content_hash: string } | undefined;
     if (row && row.content_hash === contentHash) {
-      return { action: "unchanged", kind: "goal", projectSlug: slug, goalId };
+      return { action: "unchanged", kind: "epic", projectSlug: slug, epicId };
     }
   }
 
-  const parsed = parseGoalFileContent(content);
-  if (!parsed) {
-    // Goal files are app-written; an unparseable one is recorded, and any
+  const parsed = parseEpicFileContent(content);
+  // A file whose frontmatter id disagrees with its name would project under
+  // one id and be looked up under the other; it is as unreadable as a broken
+  // one, and says why.
+  const idMismatch = parsed !== null && parsed.frontmatter.id !== epicId;
+  if (!parsed || idMismatch) {
+    // Epic files are app-written; an unparseable one is recorded, and any
     // existing row is left standing (visible-but-stale beats vanished). The
     // diagnostics rows are what make it FINDABLE: `npm run rescan` counts this
     // as an error, and untrustedFileReport is where it learns the file's name.
@@ -1309,15 +1303,15 @@ function rebuildGoalFileNow(
       sourcePath,
       projectSlug: slug,
       taskKey: null,
-      diagnostics: diagnoseGoalFileContent(content),
+      diagnostics: diagnoseEpicFileContent(content, epicId),
     });
     recordProvenance(db, {
       sourcePath,
       contentHash,
       action: "error",
-      details: { kind: "goal", message: "goal file could not be parsed" },
+      details: { kind: "epic", message: "epic file could not be parsed" },
     });
-    return { action: "error", kind: "goal", projectSlug: slug, goalId };
+    return { action: "error", kind: "epic", projectSlug: slug, epicId };
   }
   // Parsed cleanly: clear any diagnostics a previous broken revision left.
   replaceDiagnostics(db, {
@@ -1327,75 +1321,39 @@ function rebuildGoalFileNow(
     diagnostics: [],
   });
   const fm = parsed.frontmatter;
-
-  // Reconcile link statuses against the live task rows.
-  const stages = projectStagesForGoals(db, slug);
-  const links = fm.links.map((link) => {
-    if (!link.taskKey) return link;
-    // SAFETY: the SELECT names exactly `stage` (TEXT NOT NULL) and `archived`
-    // (INTEGER NOT NULL DEFAULT 0) on `task_projections`.
-    const task = db
-      .prepare(
-        `SELECT stage, archived FROM task_projections
-         WHERE project_slug = ? AND task_key = ?`,
-      )
-      .get(slug, link.taskKey) as { stage: string; archived: number } | undefined;
-    if (!task) return link;
-    if (link.status === "skipped") return link;
-    if (task.archived) {
-      // Archiving a task that already COMPLETED its link is bookkeeping, not a
-      // chain failure. The engine treats `done` as settled and never revisits
-      // it, so failing it here would write a status the file can never be
-      // brought to agree with — and the Goals panel would offer Retry/Skip
-      // buttons the server refuses from the file.
-      return link.status === "done" ? link : { ...link, status: "failed" as const };
-    }
-    if (stages && isTerminalStage(task.stage, stages)) {
-      return { ...link, status: "done" as const };
-    }
-    if (link.status === "done" || link.status === "failed") {
-      // The stored status is a CLAIM the advance machinery last wrote, and the
-      // live task contradicts it: it was pulled back out of the terminal stage,
-      // or restored from the archive. Both are re-openings, and the engine
-      // derives the same thing, so the two stay in step.
-      return { ...link, status: "active" as const };
-    }
-    return link;
-  });
-
-  const done = links.filter(
-    (l) => l.status === "done" || l.status === "skipped",
-  ).length;
   db.prepare(
-    `INSERT INTO goal_projections
-       (project_slug, goal_id, title, status, created_by, created_by_label,
-        on_failure, links_json, description, current_index, links_total,
-        links_done, created_at, updated_at, source_path, content_hash, parsed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(project_slug, goal_id) DO UPDATE SET
-       title = excluded.title, status = excluded.status,
+    `INSERT INTO epic_projections
+       (project_slug, epic_id, epic_number, title, status, color, lead_user_id,
+        start_date, target_date, description, created_by, created_by_label,
+        conversation_id, created_at, updated_at, source_path, content_hash,
+        parsed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(project_slug, epic_id) DO UPDATE SET
+       epic_number = excluded.epic_number, title = excluded.title,
+       status = excluded.status, color = excluded.color,
+       lead_user_id = excluded.lead_user_id,
+       start_date = excluded.start_date, target_date = excluded.target_date,
+       description = excluded.description,
        created_by = excluded.created_by,
        created_by_label = excluded.created_by_label,
-       on_failure = excluded.on_failure, links_json = excluded.links_json,
-       description = excluded.description,
-       current_index = excluded.current_index,
-       links_total = excluded.links_total, links_done = excluded.links_done,
+       conversation_id = excluded.conversation_id,
        created_at = excluded.created_at, updated_at = excluded.updated_at,
        source_path = excluded.source_path, content_hash = excluded.content_hash,
        parsed_at = excluded.parsed_at`,
   ).run(
     slug,
     fm.id,
+    epicNumber(fm.id) ?? 0,
     fm.title,
     fm.status,
+    fm.color,
+    fm.leadUserId,
+    fm.startDate,
+    fm.targetDate,
+    parsed.description,
     fm.createdBy,
     fm.createdByLabel,
-    fm.onFailure,
-    JSON.stringify(links),
-    parsed.description,
-    currentLinkIndex(links),
-    links.length,
-    done,
+    fm.conversationId,
     fm.createdAt,
     fm.updatedAt,
     sourcePath,
@@ -1406,50 +1364,22 @@ function rebuildGoalFileNow(
     sourcePath,
     contentHash,
     action: "projected",
-    details: { kind: "goal", projectSlug: slug, goalId: fm.id },
+    details: { kind: "epic", projectSlug: slug, epicId: fm.id },
   });
   emitProjectionEvent({
-    type: "goal.updated",
+    type: "epic.updated",
     projectSlug: slug,
-    goalId: fm.id,
+    epicId: fm.id,
     occurredAt: nowIso(),
   });
-  return { action: "projected", kind: "goal", projectSlug: slug, goalId: fm.id };
-}
-
-/** Decodes the `projects.stages_json` column for the goal reconciler: entries
- *  without a string `id` (and non-array payloads) read as empty, mirroring how
- *  `deployedProfileIdsSchema` tolerates a malformed projection column. */
-const goalStageEntriesSchema = z
-  .array(z.object({ id: z.string() }).nullable().catch(null))
-  .catch([]);
-
-/** The project's stage list for terminal-stage checks; null when the project
- *  row is missing or its stages column does not decode. */
-function projectStagesForGoals(
-  db: DatabaseSync,
-  slug: string,
-): { id: string }[] | null {
-  // SAFETY: `stages_json` is a single NOT NULL column on `projects` (DEFAULT
-  // '[]'); an absent row yields undefined.
-  const row = db
-    .prepare(`SELECT stages_json FROM projects WHERE slug = ?`)
-    .get(slug) as { stages_json: string } | undefined;
-  if (!row) return null;
-  try {
-    const entries = goalStageEntriesSchema.parse(JSON.parse(row.stages_json));
-    const ids = entries.flatMap((s) => (s === null ? [] : [{ id: s.id }]));
-    return ids.length ? ids : null;
-  } catch {
-    return null;
-  }
+  return { action: "projected", kind: "epic", projectSlug: slug, epicId: fm.id };
 }
 
 // ------------------------------------------------------------ path router
 
 const TASK_PATH_RE = /^projects\/([^/]+)\/tasks\/([^/]+)\/task\.md$/;
 const PROJECT_PATH_RE = /^projects\/([^/]+)\/project\.md$/;
-const GOAL_PATH_RE = /^projects\/([^/]+)\/goals\/([^/]+)\.md$/;
+const EPIC_PATH_RE = /^projects\/([^/]+)\/epics\/([^/]+)\.md$/;
 
 /**
  * Single-file incremental rebuild for any absolute path under the data
@@ -1470,9 +1400,9 @@ export function rebuildPath(
     if (projectMatch) {
       return succeeded(rel, rebuildProjectFile(db, projectMatch[1]!, options));
     }
-    const goalMatch = GOAL_PATH_RE.exec(rel);
-    if (goalMatch) {
-      return succeeded(rel, rebuildGoalFile(db, goalMatch[1]!, goalMatch[2]!, options));
+    const epicMatch = EPIC_PATH_RE.exec(rel);
+    if (epicMatch) {
+      return succeeded(rel, rebuildEpicFile(db, epicMatch[1]!, epicMatch[2]!, options));
     }
     return { action: "ignored", kind: "other" };
   } catch (error) {
@@ -1594,22 +1524,21 @@ export function rebuildProject(
     track(rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions));
   }
 
-  // Ruling 99: goals — AFTER the tasks, so link reconciliation reads fresh
-  // task rows. Force alongside a changed project row for the same baked-in
-  // reference reason tasks are forced.
-  const seenGoals = new Set<string>();
-  for (const goalId of listGoalIds(slug, options.dataRoot)) {
-    seenGoals.add(goalId);
-    track(rebuildGoalFile(db, slug, goalId, taskOptions));
+  // Ruling 503: epics. Their rows derive from their own files alone, so
+  // neither the order nor a changed project row matters to them.
+  const seenEpics = new Set<string>();
+  for (const epicId of listEpicIds(slug, options.dataRoot)) {
+    seenEpics.add(epicId);
+    track(rebuildEpicFile(db, slug, epicId, options));
   }
-  // SAFETY: `goal_id` is a single NOT NULL column (half the `goal_projections`
+  // SAFETY: `epic_id` is a single NOT NULL column (half the `epic_projections`
   // primary key).
-  const goalRows = db
-    .prepare(`SELECT goal_id FROM goal_projections WHERE project_slug = ?`)
-    .all(slug) as { goal_id: string }[];
-  for (const row of goalRows) {
-    if (!seenGoals.has(row.goal_id)) {
-      track(rebuildGoalFile(db, slug, row.goal_id, options));
+  const epicRows = db
+    .prepare(`SELECT epic_id FROM epic_projections WHERE project_slug = ?`)
+    .all(slug) as { epic_id: string }[];
+  for (const row of epicRows) {
+    if (!seenEpics.has(row.epic_id)) {
+      track(rebuildEpicFile(db, slug, row.epic_id, options));
     }
   }
 
@@ -1671,7 +1600,7 @@ export function rebuildAll(
 
   const seenProjects = new Set<string>();
   const seenTasks = new Set<string>();
-  const seenGoals = new Set<string>();
+  const seenEpics = new Set<string>();
 
   const slugs = existsSync(projRoot)
     ? readdirSync(projRoot, { withFileTypes: true }).flatMap((e) =>
@@ -1714,11 +1643,10 @@ export function rebuildAll(
         rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions),
       );
     }
-    // Ruling 99: goals, after this project's tasks (link reconciliation reads
-    // the fresh task rows).
-    for (const goalId of listGoalIds(slug, options.dataRoot)) {
-      seenGoals.add(`${slug}\u0000${goalId}`);
-      track(rebuildGoalFile(db, slug, goalId, taskOptions));
+    // Ruling 503: epics, from their own files alone.
+    for (const epicId of listEpicIds(slug, options.dataRoot)) {
+      seenEpics.add(`${slug}\u0000${epicId}`);
+      track(rebuildEpicFile(db, slug, epicId, options));
     }
   }
 
@@ -1742,13 +1670,13 @@ export function rebuildAll(
       track(rebuildTaskFile(db, row.project_slug, row.task_key, options));
     }
   }
-  // SAFETY: the two selected columns are the `goal_projections` primary key.
-  const goalRows = db
-    .prepare(`SELECT project_slug, goal_id FROM goal_projections`)
-    .all() as { project_slug: string; goal_id: string }[];
-  for (const row of goalRows) {
-    if (!seenGoals.has(`${row.project_slug}\u0000${row.goal_id}`)) {
-      track(rebuildGoalFile(db, row.project_slug, row.goal_id, options));
+  // SAFETY: the two selected columns are the `epic_projections` primary key.
+  const epicRows = db
+    .prepare(`SELECT project_slug, epic_id FROM epic_projections`)
+    .all() as { project_slug: string; epic_id: string }[];
+  for (const row of epicRows) {
+    if (!seenEpics.has(`${row.project_slug}\u0000${row.epic_id}`)) {
+      track(rebuildEpicFile(db, row.project_slug, row.epic_id, options));
     }
   }
 

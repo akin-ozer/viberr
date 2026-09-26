@@ -370,7 +370,7 @@ describe("getTaskDetail carries the same two fields", () => {
       frontmatter: baseTaskFrontmatter("VIB-401", {
         stage: "impl",
         waiting: "none",
-        blockedBy: ["goal-1 link 2"],
+        blockedBy: ["VIB-77"],
       }),
       timeline: [event(ago(3 * 60 * 60_000))],
     });
@@ -378,7 +378,7 @@ describe("getTaskDetail carries the same two fields", () => {
     const detail = getTaskDetail(store.db, store.slug, "VIB-401", { now: NOW })!;
     expect(detail.quiet).toBe(false);
     expect(detail.blockedBy).toEqual([
-      { ref: "goal-1 link 2", label: "goal-1 link 2", state: "missing", taskKey: null, goalId: "goal-1" },
+      { ref: "VIB-77", label: "VIB-77", state: "missing", taskKey: "VIB-77" },
     ]);
   });
 });

@@ -13,8 +13,11 @@ import { useFetcher, type FetcherWithComponents } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import { PRIORITY_VALUES, type TaskPriority } from "~/schemas/task-file.schema";
 import type { DependencyRender, DependencyState } from "~/shared/dependencies";
+import { EPIC_STATUS_LABEL, isEpicOpen } from "~/schemas/epic-file.schema";
+import { epicHref } from "~/shared/epic-href";
 import { Calendar } from "~/ui/calendar";
 import { useCsrfToken } from "~/ui/csrf-input";
+import { EpicChip, type EpicOption } from "~/ui/epic-chip";
 import { Icon, type IconName } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
 import { DueDatePill, LabelChips, PriorityFlag } from "~/ui/task-meta";
@@ -24,8 +27,8 @@ import { useStableValue } from "~/ui/use-stable-rows";
 import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
 
 /**
- * Ruling 501: the task's Details panel (priority, labels, due date and what
- * the task waits on), drawn the way Linear's and GitHub's issue sidebars draw
+ * Ruling 501: the task's Details panel (priority, labels, epic, due date and
+ * what the task waits on), drawn the way Linear's and GitHub's issue sidebars draw
  * their properties. Each value IS its control: a person who may edit
  * (`edit-task-meta`) clicks the value and edits that one property in a popover
  * anchored under it, as the Stage row in Current state already works. The
@@ -41,7 +44,7 @@ import { useActionFeedback, type ActionResult } from "./task-detail-hooks";
  * 131): a bad reference keeps its editor open beside the error.
  */
 
-type DetailProp = "priority" | "labels" | "due" | "deps";
+type DetailProp = "priority" | "labels" | "epic" | "due" | "deps";
 
 /** The menu reads most urgent first, the way the flags escalate. */
 const PRIORITY_MENU = [...PRIORITY_VALUES].reverse();
@@ -54,7 +57,6 @@ const WAIT_GLYPH = {
   done: "checkcircle",
   failed: "ban",
   missing: "ban",
-  cancelled: "ban",
 } satisfies Record<DependencyState, IconName>;
 
 type Fetcher = FetcherWithComponents<ActionResult>;
@@ -63,12 +65,15 @@ export function TaskDetailsPanel({
   task,
   canEdit,
   labelSuggestions = [],
+  epics = [],
   queuedQuestions = [],
 }: {
   task: TaskDetail;
   canEdit: boolean;
   /** Labels already used in this project, offered as label autocomplete. */
   labelSuggestions?: string[];
+  /** Ruling 503: the project's epics, for the Epic row's menu. */
+  epics?: EpicOption[];
   /** Ruling 241: reviewer questions the hold refused, put when it lifts. They
    *  belong under the wait because they ARE what happens when it ends. */
   queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
@@ -85,6 +90,7 @@ export function TaskDetailsPanel({
   const labels = useStableValue(task.labels);
   const suggestions = useStableValue(labelSuggestions);
   const blockedBy = useStableValue(task.blockedBy);
+  const epicList = useStableValue(epics);
 
   return (
     <div className="panel">
@@ -95,6 +101,13 @@ export function TaskDetailsPanel({
       <div className="kv props">
         <PriorityRow priority={task.priority} open={openState("priority")} setOpen={setOpen} />
         <LabelsRow labels={labels} suggestions={suggestions} open={openState("labels")} setOpen={setOpen} />
+        <EpicRow
+          projectSlug={task.projectSlug}
+          epicId={task.epicId ?? null}
+          epics={epicList}
+          open={openState("epic")}
+          setOpen={setOpen}
+        />
         <DueRow due={task.dueDate ?? null} open={openState("due")} setOpen={setOpen} />
         <WaitRow taskKey={task.key} blockedBy={blockedBy} open={openState("deps")} setOpen={setOpen} />
         {queuedQuestions.length > 0 && (
@@ -449,6 +462,133 @@ function LabelsEditor({
   );
 }
 
+/**
+ * Ruling 503: the epic this task belongs to. The menu offers "No epic" and
+ * every OPEN epic, with the current one kept even when it is closed, so the
+ * person sees where the task stands before moving it. A pick posts the one
+ * field (`set-task-epic`), and the server writes the move on the task's
+ * timeline and on both epics' histories (`setTasksEpic`). A viewer reads the
+ * chip, which opens the epic's page.
+ */
+const EpicRow = memo(function EpicRow({
+  projectSlug,
+  epicId,
+  epics,
+  ...control
+}: { projectSlug: string; epicId: string | null; epics: EpicOption[] } & RowControl) {
+  const csrf = useCsrfToken();
+  const fetcher = usePropFetcher();
+  const edit = editState("epic", control);
+  const current = epicId ? (epics.find((e) => e.id === epicId) ?? null) : null;
+  const offered = epics.filter((e) => isEpicOpen(e.status) || e.id === epicId);
+  // A project with no open epic has nothing to offer, so the row reads as
+  // text: a menu holding only "No epic" would be a control that does nothing.
+  return (
+    <PropRow
+      prop="epic"
+      label="Epic"
+      edit={offered.length > 0 || current ? edit : null}
+      busy={fetcher.state !== "idle"}
+      popup="menu"
+      value={
+        current ? (
+          edit ? (
+            <EpicChip epic={current} inLabelledControl />
+          ) : (
+            <EpicChip epic={current} to={epicHref(projectSlug, current.id)} />
+          )
+        ) : epicId ? (
+          // A stale id the project's epics no longer answer to.
+          <Quiet>{epicId}</Quiet>
+        ) : edit && offered.length > 0 ? (
+          <Quiet icon="plus">Add to epic</Quiet>
+        ) : (
+          <Quiet>None</Quiet>
+        )
+      }
+      editor={(done) => (
+        <EpicMenu
+          epics={offered}
+          current={epicId}
+          onPick={(next) => {
+            done();
+            if (next !== epicId) {
+              void fetcher.submit(
+                { intent: "set-task-epic", _csrf: csrf, epic: next ?? "" },
+                { method: "post" },
+              );
+            }
+          }}
+        />
+      )}
+    />
+  );
+});
+
+/** The epics as an ARIA menu, "No epic" first: roving arrows, Home and End,
+ *  the current one checked. A closed epic is marked, so a pick into one is a
+ *  choice the person saw. */
+function EpicMenu({
+  epics,
+  current,
+  onPick,
+}: {
+  epics: EpicOption[];
+  current: string | null;
+  onPick: (epicId: string | null) => void;
+}) {
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+    const at = items.findIndex((el) => el === document.activeElement);
+    const to =
+      e.key === "ArrowDown"
+        ? (at + 1) % items.length
+        : e.key === "ArrowUp"
+          ? (at - 1 + items.length) % items.length
+          : e.key === "Home"
+            ? 0
+            : e.key === "End"
+              ? items.length - 1
+              : null;
+    if (to === null) return;
+    e.preventDefault();
+    items[to]?.focus();
+  };
+  return (
+    <div className="prop-menu-list epic-menu" onKeyDown={onKeyDown}>
+      <button
+        type="button"
+        role="menuitemradio"
+        aria-checked={current === null}
+        className="menu-item"
+        onClick={() => onPick(null)}
+      >
+        <Icon name="x" />
+        No epic
+        {current === null && <Icon name="check" className="prop-check" />}
+      </button>
+      {epics.map((epic) => (
+        <button
+          key={epic.id}
+          type="button"
+          role="menuitemradio"
+          aria-checked={epic.id === current}
+          className="menu-item"
+          data-epic={epic.id}
+          onClick={() => onPick(epic.id)}
+        >
+          <span className="epic-dot" data-stage-color={epic.color} aria-hidden="true" />
+          <span className="epic-menu-title">{epic.title}</span>
+          {!isEpicOpen(epic.status) && (
+            <span className="fine xs dim"> · {EPIC_STATUS_LABEL[epic.status]}</span>
+          )}
+          {epic.id === current && <Icon name="check" className="prop-check" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Close an editor once the request it sent succeeds. A refusal keeps it open
  *  beside the error toast; a result that was already there when the editor
  *  mounted is not its answer. */
@@ -587,7 +727,7 @@ function WaitEditor({
           type="text"
           name="blockedBy"
           value={text}
-          placeholder={`${prefix}-12, goal-1 link 3`}
+          placeholder={`${prefix}-12, ${prefix}-14`}
           aria-label="What this task waits on"
           autoComplete="off"
           spellCheck={false}
@@ -595,8 +735,7 @@ function WaitEditor({
         />
       </label>
       <p className="fine">
-        Task keys and goal links in this project, comma-separated. Empty clears the wait and releases
-        the task.
+        Task keys in this project, comma-separated. Empty clears the wait and releases the task.
       </p>
       <SaveRow busy={busy} onCancel={done} />
     </fetcher.Form>

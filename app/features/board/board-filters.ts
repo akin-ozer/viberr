@@ -144,6 +144,23 @@ export function matchesLabelFilter(
   return task.labels.some((l) => l.toLowerCase() === want);
 }
 
+/** Ruling 503: the `?epic=` value that selects the tasks in no epic. */
+export const EPIC_FILTER_NONE = "none";
+
+/**
+ * Ruling 503: the board's epic filter. `epic` is one epic's id (the `?epic=`
+ * param), `none` for the tasks in no epic, or null when off. It ANDs with the
+ * chips, the label and the term, like the label filter.
+ */
+export function matchesEpicFilter(
+  task: { epicId?: string | null },
+  epic: string | null,
+): boolean {
+  if (!epic) return true;
+  if (epic === EPIC_FILTER_NONE) return !task.epicId;
+  return task.epicId === epic;
+}
+
 /** Archived tasks hidden from the current (non-archived) view — the count the
  *  board discloses next to the Archived chip, so the disposition is never a
  *  silent disappearance. */

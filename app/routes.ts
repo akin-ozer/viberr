@@ -93,11 +93,14 @@ export default [
 
   // Bare /projects → home (the project list lives at `/`), not a 404 (N5).
   route("projects", "routes/projects.tsx"),
-  // Workspace shell (rail + topbar) with the eight project views + task (the
+  // Workspace shell (rail + topbar) with the nine project views + task (the
   // rail order lives in features/shell/nav.ts and is pinned by nav.test.ts).
   route("projects/:slug", "routes/project.tsx", [
     index("routes/project._index.tsx"),
     route("board", "routes/project.board.tsx"),
+    // Ruling 503: the project's epics, and one epic's page.
+    route("epics", "routes/project.epics.tsx"),
+    route("epics/:epicId", "routes/project.epic.tsx"),
     route("review", "routes/project.review.tsx"),
     route("controller", "routes/project.controller.tsx"),
     route("agents", "routes/project.agents.tsx"),

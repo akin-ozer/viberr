@@ -13,8 +13,6 @@ import {
 import { findUserById } from "~/server/auth/user-store.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import type { QueuedQuestion } from "~/schemas/task-file.schema";
-import { readGoalFile, updateGoalFile } from "~/server/files/goal-writer.server";
-import { rebuildGoalFile } from "~/server/projections/rebuilder.server";
 import {
   requireProjectAuthority,
   requireProjectMutable,
@@ -22,7 +20,6 @@ import {
 import { rolesForAction } from "~/shared/rbac";
 import { logger } from "~/server/logging/logger.server";
 import type { ParsedTaskFile, TaskFileEvent } from "~/schemas/task-file.schema";
-import type { GoalLink } from "~/schemas/goal-file.schema";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 import {
   DEPENDENCY_GRAMMAR_HINT,
@@ -55,33 +52,19 @@ import { errorMessage, toError } from "~/shared/errors";
  * and the two halves of its release.
  *
  * Three doors write the list (a human on the task page, the controller through
- * `create_task` / `update_task` / a goal link, the operator through its
+ * `create_task` / `update_task` / `create_epic`, the operator through its
  * `set_dependencies` tool) and every one of them lands here: the same
  * validation against the store, the same `note`, the same audit row. Live,
- * JC-9's operator had only a decision packet to say "this waits on goal-1"
- * with, and used it as a standing token for five paid turns.
+ * JC-9's operator had only a decision packet to say "this waits on" another
+ * piece of work with, and used it as a standing token for five paid turns.
  */
 
 // ------------------------------------------------------------ validation
 
-/** What the list is being written FOR: a task (the usual case), or a goal
- *  link that has no task yet (the goal writer declares its wait, ruling
- *  131(c)); null when nothing on the store carries the list yet (creation
- *  before a key is allocated). */
+/** What the list is being written FOR: a task (the usual case), or null when
+ *  nothing on the store carries the list yet (creation before a key is
+ *  allocated). */
 export type DependencySelf = DependencyRef | null;
-
-const linksRowSchema = z
-  .array(
-    z
-      .object({
-        index: z.number().int(),
-        taskKey: z.string().nullable().default(null),
-        blockedBy: z.array(z.string()).default([]),
-      })
-      .loose(),
-  )
-  .catch([]);
-type LinkRow = z.infer<typeof linksRowSchema>[number];
 
 interface TaskRow {
   archived: number;
@@ -97,52 +80,24 @@ function taskRow(db: DatabaseSync, slug: string, key: string): TaskRow | null {
   return row ?? null;
 }
 
-function goalLinks(db: DatabaseSync, slug: string, goalId: string): LinkRow[] | null {
-  // SAFETY: `links_json` is TEXT NOT NULL DEFAULT '[]' on `goal_projections`.
-  const row = db
-    .prepare(`SELECT links_json FROM goal_projections WHERE project_slug = ? AND goal_id = ?`)
-    .get(slug, goalId) as { links_json: string } | undefined;
-  if (!row) return null;
-  return linksRowSchema.parse(JSON.parse(row.links_json));
-}
-
 function storedList(row: TaskRow | null): string[] {
   return row ? z.array(z.string()).catch([]).parse(JSON.parse(row.blocked_by_json)) : [];
 }
 
-/** The refs a node waits on: a task's stored list, or a goal link's task's
- *  list once created, else the link's DECLARED list. */
+/** The refs a task waits on: its stored list. */
 function edgesOf(db: DatabaseSync, slug: string, ref: DependencyRef): DependencyRef[] {
-  let raw: string[] = [];
-  if (ref.kind === "task") {
-    raw = storedList(taskRow(db, slug, ref.task));
-  } else {
-    const link = goalLinks(db, slug, ref.goal)?.find((l) => l.index === ref.link) ?? null;
-    if (link?.taskKey) raw = storedList(taskRow(db, slug, link.taskKey));
-    else if (link) raw = link.blockedBy;
-  }
-  return raw.map(parseDependencyRef).filter((r): r is DependencyRef => r !== null);
+  return storedList(taskRow(db, slug, ref.task))
+    .map(parseDependencyRef)
+    .filter((r): r is DependencyRef => r !== null);
 }
 
-/** Does `ref` denote the same node as `self`? A goal link whose task IS
- *  `self`'s task counts, so `JC-3` waiting on `goal-1 link 2` (which created
- *  JC-3) is a self-wait. */
-function sameNode(db: DatabaseSync, slug: string, ref: DependencyRef, self: DependencySelf): boolean {
-  if (!self) return false;
-  if (formatDependencyRef(ref) === formatDependencyRef(self)) return true;
-  if (ref.kind === "goal" && self.kind === "task") {
-    const link = goalLinks(db, slug, ref.goal)?.find((l) => l.index === ref.link);
-    return link?.taskKey === self.task;
-  }
-  if (ref.kind === "task" && self.kind === "goal") {
-    const link = goalLinks(db, slug, self.goal)?.find((l) => l.index === self.link);
-    return link?.taskKey === ref.task;
-  }
-  return false;
+/** Does `ref` denote the same task as `self`? */
+function sameNode(ref: DependencyRef, self: DependencySelf): boolean {
+  return self !== null && formatDependencyRef(ref) === formatDependencyRef(self);
 }
 
-/** Depth-first from `start` along stored AND declared edges (ruling 131(b));
- *  the path back to `self`, or null when no cycle would close. */
+/** Depth-first from `start` along stored edges (ruling 131(b)); the path back
+ *  to `self`, or null when no cycle would close. */
 function cyclePath(db: DatabaseSync, slug: string, start: DependencyRef, self: DependencySelf): string[] | null {
   const seen = new Set<string>();
   const stack: { ref: DependencyRef; path: string[] }[] = [
@@ -152,7 +107,7 @@ function cyclePath(db: DatabaseSync, slug: string, start: DependencyRef, self: D
     const { ref, path } = stack.pop()!;
     for (const next of edgesOf(db, slug, ref)) {
       const spelled = formatDependencyRef(next);
-      if (sameNode(db, slug, next, self)) return [...path, spelled];
+      if (sameNode(next, self)) return [...path, spelled];
       if (seen.has(spelled)) continue;
       seen.add(spelled);
       stack.push({ ref: next, path: [...path, spelled] });
@@ -165,8 +120,7 @@ function cyclePath(db: DatabaseSync, slug: string, start: DependencyRef, self: D
  * Validate a list against the store and return it in canonical spellings,
  * de-duplicated, in the order given. A refusal names the reference and the
  * reason: unparseable (quoting the grammar), self, unknown task, archived
- * task, unknown goal or link, or a cycle (walking stored task lists and
- * DECLARED goal-link lists alike, so a mutual sibling-chain wait is refused at
+ * task, or a cycle (walking the stored lists, so a mutual wait is refused at
  * write time instead of producing two tasks born held forever).
  */
 export function validateDependencyRefs(
@@ -180,32 +134,15 @@ export function validateDependencyRefs(
     if (text === "") continue;
     const ref = parseDependencyRef(text);
     if (!ref) {
-      throw AppError.validation(`"${text}" is not a task key or a goal link. ${DEPENDENCY_GRAMMAR_HINT}`);
+      throw AppError.validation(`"${text}" is not a task key. ${DEPENDENCY_GRAMMAR_HINT}`);
     }
     const spelled = formatDependencyRef(ref);
-    if (sameNode(db, slug, ref, input.self)) {
+    if (sameNode(ref, input.self)) {
       throw AppError.validation(`${spelled}: a task cannot wait on itself.`);
     }
-    if (ref.kind === "task") {
-      const row = taskRow(db, slug, ref.task);
-      if (!row) throw AppError.validation(`${spelled} is not a task in this project.`);
-      if (row.archived) throw AppError.validation(`${spelled} is archived; a task cannot wait on abandoned work.`);
-    } else {
-      const links = goalLinks(db, slug, ref.goal);
-      if (!links) throw AppError.validation(`${ref.goal} is not a goal in this project.`);
-      const link = links.find((l) => l.index === ref.link);
-      if (!link) throw AppError.validation(`${ref.goal} has no link ${ref.link} (it has ${links.length}).`);
-      // Ruling 398(b): a link the chain has SETTLED — `done`, or `skipped` by
-      // an onFailure=continue ride-through — is a valid thing to wait on
-      // however its task ended. The refusal below is about a live link whose
-      // work was abandoned; reading the task alone refused a wait on a link
-      // that had already completed, and refused the ride-through's own next
-      // link in the name of the failure it was riding past.
-      const settled = link.status === "done" || link.status === "skipped";
-      if (!settled && link.taskKey && taskRow(db, slug, link.taskKey)?.archived) {
-        throw AppError.validation(`${spelled} (${link.taskKey}) is archived; a task cannot wait on abandoned work.`);
-      }
-    }
+    const row = taskRow(db, slug, ref.task);
+    if (!row) throw AppError.validation(`${spelled} is not a task in this project.`);
+    if (row.archived) throw AppError.validation(`${spelled} is archived; a task cannot wait on abandoned work.`);
     const cycle = cyclePath(db, slug, ref, input.self);
     if (cycle) {
       const selfName = input.self ? formatDependencyRef(input.self) : "this task";
@@ -304,10 +241,7 @@ export async function setTaskDependencies(
   // the release it paid for sent the next drive to refresh a current branch
   // instead of re-running the review it owed. Only an ADDED entry is judged:
   // one already on the list that finished since is the engine's to release.
-  // A settled goal link stays a valid wait (ruling 398(b)).
-  const alreadyDone = resolveDependencies(db, input.projectSlug, added).filter(
-    (e) => e.state === "done" && e.goalId === null,
-  );
+  const alreadyDone = resolveDependencies(db, input.projectSlug, added).filter((e) => e.state === "done");
   if (alreadyDone.length > 0) {
     const one = alreadyDone.length === 1;
     throw AppError.validation(
@@ -316,10 +250,6 @@ export async function setTaskDependencies(
     );
   }
   if (JSON.stringify(next) === JSON.stringify(previous)) {
-    // Ruling 155: the record the link carries is brought back in step even
-    // when the task's own list did not move (a stale link heals on the next
-    // write instead of waiting for a different one).
-    await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(db, actor, ctx));
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false, blockedBy: next, added, removed };
   }
   const releasing = next.length === 0 && previous.length > 0 && !ctx.operatorAuthorized;
@@ -362,8 +292,6 @@ export async function setTaskDependencies(
     taskKey: input.taskKey,
     details: { blockedBy: next, added, removed },
   });
-  // Ruling 155: a link's task owns the wait; the goal file follows it.
-  await mirrorLinkWait(db, ctx, input.projectSlug, input.taskKey, fm.goalRef, next, changedByOf(db, actor, ctx));
   if (releasing) {
     await announceRelease(db, ctx, input.projectSlug, input.taskKey, {
       entries: previous,
@@ -382,79 +310,6 @@ export async function setTaskDependencies(
     await drainQueuedQuestions(db, ctx, input.projectSlug, input.taskKey);
   }
   return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: true, blockedBy: next, added, removed };
-}
-
-// ---------------------------------------------------------------- mirror
-
-/** The chain position a task carries (`task.md` `goalRef`), when it is a
- *  link's task. */
-export interface LinkWaitRef {
-  goalId: string;
-  linkIndex: number;
-}
-
-/**
- * Ruling 155 (pass 35, F35-3; amends 131(c)): once a goal link has started a
- * task, the task's `blockedBy` IS the wait, and the goal file's
- * `links[].blockedBy` mirrors it on every change, whoever made it (a person,
- * the controller, the operator, or the engine's release). Live, KNC-3 was
- * released by a controller `update_task {blockedBy: []}` and the Goals panel
- * kept printing "waits on goal-2 link 6" off the goal file while the task
- * ran; a retried link would have been born held on a wait a human had
- * already removed. Two records of one fact, one of them stale.
- *
- * Convergent and quiet: nothing is written unless the task is a link's task,
- * the link is `active` and carried BY this task, and the two lists differ.
- * Returns true when the goal file changed. A goal file that cannot be read or
- * parsed does not fail the task write that already landed; it is logged and
- * the next write mirrors again.
- */
-export async function mirrorLinkWait(
-  db: DatabaseSync,
-  ctx: TaskActionContext,
-  projectSlug: string,
-  taskKey: string,
-  goalRef: LinkWaitRef | null,
-  blockedBy: readonly string[],
-  by: string,
-): Promise<boolean> {
-  if (!goalRef) return false;
-  const ref = { projectSlug, goalId: goalRef.goalId, dataRoot: ctx.dataRoot };
-  const wanted = JSON.stringify(blockedBy);
-  const carries = (link: GoalLink | undefined): link is GoalLink =>
-    link !== undefined && link.status === "active" && link.taskKey === taskKey;
-  const current = readGoalFile(ref)?.parsed.frontmatter.links.find((l) => l.index === goalRef.linkIndex);
-  if (!carries(current) || JSON.stringify(current.blockedBy) === wanted) return false;
-  try {
-    let mirrored = false;
-    await updateGoalFile(ref, (goal) => {
-      // Re-checked under the goal file's own lock: a retry or a completion may
-      // have moved the link between the read above and this write.
-      const link = goal.frontmatter.links.find((l) => l.index === goalRef.linkIndex);
-      if (!carries(link) || JSON.stringify(link.blockedBy) === wanted) return;
-      link.blockedBy = [...blockedBy];
-      mirrored = true;
-      const list = blockedBy.length > 0 ? blockedBy.join(", ") : "nothing";
-      return `Link ${link.index} (${link.title}) now waits on ${list}: ${taskKey}'s list was changed by ${by}.`;
-    });
-    if (!mirrored) return false;
-    rebuildGoalFile(db, projectSlug, goalRef.goalId, { dataRoot: ctx.dataRoot });
-    return true;
-  } catch (error) {
-    logger.error("goal link wait could not mirror the task's list", {
-      projectSlug,
-      taskKey,
-      goalId: goalRef.goalId,
-      linkIndex: goalRef.linkIndex,
-      err: toError(error),
-    });
-    return false;
-  }
-}
-
-/** Who a task-list change is attributed to on the goal timeline. */
-function changedByOf(db: DatabaseSync, actor: TaskActor, ctx: TaskActionContext): string {
-  return ctx.operatorAuthorized ? "the operator" : actorProseName(db, actor);
 }
 
 // --------------------------------------------------------------- release
@@ -657,9 +512,6 @@ export async function drainQueuedQuestions(
 
 // ---------------------------------------------------------------- engine
 
-/** The goal timeline's name for the release engine (ruling 155). */
-const RELEASE_BY = "Viberr (release)";
-
 /** Ruling 361: the inbox names the engine exactly as the task timeline does
  *  (`systemId: "dependency-release"` → "Dependency release"). */
 const DEPENDENCY_RELEASE_FROM: ActorRender = {
@@ -698,7 +550,6 @@ export async function releaseTask(
       clearDependencies(parsed);
     });
     reprojectTask(db, ctx, projectSlug, taskKey);
-    await mirrorLinkWait(db, ctx, projectSlug, taskKey, fm.goalRef, [], RELEASE_BY);
     return false;
   }
   const entries = resolveDependencies(db, projectSlug, fm.blockedBy);
@@ -713,9 +564,6 @@ export async function releaseTask(
     cleared = clearDependencies(parsed);
   });
   if (cleared.length === 0) return false; // a concurrent write got there first
-  // Ruling 155: the engine's release is a change to the list like any other;
-  // the goal file follows it, so a retried link is born free.
-  await mirrorLinkWait(db, ctx, projectSlug, taskKey, fm.goalRef, [], RELEASE_BY);
   const release: AnnounceReleaseInput = { entries: cleared };
   if (opts.atBirth) release.atBirth = true;
   await announceRelease(db, ctx, projectSlug, taskKey, release);
@@ -724,10 +572,10 @@ export async function releaseTask(
 
 /**
  * Sweep a project's held tasks and release every one whose list is satisfied.
- * Called from the same task-write hooks that advance goal chains (a
- * transition, an archive or restore, an acceptance) and from the goal
- * runner's minute tick, so a hand edit or a rescan still releases within a
- * minute. Cheap: one projection read, then file work only for the few held.
+ * Called from the task-write hooks that can satisfy a wait (a transition, an
+ * archive or restore, an acceptance) and from the dependency runner's minute
+ * tick, so a hand edit or a rescan still releases within a minute. Cheap: one
+ * projection read, then file work only for the few held.
  */
 export async function releaseDependents(
   db: DatabaseSync,
@@ -736,8 +584,8 @@ export async function releaseDependents(
 ): Promise<string[]> {
   // Pass 34 review: the sweep also notices a wait that can NEVER complete,
   // whatever killed it. The archive hook was the only caller that ever looked,
-  // so a cancelled goal, a removed link or a lost task left its dependent held
-  // and silent. Idempotent by note text, like the archive path.
+  // so a lost task left its dependent held and silent. Idempotent by note
+  // text, like the archive path.
   await noteDeadDependency(db, ctx, projectSlug, null).catch((error) => {
     logger.error("dead-dependency sweep failed", {
       projectSlug,
@@ -768,10 +616,62 @@ export async function releaseDueDependents(db: DatabaseSync, ctx: TaskActionCont
   return count;
 }
 
-/** Fire-and-forget hook beside `maybeReconcileGoalForTask`: a task changed in
- *  a way that can satisfy someone's wait (reached Done, was archived or
- *  restored, was accepted). The engine converges, so a spurious call is a
- *  cheap no-op. */
+// ------------------------------------------------------------------ runner
+
+const DEPENDENCY_TICK_MS = 60_000;
+const DEPENDENCY_RUNNER_KEY = Symbol.for("viberr.dependencyRunner");
+
+interface DependencyRunnerHost {
+  [DEPENDENCY_RUNNER_KEY]?: { timer: ReturnType<typeof setInterval> };
+}
+
+/**
+ * Boot: release every held task whose wait is satisfied, once and then every
+ * minute, so a hand edit, a rescan or a restart the write hooks never saw
+ * still releases within a minute (ruling 131(e)). The goal runner of ruling 99
+ * ran this sweep on its tick; ruling 503 retired the chains and kept the
+ * sweep. Idempotent; the timer is unref'd so it never blocks exit, and a tick
+ * still running when the next is due is not overlapped.
+ */
+export function startDependencyRunner(db: DatabaseSync, ctx: TaskActionContext = {}): void {
+  // SAFETY: registry symbol under a viberr-namespaced name; only this module
+  // writes the slot.
+  const host = globalThis as DependencyRunnerHost;
+  if (host[DEPENDENCY_RUNNER_KEY]) return;
+  let running = false;
+  const tick = () => {
+    if (running) return;
+    running = true;
+    void releaseDueDependents(db, ctx)
+      .catch((error) => {
+        logger.error("dependency runner tick failed", {
+          err: toError(error),
+        });
+      })
+      .finally(() => {
+        running = false;
+      });
+  };
+  const timer = setInterval(tick, DEPENDENCY_TICK_MS);
+  timer.unref();
+  host[DEPENDENCY_RUNNER_KEY] = { timer };
+  tick();
+}
+
+/** Tests only: stop the runner so the next `startDependencyRunner` starts a
+ *  fresh one on its own store. */
+export function stopDependencyRunnerForTests(): void {
+  // SAFETY: the same registry slot `startDependencyRunner` writes.
+  const host = globalThis as DependencyRunnerHost;
+  const runner = host[DEPENDENCY_RUNNER_KEY];
+  if (!runner) return;
+  clearInterval(runner.timer);
+  delete host[DEPENDENCY_RUNNER_KEY];
+}
+
+/** Fire-and-forget hook: a task changed in a way that can satisfy someone's
+ *  wait (reached Done, was archived or restored, was accepted). The engine
+ *  converges, so a spurious call is a cheap no-op. */
 export function maybeReleaseDependents(db: DatabaseSync, ctx: TaskActionContext, projectSlug: string): void {
   void releaseDependents(db, ctx, projectSlug).catch((error) => {
     logger.error("dependency release sweep failed", {
@@ -798,8 +698,8 @@ export async function noteDeadDependency(
   projectSlug: string,
   /** The archived task this call is about, or null for the convergent sweep:
    *  ANY entry that can never complete, whatever killed it (pass 34 review —
-   *  a cancelled goal, a removed link or a lost task left the dependent held
-   *  in silence, because only the archive hook ever looked). */
+   *  a lost task left the dependent held in silence, because only the archive
+   *  hook ever looked). */
   archivedKey: string | null,
 ): Promise<string[]> {
   const noted: string[] = [];

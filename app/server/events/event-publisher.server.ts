@@ -144,14 +144,14 @@ export function translateProjectionEvent(
         },
       ];
     }
-    case "goal.updated":
+    case "epic.updated":
       return [
         {
           event: {
-            type: "goal.updated",
-            entityId: `${e.projectSlug}/${e.goalId}`,
+            type: "epic.updated",
+            entityId: `${e.projectSlug}/${e.epicId}`,
             occurredAt: e.occurredAt,
-            data: { projectSlug: e.projectSlug, goalId: e.goalId },
+            data: { projectSlug: e.projectSlug, epicId: e.epicId },
           },
           route: { projectSlug: e.projectSlug },
         },

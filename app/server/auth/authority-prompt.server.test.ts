@@ -80,8 +80,10 @@ describe("projectAuthorityPrompt", () => {
     // on — clearing it RELEASES a held task — and `edit-policy` also gates
     // archiving and restoring the project, so "who can unarchive this?" had no
     // answer anywhere. The names stay short because eight sentences across two
-    // pages read them inline as "the X grant".
-    expect(text).toContain("Edit task priority, labels & due date (and what a task waits on");
+    // pages read them inline as "the X grant". Ruling 503 added the epic a
+    // task is in to the first, and gave `manage-epics` its own scope line.
+    expect(text).toContain("Edit task priority, labels & due date (the epic a task is in, and what it waits on");
+    expect(text).toContain("Create & edit epics (their status, lead and dates)");
     expect(text).toContain("Edit workflow & policy (and archiving or restoring");
     for (const d of RBAC_DEFINITIONS.filter((def) => "covers" in def)) {
       expect(text, `${d.id} loses its scope`).toContain(`${d.label} (${d.covers})`);

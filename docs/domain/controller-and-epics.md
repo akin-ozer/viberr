@@ -1,28 +1,30 @@
-# The controller and chained goals
+# The controller and epics
 
 > The instance-level conversational agent: whose authority and account a turn runs on, its
 > surfaces (the dock and the two pages), conversation scopes and the per-turn context read, its
 > `viberr_controller` toolkit and built-in `viberr_ops` diagnostics server, its deployment locks,
-> and the goal chains it defines and the server advances.
-> Source of truth: `app/server/controller/*`, `app/server/tasks/goal-actions.server.ts`,
-> `app/server/files/goal-writer.server.ts`, `app/schemas/goal-file.schema.ts`,
-> `app/server/projections/rebuilder.server.ts` (the goal projection), `app/features/controller/*`,
+> and the project epics it plans work into for a person (§7), which replaced its chained goals.
+> Source of truth: `app/server/controller/*`, `app/server/tasks/epic-actions.server.ts`,
+> `app/server/files/epic-writer.server.ts`, `app/schemas/epic-file.schema.ts`,
+> `app/server/projections/epic-query.server.ts`, `app/server/tasks/goal-epic-conversion.server.ts`,
+> `app/server/projections/rebuilder.server.ts` (the epic projection), `app/features/epics/*`,
+> `app/routes/project.epics.tsx`, `app/routes/project.epic.tsx`, `app/features/controller/*`,
 > `app/routes/controller.tsx`, `app/routes/project.controller.tsx`,
 > `app/routes/resources.controller.ts`, `app/routes/resources.controller-unseen.ts`, `app/root.tsx`
 > (the dock mount), `app/features/org-settings/controller-admin-panel.tsx`,
 > `db/migrations/0001_baseline.sql` (the two controller tables).
-> Rulings 99, 100, 106, 107, 108, 121, 127, 373, 390, 398, 411, 483, 492 and 502 in
+> Rulings 99, 100, 106, 107, 108, 121, 127, 373, 390, 483, 492, 502 and 503 in
 > [decisions.md](../architecture/decisions.md) set most of what is here.
-> Verified against `main` @ `7d9fbf72` (2026-09-23).
+> Verified against `main` @ `7d9fbf72` (2026-09-23); §7 rewritten for ruling 503 (2026-09-26).
 
 ## 1. What it is
 
 The controller is one instance-wide agent that every signed-in user can talk to.
 It is machinery like the per-task operator but sits above it: it answers questions
 about the instance and its projects, performs governed actions **strictly within the
-asking user's own permissions**, and defines chained goals that the server then
-carries forward. It never replaces the operator; each task a goal creates gets its own
-operator through the ordinary create-task path.
+asking user's own permissions**, and plans work into the project's epics for them (§7).
+It never replaces the operator; each task it creates gets its own operator through the
+ordinary create-task path.
 
 Identity facts:
 
@@ -63,22 +65,21 @@ Identity facts:
 | Surface | Who | Notes |
 |---|---|---|
 | `/controller` | any signed-in user | Instance scope. `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). |
-| `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 483 and 498) and the **Goals panel** (§7.5); `POST intent=kb-correction-undo` is the panel's Undo (org admins). Third item in the workspace rail (after Board and Review queue). Same execution panels as the instance page. |
+| `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 483 and 498); `POST intent=kb-correction-undo` is the panel's Undo (org admins). Fourth item in the workspace rail (after Board, Epics and Review queue). Same execution panels as the instance page. |
 | Instance settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 121: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). |
 | `/resources/controller` | any signed-in user; project and task scopes require membership | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected). |
 | `/resources/controller-unseen` | any signed-in user | The dock's status: the viewer's unseen controller replies in every scope, each with the page that opens it (§3, ruling 448), and the viewer's turns working right now with their scope, phase and step (ruling 457). |
 
 Entry points: the dock (everywhere), the workspace rail item, the Home hero link (once a
-project exists), the org-settings tab's "Open the controller", and the goal chip on a
-task page (it lands on the task's own link row in its chain, `#goal-N-link-M`, ruling
-476(b)). There is no command-palette entry.
+project exists) and the org-settings tab's "Open the controller". There is no
+command-palette entry.
 The page subscribes to the user SSE scope (and the project scope on the project surface)
 and, while a turn is working, reads the turn's console tail every 5 seconds: the fallback
 for a settle the stream missed, which revalidates the page once the tail says the run
 ended (ruling 457, CTL-2; it used to revalidate root, the workspace layout and the page
 every 5 s to move one step line). New conversation sits in the page head;
-the rail lists conversations first and goal chains after, is `position: sticky` and scrolls
+the rail lists the conversations, is `position: sticky` and scrolls
 itself, and below the two-column breakpoint the head carries a native thread picker
 (`ConversationPicker`); the transcript is a capped scroller that never moves the page
 (ruling 419). A blank transcript offers three example asks per scope that send on click
@@ -369,14 +370,14 @@ a notification row: replies stay out of the bell (§8).
    - for a task-anchored conversation, a derived header (stage and its position, readiness,
      waiting, validation, owner, priority, due date, labels, next stages with their
      boundaries, the asking person's live project role as `your authority: …`
-     (ruling 309), engaged agents, branch and PR, open packet, goal chain link, and what
+     (ruling 309), engaged agents, branch and PR, open packet, the task's epic, and what
      the task waits on with each entry's state) plus the canonical `task.md` verbatim inside
      a fence, bounded by `TASK_FILE_CONTEXT_CHARS` (24 000; over budget the head stays whole
      and the newest timeline entries are kept, with a marker naming how many were omitted);
    - for a board, the project's description (600-char excerpt), repo, members
      (`BOARD_CONTEXT_MEMBERS` 20), the same `your authority: …` line, stages with counts,
      boundaries, the open-task table (`BOARD_CONTEXT_TASKS` 40 rows, `BOARD_CONTEXT_CHARS`
-     12 000) and the goal chains (`BOARD_CONTEXT_GOALS` 20);
+     12 000) and the open epics with their progress (`BOARD_CONTEXT_EPICS` 20, ruling 503);
    - for the instance, the projects the person can see (`INSTANCE_CONTEXT_PROJECTS` 40)
      with their role and what is happening in each: task totals, how many are not done,
      running, and waiting on them (ruling 307);
@@ -435,7 +436,7 @@ a notification row: replies stay out of the bell (§8).
    and are cited by document and section); the per-turn tool manifest generated from both
    in-process servers' registries (ruling 297); the measured shell inventory (ruling 191);
    and the writing guide, the vendored Humanizer skill every operator drive also carries
-   (ruling 502, [operator.md §4](operator.md)). The controller writes its replies, goals
+   (ruling 502, [operator.md §4](operator.md)). The controller writes its replies, epics
    and directives by the guide and never names it; no profile grants it, so the settings
    panel (§6), `configSkills` and the run's `run_inputs` skills row never list it, and no
    lock or save removes it. The dynamic tail behind the SDK's boundary is: the granted MCP
@@ -554,28 +555,28 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 
 | Tool | What it does |
 |---|---|
-| `get_project` | Stages with task counts, workflow, members, deployed agents with their RESOLVED grants, board-resolved eligible `stages` beside `declaredStages` (ruling 188), model, effort, operator autonomy, `resources` and `templateDrift`; `advisory` marks a matrix-only grant (ruling 377(a)); `requiredReviewers` (ruling 178), goals summary, `rulingsKb` (ruling 239), `openProposals` (ruling 483, §4.3), `kbCorrections` (ruling 498, §4.3: the newest 20, each with its passages, evidence, task, filer and whether a person undid it), resolved `fileLeases` and `spentFileLeases` (rulings 245, 247), `gates` (ruling 482) |
-| `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, goal-chain chip and `waitsOn`; Done included, archived only with `includeArchived` |
-| `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
+| `get_project` | Stages with task counts, workflow, members, deployed agents with their RESOLVED grants, board-resolved eligible `stages` beside `declaredStages` (ruling 188), model, effort, operator autonomy, `resources` and `templateDrift`; `advisory` marks a matrix-only grant (ruling 377(a)); `requiredReviewers` (ruling 178), `epics` (each with its status, lead, dates and progress; ruling 503), `rulingsKb` (ruling 239), `openProposals` (ruling 483, §4.3), `kbCorrections` (ruling 498, §4.3: the newest 20, each with its passages, evidence, task, filer and whether a person undid it), resolved `fileLeases` and `spentFileLeases` (rulings 245, 247), `gates` (ruling 482) |
+| `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, `epic` and `waitsOn`; `epicId` filters to one epic (`none` for the tasks in no epic, ruling 503); Done included, archived only with `includeArchived` |
+| `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), its `epic` by id and title (ruling 503), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
 | `read_timeline_entry` | One timeline entry in full, by the `at` stamp `get_task` prints (ruling 285) |
 | `read_task_attachment` | One text attachment of a task (`.txt .log .md .json .yml .yaml .csv .diff .patch`; ruling 293) |
 | `read_default_branch_file` | One file as the project's default branch has it, from the project's git mirror (built on first use), in pages of whole lines via `fromLine` (rulings 299, 436); an absent path is reported absent; audited `controller.repo.read` |
 | `get_github_state` | Connection and credential health, task branches with sync state, PRs with checks, review and mergeability (the three meanings of a null `checks` spelled out), cache freshness |
 | `read_pull_request` | A task's review PR: every changed file with status, counts and unified-diff hunks; `patches: false` for the file list, `path` for one file, a byte budget with `patchOmitted` flags (ruling 266); audited `controller.github.read` |
 | `list_decisions` | Everything waiting on a person: open packets with every option and the `ownWords` free-text choice (ruling 271), pending recommendations, completions ready to accept, each with `releases.direct` / `releases.downstream` (ruling 336); answers nothing (ruling 251) |
-| `list_goals` | The project's chains with status, current link and per-link status, task and `blockedBy` |
-| `get_goal` | One chain in full with its history; a link's `goal` is the contract in force and `declaredGoal` the superseded declaration (ruling 335, §7.5) |
+| `list_epics` | The project's epics, each with its status, lead, dates and progress counted from its tasks (§7.2) |
+| `get_epic` | One epic in full: what it is, its progress by stage, every task in it (archived ones included) with its stage, readiness, owner and what it waits on, and its history, newest first |
 
 **Board writes** (`requireVisible`, then the same `requireAction` / `assertProjectAction`
 matrix the human surfaces use; the tier in brackets is the floor)
 
 | Tool | What it does |
 |---|---|
-| `create_task` | A task at the entry stage [contributor, `create-task`]; takes `blockedBy` (validated before a key is allocated; the task is born held), `owner` (a member email or `me`, seated in the creating write before the first operator run; ruling 140(a)), `dueDate`, and `priority: urgent` as the urgent flag |
+| `create_task` | A task at the entry stage [contributor, `create-task`]; takes `blockedBy` (validated before a key is allocated; the task is born held), `owner` (a member email or `me`, seated in the creating write before the first operator run; ruling 140(a)), `dueDate`, `priority: urgent` as the urgent flag, and `epic`, the epic it is born in (checked before a key is allocated; ruling 503) |
 | `move_task` | A stage move [`approve-transition`]; a move into the terminal stage is refused and pointed at the task page; a move to an EARLIER stage requires `reason`, which lands on the transition entry (ruling 381) |
 | `comment_on_task` | A comment signed `_Posted by the controller for <name>._` [member; refused on an archived project]; @mentions of people notify; an @mention of an agent starts nothing and the line is stamped saying so (ruling 252) |
 | `set_task_owner` | Seat the asker, another member, or release [`own-task`; takeover needs the acceptance tier]; the person whose seat changed is notified (ruling 140(b)) |
-| `update_task` | The goal and the `title` [`update-goal`, maintainer; ruling 295], priority / labels / due date, each axis it is given replaced whole and the rest left as they stand [`edit-task-meta`], and `blockedBy` as the FULL list through `setTaskDependencies` (`[]` clears it and releases the task; ruling 131); each part reported on its own arm, an unchanged axis answers `[noop]` |
+| `update_task` | The goal and the `title` [`update-goal`, maintainer; ruling 295], priority / labels / due date, each axis it is given replaced whole and the rest left as they stand [`edit-task-meta`], `blockedBy` as the FULL list through `setTaskDependencies` (`[]` clears it and releases the task; ruling 131), and `epic` through `setTasksEpic` (`""` takes the task out; ruling 503) [`edit-task-meta`]; each part reported on its own arm, an unchanged axis answers `[noop]` |
 | `run_agent_on_task` | Start the operator (`runOperator({trigger: "manual"})`, relaying `open-packet` / `closed` / queued honestly) or a deployed profile (`startAgentRun`) with a directive, also written on the timeline [`run-agents`, maintainer] |
 | `schedule_task_action` | A future operator re-run or profile run, 1 minute to 28 days out (`delayMinutes` 1..40320 or an ISO `dueAt`), written on `task.md` with the `<email> · via controller` label [`run-agents`; ruling 153] |
 | `cancel_task_schedule` | Cancel one pending entry; `[noop]` when it is not pending [`run-agents`] |
@@ -592,17 +593,17 @@ matrix the human surfaces use; the tier in brackets is the floor)
 | `remove_agent_deployment` | Take a specialist's deployment off the project (ruling 464): `deleteAgentProfile`, the Agents page's Delete, under its gate and its audit row `project.agent_profile.deleted`, with the required `reason` in the details. Refuses the Operator by name and a profile that is the delivering or an engaged agent on an open task (not archived, not in the final stage), naming the tasks; the global template is untouched; a project left with no specialist is told the base Developer and Reviewer come back at the next restart [`manage-agents`] |
 | `update_agent_deployment` | A deployment's capability modes, backend, model, effort, stages, operator autonomy, its own `skills` / `mcps` / `kbs` for every kind, the operator included (G36-1), and its `persona` (ruling 467: the whole text, an empty one refused, the reply naming the length before and after and the first and last changed lines); merge semantics; checked before the write (§4.2) [`manage-agents`] |
 
-**Goals** (`requireVisible`, then the goal gate, §7)
+**Epics** (`requireVisible`, then the epic gates, §7.3)
 
 | Tool | What it does |
 |---|---|
-| `create_goal` | 1..20 links, each with an optional `blockedBy` (`link N` for a sibling, `goal-1 link 3`, or a task key); every link whose wait is satisfied starts at once (ruling 398) [`create-task`] |
-| `update_goal` | `rename`, `pause`, `resume`, `cancel`, `skip_link`, `retry_link`, `edit_link`, `add_link`, `remove_pending_link`, `adopt_task` (§7.4) [the creator, or `run-agents`] |
+| `create_epic` | An epic with its title, description, status (default `planned`), colour, `lead` (a member email or `me`), start and target dates, and `tasks`, existing tasks put in it as it is made (a task in another epic moves); records the turn's conversation (ruling 476(h)) [`manage-epics`; `edit-task-meta` for `tasks`] |
+| `update_epic` | Any of those fields (`lead: "none"` and a blank date clear), plus `addTasks` and `removeTasks`; every task key is checked before anything is written (one not in this epic for `removeTasks`, an unknown or archived one, or a withheld grant refuses the whole call, fields included); there is no delete, and an epic is closed by its status [`manage-epics` for the fields, `edit-task-meta` for the tasks] |
 
 Invariants pinned by tests: there is **no** tool for merge, acceptance,
 force-accept, packet resolution or a move into the terminal stage (ruling 88's
 disclosure ceremony is what chat cannot impersonate), and no tool deletes an entity
-(`update_stages op: remove`, `update_goal op: remove_pending_link`, an empty
+(`update_stages op: remove`, `update_epic`'s `removeTasks`, an empty
 `set_file_leases` and, since ruling 464, `remove_agent_deployment` edit a file's list;
 they do not delete a project, task, user, template or resource). The toolkit test pins
 `remove_agent_deployment` as the only `remove_*` tool. Policy edits **are** offered, gated on the asker's `edit-policy`, because the
@@ -796,8 +797,7 @@ edit in reverse.
   carries it out with `resolve_kb_proposal` (org admin, because it edits an org knowledge
   base). Anyone else reads "An org admin promotes or dismisses proposals." A proposal's
   notification opens its entry here (`#proposal-<id>`, ruling 497): the entry is marked and
-  focused, and one promoted or dismissed since leaves the proposals list in view. A goal
-  notification opens its chain, or its link's row, the same way.
+  focused, and one promoted or dismissed since leaves the proposals list in view.
 
 ## 5. The `viberr_ops` diagnostics server (ruling 107)
 
@@ -889,246 +889,252 @@ intent, `saveControllerConfig`):
   again later, that raises a new request. Nothing in the app sets `withdrawn`, and a grant
   made by hand-editing the profile file closes nothing until the next Controller-tab save.
 
-## 7. Chained goals
+## 7. Epics
 
-A goal decomposes **one outcome into a set of linked tasks inside one project**. The
-controller (or any authorized member through it) defines the chain; the server starts
-each link as soon as nothing makes it wait, and advances the chain as links settle.
-Position in the list is presentation, not order: a link's declared `blockedBy` is the only
-thing that holds it back (ruling 398).
+An epic is **a named body of work inside one project**, the way Jira draws an epic and
+Linear a project (ruling 503). Tasks join and leave it one at a time, whoever they are
+and whatever stage they stand at. An epic never creates, starts, orders or holds a task:
+what a task waits on is its own `blockedBy` (ruling 131), and the release engine starts
+it when that work is done, whatever epic it is in. Epics replaced ruling 99(e)'s chained
+goals, which the controller defined and the server advanced link by link; §7.6 is how an
+upgraded store's chains became epics.
 
 ### 7.1 The file
 
-Canonical at `projects/<slug>/goals/goal-<n>.md`, written only by the app (hand edits
-are tolerated by the parser; unknown frontmatter keys round-trip). Frontmatter
-(`GOAL_FRONTMATTER_KEYS` order): `id`, `title`, `status` `active | paused | attention |
-completed | cancelled`, `createdBy`, `createdByLabel`, `conversationId` (the controller
-conversation the chain was planned in; ruling 476(h). A chain the controller wrote before
-the key gets it at boot, `backfillGoalConversations`, when exactly one of its creator's
-controller turns was running at its `goal.created` audit row; otherwise it stays null,
-ruling 476(j)),
-`onFailure` `pause | continue`
-(default `pause`), `links[]`, `createdAt`, `updatedAt`. Each link carries `index`
-(1-based), `title`, `goal` (the link's task text), `taskKey` (null until the link
-starts), `status` `pending | active | done | failed | skipped`, `note`, `redeclared`
-(ruling 192(b): an `edit_link` on a failed link re-declared its text, so the next retry
-builds from the link; cleared by that retry) and `blockedBy` (what the link waits on, in
-the canonical spellings of `app/shared/dependencies.ts`: a task key, or `goal-2 link 1`;
-the writer accepts `link 2` for a sibling of the goal being written and stores the
-absolute spelling). Body: `## Description` then `## Timeline` of newest-first
-`- <UTC ISO> · <text>` bullets. Each member task carries the back-reference
-`goalRef: {goalId, linkIndex}`, projected to `task_projections.goal_id` /
-`goal_link_index`; the task hero shows a goal chip.
+Canonical at `projects/<slug>/epics/epic-<n>.md` (`app/schemas/epic-file.schema.ts`),
+written only by `app/server/files/epic-writer.server.ts`: a per-file lock and an atomic
+write, the id minted from a directory scan under the project's epics lock
+(`withEpicsLock`, `nextEpicId`), unknown frontmatter keys round-tripped. Frontmatter
+(`EPIC_FRONTMATTER_KEYS` order): `id`, `title` (3 to `EPIC_TITLE_MAX` 120 characters),
+`status` `planned | in_progress | paused | done | cancelled`, `color` (one of ruling 364's
+twenty stage presets; a new epic takes the next hue of a fixed far-apart sequence,
+`defaultEpicColor`), `leadUserId` (a project member, or null), `startDate` and
+`targetDate` (`YYYY-MM-DD` or null; the target may not precede the start), `createdBy`,
+`createdByLabel`, `conversationId` (the controller conversation whose turn called
+`create_epic`, ruling 476(h)), `convertedFrom` (`goal-N` for an epic the conversion
+made, §7.6), `createdAt`, `updatedAt`. Body: `## Description` (markdown) then
+`## Timeline` of newest-first `- <UTC ISO> · <text>` history bullets. A frontmatter the
+schema rejects makes the file untrusted with a diagnostic naming the field
+(`diagnoseEpicFileContent`, which the store doctor and the rebuilder share), and a file
+whose frontmatter id differs from its name is refused the same way.
 
-A link's task is created with its goal text prefixed by a frozen chain header
-(`linkGoalText`): "Part of goal <id> (<title>), link <n>." plus "The previous link was
-carried by <KEY>." when that task exists. Ruling 404: the header states only facts that
-cannot move, so it never names the chain's length or another link's status; the live
-chain is the operator snapshot's `goalChain` (operator §4).
+The status is a person's call, never derived. Nothing deletes an epic: a `done` or
+`cancelled` one stays readable, a done one can be reopened, and tasks can still join or
+leave a closed one. `epic_projections` is the derived row (rebuilt from the file by
+`rebuildEpicFile`, watched, rescanned and store-checked like every canonical file), and
+every change publishes the project-routed SSE event `epic.updated`.
 
-`goal_projections` is the derived row; the rebuilder **reconciles link statuses
-against live task rows** (archived → failed unless done; terminal stage → done; a
-stored done/failed whose task is open again → active; skipped never re-derives), walks
-goals after tasks, and emits the project-routed SSE event `goal.updated`. Goal files are
-watched, rescanned and store-checked like every canonical file. Goals are never deleted;
-terminal chains stay readable.
+### 7.2 Membership
 
-### 7.2 Defining
+Membership lives on the TASK: `task.md` carries `epic` (an epic id, or absent),
+projected to `task_projections.epic_id`, the same project-to-task shape as `stage`. A
+task is in at most one epic, so joining another moves it. The epic file does not list
+its tasks.
 
-`createGoal` requires the asking user's own `create-task` in the project, a title of
-at least 3 characters and 1..20 links (`GOAL_MAX_LINKS`; blank-titled links are dropped
-before numbering). Under the project's goals lock it mints the id and validates every
-link's wait at declaration time (`validateLinkWait`: a sibling reference must name an
-existing link and never the link itself, a forward wait on a later sibling is ordinary,
-everything else goes through the shared `validateDependencyRefs`), then refuses a cycle
-among the chain's own links (`refuseLinkCycles`). It writes the FILE first (ruling 398(c):
-a link's inherited wait on `goal-N link M` is validated against the store, which does not
-hold the goal until the file exists), re-projects, and runs `reconcileGoal`, which starts
-every link whose wait is already satisfied under the creator's re-proven authority. A
-start that fails parks the goal in `attention` by name instead of throwing. The goal
-records the conversation whose turn called `create_goal` (`conversationId`, handed to the
-toolkit by the turn's mounts; ruling 476(h)). Audit `goal.created {title, links, firstTask}`,
-which the project's Activity audit column reads as "<person> created goal **goal-N** (<title>)
-with N links." (ruling 477(b)); the reply names every link started ("2 started
-now (link 1 is KNC-3, link 3 is KNC-4)") or says every link waits on something.
+An epic's **progress** is counted from those task rows at read time
+(`progressByEpic` in `app/server/projections/epic-query.server.ts`, one grouped read per
+project), never stored: `total`, `done` (at the terminal stage), `started` (past the
+entry stage and not done), `notStarted`, `held` (waiting on other work, counted in the
+three above too), `archived` (counted apart and left out of the total, as Linear leaves a
+cancelled issue out of a project's progress) and `byStage`, the bar's segments in the
+project's stage order.
 
-**A link's done signal is one its task can show before acceptance** (ruling 492).
-Acceptance moves a task to Done and nothing after it happens inside the task; a person's
-acceptance also merges the PR when GitHub can, and a full-autonomy operator's leaves the
-merge to a person ([task-lifecycle.md §11](task-lifecycle.md#11-acceptance-and-the-endings)).
-So a link whose outcome needs a proof only the merged or deployed code can show (a
-production deploy, a cron run on the merged code, a live page, a production log) is split
-in two: the delivery link, whose done signal is its gates, its reviewers' verdicts or a
-measurement made on the branch, and a read link whose `blockedBy` names it (goal-1 links
-12 and 13 on akinozer-com). The chain starts the read link when the delivery link's task
-reaches Done, which can be before the merge and before the deploy, so the read link's goal
-confirms the change is merged and deployed before it reads. A task created outside a chain
-gets the same pair: the delivery task and a read task whose `blockedBy` names its key,
-created before the delivery task is accepted. The controller's four goal doors
-(`create_task.goal`, `update_task.goal`, `create_goal.links[].goal` and `update_goal.goal`,
-the field `add_link` and `edit_link` write) carry the rule in the goal field's description,
-from one constant (`DONE_SIGNAL_RULE`, `app/server/tasks/done-signal.server.ts`), and the
-controller guide says it under "Creating a task" and "Chained goals". It is guidance:
+`setTasksEpic` (`app/server/tasks/epic-actions.server.ts`) is THE writer of a task's
+`epic` after creation, and every door lands there: the task page's Epic menu
+(`intent=set-task-epic`), the epic page's Add tasks and Remove, the controller's
+`update_task.epic` and `update_epic`'s `addTasks` / `removeTasks`, and the operator's
+`set_epic`. It checks every key before it writes anything (a missing task is a 404, an
+archived one is refused: its planning metadata is frozen), leaves a task already where it
+was asked to be as unchanged, and re-reads each task under its own lock so a concurrent
+move wins. A removal from one epic (the epic page's Remove, `update_epic`'s
+`removeTasks`) names that epic as `fromEpicId`, so a stale page never takes a task out of
+the epic it has since moved to: a task not in it is refused and nothing is written. Its
+checks run on their own as `planTasksEpic`, which `update_epic` calls for its task keys
+before it writes the epic's fields, so a call lands whole or not at all. Each move writes an "Epic" note on the task's timeline ("Added to **epic-3**
+(Checkout redesign).", "Moved from … to …", "Removed from …"), a `task.epic.changed`
+audit row `{from, to, title}`, and, once per epic touched however many tasks moved, one
+line on that epic's history ("<who> added WEB-3 and WEB-4 and moved WEB-5 here from
+epic-2.") and an `epic` notice to its lead.
+
+A task can also be born in an epic: `createTask` takes `epic`, checked before a key is
+allocated (`requireEpicForNewTask`), and writes the same "Epic" note, with the epic in
+the `task.created` row's details. The epic's history says "<who> made WEB-7 in this
+epic." and its lead is told, as for a task added later (`noteTaskMadeInEpic`); the
+conversion's own tasks are named by its line on the epic instead. The board's New task
+dialog, the epic page's New task and the controller's `create_task` pass it, and a task
+a person creates from an operator's `create_task` option joins the deciding task's
+epic.
+
+### 7.3 Authority, notices and the all-done line
+
+- `manage-epics` ("Create & edit epics": admin, maintainer, contributor) gates
+  `createEpic` and `updateEpic`, which change what the epic is (name, description,
+  status, colour, lead, dates). An archived project refuses both (R6-3).
+- Moving a task in or out is the task's own planning metadata, like a label:
+  `edit-task-meta` (the same three roles). The operator's `set_epic` moves its own task
+  only, under the in-process authority and the `append-typed-events` grant its other
+  typed writes use (`operatorSetEpic`).
+- Audit: `epic.created {title, status, total}`, `epic.updated {title, summary, status?}`
+  (the summary is the sentence of what changed, "renamed it from … to … and set the
+  status to Done"), `task.epic.changed`. The project's Activity audit column writes one
+  sentence per row (`activity-feed.server.ts`).
+- **Notices** (kind `epic`, the profile's "Epic updates" category) go to the epic's
+  lead, or to its creator while nobody leads it, and never to the person whose act they
+  report: a task joining (made in it included), leaving or moving; being made the lead
+  (at creation or by an edit); someone else changing the status. They fail open: the
+  change has landed.
+- **All done.** When the last open task of an OPEN epic is done (it reached the terminal
+  stage, or the one still open left the epic or was archived), `noteEpicCompleteIfDone`
+  writes "Every task is done (N tasks)." on the epic's history once and tells the lead
+  "Set the epic to Done once the work has landed." The hooks are the task write paths
+  that used to reconcile a chain: a stage transition, acceptance, archiving a task that
+  was still open, and an open task leaving (`maybeNoteEpicComplete`, fire-and-forget).
+  A done task archived or taken out, and a restore, complete nothing new, so they say
+  nothing: the line would repeat with a smaller count. The status stays the person's:
+  "every task I filed is done" and "the work has landed" are different claims.
+
+The release engine kept the minute tick the goal runner gave it (ruling 131(e),
+`startDependencyRunner`), so a hand edit the hooks never saw still releases within a
+minute.
+
+### 7.4 Where a person meets an epic
+
+- **The rail** lists Epics second, after Board (`nav.ts`).
+- **`/projects/:slug/epics`** (`project.epics.tsx`, `EpicsPage`): Open (the default),
+  Closed and All; each row its colour dot and name, its status pill, the progress bar
+  in the project's stage colours (the Home card's meter) with "N of M done", its lead and
+  its target date. New epic (for `manage-epics`) opens the epic dialog: name, description,
+  status, lead, start and target dates, colour; `intent=create-epic`.
+- **`/projects/:slug/epics/:epicId`** (`project.epic.tsx`, `EpicPage`): the head carries
+  the status select and Edit (the same dialog). About renders the description; Tasks
+  has the bar and one row per task with its stage, the board card's status word (the
+  same `cardStatus` the board computes, fed the review queue and live-run state, ruling
+  476(g)), "waits on N" when it waits, its owner, and Remove; Add tasks offers every live
+  task not in it and says which will move from another epic; New task makes one in it;
+  archived tasks fold under the list. History is the file's timeline (the newest shown,
+  "Show all" for the rest). Details: status, lead, dates, creator, and "Planned in
+  <conversation>" for a viewer who may open that thread (its owner or an org admin,
+  `canAccessConversation`). Intents: `update-epic`, `add-tasks`, `remove-task`,
+  `create-task`, each gated inside its writer.
+- **The task page** names the epic in its hero, a chip linking to the epic page
+  (`EpicChip`), and in the Details panel's Epic row, a menu of the open epics with "No
+  epic" first.
+- **The board** has an epic filter (`?epic=<id>` or `none`; Clear resets it, the empty
+  copy names it) and the New task dialog an Epic select that starts on the filtered
+  epic. Cards and list rows draw no epic: ruling 172 keeps planning metadata off them, as
+  it kept the goal link off.
+
+Both epic routes read the project's domain and run facts (ruling 457), which
+`epic.updated` and every task event move.
+
+### 7.5 The agents' epic tools
+
+- **Controller** (§4): `list_epics` (each with status, lead, dates and progress),
+  `get_epic` (the epic in full: its tasks with stage, readiness, owner and waits, its
+  progress by stage and its history), `create_epic` (`tasks` puts existing tasks in as it
+  is created; the conversation is recorded) and `update_epic` (every field, `addTasks`,
+  `removeTasks`; a key not in the epic refuses the removal before anything is written;
+  no delete). `list_tasks` names each task's `epic` and filters by `epicId` (`none` for
+  the tasks in no epic), `get_task` names it, `create_task` and `update_task` take
+  `epic` (`""` takes the task out), and `get_project` summarises the epics. The board
+  context read lists the open epics with their progress (`BOARD_CONTEXT_EPICS` 20) and a
+  task-anchored one names the task's epic.
+- **Operator** ([operator.md §4](operator.md)): the snapshot carries `epic` (the epic
+  this task is in, its description clipped, and its OTHER tasks with their stage and
+  `blockedBy`; it replaced ruling 402's `goalChain`) and `openEpics`, the ones `set_epic`
+  can put the task in. A Codex operator reaches `set_epic` through the plan schema's
+  `epicId` argument.
+
+**A task's done signal is one it can show before acceptance** (ruling 492). Acceptance
+moves a task to Done and nothing after it happens inside the task; a person's acceptance
+also merges the PR when GitHub can, and a full-autonomy operator's leaves the merge to a
+person ([task-lifecycle.md §11](task-lifecycle.md#11-acceptance-and-the-endings)). So
+planned work whose outcome needs a proof only the merged or deployed code can show (a
+production deploy, a cron run on the merged code, a live page, a production log) is two
+tasks, in the same epic when it has one: the delivery task, whose done signal is its
+gates, its reviewers' verdicts or a measurement made on the branch, and a read task whose
+`blockedBy` names it. The release engine starts the read task when the delivery task
+reaches Done, which can be before the merge and before the deploy, so the read task's goal
+confirms the change is merged and deployed before it reads. The controller's two goal
+doors (`create_task.goal` and `update_task.goal`) carry the rule in the goal field's
+description, from one constant (`DONE_SIGNAL_RULE`, `app/server/tasks/done-signal.server.ts`),
+and the controller guide says it under "Creating a task" and "Epics". It is guidance:
 nothing refuses a goal for its words.
 
-### 7.3 Advancing
+### 7.6 The conversion from chained goals
 
-`reconcileGoal` is a convergent engine: hooks and the runner both just say "look at
-this goal now". It runs from three task write paths (stage transition, archive or
-restore, acceptance) through `maybeReconcileGoalForTask`, after `resume | skip_link |
-add_link | edit_link` (an `edit_link` that sets `blockedBy`, ruling 411), and from
-`startGoalRunner` (a boot catch-up, then every 60 seconds over goals in
-`active | attention`). The same tick (`goalRunnerTick`) also runs the dependency release
-engine (ruling 131(e), `releaseDueDependents`): every held task whose `blockedBy` entries
-are all done is released, so a hand edit the hooks never saw releases within a minute.
-Each pass reads every linked task's state from its canonical file and applies, under the
-goal file's lock:
+Boot converts every goal file once, after the rescan and before the watcher
+(`convertGoalsToEpics`, `app/server/tasks/goal-epic-conversion.server.ts`); a project
+that fails is logged and retried on the next boot.
 
-- a task at the terminal stage marks its link `done`; an archived or missing task marks
-  it `failed` with a note; a done link whose task left the terminal stage reopens to
-  `active`; a failed link whose task is back on the board recovers to `active` and lifts
-  the `attention` that failure caused (never a person's `paused`);
-- a failed link with `onFailure: pause` parks the chain in `attention` and notifies the
-  creator; with `continue` it marks every failed link `skipped` and moves on;
-- when every link is `done` or `skipped` and the chain is not in `attention`, the goal
-  completes (audit `goal.completed {title}`, notification to the creator);
-- otherwise, on an active chain, EVERY pending link with no task is judged
-  (`linkWaitState`): a wait on a sibling is answered from the frontmatter being written (a
-  `skipped` sibling settles it like `done`), anything else through the projection. `ready`
-  links start; `open` ones wait; a `dead` wait (a failed sibling, a missing link, an
-  archived task) parks the chain in `attention` with "Link N (…) waits on work that can
-  never complete".
+- Each `goals/goal-N.md` becomes the epic with its number (goal-3 becomes epic-3, or the
+  next free number when that one exists), keeping its title, description, creator,
+  `conversationId` and history, with `convertedFrom: goal-N`. Its status maps: active is
+  `in_progress`, or `planned` while no link had started; paused and attention are
+  `paused`; completed is `done`; cancelled is `cancelled`.
+- Every task that carried a link, and every task whose `goalRef` named the goal, joins
+  the epic with an "Epic" note, and the retired `goalRef` key leaves it, a dangling one
+  (naming a goal the project no longer has) included. A task already in an epic keeps it
+  and is not written again. A `goalRef: null` line the old writer left on a task in no
+  chain is an unknown key now, kept as written and read by nothing, as ruling 98 left the
+  retired engagement slots.
+- An unstarted link of a chain that was still running becomes a task now, in the epic,
+  waiting on what the link waited on, so the release engine starts it when that work
+  lands, exactly as the chain would have. It is created on the goal creator's authority,
+  re-proven as the chain re-proved it (`create-task`, silent deny), with its creation
+  events signed `system:epic-conversion` (`createTask`'s `signedBy`, ruling 477(b)'s
+  signature kept for this one caller). Links that wait on each other are made in the
+  order their waits allow. A link that cannot be made that way (a paused, stopped, done
+  or cancelled chain, a creator who lost task creation, a wait on work that will never
+  exist, a loop) is listed in the epic's description with its text and why, so a person
+  can make it a task.
+- Every stored `goal-N link M` wait, in a task's `blockedBy` and in an open decision's
+  options, is respelled by the key of the task that carried the link; an entry naming a
+  skipped link is dropped (the chain counted it settled), and one naming a link that
+  will never have a task is dropped with a note (an option whose list it emptied keeps
+  an empty list, so the option stays). A task left waiting on nothing is released when
+  everything it waited on was settled, and put in front of a person (`waiting: human`)
+  when something it waited on can never happen. The waits are respelled, as text,
+  before any task file is parsed and written for the joins, because the task parser
+  drops a wait it cannot read and a decision option holding one.
+- A goal file that cannot be read is left in `goals/` and reported, and so is
+  everything naming it: its tasks keep their `goalRef`, and a task whose waits or
+  decision name one of its links keeps them spelled the old way, until a boot can read
+  the goal.
+- Notices whose link opened the goal on the Controller page (`#goal-N`, `#goal-N-link-M`)
+  open the epic's page.
+- The epic's history gains "Converted from goal-N (<title>) when goal chains became
+  epics, holding N tasks." (plus what was made and listed), the audit gains
+  `epic.converted {title, from, total}` signed by the conversion, and the goal file is
+  filed under `goals/converted/`, which is what makes the conversion run once. Every
+  step is idempotent (an epic is found again by its `convertedFrom`, a link's new task is
+  recorded in the goal file the moment it exists), so a conversion interrupted part-way
+  finishes on the next boot.
 
-Before any start the creator's **live** `create-task` is re-proven (`creatorMayCreateTasks`,
-silent deny); lost authority parks the chain in `attention` and notifies the creator. Each
-start (`startLinkTask`) holds a per-link lock (`goal-start:<slug>:<goal>:<link>`), re-checks
-that the chain is active and the link still pending before `createTask` and again under the
-goal-file lock after it, and creates the task under the actor
-`{ userId: createdBy, label: "<label> · goal chain" }`. The task's creation events (the
-owner seat and any "Waits on other work" note) are signed `system:goal-chain`, not by the
-creator, and the seat reads "Started by **goal-N** as link M, on <creator>'s authority,
-with <owner> as owner. …" (ruling 477(b)); a retry's reads the same with the retrying
-person's authority. The first start that throws parks
-the chain and leaves the rest for a later pass. Each start notifies the creator ("Link N
-started as KEY"). Ruling 131(c): the link's declared `blockedBy` is copied into
-`createTask` and validated there, so the task is born held (readiness floored at
-`blocked`); when the mint is the completion of the very work it waits on, the release
-engine is asked once right away (`releaseTask`, ruling 358) instead of leaving the task for
-the minute tick.
-
-From the moment a link has a task, the task's list IS the wait (ruling 155): every
-change to it, whoever makes it (the task page, the controller's `update_task`, the
-operator's `set_dependencies`, the release engine), is mirrored onto `links[].blockedBy`
-by `mirrorLinkWait` (`dependencies.server.ts`) with a goal timeline line naming who
-changed it (the engine signs as "Viberr (release)"), and the goal projection is rebuilt.
-The mirror writes only while the link is `active` and carried by that task, and only
-when the two lists differ; a retried link is therefore born on the wait the record last
-held.
-
-### 7.4 Redirecting
-
-`updateGoal` is gated by `requireGoalAuthority`: the creator (project mutable and any
-membership) **or** a member holding `run-agents`. Every op except `rename` refuses on a
-`completed` or `cancelled` chain. Audit `goal.updated {op, message, title, index?,
-reason?, from?, to?, unchanged?}` (the chain's title after the op, the link an op touched,
-a person's reason, a rename's two titles, `unchanged` for an op that changed nothing; an
-`adopt_task` row carries the adopted task's key), from which the Activity audit column
-writes one sentence per op (ruling 477(b)).
-
-- `rename` — the chain's title and/or description, on any chain including a settled one
-  (ruling 267); neither steers work, and the timeline says link tasks keep the old name in
-  their frozen chain header.
-- `pause`, `resume` (re-runs the reconcile), `cancel` (optional reason; terminal).
-- `skip_link` — a pending or failed link (refused while an active link's task is being
-  worked); un-parks `attention` and re-runs the reconcile.
-- `retry_link` — failed links only; a fresh task under the PRESENT caller, rebuilt from
-  the failed TASK's own current title and goal rather than the link's frozen copy
-  (ruling 192), unless the link was re-declared by `edit_link` (ruling 192(b)); the goal
-  timeline records which text it carried. A retry that starts nothing (the chain stopped
-  being active while it ran) re-parks the chain, notes the link, notifies the creator and
-  says so (ruling 194); a retry whose `createTask` throws parks the chain the same way.
-- `edit_link` — a pending or failed link's title, goal and `blockedBy` (absent leaves the
-  wait, `[]` clears it; validated at declaration time, cycles refused). Setting a pending
-  link's `blockedBy` re-runs the reconcile in the same call, and when the wait is cleared
-  the reply names the task just created ("Link N started as KEY"), not the chain's current
-  link (ruling 411). On an ACTIVE link `blockedBy` is the only editable field: the chain's
-  own rules are applied first, then it is forwarded to `setTaskDependencies` on the link's
-  task after the goal-file lock is released, under that writer's own gate, and mirrored
-  back ("Link 1 waits on nothing, through KNC-3."); a title or goal on an active link, or
-  an edit with nothing to forward, is refused with "Only a pending or failed link's title
-  or goal can be edited; link 1 is active. Its wait follows KNC-3: pass blockedBy here or
-  edit it on the task."
-- `add_link` — ≤ 20 links; the index is the highest + 1; re-runs the reconcile, so a link
-  with no wait starts at once.
-- `remove_pending_link` — a pending link with no task; re-indexes the later links, so it
-  is refused while any link of this or another goal, or any task, waits on a link at or
-  after the removed index (`referencesToLinksFrom`), naming them.
-- `adopt_task` — binds an EXISTING, non-archived task that belongs to no other chain to a
-  pending link with no task (ruling 243): the link goes `active` and mirrors the task's own
-  `blockedBy`, and the task gains its `goalRef` and an "Adopted into a goal chain" note
-  after the goal file commits.
-
-The project route's `goal-op` intent exposes `pause`, `resume`, `cancel`, `skip_link` and
-`retry_link`; `rename`, `edit_link`, `add_link`, `remove_pending_link` and `adopt_task` are
-controller-tool-only.
-
-### 7.5 Reading a chain
-
-- **`get_goal`** reads the canonical file with its history and the `conversationId` the
-  chain was planned in (ruling 476(h)). A link's `goal` is always the
-  contract in force: for a link whose task's current goal (chain header stripped) differs
-  from what the chain declared, `goal` is the task's text and the declaration is kept as
-  `declaredGoal` (ruling 335, reversing ruling 192's `liveGoal` naming).
-- **`list_goals`** and the Goals panel read the projection; each link carries `waits`, its
-  declared entries with their live state (ruling 359).
-- **The Goals panel** (the project controller page's rail): the head counts chains by
-  status, naming only the non-zero ones ("1 active · 1 paused · 2 need attention · 3
-  settled", `goalsCountLine`, ruling 476(f)). Each chain is a `<details>` card anchored
-  `#goal-N`, stating "N of M done", plus "· N waiting on you" and "· N waiting on a human"
-  for its started links whose task waits on a person; a settled chain starts folded. Each
-  link row prints its number ("Link 3" to a screen reader) and is anchored
-  `#goal-N-link-M` (`goalLinkAnchor`, `app/shared/goal-anchor.ts`): the task page's chain
-  chip and a wait entry naming a goal link open that row, and the jump opens its chain,
-  scrolls the row to the top of the rail, focuses it and marks it (`data-targeted`; ruling
-  476(b)). "About this chain" folds "Planned in <conversation>" (a link to the thread whose
-  turn created the chain, for a viewer who may open it: its owner or an org admin), the
-  description and the newest six history entries, all read from the file in one pass
-  (`readGoalFileFacts`, rulings 419(h) and 476(h)); the Conversations panel above lists the
-  planning threads its own list does not hold under "Where this board's chains were
-  planned" (`plannedElsewhere`). A started link's pill is the board card's status for its
-  task, word and colour (`cardStatus` through `linkTaskStatuses`, fed the board's own
-  review queue and live-run state; "waiting on you" in the board's blue, "waiting on a
-  human", "input required", "agent working", "resumes <time>"; ruling 476(g)); without it,
-  a link whose task exists and still waits on anything unfinished shows **blocked**. Its
-  wait is a disclosure summarised as a count ("waits on 6 open · 4 done", plus "· N can
-  never finish" in the danger colour) that opens to one row per entry with its state, link
-  and title (ruling 425; the "open" is ruling 476(b)'s, so the count never reads as a link
-  number). Controls (Retry and Skip per failed
-  link, Pause/Resume, Cancel) render for `run-agents` holders, org admins and the chain's
-  own creator (ruling 260). Cancel and Skip confirm in the danger face; the cancel confirm
-  names the unstarted links that will never start and the other chains' links that would
-  wait forever (`linksStrandedByCancel`) and takes an optional reason (ruling 419(c)).
-- **The operator** of a chain task reads the live chain as `goalChain` in its snapshot
-  (ruling 402).
+An upgraded database keeps `goal_projections` and the two retired `task_projections`
+columns (`goal_id`, `goal_link_index`), which nothing reads or writes.
 
 ## 8. Identifiers this subsystem emits
 
 - Audit actions: `controller.authority.denied`, `controller.ops.read`,
   `controller.repo.read`, `controller.github.read`,
   `controller.resource_grant.requested|granted|declined`, `org.controller.updated`,
-  `goal.created`, `goal.updated`, `goal.completed`, plus
-  `task.agent.commented` with label `controller` and every downstream row under
-  `<email> · via controller`.
-- Notification kind: `controller`, created only for goal progress (a link started, the
-  chain parked in attention, a retry that did not start, completion), addressed to the
-  goal creator, from the "Controller" agent identity. The category has a routing toggle
-  in the profile, default on. A conversation reply is not a notification: the
-  unseen-reply dot (§3) is its signal.
+  `epic.created`, `epic.updated`, `task.epic.changed` and, once per converted goal,
+  `epic.converted` (§7), plus `task.agent.commented` with label `controller` and every
+  downstream row under `<email> · via controller`. The `goal.created`, `goal.updated`
+  and `goal.completed` rows an upgraded store holds still read in the Activity column.
+- Notification kind: `epic` (§7.3), addressed to the epic's lead or, while nobody leads
+  it, its creator; its profile category is `epics` ("Epic updates", default on). The
+  `controller` kind, written only for goal-chain progress, has no writer since ruling
+  503; the rows an upgraded inbox holds still read and answer to the `epics` toggle, and
+  a person who had silenced the old `controller` category keeps `epics` silenced. A
+  conversation reply is not a notification: the unseen-reply dot (§3) is its signal.
 - SSE: `controller.updated {conversationId, userId}` (owner-routed),
   `controller.log-appended {conversationId, userId, runId, threadId, seq}` (owner-routed,
   one per stored console line of a controller run; a stream event, tailed by the console
   and ignored by `useLiveUpdates`),
-  `goal.updated {projectSlug, goalId}` (project-routed).
+  `epic.updated {projectSlug, epicId}` (project-routed; a task joining or leaving an
+  epic is that task's own `task.updated`).
 - Timeline: `comment` events authored by `controller` with the trailer
   `_Posted by the controller for <name>._`.
 
@@ -1140,6 +1146,3 @@ controller-tool-only.
 - `read_store_doc`'s not-found sentence says "Viberr has no tool that returns repository
   file contents"; `read_default_branch_file` (ruling 299) is one
   (`controller-ops-mcp.server.ts`).
-- The shipped controller doctrine and `controller-guide` skill still describe chains as
-  starting one link at a time (§7 is ruling 398's fan-out); they are product prompts
-  pinned by tests and are the owner's to change.

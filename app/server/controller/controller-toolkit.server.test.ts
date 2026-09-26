@@ -161,56 +161,6 @@ describe("the tool surface itself encodes the invariants", () => {
     expect(loading.loaded).toEqual([]);
     expect(loading.deferred).toHaveLength(toolkit.tools.length);
   });
-
-  /**
-   * Ruling 411 (F39-38), live on ax-clone.
-   *
-   * `edit_link` was the one op that can make a link STARTABLE and the one that
-   * did not advance the chain afterwards -- `resume`, `skip_link` and
-   * `add_link` all do. So clearing a wait left the link for the periodic tick,
-   * and `update_goal` returned with `activeTaskKey` still naming the link
-   * before it. The controller cleared goal-4 link 2's wait, read the goal back
-   * TWICE, saw a startable link with no task both times, and created AX-25 to
-   * carry it -- while the tick had already minted AX-24 four seconds earlier.
-   * `adopt_task` correctly refused the second ("Link 2 already has a task"),
-   * leaving AX-25 an orphan with an agent dispatched on it, building
-   * `ax apply -f` a second time on a second branch.
-   *
-   * The guard held. The op that should have closed the window did not exist,
-   * so the instruction is only half the fix: `edit_link` now advances.
-   */
-  it("ruling 411: update_goal says a link you unblock starts AT ONCE, so do not pre-make its task", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
-      projectSlug: SLUG,
-    });
-    const updateGoal = toolkit.tools.find((t) => t.name === "update_goal");
-    expect(updateGoal, "update_goal must exist for this to mean anything").toBeTruthy();
-    // The instruction text lives on each zod field's `.describe()`, which is
-    // what the model is shown. Read the shape, not a stringify of the schema:
-    // Zod 4 keeps descriptions off the serialized `def`.
-    const described = updateGoal!.description;
-    // CANARY: drop either sentence and the controller is told what it was told
-    // when it made AX-25.
-    expect(described).toContain("STARTS that link in the same call");
-    expect(described).toContain("never create a task for a link you are about to unblock");
-    expect(described).toContain("RULING 411");
-    // The reply names the started task in its message. `activeTaskKey` is the
-    // chain's current link (goal-actions' own ruling 411 test pins that it is
-    // NOT the started one), so the text must never send the reader there.
-    // CANARY: restore "names it in activeTaskKey" to either text and this fails.
-    // `strictTool` hands the SDK a whole `z.strictObject` as the tool's input
-    // schema (strict-tool.server.ts); parsed as one rather than asserted.
-    const schema = z.instanceof(z.ZodType).parse(updateGoal!.inputSchema);
-    const fields = JSON.stringify(z.toJSONSchema(schema));
-    for (const text of [described, fields]) {
-      expect(text).toContain("Link N started as KEY");
-      expect(text).not.toMatch(/activeTaskKey names|names it in activeTaskKey/);
-    }
-  });
 });
 
 /**
@@ -223,7 +173,8 @@ describe("the tool surface itself encodes the invariants", () => {
  * links 9 and 11, carried by WEB-12 and WEB-7), and each needed a person or an
  * extra packet before it could finish. Its four goal doors said only
  * "deliverable plus the done signal", and `update_goal`'s goal field, which
- * `add_link` and `edit_link` write through, said nothing at all.
+ * `add_link` and `edit_link` write through, said nothing at all. Ruling 503
+ * retired the two chain doors; the two task doors remain.
  */
 describe("ruling 492: every controller door that writes a goal carries the done-signal rule", () => {
   // The published description of a door's goal field, "" when the field has
@@ -232,26 +183,17 @@ describe("ruling 492: every controller door that writes a goal carries the done-
     .object({ properties: z.object({ goal: z.object({ description: z.string() }) }) })
     .transform((schema) => schema.properties.goal.description)
     .catch("");
-  const linkGoal = z
-    .object({
-      properties: z.object({
-        links: z.object({
-          items: z.object({
-            properties: z.object({ goal: z.object({ description: z.string() }) }),
-          }),
-        }),
-      }),
-    })
-    .transform((schema) => schema.properties.links.items.properties.goal.description)
-    .catch("");
-
-  it("create_task, update_task, create_goal's links and update_goal publish DONE_SIGNAL_RULE on their goal field", async () => {
+  it("create_task and update_task publish DONE_SIGNAL_RULE on their goal field", async () => {
     // CANARY: drop `DONE_SIGNAL_RULE` from any one door and its assertion
     // fails naming it. Empty the rule and the three lines below fail first,
     // since every door would then "contain" it.
     expect(DONE_SIGNAL_RULE).toContain("a done signal is something the task can show BEFORE acceptance");
     expect(DONE_SIGNAL_RULE).toContain("that proof goes in a follow-up read task that waits on this one");
-    expect(DONE_SIGNAL_RULE).toContain("split in two: the delivery link, and a read link");
+    // Ruling 503: planned work is tasks in an epic, never links of a chain.
+    expect(DONE_SIGNAL_RULE).toContain(
+      "is two tasks, in the same epic when it has one: the delivery task, and a read task whose `blockedBy` names it",
+    );
+    expect(DONE_SIGNAL_RULE).not.toMatch(/\blink\b/);
     // Review (2026-09-26): the rule is true on every acceptance path. A
     // full-autonomy operator's acceptance leaves the PR "accepted, merge
     // pending", and a `blockedBy` wait is done when its task reaches Done,
@@ -282,8 +224,6 @@ describe("ruling 492: every controller door that writes a goal carries the done-
     const doors: [string, string][] = [
       ["create_task.goal", topGoal.parse(published.get("create_task"))],
       ["update_task.goal", topGoal.parse(published.get("update_task"))],
-      ["create_goal.links[].goal", linkGoal.parse(published.get("create_goal"))],
-      ["update_goal.goal", topGoal.parse(published.get("update_goal"))],
     ];
     for (const [door, description] of doors) {
       expect(description, `${door} does not carry DONE_SIGNAL_RULE`).toContain(DONE_SIGNAL_RULE);
@@ -1746,21 +1686,17 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
 
   /**
    * The WRITE tools must hold the same posture as the reads. `createTask` and
-   * `createGoal` gate themselves on `create-task`, whose refusal names the
-   * project and the role — so a non-member probing a slug they should not know
+   * `createEpic` gate themselves on a role grant (`create-task`,
+   * `manage-epics`), whose refusal names the project and the role — so a
+   * non-member probing a slug they should not know
    * exists got a different sentence for a real project than for an invented
    * one. That difference is the existence oracle R15-4 closes.
    */
-  it("create_task and create_goal keep the not-visible posture for a non-member", async () => {
+  it("create_task and create_epic keep the not-visible posture for a non-member", async () => {
     const probes: { tool: string; args: Record<string, JsonValue> }[] = [
       { tool: "create_task", args: { title: "Should not land", goal: "Nor this." } },
-      {
-        tool: "create_goal",
-        args: {
-          title: "Should not land",
-          links: [{ title: "One", goal: "Nor this." }],
-        },
-      },
+      // Ruling 503: the epic door, where create_goal's stood.
+      { tool: "create_epic", args: { title: "Should not land" } },
     ];
     for (const { tool, args } of probes) {
       const real = await call(ids.nonMember, tool, args);
@@ -2308,49 +2244,35 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(reply).toContain("[denied]");
   });
 
-  it("goals: a viewer cannot define a chain; a contributor can; redirecting needs the creator or a maintainer", async () => {
-    const denied = await call(ids.viewer, "create_goal", {
-      title: "Viewer chain",
-      links: [{ title: "One", goal: "Do one thing. Done when it exists." }],
-    });
+  it("epics (ruling 503): a viewer reads them and cannot create or change one; a contributor can; moving tasks needs edit-task-meta", async () => {
+    // CANARY: drop the `manage-epics` check from `createEpic` and the viewer's
+    // epic lands.
+    const denied = await call(ids.viewer, "create_epic", { title: "Viewer epic" });
     expect(denied).toContain("[denied]");
 
-    const created = await call(ids.contributor, "create_goal", {
-      title: "Matrix probe chain",
-      description: "Two links, advanced by the server.",
-      links: [
-        { title: "First link", goal: "Do the first thing. Done when done." },
-        { title: "Second link", goal: "Do the second thing. Done when done." },
-      ],
+    const created = await call(ids.contributor, "create_epic", {
+      title: "Matrix probe epic",
+      description: "Tasks join and leave it one at a time.",
     });
     expect(created).toContain("[done]");
-    expect(created).toContain("goal-1");
+    const epicId = /epic-\d+/.exec(created)?.[0];
+    expect(epicId, "the reply names the epic it created").toBeTruthy();
 
-    const listed = await call(ids.viewer, "list_goals");
-    expect(listed).toContain("Matrix probe chain");
-    const goal = await call(ids.viewer, "get_goal", { goalId: "goal-1" });
-    expect(goal).toContain("First link");
+    const listed = await call(ids.viewer, "list_epics");
+    expect(listed).toContain("Matrix probe epic");
+    const epic = await call(ids.viewer, "get_epic", { epicId: epicId! });
+    expect(epic).toContain("Tasks join and leave it one at a time.");
 
-    // The invited member is a plain viewer now and NOT the creator: refused.
+    // The invited member is a plain viewer now: refused both ways.
     const { findUserByEmail } = await import("~/server/auth/user-store.server");
     const invited = findUserByEmail(app.db, "invited-probe@viberr.test")!.id;
-    const redirectDenied = await call(invited, "update_goal", {
-      goalId: "goal-1",
-      op: "pause",
-    });
-    expect(redirectDenied).toContain("[denied]");
+    expect(await call(invited, "update_epic", { epicId: epicId!, status: "in_progress" })).toContain("[denied]");
+    expect(await call(invited, "update_epic", { epicId: epicId!, addTasks: ["VIB-142"] })).toContain("[denied]");
 
-    // The creator pauses their own chain; a maintainer resumes it.
-    const paused = await call(ids.contributor, "update_goal", {
-      goalId: "goal-1",
-      op: "pause",
-    });
-    expect(paused).toContain("[done]");
-    const resumed = await call(ids.maintainer, "update_goal", {
-      goalId: "goal-1",
-      op: "resume",
-    });
-    expect(resumed).toContain("[done]");
+    // A contributor changes what it is; a maintainer puts a task in and takes it out.
+    expect(await call(ids.contributor, "update_epic", { epicId: epicId!, status: "in_progress" })).toContain("[done]");
+    expect(await call(ids.maintainer, "update_epic", { epicId: epicId!, addTasks: ["VIB-142"] })).toContain("[done]");
+    expect(await call(ids.maintainer, "update_epic", { epicId: epicId!, removeTasks: ["VIB-142"] })).toContain("[done]");
   });
 });
 
@@ -2769,50 +2691,6 @@ describe("task anchoring (ruling 121)", () => {
     // SAFETY: same mapping as above.
     const listedAgain = JSON.parse(await call(ids.contributor, "list_tasks", {})) as { key: string; waitsOn: string[] }[];
     expect(listedAgain.find((t) => t.key === key)!.waitsOn).toEqual(["VIB-142 (open)"]);
-  });
-
-  it("ruling 131(c): create_goal links declare a wait, update_goal edit_link leaves it when absent and clears it with [], and list_goals/get_goal expose it", async () => {
-    // Canary: drop `blockedBy` from the `edit_link` op mapping (the [] clear
-    // is silently ignored).
-    const created = await call(ids.maintainer, "create_goal", {
-      title: "Chain with a declared wait",
-      links: [
-        { title: "First", goal: "Do the first thing. Done when merged." },
-        { title: "Second", goal: "Do the second thing. Done when merged.", blockedBy: ["VIB-142"] },
-      ],
-    });
-    // Ruling 398: the message names every link that started, because more than
-    // one can. Link 2 waits on VIB-142, so only link 1 starts here.
-    expect(created).toMatch(
-      /^\[done\] Goal goal-\d+ created with 2 links; 1 started now \(link 1 is VIB-\d+\)\.$/,
-    );
-    const goalId = /goal-\d+/.exec(created)![0];
-    // SAFETY: `get_goal` answers `json(goalView)`, whose `links` are the
-    // schema-parsed GoalLink[] (index and blockedBy always present).
-    const goal = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { index: number; blockedBy: string[] }[] };
-    expect(goal.links.map((l) => l.blockedBy)).toEqual([[], ["VIB-142"]]);
-    // A title-only edit leaves the wait alone.
-    await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, title: "Second, renamed" });
-    // SAFETY: same shape as above.
-    let after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
-    expect(after.links[1]!.blockedBy).toEqual(["VIB-142"]);
-    // A declared cycle is refused at declaration time.
-    expect(await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, blockedBy: [`${goalId} link 2`] })).toContain(
-      `[error] ${goalId} link 2: a link cannot wait on itself.`,
-    );
-    // [] clears.
-    expect(await call(ids.maintainer, "update_goal", { goalId, op: "edit_link", index: 2, blockedBy: [] })).toContain("waits on nothing");
-    // SAFETY: same shape as above.
-    after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
-    expect(after.links[1]!.blockedBy).toEqual([]);
-    // SAFETY: `list_goals` maps every link to `{index, title, status, taskKey, blockedBy}`.
-    const listed = JSON.parse(await call(ids.maintainer, "list_goals", {})) as { id: string; links: { blockedBy: string[] }[] }[];
-    expect(listed.find((g) => g.id === goalId)!.links.map((l) => l.blockedBy)).toEqual([[], []]);
-    // add_link with a wait.
-    expect(await call(ids.maintainer, "update_goal", { goalId, op: "add_link", title: "Third", goal: "Third thing.", blockedBy: ["VIB-148"] })).toContain("[done] Link 3 added.");
-    // SAFETY: same shape as above.
-    after = JSON.parse(await call(ids.maintainer, "get_goal", { goalId })) as { links: { blockedBy: string[] }[] };
-    expect(after.links[2]!.blockedBy).toEqual(["VIB-148"]);
   });
 
   it("update_task is a write tool, so the always-human and no-delete invariants still hold", async () => {

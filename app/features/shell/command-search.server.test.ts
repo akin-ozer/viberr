@@ -11,6 +11,8 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
+import { defaultEpicColor, type EpicStatus } from "~/schemas/epic-file.schema";
+import { createEpicFile } from "~/server/files/epic-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { searchWorkspace } from "./command-search.server";
 
@@ -301,6 +303,97 @@ describe("searchWorkspace", () => {
       searchWorkspace(store.db, asMember(store), "%", {
         dataRoot: store.dataRoot,
       }).filter((h) => h.kind === "task"),
+    ).toEqual([]);
+  });
+});
+
+/**
+ * Ruling 503: the palette finds an epic by its name or its id, the way
+ * Linear's finds a project, inside the same membership scope as every other
+ * hit.
+ */
+describe("searchWorkspace: epics (ruling 503)", () => {
+  async function writeEpic(store: TestStore, id: string, title: string, status: EpicStatus, updatedAt: string) {
+    await createEpicFile(
+      { projectSlug: store.slug, epicId: id, dataRoot: store.dataRoot },
+      {
+        frontmatter: {
+          id,
+          title,
+          status,
+          color: defaultEpicColor(id),
+          leadUserId: null,
+          startDate: null,
+          targetDate: null,
+          createdBy: store.users.arda.id,
+          createdByLabel: store.users.arda.email,
+          conversationId: null,
+          convertedFrom: null,
+          createdAt: updatedAt,
+          updatedAt,
+        },
+        description: "",
+      },
+    );
+  }
+
+  async function seedEpics(): Promise<TestStore> {
+    const store = seed();
+    // The done one is the newest: recency alone would put it first.
+    await writeEpic(store, "epic-1", "Checkout revamp", "done", "2026-09-25T10:00:00.000Z");
+    await writeEpic(store, "epic-2", "Checkout analytics", "in_progress", "2026-09-20T10:00:00.000Z");
+    await writeEpic(store, "epic-3", "Search", "planned", "2026-09-21T10:00:00.000Z");
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    return store;
+  }
+
+  it("finds an epic by name, open ones first, a closed one saying so", async () => {
+    // CANARY: drop the open-first CASE from the epic query's ORDER BY.
+    const store = await seedEpics();
+    const epics = searchWorkspace(store.db, asMember(store), "checkout", {
+      dataRoot: store.dataRoot,
+    }).filter((h) => h.kind === "epic");
+    expect(epics).toEqual([
+      {
+        kind: "epic",
+        id: "epic:viberr-core/epic-2",
+        label: "Checkout analytics",
+        sub: "epic-2 · Viberr Core",
+        href: "/projects/viberr-core/epics/epic-2",
+      },
+      {
+        kind: "epic",
+        id: "epic:viberr-core/epic-1",
+        label: "Checkout revamp",
+        sub: "epic-1 · Viberr Core · done",
+        href: "/projects/viberr-core/epics/epic-1",
+      },
+    ]);
+  });
+
+  it("finds an epic by its id, and lists epics after projects and before tasks", async () => {
+    const store = await seedEpics();
+    const byId = searchWorkspace(store.db, asMember(store), "EPIC-3", {
+      dataRoot: store.dataRoot,
+    });
+    expect(byId.filter((h) => h.kind === "epic").map((h) => h.label)).toEqual(["Search"]);
+    // "c" meets the project (Viberr Core), the epics and the tasks.
+    const kinds = searchWorkspace(store.db, asMember(store), "c", {
+      dataRoot: store.dataRoot,
+    }).map((h) => h.kind);
+    const firstTask = kinds.indexOf("task");
+    expect(kinds.indexOf("project")).toBe(0);
+    expect(kinds.lastIndexOf("epic")).toBeLessThan(firstTask);
+    expect(kinds.includes("epic")).toBe(true);
+  });
+
+  it("shows a NON-MEMBER no epic (R15-4 scoping)", async () => {
+    // CANARY: query `epic_projections` without the visible-project filter.
+    const store = await seedEpics();
+    expect(
+      searchWorkspace(store.db, asNonMember(store), "checkout", {
+        dataRoot: store.dataRoot,
+      }),
     ).toEqual([]);
   });
 });

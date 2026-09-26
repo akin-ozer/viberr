@@ -7,6 +7,7 @@ import type { IconName } from "~/ui/icon";
 export interface WorkspaceNavItem {
   id:
     | "board"
+    | "epics"
     | "review"
     | "controller"
     | "agents"
@@ -20,6 +21,8 @@ export interface WorkspaceNavItem {
 
 export const WORKSPACE_NAV: readonly WorkspaceNavItem[] = [
   { id: "board", label: "Board", icon: "board" },
+  // Ruling 503: the project's epics, beside the board whose tasks they hold.
+  { id: "epics", label: "Epics", icon: "epic" },
   { id: "review", label: "Review queue", icon: "inbox" },
   // Ruling 99: the instance controller, addressed inside this project.
   { id: "controller", label: "Controller", icon: "cpu" },

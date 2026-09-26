@@ -186,21 +186,22 @@ describe("ProfilePage", () => {
   it("Your access renders the shared RBAC table for the REAL role", () => {
     const { container, getByText } = renderProfile();
     expect(getByText("Your access")).toBeTruthy();
-    // Maintainer holds 14 of the 19 rows — all but the 5 admin-only actions
+    // Maintainer holds 16 of the 21 rows — all but the 5 admin-only actions
     // (release-any-owner, manage members, manage agent profiles, edit workflow/
     // policy, and force-accept past the review gate) — the total table (R8-2)
     // surfaces every enforced action. edit-task-meta (contributor+) is one of
-    // the 14.
+    // the 16.
     // Ruling 309(a): the same scope line the Policy table carries. This list is
     // the one a person reads about THEMSELVES, so a maintainer learning they
     // hold "Edit task priority, labels & due date" has to also learn that the
     // grant releases held tasks. CANARY: drop `covers` from RBAC_ROWS.
+    // Ruling 503 added the epic a task is in to the same line.
     expect(
-      getByText("and what a task waits on, which releases it when cleared"),
+      getByText("the epic a task is in, and what it waits on, which releases it when cleared"),
     ).toBeTruthy();
-    // Ruling 379 added the `attach-file` row (contributor and above), so a
-    // maintainer holds one more.
-    expect(container.querySelectorAll(".rbac-yes")).toHaveLength(15);
+    // Ruling 379 added the `attach-file` row (contributor and above), and
+    // ruling 503 `manage-epics` (the same tiers), so a maintainer holds two more.
+    expect(container.querySelectorAll(".rbac-yes")).toHaveLength(16);
     expect(container.querySelectorAll(".rbac-no")).toHaveLength(5);
     // Ruling 148: each cell says the fact. The check is aria-hidden, so a
     // glyph-only pair announced nothing at all, and the denied "−" read as a

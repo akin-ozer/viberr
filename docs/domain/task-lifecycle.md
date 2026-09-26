@@ -58,13 +58,14 @@ Roles are a strict tier: `viewer ⊂ contributor ⊂ maintainer ⊂ admin`.
 | Action id | admin | maintainer | contributor | viewer |
 |---|---|---|---|---|
 | `view`, `comment` | ✓ | ✓ | ✓ | ✓ |
-| `create-task`, `own-task`, `edit-task-meta`, `attach-file` | ✓ | ✓ | ✓ | |
+| `create-task`, `own-task`, `edit-task-meta`, `attach-file`, `manage-epics` | ✓ | ✓ | ✓ | |
 | `approve-transition`, `resolve-packet`, `accept-completion`, `update-goal`, `run-agents`, `reorder-board`, `reconcile-github`, `grant-github-scope`, `rescan-project` | ✓ | ✓ | | |
 | `release-any-ownership`, `manage-members`, `manage-agents`, `edit-policy`, `force-accept-completion` | ✓ | | | |
 
 Two grants gate more than their labels name, and each definition carries a `covers`
 line saying so (ruling 309(a)): `edit-task-meta` also gates what a task waits on
-(`setTaskDependencies`, which releases a held task when the list is cleared), and
+(`setTaskDependencies`, which releases a held task when the list is cleared) and which
+epic it is in (`setTasksEpic`, ruling 503), and
 `edit-policy` also gates archiving and restoring the project itself. `update-goal` gates
 the task title as well as its goal (§3). `app/shared/rbac.test.ts` fails when this table
 and `RBAC_DEFINITIONS` disagree.
@@ -79,15 +80,18 @@ minute). Denials are audited as `project.authority.denied`.
 
 ## 3. Creation
 
-`createTask` (`create-task`; the `create-task` intent on the board, the controller's
-`create_task`, a packet's `create_task` option, goal-chain advancement) refuses any
+`createTask` (`create-task`; the `create-task` intent on the board and on an epic's page,
+the controller's `create_task`, a packet's `create_task` option, the goal-to-epic
+conversion) refuses any
 stage but the **entry stage** (ruling 70), and a title under 3 characters. It allocates
 the key from `project.md` `nextTaskNumber` under the project mutex, writes `task.md`
 with `readiness: input_required`, `waiting: human`, the goal (or the placeholder "Goal
 to be refined at the triage quality gate."), optional `priority | labels | dueDate`,
-optional `goalRef`, then auto-invokes the operator with the `create` trigger. Every
-check that can refuse (priority, due date, named owner, dependencies) runs before the
-key is allocated, so a refused creation burns no counter value.
+optional `epic` (ruling 503: the epic it is born in, with an "Epic" note; a task made
+from an operator's `create_task` option joins the deciding task's epic), then
+auto-invokes the operator with the `create` trigger. Every check that can refuse
+(priority, due date, named owner, dependencies, the epic) runs before the key is
+allocated, so a refused creation burns no counter value.
 
 **Creation seats the creator as owner** (ruling 127), or the member named at creation
 (ruling 140(a): `CreateTaskInput.ownerUserId`, the controller's `create_task` `owner`).
@@ -96,10 +100,12 @@ and seated in the same `task.md` write, before the operator's `create` trigger, 
 first triage run bills the named owner and is refused honestly when they have no
 credential. The seat is written with the same `assign` timeline event a take through
 `setOwner` writes ("Took task ownership by creating the task …" or "Seated <name> as
-owner at creation …"); a task a goal chain starts gets that event, and its "Waits on
-other work" note, signed `system:goal-chain` instead ("Started by **goal-N** as link M, on
-<creator>'s authority, with <owner> as owner. …", ruling 477(b)), so Activity does not
-credit a person with the chain's act. `task.created` details carry `ownerUserId` and `seat:
+owner at creation …"). A creation an automation makes on a person's authority signs
+that event, and its "Waits on other work" and "Epic" notes, itself (`signedBy`, ruling
+477(b)), so Activity does not credit the person with the automation's act: the one
+caller is the goal-to-epic conversion (`system:epic-conversion`, "Made for link M of
+goal-N (<title>) when goal chains became epics, on <creator>'s authority, …"; ruling
+503). Tasks a goal chain started before that carry `system:goal-chain`. `task.created` details carry `ownerUserId` and `seat:
 creator | named | none`; a named owner who is not the creator is notified (§7). The
 reason is the credential principal: every agent run on a task bills the OWNER's own
 Claude and Codex accounts, so a task born unowned could not run the operator it was
@@ -125,17 +131,15 @@ moving a task past an open packet. `input_required` set at creation clears when 
 task leaves the entry stage.
 
 **Waiting on other work at birth** (ruling 131(c)): `createTask` accepts `blockedBy`
-(task keys and goal links in the same project, validated by `validateDependencyRefs`).
+(task keys in the same project, validated by `validateDependencyRefs`).
 The task is written with the list, `waiting: none`, a "Waits on other work" note
 ("Created waiting on … Held until every entry is done; Viberr releases it then."), and
 its stored readiness at the birth value `input_required`; the `blocked` it shows is the
 derived floor. When every entry is already done the note says so instead ("Created after
 the work it waits on was done …, so nothing holds it; Viberr releases the list at
-once."). The controller's `create_task`, a goal link's declared `blockedBy` and a packet's
-`create_task` option all come in through this door; from then on the link's record
-follows the task's list (ruling 155, §6). A goal creates a chain task only once the
-link's own wait is satisfied (ruling 398), and a link minted by the completion of the
-link it waits on is released at birth (ruling 358).
+once."). The controller's `create_task`, the goal-to-epic conversion (an unstarted
+link's declared wait, respelled by task key) and a packet's `create_task` option all
+come in through this door.
 
 ## 4. Stages and the workflow graph
 
@@ -222,8 +226,9 @@ profile's stages.
    deployed operator's gate and skips the re-trigger when the card was filed (the fold,
    owner decision Q35-15). Consecutive operator-authored moves carry a depth; at
    `OPERATOR_TRANSITION_CHAIN_CAP` (8) the chain stops and a stuck-loop packet opens
-   instead. Goal chains reconcile, held dependents are swept (`maybeReleaseDependents`,
-   ruling 131(e)), and entering the review stage with no live PR writes a "Review reached
+   instead. The task's epic is checked for being all done (`maybeNoteEpicComplete`,
+   ruling 503), held dependents are swept (`maybeReleaseDependents`, ruling 131(e)), and
+   entering the review stage with no live PR writes a "Review reached
    with no PR yet" `github` event, so the gap is never silent.
 
 A person's own operator run (a `manual` trigger) also clears `heldAtStage`; a scheduled
@@ -296,7 +301,7 @@ door it comes through: the task page's own "Blocked by" form (intent
 operator's `set_dependencies` tool (in-process authority), and a packet's
 `block_on_dependencies` option (ruling 230). Every write validates against the store,
 names the reference and the reason when it refuses (unparseable, self, unknown,
-archived, unknown goal or link, a cycle through stored and declared edges, or an added
+archived, a cycle through stored and declared edges, or an added
 task that is already done, which would hold nothing), writes a "Dependencies updated"
 note and a `task.dependencies.updated` audit row, and settles `waiting: none` when
 nothing else is pending. An emptied list clears `heldAtStage`.
@@ -308,7 +313,7 @@ pill already carries the red), the hero renders one linked chip per entry, the
 Current-state row reads "Other work: …", and the Details panel shows a "Blocked by" row
 with its own editor. Every hold sentence is built by `holdEntriesSentence` and
 `holdRefusal` (`app/shared/dependencies.ts`; `holdRefusalFor` on the server): pending
-entries first, each done entry tagged in its own parenthesis ("goal-1 link 2 and JC-3
+entries first, each done entry tagged in its own parenthesis ("JC-2 and JC-3
 (done)", ruling 420), and an entry that can never complete named as such, with no
 promised release (rulings 355, 356).
 
@@ -329,29 +334,17 @@ is given the held doctrine in place of the stage rule, which tells it `run_agent
 `deliver_for_review` are refused. Other operator triggers are not narrowed: with
 dispatch gated they cannot cause work.
 
-Because a goal-link wait is stored BY INDEX, removing a pending link is REFUSED while any
-task or sibling link waits on that link or a later one: the removal renumbers them, so the
-reference would silently denote different work. The refusal names every holder, and the
-waits are re-pointed by hand first.
-
 A PERSON emptying the list is the release itself (ruling 131(e)): the same two halves
 the engine uses (`clearDependencies`, then `announceRelease`: the "Dependencies
 released" note naming who cleared it, a stored `blocked` lifted to `ready`, the
 `task.dependencies.released` audit row, a `dependency` notification to the owner and
 supervisors, and the operator re-invoked with `dependencies-released`). A wait that can
 NEVER complete is noticed by the same sweep, whatever killed it (an archived task, a
-cancelled goal, a removed link, a reference to nothing): ONE "Waiting on work that cannot
-complete" note, one notification, `waiting: human`, and the list left for a person to
-edit. A settled goal link (`done` or `skipped`) satisfies a wait whatever its task's
-state (ruling 398). A task that already reached the terminal stage has its list cleared
-quietly — no note, no operator turn. When the task carries a goal link (`goalRef`) and
-that link is `active` on it, every one of these writes, the quiet terminal clear
-included, mirrors the task's list onto the goal file's `links[].blockedBy` (ruling 155,
-`mirrorLinkWait`) with a goal timeline line naming the task and who changed it (the
-engine as "Viberr (release)"), and rebuilds the goal projection: the Goals panel's
-"waits on" and a later retry of the link read the list the task last held. The link's
-`edit_link` accepts `blockedBy` alone on an active link and forwards it to this same
-writer.
+reference to nothing): ONE "Waiting on work that cannot complete" note, one
+notification, `waiting: human`, and the list left for a person to edit. A task that
+already reached the terminal stage has its list cleared quietly — no note, no operator
+turn. An epic holds nothing (ruling 503): a task's epic never enters its wait, and the
+order of an epic's work is each task's own list.
 
 ## 7. Ownership, comments, mentions
 
@@ -902,8 +895,9 @@ them.
    branch. Pending schedules are not cancelled; the runner never fires on a terminal
    task.
 
-Post-acceptance: the task workspace is reclaimed once no run is live, goal chains
-reconcile, held dependents are swept (ruling 131(e): a task whose every `blockedBy`
+Post-acceptance: the task workspace is reclaimed once no run is live, the task's epic is
+checked for being all done (ruling 503: its history says so once and its lead is told),
+held dependents are swept (ruling 131(e): a task whose every `blockedBy`
 entry is now done is released), and the board renders "accepted" (or "merged").
 
 **A post-merge proof is a follow-up read task** (ruling 492, the owner's F40-64 decision).
@@ -920,8 +914,8 @@ Done, which can be before the merge and before the deploy, because a `blockedBy`
 is done at Done whatever the PR's state; so the read's goal has it confirm the change is
 merged and deployed before it reads.
 Every door that writes a goal says so, from one constant (`DONE_SIGNAL_RULE`,
-`app/server/tasks/done-signal.server.ts`): the controller's four
-([controller-and-goals.md §7.2](controller-and-goals.md#72-defining)) and the operator's,
+`app/server/tasks/done-signal.server.ts`): the controller's two
+([controller-and-epics.md §7.5](controller-and-epics.md#75-the-agents-epic-tools)) and the operator's,
 which also raises the read's `create_task` option itself
 ([operator.md §6](operator.md#6-decision-packets)). An acceptance withdraws an open
 decision it does not answer (step 7), so the operator puts the task up for acceptance only
@@ -968,6 +962,9 @@ on does not release the dependent (ruling 131(e)): before the archive returns,
 dependent, notifies its owner and supervisors once (`dependency`, titled "<KEY> waits on
 archived work"), and sets it `waiting: human`, because a person owes the list an edit;
 the entry renders as archived until they make it. A restore sweeps the dependents again.
+An archived task keeps its `epic` (it is counted apart from the epic's progress) and
+cannot change epics until it is restored; archiving the last open task of an epic is one
+of the ways every task in it becomes done (ruling 503).
 
 An `archive_task` option with `deleteBranch: true` deletes the remote branch through the
 same door every branch cleanup uses: a cached open PR is re-confirmed against GitHub first
@@ -1013,7 +1010,10 @@ retention in
 
 Kinds (`NOTIFICATION_KINDS`): `packet` (a decision waits, `ptype` `input | blocked`),
 `approval` (a stage approval or acceptance waits), `mention`, `quality`, `policy` (a
-violation, a refusal or a credential advisory), `controller` (goal progress),
+violation, a refusal or a credential advisory), `controller` (ruling 99's goal progress,
+unwritten since ruling 503), `epic` (ruling 503: a task joined or left an epic the reader
+leads, they were made its lead, someone else closed or reopened it, or every task in it is
+done; its own routing toggle, "epics"),
 `dependency` (ruling 131: the work a task waited on landed and it was released, or a
 dependency can never complete; its own routing toggle, "dependencies"), and `ownership`
 (ruling 140(b): the reader's owner seat changed hands, addressed to that one person
@@ -1030,8 +1030,8 @@ timeline event opens that event (`#event-<occurredAt>`: a verdict, a failed run,
 delivery or PR note, a release, a lease, a scope violation, an ownership change, a
 mention's comment), a packet or an agent's question opens `#decision`, a recommendation
 opens `#recommendations`, a knowledge-base proposal opens its entry on the project
-Controller page, "GitHub sync is failing" opens the project's GitHub page, and goal
-progress opens its chain or its link's row. A task notice names its subject
+Controller page, "GitHub sync is failing" opens the project's GitHub page, and an epic
+notice opens the epic's page. A task notice names its subject
 (`TaskWatcherNotice.about`); the anchors are spelled once in `app/shared/page-anchors.ts`.
 A stored link is used only inside the row's own project, and a row with none opens the
 task, or the project's board for a project-level row (B-FD6). On the task page the named

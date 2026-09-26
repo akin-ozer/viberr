@@ -6,7 +6,7 @@ import {
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
-import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
+import { recordAudit, SYSTEM_ACTOR, type AuditEventInput } from "~/server/audit/audit-recorder.server";
 import {
   openScopeViolation,
   resolveScopeViolation,
@@ -861,6 +861,68 @@ describe("ruling 477(b): goal-chain rows on the audit column", () => {
     expect(countAuditLog(store.db, store.slug, { kind: "change" })).toBe(9);
     expect(listAuditLog(store.db, store.slug, { filters: { kind: "audit" } }).map((r) => r.text)).toEqual([
       "Goal **goal-4** completed: every link is settled.",
+    ]);
+  });
+});
+
+/**
+ * Ruling 503: the epic rows. Creating an epic, changing it and putting a task
+ * in one or taking it out are a person's plan; the one-time conversion of a
+ * goal chain is Viberr's own record. A task's move reads on its task chip,
+ * and a row written without one still ends in a full stop.
+ */
+describe("ruling 503: epic rows on the audit column", () => {
+  it("names the epic, what changed, where a task moved, and the conversion", () => {
+    // CANARY: leave `task.epic.changed` out of AUDIT_ACTION_KINDS and the
+    // three membership rows vanish from the column.
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    const epicRow = (action: string, details: Record<string, string | number | boolean>) =>
+      recordAudit(store.db, {
+        action,
+        actor: action === "epic.converted" ? { userId: null, label: "epic-conversion" } : { userId: arda.id, label: arda.email },
+        subjectKind: "epic",
+        subjectId: "epic-4",
+        projectSlug: store.slug,
+        details,
+      });
+    const moveRow = (details: Record<string, string>, onTask = true) => {
+      const event: AuditEventInput = {
+        action: "task.epic.changed",
+        actor: { userId: arda.id, label: encodeControllerInstrument(arda.email) },
+        subjectKind: "task",
+        subjectId: "VIB-9",
+        projectSlug: store.slug,
+        details,
+      };
+      if (onTask) event.taskKey = "VIB-9";
+      recordAudit(store.db, event);
+    };
+    epicRow("epic.created", { title: "Launch", status: "planned", total: 2 });
+    epicRow("epic.created", { title: "Launch", status: "planned", total: 0 });
+    epicRow("epic.updated", { title: "Launch", summary: "set the status to In progress and cleared the lead" });
+    epicRow("epic.updated", { title: "Launch" });
+    moveRow({ to: "epic-4", title: "Launch" });
+    moveRow({ from: "epic-4", to: "epic-5", title: "Beta" });
+    moveRow({ from: "epic-5", title: "Beta" }, false);
+    epicRow("epic.converted", { title: "Launch", from: "goal-4", total: 3 });
+    const rows = listAuditLog(store.db, store.slug, { limit: 20 }).reverse();
+    expect(rows.map((r) => r.text)).toEqual([
+      `${arda.name} created epic **epic-4** (Launch) with 2 tasks.`,
+      `${arda.name} created epic **epic-4** (Launch).`,
+      `${arda.name} changed epic **epic-4** (Launch): set the status to In progress and cleared the lead.`,
+      `${arda.name} changed epic **epic-4** (Launch).`,
+      `${arda.name} (via the controller) set the epic to **epic-4** (Launch) on`,
+      `${arda.name} (via the controller) moved the epic from **epic-4** to **epic-5** (Beta) on`,
+      // No task on the row: no chip, so no dangling "on".
+      `${arda.name} (via the controller) cleared the epic **epic-5** (Beta).`,
+      "Goal **goal-4** became epic **epic-4** (Launch) with 3 tasks.",
+    ]);
+    expect(rows.slice(4, 6).map((r) => r.taskKey)).toEqual(["VIB-9", "VIB-9"]);
+    // A person's plan is a change; the conversion is an audit note.
+    expect(countAuditLog(store.db, store.slug, { kind: "change" })).toBe(7);
+    expect(listAuditLog(store.db, store.slug, { filters: { kind: "audit" } }).map((r) => r.text)).toEqual([
+      "Goal **goal-4** became epic **epic-4** (Launch) with 3 tasks.",
     ]);
   });
 });

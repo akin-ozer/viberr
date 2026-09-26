@@ -22,8 +22,10 @@ export const NOTIF_PREF_CATEGORIES = [
   "mentions",
   "policy",
   "quality",
-  // Ruling 99: controller replies and chained-goal progress notes.
-  "controller",
+  // Ruling 503: the epics this person leads. It replaced ruling 99's
+  // `controller` category, whose only writer was the chained-goal progress
+  // note that epics retired.
+  "epics",
   // Ruling 131: a task this person owns or supervises was released from (or
   // stranded on) the work it waited for.
   "dependencies",
@@ -51,7 +53,7 @@ function defaultNotifPrefs() {
     mentions: { app: true },
     policy: { app: true },
     quality: { app: true },
-    controller: { app: true },
+    epics: { app: true },
     dependencies: { app: true },
     ownership: { app: true },
   } satisfies NotifPrefs;
@@ -74,9 +76,13 @@ const KIND_TO_CATEGORY = {
   mention: "mentions",
   policy: "policy",
   quality: "quality",
-  controller: "controller",
+  // Ruling 503: the rows an upgraded inbox holds from goal chains were epic
+  // progress in all but name, so they answer to the category that replaced
+  // theirs.
+  controller: "epics",
   dependency: "dependencies",
   ownership: "ownership",
+  epic: "epics",
 } satisfies Record<NotificationKind, NotifPrefCategory>;
 
 export function notifCategoryForKind(kind: NotificationKind): NotifPrefCategory {
@@ -84,8 +90,8 @@ export function notifCategoryForKind(kind: NotificationKind): NotifPrefCategory 
 }
 
 /** The routing categories — PROFILE_NTF (the rows of profile.jsx;
- *  `controller` per ruling 99, `dependencies` per ruling 131, `ownership` per
- *  ruling 140 and `questions` per ruling 481).
+ *  `dependencies` per ruling 131, `ownership` per ruling 140, `questions` per
+ *  ruling 481 and `epics` per ruling 503).
  *
  *  Ruling 481(a) (F40-48): each description names what its kind's writers
  *  actually send. "Approval requests" said "Operator transition requests at
@@ -129,9 +135,9 @@ export const PROFILE_NTF: {
     d: "Specialist flags on tasks where you own review or acceptance.",
   },
   {
-    id: "controller",
-    n: "Controller updates",
-    d: "Replies from the controller and progress on goal chains you defined.",
+    id: "epics",
+    n: "Epic updates",
+    d: "Tasks joining or leaving an epic you lead, being made its lead, someone else closing or reopening it, and every task in it being done.",
   },
   {
     id: "dependencies",
@@ -183,9 +189,12 @@ const storedNotifPrefsSchema = z.object({
   mentions: storedChannelPrefsSchema,
   policy: storedChannelPrefsSchema,
   quality: storedChannelPrefsSchema,
-  // Ruling 99: absent on prefs stored before the controller shipped — the
-  // per-field catch reads it as ON, the opt-out default every category has.
-  controller: storedChannelPrefsSchema,
+  // Ruling 503: absent on prefs stored before epics — the per-field catch
+  // reads it as ON, the opt-out default every category has. A person who had
+  // silenced ruling 99's `controller` category keeps it silenced here, since
+  // that category carried the goal-chain notes epics replaced
+  // (`mergeNotifPrefs`).
+  epics: storedChannelPrefsSchema,
   // Rulings 131 / 140 (pass 34): same posture — absent reads ON.
   dependencies: storedChannelPrefsSchema,
   ownership: storedChannelPrefsSchema,
@@ -194,6 +203,24 @@ const storedNotifPrefsSchema = z.object({
 /** Tolerant merge of a stored (possibly partial/malformed) pref value over
  * the defaults — unknown keys dropped, missing keys defaulted. */
 export function mergeNotifPrefs(raw: StoredPrefJson | null): NotifPrefs {
-  const parsed = storedNotifPrefsSchema.safeParse(raw);
+  const parsed = storedNotifPrefsSchema.safeParse(carryControllerPref(raw));
   return parsed.success ? parsed.data : defaultNotifPrefs();
 }
+
+/**
+ * Ruling 503: a value stored before epics names the retired `controller`
+ * category, whose only notes were goal-chain progress. Read it as `epics`
+ * when `epics` itself was never stored, so silencing goal-chain notes keeps
+ * epic notes silenced instead of turning them back on at the upgrade.
+ */
+function carryControllerPref(raw: StoredPrefJson | null): StoredPrefJson | null {
+  if (raw === null || !isStoredPrefMap(raw)) return raw;
+  if ("epics" in raw || !("controller" in raw)) return raw;
+  return { ...raw, epics: raw.controller ?? null };
+}
+
+function isStoredPrefMap(raw: StoredPrefJson): raw is { [key: string]: StoredPrefJson } {
+  return storedPrefMapSchema.safeParse(raw).success;
+}
+
+const storedPrefMapSchema = z.record(z.string(), z.unknown());

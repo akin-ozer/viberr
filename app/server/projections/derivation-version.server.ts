@@ -33,8 +33,12 @@ import type { RescanSummary } from "./rebuilder.server";
  * and SHOP-21's card and rail went on reading "waiting on a human" over a
  * schedule pending for 07:29. This file's whole first paragraph describes that
  * failure, and I shipped the ruling without bumping the stamp it describes.
+ * 5 = ruling 503 (epics replace chained goals): every task row derives
+ * `epic_id` from task.md `epic`, and epic files project into
+ * `epic_projections`. A row written by an older build never named the column,
+ * so an unchanged task file would keep its NULL forever without this stamp.
  */
-export const PROJECTION_DERIVATION_VERSION = 4;
+export const PROJECTION_DERIVATION_VERSION = 5;
 
 const SETTING_KEY = "projection.derivationVersion";
 

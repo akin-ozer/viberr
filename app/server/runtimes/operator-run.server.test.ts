@@ -1434,8 +1434,10 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // ride a DIRECT dispatch grant, which this operator does not hold, so they
     // are withheld too and it is still 10. Ruling 488's `relay_to_task` is a
     // comment on another task of the project, in-Viberr like `post_comment`,
-    // so it joins the fallback and it is 11.
-    expect(tools).toHaveLength(11);
+    // so it joins the fallback and it is 11. Ruling 503's `set_epic` puts this
+    // task in an epic, in-Viberr like `set_dependencies`, so it is 12.
+    expect(tools).toHaveLength(12);
+    expect(tools).toContain("set_epic");
     expect(tools).toContain("relay_to_task");
     expect(tools).not.toContain("schedule_task_action");
     expect(tools).toContain("set_dependencies");
@@ -3585,8 +3587,8 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
       stageName: "In Progress",
       goal: "Ship it.",
       blockedBy: [
-        { ref: "goal-1 link 2", label: "goal-1 link 2 (JC-3)", state: "open", taskKey: "JC-3", goalId: "goal-1" },
-        { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6", goalId: null },
+        { ref: "JC-3", label: "JC-3", state: "open", taskKey: "JC-3" },
+        { ref: "JC-6", label: "JC-6", state: "failed", taskKey: "JC-6" },
       ],
     });
     for (const prompt of [
@@ -3594,7 +3596,7 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
       operatorPrompts.buildOperatorTurnPrompt(held, "agent-reply", undefined, "I finished.", undefined, undefined, undefined, undefined, true),
       operatorPrompts.buildCodexOperatorPrompt(held, "manual"),
     ]) {
-      expect(prompt).toContain("This task WAITS ON OTHER WORK and Viberr is holding it: goal-1 link 2 (JC-3) (open), JC-6 (archived, can never complete).");
+      expect(prompt).toContain("This task WAITS ON OTHER WORK and Viberr is holding it: JC-3 (open), JC-6 (archived, can never complete).");
       expect(prompt).toContain("`set_dependencies`");
       expect(prompt).toContain("do NOT open a decision packet about the wait");
       expect(prompt).not.toContain("NEVER end your turn");
@@ -3605,7 +3607,7 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     // still binds what the answer may do.
     const asked = operatorPrompts.buildOperatorTurnPrompt(held, "manual", "Why is this waiting?", undefined, "Arda");
     expect(asked).toContain("addressed you directly");
-    expect(asked).toContain("This task waits on other work (goal-1 link 2 (JC-3) (open), JC-6 (archived, can never complete)) and Viberr is holding it: answer them");
+    expect(asked).toContain("This task waits on other work (JC-3 (open), JC-6 (archived, can never complete)) and Viberr is holding it: answer them");
     expect(asked).not.toContain("NEVER end your turn");
     // Every waking trigger, not only `manual`, gets the held doctrine.
     for (const trigger of ["goal-updated", "pr-diverged", "packet-resolved", "delivered", "transition", "scheduled"] as const) {
@@ -3619,10 +3621,10 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     // Canary: return "" from `dependenciesInstruction`.
     const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it.", openPacket: true });
     const prompt = operatorPrompts.buildOperatorTurnPrompt(atWork, "dependencies-released", undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
-      entries: ["goal-1 link 2", "goal-1 link 3"],
+      entries: ["JC-2", "JC-3"],
       clearedBy: null,
     });
-    expect(prompt).toContain("The work this task waited on has landed: goal-1 link 2, goal-1 link 3 is done.");
+    expect(prompt).toContain("The work this task waited on has landed: JC-2, JC-3 is done.");
     expect(prompt).toContain("The base branch has CHANGED since the hold");
     expect(prompt).toContain("it is now MOOT: `resolve_decision_packet` it first");
     expect(prompt).toContain("You are at stage \"In Progress\"");

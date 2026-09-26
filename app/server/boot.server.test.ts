@@ -515,6 +515,38 @@ describe("projectionCheckGaps (ruling 140)", () => {
         "notifications.kind: question",
         "notifications.kind: dependency",
         "notifications.kind: ownership",
+        "notifications.kind: epic",
+      ]);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("ruling 503: reports an epic_projections status CHECK that lacks a declared status", async () => {
+    // CANARY: drop the `epic_projections.status` arm from `projectionCheckGaps`.
+    const { projectionCheckGaps } = await import("./boot.server");
+    const ctx = createTestDbContext();
+    try {
+      const db = ctx.makeDb();
+      expect(projectionCheckGaps(db)).toEqual([]);
+      // A root whose epic table predates a status the file schema declares.
+      db.exec(`
+        DROP TABLE epic_projections;
+        CREATE TABLE epic_projections (
+          project_slug TEXT NOT NULL,
+          epic_id TEXT NOT NULL,
+          epic_number INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('planned', 'in_progress', 'done')),
+          color TEXT NOT NULL,
+          source_path TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          PRIMARY KEY (project_slug, epic_id)
+        );
+      `);
+      expect(projectionCheckGaps(db)).toEqual([
+        "epic_projections.status: paused",
+        "epic_projections.status: cancelled",
       ]);
     } finally {
       ctx.cleanup();
@@ -568,9 +600,10 @@ describe("widenNotificationKindCheck (ruling 481)", () => {
           )
           .run();
       expect(insertQuestion).toThrow(/CHECK constraint failed/);
-      expect(projectionCheckGaps(db)).toEqual(["notifications.kind: question"]);
+      // Ruling 503's `epic` postdates this root too.
+      expect(projectionCheckGaps(db)).toEqual(["notifications.kind: question", "notifications.kind: epic"]);
 
-      expect(widenNotificationKindCheck(db)).toEqual(["question"]);
+      expect(widenNotificationKindCheck(db)).toEqual(["question", "epic"]);
 
       expect(projectionCheckGaps(db)).toEqual([]);
       expect(db.prepare(`SELECT id, kind, ptype, title FROM notifications`).all()).toEqual([

@@ -43,9 +43,9 @@ function emptyCopy(view: ControllerDockView): string {
     return `Ask about ${view.scope.taskKey} or say what to do with it. The controller already has its task file.`;
   }
   if (view.scope.kind === "board") {
-    return `Ask about the ${view.scope.projectName} board or say what to do on it: tasks, agents, goal chains.`;
+    return `Ask about the ${view.scope.projectName} board or say what to do on it: tasks, epics, agents.`;
   }
-  return "Ask about this instance or say what to do: projects, users, resources, agents, goal chains.";
+  return "Ask about this instance or say what to do: projects, users, resources, agents, epics.";
 }
 
 /**

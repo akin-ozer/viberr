@@ -49,6 +49,8 @@ import {
   type TaskPriority,
 } from "~/schemas/task-file.schema";
 import { Avatar } from "~/ui/avatar";
+import type { EpicOption } from "~/ui/epic-chip";
+import { EPIC_STATUS_LABEL, isEpicOpen } from "~/schemas/epic-file.schema";
 import { createVelocityTracker, springFrames, springProgress, type Spring } from "~/ui/spring";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
@@ -76,8 +78,10 @@ import {
   boardEmptyCopy,
   countArchived,
   isArchived,
+  EPIC_FILTER_NONE,
   isBoardFilterId,
   matchesBoardFilter,
+  matchesEpicFilter,
   matchesLabelFilter,
   matchesSearch,
   type BoardFilterId,
@@ -424,7 +428,9 @@ function ProblemChips({ task }: { task: BoardTask }) {
 
 /** The card's property row: the status chip, then the problems. Drawn by the
  *  card and the list row alike (F19-13: one state block, both layouts), and
- *  absent when there is nothing to say. */
+ *  absent when there is nothing to say. Ruling 503 keeps the epic off it, as
+ *  ruling 172 kept the goal link off it: the board's epic filter and the task
+ *  page say which epic a task is in. */
 function CardChips({ task }: { task: BoardTask }) {
   if (cardStatus(task) === null && cardProblems(task).length === 0) return null;
   return (
@@ -1169,16 +1175,23 @@ function AcceptOnBoardConfirm({
 function NewTaskModal({
   entryStageName,
   labelSuggestions,
+  epics,
+  initialEpic,
   onClose,
 }: {
   /** R19-14: every task is created at the entry stage — the modal names it. */
   entryStageName: string;
   /** Labels already used across the board, offered as label autocomplete. */
   labelSuggestions: string[];
+  /** Ruling 503: the project's open epics, a new task can start in one. */
+  epics: readonly EpicOption[];
+  /** The epic the board is filtered to, so a task made there lands in it. */
+  initialEpic: string | null;
   onClose: () => void;
 }) {
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
+  const [epic, setEpic] = useState(initialEpic ?? "");
   const [priority, setPriority] = useState<TaskPriority>("normal");
   const [labels, setLabels] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState("");
@@ -1244,6 +1257,7 @@ function NewTaskModal({
     if (priority !== "normal") fd.set("priority", priority);
     if (labels.length > 0) fd.set("labels", labels.join(","));
     if (dueDate) fd.set("dueDate", dueDate);
+    if (epic) fd.set("epic", epic);
     // R19-14: no stage field — the server creates at the entry stage.
     fetcher.submit(fd, { method: "post" });
   };
@@ -1370,6 +1384,24 @@ function NewTaskModal({
             suggestions={labelSuggestions}
           />
         </div>
+        {/* Ruling 503: a task can start in an epic; it can join or leave one
+            at any time afterwards, from its own page or the epic's. */}
+        {epics.length > 0 && (
+          <div className="field">
+            <label className="flabel" htmlFor="new-task-epic">
+              Epic
+              <span className="fhint">optional</span>
+            </label>
+            <select id="new-task-epic" value={epic} onChange={(e) => setEpic(e.target.value)}>
+              <option value="">No epic</option>
+              {epics.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.title}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       <div className="modal-foot">
         <span
@@ -1566,6 +1598,8 @@ function FilterBar({
   query,
   labelFilter,
   projectLabels,
+  epicFilter,
+  epics,
   waitingOnMe,
   quiet,
   continuity,
@@ -1578,6 +1612,10 @@ function FilterBar({
    *  vocabulary offered as filter chips. */
   labelFilter: string | null;
   projectLabels: string[];
+  /** Ruling 503: the active epic filter (`?epic=`, an epic's id or `none`),
+   *  and the project's epics it picks from. */
+  epicFilter: string | null;
+  epics: readonly EpicOption[];
   /** Board filter term (`?q=`) — it hides cards exactly like the chips do. */
   query: string;
   /** R8-3: member-scoped count for the "Waiting on me" chip. */
@@ -1689,6 +1727,33 @@ function FilterBar({
             : `+${orderedLabels.length - LABEL_CHIP_CAP} more`}
         </button>
       )}
+      {/* Ruling 503: one epic's tasks, or those in none. A select rather than
+          chips: a project can hold many epics, and their names are long. Only
+          when the project has epics, or the filter is already on. */}
+      {(epics.length > 0 || epicFilter) && (
+        <label className={"board-epic-filter" + (epicFilter ? " on" : "")}>
+          <Icon name="epic" />
+          <select
+            value={epicFilter ?? ""}
+            aria-label="Show one epic's tasks"
+            onChange={(e) => setParam("epic", e.target.value || null)}
+          >
+            <option value="">All epics</option>
+            <option value={EPIC_FILTER_NONE}>No epic</option>
+            {epics.map((epic) => (
+              <option key={epic.id} value={epic.id}>
+                {epic.title}
+                {isEpicOpen(epic.status) ? "" : ` (${EPIC_STATUS_LABEL[epic.status]})`}
+              </option>
+            ))}
+            {epicFilter &&
+              epicFilter !== EPIC_FILTER_NONE &&
+              !epics.some((epic) => epic.id === epicFilter) && (
+                <option value={epicFilter}>{epicFilter}</option>
+              )}
+          </select>
+        </label>
+      )}
       <label className="board-filter-input">
         <Icon name="filter" />
         <input
@@ -1703,12 +1768,12 @@ function FilterBar({
           filter but NOT `?q=`, so a board hidden by a stale term needs one
           control that resets both (and the label filter — F26-12). One chip per
           board, not one per column. */}
-      {(filter !== "all" || query.trim() !== "" || labelFilter) && (
+      {(filter !== "all" || query.trim() !== "" || labelFilter || epicFilter) && (
         <button
           type="button"
           className="fchip"
           onClick={onClear}
-          title="Show every task again. Clears the board filter, the label filter and the search"
+          title="Show every task again. Clears the board filter, the label and epic filters and the search"
         >
           <Icon name="x" />
           Clear
@@ -2000,6 +2065,7 @@ export function BoardPage({
   canRescan,
   defaultBranch = "main",
   repoAccess,
+  epics = [],
 }: {
   columns: BoardColumnData[];
   orphanTasks: BoardTask[];
@@ -2023,6 +2089,9 @@ export function BoardPage({
    * has established it", which the banner reads as silence, never as health.
    */
   repoAccess?: RepoAccessResult;
+  /** Ruling 503: the project's epics, for the epic filter and the New-task
+   *  Epic pick. */
+  epics?: readonly EpicOption[];
 }) {
   const { slug: projectSlug } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2032,6 +2101,9 @@ export function BoardPage({
   const query = searchParams.get("q") ?? "";
   // F26-12 / R26-2: the active label filter (`?label=`), or null when off.
   const labelFilter = searchParams.get("label");
+  // Ruling 503: the active epic filter (`?epic=`), or null when off.
+  const epicFilter = searchParams.get("epic");
+  const openEpics = useMemo(() => epics.filter((e) => isEpicOpen(e.status)), [epics]);
   // R19-14: creation always lands at the entry stage, so this is a plain
   // open/closed flag — no per-lane stage rides along any more.
   const [creating, setCreating] = useState(false);
@@ -2440,6 +2512,7 @@ export function BoardPage({
       (t) =>
         matchesBoardFilter(t, filter) &&
         matchesLabelFilter(t, labelFilter) &&
+        matchesEpicFilter(t, epicFilter) &&
         matchesSearch(t, query),
     );
   // The all-tasks filter feeds the roving tab stop, the "N shown" count and the
@@ -2566,10 +2639,18 @@ export function BoardPage({
 
   // P13-D-34: what the board actually draws, and why anything is missing.
   const shownCount = visibleAllTasks.length;
-  const filterLabel =
+  const readinessFilterLabel =
     filter === "all"
       ? null
       : (FILTERS.find((f) => f.id === filter)?.label ?? null);
+  // Ruling 503: an epic filter hides cards too, so the empty copy names it.
+  const epicFilterLabel = !epicFilter
+    ? null
+    : epicFilter === EPIC_FILTER_NONE
+      ? "No epic"
+      : `Epic: ${epics.find((e) => e.id === epicFilter)?.title ?? epicFilter}`;
+  const filterLabel =
+    [readinessFilterLabel, epicFilterLabel].filter((l) => l !== null).join(" · ") || null;
   // R15-10: `boardTotal` lets the copy tell "this column is empty" apart from
   // "this project has nothing yet"; only the latter teaches, and only once.
   const emptyCopyFor = (total: number, isEntryColumn = false) =>
@@ -2604,6 +2685,7 @@ export function BoardPage({
         next.delete("filter");
         next.delete("q");
         next.delete("label"); // F26-12: Clear resets the label filter too.
+        next.delete("epic"); // Ruling 503: and the epic filter.
         return next;
       },
       { replace: true, preventScrollReset: true },
@@ -2700,12 +2782,15 @@ export function BoardPage({
         archivedCount > 0 ||
         filter !== "all" ||
         query !== "" ||
-        labelFilter != null) && (
+        labelFilter != null ||
+        epicFilter != null) && (
         <FilterBar
           filter={filter}
           query={query}
           labelFilter={labelFilter}
           projectLabels={labelSuggestions}
+          epicFilter={epicFilter}
+          epics={epics}
           waitingOnMe={waitingOnMe}
           quiet={quietCount}
           continuity={continuityCount}
@@ -2747,7 +2832,8 @@ export function BoardPage({
               liveTasks.length === 0 &&
               filter === "all" &&
               query === "" &&
-              labelFilter == null
+              labelFilter == null &&
+              epicFilter == null
             }
             canTransition={canTransition}
             onNew={() => setCreating(true)}
@@ -2780,6 +2866,12 @@ export function BoardPage({
         <NewTaskModal
           entryStageName={stages[0].name}
           labelSuggestions={labelSuggestions}
+          epics={openEpics}
+          initialEpic={
+            epicFilter && epicFilter !== EPIC_FILTER_NONE && openEpics.some((e) => e.id === epicFilter)
+              ? epicFilter
+              : null
+          }
           onClose={() => setCreating(false)}
         />
       )}

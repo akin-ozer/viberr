@@ -4,12 +4,14 @@ import { describe, expect, it } from "vitest";
 import { STANDALONE_PAGES, standalonePageLabel, WORKSPACE_NAV } from "./nav";
 
 describe("workspace rail order (A00-9, pass 32)", () => {
-  it("is the eight project views in the documented order — and the codebase map says the same", () => {
+  it("is the nine project views in the documented order — and the codebase map says the same", () => {
     // The docs claimed the order lives in nav.ts "with no test pinning it";
     // a reordered rail would silently contradict every screenshot and the
-    // codebase map. Pinned here, against the map's own sentence.
+    // codebase map. Pinned here, against the map's own sentence. Ruling 503
+    // put Epics after Board: the board's work, grouped.
     expect(WORKSPACE_NAV.map((n) => n.id)).toEqual([
       "board",
+      "epics",
       "review",
       "controller",
       "agents",

@@ -73,6 +73,8 @@ function boardTask(i: number): BoardTask {
     packet: null,
     quiet: false,
     continuity: null,
+    // Ruling 503: the filter reads it; the card draws no chip (ruling 172).
+    epicId: i % 4 === 1 ? "epic-1" : null,
   };
 }
 

@@ -49,12 +49,13 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
   the verdicts on the CURRENT revision. This holds for a task that produced no commit too. A
   report, a decision, a design note delivered as an attachment is delivered work, and the
   reviewer the project named still judges it.
-- **Your task is usually one link of a chain, and `get_task` gives you the whole chain in
-  `goalChain`.** Read it before you offer to create a task or defer a piece of scope: a link
-  with `taskKey: null` is work this project has already decided to do and has not started
-  yet, and `read_board` cannot see it, because a planned link has no task to list. Offering a
-  follow-on task for something a later link already owns duplicates the plan; saying "that is
-  goal-4 link 5, waiting on this task" answers the same question and costs nothing.
+- **Your task may be one of an epic's, and `get_task` gives you that epic in `epic`: what it
+  is for, and its other tasks with the stage each stands at and what each waits on.** Read
+  it before you offer to create a task or defer a piece of scope: a task in your epic is work
+  this project has already planned, and it may be waiting on this one. Offering a follow-on
+  task for something another task of the epic already owns duplicates the plan; saying "that
+  is WEB-12, in this epic, waiting on this task" answers the same question and costs nothing.
+  A follow-on a person creates from your `create_task` option joins this task's epic by itself.
 - **A reviewer's findings are a work list, and the list may not be one agent's.** A verdict
   is written against the TASK, not against a profile, so its findings can land on either
   side of a project's ownership split. Before you relay them, read each finding against the
@@ -73,6 +74,7 @@ Pre-work `auto` transitions can be taken directly. Never propose a later transit
 
 - `get_task` reads the live contract.
 - `set_goal` fills an unspecified goal.
+- `set_epic` puts THIS task in an epic, moves it to another or takes it out (ruling 503); `openEpics` lists the project's open ones. Membership orders and holds nothing: what the task waits on is `set_dependencies`.
 - `run_agent` selects and runs an agent: engages it if needed, posts your prompt as the hand-off comment, and starts the run with it as the directive. Omit the prompt only to re-run an agent against the task as it stands.
 - `deliver_for_review` pushes the deliverer's committed branch and opens (or reuses) the review PR. Delivery is your decision; this is how it happens.
 - `update_branch_from_base` brings the task branch up to date with its base; call it before delivering or handing work to a reviewer, never at the acceptance stage once the work is approved, where the acceptance ceremony refreshes once and merges (rulings 162, 429). `get_task`'s `notRefreshableReason` is set exactly where it refuses (ruling 424).

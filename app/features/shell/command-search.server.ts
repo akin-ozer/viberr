@@ -1,22 +1,25 @@
 import type { DatabaseSync } from "node:sqlite";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
+import { EPIC_STATUS_LABEL, isEpicOpen, type EpicStatus } from "~/schemas/epic-file.schema";
 import { listDeployedSpecialists } from "~/server/tasks/specialist-run.server";
+import { epicHref } from "~/shared/epic-href";
 
 /**
  * R15-5 — the ⌘K palette's ONE query.
  *
  * The topbar used to promise "Search tasks, branches, agents…" while only
- * filtering the board that happened to be open. This resolves the same four
- * things GLOBALLY, over exactly the projects the viewer may open: it reuses
+ * filtering the board that happened to be open. This resolves those things,
+ * with projects and (ruling 503) epics, GLOBALLY, over exactly the projects
+ * the viewer may open: it reuses
  * `listHomeProjectsForUser`, the same membership scoping the home grid and the
  * R15-4 workspace gate apply, so the palette can never surface a task, branch
  * or agent belonging to a project whose existence the viewer must not learn.
  *
- * Read-only over existing projections (`task_projections` + project.md agent
- * deployments) — no new read model, no new table.
+ * Read-only over existing projections (`task_projections`, `epic_projections`
+ * and project.md agent deployments) — no new read model, no new table.
  */
 
-export type CommandHitKind = "project" | "task" | "branch" | "agent";
+export type CommandHitKind = "project" | "epic" | "task" | "branch" | "agent";
 
 export interface CommandHit {
   kind: CommandHitKind;
@@ -60,6 +63,13 @@ type TaskRow = {
   labels_json: string;
   /** 0/1 — see `archivedSub` below. */
   archived: number;
+};
+
+type EpicRow = {
+  project_slug: string;
+  epic_id: string;
+  title: string;
+  status: EpicStatus;
 };
 
 /**
@@ -168,6 +178,38 @@ export function searchWorkspace(
       prefix,
     ) as TaskRow[];
 
+  // Ruling 503: an epic, by its name or its id, the way Linear's palette finds
+  // a project. Open ones first; a done or cancelled one says so, as an
+  // archived task does.
+  // SAFETY: EpicRow names exactly the four columns this SELECT lists, in the
+  // types 0001_baseline declares for `epic_projections`, whose CHECK holds
+  // `status` to EPIC_STATUS_VALUES.
+  const epicRows = db
+    .prepare(
+      `SELECT project_slug, epic_id, title, status
+         FROM epic_projections
+        WHERE project_slug IN (${placeholders})
+          AND ( LOWER(epic_id) LIKE ? ESCAPE '\\'
+             OR LOWER(title)   LIKE ? ESCAPE '\\' )
+        ORDER BY
+          CASE WHEN LOWER(epic_id) = ? THEN 0 ELSE 1 END,
+          CASE WHEN status IN ('done', 'cancelled') THEN 1 ELSE 0 END,
+          updated_at DESC
+        LIMIT ?`,
+    )
+    .all(...projects.map((p) => p.slug), term, term, q, limit) as EpicRow[];
+  const epicHits: CommandHit[] = epicRows.map((row) => {
+    let sub = `${row.epic_id} · ${nameOf.get(row.project_slug) ?? row.project_slug}`;
+    if (!isEpicOpen(row.status)) sub += ` · ${EPIC_STATUS_LABEL[row.status].toLowerCase()}`;
+    return {
+      kind: "epic",
+      id: `epic:${row.project_slug}/${row.epic_id}`,
+      label: row.title,
+      sub,
+      href: epicHref(row.project_slug, row.epic_id),
+    };
+  });
+
   const taskHits: CommandHit[] = [];
   const branchHits: CommandHit[] = [];
   for (const row of rows) {
@@ -235,5 +277,5 @@ export function searchWorkspace(
     }
   }
 
-  return [...projectHits, ...taskHits, ...branchHits, ...agentHits];
+  return [...projectHits, ...epicHits, ...taskHits, ...branchHits, ...agentHits];
 }

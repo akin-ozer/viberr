@@ -22,7 +22,7 @@ npm run store:check
 ```
 
 Read-only, needs no lock and no database, and runs against a live instance. It parses
-every `project.md`, `tasks/*/task.md` and `goals/*.md`, and for anything the app cannot
+every `project.md`, `tasks/*/task.md` and `epics/*.md`, and for anything the app cannot
 trust it names the file, the parse error and the offending line with an excerpt; it exits
 1 when any file is untrusted and also lists "degraded" files (parsed with error-severity
 findings: readable, integrity in doubt). A file in the untrusted state is forced to
@@ -121,7 +121,7 @@ are a cache.
   per project on the board for admin/maintainer (`rescan-project`); `npm run rescan` takes
   the single-writer lock and REFUSES against a live instance): incremental — re-reads
   changed files (content-hash short-circuit; `--force` on the CLI re-projects everything)
-  and updates projections. Use after editing task/project/goal files directly, or if the
+  and updates projections. Use after editing task/project/epic files directly, or if the
   watcher missed a change.
 - **Rebuild projections** (Home, org admin, confirm dialog, 30 s cooldown
   (`REBUILD_MIN_INTERVAL_MS`)): deletes every row of `projects` (and so `project_members`),
@@ -219,7 +219,7 @@ each entry with its live state, and `waiting` is `none` unless a packet or a
 recommendation is open. Nothing is owed by anyone while it waits.
 
 - **Who set it:** the task page's Details panel (its "Blocked by" row), the controller's
-  `update_task` / `create_task` / a goal link, or the operator's `set_dependencies`
+  `update_task` / `create_task`, or the operator's `set_dependencies`
   tool. Every write is a "Dependencies updated" note and a `task.dependencies.updated`
   audit row; a bad reference is refused by name (unknown, archived, self, a cycle).
 - **Why the operator is quiet:** `create`, `transition` and `scheduled` triggers are
@@ -228,9 +228,9 @@ recommendation is open. Nothing is owed by anyone while it waits.
   packet, a manual run) is told the wait and told not to advance, dispatch delivery or
   open a packet about it. A scheduled `run-operator` occurrence retires as
   `skipped-held` with a note; a scheduled `run-agent` still fires.
-- **How it releases:** when every entry is done (its task at the terminal stage; its
-  goal link done or skipped) the release engine, which runs from the same task-write
-  hooks that advance goal chains and from the goal runner's minute tick, clears the
+- **How it releases:** when every entry is done (its task at the terminal stage) the
+  release engine, which runs from the task-write hooks (a stage move, an archive or
+  restore, an acceptance) and from its own minute tick (`startDependencyRunner`), clears the
   list, writes "Dependencies released", lifts a stored `blocked` to `ready`, clears
   `heldAtStage`, notifies the owner and supervisors (kind `dependency`, its own
   toggle) and re-invokes the operator with `dependencies-released`. A person emptying
@@ -247,6 +247,31 @@ recommendation is open. Nothing is owed by anyone while it waits.
   blocked_by_json TEXT NOT NULL DEFAULT '[]'` with the app stopped — never a re-baseline
   (the file also carries users, sessions and sealed PATs), and never a write against the
   running container.
+
+## Goal chains became epics (ruling 503)
+
+The first boot of a build with epics converts every chained-goal file once, after the
+rescan (`convertGoalsToEpics`). Each `projects/<slug>/goals/goal-N.md` becomes
+`epics/epic-N.md` with its tasks in it, and the goal file moves to `goals/converted/`,
+which is what stops the conversion running again. What it did is one `info` line,
+"converted goal chains into epics", listing each `<slug>/goal-N -> epic-N (N tasks, made
+<keys>, N listed)` and the tasks whose waits were respelled by task key; each epic's
+history opens with "Converted from goal-N …", and the project's Activity column has an
+`epic.converted` row.
+
+- **A goal file was not converted:** the WARN "some goal files were not converted; they
+  stay in goals/ for the next boot" names each one and why (its frontmatter could not be
+  read, or a step threw). Nothing else changed for that goal. Fix the file, then restart;
+  every step is idempotent, so a half-finished goal finishes (its epic is found again by
+  `convertedFrom`, a link already made a task is recorded in the goal file).
+- **A link that had not started is not a task:** it is listed in the epic's description
+  with its text and the reason (a paused, stopped or closed chain, a creator who lost task
+  creation, a wait on work that will never exist). A person makes it a task from the epic
+  page's New task.
+- **A task says it "waits for you" after the upgrade:** everything it waited on was a goal
+  link that can never have a task, so the conversion cleared the list and put it in front
+  of a person, with a "Waits on other work" note saying which links. Give it other work to
+  wait on, or move it on.
 
 ## GitHub / PAT issues
 
@@ -534,7 +559,8 @@ rest of the data root (`DATA_ROOT_SUBDIRS`) and is one of `npm run backup`'s
 
 **Tables with no retention:** `provenance` (append-only observation ledger, the one that
 grows fastest; prune by hand with the app stopped: `DELETE FROM provenance WHERE
-observed_at < …; VACUUM;`), better-auth `session`, `agent_runs`, `goal_projections`,
+observed_at < …; VACUUM;`), better-auth `session`, `agent_runs`, `goal_projections` (an
+upgraded root's; nothing writes it since ruling 503),
 `controller_conversations`, `controller_messages`, `staged_outcomes` (24 h TTL in code,
 rows kept), `scope_violations`, `model_availability`. `diagnostics` is rebuilt, not
 pruned.

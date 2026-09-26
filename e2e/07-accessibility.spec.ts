@@ -30,6 +30,10 @@ const THEME_COOKIE = "viberr_theme";
 
 const SURFACES: { name: string; path: string; ready: string }[] = [
   { name: "board", path: "/projects/viberr-core/board", ready: "section.column" },
+  // Ruling 503: the Epics page, as a new project sees it (the seed holds no
+  // epic). `09-epics.spec.ts` audits an epic's page and its dialogs once it
+  // has made one.
+  { name: "epics", path: "/projects/viberr-core/epics", ready: ".empty-hero" },
   {
     name: "task detail",
     path: "/projects/viberr-core/tasks/VIB-142",

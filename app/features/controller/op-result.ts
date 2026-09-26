@@ -11,9 +11,9 @@ export interface ActionResult {
 }
 
 /**
- * Toasts an interrupt, goal-op or knowledge-base undo result once: the
- * server's `toast` (tinted by `ok`), else a failure's `error`. The run strip,
- * every goal card and the Knowledge base panel answer through it.
+ * Toasts an interrupt or knowledge-base undo result once: the server's
+ * `toast` (tinted by `ok`), else a failure's `error`. The run strip and the
+ * Knowledge base panel answer through it.
  */
 export function useOpResultToast(fetcher: ReturnType<typeof useFetcher<ActionResult>>) {
   const push = useToast();

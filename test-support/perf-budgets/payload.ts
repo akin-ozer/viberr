@@ -85,8 +85,10 @@ export const PAYLOAD_BUDGETS: PerfBudgetTable = {
   },
   // BOARD-3: 49 before; `toBoardCard` ships the board's read set. 28 since
   // ruling 491 dropped `prChecksUnread`, which fed only the removed pill.
+  // Raised 28 to 29 by ruling 503: `epicId`, which the board's epic filter
+  // reads (the card draws no chip for it, ruling 172).
   "payload:board-40.card-fields": {
-    ceiling: 28,
+    ceiling: 29,
     unit: "count",
     journey: "board-live",
     fixture: `${BOARD_40}; /board; the most fields any card ships`,

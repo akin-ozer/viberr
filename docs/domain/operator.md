@@ -381,8 +381,11 @@ for exactly this. Either is written at once; a person undoes what they disagree 
   from the whole timeline with their own words; ruling 415), `recentTimeline` (default 6
   entries, `events` up to 50), `timelineTotal` and `timelineOlder` (ruling 302),
   `unfinishedReport` (ruling 397), `unansweredRefusal` (ruling 408).
-- **The board around it**: `goalChain` (the chain this task is one link of, every link
-  with its status, task and wait; ruling 402), `collisions` (the other open review PRs whose
+- **The board around it**: `epic` (ruling 503: the epic this task is in, its status, its
+  description clipped at `EPIC_DESCRIPTION_CAP`, and its OTHER tasks, archived ones left
+  out, each with its stage and `blockedBy`; absent for a task in no epic; it replaced
+  ruling 402's `goalChain`), `openEpics` (the project's open epics, for `set_epic`),
+  `collisions` (the other open review PRs whose
   diff shares a file with this one, ruling 413), `fileLeases` (the leases that bind now,
   ruling 431).
 
@@ -411,11 +414,11 @@ in-process MCP server `viberr` (loaded up front, `alwaysLoad`), its granted org 
 with marked write tools withheld (ruling 176), and the deny list
 `OPERATOR_READ_ONLY_DENIED_TOOLS` (`Bash`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`).
 On Codex it runs in a scratch working directory with the task store and checkout read-only
-and returns a structured plan over sixteen verbs (`post_comment`, `open_packet`,
+and returns a structured plan over seventeen verbs (`post_comment`, `open_packet`,
 `resolve_packet`, `set_goal`, `run_agent`, `transition_stage`, `deliver_for_review`,
 `update_branch_from_base`, `accept_completion`, `flag_context_conflict`,
-`set_dependencies`, `correct_knowledge_doc`, `lease_files`, `schedule_task_action`,
-`cancel_task_schedule`, `relay_to_task`), the schema narrowed to what its policy allows
+`set_dependencies`, `set_epic`, `correct_knowledge_doc`, `lease_files`,
+`schedule_task_action`, `cancel_task_schedule`, `relay_to_task`), the schema narrowed to what its policy allows
 (`operatorPlanToolsFor`; the two schedule verbs only on a `direct` dispatch grant, and never
 in the all-denied fallback) and its packet options carrying every payload the
 Claude tool does (ruling 433). `relay_to_task` takes the target in the plan's `taskKey`
@@ -448,6 +451,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `open_decision_packet` | `operatorOpenPacketDisclosed` → `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 84; refuses while a packet is open) | `generate-packets` |
 | `resolve_decision_packet` | `operatorResolvePacket` (withdraws only a packet the operator raised: `from: operator` and no `askedBy`, `packetIsOperators`) | `generate-packets` |
 | `set_dependencies` | `operatorSetDependencies` → `setTaskDependencies` (ruling 131(b): the FULL `blockedBy` list, `[]` clears; a validator refusal is a `noop` carrying the validator's own sentence, an unchanged list a `noop`) | `generate-packets` (the wait is the hold packet's replacement) |
+| `set_epic` | `operatorSetEpic` → `setTasksEpic` (ruling 503: puts THIS task in an epic, moves it to another or takes it out with `""`; an unknown epic or an archived task is a `noop` with the writer's sentence, an unchanged one a `noop`; the Codex plan carries it in `epicId`) | `append-typed-events` |
 | `run_agent` | `operatorDispatchAgent` (`profileId`, `prompt`, `delivers`, `reason`, `completeness`) | `dispatch-agents` |
 | `schedule_task_action` | `operatorScheduleRun` → `scheduleTaskAction` (ruling 487: THIS task's own re-run or a deployed agent's run with a directive, `delayMinutes` 1..40320 or an ISO `dueAt`, refused as `noop` for an agent it could not dispatch now) | `dispatch-agents: direct` only |
 | `cancel_task_schedule` | `operatorCancelSchedule` → `cancelScheduledAction` (ruling 487: a pending entry the operator scheduled itself; a person's is `denied`) | `dispatch-agents: direct` only |
@@ -703,7 +707,7 @@ Resolution effects by option kind (`resolvePacket`):
 | `accept_unverified_head` | Re-reads the PR head check live; when it still cannot be verified, records a `headCheckWaiver` for that one (PR, delivered revision, live head) triple, honoured only while all three match (ruling 226). Requires `accept-completion`. |
 | `block_on_dependencies` | Writes the option's `blockedBy` as the task's wait through `setTaskDependencies`, so Viberr holds the task and releases it when every entry is done (ruling 230). |
 | `question_reviewer` | Starts THAT reviewer with `REVIEW_DEADLOCK_QUESTION` (name everything it would still block on, no new verdict), `waiting: agent`, the stage unmoved (ruling 237); on a held task the question is queued on the task and put the moment the wait clears (ruling 241). |
-| `create_task` | Creates `newTask` through `createTask` under the RESOLVING person's authority and names the new key on both timelines; when `newTask.blocks` names this task, this task then waits on the new one (rulings 269, 287, 322). A created task starts from the base branch, which the authoring guidance says (`CREATE_TASK_BASE_NOTE`, ruling 441). It is also how a post-merge proof gets its task (ruling 492): acceptance closes the task and nothing after it happens inside the task, so before the operator puts a task up for acceptance, its doctrine has it read the goal and the delivering agent's report, and when either names a proof only the merged or deployed code can show and no task owns that read (`read_board` lists none, no link in `goalChain` plans one), raise a `create_task` option for the read, `newTask.blockedBy` naming this task and `newTask.goal` confirming the change is merged and deployed before it reads (the read is released when this task reaches Done, which under the operator's own full-autonomy acceptance comes before the merge). The read is the new task's own done signal. The operator then waits for a person's answer before it puts the task up for acceptance, because an acceptance withdraws the option unanswered, and its `accept_completion` refuses while the option is open (§5). |
+| `create_task` | Creates `newTask` through `createTask` under the RESOLVING person's authority and names the new key on both timelines; when `newTask.blocks` names this task, this task then waits on the new one (rulings 269, 287, 322). A created task starts from the base branch, which the authoring guidance says (`CREATE_TASK_BASE_NOTE`, ruling 441). It is also how a post-merge proof gets its task (ruling 492): acceptance closes the task and nothing after it happens inside the task, so before the operator puts a task up for acceptance, its doctrine has it read the goal and the delivering agent's report, and when either names a proof only the merged or deployed code can show and no task owns that read (`read_board` lists none, and no task in its `epic` is one), raise a `create_task` option for the read, `newTask.blockedBy` naming this task and `newTask.goal` confirming the change is merged and deployed before it reads (the read is released when this task reaches Done, which under the operator's own full-autonomy acceptance comes before the merge). The read is the new task's own done signal. The operator then waits for a person's answer before it puts the task up for acceptance, because an acceptance withdraws the option unanswered, and its `accept_completion` refuses while the option is open (§5). |
 | `deliver_for_review` | After the resolution write, runs the task page's own delivery door (`manualDeliverForReview` → `performDelivery`, the core behind the operator's `deliver_for_review` tool) under the resolving person's authority: the push, the PR, the `github.delivery.manual` row and every refusal's own timeline event. A delivery that reached the PR lifts the stall's `blocked` readiness; a supervised task also gets the delivery's "Move to <review>" card. Exactly one hand-off: a full-autonomy delivery that moved the head re-queues the operator itself, otherwise `packet-resolved` carries the typed `serverOutcome` (`delivered`, `current`, `failed`). The `run-agents` tier (or the owner) and ruling 240's hold are checked before the write, so a refusal leaves the packet open. Authoring refuses it unless the task's head is committed and not delivered (ruling 489). Process-only: not appended to the goal. |
 
 An option TITLE is a promise the resolution keeps (ruling 164). `operatorOpenPacket`

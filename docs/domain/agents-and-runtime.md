@@ -3,7 +3,7 @@
 > How a Claude or Codex process is started for a task, what it is allowed to do, what
 > it sees, how its output is stored and streamed, and how the server recovers when it
 > dies. The operator's own behaviour is in [operator.md](operator.md); the controller's in
-> [controller-and-goals.md](controller-and-goals.md).
+> [controller-and-epics.md](controller-and-epics.md).
 > Source of truth: `app/server/runtimes/*` (the two adapters, `run-service`, `run-sink`,
 > `run-projection`, `context-policy.server.ts`, `prompt-prefix.server.ts`),
 > `app/server/tasks/specialist-*.ts`, `app/server/tasks/agent-*.ts`,

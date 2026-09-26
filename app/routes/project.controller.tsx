@@ -8,25 +8,16 @@ import { csrfError } from "~/features/shell/csrf-result.server";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import { requireVisibleProject } from "./project-visibility.server";
 import { getDb } from "~/server/db/sqlite.server";
-import { z } from "zod";
-import { PROJECT_ROLES } from "~/schemas/project-file.schema";
-import { roleCan } from "~/shared/rbac";
 import { createConversation } from "~/server/controller/controller-conversations.server";
 import {
   interruptControllerTurn,
   runControllerTurn,
 } from "~/server/controller/controller-run.server";
-import {
-  updateGoal,
-  type UpdateGoalOp,
-} from "~/server/tasks/goal-actions.server";
 import { ControllerPage } from "~/features/controller/controller-page";
 import {
   getControllerSurface,
-  linkTaskStatuses,
   selectedConversationId,
 } from "~/features/controller/controller-query.server";
-import { readWorkspace } from "./project-workspace.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { undoKbCorrectionOnTask } from "~/server/tasks/kb-correction-actions.server";
 import { isDocumentNavigation } from "~/server/http/single-fetch.server";
@@ -34,7 +25,8 @@ import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 /**
  * /projects/:slug/controller — the controller addressed INSIDE one project
  * (ruling 99): the same conversation machinery bound to this board, plus the
- * Goals panel where a human sees and redirects every chain.
+ * knowledge-base panel. The board's planned work is its epics (ruling 503),
+ * on the Epics page.
  */
 
 /** D32-3: "<Page> · <project> · Viberr" — this view used to inherit the bare
@@ -65,36 +57,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       all: url.searchParams.get("all") === "1",
       // Ruling 457 (owner decision 2): console lines on a document load only.
       console: isDocumentNavigation(request) ? "shown" : "none",
-      // Ruling 476(g): a started link says what the board's card for its task
-      // says. The board's rows and review queue come from the workspace read
-      // the layout makes on the same request (`readWorkspace`, once per request).
-      taskStatuses: () => {
-        const { tasks, reviewQueue } = readWorkspace(request, db, params.slug, ctx.user);
-        return linkTaskStatuses(
-          db,
-          ctx.user.id,
-          params.slug,
-          tasks,
-          reviewQueue.ready.map((r) => r.key),
-        );
-      },
     },
   );
-  // The goal redirect controls follow the goal-actions gate (creator OR
-  // run-agents); the page only knows the ROLE half — a creator below that tier
-  // still gets their own goals' controls honored server-side per submit.
-  // SAFETY: the statement selects the single `role` column, TEXT NOT NULL with
-  // a CHECK constraint on `project_members` (the safeParse below judges it).
-  const roleRow = db
-    .prepare(
-      `SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`,
-    )
-    .get(params.slug, ctx.user.id) as { role: string } | undefined;
-  const memberRole = z.enum(PROJECT_ROLES).safeParse(roleRow?.role);
-  const canRedirectGoals = memberRole.success
-    ? roleCan(memberRole.data, "run-agents")
-    : view.viewerIsOrgAdmin;
-  return { view, canRedirectGoals };
+  return { view };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -144,44 +109,6 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
       }
       return { ok: true as const, conversationId };
-    }
-    if (intent === "goal-op") {
-      const opName = String(formData.get("op") ?? "");
-      const index = Number(formData.get("index") ?? 0);
-      const reason = String(formData.get("reason") ?? "").trim();
-      let op: UpdateGoalOp;
-      switch (opName) {
-        case "pause":
-          op = { op: "pause" };
-          break;
-        case "resume":
-          op = { op: "resume" };
-          break;
-        case "cancel":
-          op = reason ? { op: "cancel", reason } : { op: "cancel" };
-          break;
-        case "skip_link":
-          op = reason ? { op: "skip_link", index, reason } : { op: "skip_link", index };
-          break;
-        case "retry_link":
-          op = { op: "retry_link", index };
-          break;
-        default:
-          return data(
-            { ok: false as const, error: "Unknown goal action." },
-            { status: 400 },
-          );
-      }
-      const result = await updateGoal(
-        db,
-        {
-          projectSlug: params.slug,
-          goalId: String(formData.get("goalId") ?? ""),
-          action: op,
-        },
-        { userId: auth.user.id, label: auth.user.email },
-      );
-      return { ok: true as const, toast: result.message };
     }
     if (intent === "kb-correction-undo") {
       // Ruling 498: the Knowledge base panel's Undo, confirmed on the page.
@@ -241,11 +168,7 @@ export default function ProjectControllerRoute({
   params,
 }: Route.ComponentProps) {
   return (
-    <ControllerPage
-      view={loaderData.view}
-      projectSlug={params.slug}
-      canRedirectGoals={loaderData.canRedirectGoals}
-    />
+    <ControllerPage view={loaderData.view} projectSlug={params.slug} />
   );
 }
 

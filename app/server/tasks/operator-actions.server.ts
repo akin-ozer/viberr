@@ -75,7 +75,9 @@ import {
 import { PLAN_NOT_CARRIED_OUT_RE, RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { escapeRegExp } from "~/shared/text/regexp";
-import { readGoalFile } from "~/server/files/goal-writer.server";
+import { isEpicOpen, type EpicStatus } from "~/schemas/epic-file.schema";
+import { epicTaskRows, listEpics } from "~/server/projections/epic-query.server";
+import { setTasksEpic } from "./epic-actions.server";
 import { acceptanceBoundaryRefusal } from "~/server/github/acceptance-boundary.server";
 import {
   activeWorkRevision,
@@ -1138,8 +1140,7 @@ export interface OperatorPacketOptionInput {
   /** wait_for_window only — ruling 224: the provider's own reset instant, ISO.
    *  The resolution schedules the agent's re-dispatch just after it. */
   dueAt?: string;
-  /** block_on_dependencies only — ruling 230: the tasks or goal links this one
-   *  waits on. The resolution writes them through `setTaskDependencies`, so
+  /** block_on_dependencies only — ruling 230: the tasks this one waits on. The resolution writes them through `setTaskDependencies`, so
    *  Viberr releases the task when the last entry finishes. */
   blockedBy?: string[];
   /** create_task only — ruling 269: the task the resolution creates. Required
@@ -1743,7 +1744,7 @@ export async function operatorOpenPacket(
       outcome: "noop",
       message:
         `A block_on_dependencies option needs the work it waits on — "${strayHold.title}" names none. ` +
-        "Pass blockedBy as task keys or goal links, or offer a different hold.",
+        "Pass blockedBy as task keys, or offer a different hold.",
     };
   }
   const strayBlockedBy = rawOptions.find(
@@ -2500,38 +2501,30 @@ export interface OperatorTaskSnapshot {
     yours: boolean;
   } | null;
   /**
-   * Ruling 402 (F39-29): the CHAIN this task is one link of.
+   * Ruling 503: the EPIC this task is in, with the rest of its work.
    *
-   * The task's own goal text opens "Part of goal goal-4 (Cycle 4 — CLI: apply,
-   * get, watch, logs), link 1" — it names the chain and this task's place in
-   * it, and nothing else. `read_board` lists TASKS, and a pending link has no
-   * task yet, so the one read its own description names for the question
-   * ("work you are about to ask for may already have an owner") could not
-   * answer it. This is now the ONLY live view of the chain an actor gets:
-   * ruling 404 removed the "of 5" that header used to carry, because a frozen
-   * total went stale the moment the chain grew (AX-21 told its own agent it
-   * was the last link while three more followed).
-   *
-   * Live on ax-clone AX-4 the operator planned a decision packet offering to
-   * create a follow-on task for the missing `/logs` baseline. `ax logs` is
-   * goal-4 link 5, waiting on AX-4 itself — the very task it was coordinating.
-   * Absent for a task that belongs to no goal.
+   * Ruling 402 (F39-29) gave the operator the goal chain its task was a link
+   * of, because a link that had not started had no task and `read_board`
+   * could not see it: live on ax-clone AX-4 the operator planned a packet
+   * offering to create a follow-on for the missing `/logs` baseline, which
+   * goal-4 link 5 already held, waiting on AX-4 itself. Every task an epic
+   * holds exists from the moment it joins, so the same question has a plain
+   * answer here: the epic's other tasks, each with its stage and what it
+   * waits on. Absent for a task in no epic.
    */
-  goalChain?: {
-    goalId: string;
+  epic?: {
+    id: string;
     title: string;
-    /** This task's own link index within the chain. */
-    linkIndex: number;
-    links: {
-      index: number;
-      title: string;
-      status: string;
-      /** The task carrying it, or null while the link is still only a plan —
-       *  which is exactly the case `read_board` cannot see. */
-      taskKey: string | null;
-      blockedBy: string[];
-    }[];
+    status: EpicStatus;
+    description: string;
+    /** Present only when `description` was cut. */
+    clipped?: string;
+    /** The epic's OTHER tasks, archived ones left out. */
+    tasks: { key: string; title: string; stage: string; blockedBy: string[] }[];
   };
+  /** Ruling 503: the project's open epics, for `set_epic`. Absent when it has
+   *  none. */
+  openEpics?: { id: string; title: string }[];
   recentTimeline: OperatorTimelineRow[];
   /**
    * Ruling 397 (F39-24): a run Viberr recorded as FAILED that had already
@@ -2591,7 +2584,8 @@ export interface OperatorTaskSnapshot {
    * at all: asked where it was weakest, the ax-clone controller answered that
    * `get_task` is single-task, "so every cross-task correlation on this board
    * is currently done by you". Ruling 402 gave it the goal chain for the same
-   * reason; this is the other fact viberr already holds.
+   * reason (ruling 503: its epic now); this is the other fact viberr already
+   * holds.
    *
    * Read live on ax-clone: all five open PRs carried one, and AX-20 and AX-21
    * had already spent a run, a decision packet and a human answer on a
@@ -3123,6 +3117,9 @@ const OLDER_DECISION_WORDS_CAP = TIMELINE_ENTRY_CAP;
  * at 1,500 characters on any other turn, which "cannot fetch the rest".
  */
 export const AGENT_REPORT_CAP_TOOLLESS = 16000;
+/** Ruling 503: the snapshot carries the task's epic's description up to this;
+ *  the epic's page has the rest. */
+const EPIC_DESCRIPTION_CAP = 2000;
 /** Every packet resolution a person makes is written with this label. */
 const DECISION_LEAD = "**Decision:**";
 
@@ -3481,31 +3478,34 @@ export function operatorSnapshot(
       }
       return row;
     }),
-    // Ruling 402: the chain, when this task is a link of one.
-    ...((): Pick<OperatorTaskSnapshot, "goalChain"> => {
-      const ref = fm.goalRef;
-      if (!ref) return {};
-      const goal = readGoalFile({
-        projectSlug,
-        goalId: ref.goalId,
-        dataRoot: ctx.dataRoot,
-      });
-      if (!goal) return {};
-      const g = goal.parsed.frontmatter;
-      return {
-        goalChain: {
-          goalId: g.id,
-          title: g.title,
-          linkIndex: ref.linkIndex,
-          links: g.links.map((l) => ({
-            index: l.index,
-            title: l.title,
-            status: l.status,
-            taskKey: l.taskKey,
-            blockedBy: l.blockedBy,
+    // Ruling 503: the epic, when this task is in one, and the open epics it
+    // could be put in.
+    ...((): Pick<OperatorTaskSnapshot, "epic" | "openEpics"> => {
+      const epics = listEpics(db, projectSlug);
+      const out: Pick<OperatorTaskSnapshot, "epic" | "openEpics"> = {};
+      const open = epics.filter((e) => isEpicOpen(e.status)).map((e) => ({ id: e.id, title: e.title }));
+      if (open.length > 0) out.openEpics = open;
+      const own = fm.epic ? epics.find((e) => e.id === fm.epic) : undefined;
+      if (!own) return out;
+      const cut = own.description.length > EPIC_DESCRIPTION_CAP;
+      out.epic = {
+        id: own.id,
+        title: own.title,
+        status: own.status,
+        description: cut ? `${own.description.slice(0, EPIC_DESCRIPTION_CAP - 1)}…` : own.description,
+        tasks: epicTaskRows(db, projectSlug, own.id)
+          .filter((t) => !t.archived && t.key !== fm.key)
+          .map((t) => ({
+            key: t.key,
+            title: t.title,
+            stage: stageName(stages, t.stage),
+            blockedBy: t.blockedBy,
           })),
-        },
       };
+      if (cut) {
+        out.epic.clipped = `cut at ${EPIC_DESCRIPTION_CAP.toLocaleString("en-US")} chars; the epic's page has it whole`;
+      }
+      return out;
     })(),
     // Ruling 397: scanned over the WHOLE timeline, not the window above — the
     // pair is adjacent, but the window can end between them.
@@ -3718,7 +3718,7 @@ export function operatorSnapshot(
       ? notShown +
         "This turn cannot fetch them. What in them still binds you is carried in this snapshot: " +
         "`humanDecisions` (every decision a person made here, in their own words), `unansweredRefusal`, " +
-        "`unfinishedReport` and `goalChain`."
+        "`unfinishedReport` and `epic`."
       : notShown +
         `Call get_task with events up to ${OPERATOR_TIMELINE_MAX} to widen this window, ` +
         "and read_timeline_entry with an occurredAt for one in full.";
@@ -3919,6 +3919,45 @@ export async function operatorSetDependencies(
     // The validator's refusal names the reference and the reason: a fact about
     // the store, never a policy block.
     if (error instanceof AppError && error.status === 400) {
+      return { outcome: "noop", message: error.userMessage };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Ruling 503: the operator puts ITS OWN task in an epic, moves it to another,
+ * or takes it out, through the one writer of a task's `epic`
+ * (`setTasksEpic`), so the task's note, the epic's history line, the audit
+ * row and the lead's notice read as they do when a person does it. It rides
+ * `append-typed-events`, the grant of its other planning edit on the task
+ * (`set_goal`). A refusal the store rules out (no such epic, an archived
+ * task) is a `noop` carrying its sentence, never a policy block.
+ */
+export async function operatorSetEpic(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; epicId: string | null; reason?: string },
+  authority: OperatorAuthority,
+): Promise<OperatorActionResult> {
+  if (gate(authority, "append-typed-events") === "deny") {
+    return {
+      outcome: "denied",
+      message: "The operator cannot change which epic a task is in on this project (the append-typed-events grant is withheld).",
+    };
+  }
+  try {
+    const result = await setTasksEpic(
+      db,
+      { projectSlug: input.projectSlug, taskKeys: [input.taskKey], epicId: input.epicId },
+      OPERATOR_TASK_ACTOR,
+      { ...ctx, operatorAuthorized: true },
+    );
+    if (result.changed.length === 0) return { outcome: "noop", message: `Unchanged: ${result.message}` };
+    const why = input.reason?.trim() ? ` Reason: ${input.reason.trim()}` : "";
+    return { outcome: "done", message: `Recorded: ${result.message}${why}` };
+  } catch (error) {
+    if (error instanceof AppError && (error.status === 400 || error.status === 404)) {
       return { outcome: "noop", message: error.userMessage };
     }
     throw error;

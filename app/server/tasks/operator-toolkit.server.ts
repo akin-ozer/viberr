@@ -35,6 +35,7 @@ import {
   operatorPostComment,
   operatorRelayToTask,
   operatorSetDependencies,
+  operatorSetEpic,
   operatorSetGoal,
   operatorSnapshot,
   operatorTransitionStage,
@@ -359,7 +360,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "read_board",
-      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, and its goal. Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about — in a document, a report or a directive — is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. Ruling 402: this lists TASKS, so it cannot see a goal link that is still only PLANNED — check `goalChain` in `get_task` as well before you offer to create anything, because a pending link is work this project has already decided to do and has not started yet. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
+      "Read THIS project's board. With `taskKey`, that one task: title, stage, readiness, what it waits on, whether it is archived, and its goal. Without, every task in the project. Read-only. Call it BEFORE you offer a create_task option or write a blockedBy: a task key you were told about — in a document, a report or a directive — is a claim about the board until you check it, and work you are about to ask for may already have an owner. Archived tasks are included, so a retired key reads as retired rather than as absent. Ruling 503: `get_task`'s `epic` lists the other tasks of this task's epic, the work planned beside it, so read it as well before you offer to create anything. `get_task` remains the deep read of the task you are coordinating; this is the shallow read of everything beside it.",
       {
         taskKey: z
           .string()
@@ -599,6 +600,29 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       ),
       "set_goal",
     );
+    // Ruling 503: which epic this task is in. Same grant as `set_goal`, the
+    // other planning edit the operator makes on its own task.
+    add(
+      tool(
+        "set_epic",
+        "Put THIS task in an epic, move it to another, or take it out. An epic is a named body of work in the project (like a Jira epic or a Linear project); the snapshot's `openEpics` lists the ones open, and `epic` shows the one this task is in with its other tasks. A task is in at most one epic. Membership orders and holds nothing: what the task waits on is `set_dependencies`. Use it when a person asks for it, or when the task plainly belongs to an epic it is not in; a follow-on task a person creates from your `create_task` option joins this task's epic by itself.",
+        {
+          epicId: z
+            .string()
+            .describe('The epic to put the task in (epic-3), or "" to take it out of its epic.'),
+          reason: z.string().optional().describe("One line: why (returned with the result)."),
+        },
+        async (args: { epicId: string; reason?: string }) => {
+          const input: Parameters<typeof operatorSetEpic>[2] = {
+            ...base,
+            epicId: args.epicId.trim() || null,
+          };
+          if (args.reason) input.reason = prose(args.reason);
+          return resultText(await operatorSetEpic(db, ctx, input, authority));
+        },
+      ),
+      "set_epic",
+    );
     // R19-2: the repository wins over a knowledge base for how the repository's
     // own files should look — but the disagreement is never settled quietly.
     add(
@@ -767,7 +791,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   .array(z.string())
                   .optional()
                   .describe(
-                    "block_on_dependencies only (ruling 230): what THIS task waits on — task keys, or `goal-N link M`. Required on that kind (an option that names nothing to wait on resolves into a hold that releases on nothing) and refused on every other one.",
+                    "block_on_dependencies only (ruling 230): what THIS task waits on, as task keys. Required on that kind (an option that names nothing to wait on resolves into a hold that releases on nothing) and refused on every other one.",
                   ),
                 dueAt: z
                   .string()
@@ -788,7 +812,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                       .array(z.string())
                       .optional()
                       .describe(
-                        "What the NEW task waits on (task keys, or `goal-N link M`) — not what THIS task waits on.",
+                        "What the NEW task waits on (task keys) — not what THIS task waits on.",
                       ),
                     blocks: z
                       .array(z.string())
@@ -889,7 +913,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "set_dependencies",
-        "Record what this task WAITS ON: the FULL list of task keys (`JC-6`) and goal links (`goal-1 link 3`) in this project; an empty list clears the wait. Use it whenever the task cannot proceed until OTHER work lands, INSTEAD of a decision packet: Viberr then holds the task (readiness `blocked`, the wait shown on the board, the coordinating triggers refused at no cost) and RELEASES it itself the moment every entry is done, re-invoking you with the base branch to re-read. Every reference is checked against the store: it must exist, must not be this task, an archived task, or close a cycle (declared goal-link waits count); a refusal names the reference and the reason and is a fact about the task, not a policy block. Never open a hold packet about a wait on other work.",
+        "Record what this task WAITS ON: the FULL list of task keys (`JC-6`) in this project; an empty list clears the wait. Use it whenever the task cannot proceed until OTHER work lands, INSTEAD of a decision packet: Viberr then holds the task (readiness `blocked`, the wait shown on the board, the coordinating triggers refused at no cost) and RELEASES it itself the moment every entry is done, re-invoking you with the base branch to re-read. Every reference is checked against the store: it must exist, must not be this task, an archived task, or close a cycle; a refusal names the reference and the reason and is a fact about the task, not a policy block. Never open a hold packet about a wait on other work.",
         {
           blockedBy: z
             .array(z.string())

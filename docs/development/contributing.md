@@ -58,14 +58,15 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
   `requireFormAction` (session + CSRF + `intent`) and return `{ ok, toast }` or
   `{ ok: false, error }` (`appErrorResponse` renders a caught `AppError` that way);
   loaders never mutate.
-- **Governed task logic** lives in `app/server/tasks/*`; controller and goal logic in
-  `app/server/controller/*` and `app/server/tasks/goal-actions.server.ts`; project and
+- **Governed task logic** lives in `app/server/tasks/*`; controller logic in
+  `app/server/controller/*`, and epic logic in `app/server/tasks/epic-actions.server.ts`
+  (ruling 503); project and
   org logic beside its surface in `app/features/<surface>/*.server.ts` or
   `app/server/org/*`.
 - **Never write canonical files directly.** Use the writers in `app/server/files/`:
   `updateTaskFile`, `appendTimelineEvent`, `patchTaskFrontmatter` (task-writer),
-  `updateProjectFile` / `createProjectFile` (project-writer), `createGoalFile` /
-  `updateGoalFile` (goal-writer). They hold the per-file mutex, preserve unknown keys and
+  `updateProjectFile` / `createProjectFile` (project-writer), `createEpicFile` /
+  `updateEpicFile` (epic-writer). They hold the per-file mutex, preserve unknown keys and
   sections, write atomically, and refuse to overwrite a task file whose parse carries a
   hard-stop diagnostic (`FILE_NOT_TRUSTED`). The governed caller then re-projects
   (`reprojectTask`, `rebuildPath`); never write a projection row without file backing.

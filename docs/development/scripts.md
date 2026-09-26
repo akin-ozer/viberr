@@ -45,7 +45,7 @@ Every script that imports the app's config loads `.env` from the working directo
 | `npm run seed [-- --reset]` | **writer** | product baseline: bootstrap admin, three agent profile templates, org KBs and skills, domain allowlist. No projects, tasks, notifications or run history |
 | `npm run seed:demo [-- --reset]` | **writer** | test/dev fixture: five users, three projects, twelve tasks, notifications, one scope violation; refuses in the production image (no `test-support/`) |
 | `npm run rescan [-- --force]` | **writer** | `rescanProjections` (hash short-circuit unless `--force`) and a report of untrusted files from the `diagnostics` table |
-| `npm run store:check` | none, no DB | parses every `project.md`, `tasks/*/task.md`, `goals/*.md`; exit 1 when any file is untrusted |
+| `npm run store:check` | none, no DB | parses every `project.md`, `tasks/*/task.md`, `epics/*.md`; exit 1 when any file is untrusted |
 | `npm run backup [-- --out <dir>] [--include-runtimes]` | none; with a `state/writer.lock` present at all it reads a copy of the DB taken under `state/tmp/`, never the live file (ruling 158) | `VACUUM INTO` snapshot + store tree copy (incl. `audit-exports/`, ruling 102) + manifest, whose first `contains` line says whether the projection was read from the file or from a copy |
 | `npm run restore -- --from <artefact> [--force]` | **writer** | whole-root restore; occupied roots need `--force` and are moved aside, never deleted |
 | `npm run restore -- --from <artefact> --file <store path>` | none | single canonical file restore; the displaced file is kept as `<file>.broken-<ts>` |

@@ -102,7 +102,7 @@ describe("HumanAccess", () => {
     expect(getByText("Admin · 2")).toBeTruthy();
     expect(getByText("Maintainer · 1")).toBeTruthy();
     // Grant rows (derived from PROJECT_CAP_MATRIX) — total table, every enforced action.
-    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(20);
+    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(21);
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Edit task priority, labels & due date")).toBeTruthy();
     // Ruling 309(a): two grants gate more than their name says. The name stays
@@ -114,9 +114,12 @@ describe("HumanAccess", () => {
     // a held task onto the board.
     // CANARY: stop threading `covers` into RBAC_ROWS and both lines vanish.
     expect(
-      getByText("and what a task waits on, which releases it when cleared"),
+      getByText("the epic a task is in, and what it waits on, which releases it when cleared"),
     ).toBeTruthy();
     expect(getByText("and archiving or restoring the project itself")).toBeTruthy();
+    // Ruling 503: the epic row says what editing an epic covers.
+    expect(getByText("Create & edit epics")).toBeTruthy();
+    expect(getByText("their status, lead and dates")).toBeTruthy();
     expect(getByText("Create tasks")).toBeTruthy();
     expect(getByText("Re-scan project files & projections")).toBeTruthy();
     // Newly-surfaced enforced actions (were hidden before the total-table fix).

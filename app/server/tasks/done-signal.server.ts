@@ -23,8 +23,8 @@
  * `create_task` option (`followUpOptionRefusal`, operator-actions.server.ts).
  *
  * This is the rule's one home. Every door that writes a goal carries it in the
- * goal field's description: the controller's `create_task`, `update_task`,
- * `create_goal` (each link) and `update_goal` (`add_link`, `edit_link`), and
+ * goal field's description: the controller's `create_task` and `update_task`
+ * (ruling 503 retired `create_goal` and `update_goal` with the chains), and
  * the operator's `set_goal`, `edit_goal` option (`goalDraft`) and `create_task`
  * option (`newTask.goal`), on the Claude toolkit and in the Codex plan schema.
  * The shipped controller guide and operator doctrine quote it word for word,
@@ -36,4 +36,4 @@ export const DONE_SIGNAL_RULE =
   "So a done signal is something the task can show BEFORE acceptance: its gates, its reviewers' verdicts, a measurement made on the branch or locally. " +
   "Anything only the merged or deployed code can show (a production deploy, a cron run on the merged code, a live page, a production log) is never this task's done signal: that proof goes in a follow-up read task that waits on this one (`blockedBy` this task's key), created before this task is accepted. " +
   "Viberr releases the read when this task reaches Done, which can be before the merge and before the deploy, so the read's goal has it confirm this task's change is merged and deployed before it reads. " +
-  "A goal link whose outcome needs such a proof is split in two: the delivery link, and a read link whose `blockedBy` names it.";
+  "Planned work whose outcome needs such a proof is two tasks, in the same epic when it has one: the delivery task, and a read task whose `blockedBy` names it.";

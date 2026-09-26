@@ -323,7 +323,7 @@ function fm(input: {
     deliveredAt: null,
     previousStageId: null,
     heldAtStage: null,
-    goalRef: null,
+    epic: null,
     readiness: input.readiness,
     waiting: input.waiting,
     ownerUserId: input.owner,

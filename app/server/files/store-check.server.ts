@@ -4,12 +4,12 @@ import type { DatabaseSync } from "node:sqlite";
 import YAML, { YAMLParseError } from "yaml";
 import { z } from "zod";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
-import { diagnoseGoalFileContent, listGoalIds } from "./goal-writer.server";
+import { diagnoseEpicFileContent, listEpicIds } from "./epic-writer.server";
 import { parseProjectFileContent } from "./project-file.server";
 import { parseTaskFileContent } from "./task-file.server";
 import {
+  epicFilePath,
   getDataRoot,
-  goalFilePath,
   projectFilePath,
   projectsDir,
   storeRelativePath,
@@ -43,7 +43,7 @@ import { errorMessage } from "~/shared/errors";
  * file without rolling the SQLite side back with it.
  */
 
-export type StoreFileKind = "project" | "task" | "goal";
+export type StoreFileKind = "project" | "task" | "epic";
 
 /** Where in the file the problem is, when we can pin it down. */
 export interface FileLocation {
@@ -171,8 +171,8 @@ function checkFile(
   const diagnostics =
     kind === "task"
       ? parseTaskFileContent(content, { fallbackKey: key }).diagnostics
-      : kind === "goal"
-        ? diagnoseGoalFileContent(content)
+      : kind === "epic"
+        ? diagnoseEpicFileContent(content, key)
         : parseProjectFileContent(content, { fallbackSlug: key }).diagnostics;
   const blocking = diagnostics.filter((d) => d.hardStop === true);
   return {
@@ -218,13 +218,13 @@ export function checkStore(
         files.push(checkFile(taskFile, "task", key, options.dataRoot));
       }
     }
-    // Ruling 99: goal files are canonical too. Without this walk a rescan
-    // reports `errors: 1` for an unreadable goal and NOTHING names the file —
+    // Ruling 503: epic files are canonical too. Without this walk a rescan
+    // reports `errors: 1` for an unreadable epic and NOTHING names the file —
     // the exact blind spot this module exists to close.
-    for (const goalId of listGoalIds(slug, options.dataRoot)) {
-      const goalFile = goalFilePath(slug, goalId, options.dataRoot);
-      if (existsSync(goalFile)) {
-        files.push(checkFile(goalFile, "goal", goalId, options.dataRoot));
+    for (const epicId of listEpicIds(slug, options.dataRoot)) {
+      const epicFile = epicFilePath(slug, epicId, options.dataRoot);
+      if (existsSync(epicFile)) {
+        files.push(checkFile(epicFile, "epic", epicId, options.dataRoot));
       }
     }
   }
@@ -249,7 +249,7 @@ function renderCheckReport(
     `viberr store check — ${report.files.length} canonical files under ${report.dataRoot}`,
   ];
   if (report.untrusted.length === 0 && report.degraded.length === 0) {
-    lines.push("", "Every project, task and goal file parsed cleanly.");
+    lines.push("", "Every project, task and epic file parsed cleanly.");
     return lines.join("\n");
   }
 

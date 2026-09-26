@@ -7,7 +7,7 @@ import { freshestContent, rememberWrite, resetWriteCacheForTests } from "./write
 
 /**
  * The stale-read shield that every canonical file writer (task.md, project.md,
- * goals/*.md) reads through. Nothing imported it before pass 33, so the guard
+ * epics/*.md) reads through. Nothing imported it before pass 33, so the guard
  * could be deleted and every gate would stay green — ruling 65: a ruling whose
  * guard cannot go red gets reverted in silence.
  *
@@ -147,13 +147,13 @@ describe("freshestContent — the read-your-own-writes repair", () => {
     // Two back-to-back writes (pass-31 gotcha 10: two link-status writes on a
     // cached mount) must converge on the second. Restoring the first would be
     // the same data loss with extra steps.
-    const abs = path.join(dir, "goal-1.md");
+    const abs = path.join(dir, "epic-1.md");
     ourWriteLanded(abs, "first write\n");
     ourWriteLanded(abs, "second write\n");
     mountServesStaleBytes(abs, STALE);
     vi.spyOn(logger, "warn").mockImplementation(() => {});
 
-    expect(freshestContent(abs, STALE, { kind: "goal-file", id: "goal-1" })).toBe("second write\n");
+    expect(freshestContent(abs, STALE, { kind: "epic-file", id: "epic-1" })).toBe("second write\n");
   });
 
   it("an edit landing INSIDE the 100 ms slack loses — the deliberate trade, stated", () => {
@@ -178,25 +178,27 @@ describe("freshestContent — the read-your-own-writes repair", () => {
     expect(freshestContent(abs, HUMAN, taskFile)).toBe(HUMAN);
   });
 
-  it("names the file by its caller's own key: projectSlug for project.md, goalId for a goal", () => {
+  it("names the file by its caller's own key: projectSlug for project.md, epicId for an epic", () => {
     // Three writers share one module; a warn that called every id "taskKey"
-    // would be ungreppable during the next incident.
+    // would be ungreppable during the next incident. Ruling 503: the epic
+    // writer took the goal writer's place.
     const project = path.join(dir, "project.md");
-    const goal = path.join(dir, "goal-1.md");
+    const epic = path.join(dir, "epic-1.md");
     ourWriteLanded(project, OURS);
-    ourWriteLanded(goal, OURS);
+    ourWriteLanded(epic, OURS);
     mountServesStaleBytes(project, STALE);
-    mountServesStaleBytes(goal, STALE);
+    mountServesStaleBytes(epic, STALE);
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
     freshestContent(project, STALE, { kind: "project-file", id: "viberr-core" });
-    freshestContent(goal, STALE, { kind: "goal-file", id: "goal-1" });
+    freshestContent(epic, STALE, { kind: "epic-file", id: "epic-1" });
 
     expect(warn.mock.calls[0]?.[0]).toBe(
       "stale project-file read repaired from the in-process write cache",
     );
     expect(warn.mock.calls[0]?.[1]).toMatchObject({ projectSlug: "viberr-core" });
-    expect(warn.mock.calls[1]?.[1]).toMatchObject({ goalId: "goal-1" });
+    expect(warn.mock.calls[1]?.[0]).toBe("stale epic-file read repaired from the in-process write cache");
+    expect(warn.mock.calls[1]?.[1]).toMatchObject({ epicId: "epic-1" });
   });
 });
 
